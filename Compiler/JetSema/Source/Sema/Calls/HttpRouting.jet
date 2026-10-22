@@ -505,15 +505,6 @@ fn sema_http_route_schema_expr(expression: Expr, environment: SemaScopeEnvironme
                 else -> { return None }
             }
         }
-        .Call(call) -> {
-            if call.resolved_ret == .Val(ty) -> return sema_http_route_schema_type(ty, environment, program, [String]{}) else -> return None
-        }
-        .MethodCall(_, _, _, _, _, _, _, resolved_ret) -> {
-            if resolved_ret == {
-                .Val(ty) -> { return sema_http_route_schema_type(ty, environment, program, [String]{}) }
-                else -> { return None }
-            }
-        }
         .Ok(inner, _) | .Try(inner, _, _, _) -> return sema_http_route_schema_expr(inner, environment, program, locals)
         .ListLit(items, _) -> {
             if items.len() == 0 -> return None
@@ -622,9 +613,6 @@ fn sema_http_route_response_local_type(expression: Expr, environment: SemaScopeE
         .TupleLit(_, _, tuple_ty) -> {
             return tuple_ty
         }
-        .Call(call) -> return call.resolved_ret
-        // copy: `resolved_ret` is a payload of read parameter `expression`, which keeps the original; the returned value owns this one
-        .MethodCall(_, _, _, _, _, _, _, resolved_ret) -> return resolved_ret.copy()
         .ListLit(items, _) -> {
             if items.len() == 0 -> return None
             item :: sema_http_route_response_local_type(items[0], environment, program, locals, module_identity) ?? return None
@@ -698,11 +686,10 @@ fn sema_http_route_response_expr(expression: Expr, environment: SemaScopeEnviron
             leaf := leaf_parts[leaf_parts.len() - 1]
             if sema_http_route_response_constructor(leaf, call.args, environment, program, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
         }
-        .MethodCall(receiver, method, method_span, _, type_args, args, _, resolved_ret) -> {
+        .MethodCall(receiver, method, method_span, _, type_args, args) -> {
             if sema_http_route_response_constructor(method, args, environment, program, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
             receiver_responses := sema_http_route_response_expr(receiver, environment, program, scopes, locals, aliases, module_identity)
             if receiver_responses.len() > 0 {
-                if resolved_ret == .Val(ty) && sema_call_http_nominal_leaf(ty) == "HTTPResponse" -> return receiver_responses
                 if sema_http_route_response_adapter_returns_response(method, args, type_args, method_span, environment, program, scopes, module_identity) -> return receiver_responses
             }
         }
@@ -767,9 +754,9 @@ fn sema_http_route_response_statements(statements: [Stmt], environment: SemaScop
 fn sema_http_route_find_json_expr(expression: Expr, request_names: [String]) -> Type? {
     if expression == {
         .Paren(inner, _) -> return sema_http_route_find_json_expr(inner, request_names)
-        .MethodCall(receiver, method, _, _, type_args, args, recv_type, _) -> {
+        .MethodCall(receiver, method, _, _, type_args, args) -> {
             if method == "json" && type_args.len() == 1 {
-                request := recv_type == (Val("HTTPRequest"))
+                request := false
                 if receiver == {
                     .Ident(name, _) -> {
                         loop request_name in request_names {

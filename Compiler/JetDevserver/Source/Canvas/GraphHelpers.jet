@@ -150,7 +150,7 @@ fn expr_type(g: GraphBuilder, index: SemIndex, expr: Expr) -> String {
         }
         .Binary(op, left, _, _) -> if op_is_bool(op) -> "Bool" else -> expr_type(g, index, left)
         .Call(c) -> call_ret(index, c.name).unwrap_or("unknown")
-        .MethodCall(resolved_ret: resolved_ret, ..) -> resolved_ret.as_ref().map((ty) -> ty.name()).unwrap_or("unknown")
+        .MethodCall(..) -> "unknown"
         .Try(inner, _, _, _) -> {
             ty := expr_type(g, index, inner).trim_end_matches('?') // #4303
             ty.to_string()

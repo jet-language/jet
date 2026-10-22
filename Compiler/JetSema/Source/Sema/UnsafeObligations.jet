@@ -429,7 +429,7 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
             &out.push(SemaUnsafeOperation{kind: "raw_pointer", span: span, required: ["no_alias"]})
             sema_unsafe_expr_operations(inner, &out)
         }
-        .MethodCall(receiver, method, span, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, span, _, _, args) -> {
             if method == {
                 "volatile_read" -> {
                     &out.push(SemaUnsafeOperation{kind: "volatile_read", span: span, required: ["valid_ptr", "aligned"]})

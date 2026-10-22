@@ -177,7 +177,7 @@ fn sema_call_compute_function_names(expression: Expr, ty: Type, scopes: SemaScop
         .Call(call) -> if call.name == "gradient" || call.name == "value_and_gradient" || call.name == "vjp" || call.name == "jvp" {
             if call.args.len() > 0 -> return sema_call_compute_function_names(call.args[0].expr, ty, scopes)
         }
-        .MethodCall(_, method, _, _, _, args, _, _) -> if method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp" {
+        .MethodCall(_, method, _, _, _, args) -> if method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp" {
             if args.len() > 0 -> return sema_call_compute_function_names(args[0].expr, ty, scopes)
         }
         .Ident(name, _) -> if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function {
@@ -193,7 +193,7 @@ fn sema_call_compute_function_identity(expression: Expr, scopes: SemaScopeTable)
         .Paren(inner, _) -> sema_call_compute_function_identity(inner, scopes)
         .Ident(name, _) -> if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function -> Val(symbol.id.key) else -> None
         .Call(call) -> if (call.name == "gradient" || call.name == "value_and_gradient" || call.name == "vjp" || call.name == "jvp") && call.args.len() > 0 -> sema_call_compute_function_identity(call.args[0].expr, scopes) else -> None
-        .MethodCall(_, method, _, _, _, args, _, _) -> if (method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp") && args.len() > 0 -> sema_call_compute_function_identity(args[0].expr, scopes) else -> None
+        .MethodCall(_, method, _, _, _, args) -> if (method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp") && args.len() > 0 -> sema_call_compute_function_identity(args[0].expr, scopes) else -> None
         else -> None
     }
 }

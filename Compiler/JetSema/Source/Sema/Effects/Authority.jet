@@ -46,7 +46,7 @@ fn sema_authority_exprs_escape(values: [Expr], handle: String) -> Span? {
 fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
     if expr == {
         .Ident(name, span) -> if name == handle -> Val(span) else -> None
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_authority_bare(receiver, handle) -> return sema_authority_args_escape(args, handle, false)
             found :: sema_authority_expr_escape(receiver, handle)
             if found != None -> return found
@@ -290,7 +290,7 @@ fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) ->
     if expr == {
         .Ident(name, _) -> name == handle || sema_authority_contains(aliases, name)
         .Paren(inner, _) -> sema_authority_chain_rooted(inner, handle, aliases)
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
         else -> false
     }
 }
@@ -298,7 +298,7 @@ fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) ->
 fn sema_authority_narrowing_chain(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
     if expr == {
         .Paren(inner, _) -> sema_authority_narrowing_chain(inner, handle, aliases)
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
         else -> false
     }
 }
@@ -315,7 +315,7 @@ fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) ->
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found :: sema_authority_value_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
@@ -373,7 +373,7 @@ fn sema_authority_call_argument_escape(expr: Expr, handle: String, aliases: [Str
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found :: sema_authority_call_argument_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)

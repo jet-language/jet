@@ -149,7 +149,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
     task_group :: loop stmt in run.body { if stmt == .TaskGroup(_, _, _, body, _) -> break body } ?? panic("task group")
     binding :: loop stmt in task_group { if stmt == .Val(b) -> break b } ?? panic("binding")
     if binding.init == {
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args) -> {
             assert(method == parser_test_task_name("spawn"))
             assert(args.len() == 1)
             assert(if args[0].expr == { .Lambda(_) -> true else -> false })

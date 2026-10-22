@@ -29,7 +29,7 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
             ast_visit_expr(right, visitor)
         }
         .Call(call) -> ast_visit_call_args(call.args, visitor)
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
             ast_visit_expr(receiver, visitor)
             ast_visit_call_args(args, visitor)
         }

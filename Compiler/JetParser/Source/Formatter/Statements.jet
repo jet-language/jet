@@ -1512,7 +1512,7 @@ fn jfmt_same_subject(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
 fn jfmt_fmt_refutable_subject(f: &JetFmt, expr: Expr) {
     unwrapped :: jfmt_expr_without_parens(expr)
     postfix :: if unwrapped == {
-        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) | .Field(_, _, _) | .OptField(_, _, _, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) -> true
+        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _) | .Field(_, _, _) | .OptField(_, _, _, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) -> true
         else -> false
     }
     if postfix {
@@ -1685,7 +1685,7 @@ fn jfmt_resugar_layout_args(layout_name: String, args: [CallArg]) -> [CallArg] N
 }
 
 fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
-    if e == .MethodCall(receiver, method, method_span, _, _, args, _, _) {
+    if e == .MethodCall(receiver, method, method_span, _, _, args) {
         if (method == "h" || method == "v") && args.len() == 2 {
             if receiver == .Ident(recv_name, recv_span) {
                 if recv_name == layout_name {
@@ -1705,8 +1705,7 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
         .Binary(op, l, r, span) -> Expr.Binary{op: op, left: jfmt_resugar_layout_expr(layout_name, l), right: jfmt_resugar_layout_expr(layout_name, r), span: span}
         .Unary(op, x, span) -> Expr.Unary{op: op, operand: jfmt_resugar_layout_expr(layout_name, x), span: span}
         .Field(base, field, span) -> Expr.Field{base: jfmt_resugar_layout_expr(layout_name, base), member: field, span: span}
-        // copy: `recv_type` and `resolved_ret` are payloads of read parameter `e`, which keeps the originals; the new Expr.MethodCall's fields own `recv_type` and `resolved_ret`
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), recv_type: recv_type.copy(), resolved_ret: resolved_ret.copy()}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args)}
         .Call(call) -> {
             call2 := call
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)

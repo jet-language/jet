@@ -152,7 +152,7 @@ fn semindex_expr_shape(expr: Expr) -> String Never! {
         .Place(_, _, _) -> 24
         .Field(_, _, _) -> 25
         .OptField(_, _, _, _, _) -> 26
-        .MethodCall(_, _, _, _, _, _, _, _) -> 27
+        .MethodCall(_, _, _, _, _, _) -> 27
         // The canonical borrowed visitor projects this as CallValue(OptField).
         .OptMethodCall(_, _, _, _, _, _, _, _) -> 45
         .StructLit(_, _, _, _, _, _, _) -> 28
@@ -189,7 +189,7 @@ fn semindex_structural_expr_span(expr: Expr) -> Span Never! {
             if call.args.len() > 0 -> end = semindex_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
             Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args) -> {
             end := method_span.end + 2
             if args.len() > 0 -> end = semindex_structural_expr_span(args[args.len() - 1].expr).end + 1
             Span{start: semindex_structural_expr_span(receiver).start, end: end}

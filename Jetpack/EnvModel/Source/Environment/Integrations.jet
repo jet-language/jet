@@ -19,7 +19,7 @@ use jet_pkg_model.[pkg_ascii_lower]
 fn envmodel_qualified_call_name(expr: Expr) -> String? Never! {
     if expr == {
         .Call(call) -> Val(call.name)
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _) -> {
             path :: envmodel_expression_path(receiver) ?? return None
             Val("{path}.{method}")
         }

@@ -627,7 +627,7 @@ fn jet_cli_sem_structural_expr_span(expr: Expr) -> Span {
             end :: if call.args.len() == 0 -> call.name_span.end + 2 else -> jet_cli_sem_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
             return Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args) -> {
             end :: if args.len() == 0 -> method_span.end + 2 else -> jet_cli_sem_structural_expr_span(args[args.len() - 1].expr).end + 1
             return Span{start: jet_cli_sem_structural_expr_span(receiver).start, end: end}
         }
@@ -1159,7 +1159,7 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             &db.refs.push(jet_cli_sem_scoped_ref(call.name, call.name_span, ctx))
             jet_cli_sem_args(call.args, &db, &ctx, modules)
         }
-        .MethodCall(receiver, method, method_span, _, _, args, _, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .MethodCall(receiver, method, method_span, _, _, args) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
         .OptMethodCall(receiver, method, method_span, _, args, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
         .Field(base, member, span) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)

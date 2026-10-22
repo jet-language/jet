@@ -701,7 +701,7 @@ fn sema_serde_items_struct_decode_body(definition: StructDef, items: [Item], spa
     if definition.validate_block.len() == 0 {
         &success.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_ident("decoded", span), span: span}, span))
     } else {
-        validate :: Expr.MethodCall{receiver: sema_serde_items_ident(definition.name, span), method: "validate", method_span: span, owner_type_args: sema_serde_items_type_args(definition.type_params), type_args: [Type]{}, args: [CallArg]{sema_serde_items_arg(sema_serde_items_ident("decoded", span), span)}, recv_type: None, resolved_ret: None}
+        validate :: Expr.MethodCall{receiver: sema_serde_items_ident(definition.name, span), method: "validate", method_span: span, owner_type_args: sema_serde_items_type_args(definition.type_params), type_args: [Type]{}, args: [CallArg]{sema_serde_items_arg(sema_serde_items_ident("decoded", span), span)}}
         &success.push(sema_serde_items_return(validate, span))
     }
     position := decoded_slots.len() - 1
@@ -973,12 +973,12 @@ fn sema_serde_items_arg(value: Expr, span: Span) -> CallArg Never! {
 fn sema_serde_items_method_call(receiver: Expr, method: String, args: [Expr], span: Span) -> Expr Never! {
     call_args := [CallArg]{}
     loop argument in args -> &call_args.push(sema_serde_items_arg(argument, span))
-    Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, recv_type: None, resolved_ret: None}
+    Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args}
 }
 
 // `receiver.decode<ty>()`.
 fn sema_serde_items_decode_call(receiver: Expr, ty: Type, span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: receiver, method: "decode", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{ty.copy()}, args: [CallArg]{}, recv_type: None, resolved_ret: None}
+    Expr.MethodCall{receiver: receiver, method: "decode", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{ty.copy()}, args: [CallArg]{}}
 }
 
 // `FieldError.under(path, value)`.

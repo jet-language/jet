@@ -1550,7 +1550,7 @@ fn parser_parse_assert_names(state: &JetParserState) -> Stmt {
         if parser_current_kind(&state) == TOKEN_RPAREN -> break
     }
     parser_finish_statement(&state)
-    Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_unsafe_assert", name_span: start.span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}}}
+    Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_unsafe_assert", name_span: start.span, type_args: [Type]{}, args: args}}}
 }
 
 // Rust `stmt`, its name/`self` arm and its general expression arm (#18): a
@@ -1618,7 +1618,7 @@ fn parser_starts_expression(kind: Int) -> Bool Never! {
 // on an `OptField`.
 fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never! {
     works :: if expr == {
-        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
         .CallValue(callee, _, _) -> callee == .OptField(_, _, _, _, _)
         .If(_, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
         else -> false
@@ -1631,7 +1631,7 @@ fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never
 fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: Int) -> Bool Never! {
     if start_kind == TOKEN_AMP || start_kind == TOKEN_CARET {
         call :: if expr == {
-            .Call(_) | .MethodCall(_, _, _, _, _, _, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+            .Call(_) | .MethodCall(_, _, _, _, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
             else -> false
         }
         if call -> return true

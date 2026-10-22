@@ -232,7 +232,7 @@ fn sema_expression_err_payload_is_err(value: Expr, environment: SemaScopeEnviron
 
 fn sema_expression_default_err_call(value: Expr, span: Span, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     argument :: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
-    call :: Call{name: "Err", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}, resolved_ret: None, range_checked: false, widen_approx: false}
+    call :: Call{name: "Err", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}
     sema_call_check_default_err(call, Val(expected), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -361,7 +361,7 @@ fn sema_expression_carrier_payload(ty: Type) -> Type? {
 fn sema_expression_propagating_call(expr: Expr) -> Bool Never! {
     if expr == {
         .Call(call) -> call.name != "Ok" && call.name != "Err"
-        .MethodCall(_, _, _, _, _, _, _, _) -> true
+        .MethodCall(_, _, _, _, _, _) -> true
         .CallValue(callee, args, _) -> !sema_call_value_is_inline_loop(callee, args)
         else -> false
     }
@@ -513,7 +513,7 @@ fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, 
             }
             return SemaFailureProvenance{callee: call.name, definition: definition, contract: contract}
         }
-        .MethodCall(_, method, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
+        .MethodCall(_, method, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
         else -> {}
     }
     SemaFailureProvenance{callee: "this fallible expression", definition: fallback, contract: "inferred failure contract"}
@@ -541,7 +541,7 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
         // Rust `inferable_failure_callee`: `alias.member(...)` through a
         // whole-module import names that module's source function, which the
         // bundle solve settles like a same-module callee.
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _) -> {
             alias :: if receiver == {
                 .Ident(name, _) -> name
                 else -> { return None }
@@ -986,7 +986,7 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
         // copy: `value` is a payload of read parameter `fallback`, which keeps the original; field `value` of the new Stmt.Return owns this one
         .Return(value, span) -> return Val(Stmt.Return{value: value.copy(), span: span})
         .Panic(name_span, args) -> {
-            call := Call{name: "panic", name_span: name_span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+            call := Call{name: "panic", name_span: name_span, type_args: [Type]{}, args: args}
             return Val(Stmt.Expr{expr: Expr.Call{call: call}})
         }
         .BreakLabel(name, span) -> {

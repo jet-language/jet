@@ -719,7 +719,7 @@ fn sema_compiler_index_expr_shape(expression: Expr) -> String {
         .Place(_, _, _) -> 24
         .Field(_, _, _) -> 25
         .OptField(_, _, _, _, _) -> 26
-        .MethodCall(_, _, _, _, _, _, _, _) -> 27
+        .MethodCall(_, _, _, _, _, _) -> 27
         .StructLit(_, _, _, _, _, _, _) -> 28
         .TypedLit(_, _, _) -> 29
         .EnumLit(_, _, _, _, _, _) -> 30
@@ -753,7 +753,7 @@ fn sema_compiler_index_expr_structural_span(expression: Expr) -> Span {
             if call.args.len() > 0 -> end = expr_span(call.args[call.args.len() - 1].expr).end + 1
             Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args, _, _) | .OptMethodCall(receiver, _, method_span, _, args, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args) | .OptMethodCall(receiver, _, method_span, _, args, _) -> {
             end := method_span.end + 2
             if args.len() > 0 -> end = expr_span(args[args.len() - 1].expr).end + 1
             Span{start: expr_span(receiver).start, end: end}
@@ -969,7 +969,7 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
     &state.parents.push(id)
     if expression == {
         .Call(call) -> sema_compiler_index_walk_call_args(&state, call.args, module_path)
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "receiver", receiver, module_path)
             sema_compiler_index_walk_call_args(&state, args, module_path)
         }

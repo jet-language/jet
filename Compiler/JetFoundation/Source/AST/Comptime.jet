@@ -302,7 +302,7 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
             ast_comptime_walk_expr(left, calls, &sites)
             ast_comptime_walk_expr(right, calls, &sites)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) -> {
             ast_comptime_walk_expr(receiver, calls, &sites)
             loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
         }

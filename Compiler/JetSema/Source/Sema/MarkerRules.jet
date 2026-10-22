@@ -1709,7 +1709,7 @@ fn sema_inline_always_scan_expr(expression: Expr, scan: &SemaInlineAlwaysScan) {
             if call.name == scan.target -> scan.self_recursive = true
             sema_inline_always_scan_args(call.args, &scan)
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
+        .MethodCall(receiver, method, _, _, _, args) | .OptMethodCall(receiver, method, _, _, args, _) -> {
             if method == scan.target -> scan.self_recursive = true
             sema_inline_always_scan_expr(receiver, &scan)
             sema_inline_always_scan_args(args, &scan)

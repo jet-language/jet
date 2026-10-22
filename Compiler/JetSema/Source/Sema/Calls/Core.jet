@@ -747,9 +747,6 @@ fn sema_call_core_default_expr(default: CoreCallDefault, span: Span) -> Expr Nev
             name_span: span,
             type_args: [Type]{},
             args: [CallArg]{},
-            resolved_ret: None,
-            range_checked: false,
-            widen_approx: false,
         }}
         .StaticEnum(type_name, variant) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span}
     }
@@ -1104,7 +1101,7 @@ fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, typ
     if !same_module -> return sema_call_core_shared_reject(member, span, &diagnostics)
     params :: sema_call_params_from_type(target.signature) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
-    call :: Call{name: name, name_span: span, type_args: [Type]{}, args: [CallArg]{}, resolved_ret: None, range_checked: false, widen_approx: false}
+    call :: Call{name: name, name_span: span, type_args: [Type]{}, args: [CallArg]{}}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, None, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if checked.facts.failure_carrier != TFailureCarrier.Infallible -> return sema_call_core_shared_reject(member, span, &diagnostics)
     shared :: if checked.value.ty == {
@@ -1128,7 +1125,7 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
         check :: sema_compiler_services_check_call("core.build", "graph", args, span, environment.function_name == "build", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
     }
-    call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+    call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
     // Rust `record_call_result_views` composes every call's returned views
     // with its arguments; a source-module call (`stream.object_entries(v)`)

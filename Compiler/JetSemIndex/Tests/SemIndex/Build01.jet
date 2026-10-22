@@ -7,14 +7,14 @@ use jet_foundation.[Expr, Span, Call]
     assert_eq(structural_span_add(maximum - 1, 2), maximum)
     assert_eq(structural_span_add(maximum - 2, 2), maximum)
     assert_eq(structural_span_add(20, 2), 22)
-    call :: Call{name: "f", name_span: Span{start: 3, end: maximum - 1}, type_args: [], args: [], resolved_ret: None, range_checked: false, widen_approx: false}
+    call :: Call{name: "f", name_span: Span{start: 3, end: maximum - 1}, type_args: [], args: []}
     span :: structural_expr_span(Expr.Call(call))
     assert_eq(span.start, 3)
     assert_eq(span.end, maximum)
 }
 #Test("structural_expression_method_retains_receiver_start_and_empty_call_end") {
     receiver :: Expr.Ident("items", Span{start: 2, end: 7})
-    expr :: Expr.MethodCall(receiver, "size", Span{start: 8, end: 12}, [], [], [], None, None)
+    expr :: Expr.MethodCall(receiver, "size", Span{start: 8, end: 12}, [], [], [])
     span :: structural_expr_span(expr)
     assert_eq(span.start, 2)
     assert_eq(span.end, 14)

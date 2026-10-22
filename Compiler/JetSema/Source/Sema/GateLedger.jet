@@ -265,7 +265,7 @@ fn sema_gate_expression(source: String, expression: Expr, ledger: &GateLedger, c
 fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {
     if expression == {
         .Call(call) -> {
-            if call.widen_approx || call.name == "approx" {
+            if call.name == "approx" {
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, "approx", None, "exact value widened to an approximation", "recorded"))
             } else if call.name == "wrapping" || call.name == "saturating" || call.name == "checked" {
                 detail :: if call.name == {
@@ -276,7 +276,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, call.name, None, detail, "recorded"))
             }
         }
-        .MethodCall(receiver, method, span, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, span, _, _, args) -> {
             if {
                 sema_gate_rounded_conversion(method, args) -> {
                     gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, method, None, "unit conversion rounded with an explicit mode", "recorded"))

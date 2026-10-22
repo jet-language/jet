@@ -747,7 +747,7 @@ struct SemaDropStatement {
 
 fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
     if expr == {
-        .MethodCall(receiver, method, method_span, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, method_span, _, _, args) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
             reason :: sema_drop_reason_problem(args)
             if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
@@ -835,7 +835,7 @@ fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, progr
             }
             return false
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
+        .MethodCall(receiver, method, _, _, _, args) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
         else -> return sema_stmt_refutable_expr_diverges(expr)
     }
 }

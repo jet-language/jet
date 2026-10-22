@@ -4,7 +4,6 @@ use std.fmt.[format]
 use jet_parser.AST as AST
 use jet_parser.AST.[Expr, Stmt]
 use jet_foundation.[Span, Expr, Stmt]
-use jet_parser.Syntax.[INTERNAL_TASK_SURFACE_TYPE, INTERNAL_TASK_GROUP_SURFACE_TYPE]
 use jet_semindex.[SemIndex, SourceSpan]
 use jet_devserver.Canvas.GraphProjection.[GraphBuilder, game_assets_receiver]
 use jet_devserver.Canvas.GraphHelpers.[assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title, expr_type, lvalue_type, pure_leaf, snippet, span_through_closing_parens, starts_uppercase, wire_ident_refs]
@@ -520,16 +519,12 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
             ret :: call_ret(index, c.name).unwrap_or("Void")
             .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
         }
-        .MethodCall(receiver: receiver, method: method, method_span: method_span, args: args, recv_type: recv_type, resolved_ret: resolved_ret, ..) -> {
+        .MethodCall(receiver: receiver, method: method, method_span: method_span, args: args, ..) -> {
             node_id :: "{g.graph_id}:expr:{ordinal}:method:{method}"
             variant_like :: starts_uppercase(method)
             pure :: method_is_pure(index, method_span.into())
             archetype :: if variant_like || pure -> "function_pure" else -> "function_exec"
-            // Checked task desugaring may replace the internal receiver with
-            // the lexical group name. The private recv_type tags survive that
-            // rewrite and distinguish authored task syntax from ordinary methods.
-            is_task_surface :: recv_type.as_ref() == .Some(INTERNAL_TASK_SURFACE_TYPE) || recv_type.as_ref() == .Some(INTERNAL_TASK_GROUP_SURFACE_TYPE)
-            title :: if is_task_surface { if method == "spawn" -> "task" else -> "task.{method}" } else if variant_like { method.clone() } else { ".{method}" }
+            title :: if variant_like { method.clone() } else { ".{method}" }
             is_game_asset :: (method == "image" || method == "sound") && game_assets_receiver(receiver)
             is_game_component :: method == "component"
             affordances := [String]{["insert_call", "source_jump"]}
@@ -543,7 +538,7 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
                 input :: add_pin(g, node_id, "arg{i + 1}", "input", ty, arg.convention.sigil(), false)
                 connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 2, "arg{i + 1}", node_id, input, x - 220, y + (I32{i} + 1) * 74)
             }
-            ret :: resolved_ret.as_ref().map((ty) -> ty.name()).unwrap_or("unknown")
+            ret :: "unknown"
             .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
         }
         .Try(inner, span, _, _) -> {

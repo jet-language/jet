@@ -82,7 +82,7 @@ fn sema_ui_handle_imported_ui_alias(alias: String, environment: SemaScopeEnviron
 
 fn sema_ui_handle_interactive_role(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if expr == {
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _) -> {
             if receiver == {
                 .Ident(alias, _) -> {
                     if !sema_ui_handle_imported_ui_alias(alias, environment, program, scopes) -> return None
@@ -111,7 +111,7 @@ fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: 
             labels := [String]{}
             loop item in items {
                 if item == {
-                    .MethodCall(receiver, method, _, _, _, call_args, _, _) -> {
+                    .MethodCall(receiver, method, _, _, _, call_args) -> {
                         if method != "node_role" || call_args.len() != 4 -> next
                         alias :: if receiver == {.Ident(name, _) -> Val(name) else -> None} ?? next
                         if !sema_ui_handle_imported_ui_alias(alias, environment, program, scopes) -> next

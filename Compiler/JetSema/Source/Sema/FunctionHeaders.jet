@@ -119,7 +119,7 @@ fn sema_function_header_default_idents(value: Expr, found: &[Expr]) {
             sema_function_header_default_idents(callee, &found)
             loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) -> {
             sema_function_header_default_idents(receiver, &found)
             loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
         }
@@ -393,7 +393,7 @@ fn sema_function_header_variadic_expr(expr: Expr, name: String, uses: &[Span]) N
             if found == name -> &uses.push(span)
         }
         .Call(call) -> sema_function_header_variadic_args(call.args, name, &uses)
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .CallValue(receiver, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .CallValue(receiver, args, _) -> {
             sema_function_header_variadic_expr(receiver, name, &uses)
             sema_function_header_variadic_args(args, name, &uses)
         }

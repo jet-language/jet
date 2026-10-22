@@ -53,7 +53,7 @@ fn sema_pin_view_fact(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> Bo
 // requires the `Pin<T>` result type.
 fn sema_pin_call_argument(expr: Expr) -> CallArg? {
     if expr == {
-        .MethodCall(receiver, method, _, _, _, args, _, _) -> if method == "pin" && args.len() == 1 && receiver == .Ident(_, _) -> Val(args[0]) else -> None
+        .MethodCall(receiver, method, _, _, _, args) -> if method == "pin" && args.len() == 1 && receiver == .Ident(_, _) -> Val(args[0]) else -> None
         .Paren(value, _) -> sema_pin_call_argument(value)
         else -> None
     }

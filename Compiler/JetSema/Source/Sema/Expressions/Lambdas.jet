@@ -258,7 +258,7 @@ fn sema_expression_lambda_uses_outer(expr: Expr, frame: Int, params: [String], s
             }
             false
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_expression_lambda_uses_outer(receiver, frame, params, &scopes) -> return true
             index := 0
             loop index < args.len() {
@@ -534,7 +534,7 @@ fn sema_expression_lambda_bound_expr_use(expr: Expr, name: String) -> Bool {
                 if sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true
             }
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_expression_lambda_bound_expr_use(receiver, name) -> return true
             loop argument in args {
                 if sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true
@@ -671,7 +671,7 @@ fn sema_expression_lambda_bound_expr_non_direct_use(expr: Expr, name: String) ->
             }
             return false
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
+        .MethodCall(receiver, method, _, _, _, args) | .OptMethodCall(receiver, method, _, _, args, _) -> {
             if !(method == "call" && sema_expression_lambda_bound_direct_callee(receiver, name)) && sema_expression_lambda_bound_expr_use(receiver, name) -> return true
             loop argument in args {
                 if sema_expression_lambda_bound_expr_non_direct_use(argument.expr, name) -> return true
@@ -794,7 +794,7 @@ fn sema_expression_lambda_bound_expr_mut_use(expr: Expr, name: String) -> Bool {
                 if sema_expression_lambda_bound_expr_mut_use(argument.expr, name) -> return true
             }
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_expression_lambda_bound_expr_mut_use(receiver, name) -> return true
             loop argument in args {
                 if argument.convention == AccessConvention.Write && sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true

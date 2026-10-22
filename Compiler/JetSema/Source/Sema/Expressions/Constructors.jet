@@ -1084,9 +1084,6 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         name_span: method_span,
         type_args: type_args,
         args: args,
-        resolved_ret: None,
-        range_checked: false,
-        widen_approx: false,
     }
     checked :: sema_call_check_direct_target_owned(&state, direct, call, [SemaCallDefaultValue]{}, if method_name == "from" -> None else -> expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if method_name == "encode_hole" && checked.value.ty != Type.String {
@@ -1223,8 +1220,6 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
                     owner_type_args: [Type]{},
                     type_args: [Type]{},
                     args: [CallArg]{argument},
-                    recv_type: Val(type_name),
-                    resolved_ret: Val(Type.String),
                 }
                 &encoded_parts.push(StrPart.Interp{expr: encoder, format: StrFormat.Display})
             }
@@ -1239,8 +1234,6 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         owner_type_args: [Type]{},
         type_args: [Type]{},
         args: [CallArg]{check_argument},
-        recv_type: Val(type_name),
-        resolved_ret: None,
     }
     fact_start := context.call_facts.len()
     reference_start := context.name_references.len()
@@ -1533,8 +1526,6 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
             owner_type_args: [Type]{},
             type_args: [Type]{},
             args: [CallArg]{argument},
-            recv_type: None,
-            resolved_ret: None,
         }
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }

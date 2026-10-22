@@ -27,12 +27,12 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 #Test("task_combinators_nest_and_accept_block_branches") {
     p :: entry02_program("fn run() {{\n                result :: task.race {{\n                    task.all {{ one(), two() }},\n                    {{ three() }}\n                }}\n            }}\n")
     binding :: entry02_binding(entry02_func(p, "run"))
-    if binding.init == .MethodCall(_, method, _, _, _, args, _, _) {
+    if binding.init == .MethodCall(_, method, _, _, _, args) {
         assert(method == parser_test_task_name("race"))
         if args[0].expr == .ListLit(branches, _) {
             assert(branches.len() == 2)
-            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa, _, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Expr(.MethodCall(_, inner, _, _, _, _, _, _)) -> inner == parser_test_task_name("all") else -> false } else -> false } else -> false })
-            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa, _, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Block(_) -> true else -> false } else -> false } else -> false })
+            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Expr(.MethodCall(_, inner, _, _, _, _)) -> inner == parser_test_task_name("all") else -> false } else -> false } else -> false })
+            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Block(_) -> true else -> false } else -> false } else -> false })
         } else { panic("expected task.race branch list") }
     } else { panic("expected task.race method call") }
 }
@@ -42,7 +42,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
     f :: entry02_func(p, "run")
     found := false
     loop stmt in f.body {
-        if stmt == .Expr(.MethodCall(_, method, _, _, _, args, _, _)) {
+        if stmt == .Expr(.MethodCall(_, method, _, _, _, args)) {
             assert(method == parser_test_task_name("timeout"))
             assert(args.len() == 1)
             found = true

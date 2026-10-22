@@ -202,11 +202,11 @@ fn semindex_structure_test_rust_discriminants() Never! {
     assert_eq(semindex_item_span(item), span)
 }
 fn semindex_structure_test_exact_call_spans() Never! {
-    empty :: Expr.Call{call: Call{name: "f", name_span: Span{start: 4, end: 5}, type_args: [Type]{}, args: [CallArg]{}, resolved_ret: None, range_checked: false, widen_approx: false}}
+    empty :: Expr.Call{call: Call{name: "f", name_span: Span{start: 4, end: 5}, type_args: [Type]{}, args: [CallArg]{}}}
     assert_eq(semindex_structural_expr_span(empty), Span{start: 4, end: 7})
     // A nested no-argument call contributes its closing extent, not name_span.
     last :: CallArg{convention: AccessConvention.Read, expr: empty, span: Span{start: 4, end: 7}, flags: ast_empty_call_arg_flags(), label: None, spread: false}
-    outer :: Expr.Call{call: Call{name: "g", name_span: Span{start: 1, end: 2}, type_args: [Type]{}, args: [CallArg]{last}, resolved_ret: None, range_checked: false, widen_approx: false}}
+    outer :: Expr.Call{call: Call{name: "g", name_span: Span{start: 1, end: 2}, type_args: [Type]{}, args: [CallArg]{last}}}
     assert_eq(semindex_structural_expr_span(outer), Span{start: 1, end: 8})
 }
 fn semindex_structure_test_state_marker_paths() Never! {

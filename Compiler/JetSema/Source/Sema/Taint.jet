@@ -697,15 +697,8 @@ fn sema_taint_core_module_for_receiver(state: SemaTaintFlowState, receiver: Expr
     }
     ""
 }
-fn sema_taint_method_destinations(state: SemaTaintFlowState, receiver: Expr, method: String, recv_type: String?) -> [String] Never! {
+fn sema_taint_method_destinations(state: SemaTaintFlowState, receiver: Expr, method: String) -> [String] Never! {
     destinations := [String]{}
-    if recv_type == {
-        .Val(owner) -> {
-            &destinations.push("{owner}.{method}")
-            &destinations.push("{owner}::{method}")
-        }
-        .None -> {}
-    }
     if receiver == {
         .Ident(alias, _) -> {
             module_row := sema_taint_core_alias(state, alias)
@@ -740,25 +733,8 @@ fn sema_taint_type_of_expr(state: SemaTaintFlowState, expression: Expr) -> Strin
         .Ident(name, _) -> return sema_taint_get_binding(state, name).type_name
         .StructLit(type_name, _, _, _, _, _, _) -> return Val(type_name)
         .Call(call) -> {
-            if call.resolved_ret == {
-                .Val(ty) -> return sema_taint_type_name(ty)
-                .None -> {}
-            }
             fact :: sema_taint_find_callable(state.catalog, state.module_identity, "", call.name) ?? return None
             return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
-        }
-        .MethodCall(_, method, _, _, _, _, recv_type, resolved_ret) -> {
-            if resolved_ret == {
-                .Val(ty) -> return sema_taint_type_name(ty)
-                .None -> {}
-            }
-            if recv_type == {
-                .Val(owner) -> {
-                    fact :: sema_taint_find_callable(state.catalog, state.module_identity, owner, method) ?? return None
-                    return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
-                }
-                .None -> {}
-            }
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, _) -> return sema_taint_type_of_expr(state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
         .Field(base, field, _) | .OptField(base, field, _, _, _) -> {
@@ -808,13 +784,13 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
  
             return tags
         }
-        .MethodCall(receiver, method, _, _, _, args, recv_type, _) -> {
+        .MethodCall(receiver, method, _, _, _, args) -> {
             tags := sema_taint_tags_of(&state, receiver)
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
-            destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
+            destinations := sema_taint_method_destinations(state, receiver, method)
             sema_taint_union(&tags, sema_taint_source_tags(state, destinations))
-            sema_taint_union(&tags, sema_taint_call_return_tags(state, recv_type ?? "", method))
-            sema_taint_scrub(state, &tags, recv_type ?? "", method)
+            sema_taint_union(&tags, sema_taint_call_return_tags(state, "", method))
+            sema_taint_scrub(state, &tags, "", method)
             if sema_taint_is_typed_decode(state, receiver, method) -> sema_taint_clear_origins(&tags)
             if sema_taint_is_credential_verify(state, receiver, method) -> sema_taint_remove(&tags, "Credential")
             return tags
@@ -975,8 +951,8 @@ fn sema_taint_e0721(tag_value: String, api: String, destinations: [String], span
 
 fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, expression: Expr) {
     if expression == {
-        .MethodCall(receiver, method, method_span, _, _, args, recv_type, _) -> {
-            destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
+        .MethodCall(receiver, method, method_span, _, _, args) -> {
+            destinations := sema_taint_method_destinations(state, receiver, method)
             loop argument in args {
                 tags := sema_taint_tags_of(&state, argument.expr)
                 denied := sema_taint_denied_tag(graph, state, tags, destinations)

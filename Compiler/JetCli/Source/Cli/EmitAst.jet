@@ -504,7 +504,7 @@ fn jet_cli_emit_ast_expr(expression: Expr) -> JetCLIEmitNode Never! {
         .Place(value, access, _) -> jet_cli_emit_ast_unary("Place", jet_cli_emit_ast_place_access(access), value)
         .Field(base, member, _) -> jet_cli_emit_ast_unary("Field", "field .{member}", base)
         .OptField(base, member, _, _, _) -> jet_cli_emit_ast_unary("OptField", "field ?.{member}", base)
-        .MethodCall(receiver, method, _, _, type_args, args, _, _) -> {
+        .MethodCall(receiver, method, _, _, type_args, args) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(receiver)}
             jet_cli_emit_ast_args(args, &children)
             jet_cli_emit_node("MethodCall", "method .{method}{jet_cli_emit_ast_type_args(type_args)}", children)

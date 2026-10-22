@@ -223,7 +223,7 @@ fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
                         &stack.push(PolicyWalkNode.Expression(base))
                     }
                     .Call(call) -> policy_push_args(&stack, call.args)
-                    .MethodCall(receiver, _, _, _, _, args, _, _, _, _) |
+                    .MethodCall(receiver, _, _, _, _, args) |
                     .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
                         policy_push_args(&stack, args)
                         &stack.push(PolicyWalkNode.Expression(receiver))
@@ -386,19 +386,19 @@ fn policy_literal_string(expression: Expr, expected: String) -> Bool {
     false
 }
 fn policy_is_process_input(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
         return (method == "argv" || method == "args") && policy_receiver_is(receiver, "process", aliases)
     }
     false
 }
 fn policy_is_process_argv(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
         return method == "argv" && policy_receiver_is(receiver, "process", aliases)
     }
     false
 }
 fn policy_is_process_argv_view(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
         if method == "skip" && args.len() > 0 && policy_without_parens(args[0].expr) == .Int(value, _, _, _) {
             return value == 1 && policy_is_process_argv(receiver, aliases)
         }
@@ -406,7 +406,7 @@ fn policy_is_process_argv_view(expression: Expr, aliases: [String: String]) -> B
     false
 }
 fn policy_is_legacy_digest_call(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
         if method == "sha256_bytes" && policy_without_parens(receiver) == .Ident(name, _) -> return (aliases.get(name) ?? "") == "core.crypto"
     }
     false
@@ -438,7 +438,7 @@ fn policy_constant_expression(expression: Expr) -> Bool {
     constant
 }
 fn policy_is_constant_duration(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
         return policy_receiver_is(receiver, "Duration", aliases) && policy_duration_method(method) &&
             args.len() > 0 && policy_nonnegative_numeric_literal(args[0].expr) && policy_constant_expression(args[0].expr)
     }
@@ -453,14 +453,14 @@ fn policy_plain_fixed_projection(expression: Expr) -> Bool {
     false
 }
 fn policy_is_redundant_fixed_cleanup(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
         return method == "replace" && args.len() == 2 && policy_literal_string(args[0].expr, ",") &&
             policy_literal_string(args[1].expr, "") && policy_plain_fixed_projection(receiver)
     }
     false
 }
 fn policy_is_unit_projection(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
         return (args.len() == 0 && method == "raw") || method == "in"
     }
     false
@@ -477,7 +477,7 @@ fn policy_direct_scalar(expression: Expr) -> Bool {
                     else -> return false
                 }
             }
-            .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+            .MethodCall(receiver, method, _, _, _, args) -> {
                 if method != "from_int" || args.len() != 1 || !policy_ident_is(receiver, "Float") -> return false
                 current = args[0].expr
             }
@@ -486,7 +486,7 @@ fn policy_direct_scalar(expression: Expr) -> Bool {
     }
 }
 fn policy_is_unit_scalar_rewrap(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
         constructor :: method.starts_with("from_") || (policy_receiver_is(receiver, "Duration", aliases) && policy_duration_method(method))
         if !constructor || args.len() != 1 -> return false
         if policy_without_parens(args[0].expr) == .Binary(operator, left, right, _) {
@@ -517,7 +517,7 @@ fn policy_is_readonly_copy(expression: Expr, aliases: [String: String]) -> Bool 
             module_name :: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
             return policy_readonly_file_args(module_name, method, call.args, aliases)
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args) -> {
             return policy_receiver_is(receiver, "files", aliases) && policy_readonly_file_args("files", method, args, aliases)
         }
         else -> return false
@@ -536,7 +536,7 @@ fn policy_is_io_call(expression: Expr, aliases: [String: String]) -> Bool {
             leaf :: parts[parts.len() - 1]
             return policy_io_module(policy_slice_bytes(call.name, 0, call.name.bytes().len() - leaf.bytes().len() - 1), aliases)
         }
-        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> return policy_receiver_is(receiver, "files", aliases) || policy_receiver_is(receiver, "io", aliases) || policy_receiver_is(receiver, "env", aliases)
+        .MethodCall(receiver, _, _, _, _, _) -> return policy_receiver_is(receiver, "files", aliases) || policy_receiver_is(receiver, "io", aliases) || policy_receiver_is(receiver, "env", aliases)
         else -> return false
     }
 }
@@ -573,19 +573,19 @@ fn policy_is_http_request_value(expression: Expr, program: Program) -> Bool {
     false
 }
 fn policy_is_http_ceremony(expression: Expr, program: Program) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
         return method == "body" && args.len() > 0 && policy_is_http_request_value(receiver, program)
     }
     false
 }
 fn policy_is_http_message_text(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
-        if method == "text" && args.len() > 0 && policy_without_parens(receiver) == .MethodCall(_, inner_method, _, _, _, _, _, _, _, _) -> return inner_method == "body"
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
+        if method == "text" && args.len() > 0 && policy_without_parens(receiver) == .MethodCall(_, inner_method, _, _, _, _) -> return inner_method == "body"
     }
     false
 }
 fn policy_is_raw_delimited_split(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
         return method == "split" && args.len() > 0 && policy_literal_string(args[0].expr, "\t")
     }
     false
@@ -610,7 +610,7 @@ fn policy_is_hand_json_wire(expression: Expr) -> Bool {
     interpolated && object_shape
 }
 fn policy_is_string_prefix_containment(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
         if method == "starts_with" && args.len() > 0 && policy_without_parens(args[0].expr) == .Str(parts, _) {
             loop part in parts {
                 if part == {
@@ -623,7 +623,7 @@ fn policy_is_string_prefix_containment(expression: Expr) -> Bool {
     false
 }
 fn policy_is_url_query_reparse(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
         return method == "split" && args.len() > 0 && (policy_literal_string(args[0].expr, "&") || policy_literal_string(args[0].expr, "="))
     }
     false
@@ -631,7 +631,7 @@ fn policy_is_url_query_reparse(expression: Expr) -> Bool {
 fn policy_is_named_list_equality(expression: Expr) -> Bool {
     if policy_without_parens(expression) == {
         .Call(call) -> return call.name == "same_strings"
-        .MethodCall(_, method, _, _, _, _, _, _, _, _) -> return method == "same_strings"
+        .MethodCall(_, method, _, _, _, _) -> return method == "same_strings"
         else -> return false
     }
 }
@@ -644,7 +644,7 @@ fn policy_is_non_idempotent_directory(expression: Expr, aliases: [String: String
             module_name :: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
             return method == "create_dir" && policy_module_is_files(module_name, aliases)
         }
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> return method == "create_dir" && policy_receiver_is(receiver, "files", aliases)
+        .MethodCall(receiver, method, _, _, _, _) -> return method == "create_dir" && policy_receiver_is(receiver, "files", aliases)
         else -> return false
     }
 }
@@ -665,7 +665,7 @@ fn policy_is_ascii_replacement_chain(expression: Expr) -> Bool {
     lower := 0
     upper := 0
     loop true {
-        if policy_without_parens(current) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        if policy_without_parens(current) == .MethodCall(receiver, method, _, _, _, args) {
             if method != "replace" || args.len() != 2 -> break
             first :: policy_ascii_literal(args[0].expr) ?? break
             second :: policy_ascii_literal(args[1].expr) ?? break
@@ -699,7 +699,7 @@ fn policy_expression_effect(expression: Expr, aliases: [String: String]) -> Stri
             leaf :: parts[parts.len() - 1]
             return policy_effect_for_module(policy_slice_bytes(call.name, 0, call.name.bytes().len() - leaf.bytes().len() - 1), aliases)
         }
-        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, _) -> {
             if policy_without_parens(receiver) == .Ident(name, _) -> return policy_effect_for_module(name, aliases)
             return None
         }
@@ -731,7 +731,7 @@ fn policy_is_task_expression(expression: Expr, only_all: Bool) -> Bool {
                 if call.name == "task.all" || call.name == POLICY_TASK_INTERNAL_ALL -> return true
                 return !only_all && (call.name == "task.race" || call.name == "task.any" || call.name == POLICY_TASK_INTERNAL_RACE || call.name == POLICY_TASK_INTERNAL_ANY)
             }
-            .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+            .MethodCall(receiver, method, _, _, _, _) -> {
                 if !policy_ident_is(receiver, "task") && !policy_ident_is(receiver, POLICY_TASK_INTERNAL_RECEIVER) -> return false
                 if method == "all" || method == POLICY_TASK_INTERNAL_ALL -> return true
                 return !only_all && (method == "race" || method == "any" || method == POLICY_TASK_INTERNAL_RACE || method == POLICY_TASK_INTERNAL_ANY)
@@ -821,7 +821,7 @@ fn policy_response_decoder(function: Func) -> Bool {
 fn policy_ordinary_envelope_decoder(function: Func) -> Bool {
     found := false
     policy_visit_body(function.body, (expression) -> {
-        if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+        if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
             if method == "field" && args.len() > 0 && policy_literal_string(args[0].expr, "ok") -> found = true
         }
     })
@@ -913,7 +913,7 @@ fn policy_manual_counter_body(counter: String, body: [Stmt]) -> Bool {
     increments == 1 && used
 }
 fn policy_is_file_walk(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
         return method == "walk" && policy_receiver_is(receiver, "files", aliases)
     }
     false
@@ -1051,7 +1051,7 @@ fn policy_body_anchored_regex_capture(body: [Stmt], aliases: [String: String]) -
                 if literal == .Value(value) && policy_anchored_literal(value) -> anchored = true
             }
             .Call(call) -> { if call.name == "re.match" -> matched = true }
-            .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+            .MethodCall(receiver, method, _, _, _, _) -> {
                 if method == "group" -> captured = true
                 if method == "match" && policy_without_parens(receiver) == .Ident(name, _) {
                     if (aliases.get(name) ?? "") == "core.regex" -> matched = true
@@ -1174,7 +1174,7 @@ fn policy_has_args_builder(program: Program) -> Bool {
     specification := false
     parsed := false
     policy_visit_program(program, (expression) -> {
-        if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+        if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
             if method == "spec" && policy_receiver_is(receiver, "args", aliases) -> specification = true
             if method == "parse" || method == "parse_or_exit" -> parsed = true
         }

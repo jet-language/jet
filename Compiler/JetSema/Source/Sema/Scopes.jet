@@ -1708,8 +1708,9 @@ fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Sp
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
             index :: table.name_positions[slot][cursor]
-            binding :: table.bindings[index]
-            if binding.frame == frame && (module_frame || binding.symbol.span.start <= use_span.start) -> return Val(index)
+            // Read the row through its place: binding it copied the whole row
+            // (its Symbol's Strings) for every candidate.
+            if table.bindings[index].frame == frame && (module_frame || table.bindings[index].symbol.span.start <= use_span.start) -> return Val(index)
             cursor -= 1
         }
         frame = table.frames[frame].parent

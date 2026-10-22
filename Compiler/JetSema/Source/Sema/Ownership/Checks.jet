@@ -608,8 +608,7 @@ fn sema_ownership_writes_read_shared_guard(expr: Expr, scopes: SemaScopeTable) -
     output_path := [String]{}
     root :: sema_ownership_named_view_root(expr, &output_path) ?? return false
     root_index :: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
-    root_binding :: scopes.bindings[root_index]
-    if root_binding.symbol.kind == SymbolKind.Parameter && root_binding.access == AccessConvention.Write -> return false
+    if scopes.bindings[root_index].symbol.kind == SymbolKind.Parameter && scopes.bindings[root_index].access == AccessConvention.Write -> return false
     sema_ownership_place_reads_read_shared_guard(expr, scopes)
 }
 
@@ -931,11 +930,10 @@ fn sema_ownership_declaration_index(state: &SemaOwnershipState, key: String) -> 
 // rather than manufacturing a second name-resolution table.
 fn sema_ownership_note_reference(state: &SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
     index :: sema_scope_resolve_index_at(scopes, name, use_span) ?? return false
-    binding :: scopes.bindings[index]
-    def_key :: binding.symbol.id.key
+    def_key :: scopes.bindings[index].symbol.id.key
     declaration_index := sema_ownership_declaration_index(&state, def_key)
     if declaration_index == None {
-        sema_ownership_declare_binding(&state, binding.symbol, binding.symbol.kind == SymbolKind.Parameter)
+        sema_ownership_declare_binding(&state, scopes.bindings[index].symbol, scopes.bindings[index].symbol.kind == SymbolKind.Parameter)
         declaration_index = sema_ownership_declaration_index(&state, def_key)
     }
     fact_index :: declaration_index ?? return false
@@ -950,7 +948,7 @@ fn sema_ownership_note_reference(state: &SemaOwnershipState, name: String, use_s
         sema_ownership_mark_dirty(&state, fact_index)
         sema_ownership_mark_dirty(&state, first)
     }
-    sema_ownership_push_reference(&state, SemaOwnershipReference{name: name, def_key: def_key, def_span: binding.symbol.span, use_span: use_span, kind: kind})
+    sema_ownership_push_reference(&state, SemaOwnershipReference{name: name, def_key: def_key, def_span: scopes.bindings[index].symbol.span, use_span: use_span, kind: kind})
     true
 }
 
@@ -1164,11 +1162,10 @@ fn sema_ownership_place_from_expr_inner(expr: Expr, scopes: SemaScopeTable) -> S
     if expr == {
         .Ident(name, span) -> {
             index :: sema_scope_resolve_index_at(scopes, name, span) ?? return None
-            binding :: scopes.bindings[index]
             Val(SemaOwnershipPlace{
-                root: binding.symbol.name,
-                root_key: binding.symbol.id.key,
-                root_span: binding.symbol.span,
+                root: scopes.bindings[index].symbol.name,
+                root_key: scopes.bindings[index].symbol.id.key,
+                root_span: scopes.bindings[index].symbol.span,
                 projections: [String]{},
                 typed_projections: [SemaOwnershipProjection]{},
             })
@@ -1352,7 +1349,7 @@ fn sema_ownership_view_producer(expr: Expr) -> SemaOwnershipViewProducer? {
 fn sema_ownership_arena_view_source(binding: Binding) -> Expr? {
     if !binding.arena_view -> return None
     if binding.init == {
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _) -> {
             if method != "alloc" && method != "try_alloc" -> return None
             Val(receiver)
         }
@@ -1997,7 +1994,7 @@ fn sema_ownership_check_list_view_element_aliases(state: &SemaOwnershipState, el
     loop element in elements {
         sources := [SemaOwnershipPlace]{}
         access := AccessConvention.Read
-        if element == .MethodCall(receiver, method, _, _, _, _, _, _) && method == "view" {
+        if element == .MethodCall(receiver, method, _, _, _, _) && method == "view" {
             loop place in sema_ownership_places_from_expr_in_state(receiver, scopes, &state) {
                 windowed := place
                 &windowed.projections.push("[..]")
@@ -3620,7 +3617,7 @@ fn sema_ownership_call_result_views(state: SemaOwnershipState, expr: Expr) -> [S
     none := [SemaCallReturnViewFact]{}
     if expr == {
         .Call(call) -> return state.call_views.get(sema_ownership_span_key(call.name_span)) ?? none
-        .MethodCall(_, _, method_span, _, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _) -> return state.call_views.get(sema_ownership_span_key(method_span)) ?? none
+        .MethodCall(_, _, method_span, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _) -> return state.call_views.get(sema_ownership_span_key(method_span)) ?? none
         .CallValue(_, _, span) -> return state.call_views.get(sema_ownership_span_key(span)) ?? none
         .Paren(value, _) | .Try(value, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) | .Tainted(value, _, _) -> return sema_ownership_call_result_views(state, value)
         .Copy(value, _) -> {
@@ -3760,10 +3757,9 @@ fn sema_ownership_capture_place_info(state: SemaOwnershipState, expr: Expr, scop
         .Ident(name, span) -> {
             if !sema_ownership_walk_place_shape(expr, scopes) -> return None
             index :: sema_scope_resolve_index_at(scopes, name, span) ?? return None
-            binding :: scopes.bindings[index]
             return Val(SemaOwnershipCapturePlace{
-                place: SemaOwnershipPlace{root: binding.symbol.name, root_key: binding.symbol.id.key, root_span: binding.symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}},
-                ty: binding.symbol.ty,
+                place: SemaOwnershipPlace{root: scopes.bindings[index].symbol.name, root_key: scopes.bindings[index].symbol.id.key, root_span: scopes.bindings[index].symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}},
+                ty: scopes.bindings[index].symbol.ty,
                 stopped: false,
             })
         }
@@ -3803,8 +3799,7 @@ fn sema_ownership_walk_root_is_local(scopes: SemaScopeTable, expr: Expr) -> Bool
     output_path := [String]{}
     root :: sema_ownership_named_view_root(expr, &output_path) ?? return false
     index :: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
-    binding :: scopes.bindings[index]
-    binding.symbol.kind != SymbolKind.Parameter && binding.access != AccessConvention.Write
+    scopes.bindings[index].symbol.kind != SymbolKind.Parameter && scopes.bindings[index].access != AccessConvention.Write
 }
 
 // Rust `lookup(owner).ty`: the written root binding's type.
@@ -4013,7 +4008,7 @@ fn sema_ownership_collect_evaluated_expr_accesses(state: &SemaOwnershipState, ex
                 loop arg in call.args -> sema_ownership_nested_argument_checks(&state, arg, mode, scopes, &checks)
             }
         }
-        .MethodCall(receiver, method, method_span, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, method_span, _, _, args) -> {
             if requirements {
                 receiver_access :: sema_ownership_walk_receiver_access(state, receiver)
                 sema_ownership_push_evaluated_access(&state, receiver, receiver_access, bound, scopes, &events)
@@ -4670,7 +4665,7 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
             }
             valid
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) -> {
             valid := true
             receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
             // A receiver that names no binding (`String.from_bytes(..)`,

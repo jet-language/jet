@@ -379,7 +379,7 @@ fn collect_moved_in_stmt(stmt: Stmt, bindings: Set<String>, scope: [String:CtVal
 fn collect_moved_in_expr(expr: Expr, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
     if expr == {
         .Call(call) -> { loop arg in call.args -> collect_moved_in_callarg(arg, bindings, scope, &moved) }
-        .MethodCall(receiver, _, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) -> {
             collect_moved_in_expr(receiver, bindings, scope, &moved)
             loop arg in args -> collect_moved_in_callarg(arg, bindings, scope, &moved)
         }

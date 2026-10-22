@@ -440,7 +440,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             None
         }
         .Field(base, _, _) | .OptField(base, _, _, _, _) -> sema_contract_result_ident_in_expr(base)
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found := sema_contract_result_ident_in_expr(receiver)
             if found != None -> return found
             sema_contract_result_ident_in_call_args(args)

@@ -183,7 +183,7 @@ fn sema_derive_static_value(expansion: SemaDeriveExpansion, expression: Expr) ->
             }
             CtValue?{None}
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _) -> sema_derive_static_method(expansion, receiver, method, args)
+        .MethodCall(receiver, method, _, _, _, args) -> sema_derive_static_method(expansion, receiver, method, args)
         else -> CtValue?{None}
     }
 }
@@ -831,13 +831,13 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .Place(value, access, span) -> return Expr.Place{value: sema_derive_expand_expr(&expansion, value), access: access, span: span}
         .Field(base, member, span) -> return sema_derive_expand_field(&expansion, base, member, span)
         .OptField(base, member, member_span, flatten, span) -> return Expr.OptField{base: sema_derive_expand_expr(&expansion, base), member: member, member_span: member_span, flatten: flatten, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args) -> {
             // `T.reflect()` over the template's own reflected handle is the handle.
             if method == "reflect" && args.len() == 0 && owner_type_args.len() == 0 && type_args.len() == 0 {
                 folded :: sema_derive_reflect_literal(expansion, receiver, method_span)
                 if folded == .Val(literal) -> return literal
             }
-            return Expr.MethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, owner_type_args: sema_derive_expand_types(&expansion, owner_type_args), type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), recv_type: recv_type, resolved_ret: resolved_ret}
+            return Expr.MethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, owner_type_args: sema_derive_expand_types(&expansion, owner_type_args), type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args)}
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, span) -> return Expr.OptMethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), span: span}
         // copy: `import_ns` and `as_trait` are payloads of read parameter `expression`, which keeps the originals; the new Expr.StructLit's fields own `import_ns` and `as_trait`

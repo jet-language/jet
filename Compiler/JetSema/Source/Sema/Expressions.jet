@@ -2899,7 +2899,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
     guard := sema_call_try_scope_guard(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if guard.handled -> return SemaMethodSpecialCheck{handled: true, value: guard.value}
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
-        printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
     }
     diagnostics_before := diagnostics.len()
@@ -3642,7 +3642,7 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
         .Ident(_, _) | .Field(_, _, _) | .UnitLit(_, _, _, _, _, _) -> true
         .Paren(inner, _) -> sema_expr_unit_probe_shape(inner)
         .Unary(op, inner, _) -> op == UnOp.Neg && sema_expr_unit_probe_shape(inner)
-        .MethodCall(receiver, _, _, _, _, _, _, _) -> receiver == .Ident(_, _)
+        .MethodCall(receiver, _, _, _, _, _) -> receiver == .Ident(_, _)
         .Call(call) -> call.name == "measurement"
         else -> false
     }
@@ -3843,7 +3843,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             {convention: AccessConvention.Read, expr: left, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
             {convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         }
-        constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, recv_type: None, resolved_ret: None}
+        constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments}
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if (op == BinOp.Add && left_point && right_point) || (op == BinOp.Sub && left_delta && right_point) {
@@ -3899,7 +3899,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     // the arithmetic and equality operators stay on the precise route below.
     if sema_expr_precise_orders_by_compare(op, lhs.ty, rhs.ty) {
         argument :: CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
-        call :: Expr.MethodCall{receiver: left, method: "compare", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None}
+        call :: Expr.MethodCall{receiver: left, method: "compare", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}}
         comparison :: sema_check_expression(call, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         if op == BinOp.Compare -> return sema_expr_expected(comparison, expected, environment, program, &diagnostics)
         return sema_expr_expected_owned(sema_expr_operator_ordering_test(op, comparison, span, line), expected, environment, program, &diagnostics)
@@ -4148,7 +4148,7 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         .Unary(op, operand, span) -> sema_expr_check_unary(op, operand, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Binary(op, left, right, span) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Call(call) -> sema_expr_check_call_expr(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _) -> sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args) -> sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .ListLit(elements, span) -> sema_expr_check_list_literal(elements, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Range(start, end, exclusive, span) -> sema_expression_range(start, end, exclusive, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Index(base, index, span, kind) -> sema_expression_index(base, index, kind, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4369,14 +4369,14 @@ fn sema_expr_is_bare_subject(expr: Expr) -> Bool Never! {
 fn sema_expr_is_bare_member_chain(expr: Expr) -> Bool Never! {
     if expr == {
         .Field(base, _, _) -> sema_expr_is_bare_subject(base) || sema_expr_is_bare_member_chain(base)
-        .MethodCall(receiver, _, _, _, _, _, _, _) -> sema_expr_is_bare_subject(receiver) || sema_expr_is_bare_member_chain(receiver)
+        .MethodCall(receiver, _, _, _, _, _) -> sema_expr_is_bare_subject(receiver) || sema_expr_is_bare_member_chain(receiver)
         else -> false
     }
 }
 
 // This rule a=A: `.new(...)` is inferred construction, never subject shorthand.
 fn sema_expr_is_inferred_constructor(expr: Expr) -> Bool Never! {
-    if expr == .MethodCall(receiver, method, _, _, _, _, _, _) -> return method == "new" && sema_expr_is_bare_subject(receiver)
+    if expr == .MethodCall(receiver, method, _, _, _, _) -> return method == "new" && sema_expr_is_bare_subject(receiver)
     false
 }
 
@@ -4384,7 +4384,7 @@ fn sema_expr_bare_member_chain_text(expr: Expr) -> String Never! {
     if expr == {
         .Ident(name, _) -> if name == "" -> "" else -> ".member"
         .Field(base, member, _) -> "{sema_expr_bare_member_chain_text(base)}.{member}"
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> "{sema_expr_bare_member_chain_text(receiver)}.{method}(…)"
+        .MethodCall(receiver, method, _, _, _, _) -> "{sema_expr_bare_member_chain_text(receiver)}.{method}(…)"
         else -> ".member"
     }
 }
@@ -4396,8 +4396,7 @@ fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
         // `expr` is the caller's AST node (a read parameter), which the caller keeps.
         .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> expr.copy()
         .Field(base, member, span) -> Expr.Field{base: sema_expr_replace_bare_subject(base, subject), member: member, span: span}
-        // copy: `recv_type` and `resolved_ret` are payloads of read parameter `expr`, which keeps the originals; the new Expr.MethodCall's fields own `recv_type` and `resolved_ret`
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type.copy(), resolved_ret: resolved_ret.copy()}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args}
         // copy: the rewritten guard is a new owned Expr. Other kinds stay as written, and `expr` is
         // the caller's AST node (a read parameter), which the caller keeps.
         else -> expr.copy()
@@ -4457,7 +4456,7 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
     if context.lending_view_parameter_keys.len() > 0 {
         if expr == {
             .Call(call) -> loop argument in call.args -> _ := sema_ownership_report_lending_view_escape(argument.expr, "be passed to a call", scopes, context, &diagnostics)
-            .MethodCall(_, _, _, _, _, args, _, _) | .OptMethodCall(_, _, _, _, args, _) | .CallValue(_, args, _) -> loop argument in args -> _ := sema_ownership_report_lending_view_escape(argument.expr, "be passed to a call", scopes, context, &diagnostics)
+            .MethodCall(_, _, _, _, _, args) | .OptMethodCall(_, _, _, _, args, _) | .CallValue(_, args, _) -> loop argument in args -> _ := sema_ownership_report_lending_view_escape(argument.expr, "be passed to a call", scopes, context, &diagnostics)
             else -> {}
         }
     }

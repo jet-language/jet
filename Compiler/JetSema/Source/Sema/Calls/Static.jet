@@ -696,7 +696,7 @@ fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], spa
     probe_args := args
     binding :: sema_call_bind_direct("Perf.{method}", target.signature, &probe_args, span, &diagnostics) ?? return failed
     defaults :: sema_call_registration_defaults(graph, binding) ?? return failed
-    call :: Call{name: "Perf.{method}", name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+    call :: Call{name: "Perf.{method}", name_span: span, type_args: type_args, args: args}
     checked :: sema_call_check_direct_target_owned(&state, target, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return failed
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, checked, &diagnostics) -> return failed
     return SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
@@ -863,7 +863,7 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     probe_args := args
     binding :: sema_call_bind_direct("{type_name}.{method}", selected.signature, &probe_args, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     defaults :: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return SemaMethodSpecialCheck{handled: true, value: None} else -> sema_call_static_local_defaults(target, binding, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    call := Call{name: "{type_name}.{method}", name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+    call := Call{name: "{type_name}.{method}", name_span: span, type_args: type_args, args: args}
     checked :: sema_call_check_direct_target_owned(&state, selected, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call_value :: sema_call_static_call_value(checked.value, target.method.symbol) ?? {
         &diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
