@@ -66,6 +66,7 @@ fn sema_repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModu
     ownership := sema_ownership_state_init()
     ownership.fixed_length_write_params = environment.fixed_length_write_params
     ownership.static_roots = sema_function_static_roots(environment, program, root.module_identity)
+    ownership.persist_roots = sema_function_persist_roots(program, root.module_identity)
     _ :: sema_scope_enter(&scopes, &ownership, root.key)
     return_type :: sema_checked_return_type(source.return_type, false)
     scopes.return_type = Val(return_type)

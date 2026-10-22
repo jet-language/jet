@@ -1,6 +1,7 @@
 // E0222/E0223: a `#Persist`, mutable, or `#Static` module binding owns one
 // shared storage cell. A mutable borrow (the write-access marker `&` or a
-// mutating receiver) would let access escape that cell (E0223), and a move
+// mutating receiver) would let access escape that cell (E0223), except for a
+// `#Persist` cell, which is mutable module state lent like a local; a move
 // may take the cell as a whole but never one part of it (E0222).
 use jet_foundation.[
     ConstAttr,
@@ -26,6 +27,16 @@ fn sema_ownership_is_static_root(declaration: ConstDef) -> Bool Never! {
 fn sema_ownership_static_roots(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return [String]{}
     graph.modules[module_index].static_roots
+}
+
+fn sema_ownership_persist_roots(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return [String]{}
+    graph.modules[module_index].persist_roots
+}
+
+// A static place that refuses write access: every static cell but `#Persist`.
+fn sema_ownership_place_refuses_write(state: SemaOwnershipState, place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
+    sema_ownership_place_is_static(place, scopes) && !state.persist_roots.contains(place.root_key)
 }
 
 fn sema_ownership_push_once(diagnostic: Diagnostic, diagnostics: &[Diagnostic]) {

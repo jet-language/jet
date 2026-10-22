@@ -216,6 +216,8 @@ struct SemaOwnershipState {
     // Rust `is_static_move_root`: keys of this module's `#Persist`, mutable,
     // and `#Static` bindings, which own one shared storage cell (E0222/E0223).
     static_roots: [String]
+    // The `#Persist` subset of `static_roots`, which a write borrow may lend.
+    persist_roots: [String]
     close_owners: [SemaOwnershipCloseOwner]
     // Only the parameter symbol of this exact consuming Close body is exempt.
     close_receiver_key: String
@@ -371,6 +373,7 @@ fn sema_ownership_state_init() -> SemaOwnershipState Never! {
         fixed_length_write_params: [String]{},
         uninit: [SemaOwnershipUninitFact]{},
         static_roots: [String]{},
+        persist_roots: [String]{},
         close_owners: [SemaOwnershipCloseOwner]{},
         close_receiver_key: "",
         key_slots: [String:Int]{},
@@ -451,6 +454,7 @@ fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershipSta
     snapshot.fixed_length_write_params = source.fixed_length_write_params
     snapshot.uninit = source.uninit
     snapshot.static_roots = source.static_roots
+    snapshot.persist_roots = source.persist_roots
     loop owner in source.close_owners -> &snapshot.close_owners.push(SemaOwnershipCloseOwner{place: sema_ownership_place_snapshot(owner.place), ty: owner.ty})
     snapshot.close_receiver_key = source.close_receiver_key.copy()
     snapshot.key_slots = source.key_slots
@@ -474,6 +478,7 @@ fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwnership
     state.share_known = saved.share_known.copy()
     state.fixed_length_write_params = saved.fixed_length_write_params.copy()
     state.static_roots = saved.static_roots.copy()
+    state.persist_roots = saved.persist_roots.copy()
     state.close_owners = saved.close_owners.copy()
     state.close_receiver_key = saved.close_receiver_key.copy()
 }
@@ -1885,7 +1890,7 @@ fn sema_ownership_check_owner_read(state: &SemaOwnershipState, expr: Expr, scope
 // returned place.  Ownership stores the window and enforces overlap; it does
 // not infer view kinds or invent a second type relation.
 fn sema_ownership_open_reference(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    if access == AccessConvention.Write && sema_ownership_place_is_static(place, scopes) {
+    if access == AccessConvention.Write && sema_ownership_place_refuses_write(state, place, scopes) {
         sema_ownership_report_static_write(&state, place, span, &diagnostics)
         return false
     }
@@ -1912,7 +1917,7 @@ fn sema_ownership_open_reference_for_expr(state: &SemaOwnershipState, expr: Expr
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 -> return false
     loop place in places {
-        if access == AccessConvention.Write && sema_ownership_place_is_static(place, scopes) {
+        if access == AccessConvention.Write && sema_ownership_place_refuses_write(state, place, scopes) {
             sema_ownership_report_static_write(&state, place, expr_span(expr), &diagnostics)
             return false
         }
@@ -2028,7 +2033,7 @@ fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Expr, s
         return false
     }
     loop place in places {
-        if sema_ownership_place_is_static(place, scopes) {
+        if sema_ownership_place_refuses_write(state, place, scopes) {
             sema_ownership_report_static_write(&state, place, expr_span(expr), &diagnostics)
             return false
         }
@@ -2471,7 +2476,7 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
         return false
     }
     loop place in places {
-        if sema_ownership_place_is_static(place, scopes) {
+        if sema_ownership_place_refuses_write(state, place, scopes) {
             // Rust's assignment path has no static-borrow check; keep E0202.
             if action == "be assigned" {
                 &diagnostics.push(sema_error("E0202", expr_span(expr), "cannot take write access to a static binding", "static storage is not mutable through a borrow", "copy the value into a mutable local before taking `&`"))

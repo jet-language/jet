@@ -807,6 +807,17 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 marker :: parser_parse_marker(&state)
                 &program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
             }
+            parser_persist_binding_ahead(&state) -> {
+                errors_before :: state.diagnostics.len()
+                item :: parser_parse_persist_binding(&state)
+                if parser_error_since(state, errors_before) {
+                    parser_sync_top(&state)
+                } else if item == .Val(value) {
+                    &program.items.push(value)
+                } else {
+                    parser_sync_top(&state)
+                }
+            }
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
                 if declaration.import == {

@@ -10098,3 +10098,16 @@ catalog row; native provider rows retain their existing dispatch.
 by its plain name. When two different types in one message share that name,
 each prints with its module path as the user writes it (`crypto.Secret`).
 Internal module identities never appear in a message.
+
+**2026-10-22 — D-PERSIST-BORROW1=A** *(card #5091)*: a module-level
+`#Persist name := value` binding is mutable module state, and a function that
+takes write access may be handed it with `&` (`bump(&total)`), like a local.
+Other static cells (plain mutable module bindings, `#Static`) keep E0223.
+`#Persist` on a local binding keeps E0145. Example:
+`Examples/features/devloop/persist_write_borrow.jet` (prints `1`).
+
+**2026-10-22 — D-PREP-LOCAL1=A** *(card #5091)*: `name :: prep { value }`
+inside a function body is supported: the block runs while building and every
+read of `name` is the prepared value (a read counts as a use, so no unused
+binding lint). Example: `Examples/features/comptime/prep_local_value.jet`
+(prints `8`).

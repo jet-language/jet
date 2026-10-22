@@ -3411,6 +3411,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
                     return None
                 }
                 &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
+                if !sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return None
                 prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
                 return sema_expr_expected_owned(^prepared, expected, environment, program, &diagnostics)
             }

@@ -521,6 +521,9 @@ struct SemaRegistrationModule {
     // (sema_ownership_is_static_root), collected once at registration so a
     // function check reads them without walking the constant ASTs.
     static_roots: [String]{[String]{}}
+    // The `#Persist` subset of `static_roots`: mutable module state whose
+    // cell may be lent for writing.
+    persist_roots: [String]{[String]{}}
     imports: [SemaRegistrationImport]
     exports: [SemaRegistrationExport]
     // Local import name -> its binding (Rust `Checker::imports`). Import
@@ -1849,6 +1852,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     if item == {
         .Const(value) -> {
             if sema_ownership_is_static_root(value) -> &module_row.static_roots.push(symbol.id.key)
+            if value.is_persist -> &module_row.persist_roots.push(symbol.id.key)
             &module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, identity_key: "{module_row.module_identity}:{value.name}"})
         }
         else -> {}

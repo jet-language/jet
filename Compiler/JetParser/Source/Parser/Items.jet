@@ -2192,6 +2192,11 @@ fn parser_module_binding_ahead(state: &JetParserState) -> Bool Never! {
 // `start` through `end`. A line that is not one named binding stays a script
 // statement (None), which sema reports as top-level executable code.
 fn parser_module_binding_item(statement: Stmt, start: Span, end: Int) -> Item? {
+    definition :: parser_module_binding_def(statement, start, end) ?? return None
+    Val(Item.Const{value: definition})
+}
+
+fn parser_module_binding_def(statement: Stmt, start: Span, end: Int) -> ConstDef? {
     if statement == .Val(binding) {
         if binding.pattern != None || binding.name == "" -> return None
         definition := ast_const(binding.name, binding.name_span, Span{start: start.start, end: end}, binding.init)
@@ -2202,9 +2207,27 @@ fn parser_module_binding_item(statement: Stmt, start: Span, end: Int) -> Item? {
         definition.mutable = binding.mutable
         // Everything is public by default (S18), module bindings included.
         definition.is_pub = true
-        return Val(Item.Const{value: definition})
+        return Val(definition)
     }
     None
+}
+
+// `#Persist name := value` at file scope (Rust `at_persist_binding`): module
+// state that survives a `jet dev` reload. A local `#Persist` never reaches
+// here and keeps the statement parser's E0145.
+fn parser_persist_binding_ahead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "Persist" && parser_kind_at(&state, 2) == TOKEN_IDENT
+}
+
+// Rust `persist_def`: the marker, then one named module binding.
+fn parser_parse_persist_binding(state: &JetParserState) -> Item? {
+    hash :: parser_bump(&state)
+    marker :: parser_bump(&state)
+    statement :: parser_parse_binding_statement(&state)
+    definition := parser_module_binding_def(statement, hash.span, parser_previous_end(state)) ?? return None
+    definition.is_persist = true
+    definition.persist_span = Val(parser_cover(hash.span, marker.span))
+    Val(Item.Const{value: definition})
 }
 
 fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {

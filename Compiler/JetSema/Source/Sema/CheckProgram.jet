@@ -942,7 +942,7 @@ fn sema_incremental_module_headers(modules: [SemaRegistrationModule]) -> [SemaRe
             functions: sema_incremental_registered_function_headers(source_module.functions),
             foreign_functions: source_module.foreign_functions,
             nominals: sema_incremental_registered_nominal_headers(source_module.nominals),
-            constants: source_module.constants, static_roots: source_module.static_roots,
+            constants: source_module.constants, static_roots: source_module.static_roots, persist_roots: source_module.persist_roots,
             imports: sema_incremental_import_headers(source_module.imports), exports: ^exports,
             import_binding_rows: source_module.import_binding_rows,
             declared_trait_impls: source_module.declared_trait_impls,
@@ -1843,6 +1843,11 @@ fn sema_function_static_roots(environment: SemaScopeEnvironment, program: SemaPr
     [String]{}
 }
 
+fn sema_function_persist_roots(program: SemaProgramTables, module_identity: String) -> [String] Never! {
+    if program.registration_graph == .Val(graph) -> return sema_ownership_persist_roots(graph, module_identity)
+    [String]{}
+}
+
 fn sema_function_resolve_declared(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: String, generic_params: [TGenericParam]) -> Type Never! {
     if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_with_generics(graph, ty, module_identity, generic_params)
     // copy: the resolved declared type is a new owned Type. When nothing resolves it equals `ty`,
@@ -1902,6 +1907,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     state.fixed_length_write_params = updated.fixed_length_write_params
     state.share_known = share_known
     state.static_roots = sema_function_static_roots(updated, program, module_identity)
+    state.persist_roots = sema_function_persist_roots(program, module_identity)
     tail_store := sema_statement_tail_store_init()
     // A raw protocol impl method (Comparable.compare, Display.display, …)
     // checks its body against the declared return, not the failure rail.
@@ -4929,6 +4935,7 @@ struct SemaGraphModuleMark {
     nominals: Int
     constants: Int
     static_roots: Int
+    persist_roots: Int
     program_items: Int
     exports: Int
 }
@@ -4941,6 +4948,7 @@ fn sema_graph_module_mark(module_row: SemaRegistrationModule) -> SemaGraphModule
         nominals: module_row.nominals.len(),
         constants: module_row.constants.len(),
         static_roots: module_row.static_roots.len(),
+        persist_roots: module_row.persist_roots.len(),
         program_items: module_row.program.items.len(),
         exports: module_row.exports.len(),
     }
@@ -4958,6 +4966,7 @@ fn sema_graph_module_rollback(module_row: &SemaRegistrationModule, mark: SemaGra
     loop module_row.nominals.len() > mark.nominals -> _ := &module_row.nominals.pop()
     loop module_row.constants.len() > mark.constants -> _ := &module_row.constants.pop()
     loop module_row.static_roots.len() > mark.static_roots -> _ := &module_row.static_roots.pop()
+    loop module_row.persist_roots.len() > mark.persist_roots -> _ := &module_row.persist_roots.pop()
     loop module_row.program.items.len() > mark.program_items -> _ := &module_row.program.items.pop()
     loop module_row.exports.len() > mark.exports -> _ := &module_row.exports.pop()
     if !appended || name == "" -> return
