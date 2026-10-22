@@ -19,19 +19,16 @@ IR_OPT_INLINE_BUDGET_O1 :: 200
 IR_OPT_INLINE_CALLEE_O2 :: 60
 IR_OPT_INLINE_BUDGET_O2 :: 400
 
-fn ir_opt_inline_into(m: IRModule, functions: &[IRFunction], id: Int, recursive: [Bool], level: Int, report: &IROptReport) Never! {
-    built := ir_opt_inline_build(m, functions, id, recursive, level, &report) ?? return
-    functions[id] = ^built
-}
-
-fn ir_opt_inline_build(m: IRModule, functions: [IRFunction], id: Int, recursive: [Bool], level: Int, report: &IROptReport) -> IRFunction? Never! {
-    caller :: functions[id]
+// `caller`'s body with its selected call sites inlined, None when it selects
+// none. `bodies[g]` holds function g's final body (one row); the caller's
+// own row and the rows of recursive functions are never read.
+fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], level: Int, report: &IROptReport) -> IRFunction? Never! {
     limit :: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
     budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
     sites := [Bool]{}
     any := false
     loop at in 0..<caller.op.len() {
-        size :: if caller.op[at] == .Call -> ir_opt_inline_size(m, functions, caller, at, recursive, limit) else -> -1
+        size :: if caller.op[at] == .Call -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit) else -> -1
         selected :: size >= 0 && size <= budget
         if selected {
             budget -= size
@@ -46,7 +43,7 @@ fn ir_opt_inline_build(m: IRModule, functions: [IRFunction], id: Int, recursive:
     loop value in caller.args -> &out.args.push(value)
     loop at in 0..<caller.op.len() {
         if sites[at] {
-            ir_opt_splice(m, &out, caller, at, functions[caller.a[at]])
+            ir_opt_splice(m, &out, caller, at, bodies[caller.a[at]][0])
             report.inlined_calls += 1
         } else {
             _ := ir_emit(&out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
@@ -58,10 +55,10 @@ fn ir_opt_inline_build(m: IRModule, functions: [IRFunction], id: Int, recursive:
 
 // The size of the callee of the Call at `at` when it may be inlined there,
 // else -1.
-fn ir_opt_inline_size(m: IRModule, functions: [IRFunction], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
+fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id :: caller.a[at]
-    if callee_id < 0 || callee_id >= functions.len() || recursive[callee_id] -> return -1
-    callee :: functions[callee_id]
+    if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] -> return -1
+    callee :: bodies[callee_id][0]
     if caller.c[at] != callee.param_count -> return -1
     if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) -> return -1
     // A parameter becomes the call's argument slot: same type rows only.

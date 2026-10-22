@@ -962,7 +962,7 @@ fn xp_level_failed(failure: String) -> XPLevelRun {
 // and run in `out`.
 fn xp_level(m: IRModule, level: Int, pack: [U8], pack_path: String, exe: String, out: String) -> XPLevelRun {
     optimized := m.copy()
-    report :: ir_optimize_module(&optimized, level)
+    report :: ir_optimize_module(&optimized, level, compiler_threads_single())
     compiled := ir_x64_compile_module(^optimized, compiler_threads_single())
     object :: ir_x64_object(^compiled)
     if object.errors.len() > 0 -> return xp_level_failed(object.errors.join("; "))
