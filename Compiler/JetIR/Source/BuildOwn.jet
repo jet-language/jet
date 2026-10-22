@@ -44,22 +44,15 @@ fn ir_copy_needs(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 
 // Gives the byte copy at `at` of a value of the aggregate type row `row`
 // storage of its own: each buffer is copied (its capacity is its length) and
-// each value with a runtime clone is cloned. `copying` holds the rows being
-// copied, so a type reaching itself copies through its helper function.
-fn ir_copy_fixup(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int, copying: [Int]) Never! {
+// each value with a runtime clone is cloned. A nested aggregate copies
+// through its row's helper function, so every row's copy is built once
+// (Lower's per-type clone glue) however often a type graph reaches it.
+fn ir_copy_fixup(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
     if !ir_copy_needs(&m, p, row) -> return
-    if copying.contains(row) {
-        helper :: ir_copy_helper(&m, p, &b, row)
-        start :: ir_args(&b.f, [Int]{at})
-        ir_emit(&b.f, IROp.Call, -1, helper, start, 1, b.line)
-        return
-    }
-    inner := copying.copy()
-    &inner.push(row)
-    ir_copy_fixup_body(&m, p, &b, row, at, inner)
+    ir_copy_fixup_body(&m, p, &b, row, at)
 }
 
-fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int, copying: [Int]) Never! {
+fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
     if ir_buffer_element(&m, p, row) == .Val(element) {
         length :: ir_load_word(&m, &b, at, 0)
         stride :: ir_list_stride(m, element)
@@ -80,7 +73,7 @@ fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: I
         more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
         ir_exit_unless(&m, &b, more, done)
         address :: ir_element_address(&m, &b, data, index, stride)
-        ir_copy_fixup_at(&m, p, &b, element, address, 0, copying)
+        ir_copy_fixup_at(&m, p, &b, element, address, 0)
         one :: ir_word_const(&m, &b, 1)
         ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
         ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -91,16 +84,21 @@ fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: I
     members :: ir_inline_members(&m, p, row) ?? return
     loop member in members {
         if member.boxed || !ir_copy_needs(&m, p, member.ty) -> next
-        ir_copy_fixup_at(&m, p, &b, member.ty, at, member.offset, copying)
+        ir_copy_fixup_at(&m, p, &b, member.ty, at, member.offset)
     }
 }
 
 // The value of type row `row` at byte `offset` of `base`: an aggregate gets
-// storage of its own in place, a value with a runtime clone is cloned.
-fn ir_copy_fixup_at(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, offset: Int, copying: [Int]) Never! {
+// storage of its own in place through its row's helper, a value with a
+// runtime clone is cloned.
+fn ir_copy_fixup_at(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, offset: Int) Never! {
     if m.types[row].kind == .Aggregate {
+        if !ir_copy_needs(&m, p, row) -> return
         address :: ir_load_at(&m, &b, base, offset, row)
-        ir_copy_fixup(&m, p, &b, row, address, copying)
+        helper :: ir_copy_helper(&m, p, &b, row)
+        if helper < 0 -> return
+        start :: ir_args(&b.f, [Int]{address})
+        ir_emit(&b.f, IROp.Call, -1, helper, start, 1, b.line)
         return
     }
     clone :: m.types[row].clone
@@ -111,7 +109,8 @@ fn ir_copy_fixup_at(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: I
 }
 
 // The IR function giving the byte copy at its parameter of a value of type
-// row `row` storage of its own (built on first use).
+// row `row` storage of its own (built on first use; -1 when its body cannot
+// be built, which a later use builds again to report the same failure).
 fn ir_copy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key :: "#copy<{row}>"
     known :: m.function_rows.get(helper_key) ?? -1
@@ -124,7 +123,14 @@ fn ir_copy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Ne
     a := ir_builder_new(m.functions[id].copy())
     a.line = b.line
     at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
-    ir_copy_fixup_body(&m, p, &a, row, at, [Int]{row})
+    ir_copy_fixup_body(&m, p, &a, row, at)
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        m.function_rows[helper_key] = -1
+        ir_fail(&b, a.error_span, a.error)
+        return -1
+    }
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
     m.functions[id] = ^a.f
     id

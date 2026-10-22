@@ -1078,7 +1078,7 @@ fn ir_copy_value(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Spa
         storage :: ir_fresh_temp(&m, &b, row)
         ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, storage, slot, m.types[row].size, b.line)
-        ir_copy_fixup(&m, p, &b, row, storage, [Int]{})
+        ir_copy_fixup(&m, p, &b, row, storage)
         return storage
     }
     duplicate :: ir_temp_like(&m, &b, slot)

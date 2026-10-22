@@ -1102,14 +1102,15 @@ fn ir_compare_chain(m: &IRModule, p: &IRProgram, b: &IRBuilder, operands: [TExpr
 }
 
 // `left == right` as a Bool slot (Lower Equal.jet lower_equal_values and
-// lower_helper_equal, the Rust derived PartialEq), compared inline.
+// lower_helper_equal, the Rust derived PartialEq), the outermost type
+// compared inline.
 fn ir_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     same :: ir_temp(&m, &b, bool_row)
     ir_emit(&b.f, IROp.Const, same, 0, -1, -1, b.line)
     differ :: ir_open(&b.f, IROp.Block, b.line)
     row :: b.f.slot_type[left]
-    ir_equal_into(&m, p, &b, row, left, right, differ, [String]{}, span)
+    ir_equal_into(&m, p, &b, row, left, right, differ, true, span)
     ir_emit(&b.f, IROp.Const, same, 1, -1, -1, b.line)
     ir_end(&b.f, b.line)
     same
@@ -1118,9 +1119,11 @@ fn ir_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, sp
 // Leaves the Block `differ` unless the values `left` and `right` of type row
 // `row` are equal: scalars and Strings compare in place, a runtime handle
 // through its jet_rt_handle_eq_<T>; an Option, Result, List, Map, tuple,
-// struct or payload enum member by member in declaration order. `comparing`
-// holds the declarations being compared, so a recursive type stops.
-fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, differ: Int, comparing: [String], span: Span) Never! {
+// struct or payload enum member by member in declaration order. Only the
+// `outer` struct or enum compares its members inline; a nested one compares
+// through its row's helper function (Lower lower_helper_equal), so each
+// row's comparison is built once however often the type graph reaches it.
+fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, differ: Int, outer: Bool, span: Span) Never! {
     kind :: m.types[row].kind
     if kind == .Unit -> return
     ty :: ir_untag(m.types[row].ty)
@@ -1145,7 +1148,7 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_open_if(&b.f, left_some, b.line)
         left_payload :: ir_load_at(&m, &b, left, 0, payload)
         right_payload :: ir_load_at(&m, &b, right, 0, payload)
-        ir_equal_into(&m, p, &b, payload, left_payload, right_payload, differ, comparing, span)
+        ir_equal_into(&m, p, &b, payload, left_payload, right_payload, differ, outer, span)
         ir_end(&b.f, b.line)
         return
     }
@@ -1159,11 +1162,11 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_open_if(&b.f, left_ok, b.line)
         left_value :: ir_load_at(&m, &b, left, 8, ok)
         right_value :: ir_load_at(&m, &b, right, 8, ok)
-        ir_equal_into(&m, p, &b, ok, left_value, right_value, differ, comparing, span)
+        ir_equal_into(&m, p, &b, ok, left_value, right_value, differ, outer, span)
         ir_else(&b.f, b.line)
         left_error :: ir_load_at(&m, &b, left, 8, err)
         right_error :: ir_load_at(&m, &b, right, 8, err)
-        ir_equal_into(&m, p, &b, err, left_error, right_error, differ, comparing, span)
+        ir_equal_into(&m, p, &b, err, left_error, right_error, differ, outer, span)
         ir_end(&b.f, b.line)
         return
     }
@@ -1187,7 +1190,7 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         a :: ir_load_at(&m, &b, left_at, 0, element_row)
         right_at :: ir_element_address(&m, &b, right_data, index, stride)
         c :: ir_load_at(&m, &b, right_at, 0, element_row)
-        ir_equal_into(&m, p, &b, element_row, a, c, differ, comparing, span)
+        ir_equal_into(&m, p, &b, element_row, a, c, differ, outer, span)
         one :: ir_word_const(&m, &b, 1)
         ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
         ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -1197,15 +1200,12 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
     }
     if ty == .Tuple(fields) {
         members :: ir_tuple_members(&m, p, fields) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
-        return ir_equal_members(&m, p, &b, members, left, right, differ, comparing, span)
+        return ir_equal_members(&m, p, &b, members, left, right, differ, outer, span)
     }
     if ir_native_carrier(ty) -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
     name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
     definition_row :: ir_type_def(p, name) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
-    key :: p.types[definition_row].key
-    if comparing.contains(key) {
-        // A recursive type compares through its own helper function
-        // (Lower lower_helper_equal), which calls itself for each edge.
+    if !outer {
         helper :: ir_equal_helper(&m, p, &b, row, span)
         if helper < 0 -> return
         bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -1214,11 +1214,9 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_emit(&b.f, IROp.Call, equal, helper, start, 2, b.line)
         return ir_exit_unless(&m, &b, equal, differ)
     }
-    inner := comparing
-    &inner.push(key)
     if p.types[definition_row].kind == .Struct(_, _) {
         members :: ir_struct_members(&m, p, definition_row, ir_type_args(ty)) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
-        return ir_equal_members(&m, p, &b, members, left, right, differ, inner, span)
+        return ir_equal_members(&m, p, &b, members, left, right, differ, false, span)
     }
     if kind == .Pointer && p.types[definition_row].kind == .Enum(variants, _) {
         // Equal discriminants, then the selected variant's payload members.
@@ -1232,7 +1230,7 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
             variant_word :: ir_word_const(&m, &b, index)
             selected :: ir_bool_op(&m, &b, IROp.Eq, left_tag, variant_word)
             ir_open_if(&b.f, selected, b.line)
-            ir_equal_members(&m, p, &b, members, left, right, differ, inner, span)
+            ir_equal_members(&m, p, &b, members, left, right, differ, false, span)
             ir_end(&b.f, b.line)
         }
         return
@@ -1240,17 +1238,18 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
     ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
 }
 
-fn ir_equal_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMember], left: Int, right: Int, differ: Int, comparing: [String], span: Span) Never! {
+fn ir_equal_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMember], left: Int, right: Int, differ: Int, outer: Bool, span: Span) Never! {
     loop member in members {
         if ir_failed(b) -> return
         left_member :: ir_member_value(&m, &b, left, member)
         right_member :: ir_member_value(&m, &b, right, member)
-        ir_equal_into(&m, p, &b, member.ty, left_member, right_member, differ, comparing, span)
+        ir_equal_into(&m, p, &b, member.ty, left_member, right_member, differ, outer, span)
     }
 }
 
 // The IR function `left == right` of the values of type row `row` (built on
-// first use; -1 when its body cannot be built).
+// first use; -1 when its body cannot be built, which a later use builds
+// again to report the same failure).
 fn ir_equal_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
     helper_key :: "#equal<{row}>"
     known :: m.function_rows.get(helper_key) ?? -1
@@ -1269,6 +1268,7 @@ fn ir_equal_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Sp
     if a.error != "" {
         ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = ^a.f
+        m.function_rows[helper_key] = -1
         ir_fail(&b, span, a.error)
         return -1
     }
