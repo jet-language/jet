@@ -935,12 +935,16 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             if type_args.len() > 0 && p.rows.get(key) == None -> return ir_fail_slot(&b, span, "generic method call outside the checked program")
             row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "method call outside the checked program: {method.name}")
             receiver_access :: ir_receiver_access(p.functions[row].kind)
-            if receiver_access == "static" -> return ir_call(&m, &p, &b, key, type_args, -1, [IRWriteBack]{}, args, span)
+            if receiver_access == "static" {
+                value :: ir_call(&m, &p, &b, key, type_args, -1, [IRWriteBack]{}, args, span)
+                return ir_trait_propagate(&m, &p, &b, method, value, expression.ty, span)
+            }
             backs := [IRWriteBack]{}
             self_slot :: if receiver_access == "write" -> ir_place_address(&m, &p, &b, receiver, &backs, span) else -> ir_expr(&m, &p, &b, receiver)
             if ir_failed(b) -> return -1
             if self_slot < 0 -> return ir_fail_slot(&b, span, "Unit receiver")
-            return ir_call(&m, &p, &b, key, type_args, self_slot, backs, args, span)
+            value :: ir_call(&m, &p, &b, key, type_args, self_slot, backs, args, span)
+            return ir_trait_propagate(&m, &p, &b, method, value, expression.ty, span)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
             ir_scope_open(&b)
@@ -2737,8 +2741,13 @@ fn ir_try_starts_failure(operand: TExpr) -> Bool Never! {
 fn ir_try(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
     subject :: ir_expr(&m, &p, &b, value)
     if ir_failed(b) || subject < 0 -> return subject
+    ir_try_slot(&m, &p, &b, subject, value.ty, conversion, site, span)
+}
+
+// `?` on the value in `subject`, of checked type `carrier`.
+fn ir_try_slot(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, carrier: Type, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
     held :: m.types[b.f.slot_type[subject]].ty
-    expected :: ir_untag(value.ty)
+    expected :: ir_untag(carrier)
     if expected == .Result(ok_ty, err_ty) {
         if !ir_is_result(held) -> return subject
         bool_row :: ir_type_row(&m, Type.Bool) ?? 0

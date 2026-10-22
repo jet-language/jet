@@ -3,7 +3,7 @@
 // a dynamic call loads the key and calls the matching implementation, an
 // unknown key stops at jet_rt_unreachable.
 
-use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TMethodRef, Type, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TMethodRef, TTryConvert, Type, type_carrier_identity]
 
 // The payload key of concrete type `ty`: one per type identity, from 1.
 fn ir_trait_key(p: &IRProgram, ty: Type) -> Int Never! {
@@ -165,7 +165,22 @@ fn ir_trait_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, me
     }
     ir_release(&m, &b, boxed)
     if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
-    result
+    ir_trait_propagate(&m, &p, &b, method, result, ty, span)
+}
+
+// Sema types a trait-owned call by the method's success value while the
+// implementation returns its failure carrier (codegen
+// jet_codegen_trait_call_propagates): the carrier is propagated at the call.
+fn ir_trait_propagate(m: &IRModule, p: &IRProgram, b: &IRBuilder, method: TMethodRef, slot: Int, checked: Type, span: Span) -> Int Never! {
+    if method.trait_owner == None || slot < 0 || ir_failed(b) -> return slot
+    returned :: m.types[b.f.slot_type[slot]].ty
+    carried :: if ir_untag(returned) == {
+        .Result(_, _) -> !(ir_untag(checked) == .Result(_, _))
+        .Option(_) -> !(ir_untag(checked) == .Option(_))
+        else -> false
+    }
+    if !carried -> return slot
+    ir_try_slot(&m, &p, &b, slot, returned, TTryConvert.NoConversion, None, span)
 }
 
 fn ir_trait_unreachable(m: &IRModule, b: &IRBuilder) Never! {
