@@ -20,14 +20,18 @@ fn jet_eval_ir_runtime(m: IRModule, s: &JetEvalIRState, symbol: String, args: [I
         }
         // Buffer owner counts (Refcount.jet): a buffer missing from `owners`
         // has one owner. A release reports whether it was the last; the
-        // buffer's bytes then stay until the region ends.
+        // buffer's bytes then stay until the region ends. A static box (in a
+        // data row: JetIR BuildStatic.jet) is immortal, as its negative
+        // count word makes it in the runtime.
         "jet_rt_block_retain" -> {
             if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            if jet_eval_ir_static(s, args[0]) -> return Val(0)
             s.owners[args[0]] = (s.owners.get(args[0]) ?? 1) + 1
             return Val(0)
         }
         "jet_rt_block_release" -> {
             if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            if jet_eval_ir_static(s, args[0]) -> return Val(0)
             count :: s.owners.get(args[0]) ?? 1
             if count <= 1 -> return Val(1)
             s.owners[args[0]] = count - 1
@@ -35,6 +39,7 @@ fn jet_eval_ir_runtime(m: IRModule, s: &JetEvalIRState, symbol: String, args: [I
         }
         "jet_rt_block_unique" -> {
             if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            if jet_eval_ir_static(s, args[0]) -> return Val(0)
             return Val(if (s.owners.get(args[0]) ?? 1) <= 1 -> 1 else -> 0)
         }
         "jet_rt_free" -> {

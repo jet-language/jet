@@ -3799,12 +3799,13 @@ fn ir_indirect_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, callee: TExpr, a
     dst
 }
 
-// A checked constant read: its compile-time value, built in place
-// (codegen jet_codegen_lower_constant_reference copies a known value into
-// each use).
+// A checked constant read: a borrow of its static object (BuildStatic.jet)
+// when its value freezes, else its compile-time value built in place.
 fn ir_constant(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if p.rows.get(key) != None -> return ir_function_value(&m, &p, &b, ty, key, span)
     definition :: p.constants.get(key) ?? return ir_fail_slot(&b, span, "constant {key} without a declaration")
+    borrowed :: ir_static_read(&m, p, &b, ty, key, definition.value)
+    if borrowed >= 0 -> return borrowed
     ir_comptime(&m, &p, &b, ty, definition.value, span)
 }
 

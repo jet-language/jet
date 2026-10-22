@@ -183,12 +183,27 @@ struct IRFunction {
     open: [Int]
 }
 
+// A word of a static object (IRModule.data_relocs) that holds an address:
+// data row `target` plus `addend` bytes, or (`text`) the immortal String of
+// data row `target`'s bytes, the same value a ConstText of that row gives.
+struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
+
 // The program: interned types and names, read-only data rows, functions.
+// `data_relocs` names the data rows that are static objects (8-byte
+// aligned; BuildStatic.jet) and the words in them that hold an address;
+// `constant_rows` maps "<constant key>|<type row>" to the static object
+// holding that constant's value (-1: it is built at each read).
 // `function_rows` maps a function key to its id (row of `functions`);
 // `entry` is the program entry (`fn run`), -1 for a library. `layouts`,
-// `layout_low` and `struct_members` are the builder's layout memo
-// (BuildTypes.jet ir_struct_row, ir_struct_members): a struct instance's row
-// by identity (-1 when it does not lay out) and its resolved members.
+// `layout_low`, `struct_members`, `variant_members`, `enum_sizes` and
+// `handle_rows` are the builder's layout memo (BuildTypes.jet ir_struct_row,
+// ir_struct_members, ir_variant_members, ir_enum_box_size, ir_handle_row): a
+// struct instance's row by identity (-1 when it does not lay out) and its
+// resolved members, an enum instance variant's members by "<declaration
+// row>|<identity>#<index>" and its box size by "<declaration row>|<identity>",
+// and a bare nominal name's runtime handle row (-1: none). `close_free` holds
+// the type rows BuildOwn.jet ir_close_parts_reach proved free of a Close
+// method at any depth.
 struct IRModule {
     types: [IRType]
     type_rows: [String:Int]
@@ -196,16 +211,22 @@ struct IRModule {
     name_rows: [String:Int]
     data: [[U8]]
     data_rows: [String:Int]
+    data_relocs: [Int:[IRDataReloc]]
+    constant_rows: [String:Int]
     functions: [IRFunction]
     function_rows: [String:Int]
     entry: Int
     layouts: [String:Int]
     layout_low: Int
     struct_members: [String:[IRMember]]
+    variant_members: [String:[IRMember]]
+    enum_sizes: [String:Int]
+    handle_rows: [String:Int]
+    close_free: [Int:Bool]
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}}
+    IRModule{types: [IRType]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {

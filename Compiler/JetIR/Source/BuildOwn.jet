@@ -682,17 +682,28 @@ fn ir_close_part_rows(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
 }
 
 // Whether some part of a value of type row `row`, at any depth, has a Close
-// method (Lower lower_contains_close).
+// method (Lower lower_contains_close); `row`'s own method does not count.
+// A walk that finds none from a row without a method proves every row it
+// visited free of Close at any depth (m.close_free), and a later walk does
+// not enter a free row again.
 fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if m.close_free.get(row) != None -> return false
     seen := [Int:Bool]{}
     seen[row] = true
+    visited := [Int]{}
     pending := ir_close_part_rows(&m, p, row)
     loop pending.len() > 0 {
         part :: &pending.pop() ?? break
         if seen.get(part) != None -> next
         seen[part] = true
+        if m.close_free.get(part) != None -> next
         if ir_close_method(m, p, part) >= 0 -> return true
+        &visited.push(part)
         loop next_row in ir_close_part_rows(&m, p, part) -> &pending.push(next_row)
+    }
+    if ir_close_method(m, p, row) < 0 {
+        m.close_free[row] = true
+        loop free in visited -> m.close_free[free] = true
     }
     false
 }

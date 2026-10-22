@@ -74,11 +74,29 @@ fn jet_eval_ir_state_new(m: IRModule, config: JetEvalConfig, span: Span) -> JetE
         text :: jet_eval_ir_text_new(&s, String.from_bytes_lossy(row))
         &s.data_texts.push(text)
     }
+    // A static object's address words (JetIR BuildStatic.jet): a data row's
+    // address, or the text a ConstText of the target row reads.
+    loop row in 0..<m.data.len() {
+        relocs :: m.data_relocs.get(row) ?? next
+        loop reloc in relocs {
+            if reloc.target < 0 || reloc.target >= s.data_regions.len() -> next
+            word :: if reloc.text -> s.data_texts[reloc.target] else -> s.data_regions[reloc.target] + reloc.addend
+            at :: s.data_regions[row] + reloc.offset
+            _ := jet_eval_ir_write(&s, at, 8, word)
+        }
+    }
     loop _ in m.functions {
         &s.targets.push([Int]{})
         &s.ready.push(false)
     }
     s
+}
+
+// Whether `pointer` is in a data row: static storage, never released.
+fn jet_eval_ir_static(s: JetEvalIRState, pointer: Int) -> Bool Never! {
+    if pointer <= 0 || pointer >= JET_EVAL_IR_TEXT_TAG -> return false
+    region :: pointer /% JET_EVAL_IR_REGION
+    region >= 1 && region <= s.data_regions.len()
 }
 
 fn jet_eval_ir_failed(s: JetEvalIRState) -> Bool Never! { s.failure != None || s.internal_problem != None || s.exit_code != None }

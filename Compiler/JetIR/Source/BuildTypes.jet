@@ -348,8 +348,19 @@ fn ir_handle_runtime(p: IRProgram, name: String) -> LowerRuntimeHandle? Never! {
 // lower_repr decides it for a nominal type `name`: the default Err (the
 // runtime's JetErr), a Core type the runtime handle table names that has no
 // Jet declaration, or whose Core declaration has no record schema or native
-// shape; None for any type the program lays out itself.
+// shape; None for any type the program lays out itself. It rests on `name`
+// alone (the row interns under its runtime's key), so it is kept in
+// m.handle_rows.
 fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
+    known :: m.handle_rows.get(name) ?? -2
+    if known >= 0 -> return Val(known)
+    if known == -1 -> return None
+    found :: ir_handle_row_laid(&m, p, ty, name)
+    m.handle_rows[name] = found ?? -1
+    found
+}
+
+fn ir_handle_row_laid(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
     found :: ir_type_def(p, name)
     handle :: ir_handle_runtime(p, name) ?? return None
     // A bare `Group` is the task group handle (sema types `task.group`'s
@@ -2171,8 +2182,25 @@ fn ir_carrier_type(ty: Type) -> Bool Never! {
 // The payload members of variant `index` of the enum declaration `row`
 // (applied to the instance arguments `args`), laid out from byte 8 (Lower
 // Values.jet lower_variant_members); a recursive edge holds an 8-byte
-// wrapper box pointer.
+// wrapper box pointer. Memoized in m.variant_members by the instance's
+// arguments in the terms of the instance being built, as ir_struct_members
+// is (a SharedGuard argument's row follows its unspelled read/edit tag).
 fn ir_variant_members(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
+    bound :: loop arg in args -> ir_subst(p, arg)
+    identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
+    ir_variant_members_bound(&m, p, row, bound, identity, index)
+}
+
+fn ir_variant_members_bound(m: &IRModule, p: IRProgram, row: Int, bound: [Type], identity: String, index: Int) -> [IRMember]? Never! {
+    if identity.contains("SharedGuard<") -> return ir_variant_members_laid(&m, p, row, bound, index)
+    memo :: "{identity}#{index}"
+    if m.variant_members.get(memo) == .Val(known) -> return Val(known)
+    found :: ir_variant_members_laid(&m, p, row, bound, index) ?? return None
+    m.variant_members[memo] = found.copy()
+    Val(found)
+}
+
+fn ir_variant_members_laid(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
     definition :: p.types[row]
     members := [IRMember]{}
     if definition.kind == .Enum(variants, _) {
@@ -2214,18 +2242,25 @@ fn ir_variant_members(m: &IRModule, p: IRProgram, row: Int, args: [Type], index:
 }
 
 // Lower lower_enum_box_size: the end of the widest variant, in whole words.
+// Memoized in m.enum_sizes by instance identity, as ir_variant_members is.
 fn ir_enum_box_size(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
+    bound :: loop arg in args -> ir_subst(p, arg)
+    identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
+    guarded :: identity.contains("SharedGuard<")
+    if !guarded && m.enum_sizes.get(identity) == .Val(known) -> return Val(known)
     end := 8
     if p.types[row].kind == .Enum(variants, _) {
         loop index in 0..<variants.len() {
-            members :: ir_variant_members(&m, p, row, args, index) ?? return None
+            members :: ir_variant_members_bound(&m, p, row, bound, identity, index) ?? return None
             loop member in members {
                 size :: if member.boxed -> 8 else -> m.types[member.ty].size
                 if member.offset + size > end -> end = member.offset + size
             }
         }
     }
-    Val(ir_align8(end))
+    size :: ir_align8(end)
+    if !guarded -> m.enum_sizes[identity] = size
+    Val(size)
 }
 
 // A member of a record, tuple or variant (Lower lower_render_member_push:

@@ -78,7 +78,9 @@ fn ir_x64_debug_type(ty: IRType) -> LIRDebugType Never! {
 fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
     tables := IRX64Tables{data: [LIRData]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [LIRDebugType]{}, type_debug: [Int]{}}
     loop (row, bytes) in m.data {
-        &tables.data.push(LIRData{id: LIRDataID{value: row}, bytes: bytes, align: 1, relocs: [LIRDataReloc]{}})
+        // A static object (BuildStatic.jet) holds words; a text row is bytes.
+        align :: if m.data_relocs.get(row) != None -> 8 else -> 1
+        &tables.data.push(LIRData{id: LIRDataID{value: row}, bytes: bytes, align: align, relocs: [LIRDataReloc]{}})
         &tables.lengths.push(bytes.len())
         &tables.headers.push(-1)
     }
@@ -92,23 +94,18 @@ fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
         loop at in 0..<f.op.len() {
             if f.op[at] == .ConstText {
                 row :: f.a[at]
-                if row < 0 || row >= tables.headers.len() || tables.headers[row] >= 0 -> next
-                // The process-lifetime String header [data, byte length,
-                // cap 0] over the row's bytes, which the runtime recognizes
-                // as immortal: clone returns it and drop ignores it.
-                header :: tables.data.len()
-                bytes := [U8]{}
-                loop _ in 0..<24 -> &bytes.push(U8{0})
-                length := tables.lengths[row]
-                loop index in 0..<8 {
-                    bytes[8 + index] = U8{length.bit_and(255)}
-                    length = length >> 8
-                }
-                &tables.data.push(LIRData{id: LIRDataID{value: header}, bytes: bytes, align: 8, relocs: [LIRDataReloc]{LIRDataReloc{offset: 0, target: LIRDataID{value: row}, addend: 0}}})
-                &tables.lengths.push(24)
-                tables.headers[row] = header
+                if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(&tables, row)
             }
             if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() -> _ := ir_x64_add_text(&tables, m.names[f.a[at]])
+        }
+    }
+    // A static object's address words: a data row's address, or the
+    // String header a ConstText of the target row reads.
+    loop row in 0..<m.data.len() {
+        relocs :: m.data_relocs.get(row) ?? next
+        loop reloc in relocs {
+            target :: if reloc.text -> ir_x64_text_header(&tables, reloc.target) else -> reloc.target
+            &tables.data[row].relocs.push(LIRDataReloc{offset: reloc.offset, target: LIRDataID{value: target}, addend: reloc.addend})
         }
     }
     loop ty in m.types {
@@ -116,6 +113,25 @@ fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
         &tables.debug_types.push(ir_x64_debug_type(ty))
     }
     tables
+}
+
+// The process-lifetime String header [data, byte length, cap 0] over data
+// row `row`'s bytes, which the runtime recognizes as immortal: clone returns
+// it and drop ignores it. One per row.
+fn ir_x64_text_header(tables: &IRX64Tables, row: Int) -> Int Never! {
+    if tables.headers[row] >= 0 -> return tables.headers[row]
+    header :: tables.data.len()
+    bytes := [U8]{}
+    loop _ in 0..<24 -> &bytes.push(U8{0})
+    length := tables.lengths[row]
+    loop index in 0..<8 {
+        bytes[8 + index] = U8{length.bit_and(255)}
+        length = length >> 8
+    }
+    &tables.data.push(LIRData{id: LIRDataID{value: header}, bytes: bytes, align: 8, relocs: [LIRDataReloc]{LIRDataReloc{offset: 0, target: LIRDataID{value: row}, addend: 0}}})
+    &tables.lengths.push(24)
+    tables.headers[row] = header
+    header
 }
 
 // Selecting threads (compiler_threads_admit): a thread is admitted for at
