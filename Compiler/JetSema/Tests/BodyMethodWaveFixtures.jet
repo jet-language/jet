@@ -55,7 +55,7 @@ fn method_wave_registration(source: String, keep_going: Bool, effects_source: St
     input :: SemaRegistrationModuleInput{package_identity: "method-wave", module_identity: "method-wave::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "method-wave.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
     canonical_identity :: canonical.module_identity
     facts :: SemaBuildFacts{package_name: "method-wave", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "method-wave", "method-wave::main", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "method-wave", "method-wave::main", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     graph.keep_going = keep_going
     method_wave_require(graph.complete && graph.internal_problem == None, "registration is complete")
     graph

@@ -28,7 +28,7 @@ fn output_fixture_graph(label: String, source: String, effects_source: String, f
     }
     facts :: SemaBuildFacts{package_name: "output-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     input :: SemaRegistrationModuleInput{package_identity: "output-fixture", module_identity: "output-fixture::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
-    Val(sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "output-fixture", "output-fixture::main", canonical.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false))
+    Val(sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "output-fixture", "output-fixture::main", canonical.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()))
 }
 
 fn output_fixture_case(label: String, source: String, effects_source: String, intent: SemaOutputIntent, address: String?, expected_codes: [String], expected_selected: [String], failures: &[String]) {
@@ -170,7 +170,7 @@ fn output_fixture_visibility(label: String, main_source: String, bank_source: St
     effect_identity :: canonical.module_identity.copy()
     &inputs.push(canonical)
     facts :: SemaBuildFacts{package_name: main_package.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph(inputs, edges, main_package, "{main_package}::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    graph := sema_registration_prepare_graph(inputs, edges, main_package, "{main_package}::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     if !graph.complete || graph.internal_problem != None || sema_has_error_since(graph.diagnostics, 0) {
         &failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
         return

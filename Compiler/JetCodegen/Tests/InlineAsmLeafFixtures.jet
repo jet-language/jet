@@ -10,7 +10,7 @@ use jet_sema.[
 use jet_driver.[jet_driver_canonical_effect_module, jet_driver_source_segments]
 use jet_foundation.[
     Diagnostic, MIRCoreCall, MIRFunctionKind, MIROptimizationPassID, MIRPreludeCall,
-    MIRTargetApplicability, jet_target_machine_hosted, mir_source_file_id,
+    MIRTargetApplicability, compiler_threads_single, jet_target_machine_hosted, mir_source_file_id,
 ]
 use jet_codegen.[jet_codegen_lower_asm_leaf, jet_codegen_nominal_index]
 use jet_optimizer.[MIRPassLegalityTables, mir_pass_validate_function]
@@ -28,7 +28,7 @@ fn asm_leaf_require(ok: Bool, message: String) Never! {
     canonical :: jet_driver_canonical_effect_module("effect IO\neffect Panic\n") ?? panic("the canonical effect fixture parses")
     canonical_identity :: canonical.module_identity.copy()
     facts :: SemaBuildFacts{package_name: "asm-leaf", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph :: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "asm-leaf", "asm-leaf::main", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    graph :: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "asm-leaf", "asm-leaf::main", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     diagnostics := [Diagnostic]{}
     rows :: sema_checked_foreign_functions(graph, graph.modules[0], [SemaCheckedForeignProvider]{}, &diagnostics)
     asm_leaf_require(!sema_has_error_since(diagnostics, 0) && rows.len() == 1, "the existing foreign stage admits exactly one asm row")

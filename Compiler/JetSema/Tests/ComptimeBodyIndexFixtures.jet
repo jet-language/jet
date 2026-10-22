@@ -22,7 +22,7 @@ use jet_sema.[
 ]
 use jet_foundation.[
     Diagnostic, Expr, Span, SymbolKind, TComptimeValue, TConstantDef, TTypeDef, Type,
-    jet_target_machine_hosted, symbol_id,
+    compiler_threads_single, jet_target_machine_hosted, symbol_id,
 ]
 use jet_parser.[parse_source]
 use jet_driver.[
@@ -315,7 +315,7 @@ fn body_index_publication_lifecycle() {
     input :: SemaRegistrationModuleInput{package_identity: "body-index", module_identity: "mod::one", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "lifecycle.jet", source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: "lifecycle.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
     facts :: SemaBuildFacts{package_name: "body-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     canonical_identity :: canonical.module_identity.copy()
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "body-index", "mod::one", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "body-index", "mod::one", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     body_index_require(graph.complete && graph.internal_problem == None, "the real publication-lifecycle graph registers")
     span :: Span{start: 10, end: 20}
     site :: Span{start: 3, end: 7}
@@ -440,7 +440,7 @@ fn body_index_constant_graph(sources: [String]) -> SemaRegistrationGraph {
     canonical_identity :: canonical.module_identity.copy()
     &inputs.push(^canonical)
     facts :: SemaBuildFacts{package_name: "constant-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    sema_registration_prepare_graph(^inputs, [SemaRegistrationImportEdge]{}, "constant-index", "constant::0", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    sema_registration_prepare_graph(^inputs, [SemaRegistrationImportEdge]{}, "constant-index", "constant::0", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
 }
 
 fn body_index_constant_value(module_identity: String, key: String, number: Int) -> SemaComptimeItemValue {
