@@ -2850,10 +2850,17 @@ fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackag
 }
 
 // Only the carrier's body, at its original offsets, for the manifest field
-// parser (Rust `InlinePackageBlock::body`).
+// parser (Rust `InlinePackageBlock::body`). Every byte outside the body is
+// blanked, so text after the carrier never reaches the field lexer.
 fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackage) -> String {
-    head :: jet_driver_blank_source_range(source, 0, carrier.body_start)
-    jet_driver_blank_source_range(head, carrier.body_end, head.len())
+    bytes := source.bytes()
+    loop offset in 0..<bytes.len() {
+        if offset >= carrier.body_start && offset < carrier.body_end -> next
+        if bytes[offset] != (U8{10}) && bytes[offset] != (U8{13}) -> bytes[offset] = U8{32}
+    }
+    // copy: the blanked source is a new owned String. On a UTF-8 failure it falls back to `source`,
+    // the caller's file text (a read parameter), which stays with the caller.
+    String.from_bytes(bytes) ?? source.copy()
 }
 
 // Small parse-owned facts; neither the public AST nor image schema retains tokens.
