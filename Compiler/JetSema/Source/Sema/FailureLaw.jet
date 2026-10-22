@@ -341,6 +341,16 @@ fn sema_prelude_conversion_demand_add(state: Shared<SemaPreludeDemandWalk>, key:
     &permit.value.demands.push(SemaPreludeConversionDemand{key: key, source: source, site: site})
 }
 
+// Keeps a demand some function's own walk found (sema_prelude_conversion_demands),
+// unless an earlier function already demanded its routine.
+fn sema_prelude_conversion_demand_keep(state: Shared<SemaPreludeDemandWalk>, demand: SemaPreludeConversionDemand) {
+    permit :: state.guard_edit()
+    loop kept in permit.value.demands {
+        if kept.key == demand.key -> return
+    }
+    &permit.value.demands.push(demand)
+}
+
 fn sema_prelude_demand_walk_take(state: Shared<SemaPreludeDemandWalk>) -> [SemaPreludeConversionDemand] {
     permit :: state.guard_edit()
     demands := [SemaPreludeConversionDemand]{}
@@ -352,24 +362,39 @@ fn sema_prelude_demand_walk_take(state: Shared<SemaPreludeDemandWalk>) -> [SemaP
     demands
 }
 
+// The prelude conversions `functions` demand, in function and body order,
+// first site per routine: every function's propagation sites, walked in
+// place (the walk copies no subtree). A function whose position has an entry
+// in `walked` is not walked again: the entry is its own walk's demands
+// (made on the compiler thread that checked it), and keeping each in order
+// unless an earlier function demanded its routine gives what walking it here
+// would.
+fn sema_prelude_conversion_demands(module_identity: String, functions: [TFunc], walked: [Int:[SemaPreludeConversionDemand]]) -> [SemaPreludeConversionDemand] {
+    walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
+    walk :: SemaEffectWalk.PreludeDemands{state: walk_state}
+    nodes := [SemaEffectNode]{}
+    facts :: SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
+    ignored := [Diagnostic]{}
+    loop (position, function) in functions {
+        if walked.get(position) == .Val(demands) {
+            loop demand in demands -> sema_prelude_conversion_demand_keep(walk_state, demand)
+            next
+        }
+        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, 0, function.key), statement)
+    }
+    sema_prelude_demand_walk_take(walk_state)
+}
+
 // Demand-driven injection (the Rust reference's
 // `inject_exercised_error_conversions`): only the conversions this module's
 // propagation sites exercised are checked into routines, and a module that
 // declares its own conversion for a pair keeps it. Every conversion that cannot
 // be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
 // a conversion whose body fails to check is kept as its typed trap.
-fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
-    // Every function's propagation sites, walked in place in function and
-    // body order (the walk copies no subtree).
-    walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
-    walk :: SemaEffectWalk.PreludeDemands{state: walk_state}
-    nodes := [SemaEffectNode]{}
-    facts :: SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
-    ignored := [Diagnostic]{}
-    loop function in functions {
-        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, 0, function.key), statement)
-    }
-    demands :: sema_prelude_demand_walk_take(walk_state)
+// `walked` holds the demands of the functions a compiler thread walked, by
+// position in `functions` (sema_prelude_conversion_demands).
+fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], walked: [Int:[SemaPreludeConversionDemand]], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
+    demands :: sema_prelude_conversion_demands(module_identity, functions, walked)
     complete := true
     loop demand in demands {
         present := false
