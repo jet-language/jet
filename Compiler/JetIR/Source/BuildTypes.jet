@@ -1384,17 +1384,35 @@ fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_
 
 // The Err box the failure edge of `?` returns for the Err box `subject`
 // under the function carrier `success ! error`, its error converted as
-// `conversion` asks (codegen jet_codegen_lower_try_failure_conversion).
-fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conversion: TTryConvert, success: Type, error: Type, span: Span) -> Int Never! {
-    if conversion == .NoConversion -> return subject
+// `conversion` asks (codegen jet_codegen_lower_try_failure_conversion), then
+// the hop of a journey `site` (ir_journey_hop).
+fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conversion: TTryConvert, site: IRTrySite?, success: Type, error: Type, span: Span) -> Int Never! {
     source := Type.Int
     held :: m.types[b.f.slot_type[subject]].ty
     if ir_untag(held) == .Result(_, err) -> source = err.copy()
+    framed := false
+    if site == .Val(at) {
+        if at.note != None {
+            framed = if conversion == {
+                .DefaultErr -> true
+                .Typed(_, _, target) -> ir_default_err(p, target)
+                .NoConversion -> ir_default_err(p, source)
+                else -> false
+            }
+        }
+    }
+    if conversion == .NoConversion && !framed {
+        if site == .Val(at) {
+            _ :: ir_journey_hop(&m, &p, &b, at, -1, false, span)
+        }
+        return subject
+    }
     source_row :: ir_value_type(&m, p, source) ?? return ir_type_fail(&b, span, source)
     error_value :: ir_load_at(&m, &b, subject, 8, source_row)
     payload :: ir_own(&m, &b, error_value)
     converted := -1
     if conversion == {
+        .NoConversion -> converted = payload
         .DefaultErr -> {
             error_row :: ir_value_type(&m, p, error) ?? return ir_type_fail(&b, span, error)
             converted = ir_runtime(&m, &b, "jet_err_from_message", [Int]{payload}, error_row)
@@ -1445,6 +1463,10 @@ fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conv
             b.fresh[converted] = true
         }
         else -> return ir_fail_slot(&b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
+    }
+    if site == .Val(at) {
+        converted = ir_journey_hop(&m, &p, &b, at, converted, framed, span)
+        if ir_failed(b) -> return -1
     }
     ir_release(&m, &b, subject)
     ir_result_box(&m, p, &b, Type.Result{ok: success, err: error}, false, converted)

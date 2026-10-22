@@ -11,13 +11,16 @@ use jet_foundation.[Span, TContract, TContractResult, TPanicLoc, TPanicLocal, TR
 // return checks.
 struct IRContractFrame { result: TContractResult, post: [TContract] }
 
-// One checked clause (codegen jet_codegen_lower_contract): a proven or
-// stripped clause emits nothing.
+// One checked clause (codegen Statements.jet jet_codegen_lower_contract):
+// a proven or stripped clause emits nothing. Its report quotes the clause's
+// source line (jet_codegen_contract_context).
 fn ir_contract(m: &IRModule, p: &IRProgram, b: &IRBuilder, contract: TContract) Never! {
     if contract.disposition != .Check -> return
+    if contract.file != b.f.source_file -> return ir_fail(&b, contract.span, "contract source differs from its function source")
+    source_line :: ir_source_line_text(p, contract.file, contract.line) ?? return ir_fail(&b, contract.span, "contract line {contract.line} is outside its source")
     site :: b.line
     b.line = contract.line
-    location :: TPanicLoc{file: contract.file, source_line: "", line: contract.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}}
+    location :: TPanicLoc{file: contract.file, source_line: source_line, line: contract.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}}
     _ :: ir_require_stop(&m, &p, &b, TRequireKind.Require{cond: contract.condition, msg: Val(contract.message)}, location, false, contract.span)
     b.line = site
 }

@@ -25,13 +25,15 @@ IR_SPIKE_EXIT_FAILURES :: 2
 
 // What the IR builder reads for one entry file: the checked functions MIR
 // lowering would read, every checked module's type declarations (module
-// order), and the key of the entry module's `fn run`; with the compile's
-// threads, its first source root (where `.jet/build` lives), the entry's
-// source and the application authority (Authority.jet) its run requires.
+// order), the checked source files' text by path, and the key of the entry
+// module's `fn run`; with the compile's threads, its first source root
+// (where `.jet/build` lives), the entry's source and the application
+// authority (Authority.jet) its run requires.
 struct IRSpikeInput {
     functions: [TFunc]
     type_defs: [TTypeDef]
     impls: [TImplDef]
+    sources: [String:String]
     constants: [TConstantDef]
     entry_key: String
     threads: CompilerThreads
@@ -141,7 +143,7 @@ fn ir_spike_front(file: String, trace_sink: JetCLITraceSink?) -> IRSpikeFront {
             entry_key :: symbol_id(SymbolKind.Function, inputs.entry_module_identity, "", "run").key
             authority := jet_cli_policy_authority(ir_spike_required_effects(inputs.functions, entry_key), front.compile.authority_policy)
             jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, None))
-            return IRSpikeFront.Ready{input: IRSpikeInput{functions: ^inputs.functions, type_defs: ^type_defs, impls: ^impls, constants: ^constants, entry_key: entry_key, threads: threads, root: root, source: source, authority: authority}}
+            return IRSpikeFront.Ready{input: IRSpikeInput{functions: ^inputs.functions, type_defs: ^type_defs, impls: ^impls, sources: ^inputs.sources, constants: ^constants, entry_key: entry_key, threads: threads, root: root, source: source, authority: authority}}
         }
     }
 }
@@ -175,7 +177,7 @@ fn ir_spike_required_effects(functions: [TFunc], entry_key: String) -> [String] 
 fn ir_spike_build_ir(input: ^IRSpikeInput, every_function: Bool, trace_sink: JetCLITraceSink?) -> IRBuildResult {
     owned := ^input
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built :: if every_function -> ir_build_all(^owned.functions, ^owned.type_defs, ^owned.impls, ^owned.constants) else -> ir_build_program(^owned.functions, ^owned.type_defs, ^owned.impls, ^owned.constants, owned.entry_key)
+    built :: if every_function -> ir_build_all(^owned.functions, ^owned.type_defs, ^owned.impls, ^owned.sources, ^owned.constants) else -> ir_build_program(^owned.functions, ^owned.type_defs, ^owned.impls, ^owned.sources, ^owned.constants, owned.entry_key)
     if trace_sink == .Val(sink) -> sink.end("ir.build", built.program.functions.len())
     built
 }

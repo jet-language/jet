@@ -112,6 +112,70 @@ struct IRProgram {
     close_glue: [String:Int]
     // A boxed trait value's payload key by concrete type identity (from 1).
     trait_keys: [String:Int]
+    // The checked source files' bytes and line starts by row, and each
+    // path's row: a source location reads the file in place.
+    source_bytes: [[U8]]
+    source_lines: [[Int]]
+    source_rows: [String:Int]
+}
+
+// The checked source files (`path` -> text) as rows of bytes and line
+// starts (codegen Builder.jet jet_codegen_source_index).
+fn ir_source_index(p: &IRProgram, sources: ^[String:String]) Never! {
+    loop (path, text) in ^sources {
+        if p.source_rows.get(path) != None -> next
+        bytes := text.bytes()
+        starts := [Int]{0}
+        loop (index, byte) in bytes {
+            if byte == (U8{10}) -> &starts.push(index + 1)
+        }
+        p.source_rows[path] = p.source_bytes.len()
+        &p.source_bytes.push(^bytes)
+        &p.source_lines.push(^starts)
+    }
+}
+
+// The 1-based line holding byte `offset` of `path` (codegen
+// jet_codegen_line_of); None when the file is not a checked source.
+fn ir_source_line_of(p: IRProgram, path: String, offset: Int) -> Int? Never! {
+    row :: p.source_rows.get(path) ?? return None
+    low := 0
+    high := p.source_lines[row].len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if p.source_lines[row][middle] <= offset -> low = middle + 1 else -> high = middle
+    }
+    Val(low)
+}
+
+// The 1-based character column of byte `offset` of `path` (codegen
+// jet_codegen_source_column_at): 1 when the file is not a checked source,
+// None when the offset falls outside it.
+fn ir_source_column(p: IRProgram, path: String, offset: Int) -> Int? Never! {
+    row :: p.source_rows.get(path) ?? return Val(1)
+    if offset < 0 || offset > p.source_bytes[row].len() -> return None
+    column := 1
+    at := offset
+    loop at > 0 && p.source_bytes[row][at - 1] != (U8{10}) {
+        at -= 1
+        if p.source_bytes[row][at] < (U8{128}) || p.source_bytes[row][at] >= (U8{192}) -> column += 1
+    }
+    Val(column)
+}
+
+// Line `line` of `path` without its line break (codegen
+// jet_codegen_source_location): "" when the file is not a checked source;
+// None when the line is outside it or not UTF-8.
+fn ir_source_line_text(p: IRProgram, path: String, line: Int) -> String? Never! {
+    row :: p.source_rows.get(path) ?? return Val("")
+    if line < 1 || line > p.source_lines[row].len() -> return None
+    start :: p.source_lines[row][line - 1]
+    end := start
+    loop end < p.source_bytes[row].len() && p.source_bytes[row][end] != (U8{10}) -> end += 1
+    if end > start && p.source_bytes[row][end - 1] == (U8{13}) -> end -= 1
+    text := [U8]{}
+    loop at in start..<end -> &text.push(p.source_bytes[row][at])
+    Val(String.from_bytes(text) ?? return None)
 }
 
 // A function waiting to be built: its checked row, IR id and type
@@ -134,7 +198,7 @@ struct IRLambdaJob {
 // body writes) instead of its value.
 struct IRCaptureSlot { name: String, offset: Int, row: Int, by_ref: Bool }
 
-fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
+fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
     constants := [String:TConstantDef]{}
     loop definition in ^constant_defs {
         if constants.get(definition.key) == None -> constants[definition.key] = definition
@@ -211,7 +275,9 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
         }
     }
-    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}}
+    p := IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}}
+    ir_source_index(&p, ^sources)
+    p
 }
 
 // The last segment of a qualified key (`trait:<m>::Display` is `Display`).
@@ -330,10 +396,12 @@ fn ir_symbol_name(function: TFunc) -> String Never! {
 
 // Builds the entry `entry_key` and every function it reaches.
 // `type_defs`, `impls` and `constants` are the checked modules' type,
-// implementation and constant declarations, in module order.
-fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], entry_key: String) -> IRBuildResult Never! {
+// implementation and constant declarations, in module order; `sources` the
+// checked source files' text by path (the source locations of journeys and
+// contract reports).
+fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], entry_key: String) -> IRBuildResult Never! {
     m := ir_module_new()
-    p := ir_program_new(^functions, ^type_defs, ^impls, ^constants)
+    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     failures := [IRBuildFailure]{}
     entry := ir_function_id(&m, &p, entry_key, [Type]{}) ?? {
         &failures.push(IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
@@ -415,9 +483,9 @@ fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuil
 
 // Builds every checked non-generic function (a library or a coverage
 // census); generic functions are built per instance their callers reach.
-fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef]) -> IRBuildResult Never! {
+fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef]) -> IRBuildResult Never! {
     m := ir_module_new()
-    p := ir_program_new(^functions, ^type_defs, ^impls, ^constants)
+    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     failures := [IRBuildFailure]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 -> next

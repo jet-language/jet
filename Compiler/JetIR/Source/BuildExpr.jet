@@ -636,8 +636,12 @@ fn ir_loop_frame(b: IRBuilder, label: String?) -> IRLoopFrame? Never! {
     None
 }
 
-// `loop i in start..end`: the bounds are evaluated once; `next` leaves the
-// body's Block to the step.
+// `loop i in start..end by step` (codegen jet_codegen_lower_numeric_range_loop
+// over the runtime cursor, Collections.jet jet_loop_range_init /
+// jet_loop_range_has_next): the bounds and step are evaluated once; a zero
+// step stops the program; a positive step walks up to the end, a negative
+// one down to it. A literal step fixes the direction; a computed one tests
+// its sign each round. `next` leaves the body's Block to the step.
 fn ir_range_loop(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], span: Span) Never! {
     if start.ty != Type.Int || end.ty != Type.Int -> return ir_fail(&b, span, "range loop over {ir_type_name(start.ty)}")
     first :: ir_expr(&m, &p, &b, start)
@@ -645,15 +649,28 @@ fn ir_range_loop(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, loc
     if ir_failed(b) -> return
     by := -1
     descending := false
+    // The step's sign when only the running program knows it.
+    ascending := -1
     if step == .Val(stride) {
+        if stride.ty != Type.Int -> return ir_fail(&b, span, "range loop step of {ir_type_name(stride.ty)}")
         literal := 0
         if stride.kind == .IntLit(value, _) -> literal = value
         if stride.kind == .Unary(op, operand) {
             if op != .Not && operand.kind == .IntLit(value, _) -> literal = -value
         }
-        if literal == 0 -> return ir_fail(&b, span, "range loop with a computed or zero step")
         descending = literal < 0
         by = ir_expr(&m, &p, &b, stride)
+        if ir_failed(b) -> return
+        if literal == 0 {
+            zero :: ir_const_like(&m, &b, by, 0)
+            stopped :: ir_bool_op(&m, &b, IROp.Eq, by, zero)
+            ir_open_if(&b.f, stopped, b.line)
+            message :: ir_static_text(&m, &b, "range loop stride must not be zero")
+            _ :: ir_runtime(&m, &b, "jet_rt_panic_message", message, -1)
+            ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            ascending = ir_bool_op(&m, &b, IROp.Gt, by, zero)
+        }
     } else {
         by = ir_temp_like(&m, &b, first)
         ir_emit(&b.f, IROp.Const, by, 1, -1, -1, b.line)
@@ -667,8 +684,17 @@ fn ir_range_loop(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, loc
     _ :: ir_open(&b.f, IROp.Loop, b.line)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     test :: ir_temp(&m, &b, bool_row)
-    compare :: if descending -> (if exclusive -> IROp.Gt else -> IROp.Ge) else -> (if exclusive -> IROp.Lt else -> IROp.Le)
-    ir_emit(&b.f, compare, test, counter, last, -1, b.line)
+    up :: if exclusive -> IROp.Lt else -> IROp.Le
+    down :: if exclusive -> IROp.Gt else -> IROp.Ge
+    if ascending >= 0 {
+        ir_open_if(&b.f, ascending, b.line)
+        ir_emit(&b.f, up, test, counter, last, -1, b.line)
+        ir_else(&b.f, b.line)
+        ir_emit(&b.f, down, test, counter, last, -1, b.line)
+        ir_end(&b.f, b.line)
+    } else {
+        ir_emit(&b.f, if descending -> down else -> up, test, counter, last, -1, b.line)
+    }
     ir_exit_unless(&m, &b, test, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
     &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
@@ -980,9 +1006,8 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
         }
         .Ok(value) -> return ir_result_ctor(&m, &p, &b, expression.ty, value, true, span)
         .Err(value) -> return ir_result_ctor(&m, &p, &b, expression.ty, value, false, span)
-        .Try(value, conversion, _) -> return ir_try(&m, &p, &b, value, conversion, span)
-        // The context note only annotates an error's report on its way out.
-        .TryWithContext(inner, _, conversion, _, _, _) -> return ir_try(&m, &p, &b, inner, conversion, span)
+        .Try(value, conversion, _) -> return ir_try(&m, &p, &b, value, conversion, None, span)
+        .TryWithContext(inner, note, conversion, file, line, function) -> return ir_try(&m, &p, &b, inner, conversion, Val(IRTrySite{note: note, file: file, line: line, function: function, fresh: ir_try_starts_failure(inner)}), span)
         .OrFallback(value, fallback, ambient) -> return ir_or_fallback(&m, &p, &b, expression.ty, value, fallback, ambient, span)
         .ConstRef(symbol) -> return ir_constant(&m, &p, &b, expression.ty, symbol.key, span)
         .CtLit(value) -> return ir_comptime(&m, &p, &b, expression.ty, value, span)
@@ -2306,7 +2331,9 @@ fn ir_result_ctor(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: T
 }
 
 // `return value`: a Unit executable return only evaluates it; any other
-// return hands back the value as the executable return type.
+// return hands back the value as the executable return type. A returned
+// `Err(...)` is where its failure starts: the journey's origin (codegen
+// Statements.jet `.Return`, jet_codegen_lower_journey_origin).
 fn ir_return(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr?, span: Span) Never! {
     returned :: value ?? return ir_return_fallthrough(&m, &p, &b)
     if b.f.result < 0 {
@@ -2323,14 +2350,36 @@ fn ir_return(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr?, span: Sp
     slot :: ir_value_as(&m, &p, &b, returned, result_row, span)
     if ir_failed(b) -> return
     if slot < 0 -> return ir_fail(&b, span, "return of a value without a slot")
+    if returned.kind == .Err(_) {
+        ir_journey_origin(&m, p, &b, returned.span)
+        if ir_failed(b) -> return
+    }
     owned :: ir_own(&m, &b, slot)
     ir_return_slot(&m, &p, &b, owned, span)
 }
 
+// A `?` site that joins the failure's journey (TryWithContext): its source
+// location, its `?(note)`, and whether the operand's failure starts at this
+// site (`fresh`, codegen jet_codegen_try_operand_starts_failure).
+struct IRTrySite { note: TExpr?, file: String, line: Int, function: String, fresh: Bool }
+
+// A Core call runs no program code, so its failure starts at the call; one
+// that takes a callback may carry a failure out of program code instead.
+fn ir_try_starts_failure(operand: TExpr) -> Bool Never! {
+    if operand.kind == .CoreCall(_, args, _, _, _, _, _) {
+        loop arg in args {
+            if arg.ty == .Fn(_, _, _, _, _, _) -> return false
+        }
+        return true
+    }
+    false
+}
+
 // `value?` (codegen jet_codegen_lower_try_value): the success payload, or
 // the failure handed back to the caller. A plain `T Never!` call result is
-// its own success.
-fn ir_try(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, conversion: TTryConvert, span: Span) -> Int Never! {
+// its own success. At a journey `site` the success edge drops the journey
+// an earlier, handled failure left.
+fn ir_try(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
     subject :: ir_expr(&m, &p, &b, value)
     if ir_failed(b) || subject < 0 -> return subject
     held :: m.types[b.f.slot_type[subject]].ty
@@ -2342,9 +2391,12 @@ fn ir_try(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, conversion: 
         is_ok :: ir_result_is_ok(&m, &b, subject)
         ir_emit(&b.f, IROp.Not, failed, is_ok, -1, -1, b.line)
         ir_open_if(&b.f, failed, b.line)
-        ir_try_failure(&m, &p, &b, subject, true, conversion == .Never || ir_never_type(err_ty), conversion, span)
+        ir_try_failure(&m, &p, &b, subject, true, conversion == .Never || ir_never_type(err_ty), conversion, site, span)
         ir_end(&b.f, b.line)
         if ir_failed(b) -> return -1
+        if site != None {
+            _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
+        }
         ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
         return ir_load_at(&m, &b, subject, 8, ok_row)
     }
@@ -2355,19 +2407,95 @@ fn ir_try(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, conversion: 
         present :: ir_option_is_some(&m, &b, subject)
         ir_emit(&b.f, IROp.Not, absent, present, -1, -1, b.line)
         ir_open_if(&b.f, absent, b.line)
-        ir_try_failure(&m, &p, &b, subject, false, false, conversion, span)
+        ir_try_failure(&m, &p, &b, subject, false, false, conversion, site, span)
         ir_end(&b.f, b.line)
         if ir_failed(b) -> return -1
+        if site != None {
+            _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
+        }
         inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
         return ir_load_at(&m, &b, subject, 0, inner_row)
     }
     subject
 }
 
+// The journey routes' source-site arguments in ABI order: file, line,
+// column, function (codegen jet_codegen_try_site_values); the column is
+// that of `span` in the building function's source.
+fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line: Int, function: String, span: Span) -> [Int] Never! {
+    if line < 1 || line > 4294967295 {
+        ir_fail(&b, span, "journey site line {line} is outside the supported source range")
+        return [Int]{}
+    }
+    column :: ir_source_column(p, b.f.source_file, span.start) ?? {
+        ir_fail(&b, span, "journey site span falls outside its source")
+        return [Int]{}
+    }
+    string_row :: ir_string_row(&m)
+    file_text :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, file_text, ir_intern_text(&m, file), -1, -1, b.line)
+    line_word :: ir_word_const(&m, &b, line)
+    column_word :: ir_word_const(&m, &b, column)
+    function_text :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, function_text, ir_intern_text(&m, function), -1, -1, b.line)
+    [Int]{file_text, line_word, column_word, function_text}
+}
+
+// A returned `Err(...)` at `span` starts the journey (codegen
+// jet_codegen_lower_journey_origin): its line is the statement's, else the
+// span's.
+fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) Never! {
+    file :: b.f.source_file.copy()
+    name :: b.f.name.copy()
+    line := b.line
+    if line < 1 -> line = ir_source_line_of(p, file, span.start) ?? 1
+    values :: ir_journey_site(&m, p, &b, file, line, name, span)
+    if ir_failed(b) -> return
+    _ :: ir_runtime(&m, &b, "jet_journey_origin", values, -1)
+}
+
+// The hop of the failure edge at `site`: a failure that starts here drops
+// the journey an earlier, handled failure left; then the site joins the
+// journey, or, for a `?(note)` whose error is the default `Err`, becomes a
+// context frame of `error` (codegen jet_codegen_lower_try_context). Returns
+// the error the edge hands on: `error`, or the framed copy that replaces
+// it.
+fn ir_journey_hop(m: &IRModule, p: &IRProgram, b: &IRBuilder, site: IRTrySite, error: Int, framed: Bool, span: Span) -> Int Never! {
+    if site.fresh {
+        _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
+    }
+    values := ir_journey_site(&m, p, &b, site.file, site.line, site.function, span)
+    if ir_failed(b) -> return -1
+    note := -1
+    if site.note == .Val(text) {
+        note = ir_expr(&m, &p, &b, text)
+        if ir_failed(b) -> return -1
+    } else {
+        text_row :: ir_string_row(&m)
+        note = ir_temp(&m, &b, text_row)
+        ir_emit(&b.f, IROp.ConstText, note, ir_intern_text(&m, ""), -1, -1, b.line)
+    }
+    if framed {
+        error_row :: b.f.slot_type[error]
+        arguments := [Int]{error}
+        loop value in values -> &arguments.push(value)
+        &arguments.push(note)
+        framed_error :: ir_runtime(&m, &b, "jet_err_with_context_frame", arguments, error_row)
+        b.fresh[framed_error] = true
+        ir_release(&m, &b, note)
+        ir_release(&m, &b, error)
+        return framed_error
+    }
+    &values.push(note)
+    _ :: ir_runtime(&m, &b, "jet_journey_frame_text", values, -1)
+    ir_release(&m, &b, note)
+    error
+}
+
 // The failure edge of `?`: an impossible failure is unreachable; a Result
 // carrier hands the Err box back, its error converted as `?` asks; an
-// Option carrier returns None.
-fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_result: Bool, never: Bool, conversion: TTryConvert, span: Span) Never! {
+// Option carrier returns None. A journey `site` joins the journey first.
+fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_result: Bool, never: Bool, conversion: TTryConvert, site: IRTrySite?, span: Span) Never! {
     if never {
         ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
         return
@@ -2375,7 +2503,7 @@ fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_r
     carrier :: b.failure.copy()
     if carrier == .Result(success, error) {
         if !is_result -> return ir_fail(&b, span, "`?` on an Option in a Result function")
-        returned :: ir_try_reraise(&m, &p, &b, subject, conversion, success, error, span)
+        returned :: ir_try_reraise(&m, &p, &b, subject, conversion, site, success, error, span)
         if ir_failed(b) -> return
         ir_return_slot(&m, &p, &b, returned, span)
         return
@@ -2387,6 +2515,10 @@ fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_r
         }
     }
     if optional && !is_result && b.f.result >= 0 {
+        if site == .Val(at) {
+            _ :: ir_journey_hop(&m, &p, &b, at, -1, false, span)
+            if ir_failed(b) -> return
+        }
         result_row :: b.f.result
         null :: ir_temp(&m, &b, result_row)
         ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)

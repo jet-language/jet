@@ -23,14 +23,15 @@ struct JetEvalIRResult {
 // Evaluates the comptime item `item` (a zero-parameter function whose body
 // returns the item's expression) on the IR built from it and the checked
 // `closure` it reaches; `type_defs` and `constants` are the checked modules'
-// declarations the builder lays values out by.
+// declarations the builder lays values out by. The comptime value reads no
+// source location, so the build has no source files.
 fn jet_eval_ir_comptime(closure: ^[TFunc], item: ^TFunc, type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     functions := ^closure
     key :: item.key.copy()
     &functions.push(^item)
     // copy: the builder consumes its own type rows; transport lays values out by them again.
     layouts :: type_defs.copy()
-    built := ir_build_program(^functions, ^type_defs, ^impls, ^constants, key)
+    built := ir_build_program(^functions, ^type_defs, ^impls, [String:String]{}, ^constants, key)
     if built.failures.len() > 0 {
         lines := [String]{}
         loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))
@@ -46,7 +47,7 @@ fn jet_eval_ir_build_failure_text(failure: IRBuildFailure) -> String Never! {
 // Runs the module's entry (no parameters) and reads its result back.
 fn jet_eval_ir_entry(built: ^IRModule, type_defs: ^[TTypeDef], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     m := ^built
-    p := ir_program_new([TFunc]{}, ^type_defs, [TImplDef]{}, [TConstantDef]{})
+    p := ir_program_new([TFunc]{}, ^type_defs, [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     s := jet_eval_ir_state_new(m, config, span)
     entry :: m.entry
     if entry < 0 || entry >= m.functions.len() {

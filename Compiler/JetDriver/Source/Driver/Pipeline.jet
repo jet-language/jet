@@ -5612,11 +5612,13 @@ struct JetDriverCheckedProjectionCapture {
 // What the slot IR builder reads, where MIR lowering would start (Pipeline
 // `jet_driver_lower_releasing`): the checked functions, after Core pruning
 // and keep-going traps; the checked modules (declarations, names) beside
-// them; the entry module; the key of the executable entry
+// them; the checked source files' text by path (the first file of a path);
+// the entry module; the key of the executable entry
 // (jet_driver_resolve_entry_key), None for a program without one.
 struct JetDriverLoweringInputs {
     functions: [TFunc]
     modules: [SemaGraphModuleResult]
+    sources: [String:String]
     entry_module_identity: String
     entry_key: String?
 }
@@ -6483,7 +6485,11 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
         if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
         foreign_link :: jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, entry_module_identity: load.entry_module_identity, entry_key: entry_key})
+        sources := [String:String]{}
+        loop file in load.source_files {
+            if sources.get(file.path) == None -> sources[file.path] = file.source
+        }
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key})
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
         result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
         result.foreign_link = foreign_link
