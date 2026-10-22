@@ -620,8 +620,9 @@ fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             ir_emit(&b.f, IROp.Copy, result, count, -1, -1, b.line)
             return result
         }
-        // reduce(initial, f) is the same left fold (Lower lower_closure_method).
-        .Fold | .Reduce -> {
+        // reduce(initial, f) is the same left fold (Lower lower_closure_method);
+        // a View shares the List header, so its fold walks the same buffer.
+        .Fold | .Reduce | .ViewFold -> {
             if operands.len() != 2 -> return ir_fail_slot(&b, span, "fold without an initial value")
             accumulator :: ir_temp(&m, &b, result_row)
             initial :: ir_adapt(&m, p, &b, operands[0], result_row, span)
@@ -673,8 +674,45 @@ fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             return wrote
         }
         .TryMap -> return ir_closure_try_map(&m, p, &b, ty, list, element, callback, args[args.len() - 1].ty, span)
+        .GroupBy -> return ir_closure_group_by(&m, p, &b, result_row, list, element, callback, span)
         else -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)}")
     }
+}
+
+// `xs.group_by(key)` (Lower lower_closure_group_by): each element, in order,
+// appended as a copy to the List under its key, created on first use; the
+// Map keeps its keys ascending.
+fn ir_closure_group_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: Int, list: Int, element: Int, callback: Int, span: Span) -> Int Never! {
+    shape :: ir_map_shape(&m, p, result_row) ?? return ir_fail_slot(&b, span, "group_by into {ir_type_name(m.types[result_row].ty)}")
+    if !(ir_untag(m.types[shape.value.ty].ty) == .List(_)) -> return ir_fail_slot(&b, span, "group_by into {ir_type_name(m.types[result_row].ty)}")
+    word_row :: ir_word_row(&m)
+    result :: ir_list_empty(&m, &b, result_row)
+    zero :: ir_word_const(&m, &b, 0)
+    walk :: ir_walk_open(&m, &b, list, element)
+    key :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, shape.key.ty)
+    found :: ir_map_call(&m, p, &b, result_row, "map.find", [Int]{result, key}, word_row)
+    index :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Copy, index, found, -1, -1, b.line)
+    present :: ir_bool_op(&m, &b, IROp.Ge, found, zero)
+    ir_open_if(&b.f, present, b.line)
+    if key >= 0 && ir_has_drop(m, b, key) -> ir_emit(&b.f, IROp.Drop, -1, key, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    empty :: ir_list_empty(&m, &b, shape.value.ty)
+    ir_map_set(&m, p, &b, result_row, result, key, empty)
+    // map.find's miss is -1 - the insertion point, the new entry's index.
+    minus_one :: ir_word_const(&m, &b, -1)
+    point :: ir_word_op(&m, &b, IROp.Sub, minus_one, found)
+    ir_emit(&b.f, IROp.Copy, index, point, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    entries :: ir_load_word(&m, &b, result, 16)
+    entry :: ir_element_address(&m, &b, entries, index, shape.stride)
+    group :: ir_address_at(&m, &b, entry, shape.value.offset)
+    copied :: walk.item >= 0 && (ir_has_drop(m, b, walk.item) || m.types[element].kind == .Aggregate)
+    appended :: if copied -> ir_copy_value(&m, p, &b, walk.item, span) else -> walk.item
+    ir_list_push(&m, &b, group, element, appended)
+    if copied -> b.fresh[appended] = false
+    ir_walk_close(&m, &b, walk)
+    result
 }
 
 // `opt.map(f)` (Lower Combinators.jet `jet_option_map_ref`): None stays
