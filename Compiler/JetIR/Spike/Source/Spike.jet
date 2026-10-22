@@ -5,10 +5,12 @@
 //   jet ir census [--all] FILE...   one TSV row per IR build failure, then a
 //                                   histogram of the failure messages
 //   jet ir dump FILE                the IR text of every built function
-//   jet ir build FILE -o EXE        the executable through the IR (O0)
-//   jet ir run FILE [ARGS...]       build to .jet/build/<stem>.ir, then run it
-// `--trace=FILE` traces any of them (`ir.build`, `ir.x64`, `ir.object`,
-// `ir.link` beside the driver's phases).
+//   jet ir build [--release] FILE -o EXE   the executable through the IR (O1;
+//                                   `--release` O2)
+//   jet ir run [--release] FILE [ARGS...]  build to .jet/build/<stem>.ir (O0;
+//                                   `--release` O2), then run it
+// `--trace=FILE` traces any of them (`ir.build`, `ir.opt`, `ir.x64`,
+// `ir.object`, `ir.link` beside the driver's phases).
 // Built as its own package (Compiler/JetIR/Spike/package.jet), beside the
 // default CLI (Compiler/JetCli), never instead of it.
 use core.files as cli_files
@@ -51,6 +53,7 @@ fn ir_spike_main(args: [String]) -> Int {
     verb :: args[1]
     files := [String]{}
     every_function := false
+    release := false
     trace := String?{None}
     output := String?{None}
     index := 2
@@ -58,6 +61,8 @@ fn ir_spike_main(args: [String]) -> Int {
         argument :: args[index]
         if argument == "--all" {
             every_function = true
+        } else if argument == "--release" {
+            release = true
         } else if argument.starts_with("--trace=") {
             trace = Val(argument.slice(8..<argument.len()))
         } else if argument == "-o" && index + 1 < args.len() {
@@ -72,14 +77,14 @@ fn ir_spike_main(args: [String]) -> Int {
     if verb == "census" && files.len() > 0 -> return ir_spike_census(files, every_function, trace_sink)
     if verb == "dump" && files.len() == 1 -> return ir_spike_dump(files[0], trace_sink)
     if verb == "build" && files.len() == 1 && output != None {
-        built :: ir_spike_native(files[0], output ?? "", trace_sink)
+        built :: ir_spike_native(files[0], output ?? "", release, trace_sink)
         ir_spike_write(built.stdout, built.stderr)
         return built.exit_code
     }
     if verb == "run" && files.len() > 0 {
         program_args := [String]{}
         loop at in 1..<files.len() -> &program_args.push(files[at])
-        ran :: ir_spike_run(files[0], program_args, trace_sink)
+        ran :: ir_spike_run(files[0], program_args, release, trace_sink)
         ir_spike_write(ran.stdout, ran.stderr)
         return ran.exit_code
     }
@@ -87,7 +92,7 @@ fn ir_spike_main(args: [String]) -> Int {
 }
 
 fn ir_spike_usage() -> Int {
-    ir_spike_write("", "usage: jet ir census [--all] [--trace=FILE] FILE...\n       jet ir dump [--trace=FILE] FILE\n       jet ir build [--trace=FILE] FILE -o EXE\n       jet ir run [--trace=FILE] FILE [ARGS...]\n")
+    ir_spike_write("", "usage: jet ir census [--all] [--trace=FILE] FILE...\n       jet ir dump [--trace=FILE] FILE\n       jet ir build [--release] [--trace=FILE] FILE -o EXE\n       jet ir run [--release] [--trace=FILE] FILE [ARGS...]\n")
     JET_DRIVER_EXIT_USAGE
 }
 

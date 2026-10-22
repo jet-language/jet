@@ -1,0 +1,346 @@
+// Optimization levels over the slot IR: IR in, IR out, between the builder
+// and x86-64 selection. Level 0 (`jet run`, `jet dev`, compile-time code)
+// leaves the module as built; level 1 (`jet build`) inlines small direct
+// callees bottom-up over the call graph and simplifies every function;
+// level 2 (`--release`) adds scalar replacement of non-escaping frame
+// aggregates and simplifies again.
+//
+// Every pass keeps the program's meaning exactly, on every level: runtime
+// calls, drops, stores and stops stay in order; a fold that would wrap or
+// trap is not done; Float is never folded. A pass that needs to know where
+// a slot gets its value uses the structured nesting (OptFacts below)
+// instead of an SSA form: a slot with exactly one write reaches every read
+// in a region that the write's region encloses, after the write.
+//
+// Selection reads every operand of an instruction before it writes the
+// instruction's result (the builder already emits `add s <- s, one`), so a
+// pass may make a result slot equal to an operand slot.
+
+use jet_foundation.[compiler_transfer_rows]
+
+// What the passes changed in a module, summed over its functions.
+struct IROptReport {
+    level: Int
+    inlined_calls: Int
+    direct_calls: Int
+    folded: Int
+    branches_folded: Int
+    compares_fused: Int
+    copies_coalesced: Int
+    dead_removed: Int
+    unreachable_removed: Int
+    aggregates_replaced: Int
+    instructions_before: Int
+    instructions_after: Int
+}
+
+fn ir_opt_report(level: Int) -> IROptReport Never! {
+    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, instructions_before: 0, instructions_after: 0}
+}
+
+fn ir_opt_report_text(r: IROptReport) -> String Never! {
+    "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}"
+}
+
+// Optimizes `m` in place at `level` (0, 1 or 2).
+fn ir_optimize_module(m: &IRModule, level: Int) -> IROptReport Never! {
+    report := ir_opt_report(level)
+    loop f in m.functions -> report.instructions_before += ir_opt_size(f)
+    if level <= 0 {
+        report.instructions_after = report.instructions_before
+        return report
+    }
+    // The functions leave the module while the passes rewrite them, so a
+    // pass reads the module's type and name rows beside a function it edits.
+    functions := [IRFunction]{}
+    compiler_transfer_rows<IRFunction>(&functions, &m.functions)
+    loop id in 0..<functions.len() -> ir_opt_direct_calls(&functions[id], &report)
+    order :: ir_opt_bottom_up(functions)
+    loop id in order.order {
+        ir_opt_inline_into(m, &functions, id, order.recursive, level, &report)
+        ir_opt_simplify(m, &functions[id], &report)
+        if level >= 2 {
+            replaced :: ir_opt_scalar_replace(m, &functions[id])
+            report.aggregates_replaced += replaced
+            if replaced > 0 -> ir_opt_simplify(m, &functions[id], &report)
+        }
+    }
+    compiler_transfer_rows<IRFunction>(&m.functions, &functions)
+    loop f in m.functions -> report.instructions_after += ir_opt_size(f)
+    report
+}
+
+// Instructions that do something (Nop and End excluded): the size inlining
+// measures.
+fn ir_opt_size(f: IRFunction) -> Int Never! {
+    count := 0
+    loop op in f.op {
+        if op != .Nop && op != .End -> count += 1
+    }
+    count
+}
+
+// ---------------------------------------------------------------------------
+// Facts over one function: who writes and reads each slot, and the region
+// (function body, Block body, Loop body, If then-part, Else part) each
+// instruction sits in. Openers, Else and End belong to the enclosing region.
+
+struct OptFacts {
+    // Writes per slot; parameters count one write at entry.
+    defs: [Int]
+    // The one write of a slot written once (-1 for a parameter: the entry).
+    def_at: [Int]
+    // Reads per slot.
+    uses: [Int]
+    // Region of each instruction, and each region's enclosing region (-1 for
+    // the function body, region 0).
+    region: [Int]
+    parent: [Int]
+}
+
+fn ir_opt_facts(f: IRFunction) -> OptFacts Never! {
+    count :: f.slot_type.len()
+    defs := [Int]{}
+    def_at := [Int]{}
+    uses := [Int]{}
+    loop slot in 0..<count {
+        &defs.push(if slot < f.param_count -> 1 else -> 0)
+        &def_at.push(-1)
+        &uses.push(0)
+    }
+    region := [Int]{}
+    parent := [Int]{-1}
+    open := [Int]{0}
+    reads := [Int]{}
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .Else || op == .End -> _ := &open.pop()
+        &region.push(open[open.len() - 1])
+        if op == .Block || op == .Loop || op == .If || op == .Else {
+            &parent.push(open[open.len() - 1])
+            &open.push(parent.len() - 1)
+        }
+        ir_x64_reads_into(f, at, &reads)
+        loop slot in reads {
+            if slot >= 0 && slot < count -> uses[slot] = uses[slot] + 1
+        }
+        written :: ir_x64_write(f, at)
+        if written >= 0 && written < count {
+            defs[written] = defs[written] + 1
+            def_at[written] = at
+        }
+    }
+    OptFacts{defs: defs, def_at: def_at, uses: uses, region: region, parent: parent}
+}
+
+// Whether region `outer` encloses (or is) region `inner`.
+fn ir_opt_encloses(facts: OptFacts, outer: Int, inner: Int) -> Bool Never! {
+    at := inner
+    loop at >= 0 {
+        if at == outer -> return true
+        at = facts.parent[at]
+    }
+    false
+}
+
+// The instruction that gives `slot` its value at instruction `at`: the
+// slot's one write when that write comes first and its region encloses
+// `at`'s; -1 when there is none or the slot is a parameter.
+fn ir_opt_reaching_def(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int Never! {
+    if slot < f.param_count || facts.defs[slot] != 1 -> return -1
+    def :: facts.def_at[slot]
+    if def < 0 || def >= at -> return -1
+    if !ir_opt_encloses(facts, facts.region[def], facts.region[at]) -> return -1
+    def
+}
+
+// The constant `slot` holds at instruction `at`, when a single `Const`
+// write reaches it.
+fn ir_opt_const_at(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int? Never! {
+    if slot < 0 -> return None
+    def :: ir_opt_reaching_def(f, facts, slot, at)
+    if def < 0 || f.op[def] != .Const -> return None
+    Val(f.a[def])
+}
+
+// ---------------------------------------------------------------------------
+// Compaction: drops the Nops and recomputes every structural index (Block,
+// Loop and Else `a`, If `b`/`c`, End `a`) from the nesting. Br depths count
+// open constructs, so they stay valid as long as a pass removes a construct
+// only together with every Br inside it.
+
+fn ir_opt_compact(f: &IRFunction) Never! {
+    op := [IROp]{}
+    dst := [Int]{}
+    a := [Int]{}
+    b := [Int]{}
+    c := [Int]{}
+    line := [Int]{}
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Nop -> next
+        &op.push(f.op[at])
+        &dst.push(f.dst[at])
+        &a.push(f.a[at])
+        &b.push(f.b[at])
+        &c.push(f.c[at])
+        &line.push(f.code_line[at])
+    }
+    open := [Int]{}
+    loop at in 0..<op.len() {
+        if op[at] == {
+            .Block | .Loop -> &open.push(at)
+            .If -> {
+                b[at] = -1
+                &open.push(at)
+            }
+            .Else -> b[open[open.len() - 1]] = at
+            .End -> {
+                opener :: &open.pop() ?? panic("ir_opt_compact: End without an open construct")
+                a[at] = opener
+                if op[opener] == .If {
+                    c[opener] = at
+                    if b[opener] >= 0 -> a[b[opener]] = at
+                } else {
+                    a[opener] = at
+                }
+            }
+            else -> {}
+        }
+    }
+    f.op = ^op
+    f.dst = ^dst
+    f.a = ^a
+    f.b = ^b
+    f.c = ^c
+    f.code_line = ^line
+}
+
+// Turns instruction `at` into a Nop.
+fn ir_opt_kill(f: &IRFunction, at: Int) Never! {
+    f.op[at] = .Nop
+    f.dst[at] = -1
+    f.a[at] = -1
+    f.b[at] = -1
+    f.c[at] = -1
+}
+
+// ---------------------------------------------------------------------------
+// Direct calls: a CallIndirect through a slot whose one write is the
+// FunctionAddress of a module function is a Call of that function (same
+// arguments, same ABI), which inlining can then see.
+
+fn ir_opt_direct_calls(f: &IRFunction, report: &IROptReport) Never! {
+    facts :: ir_opt_facts(f)
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .CallIndirect -> next
+        def :: ir_opt_reaching_def(f, facts, f.a[at], at)
+        if def < 0 || f.op[def] != .FunctionAddress -> next
+        f.op[at] = .Call
+        f.a[at] = f.a[def]
+        report.direct_calls += 1
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The call graph bottom-up (Tarjan's strongly connected components, callees
+// before callers). A function in a component of more than one function, or
+// that calls itself, is recursive and never inlined.
+
+struct OptOrder {
+    order: [Int]
+    recursive: [Bool]
+}
+
+struct OptTarjan {
+    edges: [[Int]]
+    index: [Int]
+    low: [Int]
+    on_stack: [Bool]
+    stack: [Int]
+    next_index: Int
+    order: [Int]
+    recursive: [Bool]
+}
+
+fn ir_opt_bottom_up(functions: [IRFunction]) -> OptOrder Never! {
+    edges := [[Int]]{}
+    self_call := [Bool]{}
+    loop f in functions {
+        out := [Int]{}
+        calls_self := false
+        loop at in 0..<f.op.len() {
+            if f.op[at] != .Call -> next
+            callee :: f.a[at]
+            if callee < 0 || callee >= functions.len() -> next
+            if callee == edges.len() -> calls_self = true
+            &out.push(callee)
+        }
+        &edges.push(^out)
+        &self_call.push(calls_self)
+    }
+    count :: functions.len()
+    t := OptTarjan{edges: ^edges, index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
+    loop _ in 0..<count {
+        &t.index.push(-1)
+        &t.low.push(0)
+        &t.on_stack.push(false)
+        &t.recursive.push(false)
+    }
+    loop node in 0..<count {
+        if t.index[node] < 0 -> ir_opt_tarjan_visit(&t, node)
+    }
+    loop node in 0..<count {
+        if self_call[node] -> t.recursive[node] = true
+    }
+    OptOrder{order: ^t.order, recursive: ^t.recursive}
+}
+
+// Iterative Tarjan visit from `root` (the compiler's own call graphs are deep).
+fn ir_opt_tarjan_visit(t: &OptTarjan, root: Int) Never! {
+    work := [Int]{root}
+    edge := [Int]{0}
+    t.index[root] = t.next_index
+    t.low[root] = t.next_index
+    t.next_index += 1
+    &t.stack.push(root)
+    t.on_stack[root] = true
+    loop work.len() > 0 {
+        top :: work.len() - 1
+        node :: work[top]
+        if edge[top] < t.edges[node].len() {
+            callee :: t.edges[node][edge[top]]
+            edge[top] = edge[top] + 1
+            if t.index[callee] < 0 {
+                t.index[callee] = t.next_index
+                t.low[callee] = t.next_index
+                t.next_index += 1
+                &t.stack.push(callee)
+                t.on_stack[callee] = true
+                &work.push(callee)
+                &edge.push(0)
+            } else if t.on_stack[callee] && t.index[callee] < t.low[node] {
+                t.low[node] = t.index[callee]
+            }
+            next
+        }
+        _ := &work.pop()
+        _ := &edge.pop()
+        if work.len() > 0 {
+            caller :: work[work.len() - 1]
+            if t.low[node] < t.low[caller] -> t.low[caller] = t.low[node]
+        }
+        if t.low[node] == t.index[node] {
+            component := [Int]{}
+            loop t.stack.len() > 0 {
+                member :: &t.stack.pop() ?? break
+                t.on_stack[member] = false
+                &component.push(member)
+                if member == node -> break
+            }
+            loop member in component {
+                if component.len() > 1 -> t.recursive[member] = true
+                &t.order.push(member)
+            }
+        }
+    }
+}

@@ -1,28 +1,30 @@
 // `jet ir build` / `jet ir run`: the executable of a file through the slot
-// IR at O0, onto the existing object writer, runtime pack and static linker
+// IR, onto the existing object writer, runtime pack and static linker
 // (Host.jet `jet_cli_native_back` links the same inputs in the same order).
-// Traced as `ir.build`, `ir.x64`, `ir.object`, `ir.link`.
+// The IR passes run at the command's level (jet_cli_native_level: `run` O0,
+// `build` O1, `--release` O2). Traced as `ir.build`, `ir.opt`, `ir.x64`,
+// `ir.object`, `ir.link`.
 use core.files as cli_files
 use jet_foundation.[CompilerThreads]
 use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK]
 use jet_backend.[x64_link_executable]
-use jet_cli.[JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_PACK_FILE, JetCLITraceSink, jet_cli_authority_report, jet_cli_build_failed, jet_cli_exec, jet_cli_runtime_dir, jet_cli_runtime_key, jet_cli_stem, jet_cli_why]
-use jet_ir.[IRBuildFailure, IRFunction, IROp, ir_x64_compile_module, ir_x64_object]
+use jet_cli.[JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_PACK_FILE, JetCLITraceSink, jet_cli_authority_report, jet_cli_build_failed, jet_cli_exec, jet_cli_native_level, jet_cli_runtime_dir, jet_cli_runtime_key, jet_cli_stem, jet_cli_why]
+use jet_ir.[IRBuildFailure, IRFunction, IROp, ir_optimize_module, ir_x64_compile_module, ir_x64_object]
 
 // The executable `executable` of `file`, or the report that stopped it.
 // Every IR build failure, then every selection failure, is listed (exit 2).
-fn ir_spike_native(file: String, executable: String, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+fn ir_spike_native(file: String, executable: String, release: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if ir_spike_front(file, trace_sink) == {
         .Stopped(output) -> { return output }
         .Ready(input) -> {
             if jet_cli_authority_report(file, input.source, false, "build", input.authority) == .Val(refusal) -> return refusal
             threads :: input.threads.copy()
-            return ir_spike_native_input(file, ^input, threads, executable, trace_sink)
+            return ir_spike_native_input(file, ^input, threads, executable, jet_cli_native_level("build", release), trace_sink)
         }
     }
 }
 
-fn ir_spike_native_input(file: String, input: ^IRSpikeInput, threads: CompilerThreads, executable: String, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+fn ir_spike_native_input(file: String, input: ^IRSpikeInput, threads: CompilerThreads, executable: String, level: Int, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     built := ir_spike_build_ir(^input, false, trace_sink)
     // Collect-all: a function the builder failed becomes one Unreachable, so
     // selection still runs over the whole module and reports its own rows.
@@ -30,6 +32,11 @@ fn ir_spike_native_input(file: String, input: ^IRSpikeInput, threads: CompilerTh
     loop failure in built.failures {
         &rows.push("ir.build {failure.name} [{failure.key}]: {ir_spike_field(failure.message)} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
         if built.program.function_rows.get(failure.key) == .Val(id) -> ir_spike_unreachable(&built.program.functions[id])
+    }
+    if level > 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
+        _ := ir_optimize_module(&built.program, level)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", built.program.functions.len())
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
     compiled := ir_x64_compile_module(^built.program, threads)
@@ -86,7 +93,7 @@ fn ir_spike_route_failed(file: String, rows: [String]) -> JetDriverVerbOutput Ne
 
 // `jet ir run FILE [ARGS...]`: build `<root>/.jet/build/<stem>.ir`, then
 // run it on this process's streams with `program_args`, as `jet run` does.
-fn ir_spike_run(file: String, program_args: [String], trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+fn ir_spike_run(file: String, program_args: [String], release: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if ir_spike_front(file, trace_sink) == {
         .Stopped(output) -> { return output }
         .Ready(input) -> {
@@ -95,7 +102,7 @@ fn ir_spike_run(file: String, program_args: [String], trace_sink: JetCLITraceSin
             build_dir :: "{input.root}/.jet/build"
             cli_files.create_dir_all(build_dir) ?? return jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", false)
             binary :: "{build_dir}/{jet_cli_stem(file)}.ir"
-            built :: ir_spike_native_input(file, ^input, threads, binary, trace_sink)
+            built :: ir_spike_native_input(file, ^input, threads, binary, jet_cli_native_level("run", release), trace_sink)
             if built.exit_code != JET_DRIVER_EXIT_OK -> return built
             return jet_cli_exec(binary, program_args, false)
         }

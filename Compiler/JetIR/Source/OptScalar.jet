@@ -1,0 +1,120 @@
+// Scalar replacement of frame aggregates (O2): frame storage
+// (StackAddress, written once) whose address is only ever the base of Loads
+// and Stores at constant offsets becomes one slot per field, so its fields
+// live in registers instead of memory. Refused for the whole storage when
+// its address is used any other way (passed, stored, copied, offset,
+// returned), when two accesses of one offset have different types, when
+// fields overlap or leave the storage, or when a field is itself an
+// aggregate. A Store becomes a move into the field's slot and a Load a move
+// out of it: the bytes a Store writes and a Load of the same type reads back
+// are exactly the slot's value.
+
+fn ir_opt_scalar_replace(m: IRModule, f: &IRFunction) -> Int Never! {
+    facts :: ir_opt_facts(f)
+    count :: f.slot_type.len()
+    candidate := [Bool]{}
+    loop slot in 0..<count {
+        def :: if slot >= f.param_count && facts.defs[slot] == 1 -> facts.def_at[slot] else -> -1
+        &candidate.push(def >= 0 && f.op[def] == .StackAddress)
+    }
+    offsets := [[Int]]{}
+    rows := [[Int]]{}
+    loop _ in 0..<count {
+        &offsets.push([Int]{})
+        &rows.push([Int]{})
+    }
+    reads := [Int]{}
+    loop at in 0..<f.op.len() {
+        ir_x64_reads_into(f, at, &reads)
+        loop slot in reads {
+            if slot < 0 || !candidate[slot] -> next
+            op :: f.op[at]
+            if op == .Load && f.a[at] == slot {
+                &offsets[slot].push(f.b[at])
+                &rows[slot].push(f.slot_type[f.dst[at]])
+            } else if op == .Store && f.a[at] == slot && f.c[at] != slot {
+                &offsets[slot].push(f.b[at])
+                &rows[slot].push(f.slot_type[f.c[at]])
+            } else {
+                candidate[slot] = false
+            }
+        }
+    }
+    replaced := 0
+    // field_slot[k] of the storage `slot`: offsets[slot][k]'s new slot.
+    fields := [[Int]]{}
+    loop slot in 0..<count {
+        &fields.push([Int]{})
+        if !candidate[slot] || offsets[slot].len() == 0 -> next
+        size :: f.a[facts.def_at[slot]]
+        if !ir_opt_fields_fit(m, offsets[slot], rows[slot], size) {
+            candidate[slot] = false
+            next
+        }
+        // One new slot per distinct offset, in first-access order.
+        seen := [Int:Int]{}
+        loop k in 0..<offsets[slot].len() {
+            offset :: offsets[slot][k]
+            found :: seen.get(offset) ?? -1
+            if found >= 0 {
+                &fields[slot].push(found)
+                next
+            }
+            field :: ir_slot(&f, rows[slot][k], IRSlotKind.Local, -1, 0)
+            seen[offset] = field
+            &fields[slot].push(field)
+        }
+        replaced += 1
+    }
+    if replaced == 0 -> return 0
+    // Rewrite the accesses in the order they were recorded.
+    cursor := [Int]{}
+    loop _ in 0..<count -> &cursor.push(0)
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .StackAddress && f.dst[at] >= 0 && candidate[f.dst[at]] && offsets[f.dst[at]].len() > 0 {
+            ir_opt_kill(&f, at)
+            next
+        }
+        if op != .Load && op != .Store -> next
+        base :: f.a[at]
+        if base < 0 || !candidate[base] -> next
+        field :: fields[base][cursor[base]]
+        cursor[base] = cursor[base] + 1
+        if op == .Load {
+            f.op[at] = .Move
+            f.a[at] = field
+            f.b[at] = -1
+            f.c[at] = -1
+        } else {
+            value :: f.c[at]
+            f.op[at] = .Move
+            f.dst[at] = field
+            f.a[at] = value
+            f.b[at] = -1
+            f.c[at] = -1
+        }
+    }
+    ir_opt_compact(&f)
+    replaced
+}
+
+// Whether the accesses (offset, slot type row) of one storage of `size`
+// bytes describe disjoint, same-typed, non-aggregate fields inside it.
+fn ir_opt_fields_fit(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bool Never! {
+    loop k in 0..<offsets.len() {
+        ty :: ir_x64_shape(m.types[rows[k]])
+        if ty.kind == .Aggregate || ty.kind == .Unit || ty.size > 8 -> return false
+        width :: ir_x64_value_width(ty)
+        if offsets[k] < 0 || offsets[k] + width > size -> return false
+        loop other in 0..<offsets.len() {
+            if offsets[other] == offsets[k] {
+                if rows[other] != rows[k] -> return false
+                next
+            }
+            other_width :: ir_x64_value_width(ir_x64_shape(m.types[rows[other]]))
+            if offsets[k] < offsets[other] + other_width && offsets[other] < offsets[k] + width -> return false
+        }
+    }
+    true
+}

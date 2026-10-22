@@ -2,7 +2,9 @@
 // existing object writer and the in-process linker with the runtime pack,
 // each run and compared with the old backend's build of the same Jet
 // program (X64ProgramSources.jet): stdout, stderr and exit status must be
-// identical. Prints one row per program with the selection time per function.
+// identical. Prints one row per program with the selection time per function,
+// then one row per optimization level (O1, O2: Source/Opt*.jet before
+// selection) whose run must be identical too.
 //
 //     cd Compiler/JetIR/Tests && jet run X64Programs.jet -- <outdir> <runtime pack> <jet>
 //
@@ -12,7 +14,7 @@
 use jet_ir.[
     IRClass, IRFunction, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
     ir_args, ir_else, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_new, ir_open, ir_open_if, ir_slot,
-    ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
+    ir_optimize_module, ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
 ]
 use jet_backend.[x64_link_executable]
 use jet_foundation.[CompilerThreads, Type, compiler_threads_single]
@@ -925,10 +927,52 @@ fn xp_status(args: [String]) -> Int {
             print("  ir:  exit {ours.code} out `{xp_quote(ours.output)}` err `{xp_quote(ours.errors)}`")
             print("  old: exit {theirs.code} out `{xp_quote(theirs.output)}` err `{xp_quote(theirs.errors)}`")
         }
+        loop level in 1..<3 {
+            leveled :: xp_level(m, level, pack, args[1], "{out}/{program.name}.o{level}.ir", out)
+            same_level :: leveled.failure == "" && leveled.code == theirs.code && leveled.output == theirs.output && leveled.errors == theirs.errors
+            print("  O{level}\tinstructions {leveled.before} -> {leveled.after}\t{leveled.object_bytes} object bytes\t{if same_level -> "IDENTICAL" else -> "DIFFERENT {leveled.failure}"}")
+            if !same_level {
+                failures += 1
+                print("  ir O{level}:  exit {leveled.code} out `{xp_quote(leveled.output)}` err `{xp_quote(leveled.errors)}`")
+            }
+        }
     }
     failures += xp_threads()
     print(if failures == 0 -> "X64 PROGRAMS PASS" else -> "X64 PROGRAMS FAIL ({failures})")
     if failures == 0 -> 0 else -> 1
+}
+
+// One optimized run of a program: its exit, streams, IR size before and after
+// the passes and object size; `failure` names a step that stopped it.
+struct XPLevelRun {
+    code: Int
+    output: String
+    errors: String
+    failure: String
+    before: Int
+    after: Int
+    object_bytes: Int
+}
+
+fn xp_level_failed(failure: String) -> XPLevelRun {
+    XPLevelRun{code: -1, output: "", errors: "", failure: failure, before: 0, after: 0, object_bytes: 0}
+}
+
+// `m` optimized at `level`, selected, linked with the runtime pack as `exe`
+// and run in `out`.
+fn xp_level(m: IRModule, level: Int, pack: [U8], pack_path: String, exe: String, out: String) -> XPLevelRun {
+    optimized := m.copy()
+    report :: ir_optimize_module(&optimized, level)
+    compiled := ir_x64_compile_module(^optimized, compiler_threads_single())
+    object :: ir_x64_object(^compiled)
+    if object.errors.len() > 0 -> return xp_level_failed(object.errors.join("; "))
+    bufs := [[U8]]{object.bytes, pack.copy()}
+    linked :: x64_link_executable([String]{"{exe}.o", pack_path}, ^bufs)
+    if linked.errors.len() > 0 -> return xp_level_failed("link: {linked.errors.join("; ")}")
+    files.write_bytes(exe, linked.bytes) ?? return xp_level_failed("cannot write {exe}")
+    files.set_mode(exe, 0o755) ?? return xp_level_failed("cannot make {exe} executable")
+    ran :: process.cmd([String]{exe}).cwd(out).run() ?? return xp_level_failed("cannot run {exe}")
+    XPLevelRun{code: ran.code, output: ran.output, errors: ran.errors, failure: "", before: report.instructions_before, after: report.instructions_after, object_bytes: object.bytes.len()}
 }
 
 // A module of many heavy functions selected on one thread and on eight: the
