@@ -70,7 +70,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[Type, mir_sha256_hex, mir_sha256_hex_bytes]
+use jet_foundation.[Type, mir_sha256_bytes, mir_sha256_hex, mir_sha256_hex_bytes]
 
 enum IROp {
     Nop
@@ -253,9 +253,10 @@ fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
     id
 }
 
-// A read-only data row holding `bytes` (shared by equal byte strings).
+// A read-only data row holding `bytes` (shared by equal byte strings: keyed
+// by length and digest, linear in the bytes however large the table).
 fn ir_intern_bytes(m: &IRModule, bytes: [U8]) -> Int Never! {
-    key :: "bytes:{mir_sha256_hex_bytes(bytes)}"
+    key :: "bytes:{bytes.len()}:{mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))}"
     found :: m.data_rows.get(key) ?? -1
     if found >= 0 -> return found
     id :: m.data.len()

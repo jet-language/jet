@@ -7,11 +7,20 @@ use jet_foundation.[Span, TCallArg, TExpr, TExprKind, TMethodRef, Type, type_car
 
 // The payload key of concrete type `ty`: one per type identity, from 1.
 fn ir_trait_key(p: &IRProgram, ty: Type) -> Int Never! {
-    identity :: type_carrier_identity(ir_untag(ty))
+    identity :: ir_trait_identity(p, ty)
     if p.trait_keys.get(identity) == .Val(key) -> return key
     key :: p.trait_keys.len() + 1
     p.trait_keys[identity] = key
     key
+}
+
+// A concrete receiver type's identity, the same however the checked type
+// spells the name: a boxed value's type is module-qualified, an
+// implementation's owner type is the name its body wrote.
+fn ir_trait_identity(p: IRProgram, ty: Type) -> String Never! {
+    plain :: ir_untag(ty)
+    if plain == .Named(_) -> return ir_render_type_key(p.type_rows, p.types, plain)
+    type_carrier_identity(plain)
 }
 
 // Whether `receiver` is a trait value whose `method` dispatches dynamically
@@ -27,11 +36,11 @@ fn ir_trait_receiver(p: IRProgram, receiver: Type, method: TMethodRef) -> Bool N
 fn ir_method_key(p: IRProgram, receiver: Type, method: TMethodRef) -> String Never! {
     if p.rows.get(method.symbol.key) != None -> return method.symbol.key.copy()
     owner :: method.trait_owner ?? return method.symbol.key.copy()
-    concrete :: type_carrier_identity(ir_untag(ir_subst(p, receiver)))
+    concrete :: ir_trait_identity(p, ir_subst(p, receiver))
     loop function in p.functions {
         if function.name != method.name -> next
         if function.kind == .TraitMethod(_, _, owner_type, trait_name, _) {
-            if trait_name.key == owner.key && type_carrier_identity(ir_untag(owner_type)) == concrete -> return function.key.copy()
+            if trait_name.key == owner.key && ir_trait_identity(p, owner_type) == concrete -> return function.key.copy()
         }
     }
     method.symbol.key.copy()

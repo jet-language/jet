@@ -175,7 +175,10 @@ fn ir_stmts(m: &IRModule, p: &IRProgram, b: &IRBuilder, body: [TStmt]) Never! {
 
 fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! {
     if statement == {
-        .LineMarker(line) -> b.line = line
+        .LineMarker(line) -> {
+            b.line = line
+            b.marked = line
+        }
         .SourceSpan(_) -> {}
         .Let(local, let_ty, init, _, _, span) -> {
             if local.deref && local.address_lifetime == None && local.persist_key == None && init.kind == .Borrow(_, _) -> return ir_bind_pin(&m, &p, &b, local, init, span)
@@ -2566,12 +2569,12 @@ fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line
 }
 
 // A returned `Err(...)` at `span` starts the journey (codegen
-// jet_codegen_lower_journey_origin): its line is the statement's, else the
-// span's.
+// jet_codegen_lower_journey_origin): its line is the last statement line
+// marker's, else the span's.
 fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) Never! {
     file :: b.f.source_file.copy()
     name :: b.f.name.copy()
-    line := b.line
+    line := b.marked
     if line < 1 -> line = ir_source_line_of(p, file, span.start) ?? 1
     values :: ir_journey_site(&m, p, &b, file, line, name, span)
     if ir_failed(b) -> return

@@ -56,6 +56,9 @@ struct IRBuilder {
     // Pattern bindings of the condition being built, bound when its If opens.
     pending: [IRPending]
     line: Int
+    // The line of the last statement line marker (0: none yet), the line a
+    // returned `Err(...)` starts its journey at (ir_journey_origin).
+    marked: Int
     error: String
     error_span: Span
     // The function's executable return (None: Unit), its failure carrier, and
@@ -532,7 +535,7 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure], from
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, marked: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
@@ -811,8 +814,10 @@ fn ir_member_read(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember) -> I
 }
 
 // Writes `value` into the member of the aggregate at `base`; a recursive
-// edge gets a wrapper box of its own.
+// edge gets a wrapper box of its own. A variable's value moved in here is
+// no longer closed by its scope: the aggregate closes it.
 fn ir_member_write(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
+    ir_close_disarm(&b, value)
     holder := base
     offset := member.offset
     if member.boxed {
