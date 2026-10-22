@@ -124,6 +124,11 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         // code address at 8, release helper at 16, captures from 24.
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
     }
+    if ty == .TraitObject(_) {
+        // A trait value box pointer (Lower Traits.jet): the concrete
+        // payload's key word at 0, the payload from 8.
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+    }
     if ty == .Tuple(fields) {
         members :: ir_tuple_members_in(&m, p, fields, laying) ?? return None
         size :: ir_struct_size(m, members)

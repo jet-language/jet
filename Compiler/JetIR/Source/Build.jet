@@ -110,6 +110,8 @@ struct IRProgram {
     // glue key (BuildOwn.jet; -1: the type closes nothing, -2: its glue failed).
     close_methods: [String:Int]
     close_glue: [String:Int]
+    // A boxed trait value's payload key by concrete type identity (from 1).
+    trait_keys: [String:Int]
 }
 
 // A function waiting to be built: its checked row, IR id and type
@@ -209,7 +211,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
         }
     }
-    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}}
+    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}}
 }
 
 // The last segment of a qualified key (`trait:<m>::Display` is `Display`).
