@@ -75,7 +75,10 @@ fn ir_packed_bytes(bits: Int) -> Int Never! {
 }
 
 // The type row of a checked type, or None when the builder cannot lay it out yet.
+// A scalar's row is interned once and then read from m.scalar_rows.
 fn ir_type_row(m: &IRModule, ty: Type) -> Int? Never! {
+    code :: ir_scalar_code(ty)
+    if code >= 0 && code < m.scalar_rows.len() && m.scalar_rows[code] >= 0 -> return Val(m.scalar_rows[code])
     row :: if ty == {
         .Int -> ir_owned_layout(IRTypeKind.Int, ty, "jet_rt_int_drop", "jet_rt_int_clone")
         .Bool -> ir_layout(IRTypeKind.Bool, ty, 1, 1, IRClass.Integer, false, 8, "")
@@ -102,7 +105,29 @@ fn ir_type_row(m: &IRModule, ty: Type) -> Int? Never! {
         }
         else -> { return None }
     }
-    Val(ir_intern_type(&m, type_carrier_identity(ty), row))
+    interned :: ir_intern_type(&m, type_carrier_identity(ty), row)
+    if code >= 0 {
+        loop m.scalar_rows.len() <= code -> &m.scalar_rows.push(-1)
+        m.scalar_rows[code] = interned
+    }
+    Val(interned)
+}
+
+// The slot of a scalar checked type in IRModule.scalar_rows (its row depends
+// on nothing but the type), -1 for any other type.
+fn ir_scalar_code(ty: Type) -> Int Never! {
+    if ty == {
+        .Int -> 0
+        .Bool -> 1
+        .Float -> 2
+        .Float32 -> 3
+        .Char -> 4
+        .String -> 5
+        .Named(name) -> if name == "Unit" -> 6 else if name == "()" -> 7 else if name == "Never" -> 8 else -> -1
+        .Tuple(fields) -> if fields.len() == 0 -> 9 else -> -1
+        .IntN(signed, bits) -> if bits >= 1 && bits <= 64 -> 10 + (if signed -> 64 else -> 0) + bits - 1 else -> -1
+        else -> -1
+    }
 }
 
 // ir_type_row extended to declared types: a payload-free enum is its

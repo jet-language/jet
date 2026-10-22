@@ -203,7 +203,8 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // row>|<identity>#<index>" and its box size by "<declaration row>|<identity>",
 // and a bare nominal name's runtime handle row (-1: none). `close_free` holds
 // the type rows BuildOwn.jet ir_close_parts_reach proved free of a Close
-// method at any depth.
+// method at any depth. `scalar_rows` holds the row of each scalar checked
+// type by its BuildTypes.jet ir_scalar_code (-1: not interned yet).
 struct IRModule {
     types: [IRType]
     type_rows: [String:Int]
@@ -223,10 +224,11 @@ struct IRModule {
     enum_sizes: [String:Int]
     handle_rows: [String:Int]
     close_free: [Int:Bool]
+    scalar_rows: [Int]
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}}
+    IRModule{types: [IRType]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {
