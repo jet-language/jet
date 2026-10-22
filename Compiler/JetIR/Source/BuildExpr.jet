@@ -940,6 +940,13 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             if extra != None -> return ir_fail_slot(&b, span, "struct literal with host extras")
             if ir_default_err(p, expression.ty) -> return ir_default_err_literal(&m, &p, &b, expression.ty, fields, span)
             ty :: ir_value_type(&m, p, expression.ty) ?? return ir_type_fail(&b, span, expression.ty)
+            if ir_word_record(m, p, ty) == .Val(record) {
+                if fields.len() != 1 || fields[0].field.name != record.field -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression.ty)}")
+                value :: ir_expr(&m, &p, &b, fields[0].value)
+                if ir_failed(b) -> return -1
+                if value < 0 || ir_kind_of(m, b, value) != .Int -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression.ty)}")
+                return ir_word_record_new(&m, &b, record, value, ty)
+            }
             if m.types[ty].kind != .Aggregate -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression.ty)}")
             storage :: ir_fresh_temp(&m, &b, ty)
             ir_emit(&b.f, IROp.StackAddress, storage, m.types[ty].size, 8, -1, b.line)
@@ -958,6 +965,14 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             if ir_failed(b) -> return -1
             if base >= 0 && ir_kind_of(m, b, base) == .Pointer {
                 if ir_process_member(&m, p, receiver.ty, field.name) == .Val(member) -> return ir_member_read(&m, &b, base, member)
+                if ir_word_record(m, p, b.f.slot_type[base]) == .Val(record) {
+                    if record.field == field.name {
+                        int_row :: ir_value_type(&m, p, expression.ty) ?? return ir_type_fail(&b, span, expression.ty)
+                        exact :: ir_runtime(&m, &b, record.getter, [Int]{base}, int_row)
+                        ir_release(&m, &b, base)
+                        return exact
+                    }
+                }
             }
             if base < 0 || ir_kind_of(m, b, base) != .Aggregate -> return ir_fail_slot(&b, span, "field of {ir_type_name(receiver.ty)}")
             member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "field {field.name} of {ir_type_name(receiver.ty)}")
@@ -1142,7 +1157,7 @@ fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiv
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> true
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> true
-        .DurationNew(_, _) | .GameSceneOnFrame(_, _) | .TaskJoin | .TaskDetach -> true
+        .GameSceneOnFrame(_, _) | .TaskJoin | .TaskDetach -> true
         else -> false
     }
     if dedicated -> return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)}")
@@ -1164,6 +1179,16 @@ fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiv
         slot :: ir_expr(&m, &p, &b, receiver)
         if ir_failed(b) -> return -1
         &inputs.push(slot)
+    }
+    if operation == .DurationNew(unit, _) {
+        // The checked unit crosses as its DurationUnit tag (codegen
+        // jet_codegen_lower_general_handle_method).
+        unit_def :: ir_type_def(p, "DurationUnit") ?? return ir_fail_slot(&b, span, "DurationUnit without its declaration")
+        unit_index :: ir_variant_index(p, unit_def, unit) ?? return ir_fail_slot(&b, span, "DurationUnit without {unit}")
+        unit_row :: ir_value_type(&m, p, Type.Named{name: "DurationUnit"}) ?? return ir_type_fail(&b, span, Type.Named{name: "DurationUnit"})
+        unit_tag :: ir_temp(&m, &b, unit_row)
+        ir_emit(&b.f, IROp.Const, unit_tag, unit_index, -1, -1, b.line)
+        &inputs.push(unit_tag)
     }
     loop arg in args {
         slot :: ir_expr(&m, &p, &b, arg)

@@ -182,6 +182,125 @@ fn ir_list_extend(m: &IRModule, b: &IRBuilder, list: Int, row: Int, source: Int)
     ir_end(&b.f, b.line)
 }
 
+// `xs.try_reserve(additional)` (Lower lower_helper_list_try_reserve): room
+// for `additional` more elements, or `Err(AllocError)` naming the requested
+// bytes with the List untouched. A negative request asks for 0 bytes; one
+// above I64.MAX, or whose bytes would pass I64.MAX, saturates there.
+fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, additional: Int, span: Span) -> Int Never! {
+    err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "try_reserve without its checked Result") }
+    if ir_kind_of(m, b, additional) != .Int {
+        capacity_ty :: m.types[b.f.slot_type[additional]].ty
+        return ir_fail_slot(&b, span, "try_reserve with a capacity of {ir_type_name(capacity_ty)}")
+    }
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    word_row :: ir_word_row(&m)
+    int_row :: b.f.slot_type[additional]
+    largest :: 9223372036854775807
+    unit_element :: m.types[row].kind == .Unit
+    stride :: if unit_element -> 1 else -> ir_list_stride(m, row)
+    limit :: if unit_element -> largest else -> 9223372036854775800 /% stride
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    failed :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, failed, 0, -1, -1, b.line)
+    requested :: ir_word_const(&m, &b, 0)
+    zero_int :: ir_int_constant(&m, &b, int_row, 0)
+    negative :: ir_bool_op(&m, &b, IROp.Lt, additional, zero_int)
+    ir_release(&m, &b, zero_int)
+    ir_open_if(&b.f, negative, b.line)
+    ir_emit(&b.f, IROp.Const, failed, 1, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    amount :: ir_word_const(&m, &b, largest)
+    maximum :: ir_int_constant(&m, &b, int_row, largest)
+    fits :: ir_bool_op(&m, &b, IROp.Le, additional, maximum)
+    ir_release(&m, &b, maximum)
+    ir_open_if(&b.f, fits, b.line)
+    native :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{additional}, word_row)
+    ir_emit(&b.f, IROp.Copy, amount, native, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    width :: ir_word_const(&m, &b, stride)
+    ir_emit(&b.f, IROp.Const, requested, largest, -1, -1, b.line)
+    request_limit :: ir_word_const(&m, &b, largest /% stride)
+    bounded :: ir_bool_op(&m, &b, IROp.Le, amount, request_limit)
+    ir_open_if(&b.f, bounded, b.line)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, amount, width)
+    ir_emit(&b.f, IROp.Copy, requested, bytes, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    length :: ir_load_word(&m, &b, list, 0)
+    capacity :: ir_load_word(&m, &b, list, 8)
+    ceiling :: ir_word_const(&m, &b, limit)
+    available :: ir_word_op(&m, &b, IROp.Sub, ceiling, length)
+    impossible :: ir_bool_op(&m, &b, IROp.Gt, amount, available)
+    ir_open_if(&b.f, impossible, b.line)
+    _ :: ir_runtime(&m, &b, "jet_fault_should_fail_allocation", [Int]{}, bool_row)
+    ir_emit(&b.f, IROp.Const, failed, 1, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    required :: ir_word_op(&m, &b, IROp.Add, length, amount)
+    grow :: ir_bool_op(&m, &b, IROp.Gt, required, capacity)
+    if unit_element -> ir_emit(&b.f, IROp.Const, grow, 0, -1, -1, b.line)
+    ir_open_if(&b.f, grow, b.line)
+    // Geometric growth bounded before the multiply, the request the floor
+    // (Lower lower_list_growth_capacity).
+    grown :: ir_word_op(&m, &b, IROp.Add, capacity, capacity)
+    threshold :: ir_word_const(&m, &b, limit /% 2)
+    large :: ir_bool_op(&m, &b, IROp.Gt, capacity, threshold)
+    short :: ir_bool_op(&m, &b, IROp.Lt, grown, required)
+    ir_open_if(&b.f, large, b.line)
+    ir_emit(&b.f, IROp.Const, short, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_open_if(&b.f, short, b.line)
+    ir_emit(&b.f, IROp.Copy, grown, required, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    grown_bytes :: ir_word_op(&m, &b, IROp.Mul, grown, width)
+    align :: ir_word_const(&m, &b, 8)
+    data :: ir_runtime(&m, &b, "jet_rt_alloc_try", [Int]{grown_bytes, align}, word_row)
+    nil :: ir_word_const(&m, &b, 0)
+    no_memory :: ir_bool_op(&m, &b, IROp.Eq, data, nil)
+    ir_open_if(&b.f, no_memory, b.line)
+    ir_emit(&b.f, IROp.Const, failed, 1, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    old_data :: ir_load_word(&m, &b, list, 16)
+    old_bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, old_data, old_bytes}, -1)
+    // A frozen buffer (cap 0) is not the List's to free.
+    owned :: ir_bool_op(&m, &b, IROp.Ne, capacity, nil)
+    ir_open_if(&b.f, owned, b.line)
+    held :: ir_word_op(&m, &b, IROp.Mul, capacity, width)
+    _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{old_data, held, align}, -1)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
+    ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
+    ir_end(&b.f, b.line)
+    ir_else(&b.f, b.line)
+    fault :: ir_runtime(&m, &b, "jet_fault_should_fail_allocation", [Int]{}, bool_row)
+    ir_open_if(&b.f, fault, b.line)
+    ir_emit(&b.f, IROp.Const, failed, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, additional)
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_open_if(&b.f, failed, b.line)
+    exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{requested}, int_row)
+    string_row :: ir_string_row(&m)
+    list_text :: ir_static_text(&m, &b, "List")
+    allocator :: ir_runtime(&m, &b, "jet_rt_string_from_static", list_text, string_row)
+    pointer_row :: ir_pointer_row(&m)
+    record :: ir_runtime(&m, &b, "jet_rt_record_new_alloc_error", [Int]{exact, allocator}, pointer_row)
+    ir_release(&m, &b, exact)
+    ir_release(&m, &b, allocator)
+    refused :: ir_result_box(&m, p, &b, ty, false, -1)
+    ir_record_in(&m, p, &b, err_ty, record, refused, 8, span)
+    ir_emit(&b.f, IROp.Copy, result, refused, -1, -1, b.line)
+    b.fresh[refused] = false
+    ir_else(&b.f, b.line)
+    reserved :: ir_result_box(&m, p, &b, ty, true, -1)
+    ir_emit(&b.f, IROp.Copy, result, reserved, -1, -1, b.line)
+    b.fresh[reserved] = false
+    ir_end(&b.f, b.line)
+    result
+}
+
 // `xs.remove(value)` (the first equal element, None when there is none)
 // and `xs.remove(at)` (a position in 0..<len, else the List bounds stop),
 // Lower lower_helper_list_remove: the element moves into an Option box and
@@ -199,7 +318,7 @@ fn ir_list_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int
         needle :: ir_adapt(&m, p, &b, operand, row, span)
         if ir_failed(b) -> return -1
         walk :: ir_walk_open(&m, &b, list, row)
-        same :: ir_route_equal(&m, &b, walk.item, needle, span)
+        same :: ir_route_equal(&m, p, &b, walk.item, needle, span)
         if ir_failed(b) -> return -1
         ir_open_if(&b.f, same, b.line)
         ir_emit(&b.f, IROp.Copy, found, walk.index, -1, -1, b.line)
@@ -240,14 +359,11 @@ fn ir_list_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int
     result
 }
 
-// `left == right` for two elements of a scalar or String type (Lower
-// lower_equal_values over the types the builder compares inline).
-fn ir_route_equal(m: &IRModule, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
+// `left == right` for two elements: a scalar or String in place, any other
+// type structurally (Lower lower_equal_values, ir_equal).
+fn ir_route_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     kind :: ir_kind_of(m, b, left)
-    if kind != .Int && kind != .Word && kind != .Bool && kind != .Char && kind != .String {
-        shown :: ir_type_name(m.types[b.f.slot_type[left]].ty)
-        return ir_fail_slot(&b, span, "equality of {shown}")
-    }
+    if kind != .Int && kind != .Word && kind != .Bool && kind != .Char && kind != .String -> return ir_equal(&m, p, &b, left, right, span)
     ir_bool_op(&m, &b, IROp.Eq, left, right)
 }
 
@@ -310,6 +426,10 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
                 if ir_list_element(&m, p, b, operands[1]) != Val((element)) -> return ir_fail_slot(&b, span, "extend from a List of another element type")
                 ir_list_extend(&m, &b, subject, element, operands[1])
                 return -1
+            }
+            .TryReserve -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "try_reserve without a capacity")
+                return ir_list_try_reserve(&m, p, &b, ty, subject, element, operands[1], span)
             }
             .Clear -> {
                 zero :: ir_word_const(&m, &b, 0)
@@ -1136,7 +1256,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     needle :: ir_adapt(&m, p, &b, inputs[1], row, span)
     if ir_failed(b) -> return -1
     walk :: ir_walk_open(&m, &b, list, row)
-    same :: ir_route_equal(&m, &b, walk.item, needle, span)
+    same :: ir_route_equal(&m, p, &b, walk.item, needle, span)
     if ir_failed(b) -> return -1
     ir_open_if(&b.f, same, b.line)
     if name == "jet_list_contains" {
@@ -1373,6 +1493,14 @@ fn ir_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, inputs: 
                     exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{slot}, int_row)
                     &lowered.push(exact)
                     &temporaries.push(exact)
+                } else if ir_word_record(m, p, slot_row) == .Val(record) {
+                    // The record crosses as its field's exact Int; the
+                    // handle is released after the call.
+                    int_row :: ir_type_row(&m, Type.Int) ?? 0
+                    exact :: ir_runtime(&m, &b, record.getter, [Int]{slot}, int_row)
+                    &lowered.push(exact)
+                    &temporaries.push(exact)
+                    &temporaries.push(slot)
                 } else {
                     return ir_fail_slot(&b, span, "runtime route {name} Word argument of {shown}")
                 }
@@ -1486,7 +1614,20 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         if !ir_is_handle(m, row) -> return ir_fail_slot(&b, span, "runtime route {export} handle result as {result}")
     }
     if carrier == .Option(_) -> return ir_fail_slot(&b, span, "runtime route {export} result carrier {carrier}")
+    if carrier == .Word && ir_word_record(m, p, row) == .Val(record) {
+        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        exact :: ir_runtime(&m, &b, export, args, int_row)
+        return ir_word_record_new(&m, &b, record, exact, row)
+    }
     ir_runtime(&m, &b, export, args, row)
+}
+
+// The runtime handle of word record `record` for the exact Int `exact`,
+// which the constructor borrows and which is released after.
+fn ir_word_record_new(m: &IRModule, b: &IRBuilder, record: IRWordRecord, exact: Int, row: Int) -> Int Never! {
+    handle :: ir_runtime(&m, &b, record.constructor, [Int]{exact}, row)
+    ir_release(&m, &b, exact)
+    handle
 }
 
 // A List header (len, cap, data) at `offset` of `base` from a route's
@@ -1509,6 +1650,16 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "payload type {payload}")
     if carrier == .Handle(_) || carrier == .HandleMut(_) {
         if !ir_is_handle(m, row) -> return ir_route_record_in(&m, p, &b, base, offset, payload, out, span)
+    }
+    if carrier == .Word && ir_word_record(m, p, row) == .Val(record) {
+        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        exact :: ir_temp(&m, &b, int_row)
+        ir_emit(&b.f, IROp.Load, exact, out, 0, -1, b.line)
+        b.fresh[exact] = true
+        handle :: ir_word_record_new(&m, &b, record, exact, row)
+        b.fresh[handle] = false
+        ir_emit(&b.f, IROp.Store, -1, base, offset, handle, b.line)
+        return
     }
     value :: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Load, value, out, 0, -1, b.line)
