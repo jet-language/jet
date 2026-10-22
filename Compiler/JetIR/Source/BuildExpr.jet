@@ -1734,6 +1734,7 @@ fn ir_print(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span: Span
 // cells back into their variables after the call. The result has the
 // callee's executable return type.
 fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [TCallArg], span: Span) -> Int Never! {
+    if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(&m, &p, &b, foreign, args, span)
     row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "call of a function outside the checked program: {key}")
     callee :: ir_function_id(&m, &p, key, type_args) ?? return ir_fail_slot(&b, span, "call of {key}")
     params :: p.functions[row].params

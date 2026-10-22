@@ -7,6 +7,7 @@
 
 use jet_foundation.[Span, Type, TypeTupleField, TConstantDef, TExpr, TFailureCarrier, TFunc, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
 use jet_backend.[lower_int_inline]
+use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
     key: String
@@ -120,6 +121,8 @@ struct IRProgram {
     source_bytes: [[U8]]
     source_lines: [[Int]]
     source_rows: [String:Int]
+    // The checked foreign functions a call may name, by function key.
+    foreign: [String:SemaCheckedForeignFunction]
 }
 
 // The checked source files (`path` -> text) as rows of bytes and line
@@ -278,7 +281,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
         }
     }
-    p := IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}}
+    p := IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}}
     ir_source_index(&p, ^sources)
     p
 }
@@ -401,10 +404,11 @@ fn ir_symbol_name(function: TFunc) -> String Never! {
 // `type_defs`, `impls` and `constants` are the checked modules' type,
 // implementation and constant declarations, in module order; `sources` the
 // checked source files' text by path (the source locations of journeys and
-// contract reports).
-fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], entry_key: String) -> IRBuildResult Never! {
+// contract reports); `foreign` the checked foreign functions.
+fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String) -> IRBuildResult Never! {
     m := ir_module_new()
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+    ir_foreign_index(&p, ^foreign)
     failures := [IRBuildFailure]{}
     entry := ir_function_id(&m, &p, entry_key, [Type]{}) ?? {
         &failures.push(IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
@@ -486,9 +490,10 @@ fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuil
 
 // Builds every checked non-generic function (a library or a coverage
 // census); generic functions are built per instance their callers reach.
-fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef]) -> IRBuildResult Never! {
+fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction]) -> IRBuildResult Never! {
     m := ir_module_new()
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+    ir_foreign_index(&p, ^foreign)
     failures := [IRBuildFailure]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 -> next

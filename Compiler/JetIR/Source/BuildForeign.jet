@@ -1,0 +1,97 @@
+// Calls of checked foreign functions (Lower CForeign.jet lower_c_import_call):
+// a direct C function is called by its checked symbol, which the program's C
+// closure defines (an `#FFI(c)` body's `jet_inline_jet_ffi_<name>` wrapper).
+
+use jet_foundation.[AccessConvention, Span, TCallArg]
+use jet_sema.[SemaCheckedForeignFunction]
+
+// Indexes the checked foreign functions by the function key their calls
+// name (the first row of a key).
+fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction]) Never! {
+    loop row in ^foreign {
+        if p.foreign.get(row.symbol_id.key) == None -> p.foreign[row.symbol_id.key.copy()] = row
+    }
+}
+
+// A call of the foreign function `foreign`: a direct C function (C language
+// and ABI, no callback, close or undo adapter) whose arguments cross as C
+// scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
+// packed NUL-terminated copy freed after the call; the C result converts
+// back.
+fn ir_foreign_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
+    if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
+        return ir_fail_slot(&b, span, "foreign import requires a checked direct C scalar signature")
+    }
+    if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "foreign import argument count differs from its checked signature")
+    word_row :: ir_word_row(&m)
+    pointer_row :: ir_pointer_row(&m)
+    result_row := -1
+    if foreign.return_type == .Val(ty) {
+        if !ir_unit_type(ty) {
+            result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            if m.types[result_row].kind == {
+                .Int | .Word | .Bool | .Float | .String -> {}
+                else -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+            }
+        }
+    }
+    values := [Int]{}
+    lowered := [Int]{}
+    strings := [Int]{}
+    sizes := [Int]{}
+    loop (index, arg) in args {
+        param :: foreign.params[index]
+        if param.variadic || param.convention == AccessConvention.Write || arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
+        row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
+        value :: ir_value_as(&m, &p, &b, arg.value, row, span)
+        if ir_failed(b) -> return -1
+        if value < 0 -> return ir_fail_slot(&b, span, "Unit foreign C argument")
+        &values.push(value)
+        if m.types[row].kind == {
+            .Int -> &lowered.push(ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row))
+            .Word | .Bool | .Float | .Char -> &lowered.push(value)
+            .String -> {
+                pointer :: ir_runtime(&m, &b, "jet_rt_c_string_pack", [Int]{value}, pointer_row)
+                length :: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{value}, word_row)
+                one :: ir_word_const(&m, &b, 1)
+                size :: ir_temp(&m, &b, word_row)
+                ir_emit(&b.f, IROp.Add, size, length, one, IR_OVERFLOW_WRAP, b.line)
+                &strings.push(pointer)
+                &sizes.push(size)
+                &lowered.push(pointer)
+            }
+            else -> return ir_fail_slot(&b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+        }
+    }
+    dst := -1
+    kind :: if result_row < 0 -> IRTypeKind.Unit else -> m.types[result_row].kind
+    if kind == {
+        .Unit -> {
+            _ :: ir_runtime(&m, &b, foreign.symbol, lowered, -1)
+        }
+        .Int -> {
+            raw :: ir_runtime(&m, &b, foreign.symbol, lowered, word_row)
+            dst = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
+        }
+        .Bool -> {
+            raw :: ir_runtime(&m, &b, foreign.symbol, lowered, word_row)
+            mask :: ir_word_const(&m, &b, 255)
+            low :: ir_temp(&m, &b, word_row)
+            ir_emit(&b.f, IROp.BitAnd, low, raw, mask, IR_OVERFLOW_WRAP, b.line)
+            zero :: ir_word_const(&m, &b, 0)
+            dst = ir_bool_op(&m, &b, IROp.Ne, low, zero)
+        }
+        .String -> {
+            // Own the String before freeing the arguments: a C function may
+            // return a pointer into one of its CString arguments.
+            raw :: ir_runtime(&m, &b, foreign.symbol, lowered, pointer_row)
+            dst = ir_runtime(&m, &b, "jet_rt_c_string_unpack", [Int]{raw}, result_row)
+        }
+        else -> dst = ir_runtime(&m, &b, foreign.symbol, lowered, result_row)
+    }
+    loop (index, pointer) in strings {
+        _ :: ir_runtime(&m, &b, "jet_rt_c_string_free", [Int]{pointer, sizes[index]}, -1)
+    }
+    loop value in values -> ir_release(&m, &b, value)
+    dst
+}
