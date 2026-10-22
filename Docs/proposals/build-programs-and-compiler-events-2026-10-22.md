@@ -14,7 +14,7 @@ The document covers two language questions:
 1. How `fn build(b: Build)`, `fn dev(d: Dev)` and `fn test(t: Test)` receive
    real Core types, and why they don't already.
 2. How Jet offers full Jai-level compiler control (message loop, adding and
-   rewriting code, macros, unrestricted compile-time execution) while
+   rewriting code, unrestricted compile-time execution) while
    keeping code easy to reason about and the power easy to limit and audit.
 
 ## 1. Build, Dev and Test as Core types
@@ -194,7 +194,7 @@ includes:
 - receiving a message for each declaration as it is checked;
 - adding code at any point before checking ends;
 - rewriting the body of a checked function;
-- expanding macros in place;
+- everything Jai uses macros for, through markers and compile-time code;
 - running arbitrary code at compile time;
 - controlling build options and outputs.
 
@@ -223,7 +223,7 @@ and audit.
    declarations a metaprogram asked to see. Everything else keeps compiling
    in parallel.
 
-### The ladder: one mechanism, three heights
+### The ladder: one mechanism, two heights
 
 There is one mechanism, the compiler message stream, reached through
 `Compiler`. Everything else is an ordinary Core function built on it, so a
@@ -255,29 +255,15 @@ fn build(b: Build) {
 These are implemented in Core on top of the message stream. They are not a
 second mechanism.
 
-**Height 2: macros and inserted code.**
+**No macros.** Markers and compile-time code already cover what macros do
+in Jai. A marker names the declaration to act on (`#Traced`, `#Route`), and
+an ordinary compile-time function decides what to do with it. A reader sees
+the marker on the declaration and finds the code that acts on it by looking
+up the marker. There is no second call syntax that expands in place. Code
+that a metaprogram adds or rewrites is a `Code` value: a typed syntax tree,
+written as a quote (`#code { … }` with `#( … )` splices) or built as data.
 
-A macro is a compile-time function from code to code. It is called with a
-`#` so a reader always knows the call expands:
-
-```jet
-macro retry(times: Int, body: Code) -> Code {
-    #code {
-        loop attempt in 1...#(times) {
-            if #(body) == .Ok(value) -> break value
-        }
-    }
-}
-
-user :: #retry(3) { fetch_user(id) }
-```
-
-`#insert` places a `Code` value computed at compile time, as Jai's `#insert`
-does. `Code` is a typed syntax tree. It can be written as a quote,
-`#code { … }` with `#( … )` splices, or built as data, and every name in it
-resolves where the macro was written (hygiene) unless it is spliced in.
-
-**Height 3: the compiler loop, with full control (`Compiler` only).**
+**Height 2: the compiler loop, with full control (`Compiler` only).**
 
 ```jet
 fn build(b: Build) {
@@ -329,7 +315,7 @@ That line is the entire audit trail for tracing.
 |Compile-time code can do anything to the machine|Compile-time effects are checked. Files, network, processes and FFI at compile time need an explicit grant (`b.allow(.Files, .Network)`), and every granted read becomes a cache input.|
 |The editor cannot run the loop|The loop runs in the language server in the background, with the same inputs and the same fixed message order, and is cached by the facts it read. The editor shows the same final code as the build.|
 |Incremental builds rerun everything|The compiler records which messages the loop received and what it did. If no watched declaration changed, it replays the recorded actions without running the loop.|
-|Errors stop the metaprogram|The loop also receives `.Error` messages and can keep going. A failing macro or rewrite becomes a diagnostic row, and the compiler continues with everything else.|
+|Errors stop the metaprogram|The loop also receives `.Error` messages and can keep going. A failing rewrite becomes a diagnostic row, and the compiler continues with everything else.|
 |Anyone can rewrite anyone's code|Rewriting a function from another package requires the application to say so: `meta.allow_rewrite(package: "orm")`. A team can forbid that, or forbid `Compiler` entirely, in the package manifest, and `jet audit meta` lists every power in use with its location.|
 
 ### Control for teams
@@ -343,7 +329,7 @@ rewrite = "own-package"  # "none" | "own-package" | "any"
 compile-time-effects = ["Files"]
 ```
 
-`jet audit meta` prints every `Compiler` use, every macro, every rewrite and
+`jet audit meta` prints every `Compiler` use, every rewrite and
 every compile-time effect grant. It shows where each one is and which
 declarations it touched.
 
@@ -355,17 +341,15 @@ selects types), and the metaprogramming ceiling. The owner has set the goal;
 the exact surface still goes on a Tower ballot. The ballot should cover:
 
 - the `Compiler` value and the message set;
-- `Code`, `#code`, `#( … )`, `macro` and `#insert`;
+- `Code`, `#code` and `#( … )`;
 - `rewrite_body` and its cross-package rule;
 - the manifest keys.
 
 ### Questions for the owner
 
-1. Is "one stream, three heights" the right shape, with heights 1 and 2
-   implemented as Core library code over height 3?
-2. Do you want macros as a `macro` function called with `#name(...)`, or
-   another spelling?
-3. Should cross-package rewrites be allowed by default (as in Jai) or require
+1. Is "one stream, two heights" the right shape, with height 1 implemented
+   as Core library code over height 2?
+2. Should cross-package rewrites be allowed by default (as in Jai) or require
    `allow_rewrite`?
-4. Should the manifest default be `compiler = "root"`, or should a fresh
+3. Should the manifest default be `compiler = "root"`, or should a fresh
    package start with `compiler = "none"`?
