@@ -371,9 +371,11 @@ fn ir_render_map(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: 
 }
 
 // A Map builtin by its route symbol (Lower lower_map_method): len, is_empty,
-// has_key, get (an owned copy), insert (the replaced value) and remove (the
-// removed value); None when the builder does not lower `symbol` on Maps.
-fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
+// has_key, get (an owned copy), insert (the replaced value), remove (the
+// removed value), keys / values (an Iter) and top_n (a ranked List of
+// entries); `ty` is the result type. None when the builder does not lower
+// `symbol` on Maps.
+fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     row :: b.f.slot_type[subject]
     shape :: ir_map_shape(&m, p, row) ?? return None
     if symbol == "jet_map_len" {
@@ -384,6 +386,14 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, sub
         length :: ir_load_word(&m, &b, subject, 0)
         zero :: ir_word_const(&m, &b, 0)
         return Val(ir_bool_op(&m, &b, IROp.Eq, length, zero))
+    }
+    if symbol == "jet_map_keys" || symbol == "jet_map_values" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        return Val(ir_map_view(&m, p, &b, ir_subst(p, ty), shape, subject, symbol == "jet_map_keys", span))
+    }
+    if symbol == "jet_map_top_n" {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map top_n without a count"))
+        return Val(ir_map_top_n(&m, p, &b, ir_subst(p, ty), shape, subject, operands[1], span))
     }
     keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
     if !keyed && symbol != "jet_map_insert" -> return None
@@ -412,4 +422,159 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, sub
     }
     ir_release(&m, &b, key)
     Val(result)
+}
+
+// `map.keys()` / `map.values()` (Lower lower_map_method_more): a List of
+// copies of the entries' keys (values), in key order, handed to the runtime
+// Iter by value; later map writes never reach it.
+fn ir_map_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, keys: Bool, span: Span) -> Int Never! {
+    member :: if keys -> shape.key else -> shape.value
+    item_ty :: m.types[member.ty].ty
+    if m.types[member.ty].kind == .Unit -> return ir_fail_slot(&b, span, "Map view of {ir_type_name(item_ty)}")
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    list_row :: ir_value_type(&m, p, Type.List{element: item_ty}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(item_ty)}]")
+    items :: ir_list_empty(&m, &b, list_row)
+    walk :: ir_walk_open(&m, &b, map, shape.entry)
+    item :: ir_load_at(&m, &b, walk.item, member.offset, member.ty)
+    ir_list_push(&m, &b, items, member.ty, item)
+    ir_walk_close(&m, &b, walk)
+    meta :: ir_lazy_meta(&m, p, &b, item_ty, span)
+    if meta < 0 -> return -1
+    moved :: ir_lazy_moved(&m, &b, items)
+    ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, result_row)
+}
+
+// `map.top_n(n)` (Lower lower_map_entry_list, list.rank_entries): the
+// entries ordered by descending value, ties by ascending key (a stable
+// insertion order over the entry positions), the first max(n, 0) copied
+// into a new List of `(key, value)` entries.
+fn ir_map_top_n(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, count: Int, span: Span) -> Int Never! {
+    value_kind :: ir_map_key_kind(m, shape.value.ty)
+    if value_kind == "" || shape.stride %% 8 != 0 -> return ir_fail_slot(&b, span, "Map top_n over {ir_type_name(shape.value_ty)} values is not lowered at O0 yet")
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_list_empty(&m, &b, result_row)
+    if ir_list_element(&m, p, b, result) != Val(shape.entry) -> return ir_fail_slot(&b, span, "Map top_n entries as {ir_type_name(ty)}")
+    limit :: ir_native_index(&m, &b, count, span)
+    if ir_failed(b) -> return -1
+    word_row :: ir_word_row(&m)
+    length :: ir_load_word(&m, &b, map, 0)
+    data :: ir_load_word(&m, &b, map, 16)
+    eight :: ir_word_const(&m, &b, 8)
+    one :: ir_word_const(&m, &b, 1)
+    zero :: ir_word_const(&m, &b, 0)
+    order_words :: ir_word_op(&m, &b, IROp.Mul, length, eight)
+    order_bytes :: ir_word_op(&m, &b, IROp.Add, order_words, eight)
+    order :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{order_bytes, eight}, word_row)
+    fill :: ir_word_const(&m, &b, 0)
+    filling :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    unfilled :: ir_bool_op(&m, &b, IROp.Lt, fill, length)
+    ir_exit_unless(&m, &b, unfilled, filling)
+    fill_at :: ir_element_address(&m, &b, order, fill, 8)
+    ir_emit(&b.f, IROp.Store, -1, fill_at, 0, fill, b.line)
+    ir_emit(&b.f, IROp.Add, fill, fill, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    // Each position moves before every earlier one it ranks above.
+    at :: ir_word_const(&m, &b, 1)
+    sorted :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    more :: ir_bool_op(&m, &b, IROp.Lt, at, length)
+    ir_exit_unless(&m, &b, more, sorted)
+    moving_at :: ir_element_address(&m, &b, order, at, 8)
+    moving :: ir_load_word(&m, &b, moving_at, 0)
+    current :: ir_element_address(&m, &b, data, moving, shape.stride)
+    current_value :: ir_load_at(&m, &b, current, shape.value.offset, shape.value.ty)
+    current_key :: ir_load_at(&m, &b, current, shape.key.offset, shape.key.ty)
+    hole :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Copy, hole, at, -1, -1, b.line)
+    placed :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    open_hole :: ir_bool_op(&m, &b, IROp.Gt, hole, zero)
+    ir_exit_unless(&m, &b, open_hole, placed)
+    before :: ir_word_op(&m, &b, IROp.Sub, hole, one)
+    prior_at :: ir_element_address(&m, &b, order, before, 8)
+    prior :: ir_load_word(&m, &b, prior_at, 0)
+    previous :: ir_element_address(&m, &b, data, prior, shape.stride)
+    previous_value :: ir_load_at(&m, &b, previous, shape.value.offset, shape.value.ty)
+    values :: ir_map_order(&m, &b, value_kind, previous_value, current_value)
+    above :: ir_temp_like(&m, &b, values.less)
+    ir_emit(&b.f, IROp.Copy, above, values.less, -1, -1, b.line)
+    ir_open_if(&b.f, values.same, b.line)
+    previous_key :: ir_load_at(&m, &b, previous, shape.key.offset, shape.key.ty)
+    keys :: ir_map_order(&m, &b, shape.kind, current_key, previous_key)
+    ir_emit(&b.f, IROp.Copy, above, keys.less, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_exit_unless(&m, &b, above, placed)
+    hole_at :: ir_element_address(&m, &b, order, hole, 8)
+    ir_emit(&b.f, IROp.Store, -1, hole_at, 0, prior, b.line)
+    ir_emit(&b.f, IROp.Copy, hole, before, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    landing :: ir_element_address(&m, &b, order, hole, 8)
+    ir_emit(&b.f, IROp.Store, -1, landing, 0, moving, b.line)
+    ir_emit(&b.f, IROp.Add, at, at, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    // keep = min(max(limit, 0), length) copies, in rank order.
+    keep :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Copy, keep, limit, -1, -1, b.line)
+    negative :: ir_bool_op(&m, &b, IROp.Lt, keep, zero)
+    ir_open_if(&b.f, negative, b.line)
+    ir_emit(&b.f, IROp.Copy, keep, zero, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    over :: ir_bool_op(&m, &b, IROp.Gt, keep, length)
+    ir_open_if(&b.f, over, b.line)
+    ir_emit(&b.f, IROp.Copy, keep, length, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    taken :: ir_word_const(&m, &b, 0)
+    copying :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    wanted :: ir_bool_op(&m, &b, IROp.Lt, taken, keep)
+    ir_exit_unless(&m, &b, wanted, copying)
+    ranked_at :: ir_element_address(&m, &b, order, taken, 8)
+    ranked :: ir_load_word(&m, &b, ranked_at, 0)
+    entry :: ir_element_address(&m, &b, data, ranked, shape.stride)
+    written :: ir_list_reserve(&m, &b, result, shape.entry)
+    room :: ir_load_word(&m, &b, result, 16)
+    target :: ir_element_address(&m, &b, room, written, shape.stride)
+    key :: ir_load_at(&m, &b, entry, shape.key.offset, shape.key.ty)
+    ir_store_at(&m, &b, target, shape.key.offset, key)
+    value :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+    ir_store_at(&m, &b, target, shape.value.offset, value)
+    grown :: ir_word_op(&m, &b, IROp.Add, written, one)
+    ir_emit(&b.f, IROp.Store, -1, result, 0, grown, b.line)
+    ir_emit(&b.f, IROp.Add, taken, taken, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_free(&m, &b, order, order_bytes)
+    result
+}
+
+// `Map.from_keys(keys, default)` (Lower lower_list_method_shape): every key,
+// in List order, set to a copy of the default (a later duplicate key
+// replacing the earlier entry). The caller keeps `keys` and `fallback`.
+fn ir_map_from_keys(m: &IRModule, p: IRProgram, b: &IRBuilder, keys: Int, fallback: Int, result: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "Map.from_keys into {ir_type_name(result)} is not lowered at O0 yet")
+    if m.types[shape.value.ty].kind == .Unit -> return ir_fail_slot(&b, span, "Map.from_keys with a {ir_type_name(shape.value_ty)} default is not lowered at O0 yet")
+    keys_ty :: m.types[b.f.slot_type[keys]].ty
+    key_element :: ir_list_element(&m, p, b, keys)
+    if key_element != Val(shape.key.ty) -> return ir_fail_slot(&b, span, "Map.from_keys over {ir_type_name(keys_ty)}")
+    value :: ir_adapt(&m, p, &b, fallback, shape.value.ty, span)
+    if ir_failed(b) -> return -1
+    // Every entry takes a copy: the default itself stays the caller's.
+    was_fresh :: b.fresh[value]
+    b.fresh[value] = false
+    map :: ir_list_empty(&m, &b, row)
+    walk :: ir_walk_open(&m, &b, keys, shape.key.ty)
+    ir_map_set(&m, p, &b, row, map, walk.item, value)
+    ir_walk_close(&m, &b, walk)
+    b.fresh[value] = was_fresh
+    if value != fallback -> ir_release(&m, &b, value)
+    map
 }

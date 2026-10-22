@@ -63,7 +63,8 @@ fn ir_x64_debug_type(ty: IRType) -> LIRDebugType Never! {
         .Int -> LIRDebugType{name: "Int", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Signed}}
         .Word -> {
             bits :: ir_x64_bits(ir_x64_shape(ty))
-            LIRDebugType{name: "{if ty.signed -> "I" else -> "U"}{bits}", size: bits /% 8, kind: LIRDebugTypeKind.Base{encoding: if ty.signed -> LIRDebugEncoding.Signed else -> LIRDebugEncoding.Unsigned}}
+            // Whole bytes, rounded up (Lower Debug.jet lower_debug_word): a U4 is 1 byte.
+            LIRDebugType{name: "{if ty.signed -> "I" else -> "U"}{bits}", size: (bits + 7) /% 8, kind: LIRDebugTypeKind.Base{encoding: if ty.signed -> LIRDebugEncoding.Signed else -> LIRDebugEncoding.Unsigned}}
         }
         .Float -> LIRDebugType{name: "Float", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
         .Float32 -> LIRDebugType{name: "F32", size: 4, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}

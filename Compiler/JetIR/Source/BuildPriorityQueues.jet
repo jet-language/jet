@@ -1,0 +1,438 @@
+// The IR builder's PriorityQueue<T> (Lower PriorityQueues.jet): a binary
+// max-heap in the List header (len at 0, cap at 8, element data at 16).
+// Heap swaps move bytes, never clone; the element needs a native order (a
+// Map key kind). push, heapify and pop are helper functions built once per
+// PriorityQueue type (priority_queue.push, priority_queue.heapify,
+// priority_queue.pop), as are the List sorts (list.sort, list.sort_desc,
+// Lower lower_helper_list_sort). Canonical order is highest-first:
+// to_sorted_list, remove and rendering see the descending sort.
+
+use jet_foundation.[Span, TBuiltinOp, Type, type_carrier_identity]
+
+// The element of a `PriorityQueue<T>` (Lower lower_priority_queue_element).
+fn ir_priority_queue_element(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == "PriorityQueue" && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
+}
+
+// The element row of the PriorityQueue type row `heap_row`.
+fn ir_priority_queue_row(m: &IRModule, p: IRProgram, heap_row: Int) -> Int? Never! {
+    elem :: ir_priority_queue_element(m.types[heap_row].ty) ?? return None
+    ir_value_type(&m, p, elem)
+}
+
+// The id of PriorityQueue or List sort helper `name` over the header type
+// row `row` with element row `elem_row`, built on first use.
+fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
+    key :: "{name}<{type_carrier_identity(m.types[row].ty)}>"
+    if m.function_rows.get(key) == .Val(known) -> return known
+    kind :: ir_map_key_kind(m, elem_row)
+    id :: m.functions.len()
+    symbol :: name.split(".").to_list().join("_")
+    &m.functions.push(ir_function_new(name, key, "jet_ir_{symbol}_{id}", "", 0))
+    m.function_rows[key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    heap :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "heap"))
+    if name == "priority_queue.push" {
+        value :: ir_new_slot(&a, elem_row, IRSlotKind.Param, ir_intern_name(&m, "value"))
+        ir_priority_queue_push_body(&m, &a, kind, heap, elem_row, value)
+    } else if name == "priority_queue.heapify" {
+        ir_priority_queue_heapify_body(&m, &a, kind, heap, elem_row)
+    } else if name == "priority_queue.pop" {
+        elem_ty :: m.types[elem_row].ty
+        option_row :: ir_value_type(&m, p, Type.Option{inner: elem_ty}) ?? panic("PriorityQueue pop without an Option row")
+        ir_priority_queue_pop_body(&m, &a, kind, heap, elem_row, option_row)
+    } else {
+        ir_list_sort_body(&m, &a, kind, heap, elem_row, name == "list.sort_desc")
+    }
+    m.functions[id] = ^a.f
+    id
+}
+
+// A call of helper `name` with result row `result` (-1: none).
+fn ir_heap_call(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, elem_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
+    callee :: ir_heap_helper(&m, p, row, elem_row, name)
+    dst :: if result >= 0 -> ir_fresh_temp(&m, &b, result) else -> -1
+    operands :: ir_args(&b.f, args)
+    ir_emit(&b.f, IROp.Call, dst, callee, operands, args.len(), b.line)
+    dst
+}
+
+// Swaps the elements at `left` and `right` through the frame slot `scratch`.
+fn ir_heap_swap(m: &IRModule, a: &IRBuilder, left: Int, right: Int, width: Int, scratch: Int) Never! {
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{scratch, left, width}, -1)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{left, right, width}, -1)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{right, scratch, width}, -1)
+}
+
+// Sifts the element at `start` up while its parent orders below it; every
+// comparison reads live element storage (Lower lower_priority_queue_sift_up).
+fn ir_heap_sift_up(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start: Int, elem_row: Int) Never! {
+    stride :: ir_list_stride(m, elem_row)
+    width :: ir_word_const(&m, &a, stride)
+    scratch :: ir_out_slot(&m, &a, (stride + 7) /% 8)
+    zero :: ir_word_const(&m, &a, 0)
+    one :: ir_word_const(&m, &a, 1)
+    word_row :: ir_word_row(&m)
+    at :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, at, start, -1, -1, a.line)
+    exit :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more :: ir_bool_op(&m, &a, IROp.Gt, at, zero)
+    ir_exit_unless(&m, &a, more, exit)
+    previous :: ir_word_op(&m, &a, IROp.Sub, at, one)
+    parent :: ir_word_op(&m, &a, IROp.Shr, previous, one)
+    parent_at :: ir_element_address(&m, &a, data, parent, stride)
+    child_at :: ir_element_address(&m, &a, data, at, stride)
+    left :: ir_load_at(&m, &a, parent_at, 0, elem_row)
+    right :: ir_load_at(&m, &a, child_at, 0, elem_row)
+    order :: ir_map_order(&m, &a, kind, left, right)
+    ir_exit_unless(&m, &a, order.less, exit)
+    ir_heap_swap(&m, &a, child_at, parent_at, width, scratch)
+    ir_emit(&a.f, IROp.Copy, at, parent, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+}
+
+// Sifts the element at `start` down within the first `length` elements while
+// a child orders above it, swapping with the greater child (the left one on
+// a tie) (Lower lower_priority_queue_sift_down).
+fn ir_heap_sift_down(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start: Int, length: Int, elem_row: Int) Never! {
+    stride :: ir_list_stride(m, elem_row)
+    width :: ir_word_const(&m, &a, stride)
+    scratch :: ir_out_slot(&m, &a, (stride + 7) /% 8)
+    one :: ir_word_const(&m, &a, 1)
+    two :: ir_word_const(&m, &a, 2)
+    word_row :: ir_word_row(&m)
+    at :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, at, start, -1, -1, a.line)
+    best :: ir_temp(&m, &a, word_row)
+    exit :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    doubled :: ir_word_op(&m, &a, IROp.Mul, at, two)
+    child :: ir_word_op(&m, &a, IROp.Add, doubled, one)
+    more :: ir_bool_op(&m, &a, IROp.Lt, child, length)
+    ir_exit_unless(&m, &a, more, exit)
+    ir_emit(&a.f, IROp.Copy, best, child, -1, -1, a.line)
+    sibling :: ir_word_op(&m, &a, IROp.Add, child, one)
+    has_right :: ir_bool_op(&m, &a, IROp.Lt, sibling, length)
+    ir_open_if(&a.f, has_right, a.line)
+    left_at :: ir_element_address(&m, &a, data, child, stride)
+    right_at :: ir_element_address(&m, &a, data, sibling, stride)
+    left :: ir_load_at(&m, &a, left_at, 0, elem_row)
+    right :: ir_load_at(&m, &a, right_at, 0, elem_row)
+    order :: ir_map_order(&m, &a, kind, left, right)
+    ir_open_if(&a.f, order.less, a.line)
+    ir_emit(&a.f, IROp.Copy, best, sibling, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    parent_at :: ir_element_address(&m, &a, data, at, stride)
+    child_at :: ir_element_address(&m, &a, data, best, stride)
+    parent_value :: ir_load_at(&m, &a, parent_at, 0, elem_row)
+    child_value :: ir_load_at(&m, &a, child_at, 0, elem_row)
+    parent_order :: ir_map_order(&m, &a, kind, parent_value, child_value)
+    ir_exit_unless(&m, &a, parent_order.less, exit)
+    ir_heap_swap(&m, &a, parent_at, child_at, width, scratch)
+    ir_emit(&a.f, IROp.Copy, at, best, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+}
+
+// priority_queue.push(heap, value): takes the value over at the end, then
+// sifts it up.
+fn ir_priority_queue_push_body(m: &IRModule, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, value: Int) Never! {
+    length :: ir_list_reserve(&m, &a, heap, elem_row)
+    data :: ir_load_word(&m, &a, heap, 16)
+    stride :: ir_list_stride(m, elem_row)
+    address :: ir_element_address(&m, &a, data, length, stride)
+    a.fresh[value] = true
+    ir_store_at(&m, &a, address, 0, value)
+    one :: ir_word_const(&m, &a, 1)
+    count :: ir_word_op(&m, &a, IROp.Add, length, one)
+    ir_emit(&a.f, IROp.Store, -1, heap, 0, count, a.line)
+    ir_heap_sift_up(&m, &a, kind, data, length, elem_row)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// priority_queue.heapify(heap): sifts every parent down, the last first.
+fn ir_priority_queue_heapify_body(m: &IRModule, a: &IRBuilder, kind: String, heap: Int, elem_row: Int) Never! {
+    length :: ir_load_word(&m, &a, heap, 0)
+    data :: ir_load_word(&m, &a, heap, 16)
+    one :: ir_word_const(&m, &a, 1)
+    parents :: ir_word_op(&m, &a, IROp.Shr, length, one)
+    counted :: ir_word_const(&m, &a, 0)
+    exit :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more :: ir_bool_op(&m, &a, IROp.Lt, counted, parents)
+    ir_exit_unless(&m, &a, more, exit)
+    last_parent :: ir_word_op(&m, &a, IROp.Sub, parents, one)
+    at :: ir_word_op(&m, &a, IROp.Sub, last_parent, counted)
+    ir_heap_sift_down(&m, &a, kind, data, at, length, elem_row)
+    ir_emit(&a.f, IROp.Add, counted, counted, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// priority_queue.pop(heap): the root moves into an Option box (null when
+// empty); the last element moves to the root and sifts down.
+fn ir_priority_queue_pop_body(m: &IRModule, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, option_row: Int) Never! {
+    a.f.result = option_row
+    length :: ir_load_word(&m, &a, heap, 0)
+    zero :: ir_word_const(&m, &a, 0)
+    empty :: ir_bool_op(&m, &a, IROp.Eq, length, zero)
+    ir_open_if(&a.f, empty, a.line)
+    null :: ir_temp(&m, &a, option_row)
+    ir_emit(&a.f, IROp.Const, null, 0, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    data :: ir_load_word(&m, &a, heap, 16)
+    result :: ir_element_option(&m, &a, data, elem_row, option_row, true)
+    one :: ir_word_const(&m, &a, 1)
+    last :: ir_word_op(&m, &a, IROp.Sub, length, one)
+    ir_emit(&a.f, IROp.Store, -1, heap, 0, last, a.line)
+    // With one element, the copied stale slot lies outside the live prefix.
+    stride :: ir_list_stride(m, elem_row)
+    tail :: ir_element_address(&m, &a, data, last, stride)
+    width :: ir_word_const(&m, &a, stride)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{data, tail, width}, -1)
+    ir_heap_sift_down(&m, &a, kind, data, zero, last, elem_row)
+    ir_emit(&a.f, IROp.Return, -1, result, -1, -1, a.line)
+}
+
+// list.sort / list.sort_desc (Lower lower_helper_list_sort): a bottom-up
+// merge sort. Runs of `width` elements merge pairwise from one buffer into
+// the other (the list's data and a scratch buffer of the same length,
+// swapping roles each pass); a merge takes the right run's element only when
+// it orders strictly before the left run's (strictly after it for
+// sort_desc), so equal elements keep their input order. Elements move as
+// bytes; nothing is cloned or dropped.
+fn ir_list_sort_body(m: &IRModule, a: &IRBuilder, kind: String, list: Int, elem_row: Int, descending: Bool) Never! {
+    stride :: ir_list_stride(m, elem_row)
+    stride_word :: ir_word_const(&m, &a, stride)
+    length :: ir_load_word(&m, &a, list, 0)
+    data :: ir_load_word(&m, &a, list, 16)
+    one :: ir_word_const(&m, &a, 1)
+    several :: ir_bool_op(&m, &a, IROp.Gt, length, one)
+    ir_open_if(&a.f, several, a.line)
+    word_row :: ir_word_row(&m)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    bytes :: ir_word_op(&m, &a, IROp.Mul, length, stride_word)
+    align :: ir_word_const(&m, &a, 8)
+    scratch :: ir_runtime(&m, &a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    width :: ir_word_const(&m, &a, 1)
+    source :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, source, data, -1, -1, a.line)
+    target :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, target, scratch, -1, -1, a.line)
+    passes :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    unsorted :: ir_bool_op(&m, &a, IROp.Lt, width, length)
+    ir_exit_unless(&m, &a, unsorted, passes)
+    lo :: ir_word_const(&m, &a, 0)
+    runs :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    remaining :: ir_bool_op(&m, &a, IROp.Lt, lo, length)
+    ir_exit_unless(&m, &a, remaining, runs)
+    mid :: ir_word_op(&m, &a, IROp.Add, lo, width)
+    mid_over :: ir_bool_op(&m, &a, IROp.Gt, mid, length)
+    ir_open_if(&a.f, mid_over, a.line)
+    ir_emit(&a.f, IROp.Copy, mid, length, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    hi :: ir_word_op(&m, &a, IROp.Add, mid, width)
+    hi_over :: ir_bool_op(&m, &a, IROp.Gt, hi, length)
+    ir_open_if(&a.f, hi_over, a.line)
+    ir_emit(&a.f, IROp.Copy, hi, length, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    left_index :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, left_index, lo, -1, -1, a.line)
+    right_index :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, right_index, mid, -1, -1, a.line)
+    k :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, k, lo, -1, -1, a.line)
+    merging :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    filling :: ir_bool_op(&m, &a, IROp.Lt, k, hi)
+    ir_exit_unless(&m, &a, filling, merging)
+    take_right :: ir_temp(&m, &a, bool_row)
+    ir_emit(&a.f, IROp.Const, take_right, 0, -1, -1, a.line)
+    left_open :: ir_bool_op(&m, &a, IROp.Lt, left_index, mid)
+    ir_open_if(&a.f, left_open, a.line)
+    right_open :: ir_bool_op(&m, &a, IROp.Lt, right_index, hi)
+    ir_open_if(&a.f, right_open, a.line)
+    left_at :: ir_element_address(&m, &a, source, left_index, stride)
+    right_at :: ir_element_address(&m, &a, source, right_index, stride)
+    left :: ir_load_at(&m, &a, left_at, 0, elem_row)
+    right :: ir_load_at(&m, &a, right_at, 0, elem_row)
+    order :: if descending -> ir_map_order(&m, &a, kind, left, right) else -> ir_map_order(&m, &a, kind, right, left)
+    ir_emit(&a.f, IROp.Copy, take_right, order.less, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_else(&a.f, a.line)
+    ir_emit(&a.f, IROp.Const, take_right, 1, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    slot_at :: ir_element_address(&m, &a, target, k, stride)
+    ir_open_if(&a.f, take_right, a.line)
+    right_from :: ir_element_address(&m, &a, source, right_index, stride)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{slot_at, right_from, stride_word}, -1)
+    ir_emit(&a.f, IROp.Add, right_index, right_index, one, IR_OVERFLOW_WRAP, a.line)
+    ir_else(&a.f, a.line)
+    left_from :: ir_element_address(&m, &a, source, left_index, stride)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{slot_at, left_from, stride_word}, -1)
+    ir_emit(&a.f, IROp.Add, left_index, left_index, one, IR_OVERFLOW_WRAP, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Add, k, k, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Copy, lo, hi, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Add, width, width, width, IR_OVERFLOW_WRAP, a.line)
+    swapped :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, swapped, source, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Copy, source, target, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Copy, target, swapped, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    // The sorted elements are in `source`; they move home when that is the
+    // scratch buffer, which is then released.
+    away :: ir_bool_op(&m, &a, IROp.Ne, source, data)
+    ir_open_if(&a.f, away, a.line)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{data, source, bytes}, -1)
+    ir_end(&a.f, a.line)
+    _ :: ir_runtime(&m, &a, "jet_rt_free", [Int]{scratch, bytes, align}, -1)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// `xs.sort()` / `xs.sort_desc()` on the List at `list` in place (Lower
+// lower_list_method_more): the element needs a native order.
+fn ir_list_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
+    list_row :: b.f.slot_type[list]
+    list_ty :: m.types[list_row].ty
+    is_list :: if ir_untag(list_ty) == {
+        .List(_) -> true
+        else -> false
+    }
+    if !is_list -> return ir_fail_slot(&b, span, "sort of {ir_type_name(list_ty)}")
+    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(&b, span, "List sort of {ir_type_name(m.types[elem_row].ty)} is not lowered at O0 yet")
+    helper :: if descending -> "list.sort_desc" else -> "list.sort"
+    _ :: ir_heap_call(&m, p, &b, list_row, elem_row, helper, [Int]{list}, -1)
+    return -1
+}
+
+// The copy of the heap sorted highest-first (to_sorted_list, rendering).
+fn ir_priority_queue_sorted(m: &IRModule, p: IRProgram, b: &IRBuilder, heap: Int, elem_row: Int, span: Span) -> Int Never! {
+    elem_ty :: m.types[elem_row].ty
+    list_row :: ir_value_type(&m, p, Type.List{element: elem_ty}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(elem_ty)}]")
+    sorted :: ir_list_clone(&m, &b, heap, elem_row, list_row)
+    _ :: ir_heap_call(&m, p, &b, list_row, elem_row, "list.sort_desc", [Int]{sorted}, -1)
+    sorted
+}
+
+// `PriorityQueue.from(source)` / `source.to_priority_queue()` (Lower
+// lower_priority_queue_from): a fresh List gives its buffer up, any other's
+// elements are copied; then the heap is built in place.
+fn ir_priority_queue_from(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
+    heap_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    elem_row :: ir_priority_queue_row(&m, p, heap_row) ?? return ir_fail_slot(&b, span, "PriorityQueue construction of {ir_type_name(ty)}")
+    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(&b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
+    if ir_list_element(&m, p, b, source) != Val(elem_row) -> return ir_fail_slot(&b, span, "PriorityQueue source is not its element List")
+    heap := -1
+    if b.fresh[source] {
+        heap = ir_list_empty(&m, &b, heap_row)
+        ir_emit(&b.f, IROp.CopyBytes, -1, heap, source, 24, b.line)
+        b.fresh[source] = false
+    } else {
+        heap = ir_list_clone(&m, &b, source, elem_row, heap_row)
+    }
+    _ :: ir_heap_call(&m, p, &b, heap_row, elem_row, "priority_queue.heapify", [Int]{heap}, -1)
+    heap
+}
+
+// `PriorityQueue.new()` (the Prelude std::collections::BinaryHeap::new
+// route, Lower lower_priority_queue_new): an empty header.
+fn ir_priority_queue_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    if inputs.len() != 0 -> return ir_fail_slot(&b, span, "PriorityQueue.new with {inputs.len()} arguments")
+    heap_row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    elem_row :: ir_priority_queue_row(&m, p, heap_row) ?? return ir_fail_slot(&b, span, "PriorityQueue construction of {ir_type_name(result)}")
+    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(&b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
+    ir_list_empty(&m, &b, heap_row)
+}
+
+// A PriorityQueue builtin (Lower lower_priority_queue_method): from, len,
+// is_empty, push, clear, remove, to_sorted_list, peek and pop.
+fn ir_priority_queue_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operation: TBuiltinOp, subject: Int, operands: [Int], span: Span) -> Int Never! {
+    if operation == .PriorityQueueFrom {
+        if operands.len() != 1 -> return ir_fail_slot(&b, span, "PriorityQueue.from with {operands.len() - 1} arguments")
+        return ir_priority_queue_from(&m, p, &b, ir_subst(p, ty), subject, span)
+    }
+    heap_row :: b.f.slot_type[subject]
+    elem_row :: ir_priority_queue_row(&m, p, heap_row) ?? return ir_fail_slot(&b, span, "PriorityQueue builtin on {ir_type_name(m.types[heap_row].ty)}")
+    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(&b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
+    if operation == {
+        .LenList -> {
+            int_row :: ir_type_row(&m, Type.Int) ?? 0
+            return ir_load_at(&m, &b, subject, 0, int_row)
+        }
+        .IsEmpty -> {
+            length :: ir_load_word(&m, &b, subject, 0)
+            zero :: ir_word_const(&m, &b, 0)
+            return ir_bool_op(&m, &b, IROp.Eq, length, zero)
+        }
+        .Push -> {
+            if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "push without a value")
+            value :: ir_adapt(&m, p, &b, operands[1], elem_row, span)
+            if ir_failed(b) -> return -1
+            offered :: ir_own(&m, &b, value)
+            _ :: ir_heap_call(&m, p, &b, heap_row, elem_row, "priority_queue.push", [Int]{subject, offered}, -1)
+            b.fresh[offered] = false
+            return -1
+        }
+        .Clear -> {
+            if m.types[elem_row].drop != "" {
+                walk :: ir_walk_open(&m, &b, subject, elem_row)
+                ir_emit(&b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
+                ir_walk_close(&m, &b, walk)
+            }
+            zero :: ir_word_const(&m, &b, 0)
+            ir_emit(&b.f, IROp.Store, -1, subject, 0, zero, b.line)
+            return -1
+        }
+        .PriorityQueueRemove(_, mode) -> {
+            if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "remove without an operand")
+            if mode == .Dynamic -> return ir_fail_slot(&b, span, "remove with a dynamic mode")
+            // Canonical removal slots are highest-first, not physical heap
+            // slots; a descending sequence is itself a valid max-heap.
+            _ :: ir_heap_call(&m, p, &b, heap_row, elem_row, "list.sort_desc", [Int]{subject}, -1)
+            return ir_list_remove(&m, p, &b, ty, subject, elem_row, operands[1], mode == .Slot, span)
+        }
+        .PriorityQueueToSortedList -> return ir_priority_queue_sorted(&m, p, &b, subject, elem_row, span)
+        .PriorityQueuePeek -> {
+            option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            found :: ir_fresh_temp(&m, &b, option_row)
+            ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
+            length :: ir_load_word(&m, &b, subject, 0)
+            zero :: ir_word_const(&m, &b, 0)
+            present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+            ir_open_if(&b.f, present, b.line)
+            data :: ir_load_word(&m, &b, subject, 16)
+            copied :: ir_element_option(&m, &b, data, elem_row, option_row, false)
+            ir_emit(&b.f, IROp.Copy, found, copied, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            return found
+        }
+        .PriorityQueuePop -> {
+            option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            return ir_heap_call(&m, p, &b, heap_row, elem_row, "priority_queue.pop", [Int]{subject}, option_row)
+        }
+        else -> return ir_fail_slot(&b, span, "PriorityQueue builtin {ir_builtin_name(operation)}")
+    }
+}

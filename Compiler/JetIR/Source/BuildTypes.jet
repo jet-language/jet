@@ -161,6 +161,13 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         if ir_map_key_kind(m, key) == "" -> return None
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
     }
+    if ir_priority_queue_element(ty) == .Val(element) {
+        // The List header over the heap (Lower PriorityQueues.jet): len at 0,
+        // cap at 8, element data at 16; its element needs a native order.
+        heap_element :: ir_value_type_in(&m, p, element, laying) ?? return None
+        if ir_map_key_kind(m, heap_element) == "" -> return None
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+    }
     if ir_task_element(ty) != None -> return Val(ir_task_row(&m, ty))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
     name :: ir_nominal_name(ty) ?? return None
@@ -673,6 +680,15 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
     list_element :: if ir_untag(ty) == .List(element) -> Val(element.copy()) else -> ir_view_element(ty)
     if list_element == .Val(element) {
         ir_render_list(&m, p, &b, builder, slot, element, mode, span)
+        return
+    }
+    if ir_priority_queue_element(ty) == .Val(element) {
+        // A sorted snapshot renders as its List (Lower
+        // lower_helper_priority_queue_render).
+        elem_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+        snapshot :: ir_priority_queue_sorted(&m, p, &b, slot, elem_row, span)
+        if snapshot < 0 -> return
+        ir_render_list(&m, p, &b, builder, snapshot, element, mode, span)
         return
     }
     // A native carrier (Set, Rank, Iter, Shared) renders through routes of
@@ -1779,10 +1795,11 @@ fn ir_set_element(ty: Type) -> Type? Never! {
     None
 }
 
-// Whether `ty` is a native carrier Lower lays out itself (a Set, Rank, Iter,
-// Task, ScopeGuard or Shared handle), not as its declared fields.
+// Whether `ty` is a native carrier Lower lays out itself (a Set, Rank,
+// PriorityQueue, Iter, Task, ScopeGuard or Shared handle), not as its
+// declared fields.
 fn ir_native_carrier(ty: Type) -> Bool Never! {
-    ir_set_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
+    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
 }
 
 // The Bool test of a text pattern on the String `subject` (Lower
