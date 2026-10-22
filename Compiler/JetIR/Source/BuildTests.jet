@@ -37,28 +37,28 @@ struct IRTestHarness { tests: [IRTestCase], checks: [IROutputCheck], serial: Boo
 
 // Builds `harness` and every function it reaches.
 fn ir_build_tests(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness) -> IRBuildResult Never! {
-    m := ir_module_new()
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
+    m := ir_module_for(p)
     failures := [IRBuildFailure]{}
     bodies := [Int]{}
     loop test in harness.tests {
-        id :: ir_function_id(&m, &p, test.key, [Type]{}) ?? -1
+        id :: ir_function_id(&m, p, test.key, [Type]{}) ?? -1
         if id < 0 -> &failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
         &bodies.push(id)
     }
     check_ids := [Int]{}
     loop check in harness.checks {
-        id :: ir_function_id(&m, &p, check.key, [Type]{}) ?? -1
+        id :: ir_function_id(&m, p, check.key, [Type]{}) ?? -1
         if id < 0 -> &failures.push(IRBuildFailure{key: check.key, name: check.name, message: "the output check function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
         &check_ids.push(id)
     }
     if failures.len() > 0 -> return IRBuildResult{program: m, failures: failures}
-    override :: ir_test_override(&m, &p)
-    built :: ir_build_queue(&m, &p, &failures, 0)
-    m.entry = ir_test_main(&m, &p, harness, bodies, check_ids, override, &failures)
+    override :: ir_test_override(&m, p)
+    built :: ir_build_queue(&m, p, &failures, 0)
+    m.entry = ir_test_main(&m, p, harness, bodies, check_ids, override, &failures)
     // The functions the harness's renders reached (a Printable impl).
-    _ :: ir_build_queue(&m, &p, &failures, built)
+    _ :: ir_build_queue(&m, p, &failures, built)
     ir_drop_glues(&m, p)
     IRBuildResult{program: m, failures: failures}
 }
@@ -66,7 +66,7 @@ fn ir_build_tests(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef
 // The package's `fn test(t: Test)`, when it has one: the project's test
 // entry, called with the suite before the harness runs the discovered tests.
 // -1 when there is none.
-fn ir_test_override(m: &IRModule, p: &IRProgram) -> Int Never! {
+fn ir_test_override(m: &IRModule, p: IRProgram) -> Int Never! {
     key := ""
     loop function in p.functions {
         if function.name != "test" || function.params.len() != 1 || function.generic_params.len() > 0 || function.module_name.starts_with("core") -> next
@@ -81,7 +81,7 @@ fn ir_test_override(m: &IRModule, p: &IRProgram) -> Int Never! {
         break
     }
     if key == "" -> return -1
-    ir_function_id(&m, &p, key, [Type]{}) ?? -1
+    ir_function_id(&m, p, key, [Type]{}) ?? -1
 }
 
 // A generated harness function: `name`, keyed and symbolled after the
@@ -107,12 +107,12 @@ fn ir_test_function(m: &IRModule, name: String, from: Int, suffix: String) -> In
 
 // Ends a generated function: records its failure, resolves its deferred
 // calls and stores it.
-fn ir_test_finish(m: &IRModule, p: &IRProgram, b: ^IRBuilder, id: Int, failures: &[IRBuildFailure]) Never! {
+fn ir_test_finish(m: &IRModule, p: IRProgram, b: ^IRBuilder, id: Int, failures: &[IRBuildFailure]) Never! {
     built := ^b
     if built.error != "" {
         &failures.push(IRBuildFailure{key: m.functions[id].key, name: m.functions[id].name, message: built.error, source_file: m.functions[id].source_file, span: built.error_span})
     }
-    ir_resolve_deferred(&m, &p, &built)
+    ir_resolve_deferred(&m, p, &built)
     m.functions[id] = ^built.f
 }
 
@@ -171,7 +171,7 @@ fn ir_test_exit(m: &IRModule, b: &IRBuilder, code: Int) Never! {
 }
 
 // test.invoke(env) for the test body `body`.
-fn ir_test_invoke(m: &IRModule, p: &IRProgram, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
+fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
     id :: ir_test_function(&m, "test.invoke", body, "invoke")
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[body].line
@@ -229,14 +229,14 @@ fn ir_test_invoke(m: &IRModule, p: &IRProgram, body: Int, failures: &[IRBuildFai
         ir_test_drop(&m, &b, result)
     }
     ir_emit(&b.f, IROp.Return, -1, null, -1, -1, b.line)
-    ir_test_finish(&m, &p, ^b, id, &failures)
+    ir_test_finish(&m, p, ^b, id, &failures)
     id
 }
 
 // test.unit(env) for `test`, whose body is `body`: the canonical test rail
 // over its test.invoke.
-fn ir_test_unit(m: &IRModule, p: &IRProgram, test: IRTestCase, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
-    invoke :: ir_test_invoke(&m, &p, body, &failures)
+fn ir_test_unit(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
+    invoke :: ir_test_invoke(&m, p, body, &failures)
     id :: ir_test_function(&m, "test.unit", body, "unit")
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[body].line
@@ -251,20 +251,20 @@ fn ir_test_unit(m: &IRModule, p: &IRProgram, test: IRTestCase, body: Int, failur
     outcome :: ir_runtime(&m, &b, "jet_rt_test_unit", [Int]{name, expected, env, code}, pointer_row)
     ir_test_drop(&m, &b, name)
     ir_emit(&b.f, IROp.Return, -1, outcome, -1, -1, b.line)
-    ir_test_finish(&m, &p, ^b, id, &failures)
+    ir_test_finish(&m, p, ^b, id, &failures)
     id
 }
 
 // test.release(env): the harness spawns with a null environment, so it owns
 // nothing.
-fn ir_test_release(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) -> Int Never! {
+fn ir_test_release(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure]) -> Int Never! {
     id :: ir_test_function(&m, "test.release", -1, "release")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row :: ir_pointer_row(&m)
     env_name :: ir_intern_name(&m, "env")
     _ :: ir_new_slot(&b, pointer_row, IRSlotKind.Param, env_name)
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(&m, &p, ^b, id, &failures)
+    ir_test_finish(&m, p, ^b, id, &failures)
     id
 }
 
@@ -351,7 +351,7 @@ fn ir_test_call_override(m: &IRModule, b: &IRBuilder, override: Int) Never! {
 // `function`) once: a Bool `false` stops the program, any other result is
 // dropped unclassified. It carries the check function's name, which the
 // stop report shows.
-fn ir_test_check(m: &IRModule, p: &IRProgram, check: IROutputCheck, function: Int, failures: &[IRBuildFailure]) -> Int Never! {
+fn ir_test_check(m: &IRModule, p: IRProgram, check: IROutputCheck, function: Int, failures: &[IRBuildFailure]) -> Int Never! {
     name :: m.functions[function].name.copy()
     id :: ir_test_function(&m, name, function, "check")
     b := ir_builder_new(m.functions[id].copy())
@@ -372,23 +372,23 @@ fn ir_test_check(m: &IRModule, p: &IRProgram, check: IROutputCheck, function: In
             message :: ir_test_text(&m, &b, "output check {check.name}")
             null :: ir_word_const(&m, &b, 0)
             location :: TPanicLoc{file: m.functions[function].source_file.copy(), source_line: "", line: m.functions[function].line, column: 0, caret: 0, function: name, locals: [TPanicLocal]{}}
-            ir_stop(&m, &p, &b, 2, message, null, null, location)
+            ir_stop(&m, p, &b, 2, message, null, null, location)
             ir_end(&b.f, b.line)
         }
         ir_test_drop(&m, &b, result)
     }
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(&m, &p, ^b, id, &failures)
+    ir_test_finish(&m, p, ^b, id, &failures)
     id
 }
 
 // The harness entry `main` (see the head of this file).
-fn ir_test_main(m: &IRModule, p: &IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: &[IRBuildFailure]) -> Int Never! {
+fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: &[IRBuildFailure]) -> Int Never! {
     units := [Int]{}
-    loop (index, test) in harness.tests -> &units.push(ir_test_unit(&m, &p, test, bodies[index], &failures))
-    release_id :: ir_test_release(&m, &p, &failures)
+    loop (index, test) in harness.tests -> &units.push(ir_test_unit(&m, p, test, bodies[index], &failures))
+    release_id :: ir_test_release(&m, p, &failures)
     check_helpers := [Int]{}
-    loop (index, check) in harness.checks -> &check_helpers.push(ir_test_check(&m, &p, check, check_ids[index], &failures))
+    loop (index, check) in harness.checks -> &check_helpers.push(ir_test_check(&m, p, check, check_ids[index], &failures))
     id :: ir_test_function(&m, "main", -1, "main")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row :: ir_pointer_row(&m)
@@ -460,6 +460,6 @@ fn ir_test_main(m: &IRModule, p: &IRProgram, harness: IRTestHarness, bodies: [In
     ir_test_drop(&m, &b, selected)
     ir_test_drop(&m, &b, records_path)
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(&m, &p, ^b, id, &failures)
+    ir_test_finish(&m, p, ^b, id, &failures)
     id
 }

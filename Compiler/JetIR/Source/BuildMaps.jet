@@ -21,7 +21,7 @@ fn ir_map_entry_type(ty: Type) -> Type? Never! {
 fn ir_map_row(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if ir_untag(ty) == .Map(key, _, value) {
         if !ir_pointee_lays_out(&m, p, key, laying) || !ir_pointee_lays_out(&m, p, value, laying) -> return None
-        if ir_unit_type(ir_untag(ir_subst(p, value))) -> return None
+        if ir_unit_type(ir_untag(ir_subst(m, value))) -> return None
         key_row :: ir_value_type_in(&m, p, key, laying) ?? return None
         if ir_map_key_kind(m, key_row) == "" -> return None
         interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
@@ -290,13 +290,13 @@ fn ir_list_reserve(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Neve
 
 // `[k: v, ...]` (BuildMap): an empty header, then each entry set in order,
 // a later duplicate key replacing the earlier value (Lower lower_build_map).
-fn ir_map_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, entries: [TMapEntry], span: Span) -> Int Never! {
+fn ir_map_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, entries: [TMapEntry], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map literal of {ir_type_name(ty)}")
     map :: ir_list_empty(&m, &b, row)
     loop entry in entries {
-        key :: ir_value_as(&m, &p, &b, entry.key, shape.key.ty, span)
-        value :: ir_value_as(&m, &p, &b, entry.value, shape.value.ty, span)
+        key :: ir_value_as(&m, p, &b, entry.key, shape.key.ty, span)
+        value :: ir_value_as(&m, p, &b, entry.value, shape.value.ty, span)
         if ir_failed(b) -> return -1
         if key < 0 || value < 0 -> return ir_fail_slot(&b, span, "Unit map entry")
         ir_map_set(&m, p, &b, row, map, key, value)
@@ -332,12 +332,12 @@ fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map
 }
 
 // `map[key]` read as a value (borrowed: the map keeps it).
-fn ir_map_index(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, span: Span) -> Int Never! {
-    map :: ir_expr(&m, &p, &b, base)
+fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, span: Span) -> Int Never! {
+    map :: ir_expr(&m, p, &b, base)
     if ir_failed(b) || map < 0 -> return -1
     row :: b.f.slot_type[map]
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map index of {ir_type_name(base.ty)}")
-    key :: ir_value_as(&m, &p, &b, index, shape.key.ty, span)
+    key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 -> return -1
     address :: ir_map_value_address(&m, p, &b, row, map, key)
     ir_release(&m, &b, key)
@@ -347,14 +347,14 @@ fn ir_map_index(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, index: 
 // `&map[key]` as a write place: the key's value in the map's own buffer (a
 // missing key stops, as a read does). An aggregate value is its storage's
 // address, any other the address of its word (ir_place_address).
-fn ir_map_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, backs: &[IRWriteBack], span: Span) -> Int Never! {
-    map :: ir_place_address(&m, &p, &b, base, &backs, span)
+fn ir_map_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, backs: &[IRWriteBack], span: Span) -> Int Never! {
+    map :: ir_place_address(&m, p, &b, base, &backs, span)
     if ir_failed(b) -> return -1
     if map < 0 || ir_kind_of(m, b, map) != .Aggregate -> return ir_fail_slot(&b, span, "write of a map entry of {ir_type_name(base.ty)}")
     ir_make_unique(&m, p, &b, map)
     row :: b.f.slot_type[map]
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "write of a map entry of {ir_type_name(base.ty)}")
-    key :: ir_value_as(&m, &p, &b, index, shape.key.ty, span)
+    key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 -> return -1
     value :: ir_map_value_address(&m, p, &b, row, map, key)
     ir_release(&m, &b, key)
@@ -368,17 +368,17 @@ fn ir_map_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr,
 // assignment updates the value in place. The value comes before the place
 // (ir_assign_place), and the place is a write base (ir_write_base): a Map
 // inside a List element writes that List's own buffer, never a shared one.
-fn ir_map_index_assign(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, op: TBinaryOp?, value: TExpr, span: Span) Never! {
+fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, op: TBinaryOp?, value: TExpr, span: Span) Never! {
     written_row :: ir_value_type(&m, p, base.ty) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
     written :: ir_map_shape(&m, p, written_row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
-    right :: ir_value_as(&m, &p, &b, value, written.value.ty, span)
+    right :: ir_value_as(&m, p, &b, value, written.value.ty, span)
     if ir_failed(b) -> return
-    map :: ir_write_base(&m, &p, &b, base, span)
+    map :: ir_write_base(&m, p, &b, base, span)
     if ir_failed(b) || map < 0 -> return
     ir_make_unique(&m, p, &b, map)
     row :: b.f.slot_type[map]
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
-    key :: ir_value_as(&m, &p, &b, index, shape.key.ty, span)
+    key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 || right < 0 -> return
     binary :: op ?? return ir_map_set(&m, p, &b, row, map, key, right)
     address :: ir_map_value_address(&m, p, &b, row, map, key)
@@ -386,7 +386,7 @@ fn ir_map_index_assign(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, 
     current :: ir_load_at(&m, &b, address, 0, shape.value.ty)
     site :: b.line
     value_ty :: m.types[shape.value.ty].ty
-    result :: ir_binary(&m, &p, &b, binary, false, site, value_ty, current, right, value.ty, span)
+    result :: ir_binary(&m, p, &b, binary, false, site, value_ty, current, right, value.ty, span)
     ir_release(&m, &b, right)
     if ir_failed(b) -> return
     if m.types[shape.value.ty].drop != "" -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)
@@ -440,11 +440,13 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
     }
     if symbol == "jet_map_keys" || symbol == "jet_map_values" {
         if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
-        return Val(ir_map_view(&m, p, &b, ir_subst(p, ty), shape, subject, symbol == "jet_map_keys", span))
+        subst_ty :: ir_subst(m, ty)
+        return Val(ir_map_view(&m, p, &b, subst_ty, shape, subject, symbol == "jet_map_keys", span))
     }
     if symbol == "jet_map_top_n" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map top_n without a count"))
-        return Val(ir_map_top_n(&m, p, &b, ir_subst(p, ty), shape, subject, operands[1], span))
+        subst_ty :: ir_subst(m, ty)
+        return Val(ir_map_top_n(&m, p, &b, subst_ty, shape, subject, operands[1], span))
     }
     // `equal(other)` is the maps' equality; `merge(other)` (Lower
     // lower_map_method_more) is a copy of the receiver with each entry of

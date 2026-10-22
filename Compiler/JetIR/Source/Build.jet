@@ -93,37 +93,26 @@ struct IRBuilder {
 // being built) names the checked function `key`.
 struct IRDeferredCall { at: Int, key: String, function: Int{-1} }
 
-// The checked functions every IR function id may name, by key, and the
-// checked type declarations, by key and by name. A generic function is
+// The checked program the builder reads: the checked functions every IR
+// function id may name, by key, and the checked type declarations, by key
+// and by name. It is read-only while functions are built; the build state
+// (queue, instances, substitution) lives in IRModule. A generic function is
 // built once per distinct list of concrete type arguments (monomorphized as
-// the old path's Mono pass does); `subst_names`/`subst_types` are the type
-// parameters of the instance being built and their arguments.
+// the old path's Mono pass does).
 struct IRProgram {
     functions: [TFunc]
     rows: [String:Int]
-    // Function row -> IR function id (-1 not yet queued) of a non-generic function.
-    ids: [Int]
-    // Instance key (function key and type arguments) -> IR function id.
-    instances: [String:Int]
-    queue: [IRQueued]
     types: [TTypeDef]
     type_rows: [String:Int]
-    subst_names: [String]
-    subst_types: [Type]
     // Checked constants by key (ConstRef / CtLit values).
     constants: [String:TConstantDef]
-    lambdas: [IRLambdaJob]
     // A selected Display (`display`), Printable (`show`) or user Comparable
     // (`compare`) implementation method by "<trait>|<rendered type key>"
     // (Lower Display.jet render rows, Maps.jet lower_order_user_impl).
     render_impls: [String:Int]
     // The selected Close implementation method (`close`) by rendered type
-    // key (Lower Values.jet lower_close_index), and the close glue built per
-    // glue key (BuildOwn.jet; -1: the type closes nothing, -2: its glue failed).
+    // key (Lower Values.jet lower_close_index).
     close_methods: [String:Int]
-    close_glue: [String:Int]
-    // A boxed trait value's payload key by concrete type identity (from 1).
-    trait_keys: [String:Int]
     // The implementation methods a dynamic trait call may select, by
     // "<trait>|<method>" (function rows; see ir_trait_methods).
     trait_methods: [String:[Int]]
@@ -225,10 +214,8 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
     }
     owned := ^functions
     rows := [String:Int]{}
-    ids := [Int]{}
     loop (index, function) in owned {
         if rows.get(function.key) == None -> rows[function.key] = index
-        &ids.push(-1)
     }
     types := ^type_defs
     ir_add_compiler_owned_types(&types)
@@ -310,9 +297,16 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
         }
     }
     trait_methods :: ir_trait_methods(owned, type_rows, types, impl_slots, impl_traits)
-    p := IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, trait_methods: trait_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}}
+    p := IRProgram{functions: ^owned, rows: rows, types: ^types, type_rows: type_rows, constants: constants, render_impls: render_impls, close_methods: close_methods, trait_methods: trait_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}}
     ir_source_index(&p, ^sources)
     p
+}
+
+// An empty module ready to build `p`'s functions (no function queued yet).
+fn ir_module_for(p: IRProgram) -> IRModule Never! {
+    m := ir_module_new()
+    loop _ in 0..<p.functions.len() -> &m.ids.push(-1)
+    m
 }
 
 // The implementation methods of every trait by "<trait>|<method>" (codegen
@@ -373,31 +367,31 @@ fn ir_type_def(p: IRProgram, name: String) -> Int? Never! {
 
 // The IR id of the checked function `key` applied to `type_args` (written
 // in the current instance's terms), queueing it on first use.
-fn ir_function_id(m: &IRModule, p: &IRProgram, key: String, type_args: [Type]) -> Int? Never! {
+fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -> Int? Never! {
     row :: p.rows.get(key) ?? return None
     function :: p.functions[row]
     if type_args.len() == 0 || function.generic_params.len() == 0 {
-        if p.ids[row] >= 0 -> return Val(p.ids[row])
+        if m.ids[row] >= 0 -> return Val(m.ids[row])
         id :: m.functions.len()
         &m.functions.push(ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line))
         m.function_rows[function.key] = id
-        p.ids[row] = id
-        &p.queue.push(IRQueued{row: row, id: id, args: [Type]{}})
+        m.ids[row] = id
+        &m.queue.push(IRQueued{row: row, id: id, args: [Type]{}})
         return Val(id)
     }
     concrete := [Type]{}
     spelled := [String]{}
     loop arg in type_args {
-        &concrete.push(ir_subst(p, arg))
+        &concrete.push(ir_subst(m, arg))
         &spelled.push(type_carrier_identity(concrete[concrete.len() - 1]))
     }
     instance :: "{function.key}<{spelled.join(", ")}>"
-    if p.instances.get(instance) == .Val(known) -> return Val(known)
+    if m.instances.get(instance) == .Val(known) -> return Val(known)
     id :: m.functions.len()
     &m.functions.push(ir_function_new(function.name, instance, "{ir_symbol_name(function)}__{id}", function.source_file, function.line))
     m.function_rows[instance] = id
-    p.instances[instance] = id
-    &p.queue.push(IRQueued{row: row, id: id, args: concrete})
+    m.instances[instance] = id
+    &m.queue.push(IRQueued{row: row, id: id, args: concrete})
     Val(id)
 }
 
@@ -408,9 +402,9 @@ fn ir_generic_names(function: TFunc) -> [String] Never! {
 }
 
 // `ty` in the terms of the instance being built.
-fn ir_subst(p: IRProgram, ty: Type) -> Type Never! {
-    if p.subst_names.len() == 0 -> return ty.copy()
-    ir_subst_in(p.subst_names, p.subst_types, ty)
+fn ir_subst(m: IRModule, ty: Type) -> Type Never! {
+    if m.subst_names.len() == 0 -> return ty.copy()
+    ir_subst_in(m.subst_names, m.subst_types, ty)
 }
 
 // `ty` with each type parameter `names[i]` replaced by `types[i]`.
@@ -475,18 +469,18 @@ fn ir_symbol_name(function: TFunc) -> String Never! {
 // checked source files' text by path (the source locations of journeys and
 // contract reports); `foreign` the checked foreign functions.
 fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String) -> IRBuildResult Never! {
-    m := ir_module_new()
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
+    m := ir_module_for(p)
     failures := [IRBuildFailure]{}
-    entry := ir_function_id(&m, &p, entry_key, [Type]{}) ?? {
+    entry := ir_function_id(&m, p, entry_key, [Type]{}) ?? {
         &failures.push(IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
         return IRBuildResult{program: m, failures: failures}
     }
-    built :: ir_build_queue(&m, &p, &failures, 0)
-    m.entry = ir_entry_function(&m, &p, entry, &failures)
+    built :: ir_build_queue(&m, p, &failures, 0)
+    m.entry = ir_entry_function(&m, p, entry, &failures)
     // The functions the entry's error report reached (a Printable impl).
-    _ :: ir_build_queue(&m, &p, &failures, built)
+    _ :: ir_build_queue(&m, p, &failures, built)
     ir_drop_glues(&m, p)
     IRBuildResult{program: m, failures: failures}
 }
@@ -499,7 +493,7 @@ fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplD
 // jet_rt_entry_error_exit_err, any other error through its Printable text
 // and jet_rt_entry_error_exit), a `None` with "entry returned no value";
 // success drops the result and returns.
-fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
+fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row :: m.functions[entry].result
     if row < 0 || m.functions[entry].param_count > 0 -> return entry
     ty :: m.types[row].ty.copy()
@@ -553,7 +547,7 @@ fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuil
     if b.error != "" {
         &failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: m.functions[entry].source_file, span: b.error_span})
     }
-    ir_resolve_deferred(&m, &p, &b)
+    ir_resolve_deferred(&m, p, &b)
     m.functions[id] = ^b.f
     id
 }
@@ -561,52 +555,52 @@ fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuil
 // Builds every checked non-generic function (a library or a coverage
 // census); generic functions are built per instance their callers reach.
 fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction]) -> IRBuildResult Never! {
-    m := ir_module_new()
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
+    m := ir_module_for(p)
     failures := [IRBuildFailure]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 -> next
         key :: p.functions[row].key
-        _ :: ir_function_id(&m, &p, key, [Type]{})
+        _ :: ir_function_id(&m, p, key, [Type]{})
     }
-    _ :: ir_build_queue(&m, &p, &failures, 0)
+    _ :: ir_build_queue(&m, p, &failures, 0)
     ir_drop_glues(&m, p)
     IRBuildResult{program: m, failures: failures}
 }
 
 // Builds the queued functions from queue row `from` on; returns the queue's end.
-fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure], from: Int) -> Int Never! {
+fn ir_build_queue(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], from: Int) -> Int Never! {
     cursor := from
-    loop cursor < p.queue.len() {
-        queued :: p.queue[cursor].copy()
+    loop cursor < m.queue.len() {
+        queued :: m.queue[cursor].copy()
         cursor += 1
         b := ir_builder_new(m.functions[queued.id].copy())
         if queued.lambda >= 0 {
-            job :: p.lambdas[queued.lambda].copy()
-            p.subst_names = job.subst_names
-            p.subst_types = job.subst_types
-            ir_build_lambda(&m, &p, &b, job)
+            job :: m.lambdas[queued.lambda].copy()
+            m.subst_names = job.subst_names
+            m.subst_types = job.subst_types
+            ir_build_lambda(&m, p, &b, job)
             if b.error != "" {
                 &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: m.functions[queued.id].name, message: b.error, source_file: job.source_file, span: if b.error_span.end > 0 -> b.error_span else -> job.lambda.source_span})
             }
-            ir_resolve_deferred(&m, &p, &b)
+            ir_resolve_deferred(&m, p, &b)
             m.functions[queued.id] = ^b.f
             next
         }
         // copy: the checked function is read while later calls queue more rows.
         function :: p.functions[queued.row].copy()
-        p.subst_names = if queued.args.len() > 0 -> ir_generic_names(function) else -> [String]{}
-        p.subst_types = queued.args
-        ir_build_function(&m, &p, &b, function)
+        m.subst_names = if queued.args.len() > 0 -> ir_generic_names(function) else -> [String]{}
+        m.subst_types = queued.args
+        ir_build_function(&m, p, &b, function)
         if b.error != "" {
             &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: function.name, message: b.error, source_file: function.source_file, span: if b.error_span.end > 0 -> b.error_span else -> function.source_span})
         }
-        ir_resolve_deferred(&m, &p, &b)
+        ir_resolve_deferred(&m, p, &b)
         m.functions[queued.id] = ^b.f
     }
-    p.subst_names = [String]{}
-    p.subst_types = [Type]{}
+    m.subst_names = [String]{}
+    m.subst_types = [Type]{}
     cursor
 }
 
@@ -614,9 +608,9 @@ fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
     IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, marked: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
 }
 
-fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
+fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     loop call in b.deferred {
-        callee :: ir_function_id(&m, &p, call.key, [Type]{}) ?? -1
+        callee :: ir_function_id(&m, p, call.key, [Type]{}) ?? -1
         if call.function >= 0 {
             m.functions[call.function].a[call.at] = callee
         } else {
@@ -1296,11 +1290,11 @@ fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: B
 // is boxed into `Ok` where its carrier is wanted, and a Result box is
 // unwrapped where its plain success is (codegen
 // jet_codegen_reconcile_plain_call_return, jet_codegen_lower_return_value).
-fn ir_value_as(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr, row: Int, span: Span) -> Int Never! {
+fn ir_value_as(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr, row: Int, span: Span) -> Int Never! {
     if !ir_is_result(m.types[row].ty) {
-        if expression.kind == .Ok(inner) -> return ir_value_as(&m, &p, &b, inner, row, span)
+        if expression.kind == .Ok(inner) -> return ir_value_as(&m, p, &b, inner, row, span)
     }
-    slot :: ir_expr(&m, &p, &b, expression)
+    slot :: ir_expr(&m, p, &b, expression)
     if ir_failed(b) || slot < 0 -> return slot
     ir_adapt(&m, p, &b, slot, row, span)
 }
@@ -1413,8 +1407,8 @@ fn ir_native_index(m: &IRModule, b: &IRBuilder, position: Int, span: Span) -> In
 
 // The address of element `index` of the list at `list`, after the bounds
 // check (jet_rt_panic_list_bounds(length, index)).
-fn ir_checked_element(m: &IRModule, p: &IRProgram, b: &IRBuilder, list: Int, index: TExpr, row: Int, span: Span) -> Int Never! {
-    position :: ir_expr(&m, &p, &b, index)
+fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, index: TExpr, row: Int, span: Span) -> Int Never! {
+    position :: ir_expr(&m, p, &b, index)
     if ir_failed(b) || position < 0 -> return -1
     native :: ir_native_index(&m, &b, position, span)
     if ir_failed(b) -> return -1

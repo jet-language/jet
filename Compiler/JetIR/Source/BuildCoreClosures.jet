@@ -83,12 +83,12 @@ fn ir_task_release_body(m: &IRModule, a: &IRBuilder) Never! {
 
 // A Core closure call by kind; the kinds other than `task`, `scope.guard`
 // and the transaction hooks are not built here.
-fn ir_core_closure_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, kind: TCoreClosureKind, span: Span) -> Int Never! {
+fn ir_core_closure_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: TCoreClosureKind, span: Span) -> Int Never! {
     if kind == {
-        .Spawn(group, site, label, executable) -> return ir_task_spawn(&m, &p, &b, ty, group, site, label ?? "", executable, span)
-        .Guard(executable) -> return ir_scope_guard(&m, &p, &b, ty, executable, span)
-        .OnCommit(handle_name, executable) -> return ir_transaction_hook(&m, &p, &b, handle_name, executable, true, span)
-        .OnRollback(handle_name, executable) -> return ir_transaction_hook(&m, &p, &b, handle_name, executable, false, span)
+        .Spawn(group, site, label, executable) -> return ir_task_spawn(&m, p, &b, ty, group, site, label ?? "", executable, span)
+        .Guard(executable) -> return ir_scope_guard(&m, p, &b, ty, executable, span)
+        .OnCommit(handle_name, executable) -> return ir_transaction_hook(&m, p, &b, handle_name, executable, true, span)
+        .OnRollback(handle_name, executable) -> return ir_transaction_hook(&m, p, &b, handle_name, executable, false, span)
         else -> return ir_fail_slot(&b, span, "Core closure call {ir_core_closure_name(kind)}")
     }
 }
@@ -108,13 +108,13 @@ fn ir_core_closure_name(kind: TCoreClosureKind) -> String Never! {
 // 3698-3727); the runtime takes the box over with its task.body
 // (lazy.callback) and task.release helpers and the result's descriptor
 // (Lower Tasks.jet:316 lower_task_spawn). A grouped spawn joins its group.
-fn ir_task_spawn(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, group: TExpr?, site: Int, label: String, executable: TLambda, span: Span) -> Int Never! {
-    task_ty :: ir_subst(p, ty)
+fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: TExpr?, site: Int, label: String, executable: TLambda, span: Span) -> Int Never! {
+    task_ty :: ir_subst(m, ty)
     element :: ir_task_element(task_ty) ?? return ir_fail_slot(&b, span, "spawn producing {ir_type_name(ty)}")
     task_row :: ir_value_type(&m, p, task_ty) ?? return ir_type_fail(&b, span, ty)
     group_slot := -1
     if group == .Val(group_value) {
-        group_slot = ir_expr(&m, &p, &b, group_value)
+        group_slot = ir_expr(&m, p, &b, group_value)
         if ir_failed(b) || group_slot < 0 -> return -1
     }
     int_row :: ir_type_row(&m, Type.Int) ?? 0
@@ -127,7 +127,7 @@ fn ir_task_spawn(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, group: TE
     checked.ret = if element == (Type.Named{name: "Unit"}) -> None else -> Val(element.copy())
     checked.failure_carrier = jet_codegen_failure_carrier_for_type(element)
     closure_ty :: jet_codegen_lambda_function_type(checked)
-    env :: ir_lambda(&m, &p, &b, closure_ty, checked, span)
+    env :: ir_lambda(&m, p, &b, closure_ty, checked, span)
     if ir_failed(b) || env < 0 -> return -1
     invoke_id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if invoke_id < 0 -> return -1
@@ -162,9 +162,9 @@ fn ir_task_spawn(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, group: TE
 
 // `core.mem.scope.guard(callback)`: the callback's closure box, reowned as
 // the ScopeGuard whose scope-end drop runs it (Lower Closures.jet:517).
-fn ir_scope_guard(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, executable: TLambda, span: Span) -> Int Never! {
+fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: TLambda, span: Span) -> Int Never! {
     closure_ty :: jet_codegen_lambda_function_type(executable)
-    env :: ir_lambda(&m, &p, &b, closure_ty, executable, span)
+    env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return -1
     guard_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     guard :: ir_fresh_temp(&m, &b, guard_row)
@@ -175,8 +175,8 @@ fn ir_scope_guard(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, executab
 
 // `^task.detach()`: the runtime takes the handle over and lets the task run
 // on unsupervised (Lower Tasks.jet:446).
-fn ir_task_detach(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, span: Span) -> Int Never! {
-    handle :: ir_expr(&m, &p, &b, receiver)
+fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, span: Span) -> Int Never! {
+    handle :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
     _ :: ir_runtime(&m, &b, "jet_rt_native_task_detach", [Int]{handle}, -1)
     ir_lazy_consumed(&m, &b, handle)
@@ -186,15 +186,15 @@ fn ir_task_detach(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, s
 // `^task.join()`: the runtime takes the handle over, waits for the task
 // and writes the body's outcome into the Result box (Lower Tasks.jet:455,
 // jet_rt_native_task_join without flattening).
-fn ir_task_join(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
-    result_ty :: ir_subst(p, ty)
+fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+    result_ty :: ir_subst(m, ty)
     err_ty := Type.Int
     if ir_untag(result_ty) == .Result(_, failure) {
         err_ty = failure
     } else {
         return ir_fail_slot(&b, span, "Task.join result {ir_type_name(ty)}")
     }
-    handle :: ir_expr(&m, &p, &b, receiver)
+    handle :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
     flatten :: ir_word_const(&m, &b, 0)
     boxed :: ir_task_outcome(&m, p, &b, "jet_rt_native_task_join", [Int]{handle, flatten}, result_ty, err_ty, span)

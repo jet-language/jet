@@ -141,7 +141,7 @@ fn ir_value_type(m: &IRModule, p: IRProgram, written: Type) -> Int? Never! {
 // out: one of them reached again through a pointer (an Option, Result or List
 // member) is already known to lay out; reached inline it has no finite size.
 fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Int? Never! {
-    ty :: ir_subst(p, written)
+    ty :: ir_subst(m, written)
     if ir_type_row(&m, ty) == .Val(row) -> return Val(row)
     if ir_shared_guard_editable(ty) == .Val(editable) {
         // An owned runtime permit with no Clone; which permit its drop
@@ -424,7 +424,7 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
         "JetTestSuite" -> [String]{"iteration", "result"}
         else -> { return None }
     }
-    declared :: ir_declared_field_type(p, ty, name) ?? return None
+    declared :: ir_declared_field_type(m, p, ty, name) ?? return None
     row :: ir_value_type(&m, p, declared) ?? return None
     kind :: m.types[row].kind
     if handle.runtime == "JetTestSuite" && kind != .Int -> return None
@@ -807,7 +807,7 @@ fn ir_word_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
 // being laid out does (the pointer breaks the cycle).
 fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
     if laying.len() > 0 {
-        if ir_nominal_name(ir_untag(ir_subst(p, written))) == .Val(name) {
+        if ir_nominal_name(ir_untag(ir_subst(m, written))) == .Val(name) {
             if ir_type_def(p, name) == .Val(row) {
                 at :: ir_laying_decl_at(laying, p.types[row].key)
                 if at >= 0 {
@@ -1174,7 +1174,7 @@ fn ir_struct_members(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRM
     // Memoized by the instance's arguments in the terms of the instance
     // being built, as its member types are laid out. A SharedGuard argument's
     // member row follows its read/edit tag, which the identity does not spell.
-    bound :: loop arg in args -> ir_subst(p, arg)
+    bound :: loop arg in args -> ir_subst(m, arg)
     memo :: ir_instance_identity(p.types[row].key, bound)
     if memo.contains("SharedGuard<") -> return ir_struct_members_in(&m, p, row, bound, [String]{}, true)
     if m.struct_members.get(memo) == .Val(known) -> return Val(known)
@@ -1297,7 +1297,7 @@ fn ir_route_member(op: TBinaryOp) -> String Never! {
 // exact Int `+ - *` and comparisons are IR ops (inline with a big-integer
 // spill); its other operators call their located Prelude route; a fixed
 // width with overflow checking (or a trapping op) calls jet_<w>_trap_<op>.
-fn ir_binary(m: &IRModule, p: &IRProgram, b: &IRBuilder, op: TBinaryOp, overflow: Bool, line: Int, left_ty: Type, left: Int, right: Int, right_ty: Type, span: Span) -> Int Never! {
+fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow: Bool, line: Int, left_ty: Type, left: Int, right: Int, right_ty: Type, span: Span) -> Int Never! {
     if left < 0 || right < 0 -> return ir_fail_slot(&b, span, "binary operator on Unit")
     kind :: ir_kind_of(m, b, left)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -1675,20 +1675,20 @@ fn ir_order_decide(m: &IRModule, b: &IRBuilder, below: Int, sign: Int, decided: 
 // runs only while every earlier one held, and each operand is evaluated
 // once. The right operand an open test keeps for the next comparison is
 // dropped on the arm that leaves the chain early.
-fn ir_compare_chain(m: &IRModule, p: &IRProgram, b: &IRBuilder, operands: [TExpr], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
+fn ir_compare_chain(m: &IRModule, p: IRProgram, b: &IRBuilder, operands: [TExpr], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
     if operators.len() == 0 || operands.len() != operators.len() + 1 -> return ir_fail_slot(&b, span, "comparison chain shape")
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     result :: ir_temp(&m, &b, bool_row)
     ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
-    left := ir_expr(&m, &p, &b, operands[0])
+    left := ir_expr(&m, p, &b, operands[0])
     if ir_failed(b) -> return -1
     held := [Int]{}
     loop (index, op) in operators {
         if index < hooks.len() && hooks[index] -> return ir_fail_slot(&b, span, "comparison chain hook")
-        right :: ir_expr(&m, &p, &b, operands[index + 1])
+        right :: ir_expr(&m, p, &b, operands[index + 1])
         if ir_failed(b) -> return -1
         site :: b.line
-        test :: ir_binary(&m, &p, &b, op, false, site, operands[index].ty, left, right, operands[index + 1].ty, span)
+        test :: ir_binary(&m, p, &b, op, false, site, operands[index].ty, left, right, operands[index + 1].ty, span)
         if ir_failed(b) -> return -1
         ir_release(&m, &b, left)
         if index + 1 == operators.len() {
@@ -1969,9 +1969,10 @@ fn ir_collect_unions(ty: Type, found: &[Type]) Never! {
 
 // The call argument `value` widened to the union `union_ty` (sema
 // widen_to_union).
-fn ir_widen_union(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, union_ty: Type, span: Span) -> Int Never! {
-    member_row :: ir_value_type(&m, p, ir_subst(p, value.ty)) ?? return ir_type_fail(&b, span, value.ty)
-    payload :: ir_value_as(&m, &p, &b, value, member_row, span)
+fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, union_ty: Type, span: Span) -> Int Never! {
+    subst_ty :: ir_subst(m, value.ty)
+    member_row :: ir_value_type(&m, p, subst_ty) ?? return ir_type_fail(&b, span, value.ty)
+    payload :: ir_value_as(&m, p, &b, value, member_row, span)
     if ir_failed(b) -> return -1
     ir_union_box(&m, p, &b, payload, value.ty, union_ty, span)
 }
@@ -1979,10 +1980,10 @@ fn ir_widen_union(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, unio
 // A new box of the structural enum of union `union_ty` holding `payload`
 // (of member type `member_ty`) as the variant that member's tag names.
 fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_ty: Type, union_ty: Type, span: Span) -> Int Never! {
-    target :: ir_untag(ir_subst(p, union_ty))
+    target :: ir_untag(ir_subst(m, union_ty))
     row :: ir_type_def(p, ir_union_key(target)) ?? return ir_fail_slot(&b, span, "union {ir_type_name(target)} without a definition")
     slot_type :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
-    member_tag :: type_union_member_tag(ir_untag(ir_subst(p, member_ty)))
+    member_tag :: type_union_member_tag(ir_untag(ir_subst(m, member_ty)))
     index :: ir_variant_index(p, row, member_tag) ?? return ir_fail_slot(&b, span, "{ir_type_name(member_ty)} is no member of {ir_type_name(target)}")
     members :: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
     size :: ir_enum_box_size(&m, p, row, [Type]{}) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
@@ -1997,7 +1998,7 @@ fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_
 // under the function carrier `success ! error`, its error converted as
 // `conversion` asks (codegen jet_codegen_lower_try_failure_conversion), then
 // the hop of a journey `site` (ir_journey_hop).
-fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conversion: TTryConvert, site: IRTrySite?, success: Type, error: Type, span: Span) -> Int Never! {
+fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conversion: TTryConvert, site: IRTrySite?, success: Type, error: Type, span: Span) -> Int Never! {
     source := Type.Int
     held :: m.types[b.f.slot_type[subject]].ty
     if ir_untag(held) == .Result(_, err) -> source = err.copy()
@@ -2014,7 +2015,7 @@ fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conv
     }
     if conversion == .NoConversion && !framed {
         if site == .Val(at) {
-            _ :: ir_journey_hop(&m, &p, &b, at, -1, false, span)
+            _ :: ir_journey_hop(&m, p, &b, at, -1, false, span)
         }
         return subject
     }
@@ -2032,7 +2033,7 @@ fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conv
         }
         .Typed(function_name, _, target) -> {
             row :: p.rows.get(function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
-            callee :: ir_function_id(&m, &p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
+            callee :: ir_function_id(&m, p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
             routine_return :: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(&b, span, "error conversion {function_name} without a result")
             returned_row :: ir_value_type(&m, p, routine_return) ?? return ir_type_fail(&b, span, routine_return)
             returned :: ir_fresh_temp(&m, &b, returned_row)
@@ -2076,7 +2077,7 @@ fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conv
         else -> return ir_fail_slot(&b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
     }
     if site == .Val(at) {
-        converted = ir_journey_hop(&m, &p, &b, at, converted, framed, span)
+        converted = ir_journey_hop(&m, p, &b, at, converted, framed, span)
         if ir_failed(b) -> return -1
     }
     ir_release(&m, &b, subject)
@@ -2211,7 +2212,7 @@ fn ir_carrier_type(ty: Type) -> Bool Never! {
 // arguments in the terms of the instance being built, as ir_struct_members
 // is (a SharedGuard argument's row follows its unspelled read/edit tag).
 fn ir_variant_members(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
-    bound :: loop arg in args -> ir_subst(p, arg)
+    bound :: loop arg in args -> ir_subst(m, arg)
     identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
     ir_variant_members_bound(&m, p, row, bound, identity, index)
 }
@@ -2269,7 +2270,7 @@ fn ir_variant_members_laid(m: &IRModule, p: IRProgram, row: Int, args: [Type], i
 // Lower lower_enum_box_size: the end of the widest variant, in whole words.
 // Memoized in m.enum_sizes by instance identity, as ir_variant_members is.
 fn ir_enum_box_size(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
-    bound :: loop arg in args -> ir_subst(p, arg)
+    bound :: loop arg in args -> ir_subst(m, arg)
     identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
     guarded :: identity.contains("SharedGuard<")
     if !guarded && m.enum_sizes.get(identity) == .Val(known) -> return Val(known)
@@ -2567,8 +2568,8 @@ fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int,
 
 // The declared type of member `name` of the struct or tuple type `ty` (in
 // the terms of a generic struct's instance).
-fn ir_declared_field_type(p: IRProgram, ty: Type, name: String) -> Type? Never! {
-    plain :: ir_untag(ir_subst(p, ty))
+fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> Type? Never! {
+    plain :: ir_untag(ir_subst(m, ty))
     if plain == .Tuple(fields) {
         loop field in fields {
             if field.name == name -> return Val(field.ty)
@@ -2589,7 +2590,7 @@ fn ir_declared_field_type(p: IRProgram, ty: Type, name: String) -> Type? Never! 
 // Numeric methods (codegen jet_codegen_lower_numeric_method; Lower
 // Convert.jet lower_convert_numeric / lower_convert_prelude).
 
-fn ir_numeric_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, span: Span) -> Int Never! {
+fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, span: Span) -> Int Never! {
     target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if operation == .CheckedIntToFixed(_, _, _, _) {
         // A sized literal that fits is the fixed word itself (Lower
@@ -2598,7 +2599,7 @@ fn ir_numeric_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, value)
         }
     }
-    value :: ir_expr(&m, &p, &b, receiver)
+    value :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || value < 0 -> return -1
     if operation == {
         .CastAs(_) -> return ir_numeric_cast(&m, p, &b, value, target, span)

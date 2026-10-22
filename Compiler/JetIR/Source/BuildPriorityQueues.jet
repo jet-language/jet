@@ -372,7 +372,8 @@ fn ir_priority_queue_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int
 fn ir_priority_queue_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operation: TBuiltinOp, subject: Int, operands: [Int], span: Span) -> Int Never! {
     if operation == .PriorityQueueFrom {
         if operands.len() != 1 -> return ir_fail_slot(&b, span, "PriorityQueue.from with {operands.len() - 1} arguments")
-        return ir_priority_queue_from(&m, p, &b, ir_subst(p, ty), subject, span)
+        subst_ty :: ir_subst(m, ty)
+        return ir_priority_queue_from(&m, p, &b, subst_ty, subject, span)
     }
     heap_row :: b.f.slot_type[subject]
     elem_row :: ir_priority_queue_row(&m, p, heap_row) ?? return ir_fail_slot(&b, span, "PriorityQueue builtin on {ir_type_name(m.types[heap_row].ty)}")

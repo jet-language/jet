@@ -18,7 +18,7 @@ fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction]) Never
 // scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
 // packed NUL-terminated copy freed after the call; the C result converts
 // back.
-fn ir_foreign_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
+fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
         return ir_fail_slot(&b, span, "foreign import requires a checked direct C scalar signature")
     }
@@ -43,7 +43,7 @@ fn ir_foreign_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, foreign: SemaChec
         param :: foreign.params[index]
         if param.variadic || param.convention == AccessConvention.Write || arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
         row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
-        value :: ir_value_as(&m, &p, &b, arg.value, row, span)
+        value :: ir_value_as(&m, p, &b, arg.value, row, span)
         if ir_failed(b) -> return -1
         if value < 0 -> return ir_fail_slot(&b, span, "Unit foreign C argument")
         &values.push(value)

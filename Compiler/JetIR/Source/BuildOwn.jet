@@ -712,9 +712,9 @@ fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // each part that closes, in declaration order), or only its parts when
 // `members_only` (the receiver of the type's own close method); -1 when
 // nothing in the value closes or its glue cannot be built.
-fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
+fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
     key :: if members_only -> "#close.members<{row}>" else -> "#close<{row}>"
-    known :: p.close_glue.get(key) ?? -3
+    known :: m.close_glue.get(key) ?? -3
     if known == -2 {
         ir_fail(&b, span, "close of {ir_type_name(m.types[row].ty)}")
         return -1
@@ -722,7 +722,7 @@ fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_o
     if known != -3 -> return known
     method :: if members_only -> -1 else -> ir_close_method(m, p, row)
     if method < 0 && !ir_close_parts_reach(&m, p, row) {
-        p.close_glue[key] = -1
+        m.close_glue[key] = -1
         return -1
     }
     id :: m.functions.len()
@@ -730,7 +730,7 @@ fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_o
     symbol :: "{b.f.symbol}__close{id}"
     &m.functions.push(ir_function_new("close", key, symbol, source_file, b.line))
     m.function_rows[key] = id
-    p.close_glue[key] = id
+    m.close_glue[key] = id
     a := ir_builder_new(m.functions[id].copy())
     a.line = b.line
     value :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
@@ -738,7 +738,7 @@ fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_o
         method_key :: p.functions[method].key.copy()
         generic :: p.functions[method].generic_params.len() > 0
         args :: if generic -> ir_row_args(m, row) else -> [Type]{}
-        callee :: ir_function_id(&m, &p, method_key, args) ?? -1
+        callee :: ir_function_id(&m, p, method_key, args) ?? -1
         if callee < 0 {
             ir_fail(&a, span, "the Close method of {ir_type_name(m.types[row].ty)}")
         } else {
@@ -746,12 +746,12 @@ fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_o
             ir_emit(&a.f, IROp.Call, -1, callee, start, 1, a.line)
         }
     } else {
-        ir_close_parts(&m, &p, &a, row, value, span)
+        ir_close_parts(&m, p, &a, row, value, span)
     }
     if a.error != "" {
         ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = ^a.f
-        p.close_glue[key] = -2
+        m.close_glue[key] = -2
         ir_fail(&b, span, a.error)
         return -1
     }
@@ -761,12 +761,12 @@ fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_o
 }
 
 // Closes each part of the value in `value` (type row `row`) that closes.
-fn ir_close_parts(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) Never! {
+fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) Never! {
     kind :: m.types[row].kind
     ty :: ir_untag(m.types[row].ty)
     if kind == .Aggregate {
         if ir_buffer_element(&m, p, row) == .Val(element) {
-            glue :: ir_close_glue(&m, &p, &b, element, false, span)
+            glue :: ir_close_glue(&m, p, &b, element, false, span)
             if glue < 0 -> return
             length :: ir_load_word(&m, &b, value, 0)
             data :: ir_load_word(&m, &b, value, 16)
@@ -788,7 +788,7 @@ fn ir_close_parts(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, value: I
         }
         members :: ir_inline_members(&m, p, row) ?? return
         loop member in members {
-            glue :: ir_close_glue(&m, &p, &b, member.ty, false, span)
+            glue :: ir_close_glue(&m, p, &b, member.ty, false, span)
             if glue < 0 -> next
             item :: ir_member_value(&m, &b, value, member)
             ir_close_call(&b, glue, item)
@@ -798,7 +798,7 @@ fn ir_close_parts(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, value: I
     if kind != .Pointer -> return
     if ty == .Option(inner) {
         inner_row :: ir_value_type(&m, p, inner) ?? return
-        glue :: ir_close_glue(&m, &p, &b, inner_row, false, span)
+        glue :: ir_close_glue(&m, p, &b, inner_row, false, span)
         if glue < 0 -> return
         some :: ir_option_is_some(&m, &b, value)
         ir_open_if(&b.f, some, b.line)
@@ -810,8 +810,8 @@ fn ir_close_parts(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, value: I
     if ty == .Result(ok, err) {
         ok_row :: ir_value_type(&m, p, ok) ?? return
         err_row :: ir_value_type(&m, p, err) ?? return
-        ok_glue :: ir_close_glue(&m, &p, &b, ok_row, false, span)
-        err_glue :: ir_close_glue(&m, &p, &b, err_row, false, span)
+        ok_glue :: ir_close_glue(&m, p, &b, ok_row, false, span)
+        err_glue :: ir_close_glue(&m, p, &b, err_row, false, span)
         if ok_glue < 0 && err_glue < 0 -> return
         is_ok :: ir_result_is_ok(&m, &b, value)
         ir_open_if(&b.f, is_ok, b.line)
@@ -837,7 +837,7 @@ fn ir_close_parts(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, value: I
             glues := [Int]{}
             closing := false
             loop member in members {
-                glue :: ir_close_glue(&m, &p, &b, member.ty, false, span)
+                glue :: ir_close_glue(&m, p, &b, member.ty, false, span)
                 &glues.push(glue)
                 if glue >= 0 -> closing = true
             }
@@ -862,10 +862,10 @@ fn ir_close_call(b: &IRBuilder, glue: Int, value: Int) Never! {
 }
 
 // Arms the close of the variable in `slot` when its value closes.
-fn ir_close_arm(m: &IRModule, p: &IRProgram, b: &IRBuilder, slot: Int, members_only: Bool, span: Span) Never! {
+fn ir_close_arm(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, members_only: Bool, span: Span) Never! {
     if slot < 0 -> return
     row :: b.f.slot_type[slot]
-    glue :: ir_close_glue(&m, &p, &b, row, members_only, span)
+    glue :: ir_close_glue(&m, p, &b, row, members_only, span)
     if glue < 0 -> return
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     armed :: ir_new_slot(&b, bool_row, IRSlotKind.Local, -1)

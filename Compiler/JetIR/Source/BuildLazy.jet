@@ -517,28 +517,28 @@ fn ir_lazy_symbol(symbol: String, source_ty: Type) -> Bool Never! {
 // A static Core call of an Iter route: its arguments as checked, without the
 // I64 narrowing of other Core operands (ir_lazy_route narrows counts). None
 // when `symbol` is not one.
-fn ir_lazy_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty: Type, args: [TExpr], span: Span) -> Int? Never! {
-    source_ty :: if args.len() > 0 -> ir_subst(p, args[0].ty) else -> Type.Named{name: "Unit"}
+fn ir_lazy_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: Type, args: [TExpr], span: Span) -> Int? Never! {
+    source_ty :: if args.len() > 0 -> ir_subst(m, args[0].ty) else -> Type.Named{name: "Unit"}
     if !ir_lazy_symbol(symbol, source_ty) -> return None
     operands := [Int]{}
     loop arg in args {
-        slot :: ir_expr(&m, &p, &b, arg)
+        slot :: ir_expr(&m, p, &b, arg)
         if ir_failed(b) -> return Val(-1)
         &operands.push(slot)
     }
-    Val(ir_lazy_route(&m, &p, &b, symbol, ty, operands, span))
+    Val(ir_lazy_route(&m, p, &b, symbol, ty, operands, span))
 }
 
 // An Iter route over evaluated operands, the source first (LazyIter.jet:370
 // lower_lazy_route, :529 lower_lazy_reduce, :836 lower_lazy_source_route).
 // Every route takes the source Iter over; other owned operands go by value
 // when fresh, borrowed ones are released afterwards.
-fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty: Type, operands: [Int], span: Span) -> Int Never! {
+fn ir_lazy_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: Type, operands: [Int], span: Span) -> Int Never! {
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     pointer_row :: ir_pointer_row(&m)
     word_row :: ir_word_row(&m)
     if symbol == "jet_iter_empty" || symbol == "jet_iter_indexes" || symbol == "jet_iter_enumerate" {
-        elem :: ir_iter_element(ir_subst(p, ty)) ?? return ir_fail_slot(&b, span, "Iter route {symbol} has no checked element type")
+        elem :: ir_iter_element(ir_subst(m, ty)) ?? return ir_fail_slot(&b, span, "Iter route {symbol} has no checked element type")
         meta :: ir_lazy_meta(&m, p, &b, elem, span)
         if meta < 0 -> return -1
         call_args := [Int]{}
@@ -569,7 +569,7 @@ fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty:
     if symbol == "jet_iter_from_vec" -> return ir_lazy_from_list(&m, p, &b, source, result_row, span)
     if symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" {
         if operands.len() != 2 -> return ir_fail_slot(&b, span, "String Iter source {symbol} has no checked separator")
-        elem :: ir_iter_element(ir_subst(p, ty)) ?? return ir_fail_slot(&b, span, "String Iter source {symbol} has no checked element type")
+        elem :: ir_iter_element(ir_subst(m, ty)) ?? return ir_fail_slot(&b, span, "String Iter source {symbol} has no checked element type")
         meta :: ir_lazy_meta(&m, p, &b, elem, span)
         if meta < 0 -> return -1
         out :: ir_runtime(&m, &b, ir_lazy_runtime_symbol(symbol), [Int]{source, operands[1], meta}, result_row)
@@ -595,7 +595,7 @@ fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty:
         list :: ir_list_empty(&m, &b, list_row)
         _ :: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{handle, list}, -1)
         ir_lazy_consumed(&m, &b, handle)
-        return ir_route(&m, &p, &b, symbol, [Int]{list}, [Bool]{true}, ty, span)
+        return ir_route(&m, p, &b, symbol, [Int]{list}, [Bool]{true}, ty, span)
     }
     if symbol == "jet_iter_to_list" || symbol == "jet_iter_collect" {
         out :: ir_list_empty(&m, &b, result_row)
@@ -622,7 +622,7 @@ fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty:
         }
     }
     if ir_lazy_nested(symbol) {
-        output :: ir_iter_element(ir_subst(p, ty)) ?? return ir_fail_slot(&b, span, "Iter adapter {symbol} has no checked output element")
+        output :: ir_iter_element(ir_subst(m, ty)) ?? return ir_fail_slot(&b, span, "Iter adapter {symbol} has no checked output element")
         output_meta :: ir_lazy_meta(&m, p, &b, output, span)
         if output_meta < 0 -> return -1
         &call_args.push(output_meta)
@@ -656,7 +656,7 @@ fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty:
             &call_args.push(ir_lazy_moved(&m, &b, operands[1]))
         }
     } else if collects {
-        result_ty :: ir_untag(ir_subst(p, ty))
+        result_ty :: ir_untag(ir_subst(m, ty))
         if result_ty == .Result(ok, err) {
             ok_meta :: ir_lazy_meta(&m, p, &b, ok, span)
             if ok_meta < 0 -> return -1
@@ -674,7 +674,7 @@ fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty:
         }
     } else if splits {
         fields := [TypeTupleField]{}
-        if ir_untag(ir_subst(p, ty)) == .Tuple(pair) -> fields = pair
+        if ir_untag(ir_subst(m, ty)) == .Tuple(pair) -> fields = pair
         members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, ty)
         if members.len() != 2 -> return ir_fail_slot(&b, span, "Iter split_at has no checked pair of Lists")
         size :: m.types[result_row].size
@@ -730,8 +730,8 @@ fn ir_lazy_closure_receiver(receiver_ty: Type, operation: TClosureOp) -> Bool Ne
 // lazy.callback and the output descriptor (LazyIter.jet:547
 // lower_lazy_closure_method, :871 lower_lazy_scan). An IR closure box is
 // never freed, so the adapter gets no release helper.
-fn ir_lazy_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
-    receiver_ty :: ir_subst(p, receiver.ty)
+fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
+    receiver_ty :: ir_subst(m, receiver.ty)
     route :: jet_codegen_closure_route(operation, receiver_ty)
     symbol :: route.symbol
     scans :: symbol == "jet_iter_scan"
@@ -740,20 +740,21 @@ fn ir_lazy_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, 
     expected :: if scans -> 2 else -> 1
     if args.len() != expected -> return ir_fail_slot(&b, span, "Iter closure adapter {symbol} has no single checked callback")
     closure_expr :: args[args.len() - 1]
-    closure_ty :: ir_subst(p, closure_expr.ty)
-    result_ty :: ir_subst(p, ty)
+    closure_ty :: ir_subst(m, closure_expr.ty)
+    result_ty :: ir_subst(m, ty)
     result_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, ty)
     pointer_row :: ir_pointer_row(&m)
-    source := ir_expr(&m, &p, &b, receiver)
+    source := ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || source < 0 -> return -1
     seed_slot := -1
     seed_meta := -1
     seed_moved := -1
     if scans {
-        seed :: ir_expr(&m, &p, &b, args[0])
+        seed :: ir_expr(&m, p, &b, args[0])
         if ir_failed(b) -> return -1
         seed_slot = ir_lazy_value_slot(&m, &b, seed)
-        seed_meta = ir_lazy_meta(&m, p, &b, ir_subst(p, args[0].ty), span)
+        subst_ty :: ir_subst(m, args[0].ty)
+        seed_meta = ir_lazy_meta(&m, p, &b, subst_ty, span)
         if seed_meta < 0 -> return -1
         seed_moved = ir_lazy_moved(&m, &b, seed)
     }
@@ -761,7 +762,7 @@ fn ir_lazy_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, 
         source = ir_lazy_from_list(&m, p, &b, source, pointer_row, span)
         if source < 0 -> return -1
     }
-    closure :: ir_expr(&m, &p, &b, closure_expr)
+    closure :: ir_expr(&m, p, &b, closure_expr)
     if ir_failed(b) || closure < 0 -> return -1
     id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if id < 0 -> return -1
@@ -811,11 +812,11 @@ fn ir_lazy_place(value: TExpr) -> TExpr Never! {
 // `&iter.next()`: the next item in an Option box, pulled through the shared
 // handle the variable keeps (LazyIter.jet:988 lower_lazy_call). The pull
 // changes the handle's state, not the owner's pointer: nothing is written back.
-fn ir_lazy_next(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+fn ir_lazy_next(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
     place :: ir_lazy_place(receiver)
-    if ir_iter_element(ir_subst(p, place.ty)) == None -> return ir_fail_slot(&b, span, "next on {ir_type_name(place.ty)}")
+    if ir_iter_element(ir_subst(m, place.ty)) == None -> return ir_fail_slot(&b, span, "next on {ir_type_name(place.ty)}")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    handle :: ir_expr(&m, &p, &b, place)
+    handle :: ir_expr(&m, p, &b, place)
     if ir_failed(b) || handle < 0 -> return -1
     out :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{handle}, row)
     ir_release(&m, &b, handle)
@@ -827,10 +828,10 @@ fn ir_lazy_next(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: 
 // owned binding of the loop's scope, dropped when the scope closes or the
 // function returns. Each step copies the current item into frame storage the
 // body borrows; the advance drops it.
-fn ir_lazy_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, body: [TStmt], span: Span) Never! {
-    element_ty :: ir_iter_element(ir_subst(p, collection.ty)) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection.ty)}")
+fn ir_lazy_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, body: [TStmt], span: Span) Never! {
+    element_ty :: ir_iter_element(ir_subst(m, collection.ty)) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection.ty)}")
     row :: ir_value_type(&m, p, element_ty) ?? return ir_fail(&b, span, "type {ir_type_name(element_ty)}")
-    source :: ir_expr(&m, &p, &b, collection)
+    source :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || source < 0 -> return
     pointer_row :: ir_pointer_row(&m)
     word_row :: ir_word_row(&m)
@@ -869,7 +870,7 @@ fn ir_lazy_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, vari
     } else if item >= 0 {
         &b.bindings.push(IRBinding{name: variable.name, slot: item})
     }
-    ir_stmts(&m, &p, &b, body)
+    ir_stmts(&m, p, &b, body)
     _ :: &b.loops.pop()
     ir_end(&b.f, b.line)
     _ :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_advance", [Int]{cursor}, -1)
@@ -889,7 +890,7 @@ fn ir_lazy_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, vari
 // over an owned copy of the value from its native slot, with the element
 // descriptor and the descriptor's drop role.
 fn ir_shared_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
-    shared_ty :: ir_subst(p, result)
+    shared_ty :: ir_subst(m, result)
     inner :: if ir_untag(shared_ty) == .Shared(value) -> value else -> { return ir_fail_slot(&b, span, "Shared.new producing {ir_type_name(result)}") }
     if inputs.len() != 1 || inputs[0] < 0 -> return ir_fail_slot(&b, span, "Shared.new with {inputs.len()} arguments")
     row :: ir_value_type(&m, p, shared_ty) ?? return ir_type_fail(&b, span, shared_ty)
@@ -909,10 +910,10 @@ fn ir_shared_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], resul
 // `shared.guard_read()` / `shared.guard_edit()` (Lower Transaction.jet
 // lower_shared_guard_new): the runtime takes the lock and hands back the
 // permit; the guard's checked read/edit provenance must match the method.
-fn ir_shared_guard(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, editable: Bool, span: Span) -> Int Never! {
+fn ir_shared_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, editable: Bool, span: Span) -> Int Never! {
     if ir_shared_guard_editable(ty) != Val((editable)) -> return ir_fail_slot(&b, span, "Shared guard acquisition without its checked read/edit provenance")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    shared :: ir_expr(&m, &p, &b, receiver)
+    shared :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || shared < 0 -> return -1
     guard :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_guard_edit" else -> "jet_rt_native_shared_guard_read", [Int]{shared}, row)
     ir_release(&m, &b, shared)
@@ -924,17 +925,17 @@ fn ir_shared_guard(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receive
 // takes the read lock and runs the closure through lazy.callback over the
 // cell's slot; the callback writes its owned result into `out`, an inline
 // result straight into its own frame storage.
-fn ir_shared_read(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, args: [TExpr], span: Span) -> Int Never! {
+fn ir_shared_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, args: [TExpr], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "shared.read with {args.len()} arguments")
-    closure_ty :: ir_subst(p, args[0].ty)
+    closure_ty :: ir_subst(m, args[0].ty)
     arity :: if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) -> params.len() else -> -1
     if arity != 1 -> return ir_fail_slot(&b, span, "shared.read callback {ir_type_name(closure_ty)}")
-    result_ty :: ir_subst(p, ty)
+    result_ty :: ir_subst(m, ty)
     unit :: ir_unit_type(result_ty) || ir_never_type(result_ty)
     row :: if unit -> -1 else -> ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, ty)
-    shared :: ir_expr(&m, &p, &b, receiver)
+    shared :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || shared < 0 -> return -1
-    closure :: ir_expr(&m, &p, &b, args[0])
+    closure :: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || closure < 0 -> return -1
     id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if id < 0 -> return -1
@@ -960,12 +961,12 @@ fn ir_shared_read(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver
 
 // `a.same(b)` over two `Shared<T>` handles (Lower Tasks.jet
 // lower_shared_same): one cell exactly when the handles are equal.
-fn ir_shared_same(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, other: TExpr, span: Span) -> Int Never! {
-    other_shared :: if ir_untag(ir_subst(p, other.ty)) == .Shared(_) -> true else -> false
+fn ir_shared_same(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, other: TExpr, span: Span) -> Int Never! {
+    other_shared :: if ir_untag(ir_subst(m, other.ty)) == .Shared(_) -> true else -> false
     if !other_shared -> return ir_fail_slot(&b, span, "Shared.same with {ir_type_name(other.ty)}")
-    left :: ir_expr(&m, &p, &b, receiver)
+    left :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || left < 0 -> return -1
-    right :: ir_expr(&m, &p, &b, other)
+    right :: ir_expr(&m, p, &b, other)
     if ir_failed(b) || right < 0 -> return -1
     same :: ir_bool_op(&m, &b, IROp.Eq, left, right)
     ir_release(&m, &b, left)
@@ -976,9 +977,9 @@ fn ir_shared_same(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, o
 // `guard.value` (Lower Transaction.jet lower_shared_guard_deref): the
 // permit's payload is the cell's slot, read in place (an aggregate is its
 // address); the guard keeps owning it.
-fn ir_shared_guard_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, guard: TExpr, span: Span) -> Int Never! {
+fn ir_shared_guard_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: TExpr, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    payload :: ir_shared_guard_payload(&m, &p, &b, guard, span)
+    payload :: ir_shared_guard_payload(&m, p, &b, guard, span)
     if payload < 0 -> return -1
     ir_load_at(&m, &b, payload, 0, row)
 }
@@ -987,9 +988,9 @@ fn ir_shared_guard_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, g
 // lower_shared_guard_payload): an edit permit's through
 // jet_rt_native_shared_edit_guard_edit, a read permit's through
 // jet_rt_native_shared_read_guard_deref. -1 with `b` failed on an error.
-fn ir_shared_guard_payload(m: &IRModule, p: &IRProgram, b: &IRBuilder, guard: TExpr, span: Span) -> Int Never! {
+fn ir_shared_guard_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: TExpr, span: Span) -> Int Never! {
     editable :: ir_shared_guard_editable(guard.ty) ?? return ir_fail_slot(&b, span, "Shared guard dereference without its checked read/edit provenance")
-    held :: ir_expr(&m, &p, &b, guard)
+    held :: ir_expr(&m, p, &b, guard)
     if ir_failed(b) || held < 0 -> return -1
     pointer_row :: ir_pointer_row(&m)
     payload :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_edit_guard_edit" else -> "jet_rt_native_shared_read_guard_deref", [Int]{held}, pointer_row)

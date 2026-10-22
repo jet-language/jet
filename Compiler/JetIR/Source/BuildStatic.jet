@@ -178,7 +178,7 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
 // An enum value (ir_comptime_enum): a payload-free enum's variant index, else
 // a box with the discriminant and each payload member.
 fn ir_static_enum(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_type: Int, variant: String, args: [TComptimeEnumArg]) -> IRStaticWord? Never! {
-    nominal :: ir_nominal_name(ir_untag(ir_subst(p, ty))) ?? return None
+    nominal :: ir_nominal_name(ir_untag(ir_subst(m, ty))) ?? return None
     row :: ir_type_def(p, nominal) ?? ir_enum_def(m, p, slot_type) ?? return None
     index :: ir_variant_index(p, row, variant) ?? return None
     if m.types[slot_type].kind != .Pointer {
@@ -249,7 +249,7 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
                     if member.name == field.name -> found = index
                 }
                 if found < 0 -> return false
-                field_ty :: ir_declared_field_type(p, ty, field.name) ?? return false
+                field_ty :: ir_declared_field_type(m, p, ty, field.name) ?? return false
                 if field.value == .Unit -> next
                 value_row :: ir_value_type(&m, p, field_ty) ?? return false
                 if !ir_static_member(&m, p, &s, object, offset, members[found], field_ty, value_row, field.value) -> return false
@@ -273,7 +273,7 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
         }
         .Bytes(bytes) -> {
             element_row := -1
-            if ir_untag(ir_subst(p, ty)) == .List(element) {
+            if ir_untag(ir_subst(m, ty)) == .List(element) {
                 element_row = ir_value_type(&m, p, element) ?? -1
             }
             if element_row < 0 || m.types[element_row].kind != .Word || m.types[element_row].size != 1 -> return false

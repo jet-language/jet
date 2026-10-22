@@ -227,7 +227,8 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
     symbol :: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
         if operands.len() != 1 -> return None
-        return Val(ir_set_from(&m, p, &b, ir_subst(p, ty), subject, span))
+        subst_ty :: ir_subst(m, ty)
+        return Val(ir_set_from(&m, p, &b, subst_ty, subject, span))
     }
     set_row :: b.f.slot_type[subject]
     shape :: ir_set_shape(&m, p, set_row) ?? return None
