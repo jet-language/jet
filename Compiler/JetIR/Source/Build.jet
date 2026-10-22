@@ -29,8 +29,9 @@ struct IRBuildResult {
 // when its scope ends (every other holder of the value has its own copy).
 // `symbol`: the checked symbol key of a variable that has one. `write`: an
 // aggregate write parameter (or receiver), whose slot addresses the caller's
-// storage, so a whole-value assignment writes there.
-struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false} }
+// storage, so a whole-value assignment writes there. `carrier`: the carrier
+// box slot a payload binding was read from (-1: none).
+struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false}, carrier: Int{-1} }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`.
@@ -576,7 +577,7 @@ fn ir_bind_pending(m: &IRModule, b: &IRBuilder) Never! {
         } else {
             ir_emit(&b.f, op, row.slot, row.subject, row.offset, -1, b.line)
         }
-        &b.bindings.push(IRBinding{name: row.name, slot: row.slot})
+        &b.bindings.push(IRBinding{name: row.name, slot: row.slot, carrier: if row.boxed -> -1 else -> row.subject})
     }
     b.pending = [IRPending]{}
 }

@@ -1178,6 +1178,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
 // `consume(x)` (codegen: a Drop of `^x`, a move to nowhere): the value's
 // cleanup runs now. An owned variable's binding stops owning it, so its
 // scope-end drop does not run a second time; a fresh value drops in place.
+// A payload binding moves out of its carrier box, which drops no payload.
 fn ir_drop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span: Span) -> Int Never! {
     if value.kind == .Local(local) {
         binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "drop of unknown local {local.name}")
@@ -1187,6 +1188,10 @@ fn ir_drop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span:
             ir_close_disarm(&b, binding.slot)
         }
         if !ir_has_drop(m, b, binding.slot) && binding.indirect < 0 -> return -1
+        if !binding.owned && binding.indirect < 0 && ir_payload_movable(m, p, b, binding.carrier) {
+            ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
+            return -1
+        }
         if !binding.owned || binding.indirect >= 0 -> return ir_fail_slot(&b, span, "drop of {local.name}, which the function does not own")
         ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
         loop index in 0..<b.bindings.len() {
@@ -1202,6 +1207,17 @@ fn ir_drop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span:
     ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     b.fresh[slot] = false
     return -1
+}
+
+// Whether a payload read from carrier box `carrier` (an Option, Result or
+// payload enum box, which has no drop of its own) may move out of it.
+fn ir_payload_movable(m: IRModule, p: IRProgram, b: IRBuilder, carrier: Int) -> Bool Never! {
+    if carrier < 0 || ir_has_drop(m, b, carrier) -> return false
+    ty :: m.types[b.f.slot_type[carrier]].ty
+    if ty == .Option(_) || ty == .Result(_, _) -> return true
+    name :: ir_nominal_name(ir_untag(ty)) ?? return false
+    row :: ir_type_def(p, name) ?? return false
+    p.types[row].kind == .Enum(_, _)
 }
 
 // `close(^x)` (codegen jet_codegen_lower_close): a Core file owner, an

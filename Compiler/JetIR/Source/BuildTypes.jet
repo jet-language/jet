@@ -112,7 +112,7 @@ fn ir_value_type(m: &IRModule, p: IRProgram, written: Type) -> Int? Never! {
     ir_value_type_in(&m, p, written, [String]{})
 }
 
-// ir_value_type while the structs `laying` (declaration keys) are being laid
+// ir_value_type while the structs `laying` (instance identities) are being laid
 // out: one of them reached again through a pointer (an Option, Result or List
 // member) is already known to lay out; reached inline it has no finite size.
 fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Int? Never! {
@@ -244,7 +244,7 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
 // kept in m.layouts by identity: m.layout_low is the lowest `laying` index a
 // short cut (ir_laying_touch) read while the result was computed.
 fn ir_struct_row(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], identity: String, laying: [String]) -> Int? Never! {
-    at :: ir_laying_at(laying, p.types[row].key)
+    at :: ir_laying_at(laying, identity)
     if at >= 0 {
         ir_laying_touch(&m, at)
         return None
@@ -269,10 +269,20 @@ fn ir_struct_row_laid(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Typ
     Val(ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
 }
 
-// The index of declaration key `key` in `laying`, -1 when absent.
-fn ir_laying_at(laying: [String], key: String) -> Int Never! {
+// The index of instance identity `identity` in `laying`, -1 when absent:
+// `Slot<Slot<Int>>` lays out its `Slot<Int>` member inline.
+fn ir_laying_at(laying: [String], identity: String) -> Int Never! {
     loop (index, laid) in laying {
-        if laid == key -> return index
+        if laid == identity -> return index
+    }
+    -1
+}
+
+// The index in `laying` of any instance of declaration `key`, -1 when
+// absent: a pointer to one breaks the cycle whatever its arguments.
+fn ir_laying_decl_at(laying: [String], key: String) -> Int Never! {
+    loop (index, laid) in laying {
+        if laid == key || laid.starts_with("{key}<") -> return index
     }
     -1
 }
@@ -338,7 +348,10 @@ fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Nev
     if found == .Val(row) && name != "Group" {
         definition :: p.types[row]
         native :: lower_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
-        core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/")
+        // A compiler-owned row (its key is its bare name) is no program
+        // type: Lower lower_runtime_handle_type takes a bare spelling's
+        // runtime row before any declaration.
+        core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/") || definition.key == definition.name
         // A bare spelling of a Core declaration is that declaration: both
         // spellings take the row its key does.
         owned_shape :: ir_record_schema(handle) || lower_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (lower_native_type(definition.key) != None || core_source_owns_type(definition.key)))
@@ -733,7 +746,7 @@ fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [Strin
     if laying.len() > 0 {
         if ir_nominal_name(ir_untag(ir_subst(p, written))) == .Val(name) {
             if ir_type_def(p, name) == .Val(row) {
-                at :: ir_laying_at(laying, p.types[row].key)
+                at :: ir_laying_decl_at(laying, p.types[row].key)
                 if at >= 0 {
                     ir_laying_touch(&m, at)
                     return true
@@ -1114,7 +1127,7 @@ fn ir_struct_members_in(m: &IRModule, p: IRProgram, row: Int, args: [Type], layi
     definition :: p.types[row]
     if definition.kind == .Struct(fields, _) {
         inner := laying
-        &inner.push(definition.key)
+        &inner.push(ir_instance_identity(definition.key, args))
         members := [IRMember]{}
         offset := 0
         loop field in fields {
@@ -1881,7 +1894,10 @@ fn ir_default_err(p: IRProgram, ty: Type) -> Bool Never! {
 // (JET_CODEGEN_COMPILER_OWNED_ENUMS), each plain Core enum leaf no program
 // type and no single loaded Core source declares, then `FieldError`, `Range`
 // and the carrier, Core and math records, each under its bare canonical key
-// unless a row already owns it.
+// unless a row already owns it. A program type spelling a record's leaf
+// keeps that bare spelling: the builder resolves names by leaf, and a bare
+// name in the declaring module is its own declaration (codegen
+// jet_codegen_find_source_nominal_identity looks in the module scope first).
 fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
     if types.len() == 0 -> return
     module_identity :: types[0].module_identity.copy()
@@ -1916,7 +1932,7 @@ fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
     loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
     loop record in JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
     loop name in records {
-        if declared.get(name) != None -> next
+        if declared.get(name) != None || program_names.get(name) != None -> next
         declared[name] = true
         fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
         &types.push(ir_compiler_owned_def(module_identity, name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}}))
