@@ -60,7 +60,8 @@ fn ir_build_tests(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef
     // The functions the harness's renders reached (a Printable impl).
     _ :: ir_build_queue(&m, p, &failures, built)
     ir_drop_glues(&m, p)
-    IRBuildResult{program: m, failures: failures}
+    roots :: ir_canon_roots(m)
+    IRBuildResult{program: ir_canonical(^m, roots), failures: failures}
 }
 
 // The package's `fn test(t: Test)`, when it has one: the project's test

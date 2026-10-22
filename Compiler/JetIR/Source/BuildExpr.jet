@@ -3678,7 +3678,8 @@ fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: TLambd
         }
     }
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("{b.f.name}.lambda{id}", "{b.f.key}#lambda@{span.start}", "{b.f.symbol}__lambda{id}", b.f.source_file, b.line))
+    lambda_key :: "{b.f.key}#lambda@{span.start}"
+    &m.functions.push(ir_function_new("{b.f.name}.lambda@{span.start}", lambda_key, "{b.f.symbol}__lambda_{ir_key_hash(lambda_key)}", b.f.source_file, b.line))
     &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)
@@ -3860,7 +3861,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         }
         target :: ir_function_id(&m, p, key, [Type]{}) ?? return ir_fail_slot(&b, span, "named function {function.name} as a value")
         adapter = m.functions.len()
-        &m.functions.push(ir_function_new("{function.name}.value", adapter_key, "{ir_symbol_name(function)}__value{adapter}", function.source_file, function.line))
+        &m.functions.push(ir_function_new("{function.name}.value", adapter_key, "{ir_symbol_name(function)}__value_{ir_key_hash(adapter_key)}", function.source_file, function.line))
         m.function_rows[adapter_key] = adapter
         a := ir_builder_new(m.functions[adapter].copy())
         a.line = function.line

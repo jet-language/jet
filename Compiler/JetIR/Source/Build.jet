@@ -388,7 +388,7 @@ fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) ->
     instance :: "{function.key}<{spelled.join(", ")}>"
     if m.instances.get(instance) == .Val(known) -> return Val(known)
     id :: m.functions.len()
-    &m.functions.push(ir_function_new(function.name, instance, "{ir_symbol_name(function)}__{id}", function.source_file, function.line))
+    &m.functions.push(ir_function_new(function.name, instance, "{ir_symbol_name(function)}__{ir_key_hash(instance)}", function.source_file, function.line))
     m.function_rows[instance] = id
     m.instances[instance] = id
     &m.queue.push(IRQueued{row: row, id: id, args: concrete})
@@ -482,7 +482,8 @@ fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplD
     // The functions the entry's error report reached (a Printable impl).
     _ :: ir_build_queue(&m, p, &failures, built)
     ir_drop_glues(&m, p)
-    IRBuildResult{program: m, failures: failures}
+    roots :: ir_canon_roots(m)
+    IRBuildResult{program: ir_canonical(^m, roots), failures: failures}
 }
 
 // The function the executable starts: `entry` itself when it takes nothing
@@ -566,7 +567,8 @@ fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef],
     }
     _ :: ir_build_queue(&m, p, &failures, 0)
     ir_drop_glues(&m, p)
-    IRBuildResult{program: m, failures: failures}
+    roots :: ir_canon_roots(m)
+    IRBuildResult{program: ir_canonical(^m, roots), failures: failures}
 }
 
 // Builds the queued functions from queue row `from` on; returns the queue's end.
@@ -740,7 +742,7 @@ fn ir_drop_binding(m: &IRModule, b: &IRBuilder, binding: IRBinding) Never! {
 fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
     if slot < 0 || b.fresh[slot] || !ir_has_drop(m, b, slot) -> return slot
     row :: b.f.slot_type[slot]
-    if m.types[row].kind == .Aggregate && m.types[row].drop == ir_drop_key(row) {
+    if m.types[row].kind == .Aggregate && m.types[row].drop == ir_drop_key(m, row) {
         if ir_movable_binding(b, slot) {
             ir_disown(&b, slot)
             b.fresh[slot] = true

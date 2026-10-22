@@ -96,7 +96,7 @@ fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int 
     shape :: ir_map_shape(&m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
     id :: m.functions.len()
     symbol :: if name == "map.find" -> "find" else if name == "map.set" -> "set" else if name == "map.get" -> "get" else if name == "map.remove" -> "remove" else -> "insert"
-    &m.functions.push(ir_function_new(name, key, "jet_ir_map_{symbol}_{id}", "", 0))
+    &m.functions.push(ir_function_new(name, key, "jet_ir_map_{symbol}_{ir_key_hash(key)}", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     map :: ir_new_slot(&a, map_row, IRSlotKind.Param, ir_intern_name(&m, "map"))

@@ -1,0 +1,205 @@
+// The canonical numbering of a built module: functions, type rows, names
+// and data rows renumbered by first use in a walk from the build's jobs, so
+// a row's number depends on what the program reaches and in what order the
+// jobs run, never on which module memo happened to intern it first. Rows
+// nothing reachable uses are dropped. The walk visits the job functions in
+// order, then each function it reached, in the order it reached them: a
+// function's slot types and names, then its instructions' operands in
+// order (IR.jet's operand table: ConstText/DataAddress a=data row,
+// ConstBigInt/CallRuntime a=name, Close b=name, Call/FunctionAddress
+// a=function); a type row reaches the module function its drop names, a
+// data row the rows its relocations name.
+
+use jet_foundation.[compiler_apply_order]
+
+struct IRCanon {
+    // functions[new] is the old id; function_new[old] the new one (-1: unreached).
+    functions: [Int]
+    function_new: [Int]
+    types: [Int]
+    type_new: [Int]
+    names: [Int]
+    name_new: [Int]
+    data: [Int]
+    data_new: [Int]
+}
+
+// Renumbers `built` canonically from the job functions `roots` (in job
+// order). The layout and build memos refer to old rows, so they start
+// empty; the key maps are rebuilt over the new rows.
+fn ir_canonical(built: ^IRModule, roots: [Int]) -> IRModule Never! {
+    m := ^built
+    c := IRCanon{functions: [Int]{}, function_new: [Int]{}, types: [Int]{}, type_new: [Int]{}, names: [Int]{}, name_new: [Int]{}, data: [Int]{}, data_new: [Int]{}}
+    loop _ in 0..<m.functions.len() -> &c.function_new.push(-1)
+    loop _ in 0..<m.types.len() -> &c.type_new.push(-1)
+    loop _ in 0..<m.names.len() -> &c.name_new.push(-1)
+    loop _ in 0..<m.data.len() -> &c.data_new.push(-1)
+    loop root in roots -> ir_canon_function(&c, root)
+    cursor := 0
+    loop cursor < c.functions.len() {
+        old :: c.functions[cursor]
+        ir_canon_scan(&c, m, m.functions[old])
+        cursor += 1
+    }
+    loop old in c.functions -> ir_canon_rewrite(c, &m.functions[old])
+    ir_canon_apply_functions(&m.functions, c.functions, c.function_new)
+    ir_canon_apply_types(&m, c.types, c.type_new)
+    ir_canon_apply_names(&m.names, c.names, c.name_new)
+    ir_canon_apply_data(&m.data, c.data, c.data_new)
+    relocs := [Int:[IRDataReloc]]{}
+    loop (old, words) in m.data_relocs {
+        row :: c.data_new[old]
+        if row < 0 -> next
+        relocs[row] = loop word in words -> IRDataReloc{offset: word.offset, target: c.data_new[word.target], addend: word.addend, text: word.text}
+    }
+    m.data_relocs = relocs
+    data_rows := [String:Int]{}
+    loop (key, old) in m.data_rows {
+        if c.data_new[old] >= 0 -> data_rows[key] = c.data_new[old]
+    }
+    m.data_rows = data_rows
+    function_rows := [String:Int]{}
+    loop (key, old) in m.function_rows {
+        if old >= 0 && c.function_new[old] >= 0 -> function_rows[key] = c.function_new[old]
+    }
+    m.function_rows = function_rows
+    type_rows := [String:Int]{}
+    loop (row, key) in m.type_keys -> type_rows[key] = row
+    m.type_rows = type_rows
+    name_rows := [String:Int]{}
+    loop (row, name) in m.names -> name_rows[name] = row
+    m.name_rows = name_rows
+    if m.entry >= 0 -> m.entry = c.function_new[m.entry]
+    m.constant_rows = [String:Int]{}
+    m.layouts = [String:Int]{}
+    m.layout_low = 0
+    m.struct_members = [String:[IRMember]]{}
+    m.variant_members = [String:[IRMember]]{}
+    m.enum_sizes = [String:Int]{}
+    m.handle_rows = [String:Int]{}
+    m.close_free = [Int:Bool]{}
+    m.scalar_rows = [Int]{}
+    m.ids = [Int]{}
+    m.instances = [String:Int]{}
+    m.queue = [IRQueued]{}
+    m.lambdas = [IRLambdaJob]{}
+    m.close_glue = [String:Int]{}
+    m
+}
+
+// The job functions of `m` in job order: its queue, then its entry.
+fn ir_canon_roots(m: IRModule) -> [Int] Never! {
+    roots := [Int]{}
+    loop queued in m.queue -> &roots.push(queued.id)
+    if m.entry >= 0 -> &roots.push(m.entry)
+    roots
+}
+
+fn ir_canon_function(c: &IRCanon, id: Int) Never! {
+    if id < 0 || c.function_new[id] >= 0 -> return
+    c.function_new[id] = c.functions.len()
+    &c.functions.push(id)
+}
+
+fn ir_canon_type(c: &IRCanon, m: IRModule, row: Int) Never! {
+    if row < 0 || c.type_new[row] >= 0 -> return
+    c.type_new[row] = c.types.len()
+    &c.types.push(row)
+    drop :: m.types[row].drop
+    if drop == "" -> return
+    glue :: m.function_rows.get(drop) ?? -1
+    ir_canon_function(&c, glue)
+}
+
+fn ir_canon_name(c: &IRCanon, name: Int) Never! {
+    if name < 0 || c.name_new[name] >= 0 -> return
+    c.name_new[name] = c.names.len()
+    &c.names.push(name)
+}
+
+fn ir_canon_data(c: &IRCanon, m: IRModule, row: Int) Never! {
+    if row < 0 || c.data_new[row] >= 0 -> return
+    c.data_new[row] = c.data.len()
+    &c.data.push(row)
+    if m.data_relocs.get(row) == .Val(words) {
+        loop word in words -> ir_canon_data(&c, m, word.target)
+    }
+}
+
+// Numbers what function `f` uses, in order.
+fn ir_canon_scan(c: &IRCanon, m: IRModule, f: IRFunction) Never! {
+    loop slot in 0..<f.slot_type.len() {
+        ir_canon_type(&c, m, f.slot_type[slot])
+        ir_canon_name(&c, f.slot_name[slot])
+    }
+    ir_canon_type(&c, m, f.result)
+    loop at in 0..<f.op.len() {
+        if f.op[at] == {
+            .ConstText | .DataAddress -> ir_canon_data(&c, m, f.a[at])
+            .ConstBigInt | .CallRuntime -> ir_canon_name(&c, f.a[at])
+            .Close -> ir_canon_name(&c, f.b[at])
+            .Call | .FunctionAddress -> ir_canon_function(&c, f.a[at])
+            else -> {}
+        }
+    }
+}
+
+// Rewrites a reached function's operands to the new numbers.
+fn ir_canon_rewrite(c: IRCanon, f: &IRFunction) Never! {
+    loop slot in 0..<f.slot_type.len() {
+        ty :: f.slot_type[slot]
+        if ty >= 0 -> f.slot_type[slot] = c.type_new[ty]
+        name :: f.slot_name[slot]
+        if name >= 0 -> f.slot_name[slot] = c.name_new[name]
+    }
+    if f.result >= 0 {
+        result :: c.type_new[f.result]
+        f.result = result
+    }
+    loop at in 0..<f.op.len() {
+        a :: f.a[at]
+        if f.op[at] == {
+            .ConstText | .DataAddress -> { if a >= 0 -> f.a[at] = c.data_new[a] }
+            .ConstBigInt | .CallRuntime -> { if a >= 0 -> f.a[at] = c.name_new[a] }
+            .Close -> {
+                name :: f.b[at]
+                if name >= 0 -> f.b[at] = c.name_new[name]
+            }
+            .Call | .FunctionAddress -> { if a >= 0 -> f.a[at] = c.function_new[a] }
+            else -> {}
+        }
+    }
+}
+
+// The full permutation that puts the reached rows `order` first (in the new
+// order) and every unreached row after them, in its old order.
+fn ir_canon_order(order: [Int], new: [Int]) -> [Int] Never! {
+    full := order.copy()
+    loop (old, row) in new {
+        if row < 0 -> &full.push(old)
+    }
+    full
+}
+
+fn ir_canon_apply_functions(rows: &[IRFunction], order: [Int], new: [Int]) Never! {
+    compiler_apply_order<IRFunction>(&rows, ir_canon_order(order, new))
+    loop rows.len() > order.len() -> _ := &rows.pop()
+}
+
+fn ir_canon_apply_types(m: &IRModule, order: [Int], new: [Int]) Never! {
+    full :: ir_canon_order(order, new)
+    compiler_apply_order<IRType>(&m.types, full)
+    compiler_apply_order<String>(&m.type_keys, full)
+    loop m.types.len() > order.len() -> _ := &m.types.pop()
+    loop m.type_keys.len() > order.len() -> _ := &m.type_keys.pop()
+}
+
+fn ir_canon_apply_names(rows: &[String], order: [Int], new: [Int]) Never! {
+    compiler_apply_order<String>(&rows, ir_canon_order(order, new))
+    loop rows.len() > order.len() -> _ := &rows.pop()
+}
+
+fn ir_canon_apply_data(rows: &[[U8]], order: [Int], new: [Int]) Never! {
+    compiler_apply_order<[U8]>(&rows, ir_canon_order(order, new))
+    loop rows.len() > order.len() -> _ := &rows.pop()
+}

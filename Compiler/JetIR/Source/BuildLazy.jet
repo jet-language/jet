@@ -146,7 +146,7 @@ fn ir_lazy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: T
         return known
     }
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("lazy.{role}", key, "jet_ir_lazy_{role}_{id}", "", 0))
+    &m.functions.push(ir_function_new("lazy.{role}", key, "jet_ir_lazy_{role}_{ir_key_hash(key)}", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     if role == "clone" {

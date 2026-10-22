@@ -93,14 +93,16 @@ fn ir_counted_entry(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
 }
 
 // The drop routine key of an aggregate type row: the module function its
-// glue is built as (ir_drop_glues).
-fn ir_drop_key(row: Int) -> String Never! {
-    "#drop<{row}>"
+// glue is built as (ir_drop_glues), named by the row's content key.
+fn ir_drop_key(m: IRModule, row: Int) -> String Never! {
+    "#drop<{ir_row_key(m, row)}>"
 }
 
 // `row`, a counted buffer header's row, drops through its glue.
 fn ir_mark_counted(m: &IRModule, row: Int) -> Int Never! {
-    if m.types[row].drop == "" -> m.types[row].drop = ir_drop_key(row)
+    if m.types[row].drop != "" -> return row
+    key :: ir_drop_key(m, row)
+    m.types[row].drop = key
     row
 }
 
@@ -120,7 +122,8 @@ fn ir_mark_members(m: &IRModule, row: Int, members: [IRMember]) -> Int Never! {
     if m.types[row].drop != "" -> return row
     loop member in members {
         if !member.boxed && ir_glue_drops(m, member.ty) {
-            m.types[row].drop = ir_drop_key(row)
+            key :: ir_drop_key(m, row)
+            m.types[row].drop = key
             return row
         }
     }
@@ -140,7 +143,8 @@ fn ir_box_share() -> String Never! { "#box.share" }
 // `row`, a box row, drops through its glue and copies by sharing.
 fn ir_mark_box(m: &IRModule, row: Int) -> Int Never! {
     if m.types[row].drop == "" {
-        m.types[row].drop = ir_drop_key(row)
+        key :: ir_drop_key(m, row)
+        m.types[row].drop = key
         m.types[row].clone = ir_box_share()
     }
     row
@@ -268,14 +272,13 @@ fn ir_box_drop_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int
 // a sole owner's comes back as is; a shared one is copied, the copy's
 // members gaining an owner, and the old box loses one.
 fn ir_box_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
-    helper_key :: "#box.unique<{row}>"
+    helper_key :: "#box.unique<{ir_row_key(m, row)}>"
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("unique", helper_key, "jet_ir_box_unique_{row}", b.f.source_file, b.line))
+    &m.functions.push(ir_function_new("unique", helper_key, "jet_ir_box_unique_{ir_key_hash(helper_key)}", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
-    a.line = b.line
     boxed :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "boxed"))
     a.f.result = row
     shapes :: ir_box_shapes(&m, p, row) ?? [IRBoxShape]{}
@@ -411,7 +414,7 @@ fn ir_drop_glues(m: &IRModule, p: IRProgram) Never! {
     row := 0
     loop row < m.types.len() {
         drop :: m.types[row].drop
-        if drop == ir_drop_key(row) && m.function_rows.get(drop) == None -> ir_drop_glue(&m, p, row)
+        if drop != "" && drop == ir_drop_key(m, row) && m.function_rows.get(drop) == None -> ir_drop_glue(&m, p, row)
         row += 1
     }
 }
@@ -421,9 +424,9 @@ fn ir_drop_glues(m: &IRModule, p: IRProgram) Never! {
 // tuple or struct drops each member dropped with it; a box's last owner
 // drops its active payload and frees it (ir_box_drop_body).
 fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
-    key :: ir_drop_key(row)
+    key :: ir_drop_key(m, row)
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("drop", key, "jet_ir_drop_{row}", "", 0))
+    &m.functions.push(ir_function_new("drop", key, "jet_ir_drop_{ir_key_hash(key)}", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
@@ -513,15 +516,14 @@ fn ir_make_unique(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never!
 // copy (capacity kept, or the length when frozen) whose elements gain an
 // owner, and the old buffer loses one.
 fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
-    helper_key :: "#unique<{row}>"
+    helper_key :: "#unique<{ir_row_key(m, row)}>"
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     entry :: ir_counted_entry(&m, p, row) ?? return -1
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("unique", helper_key, "jet_ir_unique_{row}", b.f.source_file, b.line))
+    &m.functions.push(ir_function_new("unique", helper_key, "jet_ir_unique_{ir_key_hash(helper_key)}", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
-    a.line = b.line
     header :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "header"))
     length :: ir_load_word(&m, &a, header, 0)
     capacity :: ir_load_word(&m, &a, header, 8)
@@ -609,16 +611,13 @@ fn ir_copy_fixup_at(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: I
 // row `row` storage of its own (built on first use; -1 when its body cannot
 // be built, which a later use builds again to report the same failure).
 fn ir_copy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
-    helper_key :: "#copy<{row}>"
+    helper_key :: "#copy<{ir_row_key(m, row)}>"
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    source_file :: b.f.source_file
-    symbol :: "{b.f.symbol}__copy{id}"
-    &m.functions.push(ir_function_new("copy", helper_key, symbol, source_file, b.line))
+    &m.functions.push(ir_function_new("copy", helper_key, "jet_ir_copy_{ir_key_hash(helper_key)}", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
-    a.line = b.line
     at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
     ir_copy_fixup_body(&m, p, &a, row, at)
     if a.error != "" {
@@ -713,7 +712,7 @@ fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // `members_only` (the receiver of the type's own close method); -1 when
 // nothing in the value closes or its glue cannot be built.
 fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
-    key :: if members_only -> "#close.members<{row}>" else -> "#close<{row}>"
+    key :: if members_only -> "#close.members<{ir_row_key(m, row)}>" else -> "#close<{ir_row_key(m, row)}>"
     known :: m.close_glue.get(key) ?? -3
     if known == -2 {
         ir_fail(&b, span, "close of {ir_type_name(m.types[row].ty)}")
@@ -726,13 +725,10 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
         return -1
     }
     id :: m.functions.len()
-    source_file :: b.f.source_file
-    symbol :: "{b.f.symbol}__close{id}"
-    &m.functions.push(ir_function_new("close", key, symbol, source_file, b.line))
+    &m.functions.push(ir_function_new("close", key, "jet_ir_close_{ir_key_hash(key)}", "", 0))
     m.function_rows[key] = id
     m.close_glue[key] = id
     a := ir_builder_new(m.functions[id].copy())
-    a.line = b.line
     value :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
     if method >= 0 {
         method_key :: p.functions[method].key.copy()
