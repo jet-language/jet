@@ -3270,10 +3270,11 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     loop state.deferred_view_opens.len() > deferred_before -> _ := &state.deferred_view_opens.pop()
     context.binding_initializer = previous_binding_initializer
     context.taskgroups.binding_name = previous_binding_name
-    init :: checked_init ?? {
+    checked_value :: checked_init ?? {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
+    init :: sema_stmt_owning_view_init(^checked_value, binding, environment, program, scopes, &context)
     if !sema_copy_site_check_guard_owned(init, environment, program, scopes, context, &diagnostics, false) {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
@@ -3341,6 +3342,29 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tir_promotion(promotion)) else -> None
     Val(TStmt.Let{local: local, let_ty: let_ty, init: view_init ?? init, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}})
+}
+
+// Rust `infer_owning_value` (`implicit_copy_target` over
+// `owned_type_for_read_view`): a `:=` binding, or a value `if` bound as a
+// non-view, owns its value, so a read-view initializer (`View<T>`,
+// `View<str>`) materializes one owned copy (`[T]`, `String`) under the
+// default copy policy. A binding declared `View`/`ViewMut` keeps the view.
+fn sema_stmt_owning_view_init(init: ^TExpr, binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: &SemaCheckContext) -> TExpr {
+    declared_view :: if binding.ty == .Val(.Apply(name, _)) -> name == "View" || name == "ViewMut" else -> false
+    value_if :: if binding.init == {
+        .If(_, _, _, _, _, _) -> true
+        .Paren(inner, _) -> inner == .If(_, _, _, _, _, _)
+        else -> false
+    }
+    if scopes.copies_explicit || declared_view || !(binding.mutable || value_if) -> return init
+    owned :: sema_copy_owned_view_type(init.ty, false)
+    if !owned.materialized -> return init
+    if binding.ty == .Val(declared) && !type_identity_equal(declared, owned.ty) -> return init
+    facts :: sema_copy_classify(init.ty, SemaCopyIntent.Materialize, environment, program, context.generic_params, true)
+    if !facts.accepted -> return init
+    if sema_copy_effect_name(facts) != None || sema_copy_memory_operation(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: init.span, facts: facts})
+    span :: init.span
+    sema_tir_node(facts.target, TExprKind.MaterializeView{value: init}, span)
 }
 
 // A `::` initializer that is a field or element projection of a name this

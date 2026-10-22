@@ -728,13 +728,30 @@ fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaR
 // Rust `struct_owner_module`'s tail: a bare type name the caller neither
 // declares nor imports names the one type declaration of that name, among the
 // loaded modules, that the caller can see. Two owners leave it unresolved. A
-// built-in typed head (`Path`, `URL`) never takes it, `Limits` is
-// `core.email`'s, and a parameterless Core alias outside the bare-owner and
-// root-type sets is skipped; an alias that re-exports a namespaced type of the
-// same leaf names that type's owner.
+// built-in typed head names its Core carrier record (`URL` in `core.net.url`,
+// `DateTime` in `core.time`) when that module is loaded, and no other owner;
+// `Limits` is `core.email`'s, and a parameterless Core alias outside the
+// bare-owner and root-type sets is skipped; an alias that re-exports a
+// namespaced type of the same leaf names that type's owner.
 fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     rows :: sema_registration_nominal_rows_named(graph, name)
-    if rows.len() == 0 || mir_typed_head_kind(Type.Named{name: name}) != None -> return None
+    if rows.len() == 0 -> return None
+    if mir_typed_head_kind(Type.Named{name: name}) != None {
+        carrier :: if {
+            name == "URL" -> "core.net.url"
+            name == "DateTime" -> "core.time"
+            else -> ""
+        }
+        if carrier == "" -> return None
+        loop row in rows {
+            carrier_row :: graph.modules[row.module_index]
+            if carrier_row.module_name != carrier || !carrier_row.module_identity.starts_with("<corelib>/") -> next
+            symbol :: carrier_row.nominals[row.row].symbol
+            if symbol.name != name -> next
+            return Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: carrier_row.module_identity, target_module_identity: carrier_row.module_identity, visibility: symbol.visibility, nominal_row: Val(row)})
+        }
+        return None
+    }
     caller_index :: sema_registration_module_index(graph, module_identity) ?? return None
     caller :: graph.modules[caller_index]
     found := SemaRegistrationRowRef?{None}

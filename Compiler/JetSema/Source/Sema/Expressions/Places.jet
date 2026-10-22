@@ -428,6 +428,18 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         module_constant :: sema_expression_module_constant(alias, member, span, expected, environment, program, &scopes, &context, &diagnostics)
         if module_constant.handled -> return module_constant.value
     }
+    // Rust `infer_field` (static-owner arm): `Type.member` on a declared
+    // struct reads no value. A typestate label is a compile-time fact, and
+    // any other member is not a static member of the struct.
+    if base == .Ident(type_name, _) {
+        owner :: sema_expression_type_symbol(&scopes, environment, program, type_name)
+        if owner == .Val(symbol) {
+            if sema_scope_declaration_struct_states(environment, program, symbol.id) == .Val(states) {
+                &diagnostics.push(sema_expression_struct_static_member_error(type_name, member, states, member_span))
+                return None
+            }
+        }
+    }
     // copy: the owner read is reported at the member name, so it checks the
     // place under that span; `field` itself spans the whole path. With no
     // live view the check cannot fail and reads nothing else, so it is skipped.
@@ -486,6 +498,13 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     // Lambda capture moves ask whether the captured field is a copy type.
     sema_ownership_note_place_type(&state, span, value.ty)
     Val(value)
+}
+
+fn sema_expression_struct_static_member_error(type_name: String, member: String, states: [String], span: Span) -> Diagnostic Never! {
+    loop state in states {
+        if state == member -> return sema_error("E0302", span, "`{type_name}.{member}` is not a value", "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values", "use a `{type_name}` value before a field, or call a static method on `{type_name}`")
+    }
+    sema_error("E0302", span, "`{type_name}` has no static member `{member}`", "`{type_name}` names a struct type; fields need a value before the dot", "use a `{type_name}` value before an instance field, or call a static method that exists on `{type_name}`")
 }
 
 // `alias.NAME` through a whole-module import `alias` (Rust `infer_field`:

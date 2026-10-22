@@ -167,21 +167,19 @@ fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, pro
     true
 }
 
-fn sema_call_core_require_imported_unsafe(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, required_module: String, operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    target :: sema_call_core_import_target(environment, program, alias)
-    if target == {
-        .Val(imported) -> {
-            if imported.module_name == required_module && sema_call_core_import_is_unshadowed(environment, program, scopes, imported) {
-                if !sema_call_core_record_import_reference(environment, program, scopes, imported, span, &context) -> return false
-                if context.unsafe_depth > 0 -> return true
-                &diagnostics.push(sema_error("E0510", span, "`{required_module}.{operation}` requires an audited `#Unsafe` region", "expert Core operations are available only inside an explicit audited boundary", "wrap the operation in `#Unsafe(\"reason\") {{ … }}`"))
-                return false
-            }
-        }
-        .None -> {}
+// Rust core_call expert policy: a raw `core.crypto.expert` primitive, or a
+// `core.crypto.vault` key-material operation other than the safe `get`,
+// runs only inside an audited `#Unsafe` region. The call already resolved
+// through the module's import, so the region is the remaining gate.
+fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: Span, context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    if context.unsafe_depth > 0 -> return
+    if module_name == "core.crypto.expert" {
+        &diagnostics.push(sema_error("E0510", span, "`core.crypto.expert.{member}` requires an audited `#Unsafe` region", "raw crypto primitives may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"crypto expert: …\") {{ … }}` or use `crypto.seal`/`open` instead"))
+        return
     }
-    &diagnostics.push(sema_error("E0510", span, "`{required_module}.{operation}` requires its exact module import", "expert Core operations must resolve through the registered module alias", "import `{required_module}` and call it through that alias inside `#Unsafe(\"reason\") {{ … }}`"))
-    false
+    if module_name == "core.crypto.vault" && member != "get" {
+        &diagnostics.push(sema_error("E0510", span, "`{module_name}.{member}` requires an audited `#Unsafe` region", "raw key import may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"vault key import: …\") {{ … }}`"))
+    }
 }
 
 fn sema_call_core_source_target(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, member: String, type_args: [Type], span: Span, registered_source_target: Bool, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {

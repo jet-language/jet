@@ -1183,6 +1183,30 @@ fn sema_call_declared_method_names(receiver: Type, environment: SemaScopeEnviron
     names
 }
 
+// Whether a nominal receiver declares `method` as a static method (no `self`
+// receiver) in its own or impl blocks.
+fn sema_call_declares_static_method(receiver: Type, method: String, program: SemaProgramTables) -> Bool Never! {
+    base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
+    if program.registration_graph == .Val(graph) {
+        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+            loop owner_index in owner_modules {
+                loop implementation in graph.modules[owner_index].impls {
+                    if implementation.target_type_name != base_name -> next
+                    loop function in implementation.methods {
+                        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") -> return true
+                    }
+                }
+            }
+        }
+        loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+            loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") -> return true
+            }
+        }
+    }
+    false
+}
+
 fn sema_call_local_method_names(environment: SemaScopeEnvironment, owner: String) -> [String] Never! {
     names := [String]{}
     loop declaration_index in 0..<environment.declarations.len() {
@@ -1284,6 +1308,8 @@ fn sema_call_missing_method_diagnostic(receiver: Type, method: String, actual: I
     }
     if type_name_value == "" -> return sema_call_missing_instance_method(method, ty, "this value does not expose an instance method named `{method}`", span, environment, program)
     display :: sema_call_method_leaf(type_name_value)
+    // Rust `infer_method_call`: a static method named through a value.
+    if sema_call_declares_static_method(nominal, method, program) -> return sema_error("E0311", span, "`{method}` is a static method on `{display}`", "static methods belong to the type name, not a value", "write `{display}.{method}(...)` instead")
     if sema_call_is_iter_receiver(ty) && method == "nth" -> return sema_error("E0102", span, "`{display}` has no method `{method}`", "positional picks on `Iter` use one consuming path", "use `.skip(n).first()`; `nth` is not part of the API")
     if sema_call_is_iter_receiver(ty) {
         element :: sema_collection_receiver_element(ty) ?? Type.Int

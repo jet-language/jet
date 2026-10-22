@@ -2836,6 +2836,28 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         else -> {}
     }
     trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
+    // Rust `validate_trait_impl` (E0906): every trait method without a default
+    // body appears in the impl. A `using` delegation forwards them instead, and
+    // a generated codec writes its own.
+    if implementation.declaration.delegation_field == None && !implementation.declaration.is_generated_serde {
+        missing := [String]{}
+        loop required_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
+            if graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.default_body != None -> next
+            required_name :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.name
+            provided := false
+            loop actual in implementation.methods {
+                if actual.declaration.name == required_name {
+                    provided = true
+                    break
+                }
+            }
+            if !provided -> &missing.push("`{required_name}`")
+        }
+        if missing.len() > 0 {
+            listed :: missing.join(", ")
+            &diagnostics.push(sema_error("E0906", implementation.declaration.type_span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
+        }
+    }
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {

@@ -1541,7 +1541,13 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {
             &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
         }
-        return sema_call_core_check_fixed(environment, program, "core.net.url", "literal", [Type]{}, args, span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
+        // `core.net.url.literal` is declared `-> URL Never!`; the head yields its
+        // success value exactly as the automatic `Never!` propagation of a call.
+        url := sema_call_core_check_fixed(environment, program, "core.net.url", "literal", [Type]{}, args, span, None, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if sema_expr_unwrap_tag(url.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
+            url = sema_expression_propagated(url, TTryConvert.Never, span) ?? return None
+        }
+        return sema_expr_expected(url, expected, environment, program, &diagnostics)
     }
     result := sema_tir_node(head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
     if kind == MIRTypedHeadKind.HTML && checked.holes.len() == 0 {
@@ -1854,10 +1860,24 @@ fn sema_expression_typed_literal_fixed_conversion(source: Type, head: Type) -> B
 }
 
 // `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's
-// expected carrier, as in Rust's typed-literal inference.
+// expected carrier, as in Rust's typed-literal inference; `I8{200}` /
+// `I8{-129}`: a fixed-width head is a bare integer literal's carrier, so the
+// literal is range-checked against it.
 // `through_binary = false`: bare/signed decimals contextualize, but compound
 // numeric syntax keeps its operand types (ScalarConversionFixtures.jet).
 fn sema_expression_typed_literal_value_needs_head(value: Expr, head: Type) -> Bool Never! {
     if sema_expression_list_element_needs_expected_type(value) -> return true
+    if head == .IntN(_, _) {
+        if sema_expression_typed_literal_integer_literal(value) -> return true
+    }
     sema_expr_decimal_literal_operand(value, false) && sema_expr_expects_machine_float(Val(head))
+}
+
+fn sema_expression_typed_literal_integer_literal(value: Expr) -> Bool Never! {
+    if value == {
+        .Int(_, _, _, _) -> true
+        .Paren(inner, _) -> sema_expression_typed_literal_integer_literal(inner)
+        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expression_typed_literal_integer_literal(inner)
+        else -> false
+    }
 }

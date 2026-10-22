@@ -1984,6 +1984,29 @@ fn sema_scope_nominal_struct(graph: SemaRegistrationGraph, module_index: Int, ro
     None
 }
 
+// The labels of a struct declaration's `state { … }` section (empty when it
+// has none); none when sema_scope_resolve_declaration(environment, id) is not
+// a struct.
+fn sema_scope_declaration_struct_states(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+    if site == .Local(index) -> return sema_scope_item_struct_states(environment.declarations[index].item)
+    if site == .Nominal(module_index, row) {
+        if program.registration_graph == .Val(graph) {
+            if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_struct_states(item)
+        }
+    }
+    None
+}
+
+fn sema_scope_item_struct_states(item: Item) -> [String]? {
+    if item == .Struct(definition) {
+        declared :: definition.state ?? return Val([String]{})
+        labels :: loop member in declared.states -> member.name
+        return Val(labels)
+    }
+    None
+}
+
 // An enum declaration's type parameters, variants and variant groups, without
 // its methods.
 struct SemaScopeEnumShape {

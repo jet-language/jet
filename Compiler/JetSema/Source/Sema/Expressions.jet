@@ -183,7 +183,10 @@ fn sema_expr_numeric_widening_to(source: Type, target: Type) -> Bool? {
     if source_bounds != None && target_bounds != None {
         source_range :: source_bounds ?? SemaIntegerRange{lo: 0, hi: 0}
         target_range :: target_bounds ?? SemaIntegerRange{lo: 0, hi: 0}
-        return Val(target_range.lo <= source_range.lo && source_range.hi <= target_range.hi)
+        // Interval containment is the only fixed-width widening; a pair that
+        // neither contains has no join (`U8` and `I8`).
+        if target_range.lo <= source_range.lo && source_range.hi <= target_range.hi -> return Val(false)
+        return None
     }
     if source != source_base {
         if type_identity_equal(source_base, target) -> return Val(false)
@@ -1977,10 +1980,14 @@ fn sema_expr_integer_fits(value: Int, signed: Bool, bits: Int) -> Bool Never! {
     value >= bounds.lo && value <= bounds.hi
 }
 
-fn sema_expr_integer_range_error(value: Int, signed: Bool, bits: Int, span: Span, diagnostics: &[Diagnostic]) {
+// Rust `int_range_error`: an integer literal outside its fixed width. `U8`
+// keeps its byte-framed reason; the other widths get the general one.
+fn sema_expr_integer_range_error(signed: Bool, bits: Int, span: Span, diagnostics: &[Diagnostic]) {
     bounds :: sema_expr_integer_range(signed, bits)
-    ty_name :: type_name(Type.IntN{signed: signed, bits: bits})
-    &diagnostics.push(sema_error("E1003", span, "{value} does not fit exactly in {ty_name}", "{ty_name} holds every whole number only from {bounds.lo} through {bounds.hi}", "use a whole-number type, or write a value from {bounds.lo} through {bounds.hi}"))
+    spelling :: type_name(Type.IntN{signed: signed, bits: bits})
+    article :: if signed -> "an" else -> "a"
+    why :: if !signed && bits == 8 -> "binary APIs use one byte per value" else -> "{article} `{spelling}` is a fixed-width number — values outside its range can't fit"
+    &diagnostics.push(sema_error("E1003", span, "{article} `{spelling}` holds {bounds.lo}..{bounds.hi}", why, "use a number from {bounds.lo} through {bounds.hi}"))
 }
 
 // The token's i64 field is only a fast path. An integer literal's
@@ -2087,7 +2094,7 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
     if ty == {
         .IntN(signed, bits) -> {
             if !sema_expr_integer_fits(value, signed, bits) {
-                sema_expr_integer_range_error(value, signed, bits, span, &diagnostics)
+                sema_expr_integer_range_error(signed, bits, span, &diagnostics)
                 return None
             }
         }
@@ -2097,7 +2104,8 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
     sema_expr_expected(bounded, expected, environment, program, &diagnostics)
 }
 
-fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+// `literal_span` is the written numeral's own span, where a range error points.
+fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?, span: Span, literal_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if expected != None {
         contextual_expected :: expected
         if contextual_expected == Type.Float || contextual_expected == Type.Float32 -> return None
@@ -2123,10 +2131,15 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
     if ty == {
         .IntN(signed, bits) -> {
             if !sema_expr_integer_fits(negated, signed, bits) {
-                sema_expr_integer_range_error(negated, signed, bits, span, &diagnostics)
+                sema_expr_integer_range_error(signed, bits, literal_span, &diagnostics)
                 return None
             }
-            if !sema_expr_integer_fits(value, signed, bits) -> return None
+            // The width's minimum has no positive operand to negate (`I8{-128}`):
+            // it is one exact literal.
+            if !sema_expr_integer_fits(value, signed, bits) {
+                minimum :: sema_expr_int_literal_tir(negated, ty, tir_width, span, environment, program) ?? return None
+                return sema_expr_expected(minimum, expected, environment, program, &diagnostics)
+            }
         }
         else -> {}
     }
@@ -2898,6 +2911,9 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
     nested :: path.leaves.len() > 0
     guard := sema_call_try_scope_guard(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if guard.handled -> return SemaMethodSpecialCheck{handled: true, value: guard.value}
+    mount := sema_call_try_ui_mount(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if mount.handled -> return SemaMethodSpecialCheck{handled: true, value: mount.value}
+    sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
@@ -2967,6 +2983,8 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
         }
         data := sema_call_try_data_literal(Type.Named{name: owner}, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if data.handled -> return data
+        html := sema_call_try_html_raw(owner, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if html.handled -> return html
     }
 
     game := sema_call_try_game_static(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2996,6 +3014,13 @@ fn sema_expr_try_hardware_pre_receiver(receiver: Expr, method: String, args: [Ca
 }
 
 fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // Rust `infer_method_call`: a secret-bearing crypto value is move-only and
+    // exposes no clone, encode, hash, debug or display method.
+    if sema_call_reflection_secret_bearing(receiver_value.ty) && (method == "clone" || method == "encode" || method == "hash" || method == "debug" || method == "display") {
+        &diagnostics.push(sema_error("E0311", span, "`{method}` is forbidden on secret-bearing `{type_name(receiver_value.ty)}`", "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display operation", "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `#Unsafe` region when raw bytes are required"))
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     debug := sema_call_try_debug_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &diagnostics)
     if debug.handled -> return debug
     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3515,7 +3540,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
 
 fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if op == UnOp.Neg {
-        if operand == .Int(value, _, width, raw) -> return sema_expr_negative_integer(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, program, &diagnostics)
+        if operand == .Int(value, literal_span, width, raw) -> return sema_expr_negative_integer(sema_expr_exact_integer_literal(value, raw), width, expected, span, literal_span, environment, program, &diagnostics)
         // `-1.5` is one exact Decimal literal; the sign folds into its
         // spelling unless a Float carrier is expected. Transparent
         // parentheses keep the same literal: `-(2.5)` is `-2.5`.

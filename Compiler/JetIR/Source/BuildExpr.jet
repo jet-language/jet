@@ -1042,6 +1042,15 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
                 ir_emit(&b.f, IROp.Not, slot, value, -1, -1, b.line)
                 return slot
             }
+            if kind == .Word {
+                // Fixed-width negation is the checked `0 - v` (Lower
+                // lower_unary): it stops on signed MIN or a nonzero unsigned
+                // operand with the subtraction's overflow message.
+                zero :: ir_const_like(&m, &b, value, 0)
+                slot :: ir_temp_like(&m, &b, value)
+                ir_emit(&b.f, IROp.Sub, slot, zero, value, IR_OVERFLOW_TRAP, b.line)
+                return slot
+            }
             if kind != .Int && kind != .Float && kind != .Float32 -> return ir_fail_slot(&b, span, "negation of {ir_type_name(operand.ty)}")
             slot :: if kind == .Int -> ir_fresh_like(&m, &b, value) else -> ir_temp_like(&m, &b, value)
             ir_emit(&b.f, IROp.Neg, slot, value, -1, IR_OVERFLOW_TRAP, b.line)
