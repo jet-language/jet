@@ -674,6 +674,7 @@ fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             return wrote
         }
         .TryMap -> return ir_closure_try_map(&m, p, &b, ty, list, element, callback, args[args.len() - 1].ty, span)
+        .TryFilter -> return ir_closure_try_filter(&m, p, &b, ty, list, element, callback, args[args.len() - 1].ty, span)
         .GroupBy -> return ir_closure_group_by(&m, p, &b, result_row, list, element, callback, span)
         else -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)}")
     }
@@ -1150,6 +1151,59 @@ fn ir_closure_try_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list:
     clean :: ir_is_null(&m, &b, result)
     ir_open_if(&b.f, clean, b.line)
     success :: ir_result_box(&m, p, &b, ty, true, output)
+    ir_emit(&b.f, IROp.Copy, result, success, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// `xs.try_filter(f)` (Lower lower_closure_try_filter): copies of the
+// elements whose verdict is Ok(true), in order; the first Err stops, drops
+// the kept prefix and becomes the result's Err.
+fn ir_closure_try_filter(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, callback: Int, closure_ty: Type, span: Span) -> Int Never! {
+    kept_ty := Type.Int
+    err_ty := Type.Int
+    if ir_untag(ty) == .Result(ok, err) {
+        kept_ty = ok
+        err_ty = err
+    } else {
+        return ir_fail_slot(&b, span, "try_filter result is not a Result")
+    }
+    ret :: ir_closure_result(closure_ty) ?? return ir_fail_slot(&b, span, "try_filter callback has no checked single-input type")
+    if !ir_is_result(ret) -> return ir_fail_slot(&b, span, "try_filter callback does not return a Result")
+    ret_row :: ir_value_type(&m, p, ret) ?? return ir_type_fail(&b, span, ret)
+    kept_row :: ir_value_type(&m, p, kept_ty) ?? return ir_type_fail(&b, span, kept_ty)
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    kept :: ir_list_empty(&m, &b, kept_row)
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    shell_bytes :: ir_result_box_bytes(&m, p, ret)
+    shell :: ir_word_const(&m, &b, shell_bytes)
+    zero :: ir_word_const(&m, &b, 0)
+    walk :: ir_walk_open(&m, &b, list, element)
+    called :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, ret_row)
+    b.fresh[called] = false
+    selector :: ir_load_word(&m, &b, called, 0)
+    failed :: ir_bool_op(&m, &b, IROp.Eq, selector, zero)
+    ir_open_if(&b.f, failed, b.line)
+    error :: ir_load_at(&m, &b, called, 8, err_row)
+    if error >= 0 -> b.fresh[error] = true
+    failure :: ir_result_box(&m, p, &b, ty, false, error)
+    ir_emit(&b.f, IROp.Copy, result, failure, -1, -1, b.line)
+    ir_free(&m, &b, called, shell)
+    if ir_has_drop(m, b, kept) -> ir_emit(&b.f, IROp.Drop, -1, kept, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    keep :: ir_load_at(&m, &b, called, 8, bool_row)
+    ir_free(&m, &b, called, shell)
+    ir_open_if(&b.f, keep, b.line)
+    ir_list_push(&m, &b, kept, element, walk.item)
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+    clean :: ir_is_null(&m, &b, result)
+    ir_open_if(&b.f, clean, b.line)
+    success :: ir_result_box(&m, p, &b, ty, true, kept)
     ir_emit(&b.f, IROp.Copy, result, success, -1, -1, b.line)
     ir_end(&b.f, b.line)
     result
