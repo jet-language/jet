@@ -1,4 +1,7 @@
 // Checked struct and enum construction expressions.
+use core.net.url as boundary_url
+use core.text as boundary_unicode
+use core.time as boundary_time
 use jet_foundation.[
     AccessConvention,
     ByteTextPart,
@@ -1386,7 +1389,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHead
     Val(SemaExpressionTypedTextParts{literals: literals, holes: holes, trusted_html: trusted_html})
 }
 
-fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [StrPart], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [StrPart], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     name := if kind == {
         .URL -> "URL"
         .Path -> "Path"
@@ -1413,20 +1416,103 @@ fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [Str
             }
         }
     }
-    if program.registration_graph == None -> panic("boundary literal checking has no canonical registration graph")
-    // A check on a compiler thread records that it wanted the validator and
-    // is checked again where the callbacks live.
-    if sema_host_hooks_withheld(context.host_hooks) {
-        _ := sema_host_hook_callbacks(context.host_hooks)
-        return true
-    }
-    hooks :: sema_host_hook_callbacks(context.host_hooks) ?? panic("canonical Prelude boundary literal validator is not installed")
-    validate :: hooks.typed_boundary_literal_validate ?? panic("canonical Prelude boundary literal validator is not installed")
-    if validate(kind, literals) == .Val(reason) {
+    if sema_expression_boundary_literal_reason(kind, literals) == .Val(reason) {
         &diagnostics.push(sema_error("E0155", span, "this `{name}` literal is invalid", reason, "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"))
         return false
     }
     true
+}
+
+// Why the literal text of a typed boundary head is invalid, or None when it
+// is valid. URL and DateTime use the same Core parsers that build the value
+// at runtime, so a literal accepted here never fails there.
+fn sema_expression_boundary_literal_reason(kind: MIRTypedHeadKind, literals: [String]) -> String? {
+    if kind == {
+        .URL -> sema_expression_url_literal_reason(literals)
+        .Path -> {
+            loop text in literals {
+                loop byte in text.bytes() {
+                    if byte == (U8{0}) -> return Val("a Path cannot contain a NUL character")
+                }
+            }
+            None
+        }
+        .DateTime -> {
+            _ :: boundary_time.parse_rfc3339(literals.join("")) ?? return Val(err.reason)
+            None
+        }
+        else -> Val("typed head is not a checked boundary head")
+    }
+}
+
+// The URL skeleton joins the literal pieces with a marker that occurs in none
+// of them (as `core.net.url.literal` does), so scheme and port holes are
+// found structurally and the rest parses with the Core URL grammar.
+fn sema_expression_url_literal_reason(literals: [String]) -> String? {
+    if literals.len() == 0 -> return Val("URL literal needs a quoted body")
+    nonce := 0
+    marker := "jet-hole-opaque-0-"
+    loop sema_expression_any_contains(literals, marker) {
+        nonce += 1
+        marker = "jet-hole-opaque-{nonce}-"
+    }
+    skeleton :: boundary_unicode.trim(literals.join(marker))
+    colon :: skeleton.find(":")
+    if colon < 0 -> return sema_expression_url_skeleton_reason(skeleton)
+    length :: skeleton.bytes().len()
+    scheme :: sema_expression_bytes_text(skeleton, 0, colon)
+    if scheme.contains(marker) -> return Val("URL scheme cannot contain interpolation")
+    rest :: sema_expression_bytes_text(skeleton, colon + 1, length)
+    if scheme.lower() == "data" {
+        data_body := rest
+        data_stops :: [String]{"?", "#"}
+        loop stop in data_stops {
+            end :: data_body.find(stop)
+            if end >= 0 -> data_body = sema_expression_bytes_text(data_body, 0, end)
+        }
+        comma :: data_body.find(",")
+        if comma >= 0 && sema_expression_bytes_text(data_body, 0, comma).contains(marker) -> return Val("data URL MIME metadata cannot contain interpolation")
+        if comma < 0 && data_body.contains(marker) -> return Val("data URL payload needs a MIME separator")
+    }
+    if rest.starts_with("//") {
+        authority := sema_expression_bytes_text(rest, 2, rest.bytes().len())
+        authority_stops :: [String]{"/", "?", "#"}
+        loop stop in authority_stops {
+            end :: authority.find(stop)
+            if end >= 0 -> authority = sema_expression_bytes_text(authority, 0, end)
+        }
+        at :: authority.rfind("@")
+        host_port :: if at >= 0 -> sema_expression_bytes_text(authority, at + 1, authority.bytes().len()) else -> authority
+        host_end :: host_port.bytes().len()
+        bracket :: host_port.find("]")
+        port := ""
+        if bracket >= 0 {
+            suffix :: sema_expression_bytes_text(host_port, bracket + 1, host_end)
+            if suffix.starts_with(":") -> port = suffix
+        } else {
+            port_colon :: host_port.rfind(":")
+            if port_colon >= 0 -> port = sema_expression_bytes_text(host_port, port_colon + 1, host_end)
+        }
+        if port.contains(marker) -> return Val("URL port cannot contain interpolation")
+    }
+    sema_expression_url_skeleton_reason(skeleton)
+}
+
+fn sema_expression_any_contains(texts: [String], needle: String) -> Bool {
+    loop text in texts {
+        if text.contains(needle) -> return true
+    }
+    false
+}
+
+// The bytes of `text` in `start..<end`.
+fn sema_expression_bytes_text(text: String, start: Int, end: Int) -> String {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
+
+fn sema_expression_url_skeleton_reason(skeleton: String) -> String? {
+    _ :: boundary_url.parse_recipe(skeleton, false) ?? return Val("the text is not a valid URL ({err})")
+    None
 }
 
 fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1437,7 +1523,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
             return None
         }
     }
-    if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), environment, program, context, &diagnostics) -> return None
+    if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), &diagnostics) -> return None
     if kind == MIRTypedHeadKind.DateTime {
         argument :: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         constructor :: Expr.MethodCall{

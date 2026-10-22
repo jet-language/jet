@@ -1874,7 +1874,6 @@ fn emit_bootstrap_native_compile_entry(
     let request_host_hooks = symbols.field_symbol("JetEvalConfig", "host_hooks")?;
     let host_hooks_type = symbols.type_symbol("SemaRegistrationHostHooks")?;
     let hook_numeric = symbols.field_symbol("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
-    let hook_boundary = symbols.field_symbol("SemaRegistrationHostHooks", "typed_boundary_literal_validate")?;
     let host_field = symbols.field_binding("JetEvalConfig", "host_adapter")?;
     let numeric_field = symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
     let entry_id = entry.function.0.to_string();
@@ -2157,7 +2156,6 @@ pub fn __jet_bootstrap_compile_with_native(
         __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_HOST_HOOKS__ =
             crate::jet_std::JetShared::new(__HOOKS_TYPE__ {
                 __HOOK_NUMERIC__: Ok(__jet_bootstrap_native_numeric_wrapper_for_adapter(&__jet_native_adapter)?),
-                __HOOK_BOUNDARY__: Err(jet_foundation::Outcome::JetAbsent),
             });
         __jet_runtime_config = Some(__RUNTIME_CONFIG__(&__jet_request.__REQUEST_EVAL_CONFIG__));
         // RUST-EXIT: dies at cutover (ExecHostEntry6 seam)
@@ -2228,7 +2226,6 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__REQUEST_HOST_HOOKS__", request_host_hooks)
         .replace("__HOOKS_TYPE__", host_hooks_type)
         .replace("__HOOK_NUMERIC__", hook_numeric)
-        .replace("__HOOK_BOUNDARY__", hook_boundary)
         .replace("__RUNTIME_CONFIG__", runtime_config_symbol)
         .replace("__CORE_SEED_SPLICE__", core_seed_splice)
         .replace("__FACTORY_SYMBOL__", &entry.symbol);

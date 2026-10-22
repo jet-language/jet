@@ -81,7 +81,7 @@ fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaReg
 }
 
 fn method_wave_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cached: [SemaComptimeFunctionResult]) -> SemaGraphResult {
-    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None, None)
 }
@@ -181,7 +181,7 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
         boxed_edges: ^environment.boxed_edges,
     }
     environment.registration_graph = None
-    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
     scopes := sema_check_module_summary_scopes(&environment, &program, sema_host_hook_access(hooks), memory_plan, 0, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
     jobs := [SemaBodyJob]{}
     loop nominal_index in 0..<graph.modules[0].nominals.len() {
@@ -231,7 +231,7 @@ fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_compti
     work := 0
     loop weight in weights -> work += weight
     method_wave_require(compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, graph.modules[0].program.items.len() * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0) == 2, "real method wave admits two threads")
-    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
     cached :: if use_comptime -> method_wave_comptime_rows(graph, hooks, negative) else -> [SemaComptimeFunctionResult]{}
     single :: method_wave_checked(graph, compiler_threads_single(), cached)
     parallel :: method_wave_checked(graph, threads, cached)
@@ -249,7 +249,7 @@ fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_compti
 }
 
 fn method_wave_cached_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cache: SemaIncrementalCache) -> SemaGraphResult {
-    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, Val(cache), None)
 }
