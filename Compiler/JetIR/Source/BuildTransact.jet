@@ -107,7 +107,7 @@ fn ir_transact(m: &IRModule, p: &IRProgram, b: &IRBuilder, handle: TLocal?, snap
         ir_emit(&b.f, IROp.Store, -1, boxed, 0, zero, b.line)
         ir_emit(&b.f, IROp.Store, -1, boxed, 8, zero, b.line)
         ir_emit(&b.f, IROp.Store, -1, boxed, 16, zero, b.line)
-        ir_bind_local(&m, &b, local, boxed)
+        ir_bind_local(&m, p, &b, local, boxed)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction {local.name} without its binding")
         handle_slot = binding.slot
     }
@@ -116,7 +116,7 @@ fn ir_transact(m: &IRModule, p: &IRProgram, b: &IRBuilder, handle: TLocal?, snap
         stm_row :: ir_stm_row(&m)
         state :: ir_runtime(&m, &b, "jet_rt_native_stm_begin", [Int]{}, stm_row)
         local :: tir_generated_local("jet_stm_{b.f.slot_type.len()}", span)
-        ir_bind_local(&m, &b, local, state)
+        ir_bind_local(&m, p, &b, local, state)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction Stm without its binding")
         stm_slot = binding.slot
     }
@@ -179,7 +179,7 @@ fn ir_tx_snapshot(m: &IRModule, p: &IRProgram, b: &IRBuilder, snapshot: TTransac
         return None
     }
     saved :: tir_generated_local("jet_txn_snapshot_{value}", span)
-    ir_bind_local(&m, &b, saved, value)
+    ir_bind_local(&m, p, &b, saved, value)
     Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: snapshot.rollback_type, restore: snapshot.restore_method})
 }
 
@@ -248,8 +248,14 @@ fn ir_return_slot(m: &IRModule, p: &IRProgram, b: &IRBuilder, slot: Int, span: S
     if ir_failed(b) -> return
     kept := slot
     if b.transactions.len() > 0 && slot >= 0 && !b.fresh[slot] && ir_kind_of(m, b, slot) != .Aggregate {
-        kept = ir_temp_like(&m, &b, slot)
-        ir_emit(&b.f, IROp.Copy, kept, slot, -1, -1, b.line)
+        if ir_box_row(m, b.f.slot_type[slot]) {
+            // A box's copy is one more owner (its Copy only aliases).
+            slot_row :: b.f.slot_type[slot]
+            kept = ir_clone(&m, &b, slot, slot_row)
+        } else {
+            kept = ir_temp_like(&m, &b, slot)
+            ir_emit(&b.f, IROp.Copy, kept, slot, -1, -1, b.line)
+        }
     }
     ir_tx_unwind(&m, &p, &b, 0, span)
     ir_emit_return(&m, &b, kept)

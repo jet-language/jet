@@ -18,6 +18,29 @@ fn jet_eval_ir_runtime(m: IRModule, s: &JetEvalIRState, symbol: String, args: [I
             if !jet_eval_ir_move_bytes(&s, args[0], args[1], args[2]) -> return None
             return Val(0)
         }
+        // Buffer owner counts (Refcount.jet): a buffer missing from `owners`
+        // has one owner. A release reports whether it was the last; the
+        // buffer's bytes then stay until the region ends.
+        "jet_rt_block_retain" -> {
+            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            s.owners[args[0]] = (s.owners.get(args[0]) ?? 1) + 1
+            return Val(0)
+        }
+        "jet_rt_block_release" -> {
+            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            count :: s.owners.get(args[0]) ?? 1
+            if count <= 1 -> return Val(1)
+            s.owners[args[0]] = count - 1
+            return Val(0)
+        }
+        "jet_rt_block_unique" -> {
+            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            return Val(if (s.owners.get(args[0]) ?? 1) <= 1 -> 1 else -> 0)
+        }
+        "jet_rt_free" -> {
+            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
+            return Val(0)
+        }
         "jet_rt_string_builder_new" -> {
             index :: s.builders.len()
             &s.builders.push([U8]{})

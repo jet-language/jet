@@ -91,8 +91,8 @@ fn ir_trait_box(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, target
     key :: ir_word_const(&m, &b, payload_key)
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, key, b.line)
     if slot >= 0 {
-        owned :: ir_own(&m, &b, slot)
-        ir_store_at(&m, &b, boxed, 8, owned)
+        owned :: ir_own(&m, p, &b, slot)
+        ir_store_at(&m, p, &b, boxed, 8, owned)
     }
     b.fresh[boxed] = true
     boxed

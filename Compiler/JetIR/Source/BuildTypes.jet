@@ -131,18 +131,21 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         // A box pointer, null when absent (Lower LowerRepr.Boxed); its payload
         // lies at offset 0.
         if !ir_pointee_lays_out(&m, p, inner, laying) -> return None
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+        boxed :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_box(&m, boxed))
     }
     if ty == .Result(ok, err) {
         // A box pointer: selector word at 0 (Ok 1, Err 0), payload at 8.
         if !ir_pointee_lays_out(&m, p, ok, laying) || !ir_pointee_lays_out(&m, p, err, laying) -> return None
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+        boxed :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_box(&m, boxed))
     }
     if ty == .List(element) {
         // The address of an inline header: len at 0, cap at 8, element data
         // at 16 (Lower Lists.jet); cap 0 is a frozen buffer.
         if !ir_pointee_lays_out(&m, p, element, laying) -> return None
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_counted(&m, interned))
     }
     if ty == .Map(_, _, _) -> return ir_map_row(&m, p, ty, laying)
     if ty == .Fn(_, _, _, _, _, _) {
@@ -158,13 +161,15 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
     if ty == .Tuple(fields) {
         members :: ir_tuple_members_in(&m, p, fields, laying) ?? return None
         size :: ir_struct_size(m, members)
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_members(&m, interned, members))
     }
     if ty == .Union(_) {
         // A box of its structural enum (Lower LowerRepr.Boxed), one payload
         // per member (ir_add_union_types).
         row :: ir_type_def(p, ir_union_key(ty)) ?? return None
-        return Val(ir_intern_type(&m, "enum:{p.types[row].key}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+        boxed :: ir_intern_type(&m, "enum:{p.types[row].key}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_box(&m, boxed))
     }
     if ir_string_view(ty) -> return ir_type_row(&m, Type.String)
     if ir_view_element(ty) == .Val(element) {
@@ -190,14 +195,16 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         // 8, entry data at 16; its element is a map key.
         key :: ir_value_type_in(&m, p, element, laying) ?? return None
         if ir_map_key_kind(m, key) == "" -> return None
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_counted(&m, interned))
     }
     if ir_priority_queue_element(ty) == .Val(element) {
         // The List header over the heap (Lower PriorityQueues.jet): len at 0,
         // cap at 8, element data at 16; its element needs a native order.
         heap_element :: ir_value_type_in(&m, p, element, laying) ?? return None
         if ir_map_key_kind(m, heap_element) == "" -> return None
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_counted(&m, interned))
     }
     if ir_task_element(ty) != None -> return Val(ir_task_row(&m, ty))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
@@ -226,7 +233,8 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
                 if variant.payload != .Unit {
                     // A heap box: discriminant word at 0, the variant's
                     // payload members from 8 (Lower Values.jet lower_variant_members).
-                    return Val(ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+                    boxed :: ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+                    return Val(ir_mark_box(&m, boxed))
                 }
             }
             return Val(ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "")))
@@ -266,7 +274,8 @@ fn ir_struct_row(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], i
 fn ir_struct_row_laid(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], identity: String, laying: [String]) -> Int? Never! {
     members :: ir_struct_members_in(&m, p, row, args, laying, false) ?? return None
     size :: ir_struct_size(m, members)
-    Val(ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
+    interned :: ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, ""))
+    Val(ir_mark_members(&m, interned, members))
 }
 
 // The index of instance identity `identity` in `laying`, -1 when absent:
@@ -350,7 +359,10 @@ fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Nev
         native :: lower_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
         // A compiler-owned row (its key is its bare name) is no program
         // type: Lower lower_runtime_handle_type takes a bare spelling's
-        // runtime row before any declaration.
+        // runtime row before any declaration. The canonical Dyn enum is the
+        // exception: it is declared in place and routes convert it to the
+        // runtime tree (Lower Dyn.jet lower_dyn_type).
+        if ir_dyn_def(p, ty) != None -> return None
         core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/") || definition.key == definition.name
         // A bare spelling of a Core declaration is that declaration: both
         // spellings take the row its key does.
@@ -411,9 +423,23 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
     symbol :: "jet_rt_handle_field_{runtime_abi_atom(handle.runtime)}_{runtime_abi_atom(name)}"
     pointer_row :: ir_pointer_row(&m)
     view := -1
-    if lent.kind == "Text" || lent.header_bytes > 0 {
+    if lent.kind == "Text" {
+        // The lent header shares the handle's buffer and has no count word
+        // in front of it, so the read is a fresh copy of its bytes rather
+        // than a retain.
         out :: ir_temp(&m, &b, pointer_row)
-        ir_emit(&b.f, IROp.StackAddress, out, if lent.kind == "Text" -> 24 else -> lent.header_bytes, 8, -1, b.line)
+        ir_emit(&b.f, IROp.StackAddress, out, 24, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, symbol, [Int]{base, out}, -1)
+        word_row :: ir_word_row(&m)
+        data :: ir_load_at(&m, &b, out, 0, word_row)
+        len :: ir_load_at(&m, &b, out, 8, word_row)
+        copied :: ir_runtime(&m, &b, "jet_rt_string_from_static", [Int]{data, len}, row)
+        ir_release(&m, &b, base)
+        return copied
+    }
+    if lent.header_bytes > 0 {
+        out :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, out, lent.header_bytes, 8, -1, b.line)
         _ :: ir_runtime(&m, &b, symbol, [Int]{base, out}, -1)
         view = ir_temp(&m, &b, row)
         ir_emit(&b.f, if kind == .Aggregate -> IROp.Offset else -> IROp.Copy, view, out, if kind == .Aggregate -> 0 else -> -1, -1, b.line)
@@ -424,7 +450,8 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
         view = ir_runtime(&m, &b, symbol, [Int]{base}, row)
         b.fresh[view] = false
     }
-    copied :: ir_copy_value(&m, p, &b, view, span)
+    // The runtime lends the field's storage, so a List gets a buffer of its own.
+    copied :: if kind == .Aggregate && ir_list_element(&m, p, b, view) == .Val(element) -> ir_list_clone(&m, p, &b, view, element, row) else -> ir_copy_value(&m, p, &b, view, span)
     ir_release(&m, &b, base)
     copied
 }
@@ -708,7 +735,7 @@ fn ir_record_load_value(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, 
         return ir_record_in(&m, p, &a, ty, nested, base, offset, span)
     }
     value :: ir_runtime(&m, &a, getter, [Int]{handle}, row)
-    ir_store_at(&m, &a, base, offset, value)
+    ir_store_at(&m, p, &a, base, offset, value)
 }
 
 // Whether type row `row` is a runtime handle (ir_handle_row).
@@ -1926,7 +1953,7 @@ fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_
     boxed :: ir_box_alloc(&m, &b, size, slot_type)
     tag_word :: ir_word_const(&m, &b, index)
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, tag_word, b.line)
-    if payload >= 0 && members.len() == 1 -> ir_member_store(&m, &b, boxed, members[0], payload)
+    if payload >= 0 && members.len() == 1 -> ir_member_store(&m, p, &b, boxed, members[0], payload)
     boxed
 }
 
@@ -1957,7 +1984,7 @@ fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conv
     }
     source_row :: ir_value_type(&m, p, source) ?? return ir_type_fail(&b, span, source)
     error_value :: ir_load_at(&m, &b, subject, 8, source_row)
-    payload :: ir_own(&m, &b, error_value)
+    payload :: ir_own(&m, p, &b, error_value)
     converted := -1
     if conversion == {
         .NoConversion -> converted = payload
@@ -1980,7 +2007,7 @@ fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conv
             if ir_untag(routine_return) == .Result(_, _) {
                 target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
                 converted_value :: ir_load_at(&m, &b, returned, 8, target_row)
-                converted = ir_own(&m, &b, converted_value)
+                converted = ir_own(&m, p, &b, converted_value)
                 b.fresh[converted] = true
                 ir_release(&m, &b, returned)
             }
@@ -2331,7 +2358,12 @@ fn ir_list_stride(m: IRModule, row: Int) -> Int Never! {
 // The element type row of a List slot (a Map's entry tuple: a Map is the
 // List of its entries, BuildMaps.jet).
 fn ir_list_element(m: &IRModule, p: IRProgram, b: IRBuilder, list: Int) -> Int? Never! {
-    ty :: m.types[b.f.slot_type[list]].ty
+    ir_list_element_of(&m, p, b.f.slot_type[list])
+}
+
+// The element type row of the List type row `list_row`.
+fn ir_list_element_of(m: &IRModule, p: IRProgram, list_row: Int) -> Int? Never! {
+    ty :: m.types[list_row].ty
     if ir_untag(ty) == .List(element) -> return ir_value_type(&m, p, element)
     if ir_view_element(ty) == .Val(element) -> return ir_value_type(&m, p, element)
     if ir_map_entry_type(ty) == .Val(entry) -> return ir_value_type(&m, p, entry)

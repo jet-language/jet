@@ -31,8 +31,10 @@ struct IRBuildResult {
 // `symbol`: the checked symbol key of a variable that has one. `write`: an
 // aggregate write parameter (or receiver), whose slot addresses the caller's
 // storage, so a whole-value assignment writes there. `carrier`: the carrier
-// box slot a payload binding was read from (-1: none).
-struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false}, carrier: Int{-1} }
+// box slot a payload binding was read from (-1: none). `live`: for an owned
+// variable some paths moved and others kept, the Bool slot that holds
+// whether it still holds its value (-1: it does wherever it owns it).
+struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false}, carrier: Int{-1}, live: Int{-1} }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`.
@@ -82,6 +84,9 @@ struct IRBuilder {
     // The open contract scopes (innermost last) whose `post` clauses a
     // return checks.
     contracts: [IRContractFrame]
+    // The variable slot an explicit move (`^x`) just read (-1: none): that
+    // read moves even where a plain read of the variable would share.
+    moving: Int{-1}
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
@@ -482,6 +487,7 @@ fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplD
     m.entry = ir_entry_function(&m, &p, entry, &failures)
     // The functions the entry's error report reached (a Printable impl).
     _ :: ir_build_queue(&m, &p, &failures, built)
+    ir_drop_glues(&m, p)
     IRBuildResult{program: m, failures: failures}
 }
 
@@ -565,6 +571,7 @@ fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef],
         _ :: ir_function_id(&m, &p, key, [Type]{})
     }
     _ :: ir_build_queue(&m, &p, &failures, 0)
+    ir_drop_glues(&m, p)
     IRBuildResult{program: m, failures: failures}
 }
 
@@ -622,20 +629,49 @@ fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
 // the payload at byte `offset` of the carrier box `subject` once the test holds.
 // `boxed`: the member at `offset` is a recursive edge's wrapper box holding the payload.
 // `loaded`: an or-pattern already loaded `slot` in its matching alternative.
-struct IRPending { name: String, slot: Int, subject: Int, offset: Int, boxed: Bool{false}, loaded: Bool{false} }
+// `window`: the subject is a write window (`if &place == ...`), so the name
+// binds the payload's storage and an assignment to it lands in the box.
+struct IRPending { name: String, slot: Int, subject: Int, offset: Int, boxed: Bool{false}, loaded: Bool{false}, window: Bool{false} }
 
 // Opens the If of a condition and binds its pending payloads in it.
-fn ir_open_condition(m: &IRModule, b: &IRBuilder, test: Int) Never! {
+fn ir_open_condition(m: &IRModule, p: IRProgram, b: &IRBuilder, test: Int) Never! {
     ir_open_if(&b.f, test, b.line)
-    ir_bind_pending(&m, &b)
+    ir_bind_pending(&m, p, &b)
 }
 
-fn ir_bind_pending(m: &IRModule, b: &IRBuilder) Never! {
+fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     pending :: b.pending
     b.pending = [IRPending]{}
     loop row in pending {
+        // A window into a variable's own box writes a box only it holds
+        // (Lower lower_box_make_unique); a copy sharing the box keeps its
+        // payload. The subject is unique before any payload address is taken.
+        if row.window && !row.loaded && ir_owned_binding(b, row.subject) -> ir_box_make_unique(&m, p, &b, row.subject)
+    }
+    loop row in pending {
+        // An aggregate payload is already bound by address (ir_pending_load).
+        row_type :: b.f.slot_type[row.slot]
+        if row.window && !row.boxed && !row.loaded && m.types[row_type].kind != .Aggregate {
+            pointer_row :: ir_pointer_row(&m)
+            address :: ir_temp(&m, &b, pointer_row)
+            ir_emit(&b.f, IROp.Offset, address, row.subject, row.offset, -1, b.line)
+            &b.bindings.push(IRBinding{name: row.name, slot: address, indirect: row_type})
+            next
+        }
         if !row.loaded -> ir_pending_load(&m, &b, row, row.slot)
         &b.bindings.push(IRBinding{name: row.name, slot: row.slot, carrier: if row.boxed -> -1 else -> row.subject})
+    }
+}
+
+// Marks the pending payload bindings from `from` on, those of a test on
+// `subject`, as write windows when the subject is one (`&place`).
+fn ir_pending_windows(b: &IRBuilder, subject: TExpr, from: Int) Never! {
+    write := false
+    if subject.kind == .Borrow(_, access) -> write = access == .Write
+    if !write -> return
+    loop index in from..<b.pending.len() {
+        row :: b.pending[index]
+        b.pending[index] = IRPending{name: row.name.copy(), slot: row.slot, subject: row.subject, offset: row.offset, boxed: row.boxed, loaded: row.loaded, window: true}
     }
 }
 
@@ -660,12 +696,20 @@ fn ir_fail(b: &IRBuilder, span: Span, message: String) Never! {
 
 fn ir_failed(b: IRBuilder) -> Bool Never! { b.error != "" }
 
-// Returns `slot` (-1: nothing) after dropping every owned variable.
+// Returns `slot` (-1: nothing) after dropping every owned variable. Code
+// after the Return in the same block is dead, so the variables keep the
+// ownership they had: the paths that go on past the enclosing branch see it.
 fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
-    if slot >= 0 -> b.fresh[slot] = false
+    states :: ir_own_states(b, b.bindings.len())
+    if slot >= 0 {
+        b.fresh[slot] = false
+        // The returned value leaves with the caller; its variable keeps nothing.
+        ir_disown(&b, slot)
+    }
     ir_close_disarm(&b, slot)
     ir_drop_bindings(&m, &b, 0)
     ir_emit(&b.f, IROp.Return, -1, slot, -1, -1, b.line)
+    ir_set_own_states(&b, states)
 }
 
 // Drops the owned variables among bindings[mark..], latest first; a
@@ -677,20 +721,195 @@ fn ir_drop_bindings(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
         index -= 1
         if binding.indirect < 0 -> ir_close_now(&b, binding.slot)
         if !binding.owned -> next
-        value :: ir_read_binding(&m, &b, binding)
-        ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+        ir_drop_binding(&m, &b, binding)
     }
 }
 
-// `slot` as a value its new holder owns: a fresh value moves; a read of a
-// place another holder keeps is copied through its type's runtime clone
-// (a value with a drop and no clone moves).
-fn ir_own(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
+// Drops the value the owned variable `binding` holds; one some paths moved
+// drops only where its live flag holds.
+fn ir_drop_binding(m: &IRModule, b: &IRBuilder, binding: IRBinding) Never! {
+    if binding.live >= 0 -> ir_open_if(&b.f, binding.live, b.line)
+    value :: ir_read_binding(&m, &b, binding)
+    ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+    if binding.live >= 0 -> ir_end(&b.f, b.line)
+}
+
+// `slot` as a value its new holder owns: a fresh value moves; a variable's
+// own aggregate moves (the variable stops owning it, and the slot reads as
+// fresh to the holder that stores it); an aggregate another holder keeps
+// is shared (a byte copy whose buffers gain an owner, ir_copy_value); any
+// other read of a place another holder keeps is copied through its type's
+// runtime clone. A value with a drop and no clone (a file or socket handle)
+// moves: the variable it is read from stops owning it, so its scope-end
+// drop cannot release what the new holder keeps (Lower's moved-binding
+// drop flag).
+fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
     if slot < 0 || b.fresh[slot] || !ir_has_drop(m, b, slot) -> return slot
     row :: b.f.slot_type[slot]
+    if m.types[row].kind == .Aggregate && m.types[row].drop == ir_drop_key(row) {
+        if ir_movable_binding(b, slot) {
+            ir_disown(&b, slot)
+            b.fresh[slot] = true
+            return slot
+        }
+        return ir_copy_value(&m, p, &b, slot, Span{start: 0, end: 0})
+    }
     symbol :: m.types[row].clone
-    if symbol == "" -> return slot
-    ir_runtime(&m, &b, symbol, [Int]{slot}, row)
+    if symbol == "" {
+        ir_disown(&b, slot)
+        return slot
+    }
+    ir_clone(&m, &b, slot, row)
+}
+
+// Whether a variable owns the value in `slot` (its own storage) on every
+// path that reaches here.
+fn ir_owned_binding(b: IRBuilder, slot: Int) -> Bool Never! {
+    ir_owned_binding_index(b, slot) >= 0
+}
+
+fn ir_owned_binding_index(b: IRBuilder, slot: Int) -> Int Never! {
+    index := b.bindings.len() - 1
+    loop index >= 0 {
+        binding :: b.bindings[index]
+        if binding.slot == slot && binding.indirect < 0 && binding.owned && binding.live < 0 -> return index
+        index -= 1
+    }
+    -1
+}
+
+// The live flag of the variable owning `slot` where only some paths kept
+// its value (-1: none).
+fn ir_live_flag(b: IRBuilder, slot: Int) -> Int Never! {
+    index := b.bindings.len() - 1
+    loop index >= 0 {
+        binding :: b.bindings[index]
+        if binding.slot == slot && binding.indirect < 0 && binding.owned -> return binding.live
+        index -= 1
+    }
+    -1
+}
+
+// Whether a read of the variable owning `slot` may move its value to a new
+// holder: only an explicit `^x` does. Sema does not mark a plain read as a
+// last use (`sym(Item.F{value: f})` followed by a read of `f` is a plain
+// read too), so a plain read shares: a byte copy whose buffers and boxes
+// gain an owner, which the variable's own scope-end drop gives back.
+fn ir_movable_binding(b: IRBuilder, slot: Int) -> Bool Never! {
+    if ir_owned_binding_index(b, slot) < 0 -> return false
+    b.moving == slot
+}
+
+// The owned variables whose value is in `slot` no longer own it.
+fn ir_disown(b: &IRBuilder, slot: Int) Never! {
+    loop index in 0..<b.bindings.len() {
+        binding :: b.bindings[index]
+        if binding.slot != slot || binding.indirect >= 0 || !binding.owned -> next
+        b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol.copy(), write: binding.write, carrier: binding.carrier}
+    }
+}
+
+// The variable `binding` names owns the value in its slot again (a move
+// out of it was followed by an assignment), on every path.
+fn ir_reown(b: &IRBuilder, binding: IRBinding) Never! {
+    index := b.bindings.len() - 1
+    loop index >= 0 {
+        row :: b.bindings[index]
+        if row.slot == binding.slot && row.indirect < 0 && row.name == binding.name {
+            ir_set_own_state(&b, index, IROwnState{owned: true})
+            return
+        }
+        index -= 1
+    }
+}
+
+// A variable's ownership on one path: whether it owns its value, and its
+// live flag (IRBinding.live).
+struct IROwnState { owned: Bool, live: Int{-1} }
+
+// The ownership of the variables bound before `count`.
+fn ir_own_states(b: IRBuilder, count: Int) -> [IROwnState] Never! {
+    states := [IROwnState]{}
+    loop index in 0..<count {
+        &states.push(IROwnState{owned: b.bindings[index].owned, live: b.bindings[index].live})
+    }
+    states
+}
+
+fn ir_set_own_state(b: &IRBuilder, index: Int, state: IROwnState) Never! {
+    row :: b.bindings[index]
+    if row.owned == state.owned && row.live == state.live -> return
+    b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol.copy(), write: row.write, carrier: row.carrier, live: state.live}
+}
+
+// Restores the ownership `states` of the variables bound before it.
+fn ir_set_own_states(b: &IRBuilder, states: [IROwnState]) Never! {
+    loop index in 0..<states.len() {
+        if index >= b.bindings.len() -> break
+        ir_set_own_state(&b, index, states[index])
+    }
+}
+
+// Where the two paths of an If on `test` meet: the bindings hold the else
+// path's ownership, `then_states` the then path's. A path that leaves passes
+// the other's ownership on unchanged.
+fn ir_meet_paths(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnState], then_leaves: Bool, else_leaves: Bool) Never! {
+    if else_leaves -> return ir_set_own_states(&b, then_states)
+    if then_leaves -> return
+    else_states :: ir_own_states(b, then_states.len())
+    ir_join_owned(&m, &b, test, then_states, else_states)
+}
+
+// A variable one path moved and the other kept still owns its value
+// through a live flag each path sets, which its drop tests (Lower's
+// moved-binding drop flag).
+fn ir_join_owned(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnState], else_states: [IROwnState]) Never! {
+    joined := [Int]{}
+    loop index in 0..<then_states.len() {
+        if index >= b.bindings.len() -> break
+        kept :: then_states[index]
+        other :: else_states[index]
+        if kept.owned == other.owned && kept.live == other.live {
+            ir_set_own_state(&b, index, kept)
+        } else if !kept.owned && !other.owned {
+            ir_set_own_state(&b, index, IROwnState{owned: false})
+        } else {
+            &joined.push(index)
+        }
+    }
+    if joined.len() == 0 -> return
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    lives := [Int]{}
+    loop _ in joined -> &lives.push(ir_temp(&m, &b, bool_row))
+    ir_open_if(&b.f, test, b.line)
+    loop (at, index) in joined -> ir_live_set(&b, lives[at], then_states[index])
+    ir_else(&b.f, b.line)
+    loop (at, index) in joined -> ir_live_set(&b, lives[at], else_states[index])
+    ir_end(&b.f, b.line)
+    loop (at, index) in joined -> ir_set_own_state(&b, index, IROwnState{owned: true, live: lives[at]})
+}
+
+// Sets the live flag `live` to whether a variable in `state` holds its value.
+fn ir_live_set(b: &IRBuilder, live: Int, state: IROwnState) Never! {
+    if state.owned && state.live >= 0 {
+        ir_emit(&b.f, IROp.Copy, live, state.live, -1, -1, b.line)
+    } else {
+        ir_emit(&b.f, IROp.Const, live, if state.owned -> 1 else -> 0, -1, -1, b.line)
+    }
+}
+
+// The storage at `address` now holds the bytes of the aggregate `value`
+// and owns them: a fresh value or a variable's own value moves there (the
+// variable stops owning it); any other holder's value is shared, its
+// buffers gaining an owner (ir_copy_fixup).
+fn ir_aggregate_take(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, address: Int) Never! {
+    if b.fresh[value] {
+        b.fresh[value] = false
+        return
+    }
+    if ir_movable_binding(b, value) -> return ir_disown(&b, value)
+    row :: b.f.slot_type[value]
+    ir_copy_fixup(&m, p, &b, row, address)
 }
 
 // The most instructions one function's build may emit. A build that passes
@@ -793,16 +1012,18 @@ fn ir_read_binding(m: &IRModule, b: &IRBuilder, binding: IRBinding) -> Int Never
 }
 
 // Writes `value` into `slot`: a move for a type with a drop, else a copy.
-fn ir_store(m: &IRModule, b: &IRBuilder, slot: Int, value: Int) Never! {
+fn ir_store(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, value: Int) Never! {
     ir_close_disarm(&b, value)
     if ir_kind_of(m, b, value) == .Aggregate && !b.fresh[value] {
         // An aggregate read from another place gets storage of its own.
-        row :: m.types[b.f.slot_type[value]]
+        value_row :: b.f.slot_type[value]
+        row :: m.types[value_row]
         ir_emit(&b.f, IROp.StackAddress, slot, row.size, row.align, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, slot, value, row.size, b.line)
+        ir_aggregate_take(&m, p, &b, value, slot)
         return
     }
-    owned :: ir_own(&m, &b, value)
+    owned :: ir_own(&m, p, &b, value)
     op :: if ir_has_drop(m, b, owned) || ir_kind_of(m, b, owned) == .Aggregate -> IROp.Move else -> IROp.Copy
     ir_emit(&b.f, op, slot, owned, -1, -1, b.line)
     b.fresh[owned] = false
@@ -892,7 +1113,7 @@ fn ir_member_read(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember) -> I
 // Writes `value` into the member of the aggregate at `base`; a recursive
 // edge gets a wrapper box of its own. A variable's value moved in here is
 // no longer closed by its scope: the aggregate closes it.
-fn ir_member_write(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
+fn ir_member_write(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
     ir_close_disarm(&b, value)
     holder := base
     offset := member.offset
@@ -907,10 +1128,10 @@ fn ir_member_write(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember, val
         address :: ir_temp(&m, &b, member.ty)
         ir_emit(&b.f, IROp.Offset, address, holder, offset, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, address, value, m.types[member.ty].size, b.line)
-        b.fresh[value] = false
+        ir_aggregate_take(&m, p, &b, value, address)
         return
     }
-    owned :: ir_own(&m, &b, value)
+    owned :: ir_own(&m, p, &b, value)
     ir_emit(&b.f, IROp.Store, -1, holder, offset, owned, b.line)
     b.fresh[owned] = false
 }
@@ -960,12 +1181,12 @@ fn ir_enum_tag_of(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 
 // Writes `value` into member `member` of the storage at `base`; a recursive
 // edge gets a wrapper box of its own.
-fn ir_member_store(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
-    if !member.boxed -> return ir_store_at(&m, &b, base, member.offset, value)
+fn ir_member_store(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
+    if !member.boxed -> return ir_store_at(&m, p, &b, base, member.offset, value)
     size :: m.types[member.ty].size
     pointer_row :: ir_pointer_row(&m)
     wrapper :: ir_box_alloc(&m, &b, size, pointer_row)
-    ir_store_at(&m, &b, wrapper, 0, value)
+    ir_store_at(&m, p, &b, wrapper, 0, value)
     ir_emit(&b.f, IROp.Store, -1, base, member.offset, wrapper, b.line)
 }
 
@@ -1013,13 +1234,13 @@ fn ir_box_alloc(m: &IRModule, b: &IRBuilder, size: Int, row: Int) -> Int Never! 
     bytes :: ir_word_const(&m, &b, ir_align8(size))
     align :: ir_word_const(&m, &b, 8)
     boxed :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, align}, row)
-    b.fresh[boxed] = false
+    b.fresh[boxed] = m.types[row].drop != ""
     boxed
 }
 
 // Writes `value` at byte `offset` of the storage at `base`: an aggregate's
 // bytes are copied, a Unit value takes no bytes.
-fn ir_store_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, value: Int) Never! {
+fn ir_store_at(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, value: Int) Never! {
     if value < 0 -> return
     kind :: ir_kind_of(m, b, value)
     if kind == .Unit -> return
@@ -1027,12 +1248,13 @@ fn ir_store_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, value: Int) 
     if kind == .Aggregate {
         address :: ir_temp_like(&m, &b, value)
         ir_emit(&b.f, IROp.Offset, address, base, offset, -1, b.line)
-        size :: m.types[b.f.slot_type[value]].size
+        value_row :: b.f.slot_type[value]
+        size :: m.types[value_row].size
         ir_emit(&b.f, IROp.CopyBytes, -1, address, value, size, b.line)
-        b.fresh[value] = false
+        ir_aggregate_take(&m, p, &b, value, address)
         return
     }
-    owned :: ir_own(&m, &b, value)
+    owned :: ir_own(&m, p, &b, value)
     ir_emit(&b.f, IROp.Store, -1, base, offset, owned, b.line)
     b.fresh[owned] = false
 }
@@ -1062,7 +1284,7 @@ fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: B
     selector :: ir_word_const(&m, &b, if success -> 1 else -> 0)
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, selector, line)
     if payload >= 0 {
-        ir_store_at(&m, &b, boxed, 8, payload)
+        ir_store_at(&m, p, &b, boxed, 8, payload)
     } else {
         zero :: ir_word_const(&m, &b, 0)
         ir_emit(&b.f, IROp.Store, -1, boxed, 8, zero, line)
@@ -1099,7 +1321,11 @@ fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span
         target :: m.types[row].ty
         return ir_result_box(&m, p, &b, target, true, slot)
     }
-    if have_box && !want_box -> return ir_load_at(&m, &b, slot, 8, row)
+    if have_box && !want_box {
+        // A fresh Result box hands its payload over (ir_box_take).
+        if b.fresh[slot] -> return ir_box_take(&m, p, &b, slot, 8, row)
+        return ir_load_at(&m, &b, slot, 8, row)
+    }
     // A member value where its structural union is wanted (a `[A | B]`
     // literal's element) is boxed as that member's variant (widen_to_union).
     union_ty :: m.types[row].ty
@@ -1154,7 +1380,7 @@ fn ir_walk_close(m: &IRModule, b: &IRBuilder, walk: IRWalk) Never! {
 }
 
 // A List of the element slots `elements` in fresh frame storage.
-fn ir_list_from(m: &IRModule, b: &IRBuilder, row: Int, element_row: Int, elements: [Int]) -> Int Never! {
+fn ir_list_from(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element_row: Int, elements: [Int]) -> Int Never! {
     stride :: ir_list_stride(m, element_row)
     storage :: ir_fresh_temp(&m, &b, row)
     ir_emit(&b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
@@ -1168,7 +1394,7 @@ fn ir_list_from(m: &IRModule, b: &IRBuilder, row: Int, element_row: Int, element
     }
     word_row :: ir_word_row(&m)
     data :: ir_box_alloc(&m, &b, elements.len() * stride, word_row)
-    loop (index, slot) in elements -> ir_store_at(&m, &b, data, index * stride, slot)
+    loop (index, slot) in elements -> ir_store_at(&m, p, &b, data, index * stride, slot)
     ir_emit(&b.f, IROp.Store, -1, storage, 16, data, b.line)
     storage
 }
@@ -1222,7 +1448,7 @@ fn ir_copy_value(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Spa
     kind :: m.types[row].kind
     clone :: m.types[row].clone
     ir_close_disarm(&b, slot)
-    if clone != "" -> return ir_runtime(&m, &b, clone, [Int]{slot}, row)
+    if clone != "" -> return ir_clone(&m, &b, slot, row)
     if kind == .Aggregate {
         storage :: ir_fresh_temp(&m, &b, row)
         ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)

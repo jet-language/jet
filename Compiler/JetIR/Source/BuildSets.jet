@@ -85,7 +85,7 @@ fn ir_set_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
     bytes :: ir_word_op(&m, &a, IROp.Mul, moved, width)
     _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
     a.fresh[key] = true
-    ir_store_at(&m, &a, target, 0, key)
+    ir_store_at(&m, p, &a, target, 0, key)
     grown :: ir_word_op(&m, &a, IROp.Add, length, one)
     ir_emit(&a.f, IROp.Store, -1, set, 0, grown, a.line)
     added :: ir_int_constant(&m, &a, bool_row, 1)
@@ -169,7 +169,7 @@ fn ir_set_equal_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 fn ir_set_list(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set: Int, list_row: Int) -> Int Never! {
     out :: ir_list_empty(&m, &b, list_row)
     walk :: ir_walk_open(&m, &b, set, shape.entry)
-    ir_list_push(&m, &b, out, shape.key.ty, walk.item)
+    ir_list_push(&m, p, &b, out, shape.key.ty, walk.item)
     ir_walk_close(&m, &b, walk)
     out
 }
@@ -272,7 +272,7 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         option_row :: ir_value_type(&m, p, Type.Option{inner: shape.entry_ty}) ?? return Val(ir_fail_slot(&b, span, "Set builtin {route} result"))
         taken :: ir_set_call(&m, p, &b, set_row, "set.take", [Int]{subject, key}, option_row)
         if symbol == "jet_set_replace_kernel" {
-            offered :: ir_own(&m, &b, key)
+            offered :: ir_own(&m, p, &b, key)
             _ :: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{subject, offered}, bool_row)
             b.fresh[offered] = false
         } else {
@@ -281,7 +281,7 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         return Val(taken)
     }
     if symbol == "jet_set_insert" {
-        offered :: ir_own(&m, &b, key)
+        offered :: ir_own(&m, p, &b, key)
         added :: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{subject, offered}, bool_row)
         b.fresh[offered] = false
         return Val(added)

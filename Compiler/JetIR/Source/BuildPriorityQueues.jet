@@ -150,7 +150,7 @@ fn ir_priority_queue_push_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: 
     stride :: ir_list_stride(m, elem_row)
     address :: ir_element_address(&m, &a, data, length, stride)
     a.fresh[value] = true
-    ir_store_at(&m, &a, address, 0, value)
+    ir_store_at(&m, p, &a, address, 0, value)
     one :: ir_word_const(&m, &a, 1)
     count :: ir_word_op(&m, &a, IROp.Add, length, one)
     ir_emit(&a.f, IROp.Store, -1, heap, 0, count, a.line)
@@ -192,7 +192,7 @@ fn ir_priority_queue_pop_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: S
     ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
     ir_end(&a.f, a.line)
     data :: ir_load_word(&m, &a, heap, 16)
-    result :: ir_element_option(&m, &a, data, elem_row, option_row, true)
+    result :: ir_element_option(&m, p, &a, data, elem_row, option_row, true)
     one :: ir_word_const(&m, &a, 1)
     last :: ir_word_op(&m, &a, IROp.Sub, length, one)
     ir_emit(&a.f, IROp.Store, -1, heap, 0, last, a.line)
@@ -332,7 +332,7 @@ fn ir_list_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row: 
 fn ir_priority_queue_sorted(m: &IRModule, p: IRProgram, b: &IRBuilder, heap: Int, elem_row: Int, span: Span) -> Int Never! {
     elem_ty :: m.types[elem_row].ty
     list_row :: ir_value_type(&m, p, Type.List{element: elem_ty}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(elem_ty)}]")
-    sorted :: ir_list_clone(&m, &b, heap, elem_row, list_row)
+    sorted :: ir_list_clone(&m, p, &b, heap, elem_row, list_row)
     _ :: ir_heap_call(&m, p, &b, list_row, elem_row, "list.sort_desc", [Int]{sorted}, -1)
     sorted
 }
@@ -351,7 +351,7 @@ fn ir_priority_queue_from(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, s
         ir_emit(&b.f, IROp.CopyBytes, -1, heap, source, 24, b.line)
         b.fresh[source] = false
     } else {
-        heap = ir_list_clone(&m, &b, source, elem_row, heap_row)
+        heap = ir_list_clone(&m, p, &b, source, elem_row, heap_row)
     }
     _ :: ir_heap_call(&m, p, &b, heap_row, elem_row, "priority_queue.heapify", [Int]{heap}, -1)
     heap
@@ -391,7 +391,7 @@ fn ir_priority_queue_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type
             if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "push without a value")
             value :: ir_adapt(&m, p, &b, operands[1], elem_row, span)
             if ir_failed(b) -> return -1
-            offered :: ir_own(&m, &b, value)
+            offered :: ir_own(&m, p, &b, value)
             _ :: ir_heap_call(&m, p, &b, heap_row, elem_row, "priority_queue.push", [Int]{subject, offered}, -1)
             b.fresh[offered] = false
             return -1
@@ -424,7 +424,7 @@ fn ir_priority_queue_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type
             present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
             ir_open_if(&b.f, present, b.line)
             data :: ir_load_word(&m, &b, subject, 16)
-            copied :: ir_element_option(&m, &b, data, elem_row, option_row, false)
+            copied :: ir_element_option(&m, p, &b, data, elem_row, option_row, false)
             ir_emit(&b.f, IROp.Copy, found, copied, -1, -1, b.line)
             ir_end(&b.f, b.line)
             return found

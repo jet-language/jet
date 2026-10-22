@@ -39,6 +39,9 @@ struct JetEvalIRState {
     data_regions: [Int]
     data_texts: [Int]
     targets: [[Int]]
+    // The owner count of each counted buffer (by data address) shared by more
+    // than one owner; a buffer missing here has one (Refcount.jet's count word).
+    owners: [Int:Int]
     ready: [Bool]
     stdout: String
     stderr: String
@@ -58,7 +61,7 @@ struct JetEvalIRState {
 fn jet_eval_ir_state_new(m: IRModule, config: JetEvalConfig, span: Span) -> JetEvalIRState Never! {
     s := JetEvalIRState{
         regions: [[U8]]{[U8]{}}, live: [Bool]{false}, texts: [String]{}, bigs: [Int]{}, builders: [[U8]]{},
-        data_regions: [Int]{}, data_texts: [Int]{}, targets: [[Int]]{}, ready: [Bool]{},
+        data_regions: [Int]{}, data_texts: [Int]{}, targets: [[Int]]{}, owners: [Int:Int]{}, ready: [Bool]{},
         stdout: "", stderr: "", steps: 0, fuel: config.fuel, depth: 0, max_depth: config.max_call_depth,
         runtime_execution: config.runtime_execution, span: span, failure: None, internal_problem: None, exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,
