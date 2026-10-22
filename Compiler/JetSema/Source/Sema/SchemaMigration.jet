@@ -240,6 +240,7 @@ fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, check
         checked_type_name_slots: ^scope.checked_type_name_slots,
         checked_type_name_rows: ^scope.checked_type_name_rows,
         boxed_edges: ^scope.boxed_edges,
+        copy_facts: ^scope.copy_facts,
     }
     scope.registration_graph = None
     scope.checked_types = [TTypeDef]{}
@@ -247,6 +248,7 @@ fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, check
     scope.checked_type_name_slots = [String:Int]{}
     scope.checked_type_name_rows = [[Int]]{}
     scope.boxed_edges = [String:[String]]{}
+    scope.copy_facts = sema_copy_facts_table_empty()
     environment := Val(^scope)
     diagnostics := [Diagnostic]{}
     loop module_index in 0..<module_count {

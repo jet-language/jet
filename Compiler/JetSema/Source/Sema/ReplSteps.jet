@@ -46,6 +46,7 @@ fn sema_repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModu
         checked_type_name_slots: ^environment.checked_type_name_slots,
         checked_type_name_rows: ^environment.checked_type_name_rows,
         boxed_edges: ^environment.boxed_edges,
+        copy_facts: ^environment.copy_facts,
     }
     environment.registration_graph = None
     environment.checked_types = [TTypeDef]{}
@@ -53,6 +54,7 @@ fn sema_repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModu
     environment.checked_type_name_slots = [String:Int]{}
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
+    environment.copy_facts = sema_copy_facts_table_empty()
     if !sema_scope_environment_enter_probe_module(&environment, program, root.module_identity, SemaComptimeBodyValues{}) {
         return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
     }

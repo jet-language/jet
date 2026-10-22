@@ -59,6 +59,7 @@ use jet_sema.[
     sema_comptime_staged_constant_rows,
     sema_comptime_value_sites,
     sema_comptime_value_sites_empty,
+    sema_copy_facts_table_empty,
     sema_finalize_graph,
     sema_output_resolve,
     SemaOutputIntent,
@@ -3674,6 +3675,7 @@ fn jet_driver_run_comptime(
         checked_type_name_slots: ^environment.checked_type_name_slots,
         checked_type_name_rows: ^environment.checked_type_name_rows,
         boxed_edges: ^environment.boxed_edges,
+        copy_facts: ^environment.copy_facts,
     }
     // The program now owns these tables. Restore the environment's ordinary
     // empty table fields before retargeting its still-owned module metadata.
@@ -3683,6 +3685,7 @@ fn jet_driver_run_comptime(
     environment.checked_type_name_slots = [String:Int]{}
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
+    environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
     staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: sema_comptime_value_sites_empty(), bare: false, bare_ok: bare_ok, declared: ^declared, declared_staged: false}
     // Each in a one-row slot: a pass's prechecks move them into the threads'

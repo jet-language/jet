@@ -424,6 +424,7 @@ struct SemaScopeEnvironment {
     checked_type_name_slots: [String:Int]{[String:Int]{}}
     checked_type_name_rows: [[Int]]{[[Int]]{}}
     boxed_edges: [String:[String]]{[String:[String]]{}}
+    copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}}}
     declarations: [SemaScopeDeclaration]
     generic_params: [TGenericParam]
     // One publication survives probe retargets. The selected view may be empty
@@ -723,6 +724,10 @@ struct SemaProgramTables {
     // comptime values type only waiting constants, never a nominal's fields,
     // so landing values leaves these edges unchanged.
     boxed_edges: [String:[String]]
+    // `sema_copy_facts_table(registration_graph)`: each non-generic nominal's
+    // copy facts, walked once per tables. Landing comptime values never
+    // changes a nominal's members, so these stay true.
+    copy_facts: SemaCopyFactsTable
 }
 
 fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
@@ -740,6 +745,7 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
         }
     }
     boxed_edges := sema_scope_environment_boxed_edges(graph)
+    copy_facts := sema_copy_facts_table(graph)
     SemaProgramTables{
         registration_graph: graph,
         checked_types: checked_types,
@@ -747,6 +753,7 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
         checked_type_name_slots: name_slots,
         checked_type_name_rows: name_rows,
         boxed_edges: boxed_edges,
+        copy_facts: copy_facts,
     }
 }
 
