@@ -5511,7 +5511,7 @@ fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs:
     }
     if compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 -> return checks
     shared_state :: shared SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, probes: [SemaScopeProbe]{}, positions: [[Int]]{}}
-    sema_comptime_precheck_fill(shared_state, &environments, &programs)
+    counting :: sema_comptime_precheck_fill(shared_state, &environments, &programs)
     loop row in 0..<module_positions.len() {
         weights := [Int]{}
         work := 0
@@ -5545,6 +5545,7 @@ fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs:
     program := &permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
     // The last module's declaration scope leaves with its threads.
     environment.module_scope = None
+    program.registration_graph = sema_comptime_precheck_counting(^program.registration_graph, counting)
     &environments.push(^environment)
     &programs.push(^program)
     checks
@@ -5580,13 +5581,33 @@ struct SemaPrecheckPart {
 
 // Moves the run's environment and program tables out of their slots into the
 // precheck threads' shared state; sema_comptime_precheck_items moves them
-// back.
-fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables]) {
+// back. The registration graph stops counting its lookups while it is there,
+// as in sema_finalize_graph: every lookup would take the shared counters'
+// permit and serialize the threads. The result is its old flag.
+fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables]) -> Bool {
     permit :: shared_state.guard_edit()
     environment := &environments.pop() ?? panic("the run's environment left its slot")
     program := &programs.pop() ?? panic("the run's program tables left their slot")
+    counting :: sema_comptime_precheck_graph_counting(program)
+    program.registration_graph = sema_comptime_precheck_counting(^program.registration_graph, false)
     &permit.value.environments.push(^environment)
     &permit.value.programs.push(^program)
+    counting
+}
+
+// The registration graph `held`, moved through, with `counting` as its
+// lookup-counting flag.
+fn sema_comptime_precheck_counting(held: ^SemaRegistrationGraph?, counting: Bool) -> SemaRegistrationGraph? {
+    graph := ^held ?? return None
+    graph.counting = counting
+    Val(^graph)
+}
+
+// Whether the registration graph of `program` counts its lookups (false
+// without a graph).
+fn sema_comptime_precheck_graph_counting(program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) -> return graph.counting
+    false
 }
 
 // Enters the shared environment in `module_identity`, prepares the module's
