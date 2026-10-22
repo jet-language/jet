@@ -640,11 +640,9 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
     // E1403: each level of the chain is one source
     // nesting level, as an `if` expression is in the Rust checker.
     if !sema_enter_source_nesting(&context, span, &diagnostics) -> return SemaStatementResult{value: [TStmt]{}, complete: false}
-    checked_condition := sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    condition_bindings :: if checked_condition == {
-        .Val(checked) -> checked.bindings
-        else -> [SemaConditionBinding]{}
-    }
+    condition_check := sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_condition :: condition_check.checked
+    condition_bindings :: condition_check.bindings
     // Both arms check in place on the live ownership state, each rolled back
     // to the fork (sema_ownership_fork), and their paths join after.
     fork :: sema_ownership_fork(&state)
@@ -795,16 +793,9 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             if readiness_table.arms[arm_index] == None -> complete = false
         } else {
             condition_result := sema_expression_check_condition(arms[arm_index].cond, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            if condition_result == {
-                .Val(condition) -> {
-                    arm_bindings = condition.bindings
-                    &conditions.push(Val(condition))
-                }
-                else -> {
-                    &conditions.push(None)
-                    complete = false
-                }
-            }
+            if condition_result.checked == None -> complete = false
+            arm_bindings = condition_result.bindings
+            &conditions.push(condition_result.checked)
         }
         branch_mark :: sema_scope_mark(&scopes)
         branch_fork :: sema_ownership_fork(&state)

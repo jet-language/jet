@@ -1491,6 +1491,23 @@ struct SemaCheckedCondition {
     bindings: [SemaConditionBinding]
 }
 
+// A condition check: the checked condition when it checked, and the bindings
+// its success branch declares either way. A pattern test that reported its
+// own error still names its bindings, so the branch does not cascade into
+// E0107 for them.
+struct SemaConditionCheck {
+    checked: SemaCheckedCondition?
+    bindings: [SemaConditionBinding]
+}
+
+fn sema_expression_condition_checked(checked: SemaCheckedCondition) -> SemaConditionCheck Never! {
+    SemaConditionCheck{checked: Val(checked), bindings: checked.bindings}
+}
+
+fn sema_expression_condition_failed(bindings: [SemaConditionBinding]) -> SemaConditionCheck Never! {
+    SemaConditionCheck{checked: None, bindings: bindings}
+}
+
 // Whether a condition tests a pattern at its top level or along a `&&` chain,
 // so its success branch may see pattern bindings.
 fn sema_expression_condition_binds(condition: Expr) -> Bool Never! {
@@ -1629,17 +1646,17 @@ fn sema_expression_pattern_slot_sources(slot: TPatternBinding, ty: Type, source:
 }
 
 // One pattern test condition, with payload aliases for the success branch.
-fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
+fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     // An `.Ok`/`.Err` pattern consumes the subject's
     // Result carrier, so its call root must not propagate.
     subject_value :: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    checked_subject :: subject_value ?? return None
+    checked_subject :: subject_value ?? return sema_expression_condition_failed([SemaConditionBinding]{})
     source :: sema_expression_window_source(subject, scopes)
     window_names := [String]{}
     if source != None -> sema_expression_window_names(pattern, &window_names)
     checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    checked :: checked_pattern.checked ?? return None
     owner :: sema_scope_local_owner_key(scopes)
+    checked :: checked_pattern.checked ?? return sema_expression_condition_failed(sema_expression_recovery_condition_bindings(checked_pattern.bindings, window_names, owner, environment))
     facts := [TPatternBindingFact]{}
     bindings := [SemaConditionBinding]{}
     loop fact in checked.bindings {
@@ -1672,29 +1689,44 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
     tested := checked.pattern
     tested.bindings = facts
     value :: sema_tir_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: tested}, span)
-    Val(SemaCheckedCondition{condition: TIfCond.IfLet{pattern: tested, subj: checked.subject}, value: value, bindings: bindings})
+    sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.IfLet{pattern: tested, subj: checked.subject}, value: value, bindings: bindings})
 }
 
-fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
+// The bindings a failed pattern test still declares: each named recovery
+// binding with its recovered type and no payload sources.
+fn sema_expression_recovery_condition_bindings(facts: [TPatternBindingFact], window_names: [String], owner: String, environment: SemaScopeEnvironment) -> [SemaConditionBinding] {
+    bindings := [SemaConditionBinding]{}
+    loop fact in facts {
+        if fact.name == "" || fact.name == "_" -> next
+        id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, fact.name)
+        symbol :: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
+        &bindings.push(SemaConditionBinding{symbol: symbol, window: window_names.contains(fact.name), sources: [Expr]{}})
+    }
+    bindings
+}
+
+fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     if condition == {
         .Paren(inner, _) -> return sema_expression_check_condition_inner(inner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .PatternTest(subject, pattern, span) -> return sema_expression_check_pattern_condition(subject, pattern, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Binary(op, left, right, span) -> {
             if op == BinOp.And && sema_expression_condition_binds(condition) {
-                left_checked :: sema_expression_check_condition_inner(left, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                left_check :: sema_expression_check_condition_inner(left, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                left_checked :: left_check.checked ?? return left_check
                 // The right side of `&&` reads the names the left side bound.
                 sema_expression_declare_condition_bindings(left_checked.bindings, &scopes, &state, false, &diagnostics)
-                right_checked :: sema_expression_check_condition_inner(right, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                right_check :: sema_expression_check_condition_inner(right, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 bindings := left_checked.bindings
-                loop binding in right_checked.bindings -> &bindings.push(binding)
+                loop binding in right_check.bindings -> &bindings.push(binding)
+                right_checked :: right_check.checked ?? return sema_expression_condition_failed(bindings)
                 value :: sema_tir_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.And, overflow: false, line: 0, lhs: left_checked.value, rhs: right_checked.value}, span)
-                return Val(SemaCheckedCondition{condition: TIfCond.And{left: left_checked.condition, right: right_checked.condition}, value: value, bindings: bindings})
+                return sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.And{left: left_checked.condition, right: right_checked.condition}, value: value, bindings: bindings})
             }
         }
         else -> {}
     }
-    value :: sema_check_expression(condition, Val(Type.Bool), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    Val(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
+    value :: sema_check_expression(condition, Val(Type.Bool), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_expression_condition_failed([SemaConditionBinding]{})
+    sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
 }
 
 // Whether `expr` is a bare `None` / `.None`.
@@ -1794,7 +1826,7 @@ fn sema_expression_rewrite_optional_ne_none(condition: Expr, scopes: SemaScopeTa
 // `sema_expression_declare_condition_bindings`. The condition's own frame
 // (`pattern@…`) keeps chain bindings out of later arms and fixes their
 // symbol identities for the branch.
-fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
+fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     rewritten :: sema_expression_rewrite_optional_ne_none(condition, scopes)
     if rewritten == .Val(presence) -> return sema_expression_check_condition(presence, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if !sema_expression_condition_binds(condition) -> return sema_expression_check_condition_inner(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1892,7 +1924,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // whether that arm can ever run.
     else_table_head :: !chain_head && !context.noelse_chain_starts.contains(span.start) && sema_coverage_is_else_table(environment, program, span)
     if else_table_head -> &context.noelse_chain_starts.push(span.start)
-    checked :: sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked :: sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics).checked ?? return None
     checked_condition :: checked.value
     // Each arm runs in its own frame on the live scope table and on the live
     // ownership state, both rolled back (sema_ownership_fork). Only a deferred
