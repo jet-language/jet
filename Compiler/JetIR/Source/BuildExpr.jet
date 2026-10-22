@@ -2,8 +2,8 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TForInMethod, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, tir_each_expr_child, tir_each_stmt_list_child, tir_generated_local, tir_user_local, type_carrier_identity]
-use jet_backend.[lower_float_constant_bits]
+use jet_foundation.[AccessConvention, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TForInMethod, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, tir_each_expr_child, tir_each_stmt_list_child, tir_generated_local, tir_user_local, type_carrier_identity]
+use jet_backend.[lower_constant_u64_bits, lower_float_constant_bits]
 use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route, jet_codegen_precise_source_helper]
 
 fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc) Never! {
@@ -2226,12 +2226,36 @@ fn ir_pattern_test(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, sha
         }
         .Range(lo, hi, _) -> return ir_in_range(&m, &b, subject, lo, hi)
         .Or(alternatives, _) -> {
+            // Each alternative binds the same names at its own payload
+            // offsets: the matching one loads them into the first
+            // alternative's slots, which the arm then binds.
             result :: ir_temp(&m, &b, bool_row)
             ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
             opened := 0
-            loop alternative in alternatives {
+            leading := [IRPending]{}
+            loop (index, alternative) in alternatives {
+                before :: b.pending.len()
                 test :: ir_pattern_test(&m, &p, &b, subject, alternative, span)
                 if ir_failed(b) -> return -1
+                rows := [IRPending]{}
+                loop at in before..<b.pending.len() -> &rows.push(b.pending[at].copy())
+                loop b.pending.len() > before {
+                    _ :: &b.pending.pop()
+                }
+                if rows.len() > 0 {
+                    ir_open_if(&b.f, test, b.line)
+                    loop row in rows {
+                        target := row.slot
+                        if index > 0 {
+                            loop kept in leading {
+                                if kept.name == row.name -> target = kept.slot
+                            }
+                        }
+                        ir_pending_load(&m, &b, row, target)
+                    }
+                    ir_end(&b.f, b.line)
+                }
+                if index == 0 -> leading = rows
                 ir_emit(&b.f, IROp.Copy, result, test, -1, -1, b.line)
                 not_matched :: ir_temp(&m, &b, bool_row)
                 ir_emit(&b.f, IROp.Not, not_matched, test, -1, -1, b.line)
@@ -2239,6 +2263,7 @@ fn ir_pattern_test(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, sha
                 opened += 1
             }
             loop _ in 0..<opened -> ir_end(&b.f, b.line)
+            loop row in leading -> &b.pending.push(IRPending{name: row.name, slot: row.slot, subject: row.subject, offset: row.offset, boxed: row.boxed, loaded: true})
             return result
         }
         .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) -> return ir_carrier_shape_test(&m, &p, &b, subject, shape, span)
@@ -3670,6 +3695,9 @@ fn ir_comptime(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TCom
             return slot
         }
         .BigInt(decimal) -> {
+            // A U64 beyond the exact-Int range keeps its decimal; its word
+            // destination takes the bit pattern (Lower lower_constant_u64_bits).
+            if m.types[row].kind == .Word -> return ir_int_constant(&m, &b, row, lower_constant_u64_bits(decimal))
             slot :: ir_fresh_temp(&m, &b, row)
             ir_emit(&b.f, IROp.ConstBigInt, slot, ir_intern_name(&m, decimal), -1, -1, b.line)
             return slot
@@ -3700,6 +3728,7 @@ fn ir_comptime(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TCom
             return ir_fail_slot(&b, span, "list constant of {ir_type_name(ty)}")
         }
         .Struct(_, fields) -> return ir_comptime_struct(&m, &p, &b, ty, row, fields, span)
+        .Map(entries) -> return ir_comptime_map(&m, &p, &b, ty, row, entries, span)
         .Enum(_, variant, args) -> return ir_comptime_enum(&m, &p, &b, ty, row, variant, args, span)
         .Bytes(bytes) -> return ir_comptime_bytes(&m, p, &b, ty, row, bytes, span)
         .Failed(report) -> {
@@ -3719,6 +3748,39 @@ fn ir_comptime(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TCom
             return ir_fail_slot(&b, span, "failed constant of {ir_type_name(ty)}")
         }
         else -> return ir_fail_slot(&b, span, "constant value {ir_comptime_name(value)}")
+    }
+}
+
+// A Map constant (Lower lower_constant_map_fill): an empty header, then each
+// entry set in order through map.set, which orders the keys and retires
+// duplicates.
+fn ir_comptime_map(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, row: Int, entries: [TComptimeMapEntry], span: Span) -> Int Never! {
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map constant of {ir_type_name(ty)}")
+    key_ty :: m.types[shape.key.ty].ty.copy()
+    value_ty :: m.types[shape.value.ty].ty.copy()
+    map :: ir_list_empty(&m, &b, row)
+    loop entry in entries {
+        key :: ir_comptime(&m, &p, &b, key_ty, ir_comptime_key_value(entry.key), span)
+        value :: ir_comptime(&m, &p, &b, value_ty, entry.value, span)
+        if ir_failed(b) -> return -1
+        if key < 0 || value < 0 -> return ir_fail_slot(&b, span, "Unit map constant entry")
+        ir_map_set(&m, p, &b, row, map, key, value)
+    }
+    map
+}
+
+// A map constant's key as the compile-time value it builds from (Lower
+// lower_constant_key).
+fn ir_comptime_key_value(key: TComptimeKey) -> TComptimeValue Never! {
+    if key == {
+        .Int(value) -> TComptimeValue.Int{value: value}
+        .BigInt(decimal) -> TComptimeValue.BigInt{decimal: decimal}
+        .String(value) -> TComptimeValue.String{value: value}
+        .Bool(value) -> TComptimeValue.Bool{value: value}
+        .Char(value) -> TComptimeValue.Char{value: value}
+        .Tuple(fields) -> TComptimeValue.Struct{type_name: "Tuple", fields: loop field in fields -> TComptimeField{name: field.name, value: ir_comptime_key_value(field.key)}}
+        .Struct(name, fields) -> TComptimeValue.Struct{type_name: name, fields: loop field in fields -> TComptimeField{name: field.name, value: ir_comptime_key_value(field.key)}}
+        .Enum(name, variant) -> TComptimeValue.Enum{type_name: name, variant: variant, args: [TComptimeEnumArg]{}}
     }
 }
 

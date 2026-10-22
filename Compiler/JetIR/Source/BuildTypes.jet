@@ -1447,7 +1447,117 @@ fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         return
     }
     if ir_is_handle(m, row) -> return ir_order_handle(&m, p, &b, ty, left, right, sign, decided, span)
+    if ir_native_carrier(ty) -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    // A user Comparable impl orders by its own body (Lower
+    // lower_order_user_impl); a derived one orders structurally.
+    selected :: ir_compare_impl(&m, p, &b, row, left, right, span)
+    if ir_failed(b) -> return
+    if selected >= 0 {
+        ordering :: ir_type_def(p, "Ordering") ?? return ir_fail(&b, span, "Comparable result Ordering has no definition")
+        equal_index :: ir_variant_index(p, ordering, "Equal") ?? return ir_fail(&b, span, "Ordering has no Equal variant")
+        ordering_row :: b.f.slot_type[selected]
+        equal :: ir_temp(&m, &b, ordering_row)
+        ir_emit(&b.f, IROp.Const, equal, equal_index, -1, -1, b.line)
+        return ir_order_step(&m, &b, selected, equal, sign, decided)
+    }
+    helper :: ir_order_helper(&m, p, &b, row, span)
+    if helper < 0 -> return
+    word_row :: ir_word_row(&m)
+    order :: ir_temp(&m, &b, word_row)
+    start :: ir_args(&b.f, [Int]{left, right})
+    ir_emit(&b.f, IROp.Call, order, helper, start, 2, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    ir_order_step(&m, &b, order, zero, sign, decided)
+}
+
+// The Ordering a selected user Comparable implementation (`compare`) gives
+// `left` against `right` of type row `row`, or -1 when none is selected.
+fn ir_compare_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, span: Span) -> Int Never! {
+    if p.render_impls.len() == 0 -> return -1
+    index :: p.render_impls.get("Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}") ?? return -1
+    function :: p.functions[index]
+    if function.generic_params.len() > 0 -> return ir_fail_slot(&b, span, "generic Comparable implementation {function.name}")
+    returned :: ir_executable_return(function) ?? return ir_fail_slot(&b, span, "Comparable implementation {function.name} without a result")
+    result_row :: ir_value_type(&m, p, returned) ?? return ir_type_fail(&b, span, returned)
+    dst :: ir_temp(&m, &b, result_row)
+    start :: ir_args(&b.f, [Int]{left, right})
+    at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 2, b.line)
+    &b.deferred.push(IRDeferredCall{at: at, key: function.key})
+    dst
+}
+
+// The IR function giving the order word -1, 0 or 1 of two values of the
+// struct or payload enum type row `row` (Lower lower_helper_map_key_compare,
+// the Rust derived Ord), built on first use so a recursive type orders
+// through its own helper; -1 when its body cannot be built.
+fn ir_order_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
+    helper_key :: "#order<{row}>"
+    known :: m.function_rows.get(helper_key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    source_file :: b.f.source_file
+    symbol :: "{b.f.symbol}__order{id}"
+    &m.functions.push(ir_function_new("order", helper_key, symbol, source_file, b.line))
+    m.function_rows[helper_key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    a.line = b.line
+    left :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "left"))
+    right :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "right"))
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    sign :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Const, sign, 0, -1, -1, a.line)
+    decided :: ir_open(&a.f, IROp.Block, a.line)
+    ir_order_nominal(&m, p, &a, row, left, right, sign, decided, span)
+    ir_end(&a.f, a.line)
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        m.function_rows[helper_key] = -1
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, sign, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
+}
+
+// Orders two values of the struct or payload enum type row `row` member by
+// member in declaration order; an enum by variant ordinal first, then the
+// selected variant's payload members.
+fn ir_order_nominal(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
+    ty :: ir_untag(m.types[row].ty)
+    name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    definition_row :: ir_type_def(p, name) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    if p.types[definition_row].kind == .Struct(_, _) {
+        members :: ir_struct_members(&m, p, definition_row, ir_type_args(ty)) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        return ir_order_members(&m, p, &b, members, left, right, sign, decided, span)
+    }
+    if m.types[row].kind == .Pointer && p.types[definition_row].kind == .Enum(variants, _) {
+        left_tag :: ir_load_word(&m, &b, left, 0)
+        right_tag :: ir_load_word(&m, &b, right, 0)
+        ir_order_step(&m, &b, left_tag, right_tag, sign, decided)
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition_row, ir_type_args(ty), index) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+            if members.len() == 0 -> next
+            variant_word :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, left_tag, variant_word)
+            ir_open_if(&b.f, selected, b.line)
+            ir_order_members(&m, p, &b, members, left, right, sign, decided, span)
+            ir_end(&b.f, b.line)
+        }
+        return
+    }
     ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+}
+
+fn ir_order_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMember], left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
+    loop member in members {
+        if ir_failed(b) -> return
+        a :: ir_member_value(&m, &b, left, member)
+        c :: ir_member_value(&m, &b, right, member)
+        ir_order_into(&m, p, &b, member.ty, a, c, sign, decided, span)
+    }
 }
 
 // A runtime handle orders by the shared runtime's law (Lower

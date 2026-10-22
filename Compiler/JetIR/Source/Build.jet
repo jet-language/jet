@@ -107,8 +107,9 @@ struct IRProgram {
     // Checked constants by key (ConstRef / CtLit values).
     constants: [String:TConstantDef]
     lambdas: [IRLambdaJob]
-    // A selected Display (`display`) or Printable (`show`) implementation
-    // method by "<trait>|<rendered type key>" (Lower Display.jet render rows).
+    // A selected Display (`display`), Printable (`show`) or user Comparable
+    // (`compare`) implementation method by "<trait>|<rendered type key>"
+    // (Lower Display.jet render rows, Maps.jet lower_order_user_impl).
     render_impls: [String:Int]
     // The selected Close implementation method (`close`) by rendered type
     // key (Lower Values.jet lower_close_index), and the close glue built per
@@ -236,7 +237,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
     owner_methods := [String:Int]{}
     render_impls := [String:Int]{}
     loop (index, function) in owned {
-        if function.name != "display" && function.name != "show" && function.name != "close" -> next
+        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" -> next
         if function.kind == {
             .TopLevel -> {}
             .Method(_, owner_type) -> {
@@ -257,7 +258,9 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
         }
     }
     // The Display, Printable and Close implementations of the host target
-    // (Lower lower_render_impl_applies, lower_close_index).
+    // (Lower lower_render_impl_applies, lower_close_index), and the user
+    // Comparable ones (a derived Comparable orders structurally: Lower
+    // lower_order_user_impl).
     close_methods := [String:Int]{}
     loop implementation in ^impl_defs {
         trait_name :: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
@@ -266,6 +269,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
             "Display" -> "display"
             "Printable" -> "show"
             "Close" -> "close"
+            "Comparable" -> if implementation.compiler_generated -> "" else -> "compare"
             else -> ""
         }
         if method == "" -> next
@@ -558,7 +562,8 @@ fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
 // A payload binding a condition introduces: `slot` (named `name`) receives
 // the payload at byte `offset` of the carrier box `subject` once the test holds.
 // `boxed`: the member at `offset` is a recursive edge's wrapper box holding the payload.
-struct IRPending { name: String, slot: Int, subject: Int, offset: Int, boxed: Bool{false} }
+// `loaded`: an or-pattern already loaded `slot` in its matching alternative.
+struct IRPending { name: String, slot: Int, subject: Int, offset: Int, boxed: Bool{false}, loaded: Bool{false} }
 
 // Opens the If of a condition and binds its pending payloads in it.
 fn ir_open_condition(m: &IRModule, b: &IRBuilder, test: Int) Never! {
@@ -567,19 +572,25 @@ fn ir_open_condition(m: &IRModule, b: &IRBuilder, test: Int) Never! {
 }
 
 fn ir_bind_pending(m: &IRModule, b: &IRBuilder) Never! {
-    loop row in b.pending {
-        op :: if m.types[b.f.slot_type[row.slot]].kind == .Aggregate -> IROp.Offset else -> IROp.Load
-        if row.boxed {
-            pointer_row :: ir_pointer_row(&m)
-            wrapper :: ir_temp(&m, &b, pointer_row)
-            ir_emit(&b.f, IROp.Load, wrapper, row.subject, row.offset, -1, b.line)
-            ir_emit(&b.f, op, row.slot, wrapper, 0, -1, b.line)
-        } else {
-            ir_emit(&b.f, op, row.slot, row.subject, row.offset, -1, b.line)
-        }
+    pending :: b.pending
+    b.pending = [IRPending]{}
+    loop row in pending {
+        if !row.loaded -> ir_pending_load(&m, &b, row, row.slot)
         &b.bindings.push(IRBinding{name: row.name, slot: row.slot, carrier: if row.boxed -> -1 else -> row.subject})
     }
-    b.pending = [IRPending]{}
+}
+
+// Loads the payload `row` names into `slot`.
+fn ir_pending_load(m: &IRModule, b: &IRBuilder, row: IRPending, slot: Int) Never! {
+    op :: if m.types[b.f.slot_type[slot]].kind == .Aggregate -> IROp.Offset else -> IROp.Load
+    if row.boxed {
+        pointer_row :: ir_pointer_row(&m)
+        wrapper :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Load, wrapper, row.subject, row.offset, -1, b.line)
+        ir_emit(&b.f, op, slot, wrapper, 0, -1, b.line)
+    } else {
+        ir_emit(&b.f, op, slot, row.subject, row.offset, -1, b.line)
+    }
 }
 
 fn ir_fail(b: &IRBuilder, span: Span, message: String) Never! {

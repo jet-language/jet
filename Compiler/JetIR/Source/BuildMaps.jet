@@ -55,7 +55,9 @@ fn ir_map_key_kind(m: IRModule, row: Int) -> String Never! {
 }
 
 // True when ir_order_into orders `ty` (Lower lower_order_kind "list",
-// "inline" and "boxed" over a tuple, List or Option).
+// "inline" and "boxed" over a tuple, List or Option; a declared struct or
+// enum, which sema checked Comparable, orders by its helper or its user
+// Comparable impl).
 fn ir_ordered_type(ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
         .Int | .String | .Bool | .Char -> true
@@ -68,6 +70,7 @@ fn ir_ordered_type(ty: Type) -> Bool Never! {
             }
             true
         }
+        .Named(_) | .Apply(_, _) -> true
         else -> false
     }
 }
