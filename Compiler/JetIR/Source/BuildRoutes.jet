@@ -2,7 +2,7 @@
 // the old path's route table (argument and result carriers, payloads).
 
 use jet_foundation.[CoreCallRecord, Span, Type, TypeTupleField, TBuiltinOp, TClosureOp, TExpr, core_call_native_return_labels, tir_builtin_mutates_receiver]
-use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_native_type, lower_runtime_route, runtime_abi_atom]
+use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_native_type, lower_route_nested, lower_runtime_route, runtime_abi_atom]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
@@ -448,7 +448,14 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
             .ExtendList -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "extend without a List")
                 if ir_list_element(&m, p, b, operands[1]) != Val((element)) -> return ir_fail_slot(&b, span, "extend from a List of another element type")
-                ir_list_extend(&m, &b, subject, element, operands[1])
+                // The route consumes the source (codegen list_extend borrows
+                // only the receiver): a moved or fresh List gives up its
+                // elements, a read of a place its holder keeps (a field of a
+                // borrowed record, say) is extended from a private copy, as
+                // Lower's consumed operand is a copy of the place.
+                owned :: b.fresh[operands[1]] || args[0].kind == .Move(_)
+                source :: if owned -> operands[1] else -> ir_copy_value(&m, p, &b, operands[1], span)
+                ir_list_extend(&m, &b, subject, element, source)
                 return -1
             }
             .TryReserve -> {
@@ -1622,6 +1629,7 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
     if ir_route_inline(&m, p, &b, name, inputs, result, span) == .Val(inlined) -> return inlined
     if lower_environment_route(name) == .Val(environment) -> return ir_environment_call(&m, p, &b, environment, inputs, result, span)
     route :: lower_runtime_route(name) ?? return ir_fail_slot(&b, span, "runtime route {name}")
+    if !route.native_lists && lower_route_nested(route) -> return ir_fail_slot(&b, span, "runtime route {name} crosses a nested List, which only a Jet runtime provider reads")
     if route.params.len() != inputs.len() -> return ir_fail_slot(&b, span, "runtime route {name} takes {route.params.len()} arguments, not {inputs.len()}")
     args := [Int]{}
     loop (index, slot) in inputs {
@@ -1682,8 +1690,10 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
                 &lowered.push(slot)
             }
             .List(element) -> {
+                // A nested List (List<List<U8>>) crosses like any List: its
+                // buffer holds the inline 24-byte element headers.
                 if ir_list_element(&m, p, b, slot) == None -> return ir_fail_slot(&b, span, "runtime route {name} List argument of {shown}")
-                if element == .List(_) || element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                if element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
                 &lowered.push(ir_load_word(&m, &b, slot, 16))
                 &lowered.push(ir_load_word(&m, &b, slot, 0))
             }
@@ -1793,7 +1803,7 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
     }
     row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
     if carrier == .List(element) {
-        if element == .List(_) || element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {export} List of {element} result")
+        if element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {export} List of {element} result")
         out :: ir_out_slot(&m, &b, 1)
         call_args := args
         &call_args.push(out)
