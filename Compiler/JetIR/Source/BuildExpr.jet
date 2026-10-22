@@ -209,7 +209,12 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         }
         .SourceSpan(_) -> {}
         .Let(local, let_ty, init, _, _, span) -> {
-            if local.deref && local.address_lifetime == None && local.persist_key == None && init.kind == .Borrow(_, _) -> return ir_bind_pin(&m, &p, &b, local, init, span)
+            // `name := &place` binds an alias of the place, never a copy (codegen
+            // Statements.jet TStmt.Let alias_place): a write borrow's edits reach
+            // the owner. A range borrow keeps its View value below.
+            if local.address_lifetime == None && local.persist_key == None && init.kind == .Borrow(borrowed, _) {
+                if local.deref || !(borrowed.kind == .Slice(_, _, _, _, _)) -> return ir_bind_pin(&m, &p, &b, local, init, span)
+            }
             if local.deref || local.address_lifetime != None || local.persist_key != None -> return ir_fail(&b, span, "addressed or persistent binding")
             // A GC-promoted or automatic-root binding binds as a plain local
             // (codegen only marks the root, which Lower never reads); codegen
@@ -452,7 +457,14 @@ fn ir_bind_pin(m: &IRModule, p: &IRProgram, b: &IRBuilder, local: TLocal, init: 
     if ir_failed(b) || value < 0 -> return
     // A borrow of a temporary owns that temporary: the pin keeps it.
     if b.fresh[value] -> return ir_bind_local(&m, &b, local, value)
-    if access != .Read && ir_kind_of(m, b, value) != .Aggregate -> return ir_fail(&b, span, "write pin of {ir_type_name(init.ty)}")
+    if access != .Read && ir_kind_of(m, b, value) != .Aggregate {
+        if local.deref -> return ir_fail(&b, span, "write pin of {ir_type_name(init.ty)}")
+        // A user binding of `&box` (an Option or enum box, written through its
+        // payload) holds the box itself.
+        ir_bind_local(&m, &b, local, value)
+        bound :: b.bindings[b.bindings.len() - 1].slot
+        return ir_close_arm(&m, &p, &b, bound, false, span)
+    }
     symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
     &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
