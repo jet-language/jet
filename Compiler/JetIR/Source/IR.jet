@@ -185,7 +185,10 @@ struct IRFunction {
 
 // The program: interned types and names, read-only data rows, functions.
 // `function_rows` maps a function key to its id (row of `functions`);
-// `entry` is the program entry (`fn run`), -1 for a library.
+// `entry` is the program entry (`fn run`), -1 for a library. `layouts`,
+// `layout_low` and `struct_members` are the builder's layout memo
+// (BuildTypes.jet ir_struct_row, ir_struct_members): a struct instance's row
+// by identity (-1 when it does not lay out) and its resolved members.
 struct IRModule {
     types: [IRType]
     type_rows: [String:Int]
@@ -196,10 +199,13 @@ struct IRModule {
     functions: [IRFunction]
     function_rows: [String:Int]
     entry: Int
+    layouts: [String:Int]
+    layout_low: Int
+    struct_members: [String:[IRMember]]
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1}
+    IRModule{types: [IRType]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {

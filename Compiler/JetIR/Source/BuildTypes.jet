@@ -231,16 +231,55 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
             }
             return Val(ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "")))
         }
-        .Struct(_, _) -> {
-            if laying.contains(definition.key) -> return None
-            members :: ir_struct_members_in(&m, p, row, args, laying, false) ?? return None
-            size :: ir_struct_size(m, members)
-            return Val(ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
-        }
+        .Struct(_, _) -> { return ir_struct_row(&m, p, ty, row, args, identity, laying) }
         .Distinct(base, _) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, base), laying) }
         .Alias(target) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, target), laying) }
         else -> { return None }
     }
+}
+
+// The row of struct declaration `row` applied to `args` (`identity`), None
+// when it does not lay out. A result that does not rest on a struct the
+// caller is still laying out (`laying`) is the same in every context and is
+// kept in m.layouts by identity: m.layout_low is the lowest `laying` index a
+// short cut (ir_laying_touch) read while the result was computed.
+fn ir_struct_row(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], identity: String, laying: [String]) -> Int? Never! {
+    at :: ir_laying_at(laying, p.types[row].key)
+    if at >= 0 {
+        ir_laying_touch(&m, at)
+        return None
+    }
+    memo :: "struct:{identity}"
+    known :: m.layouts.get(memo) ?? -2
+    if known >= 0 -> return Val(known)
+    if known == -1 -> return None
+    depth :: laying.len()
+    outer :: m.layout_low
+    m.layout_low = depth
+    found :: ir_struct_row_laid(&m, p, ty, row, args, identity, laying)
+    touched :: m.layout_low
+    m.layout_low = if touched < outer -> touched else -> outer
+    if touched >= depth -> m.layouts[memo] = found ?? -1
+    found
+}
+
+fn ir_struct_row_laid(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], identity: String, laying: [String]) -> Int? Never! {
+    members :: ir_struct_members_in(&m, p, row, args, laying, false) ?? return None
+    size :: ir_struct_size(m, members)
+    Val(ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
+}
+
+// The index of declaration key `key` in `laying`, -1 when absent.
+fn ir_laying_at(laying: [String], key: String) -> Int Never! {
+    loop (index, laid) in laying {
+        if laid == key -> return index
+    }
+    -1
+}
+
+// A short cut read `laying` index `at`: results computed since rest on it.
+fn ir_laying_touch(m: &IRModule, at: Int) Never! {
+    if at < m.layout_low -> m.layout_low = at
 }
 
 // The type arguments of a nominal instance (none for a plain name).
@@ -579,7 +618,11 @@ fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [Strin
     if laying.len() > 0 {
         if ir_nominal_name(ir_untag(ir_subst(p, written))) == .Val(name) {
             if ir_type_def(p, name) == .Val(row) {
-                if laying.contains(p.types[row].key) -> return true
+                at :: ir_laying_at(laying, p.types[row].key)
+                if at >= 0 {
+                    ir_laying_touch(&m, at)
+                    return true
+                }
             }
         }
     }
@@ -937,7 +980,16 @@ struct IRMember { name: String, offset: Int, ty: Int, boxed: Bool{false}, redact
 // no bytes, a recursive edge is one pointer to its wrapper box); None when a
 // member cannot be laid out.
 fn ir_struct_members(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRMember]? Never! {
-    ir_struct_members_in(&m, p, row, args, [String]{}, true)
+    // Memoized by the instance's arguments in the terms of the instance
+    // being built, as its member types are laid out. A SharedGuard argument's
+    // member row follows its read/edit tag, which the identity does not spell.
+    bound :: loop arg in args -> ir_subst(p, arg)
+    memo :: ir_instance_identity(p.types[row].key, bound)
+    if memo.contains("SharedGuard<") -> return ir_struct_members_in(&m, p, row, bound, [String]{}, true)
+    if m.struct_members.get(memo) == .Val(known) -> return Val(known)
+    found :: ir_struct_members_in(&m, p, row, bound, [String]{}, true) ?? return None
+    m.struct_members[memo] = found.copy()
+    Val(found)
 }
 
 // ir_struct_members while the structs `laying` are being laid out. Unless
