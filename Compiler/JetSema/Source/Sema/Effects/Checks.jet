@@ -2246,10 +2246,15 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         if node.is_unsafe -> break true
     } ?? false
 
+    // The graph's nodes move into the collecting threads' shared state once,
+    // for every module's collection, and back after the last module.
+    collect_state :: shared SemaEffectCollectShared{functions: [TFunc]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, rows: [Int]{}, any_unsafe: any_unsafe}
+    sema_effect_collect_nodes_fill(collect_state, &nodes)
     loop module_index in 0..<inputs.len() {
         calls.current_module = module_index
-        calls = sema_effect_collect_module_threads(&modules[inputs[module_index].module_index].functions, inputs[module_index], ^calls, any_unsafe, &nodes, &diagnostics, threads)
+        calls = sema_effect_collect_module_threads(collect_state, &modules[inputs[module_index].module_index].functions, inputs[module_index], ^calls, any_unsafe, &diagnostics, threads)
     }
+    sema_effect_collect_nodes_take(collect_state, &nodes)
     solved :: sema_effect_solve(nodes, calls.node_by_key)
     loop module_index in 0..<inputs.len() {
         sites := [String:MIRSharedLifetime]{}
@@ -2403,11 +2408,11 @@ SEMA_EFFECT_COLLECT_PARTS_PER_THREAD :: 8
 // each thread collects its claimed consecutive parts of the functions into
 // its own copy of the graph's nodes, and the caller moves each function's
 // node row back and publishes its reports in function order, exactly as one
-// thread does. The module's functions, the call index and the nodes move into
-// the threads' shared state and back; the call index moves in and is
-// returned. A module whose functions share a node, or whose work admits one
-// thread, collects on the calling thread.
-fn sema_effect_collect_module_threads(functions: &[TFunc], module_row: SemaEffectModuleInput, calls: ^SemaEffectCallIndex, any_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic], threads: CompilerThreads) -> SemaEffectCallIndex {
+// thread does. The graph's nodes stay in `shared_state` (moved in once for
+// every module); the module's functions and the call index move in and back,
+// and the call index is returned. A module whose functions share a node, or
+// whose work admits one thread, collects on the calling thread.
+fn sema_effect_collect_module_threads(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], module_row: SemaEffectModuleInput, calls: ^SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic], threads: CompilerThreads) -> SemaEffectCallIndex {
     index := ^calls
     rows := [Int]{}
     weights := [Int]{}
@@ -2425,35 +2430,27 @@ fn sema_effect_collect_module_threads(functions: &[TFunc], module_row: SemaEffec
         &weights.push(weight)
         work += weight
     }
-    workers :: if shared_node -> 1 else -> compiler_threads_admit(threads, functions.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, nodes.len() * SEMA_EFFECT_NODE_BYTES, 0)
+    workers :: if shared_node -> 1 else -> compiler_threads_admit(threads, functions.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, sema_effect_collect_node_count(shared_state) * SEMA_EFFECT_NODE_BYTES, 0)
     if workers <= 1 {
-        sema_effect_collect_module(functions, module_row, index, any_unsafe, &nodes, &diagnostics)
+        sema_effect_collect_module_inline(shared_state, functions, module_row, index, any_unsafe, &diagnostics)
         return index
     }
     count := workers * SEMA_EFFECT_COLLECT_PARTS_PER_THREAD
     if count > functions.len() -> count = functions.len()
     bounds :: compiler_threads_partition(weights, count)
-    shared_state :: shared SemaEffectCollectShared{functions: [TFunc]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, rows: rows, any_unsafe: any_unsafe}
-    sema_effect_collect_fill(shared_state, &functions, ^index, &nodes)
+    sema_effect_collect_fill(shared_state, &functions, ^index, rows)
     queue :: shared SemaEffectCollectQueue{next: 0}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> &parts.push([SemaEffectCollected]{})
     sema_effect_collect_claimers(shared_state, bounds, queue, 0, workers, &parts)
-    returned := sema_effect_collect_take(shared_state, &functions, &nodes)
-    loop part in 0..<count {
-        loop position in bounds[part]..<bounds[part + 1] {
-            if rows[position] < 0 -> next
-            collected := &parts[part].pop() ?? panic("a collected effect node left its part")
-            nodes[rows[position]] = ^collected.node
-            sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^collected.diagnostics)
-        }
-    }
+    returned := sema_effect_collect_take(shared_state, &functions)
+    sema_effect_collect_place(shared_state, rows, bounds, &parts, module_row, &diagnostics)
     returned
 }
 
-// What every collecting thread reads: the module's functions, the call index
-// and the graph's nodes (each the one row of its list, moved in and back
-// out), each function's node (-1 for none) and whether the graph has an
+// What every collecting thread reads: the graph's nodes, the module's
+// functions and the call index (each the one row of its list, moved in and
+// back out), each function's node (-1 for none) and whether the graph has an
 // `#Unsafe` function.
 struct SemaEffectCollectShared {
     functions: [TFunc]
@@ -2481,19 +2478,54 @@ struct SemaEffectCollectedPart {
     collected: [SemaEffectCollected]
 }
 
-fn sema_effect_collect_fill(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], calls: ^SemaEffectCallIndex, nodes: &[SemaEffectNode]) {
+fn sema_effect_collect_nodes_fill(shared_state: Shared<SemaEffectCollectShared>, nodes: &[SemaEffectNode]) {
     permit :: shared_state.guard_edit()
-    compiler_transfer_rows<TFunc>(&permit.value.functions, &functions)
     compiler_transfer_rows<SemaEffectNode>(&permit.value.nodes, &nodes)
-    &permit.value.calls.push(^calls)
 }
 
-// Moves the functions and nodes back and returns the call index.
-fn sema_effect_collect_take(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], nodes: &[SemaEffectNode]) -> SemaEffectCallIndex {
+fn sema_effect_collect_nodes_take(shared_state: Shared<SemaEffectCollectShared>, nodes: &[SemaEffectNode]) {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaEffectNode>(&nodes, &permit.value.nodes)
+}
+
+fn sema_effect_collect_node_count(shared_state: Shared<SemaEffectCollectShared>) -> Int {
+    inputs :: shared_state.guard_read()
+    inputs.value.nodes.len()
+}
+
+// One module's collection on the calling thread, into the graph's nodes in place.
+fn sema_effect_collect_module_inline(shared_state: Shared<SemaEffectCollectShared>, functions: [TFunc], module_row: SemaEffectModuleInput, calls: SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
+    permit :: shared_state.guard_edit()
+    sema_effect_collect_module(functions, module_row, calls, any_unsafe, &permit.value.nodes, &diagnostics)
+}
+
+fn sema_effect_collect_fill(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], calls: ^SemaEffectCallIndex, rows: [Int]) {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<TFunc>(&permit.value.functions, &functions)
+    &permit.value.calls.push(^calls)
+    // copy: the threads read the rows while the caller places the collected nodes by them.
+    permit.value.rows = rows.copy()
+}
+
+// Moves the functions back and returns the call index.
+fn sema_effect_collect_take(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc]) -> SemaEffectCallIndex {
     permit :: shared_state.guard_edit()
     compiler_transfer_rows<TFunc>(&functions, &permit.value.functions)
-    compiler_transfer_rows<SemaEffectNode>(&nodes, &permit.value.nodes)
     &permit.value.calls.pop() ?? panic("the effect call index left the threads' shared state")
+}
+
+// Moves each collected function's node row into the graph's nodes and
+// publishes its reports, in function order.
+fn sema_effect_collect_place(shared_state: Shared<SemaEffectCollectShared>, rows: [Int], bounds: [Int], parts: &[[SemaEffectCollected]], module_row: SemaEffectModuleInput, diagnostics: &[Diagnostic]) {
+    permit :: shared_state.guard_edit()
+    loop part in 0..<bounds.len() - 1 {
+        loop position in bounds[part]..<bounds[part + 1] {
+            if rows[position] < 0 -> next
+            collected := &parts[part].pop() ?? panic("a collected effect node left its part")
+            permit.value.nodes[rows[position]] = ^collected.node
+            sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^collected.diagnostics)
+        }
+    }
 }
 
 // Runs collecting threads `from..<workers`, one task each, and moves every
