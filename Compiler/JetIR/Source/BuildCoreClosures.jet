@@ -182,3 +182,22 @@ fn ir_task_detach(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, s
     ir_lazy_consumed(&m, &b, handle)
     return -1
 }
+
+// `^task.join()`: the runtime takes the handle over, waits for the task
+// and writes the body's outcome into the Result box (Lower Tasks.jet:455,
+// jet_rt_native_task_join without flattening).
+fn ir_task_join(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+    result_ty :: ir_subst(p, ty)
+    err_ty := Type.Int
+    if ir_untag(result_ty) == .Result(_, failure) {
+        err_ty = failure
+    } else {
+        return ir_fail_slot(&b, span, "Task.join result {ir_type_name(ty)}")
+    }
+    handle :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || handle < 0 -> return -1
+    flatten :: ir_word_const(&m, &b, 0)
+    boxed :: ir_task_outcome(&m, p, &b, "jet_rt_native_task_join", [Int]{handle, flatten}, result_ty, err_ty, span)
+    ir_lazy_consumed(&m, &b, handle)
+    boxed
+}

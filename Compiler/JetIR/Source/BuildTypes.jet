@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TExpr, TField, TFunc, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, type_carrier_identity, type_name, type_union_member_tag]
-use jet_backend.[LOWER_GENERATED_RECORDS, LOWER_RECORD_SCHEMAS, LOWER_WORD_RECORDS, LowerRecordSchema, LowerRuntimeHandle, lower_native_runtime_carrier, lower_native_type, lower_record_variant_position, lower_runtime_handle, runtime_abi_atom]
+use jet_backend.[LOWER_GENERATED_RECORDS, LOWER_RECORD_SCHEMAS, LOWER_WORD_RECORDS, LowerRecordSchema, LowerRuntimeHandle, lower_handle_field, lower_native_runtime_carrier, lower_native_type, lower_record_variant_position, lower_runtime_handle, runtime_abi_atom]
 use jet_codegen.[JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS, JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS, JET_CODEGEN_COMPILER_OWNED_ENUMS, JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS, JET_CODEGEN_RANGE_RECORD, JetCodegenCompilerOwnedPayload, jet_codegen_compiler_owned_enum_payload, jet_codegen_compiler_owned_generic_params, jet_codegen_compiler_owned_record_fields]
 
 // A rendered type's identity: its declaration key when it names one (every
@@ -339,9 +339,10 @@ fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Nev
         definition :: p.types[row]
         native :: lower_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
         core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/")
-        owned_shape :: ir_record_schema(handle) || lower_native_type(name) != None || core_source_owns_type(name)
+        // A bare spelling of a Core declaration is that declaration: both
+        // spellings take the row its key does.
+        owned_shape :: ir_record_schema(handle) || lower_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (lower_native_type(definition.key) != None || core_source_owns_type(definition.key)))
         if !native && (!core || owned_shape) -> return None
-        if !native && definition.kind == .Struct(_, _) && !name.starts_with("<corelib>/") -> return None
     }
     atom :: runtime_abi_atom(handle.runtime)
     clone :: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
@@ -371,6 +372,48 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
         if field == name -> return Val(IRMember{name: name, offset: 8 * index, ty: row, boxed: kind == .Aggregate})
     }
     None
+}
+
+// Field `name` a runtime handle lends (Lower Places.jet
+// lower_handle_field_place, RuntimeRoutes.jet LOWER_HANDLE_FIELDS), read
+// through the runtime's field export: a Float or Bool through the address it
+// returns, a String or converted carrier through the header it writes into a
+// frame slot, a nested handle as the word it returns. The handle keeps the
+// field, so the read is copied out before a fresh `base` is released. -2 when
+// the handle lends no such field.
+fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, name: String, field_ty: Type, span: Span) -> Int Never! {
+    if !ir_is_handle(m, b.f.slot_type[base]) -> return -2
+    nominal :: ir_nominal_name(ir_untag(ty)) ?? return -2
+    handle :: ir_handle_runtime(p, nominal) ?? return -2
+    lent :: lower_handle_field(handle.runtime, name) ?? return -2
+    row :: ir_value_type(&m, p, field_ty) ?? return ir_type_fail(&b, span, field_ty)
+    kind :: m.types[row].kind
+    matches :: if lent.kind == {
+        "Text" -> kind == .String
+        "Float" -> kind == .Float
+        "Flag" -> kind == .Bool
+        else -> lent.kind.starts_with("Handle.")
+    }
+    if !matches -> return -2
+    symbol :: "jet_rt_handle_field_{runtime_abi_atom(handle.runtime)}_{runtime_abi_atom(name)}"
+    pointer_row :: ir_pointer_row(&m)
+    view := -1
+    if lent.kind == "Text" || lent.header_bytes > 0 {
+        out :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, out, if lent.kind == "Text" -> 24 else -> lent.header_bytes, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, symbol, [Int]{base, out}, -1)
+        view = ir_temp(&m, &b, row)
+        ir_emit(&b.f, if kind == .Aggregate -> IROp.Offset else -> IROp.Copy, view, out, if kind == .Aggregate -> 0 else -> -1, -1, b.line)
+    } else if lent.kind == "Float" || lent.kind == "Flag" {
+        address :: ir_runtime(&m, &b, symbol, [Int]{base}, pointer_row)
+        view = ir_load_at(&m, &b, address, 0, row)
+    } else {
+        view = ir_runtime(&m, &b, symbol, [Int]{base}, row)
+        b.fresh[view] = false
+    }
+    copied :: ir_copy_value(&m, p, &b, view, span)
+    ir_release(&m, &b, base)
+    copied
 }
 
 // Whether a runtime handle row has a record schema: such a type keeps its
@@ -531,6 +574,76 @@ fn ir_record_in_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, row: I
         }
         ir_end(&a.f, a.line)
     }
+}
+
+// The runtime record handle for the borrowed native struct record of type
+// `ty` at `value` (Lower Records.jet lower_helper_record_out): the runtime's
+// constructor takes the members in the schema's field order, a nested record
+// as a handle of its own (which the constructor takes). The caller drops the
+// handle after the call. -1 after a failure.
+fn ir_record_out(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
+    unknown :: "runtime record {ir_type_name(ty)}"
+    record :: ir_record_runtime(&m, p, ty) ?? return ir_fail_slot(&b, span, unknown)
+    schema :: ir_record_schema_row(record) ?? return ir_fail_slot(&b, span, unknown)
+    name :: ir_nominal_name(ir_untag(ty)) ?? return ir_fail_slot(&b, span, unknown)
+    definition :: ir_type_def(p, name) ?? return ir_fail_slot(&b, span, unknown)
+    is_struct :: p.types[definition].kind == .Struct(_, _)
+    if !is_struct -> return ir_fail_slot(&b, span, "runtime record of the enum {ir_type_name(ty)} as an argument")
+    unsupported :: "record {ir_type_name(ty)} has a member no runtime export carries"
+    members :: ir_struct_members(&m, p, definition, [Type]{}) ?? return ir_fail_slot(&b, span, unsupported)
+    loop member in members {
+        if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail_slot(&b, span, unsupported)
+    }
+    args := [Int]{}
+    loop entry in schema.fields.split(",").to_list() {
+        if entry == "" -> next
+        field :: entry.split("=").to_list()[0]
+        loop member in members {
+            if member.name != field -> next
+            arg :: ir_record_member_arg(&m, p, &b, value, member, span)
+            if arg < 0 -> return -1
+            &args.push(arg)
+        }
+    }
+    pointer_row :: ir_pointer_row(&m)
+    made :: ir_runtime(&m, &b, "jet_rt_record_new_{runtime_abi_atom(record.runtime)}", args, pointer_row)
+    made
+}
+
+// The constructor argument for `member` of the record at `base` (Lower
+// lower_record_member_arg): a leaf word, a borrowed Option box, or a nested
+// record's new handle (null for an absent Option).
+fn ir_record_member_arg(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, span: Span) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    holder := base
+    at := member.offset
+    if member.boxed {
+        holder = ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Load, holder, base, member.offset, -1, b.line)
+        at = 0
+    }
+    ty :: m.types[member.ty].ty
+    if ir_untag(ty) == .Option(inner) {
+        box :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Load, box, holder, at, -1, b.line)
+        if ir_record_runtime(&m, p, inner) == None -> return box
+        inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+        converted :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Const, converted, 0, -1, -1, b.line)
+        zero :: ir_word_const(&m, &b, 0)
+        present :: ir_bool_op(&m, &b, IROp.Ne, box, zero)
+        ir_open_if(&b.f, present, b.line)
+        inner_value :: ir_load_at(&m, &b, box, 0, inner_row)
+        made :: ir_record_out(&m, p, &b, inner, inner_value, span)
+        if made < 0 -> return -1
+        ir_emit(&b.f, IROp.Copy, converted, made, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        return converted
+    }
+    if ir_untag(ty) == .List(_) -> return ir_fail_slot(&b, span, "runtime record sequence member {member.name}")
+    value :: ir_load_at(&m, &b, holder, at, member.ty)
+    if ir_record_runtime(&m, p, ty) != None -> return ir_record_out(&m, p, &b, ty, value, span)
+    value
 }
 
 // One member through its getter into `base` (Lower
@@ -1168,6 +1281,16 @@ fn ir_binary(m: &IRModule, p: &IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
         return dst
     }
     if kind == .Float || kind == .Float32 {
+        // Float `%`, floor division and `**` call the runtime's libm exports
+        // (Lower lower_float_binary), never a libm symbol.
+        if kind == .Float && (op == .Rem || op == .FloorDiv || op == .Pow) {
+            row :: b.f.slot_type[left]
+            if op == .Rem -> return ir_runtime(&m, &b, "jet_std_math_fmod", [Int]{left, right}, row)
+            if op == .Pow -> return ir_runtime(&m, &b, "jet_std_math_pow", [Int]{left, right}, row)
+            quotient :: ir_temp_like(&m, &b, left)
+            ir_emit(&b.f, IROp.Div, quotient, left, right, -1, site)
+            return ir_runtime(&m, &b, "jet_std_math_floor", [Int]{quotient}, row)
+        }
         if op != .Add && op != .Sub && op != .Mul && op != .Div -> return ir_fail_slot(&b, span, "Float operator {op}")
         dst :: ir_temp_like(&m, &b, left)
         ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, -1, site)

@@ -416,7 +416,7 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         return Val(ir_map_top_n(&m, p, &b, ir_subst(p, ty), shape, subject, operands[1], span))
     }
     keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
-    if !keyed && symbol != "jet_map_insert" -> return None
+    if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_add_new" -> return None
     if operands.len() < 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "map builtin {symbol} without a key"))
     key :: ir_adapt(&m, p, &b, operands[1], shape.key.ty, span)
     if ir_failed(b) -> return Val(-1)
@@ -430,6 +430,30 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         b.fresh[owned_key] = false
         b.fresh[owned_value] = false
         return Val(old)
+    }
+    // `add_new(key, value)` (Lower lower_map_method_query): inserts only
+    // under a missing key, whether it was missing; the copies made for the
+    // insert are dropped when the key is there.
+    if symbol == "jet_map_add_new" {
+        if operands.len() != 3 || operands[2] < 0 -> return Val(ir_fail_slot(&b, span, "map add_new without a value"))
+        value :: ir_adapt(&m, p, &b, operands[2], shape.value.ty, span)
+        if ir_failed(b) -> return Val(-1)
+        owned_key :: ir_own(&m, &b, key)
+        owned_value :: if ir_kind_of(m, b, value) == .Aggregate -> ir_copy_value(&m, p, &b, value, span) else -> ir_own(&m, &b, value)
+        word_row :: ir_word_row(&m)
+        found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{subject, owned_key}, word_row)
+        zero :: ir_word_const(&m, &b, 0)
+        missing :: ir_bool_op(&m, &b, IROp.Lt, found, zero)
+        ir_open_if(&b.f, missing, b.line)
+        old :: ir_map_call(&m, p, &b, row, "map.insert", [Int]{subject, owned_key, owned_value}, option_row)
+        ir_release(&m, &b, old)
+        ir_else(&b.f, b.line)
+        ir_release(&m, &b, owned_key)
+        ir_release(&m, &b, owned_value)
+        ir_end(&b.f, b.line)
+        b.fresh[owned_key] = false
+        b.fresh[owned_value] = false
+        return Val(missing)
     }
     result := -1
     if symbol == "jet_map_has_key" {

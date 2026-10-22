@@ -2,7 +2,7 @@
 // the old path's route table (argument and result carriers, payloads).
 
 use jet_foundation.[CoreCallRecord, Span, Type, TypeTupleField, TBuiltinOp, TClosureOp, TExpr, core_call_native_return_labels, tir_builtin_mutates_receiver]
-use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_native_type, lower_runtime_route]
+use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_native_type, lower_runtime_route, runtime_abi_atom]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
@@ -1514,6 +1514,8 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
     lowered := [Int]{}
     temporaries := [Int]{}
     trees := [Int]{}
+    records := [Int]{}
+    record_drops := [String]{}
     loop (index, slot) in args {
         carrier :: route.params[index]
         if carrier == .Unit -> next
@@ -1589,6 +1591,17 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
                     &lowered.push(slot)
                     next
                 }
+                // A record the program lays out itself crosses as a runtime
+                // record handle made for the call and dropped after it
+                // (Lower lower_record_to_runtime: record.out).
+                if !ir_is_handle(m, slot_row) && ir_record_runtime(&m, p, shown) == .Val(record) {
+                    made :: ir_record_out(&m, p, &b, shown, slot, span)
+                    if made < 0 -> return -1
+                    &lowered.push(made)
+                    &records.push(made)
+                    &record_drops.push("jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}")
+                    next
+                }
                 // A runtime handle crosses as itself (a mutable one too: the
                 // route mutates the runtime value behind it).
                 if !ir_is_handle(m, slot_row) -> return ir_fail_slot(&b, span, "runtime route {name} handle argument of {shown}")
@@ -1608,6 +1621,9 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
     loop temporary in temporaries -> ir_release(&m, &b, temporary)
     loop tree in trees {
         _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
+    }
+    loop (index, record) in records {
+        _ :: ir_runtime(&m, &b, record_drops[index], [Int]{record}, -1)
     }
     loop (index, slot) in args {
         if slot < 0 -> next
@@ -1695,6 +1711,24 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
             align :: ir_word_const(&m, &b, 8)
             _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{shell, bytes, align}, -1)
             return storage
+        }
+        // A record the program lays out itself crosses as a runtime record
+        // handle, converted into its declared layout (Lower
+        // lower_record_from_runtime: record.in), then dropped.
+        if !ir_is_handle(m, row) && ir_record_runtime(&m, p, result) != None {
+            pointer_row :: ir_pointer_row(&m)
+            record :: ir_runtime(&m, &b, export, args, pointer_row)
+            if m.types[row].kind == .Aggregate {
+                storage :: ir_fresh_temp(&m, &b, row)
+                ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+                ir_record_in(&m, p, &b, result, record, storage, 0, span)
+                return storage
+            }
+            out :: ir_out_slot(&m, &b, 1)
+            ir_record_in(&m, p, &b, result, record, out, 0, span)
+            value :: ir_load_at(&m, &b, out, 0, row)
+            b.fresh[value] = true
+            return value
         }
         if !ir_is_handle(m, row) -> return ir_fail_slot(&b, span, "runtime route {export} handle result as {result}")
     }
@@ -2004,6 +2038,30 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     if ir_untag(result) == .Result(success, failure) {
         ok_ty = success
         err_ty = failure
+    } else if export == "jet_int_to_radix" && ir_untag(result) == Type.String && ok == .Text && err == .Text {
+        // Int.to_radix is checked String over the kernel's Text/Text Result
+        // (Lower lower_route_int_radix): the selected text on success, a
+        // numeric stop with the error text on failure.
+        out :: ir_out_slot(&m, &b, 1)
+        call_args := args
+        &call_args.push(out)
+        &call_args.push(out)
+        word_row :: ir_word_row(&m)
+        selector :: ir_runtime(&m, &b, export, call_args, word_row)
+        string_row :: ir_string_row(&m)
+        text :: ir_fresh_temp(&m, &b, string_row)
+        ir_emit(&b.f, IROp.Load, text, out, 0, -1, b.line)
+        zero :: ir_word_const(&m, &b, 0)
+        failed :: ir_bool_op(&m, &b, IROp.Eq, selector, zero)
+        ir_open_if(&b.f, failed, b.line)
+        site :: b.line
+        stop := ir_location(&m, &b, site)
+        &stop.push(ir_load_word(&m, &b, text, 0))
+        &stop.push(ir_load_word(&m, &b, text, 8))
+        _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", stop, -1)
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        return text
     } else {
         return ir_fail_slot(&b, span, "runtime route {export} Result result as {result}")
     }

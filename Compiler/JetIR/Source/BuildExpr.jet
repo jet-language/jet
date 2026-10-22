@@ -1002,6 +1002,8 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
                         return exact
                     }
                 }
+                lent :: ir_handle_field(&m, p, &b, receiver.ty, base, field.name, expression.ty, span)
+                if lent != -2 -> return lent
             }
             if base < 0 || ir_kind_of(m, b, base) != .Aggregate -> return ir_fail_slot(&b, span, "field of {ir_type_name(receiver.ty)}")
             member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "field {field.name} of {ir_type_name(receiver.ty)}")
@@ -1208,6 +1210,9 @@ fn ir_defer_close(m: &IRModule, p: &IRProgram, b: &IRBuilder, close: TExpr, span
 // ...) and closure, mutating or frame-scheduled forms are not built here.
 fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: THandleOp, args: [TExpr], span: Span) -> Int Never! {
     if operation == .TaskDetach -> return ir_task_detach(&m, &p, &b, receiver, span)
+    if operation == .TaskJoin -> return ir_task_join(&m, &p, &b, ty, receiver, span)
+    // Encoding a Dyn is the Dyn itself (codegen jet_codegen_lower_serde_encode).
+    if operation == .SerdeEncode && (ir_nominal_name(ir_untag(ir_subst(p, receiver.ty))) ?? "") == "Dyn" -> return ir_expr(&m, &p, &b, receiver)
     dedicated :: if operation == {
         .SerdeEncode | .Hardware(_) | .ReceiptAttach | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
         .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
@@ -1693,6 +1698,30 @@ fn ir_string(m: &IRModule, p: &IRProgram, b: &IRBuilder, parts: [TStrPart], span
                 _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push_static", args, -1)
             }
             .Interpolation(value, format) -> {
+                // `{x:Fixed(n)}` / `{x:Grouped(n)}` of a Float: the
+                // core.text.fmt kernel the reference lowers it to
+                // (jet_fmt_decimal / jet_fmt_grouped, host i64 precision).
+                kernel :: if format == {
+                    .Fixed(_) -> "jet_fmt_decimal"
+                    .Grouped(_) -> "jet_fmt_grouped"
+                    else -> ""
+                }
+                precision :: if format == {
+                    .Fixed(digits) | .Grouped(digits) -> digits
+                    else -> 0
+                }
+                if kernel != "" {
+                    if ir_untag(ir_subst(p, value.ty)) != .Float -> return ir_fail_slot(&b, span, "interpolation format {format} of {ir_type_name(value.ty)}")
+                    slot :: ir_expr(&m, &p, &b, value)
+                    if ir_failed(b) -> return -1
+                    digits :: ir_word_const(&m, &b, precision)
+                    string_row :: ir_string_row(&m)
+                    text :: ir_runtime(&m, &b, kernel, [Int]{slot, digits}, string_row)
+                    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+                    ir_release(&m, &b, text)
+                    ir_release(&m, &b, slot)
+                    next
+                }
                 debug :: if format == {
                     .Display -> false
                     .Debug -> true
@@ -1866,9 +1895,11 @@ fn ir_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, place: TExpr, ba
         return address
     }
     // `f(make())` into a write parameter: the call's fresh aggregate result is
-    // its own place, which the call releases after the callee wrote it.
+    // its own place, which the call releases after the callee wrote it; a
+    // literal (`f(&[...])`) is one too.
     temporary :: if place.kind == {
         .Call(_, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> true
+        .List(_, _) | .ListLit(_) | .Tuple(_) | .Map(_) | .MapLit(_) -> true
         else -> false
     }
     if temporary {
@@ -2417,7 +2448,11 @@ fn ir_enum_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, owner: St
 fn ir_json_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, variant: String, argument: TExpr?, span: Span) -> Int Never! {
     if argument == None -> return ir_enum_value(&m, &p, &b, ty, "Dyn", variant, TEnumPayload.Unit, span)
     value := argument
-    if variant == "Object" && value.kind == .MapLit(entries) {
+    map_entries :: if value.kind == {
+        .MapLit(entries) | .Map(entries) -> Val(entries)
+        else -> None
+    }
+    if variant == "Object" && map_entries == .Val(entries) {
         pair_ty :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: ty}}}
         pairs := [TExpr]{}
         loop entry in entries {
