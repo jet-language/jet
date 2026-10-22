@@ -38,6 +38,8 @@ use jet_foundation.[
     mir_source_file_id,
     name_find,
     name_index,
+    name_intern,
+    name_table,
     ImportedItem,
 ]
 use jet_lexer.[
@@ -83,6 +85,7 @@ use jet_sema.[
     sema_effect_root,
     sema_registration_unit_family_type_names,
     sema_source_words,
+    sema_source_wanted_words,
 ]
 use jet_pkg_model.[
     PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
@@ -2273,11 +2276,17 @@ fn jet_driver_namespace_reach(modules: &[JetDriverLoadedModule], source_units: [
     always := [String]{}
     if default_slots.get("") == .Val(slot) -> always = default_words[slot]
     loop table_index in 0..<members.len() {
+        // Only a word a member of this package declares or that keys a
+        // default adds a ref or splices words in, so a member's source is
+        // read for those words alone; its refs, in order, are unchanged.
+        wanted := name_table()
+        loop (name, _) in owners[table_index] -> _ := name_intern(&wanted, name)
+        loop (name, _) in default_slots -> _ := name_intern(&wanted, name)
         loop (position, module_index) in members[table_index] {
             source :: jet_driver_module_source_bytes(source_units[modules[module_index].source_unit_index], roots, core_sources)
             seen := [String:Bool]{}
             words := [String]{}
-            sema_source_words(source, 0, source.len(), &seen, &words)
+            sema_source_wanted_words(source, wanted, &seen, &words)
             loop word in always {
                 if seen.get(word) != None -> next
                 seen[word] = true

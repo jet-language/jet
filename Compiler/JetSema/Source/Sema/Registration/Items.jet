@@ -10,6 +10,7 @@ use jet_foundation.[
     CallContractRow,
     CallablePolicy,
     CallablePolicyChain,
+    CompilerThreads,
     ConstDef,
     Diagnostic,
     Dimension,
@@ -35,6 +36,7 @@ use jet_foundation.[
     Measure,
     NamedSpan,
     NamedType,
+    NameTable,
     OperatorMarker,
     Param,
     ParamZone,
@@ -61,6 +63,11 @@ use jet_foundation.[
     Variant,
     VariantPayload,
     ast_program,
+    compiler_apply_order,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_heaviest_first,
+    compiler_transfer_rows,
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_module_export,
@@ -70,6 +77,7 @@ use jet_foundation.[
     core_source_owns_type,
     expr_span,
     mir_builtin_codec_trait_ref,
+    name_find_bytes,
     sema_reserved_type_name,
     symbol_id,
     type_identity,
@@ -2374,6 +2382,135 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     ^module_row
 }
 
+// A compiler thread is admitted for at least this many bytes of module
+// source to prepare.
+SEMA_REGISTRATION_PREPARE_MIN_BYTES_PER_THREAD :: 262144
+
+// One module's sema_registration_prepare_module_row inputs.
+struct SemaRegistrationPrepareJob {
+    input: SemaRegistrationModuleInput
+    templates: [SemaGenericModuleSource]
+    policies: [UserPolicyDecl]
+}
+
+// A prepared module row and the diagnostics its preparation reported.
+struct SemaRegistrationPreparedRow {
+    module_row: SemaRegistrationModule
+    diagnostics: [Diagnostic]
+}
+
+fn sema_registration_prepare_job(job: ^SemaRegistrationPrepareJob) -> SemaRegistrationPreparedRow {
+    owned := ^job
+    input := ^owned.input
+    templates := ^owned.templates
+    policies := ^owned.policies
+    diagnostics := [Diagnostic]{}
+    module_row := sema_registration_prepare_module_row(^input, templates, policies, &diagnostics)
+    SemaRegistrationPreparedRow{module_row: ^module_row, diagnostics: ^diagnostics}
+}
+
+// The prepared row of each job, in job order. A module's preparation reads
+// nothing but its own job, so the jobs move into the threads' shared state
+// and up to `threads` compiler threads claim them, largest source first;
+// each row lands at its job's position, so the rows and their diagnostics
+// are the same for any thread count.
+fn sema_registration_prepare_rows(jobs: ^[SemaRegistrationPrepareJob], threads: CompilerThreads) -> [SemaRegistrationPreparedRow] {
+    owned := ^jobs
+    weights := [Int]{}
+    work := 0
+    loop job in owned {
+        bytes :: job.input.source.count_bytes()
+        &weights.push(bytes)
+        work += bytes
+    }
+    workers :: compiler_threads_admit(threads, owned.len(), work, SEMA_REGISTRATION_PREPARE_MIN_BYTES_PER_THREAD, 0, 0)
+    rows := [SemaRegistrationPreparedRow]{}
+    if workers <= 1 {
+        &owned.reverse()
+        loop owned.len() > 0 {
+            job := &owned.pop() ?? break
+            &rows.push(sema_registration_prepare_job(^job))
+        }
+        return rows
+    }
+    // The jobs are held lightest first, so each claim pops the largest left;
+    // `positions[at]` is the job order position of the job held at `at`.
+    heaviest :: compiler_threads_heaviest_first(weights)
+    positions := [Int]{}
+    loop rank in 0..<heaviest.len() -> &positions.push(heaviest[heaviest.len() - 1 - rank])
+    compiler_apply_order<SemaRegistrationPrepareJob>(&owned, positions)
+    shared_state :: shared SemaRegistrationPrepareShared{jobs: [SemaRegistrationPrepareJob]{}, positions: ^positions}
+    sema_registration_prepare_fill(shared_state, &owned)
+    slots := [SemaRegistrationPreparedRow?]{}
+    loop _ in 0..<weights.len() -> &slots.push(None)
+    sema_registration_preparers(shared_state, 0, workers, &slots)
+    &slots.reverse()
+    loop slots.len() > 0 {
+        slot := &slots.pop() ?? break
+        row := ^slot ?? panic("a prepared module row left its slot")
+        &rows.push(^row)
+    }
+    rows
+}
+
+// The unclaimed jobs, lightest first, and each one's job order position.
+struct SemaRegistrationPrepareShared {
+    jobs: [SemaRegistrationPrepareJob]
+    positions: [Int]
+}
+
+// One claimed job and its job order position.
+struct SemaRegistrationPrepareClaim {
+    position: Int
+    job: SemaRegistrationPrepareJob
+}
+
+// One job's prepared row, prepared by one thread.
+struct SemaRegistrationPreparedSlot {
+    position: Int
+    row: SemaRegistrationPreparedRow
+}
+
+fn sema_registration_prepare_fill(shared_state: Shared<SemaRegistrationPrepareShared>, jobs: &[SemaRegistrationPrepareJob]) {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaRegistrationPrepareJob>(&permit.value.jobs, &jobs)
+}
+
+// Runs preparing threads `from..<workers`, one task each, and moves every row
+// a thread returned into its job's slot of `slots`.
+fn sema_registration_preparers(shared_state: Shared<SemaRegistrationPrepareShared>, from: Int, workers: Int, slots: &[SemaRegistrationPreparedRow?]) {
+    if from >= workers -> return
+    task.group sema_registration_prepare_threads {
+        head :: task sema_registration_prepare_claimed(shared_state)
+        sema_registration_preparers(shared_state, from + 1, workers, &slots)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            slots[done.position] = Val(^done.row)
+        }
+    }
+}
+
+// One thread: prepares the jobs it claims.
+fn sema_registration_prepare_claimed(shared_state: Shared<SemaRegistrationPrepareShared>) -> [SemaRegistrationPreparedSlot] {
+    prepared := [SemaRegistrationPreparedSlot]{}
+    loop {
+        claim := sema_registration_prepare_claim(shared_state) ?? break
+        position :: claim.position
+        row := sema_registration_prepare_job(^claim.job)
+        &prepared.push(SemaRegistrationPreparedSlot{position: position, row: ^row})
+    }
+    prepared
+}
+
+// Pops the largest unclaimed job, or None once every job is claimed.
+fn sema_registration_prepare_claim(shared_state: Shared<SemaRegistrationPrepareShared>) -> SemaRegistrationPrepareClaim? {
+    permit :: shared_state.guard_edit()
+    job := &permit.value.jobs.pop() ?? return None
+    position :: &permit.value.positions.pop() ?? panic("a module prepare job has no position")
+    Val(SemaRegistrationPrepareClaim{position: position, job: ^job})
+}
+
 // The CLI shape of one `#CLI` field (Rust `CLIFieldKind`).
 enum SemaRegistrationCLIFieldKind {
     Flag
@@ -3308,8 +3445,10 @@ fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name: St
 }
 
 // `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
-// are consumed: each program moves into its module row.
-fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
+// are consumed: each program moves into its module row. The unit scans and
+// the module rows are prepared on up to `threads` compiler threads, with the
+// same rows and diagnostics for any thread count.
+fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Rust CheckInner `retain_error_prelude_module` runs first: the original
@@ -3322,9 +3461,10 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     sema_registration_retain_original_error_module(&prepared_inputs, &diagnostics)
     units_catalog :: sema_units_catalog(&diagnostics)
     units_names :: sema_units_catalog_names(units_catalog)
+    units_mentions :: sema_units_scan_mentions(&prepared_inputs, canonical_effect_module_identity, units_names.wanted, threads)
     loop index in 0..<prepared_inputs.len() {
-        if prepared_inputs[index].module_identity == canonical_effect_module_identity -> next
-        sema_units_inject(&prepared_inputs[index], units_catalog, units_names)
+        if !sema_units_scanned(prepared_inputs, index, canonical_effect_module_identity) -> next
+        sema_units_inject(&prepared_inputs[index], units_catalog, units_names, units_mentions[index])
     }
     sema_units_resolve(&prepared_inputs, edges, &diagnostics)
     // Rust CheckInner `bind_marker_applications`: a directly used imported
@@ -3352,14 +3492,24 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // Only modules declaring a module alias or a generic module keep their
     // programs as written for the alias check after registration.
     written_inputs :: sema_generic_modules_written(prepared_inputs)
-    // Each input moves out of the list (front to back) into its module row.
+    // Each input moves out of the list (front to back) into its prepare job.
     &prepared_inputs.reverse()
     &imported_templates.reverse()
+    jobs := [SemaRegistrationPrepareJob]{}
     loop prepared_inputs.len() > 0 {
         input := &prepared_inputs.pop() ?? break
         templates := &imported_templates.pop() ?? break
         policies :: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
-        module_row := sema_registration_prepare_module_row(^input, templates, policies, &diagnostics)
+        &jobs.push(SemaRegistrationPrepareJob{input: ^input, templates: ^templates, policies: policies})
+    }
+    prepared := sema_registration_prepare_rows(^jobs, threads)
+    // Each prepared row moves out (front to back) into its module row, after
+    // its diagnostics, as one module after another reported them.
+    &prepared.reverse()
+    loop prepared.len() > 0 {
+        row := &prepared.pop() ?? break
+        loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
+        module_row := ^row.module_row
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
@@ -3549,6 +3699,27 @@ fn sema_source_words(bytes: [U8], start: Int, end: Int, seen: &[String:Bool], wo
         }
         word_start :: cursor
         loop cursor < stop && sema_source_word_byte(bytes[cursor]) -> cursor += 1
+        word :: String.from_bytes(bytes.slice(word_start, cursor)) ?? next
+        if seen.get(word) != None -> next
+        seen[word] = true
+        &words.push(word)
+    }
+}
+
+// sema_source_words over all of `bytes`, keeping only the words `wanted`
+// interns: a word outside it is skipped by its bytes, never built as a
+// String, so `seen` and `words` hold exactly the wanted words
+// sema_source_words would have added, in the same order.
+fn sema_source_wanted_words(bytes: [U8], wanted: NameTable, seen: &[String:Bool], words: &[String]) Never! {
+    cursor := 0
+    loop cursor < bytes.len() {
+        if !sema_source_word_byte(bytes[cursor]) {
+            cursor += 1
+            next
+        }
+        word_start :: cursor
+        loop cursor < bytes.len() && sema_source_word_byte(bytes[cursor]) -> cursor += 1
+        if name_find_bytes(wanted, bytes, word_start, cursor) == None -> next
         word :: String.from_bytes(bytes.slice(word_start, cursor)) ?? next
         if seen.get(word) != None -> next
         seen[word] = true
