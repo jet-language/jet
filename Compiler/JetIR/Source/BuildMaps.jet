@@ -30,7 +30,8 @@ fn ir_map_row(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Ne
 }
 
 // One Map type's entry layout and key order ("int": exact Int, "string":
-// byte order, "word"/"uword": a signed/unsigned word's integer order).
+// byte order, "word"/"uword": a signed/unsigned word's integer order,
+// "order": a tuple, List or Option of ordered members, the Rust derived Ord).
 struct IRMapShape { entry: Int, entry_ty: Type, key: IRMember, value: IRMember, value_ty: Type, stride: Int, kind: String }
 
 fn ir_map_shape(m: &IRModule, p: IRProgram, map_row: Int) -> IRMapShape? Never! {
@@ -48,17 +49,36 @@ fn ir_map_key_kind(m: IRModule, row: Int) -> String Never! {
         .String -> "string"
         .Word -> if m.types[row].signed -> "word" else -> "uword"
         .Char | .Bool -> "word"
+        .Aggregate | .Pointer -> if ir_ordered_type(m.types[row].ty) -> "order" else -> ""
         else -> ""
+    }
+}
+
+// True when ir_order_into orders `ty` (Lower lower_order_kind "list",
+// "inline" and "boxed" over a tuple, List or Option).
+fn ir_ordered_type(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == {
+        .Int | .String | .Bool | .Char -> true
+        .IntN(_, _) -> true
+        .Option(inner) -> ir_ordered_type(inner)
+        .List(element) -> ir_ordered_type(element)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !ir_ordered_type(field.ty) -> return false
+            }
+            true
+        }
+        else -> false
     }
 }
 
 // `left < right` and `left == right` for two keys (Lower lower_map_key_order).
 struct IRMapOrder { less: Int, same: Int }
 
-fn ir_map_order(m: &IRModule, b: &IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
-    if kind == "string" {
+fn ir_map_order(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
+    if kind == "string" || kind == "order" {
         word_row :: ir_word_row(&m)
-        order :: ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word_row)
+        order :: if kind == "string" -> ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word_row) else -> ir_order_sign(&m, p, &b, left, right, Span{start: 0, end: 0})
         zero :: ir_word_const(&m, &b, 0)
         return IRMapOrder{less: ir_bool_op(&m, &b, IROp.Lt, order, zero), same: ir_bool_op(&m, &b, IROp.Eq, order, zero)}
     }
@@ -78,7 +98,7 @@ fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int 
     map :: ir_new_slot(&a, map_row, IRSlotKind.Param, ir_intern_name(&m, "map"))
     probe_key :: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))
     if name == "map.find" {
-        ir_map_find_body(&m, &a, shape, map, probe_key)
+        ir_map_find_body(&m, p, &a, shape, map, probe_key)
     } else if name == "map.set" || name == "map.insert" {
         value :: ir_new_slot(&a, shape.value.ty, IRSlotKind.Param, ir_intern_name(&m, "value"))
         option_row :: if name == "map.insert" -> ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1 else -> -1
@@ -93,7 +113,7 @@ fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int 
 
 // Binary search over the ascending entries: the entry's index, or
 // -1 - the insertion point when the key is absent (Lower lower_helper_map_find).
-fn ir_map_find_body(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
+fn ir_map_find_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
     a.f.result = ir_word_row(&m)
     length :: ir_load_word(&m, &a, map, 0)
     data :: ir_load_word(&m, &a, map, 16)
@@ -110,7 +130,7 @@ fn ir_map_find_body(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int, ke
     middle :: ir_word_op(&m, &a, IROp.Shr, span_sum, one)
     entry :: ir_element_address(&m, &a, data, middle, shape.stride)
     probe :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
-    order :: ir_map_order(&m, &a, shape.kind, probe, key)
+    order :: ir_map_order(&m, p, &a, shape.kind, probe, key)
     ir_open_if(&a.f, order.same, a.line)
     ir_emit(&a.f, IROp.Return, -1, middle, -1, -1, a.line)
     ir_end(&a.f, a.line)
@@ -498,12 +518,12 @@ fn ir_map_top_n(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMa
     prior :: ir_load_word(&m, &b, prior_at, 0)
     previous :: ir_element_address(&m, &b, data, prior, shape.stride)
     previous_value :: ir_load_at(&m, &b, previous, shape.value.offset, shape.value.ty)
-    values :: ir_map_order(&m, &b, value_kind, previous_value, current_value)
+    values :: ir_map_order(&m, p, &b, value_kind, previous_value, current_value)
     above :: ir_temp_like(&m, &b, values.less)
     ir_emit(&b.f, IROp.Copy, above, values.less, -1, -1, b.line)
     ir_open_if(&b.f, values.same, b.line)
     previous_key :: ir_load_at(&m, &b, previous, shape.key.offset, shape.key.ty)
-    keys :: ir_map_order(&m, &b, shape.kind, current_key, previous_key)
+    keys :: ir_map_order(&m, p, &b, shape.kind, current_key, previous_key)
     ir_emit(&b.f, IROp.Copy, above, keys.less, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_exit_unless(&m, &b, above, placed)

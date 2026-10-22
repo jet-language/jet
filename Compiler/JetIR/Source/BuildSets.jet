@@ -32,11 +32,11 @@ fn ir_set_helper(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int 
     set :: ir_new_slot(&a, set_row, IRSlotKind.Param, ir_intern_name(&m, "set"))
     if name == "set.equal" {
         other :: ir_new_slot(&a, set_row, IRSlotKind.Param, ir_intern_name(&m, "other"))
-        ir_set_equal_body(&m, &a, shape, set, other)
+        ir_set_equal_body(&m, p, &a, shape, set, other)
     } else {
         probe_key :: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))
         if name == "set.find" {
-            ir_map_find_body(&m, &a, shape, set, probe_key)
+            ir_map_find_body(&m, p, &a, shape, set, probe_key)
         } else {
             ir_set_insert_body(&m, p, &a, shape, set_row, set, probe_key)
         }
@@ -91,7 +91,7 @@ fn ir_set_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 
 // Equal lengths and the same key at every position of the ascending entries
 // (Lower lower_helper_set_equal, Sets.jet:441).
-fn ir_set_equal_body(m: &IRModule, a: &IRBuilder, shape: IRMapShape, left: Int, right: Int) Never! {
+fn ir_set_equal_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, left: Int, right: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     a.f.result = bool_row
     left_len :: ir_load_word(&m, &a, left, 0)
@@ -105,7 +105,7 @@ fn ir_set_equal_body(m: &IRModule, a: &IRBuilder, shape: IRMapShape, left: Int, 
     walk :: ir_walk_open(&m, &a, left, shape.entry)
     other :: ir_element_address(&m, &a, right_data, walk.index, shape.stride)
     probe :: ir_load_at(&m, &a, other, 0, shape.key.ty)
-    order :: ir_map_order(&m, &a, shape.kind, walk.item, probe)
+    order :: ir_map_order(&m, p, &a, shape.kind, walk.item, probe)
     ir_open_if(&a.f, order.same, a.line)
     ir_else(&a.f, a.line)
     mismatch :: ir_int_constant(&m, &a, bool_row, 0)

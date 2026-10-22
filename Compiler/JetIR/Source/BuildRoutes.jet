@@ -1,7 +1,7 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the old path's route table (argument and result carriers, payloads).
 
-use jet_foundation.[CoreCallRecord, Span, Type, TBuiltinOp, TClosureOp, TExpr, tir_builtin_mutates_receiver]
+use jet_foundation.[CoreCallRecord, Span, Type, TypeTupleField, TBuiltinOp, TClosureOp, TExpr, core_call_native_return_labels, tir_builtin_mutates_receiver]
 use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_runtime_route]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
@@ -524,6 +524,7 @@ fn ir_call_closure(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_
 }
 
 fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
+    if operation == .OptionMap -> return ir_option_map(&m, &p, &b, ty, receiver, args, span)
     if ir_lazy_closure_receiver(ir_subst(p, receiver.ty), operation) -> return ir_lazy_closure_method(&m, &p, &b, ty, receiver, operation, args, span)
     list :: ir_expr(&m, &p, &b, receiver)
     if ir_failed(b) || list < 0 -> return -1
@@ -652,6 +653,37 @@ fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
     }
 }
 
+// `opt.map(f)` (Lower Combinators.jet `jet_option_map_ref`): None stays
+// None; Some lends its payload to the closure, whose result is boxed fresh.
+// The receiver is only read.
+fn ir_option_map(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, args: [TExpr], span: Span) -> Int Never! {
+    inner_ty :: if ir_untag(ir_subst(p, receiver.ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map on {ir_type_name(receiver.ty)}") }
+    mapped_ty :: if ir_untag(ir_subst(p, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map to {ir_type_name(ty)}") }
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "Option map with {args.len()} arguments")
+    if ir_unit_type(inner_ty) || ir_unit_type(mapped_ty) -> return ir_fail_slot(&b, span, "Option map over Unit")
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    inner_row :: ir_value_type(&m, p, inner_ty) ?? return ir_type_fail(&b, span, inner_ty)
+    mapped_row :: ir_value_type(&m, p, mapped_ty) ?? return ir_type_fail(&b, span, mapped_ty)
+    option :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || option < 0 -> return -1
+    callback :: ir_expr(&m, &p, &b, args[0])
+    if ir_failed(b) || callback < 0 -> return -1
+    result :: ir_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    some :: ir_option_is_some(&m, &b, option)
+    ir_open_if(&b.f, some, b.line)
+    item :: ir_load_at(&m, &b, option, 0, inner_row)
+    mapped :: ir_call_closure(&m, &b, callback, [Int]{item}, mapped_row)
+    payload_bytes :: ir_type_size(&m, p, mapped_ty)
+    boxed :: ir_box_alloc(&m, &b, payload_bytes, result_row)
+    ir_store_at(&m, &b, boxed, 0, mapped)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, option)
+    b.fresh[result] = true
+    result
+}
+
 fn ir_closure_op_name(operation: TClosureOp) -> String Never! {
     text := "{operation}"
     separators :: [String]{"(", "{{", " "}
@@ -706,7 +738,7 @@ fn ir_closure_extreme_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: 
     ir_emit(&b.f, IROp.Const, replace, 1, -1, -1, b.line)
     seen :: ir_bool_op(&m, &b, IROp.Ge, best_at, zero)
     ir_open_if(&b.f, seen, b.line)
-    order :: if maximum -> ir_map_order(&m, &b, kind, key, best_key) else -> ir_map_order(&m, &b, kind, best_key, key)
+    order :: if maximum -> ir_map_order(&m, p, &b, kind, key, best_key) else -> ir_map_order(&m, p, &b, kind, best_key, key)
     ir_emit(&b.f, IROp.Not, replace, order.less, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_open_if(&b.f, replace, b.line)
@@ -890,7 +922,7 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
         left_key_at :: ir_element_address(&m, &b, keys, left_at, key_stride)
         right_key :: ir_load_at(&m, &b, right_key_at, 0, key_row)
         left_key :: ir_load_at(&m, &b, left_key_at, 0, key_row)
-        weigh :: if ascending -> ir_map_order(&m, &b, kind, right_key, left_key) else -> ir_map_order(&m, &b, kind, left_key, right_key)
+        weigh :: if ascending -> ir_map_order(&m, p, &b, kind, right_key, left_key) else -> ir_map_order(&m, p, &b, kind, left_key, right_key)
         before = weigh.less
     } else {
         right_address :: ir_element_address(&m, &b, data, right_at, stride)
@@ -1464,6 +1496,12 @@ fn ir_string_cut(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
 // it (a fresh borrowed argument is dropped after the call; a consumed one
 // belongs to the route, so a read of another holder's value is copied first).
 fn ir_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, span: Span) -> Int Never! {
+    ir_route_labeled(&m, &p, &b, symbol, inputs, borrowed, result, [String]{}, span)
+}
+
+// ir_route whose tuple result's kernel items carry the declared `labels`
+// (Lower lower_route_call: core_call_native_return_labels).
+fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name :: ir_route_symbol(symbol)
     if ir_route_inline(&m, p, &b, name, inputs, result, span) == .Val(inlined) -> return inlined
     if lower_environment_route(name) == .Val(environment) -> return ir_environment_call(&m, p, &b, environment, inputs, result, span)
@@ -1542,7 +1580,7 @@ fn ir_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, inputs: 
         .Plain(carrier) -> dst = ir_route_plain(&m, p, &b, route.export, lowered, carrier, result, span)
         .Option(some) -> dst = ir_route_option(&m, p, &b, route.export, lowered, some, result, span)
         .Result(ok, err) -> dst = ir_route_result(&m, p, &b, route.export, lowered, ok, err, result, span)
-        .Tuple(_) -> return ir_fail_slot(&b, span, "runtime route {name} with a tuple result")
+        .Tuple(items) -> dst = ir_route_tuple(&m, p, &b, route.export, lowered, items, labels, result, span)
     }
     if ir_failed(b) -> return -1
     loop temporary in temporaries -> ir_release(&m, &b, temporary)
@@ -1646,10 +1684,19 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
         length :: ir_load_word(&m, &b, out, 8)
         return ir_route_list_header(&m, &b, base, offset, data, length)
     }
-    if carrier == .Option(_) -> return ir_fail(&b, span, "runtime route payload carrier {carrier}")
+    if carrier == .Option(some) -> return ir_route_store_option(&m, p, &b, base, offset, payload, some, out, span)
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "payload type {payload}")
     if carrier == .Handle(_) || carrier == .HandleMut(_) {
-        if !ir_is_handle(m, row) -> return ir_route_record_in(&m, p, &b, base, offset, payload, out, span)
+        if !ir_is_handle(m, row) && ir_record_runtime(&m, p, payload) != None -> return ir_route_record_in(&m, p, &b, base, offset, payload, out, span)
+        // A handle word that is no record handle points at the declared
+        // value's bytes (Lower lower_route_store_payload's plain arm:
+        // lower_write_at copies an inline struct from it).
+        if !ir_is_handle(m, row) && m.types[row].kind != .Aggregate -> return ir_fail(&b, span, "runtime route handle payload as {payload}")
+        if m.types[row].kind == .Aggregate {
+            source :: ir_temp(&m, &b, row)
+            ir_emit(&b.f, IROp.Load, source, out, 0, -1, b.line)
+            return ir_store_at(&m, &b, base, offset, source)
+        }
     }
     if carrier == .Word && ir_word_record(m, p, row) == .Val(record) {
         int_row :: ir_type_row(&m, Type.Int) ?? 0
@@ -1664,6 +1711,87 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     value :: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Load, value, out, 0, -1, b.line)
     ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
+}
+
+// An Option item a route wrote as a selector word at `out` and its payload
+// in the words after (Lower lower_route_store_payload `.Option`): a boxed
+// payload, or null, stored at `offset` of `base`.
+fn ir_route_store_option(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, some: LowerRouteCarrier, out: Int, span: Span) Never! {
+    inner :: if ir_untag(payload) == .Option(value) -> value else -> { return ir_fail(&b, span, "runtime route Option payload as {payload}") }
+    row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "runtime route Option payload type {ir_type_name(payload)}")
+    selector :: ir_load_word(&m, &b, out, 0)
+    boxed :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Const, boxed, 0, -1, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    present_flag :: ir_bool_op(&m, &b, IROp.Ne, selector, zero)
+    ir_open_if(&b.f, present_flag, b.line)
+    payload_bytes :: if some == .List(_) -> 24 else -> ir_type_size(&m, p, inner)
+    present :: ir_box_alloc(&m, &b, payload_bytes, row)
+    tail :: ir_address_at(&m, &b, out, 8)
+    ir_route_store_payload(&m, p, &b, present, 0, inner, some, tail, span)
+    ir_emit(&b.f, IROp.Copy, boxed, present, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Store, -1, base, offset, boxed, b.line)
+}
+
+// Out words a route item takes (Lower lower_route_carrier_slots).
+fn ir_route_carrier_slots(carrier: LowerRouteCarrier) -> Int Never! {
+    if carrier == .Option(some) -> return 1 + ir_route_carrier_slots(some)
+    if carrier == .List(_) -> return 2
+    1
+}
+
+// The kernel item each checked tuple member reads: by label when `labels`
+// names every checked label exactly once, else positionally (Lower
+// lower_route_tuple_order).
+fn ir_route_tuple_order(fields: [TypeTupleField], count: Int, labels: [String]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    if labels.len() != count || fields.len() != count -> return order
+    labeled := [Int]{}
+    loop field in fields {
+        if field.name == "" -> return order
+        found := -1
+        loop (position, label) in labels {
+            if label == field.name {
+                if found >= 0 -> return order
+                found = position
+            }
+        }
+        if found < 0 -> return order
+        &labeled.push(found)
+    }
+    labeled
+}
+
+// A tuple-result route (Lower lower_route_result `.Tuple`): the kernel
+// writes each item through out pointers into one zeroed frame slot, read
+// back into the checked tuple's members.
+fn ir_route_tuple(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], items: [LowerRouteCarrier], labels: [String], result: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    fields :: if ir_untag(ir_subst(p, result)) == .Tuple(checked) -> checked else -> { return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}") }
+    members :: ir_inline_members(&m, p, row) ?? return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}")
+    if fields.len() != items.len() || members.len() != items.len() -> return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}")
+    order :: ir_route_tuple_order(fields, items.len(), labels)
+    starts := [Int]{}
+    words := 0
+    loop item in items {
+        &starts.push(words)
+        words += ir_route_carrier_slots(item)
+    }
+    out :: ir_out_slot(&m, &b, words)
+    call_args := args
+    loop index in 0..<words -> &call_args.push(ir_address_at(&m, &b, out, 8 * index))
+    _ :: ir_runtime(&m, &b, export, call_args, -1)
+    storage :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    loop (index, member) in members {
+        declared :: order[index]
+        item_out :: ir_address_at(&m, &b, out, 8 * starts[declared])
+        ir_route_store_payload(&m, p, &b, storage, member.offset, fields[index].ty, items[declared], item_out, span)
+        if ir_failed(b) -> return -1
+    }
+    storage
 }
 
 // A runtime record handle a route wrote to `out` as its record's declared
@@ -1776,7 +1904,8 @@ fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: Co
         }
     }
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
-    ir_route(&m, &p, &b, symbol, slots, borrow_mask, result, span)
+    labels :: core_call_native_return_labels(canonical.module_name, canonical.member)
+    ir_route_labeled(&m, &p, &b, symbol, slots, borrow_mask, result, labels, span)
 }
 
 // An exact Int Core operand narrowed to its I64 slot: the checked fixed

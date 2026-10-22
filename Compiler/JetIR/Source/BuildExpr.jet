@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, Span, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TStructFieldValue, TTryConvert, measure_literal_value, tir_each_expr_child, tir_each_stmt_list_child, type_carrier_identity]
+use jet_foundation.[AccessConvention, Span, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TForInMethod, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, tir_each_expr_child, tir_each_stmt_list_child, type_carrier_identity]
 use jet_backend.[lower_float_constant_bits]
 use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route]
 
@@ -10,7 +10,6 @@ fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc
     b.line = function.line
     if function.generic_params.len() > 0 && p.subst_types.len() == 0 -> return ir_fail(&b, function.source_span, "generic function without type arguments")
     if function.foreign != None -> return ir_fail(&b, function.source_span, "foreign function")
-    if function.failure_carrier == .Diverges(_) -> return ir_fail(&b, function.source_span, "diverging function")
     b.failure = function.failure_carrier
     if function.kind == {
         .TopLevel -> {}
@@ -32,7 +31,7 @@ fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc
     b.plain = ir_plain_return(function) != None
     executable :: ir_executable_return(function)
     if executable == .Val(ret) {
-        if !ir_unit_type(ret) {
+        if !ir_unit_type(ret) && !ir_never_type(ret) {
             result_row :: ir_value_type(&m, p, ret) ?? return ir_fail(&b, function.source_span, "result type {ir_type_name(ret)}")
             b.f.result = result_row
         }
@@ -141,6 +140,12 @@ fn ir_executable_return(function: TFunc) -> Type? Never! {
 // `Unit Never!` carrier) hands back `Ok(())`, a Unit function returns, and
 // any other function cannot get here.
 fn ir_return_fallthrough(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
+    // A diverging (`-> Never`) body cannot end (codegen terminates it
+    // Unreachable).
+    if b.failure == .Diverges(_) {
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        return
+    }
     if b.f.result < 0 {
         ir_return_slot(&m, &p, &b, -1, Span{start: 0, end: 0})
         return
@@ -327,7 +332,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             ir_scope_close(&m, &b)
         }
         .TaskGroup(group, limit, body, span) -> ir_task_group(&m, &p, &b, group, limit, body, span)
-        .DeferClose(_, _, _, span) -> ir_fail(&b, span, "statement DeferClose")
+        .DeferClose(close, _, _, span) -> ir_defer_close(&m, &p, &b, close, span)
         .BreakValue(label, value, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
             if frame.value < 0 -> return ir_fail(&b, span, "break with a value out of a statement loop")
@@ -351,7 +356,11 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         .IndexHookAssign(_, _, _, _, span) -> ir_fail(&b, span, "statement IndexHookAssign")
         .MathSwizzleAssign(_, _, _, _, span) -> ir_fail(&b, span, "statement MathSwizzleAssign")
         .ForIn(label, variable, variable_two, _, collection, step, method_kind, columnar, _, _, body, span) -> {
-            if method_kind != None || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
+            // `loop c in s.chars()`: codegen streams the scalars
+            // (MIRLoopSourceKind.Chars); the walk of the checked `s.chars()`
+            // list visits the same Chars in the same order.
+            chars :: method_kind == (Val(TForInMethod.Chars)) && ir_untag(collection.ty) == .List(_)
+            if (method_kind != None && !chars) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
             if ir_iter_element(ir_subst(p, collection.ty)) != None -> return ir_lazy_walk(&m, &p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, &p, &b, label, variable, variable_two, collection, body, span)
         }
@@ -825,6 +834,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             return slot
         }
         .Drop(value) -> return ir_drop_value(&m, &p, &b, value, span)
+        .Close(value) -> return ir_close_value(&m, &p, &b, expression.ty, value, span)
         .Print(value) -> {
             ir_print(&m, &p, &b, value, span)
             return -1
@@ -1140,6 +1150,35 @@ fn ir_drop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span:
     ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     b.fresh[slot] = false
     return -1
+}
+
+// `close(^x)` (codegen jet_codegen_lower_close): a Core file owner, an
+// arena or a handle closes by its drop; a type's own Close method runs
+// through the variable's close glue, which its scope then no longer runs.
+// Either way it is `consume(x)` with a Unit result.
+fn ir_close_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, inner: TExpr, span: Span) -> Int Never! {
+    if !ir_unit_type(ty) -> return ir_fail_slot(&b, span, "close with a {ir_type_name(ty)} result")
+    name :: ir_nominal_name(ir_untag(ir_subst(p, inner.ty))) ?? ""
+    if name == "DBLease" || name == "DBConnection" || name == "DBScope" -> return ir_fail_slot(&b, span, "close of {name}")
+    value :: if inner.kind == .Move(moved) -> moved else -> inner
+    ir_drop_value(&m, &p, &b, value, span)
+}
+
+// `defer close(^x)` (codegen jet_codegen_register_defer_close): the
+// resource closes at every exit of its scope. A variable whose value closes
+// is armed to close there from its binding on, so the defer arms it only
+// when its binding did not.
+fn ir_defer_close(m: &IRModule, p: &IRProgram, b: &IRBuilder, close: TExpr, span: Span) Never! {
+    inner :: if close.kind == .Close(value) -> value else -> { return ir_fail(&b, span, "deferred {ir_expr_kind_name(close.kind)}") }
+    resource :: if inner.kind == .Move(moved) -> moved else -> inner
+    local :: if resource.kind == .Local(named) -> named else -> { return ir_fail(&b, span, "deferred close of {ir_expr_kind_name(resource.kind)}") }
+    binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "deferred close of unknown local {local.name}")
+    if binding.indirect >= 0 -> return ir_fail(&b, span, "deferred close of the write parameter {local.name}")
+    if !ir_closes(b, binding.slot) -> ir_close_arm(&m, &p, &b, binding.slot, false, span)
+    if ir_failed(b) || ir_closes(b, binding.slot) -> return
+    // Nothing in the value has a Close method: its drop at the scope end
+    // is the close (a Core file owner or a handle).
+    if !ir_has_drop(m, b, binding.slot) -> ir_fail(&b, span, "deferred close of {local.name}, which neither closes nor drops")
 }
 
 // A runtime-handle method (codegen jet_codegen_lower_general_handle_method,
@@ -2349,10 +2388,22 @@ fn ir_enum_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, owner: St
 // `Dyn.Null`, `Dyn.Array(items)`, ... (codegen jet_codegen_lower_json_literal):
 // the native Dyn enum's variant over its payload, which the box stores as
 // its own (a borrowed payload is cloned, as codegen's `clone_arg` copy). An
-// Object from a map literal or another container encodes and is not built.
+// Object over a map literal of Dyn values is the `(key, value)` pair List in
+// literal order (codegen jet_codegen_lower_ordered_object_encode, whose
+// encode of a Dyn value is that value); one over another container encodes
+// and is not built.
 fn ir_json_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, variant: String, argument: TExpr?, span: Span) -> Int Never! {
     if argument == None -> return ir_enum_value(&m, &p, &b, ty, "Dyn", variant, TEnumPayload.Unit, span)
-    value :: argument
+    value := argument
+    if variant == "Object" && value.kind == .MapLit(entries) {
+        pair_ty :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: ty}}}
+        pairs := [TExpr]{}
+        loop entry in entries {
+            if ir_untag(entry.key.ty) != Type.String || ir_untag(entry.value.ty) != ir_untag(ty) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
+            &pairs.push(TExpr{ty: pair_ty, kind: TExprKind.Tuple{values: [TExpr]{entry.key, entry.value}}, span: span, integer_bounds: None, cost: None})
+        }
+        value = TExpr{ty: Type.List{element: pair_ty}, kind: TExprKind.ListLit{values: pairs}, span: span, integer_bounds: None, cost: None}
+    }
     if variant == "Object" && !(value.ty == .List(_)) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
     ir_enum_value(&m, &p, &b, ty, "Dyn", variant, TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: value}}}, span)
 }
@@ -3078,8 +3129,13 @@ fn ir_borrow(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TExpr,
         place :: ir_expr(&m, &p, &b, value)
         if ir_failed(b) || place < 0 -> return place
         if ir_kind_of(m, b, place) == .Aggregate -> return place
-        // An Option box is written through its payload in place.
-        if ir_kind_of(m, b, place) == .Pointer && ir_is_option(value.ty) -> return place
+        // An Option or enum box is written through its payload in place
+        // (`if &x == .Variant(payload) -> ... &payload`); a call's write
+        // argument goes through ir_place_address instead.
+        if ir_kind_of(m, b, place) == .Pointer {
+            place_row :: b.f.slot_type[place]
+            if ir_is_option(value.ty) || ir_enum_def(m, p, place_row) != None -> return place
+        }
     }
     ir_fail_slot(&b, span, "borrow {access} of {ir_type_name(value.ty)}")
 }

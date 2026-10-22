@@ -333,7 +333,9 @@ fn ir_handle_runtime(p: IRProgram, name: String) -> LowerRuntimeHandle? Never! {
 fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
     found :: ir_type_def(p, name)
     handle :: ir_handle_runtime(p, name) ?? return None
-    if found == .Val(row) {
+    // A bare `Group` is the task group handle (sema types `task.group`'s
+    // binding so); Core's data `Group` is always applied to its arguments.
+    if found == .Val(row) && name != "Group" {
         definition :: p.types[row]
         native :: lower_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
         core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/")

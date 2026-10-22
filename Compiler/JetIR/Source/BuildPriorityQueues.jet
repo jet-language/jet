@@ -37,15 +37,15 @@ fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: Str
     heap :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "heap"))
     if name == "priority_queue.push" {
         value :: ir_new_slot(&a, elem_row, IRSlotKind.Param, ir_intern_name(&m, "value"))
-        ir_priority_queue_push_body(&m, &a, kind, heap, elem_row, value)
+        ir_priority_queue_push_body(&m, p, &a, kind, heap, elem_row, value)
     } else if name == "priority_queue.heapify" {
-        ir_priority_queue_heapify_body(&m, &a, kind, heap, elem_row)
+        ir_priority_queue_heapify_body(&m, p, &a, kind, heap, elem_row)
     } else if name == "priority_queue.pop" {
         elem_ty :: m.types[elem_row].ty
         option_row :: ir_value_type(&m, p, Type.Option{inner: elem_ty}) ?? panic("PriorityQueue pop without an Option row")
-        ir_priority_queue_pop_body(&m, &a, kind, heap, elem_row, option_row)
+        ir_priority_queue_pop_body(&m, p, &a, kind, heap, elem_row, option_row)
     } else {
-        ir_list_sort_body(&m, &a, kind, heap, elem_row, name == "list.sort_desc")
+        ir_list_sort_body(&m, p, &a, kind, heap, elem_row, name == "list.sort_desc")
     }
     m.functions[id] = ^a.f
     id
@@ -69,7 +69,7 @@ fn ir_heap_swap(m: &IRModule, a: &IRBuilder, left: Int, right: Int, width: Int, 
 
 // Sifts the element at `start` up while its parent orders below it; every
 // comparison reads live element storage (Lower lower_priority_queue_sift_up).
-fn ir_heap_sift_up(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start: Int, elem_row: Int) Never! {
+fn ir_heap_sift_up(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, data: Int, start: Int, elem_row: Int) Never! {
     stride :: ir_list_stride(m, elem_row)
     width :: ir_word_const(&m, &a, stride)
     scratch :: ir_out_slot(&m, &a, (stride + 7) /% 8)
@@ -88,7 +88,7 @@ fn ir_heap_sift_up(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start: 
     child_at :: ir_element_address(&m, &a, data, at, stride)
     left :: ir_load_at(&m, &a, parent_at, 0, elem_row)
     right :: ir_load_at(&m, &a, child_at, 0, elem_row)
-    order :: ir_map_order(&m, &a, kind, left, right)
+    order :: ir_map_order(&m, p, &a, kind, left, right)
     ir_exit_unless(&m, &a, order.less, exit)
     ir_heap_swap(&m, &a, child_at, parent_at, width, scratch)
     ir_emit(&a.f, IROp.Copy, at, parent, -1, -1, a.line)
@@ -100,7 +100,7 @@ fn ir_heap_sift_up(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start: 
 // Sifts the element at `start` down within the first `length` elements while
 // a child orders above it, swapping with the greater child (the left one on
 // a tie) (Lower lower_priority_queue_sift_down).
-fn ir_heap_sift_down(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start: Int, length: Int, elem_row: Int) Never! {
+fn ir_heap_sift_down(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, data: Int, start: Int, length: Int, elem_row: Int) Never! {
     stride :: ir_list_stride(m, elem_row)
     width :: ir_word_const(&m, &a, stride)
     scratch :: ir_out_slot(&m, &a, (stride + 7) /% 8)
@@ -124,7 +124,7 @@ fn ir_heap_sift_down(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start
     right_at :: ir_element_address(&m, &a, data, sibling, stride)
     left :: ir_load_at(&m, &a, left_at, 0, elem_row)
     right :: ir_load_at(&m, &a, right_at, 0, elem_row)
-    order :: ir_map_order(&m, &a, kind, left, right)
+    order :: ir_map_order(&m, p, &a, kind, left, right)
     ir_open_if(&a.f, order.less, a.line)
     ir_emit(&a.f, IROp.Copy, best, sibling, -1, -1, a.line)
     ir_end(&a.f, a.line)
@@ -133,7 +133,7 @@ fn ir_heap_sift_down(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start
     child_at :: ir_element_address(&m, &a, data, best, stride)
     parent_value :: ir_load_at(&m, &a, parent_at, 0, elem_row)
     child_value :: ir_load_at(&m, &a, child_at, 0, elem_row)
-    parent_order :: ir_map_order(&m, &a, kind, parent_value, child_value)
+    parent_order :: ir_map_order(&m, p, &a, kind, parent_value, child_value)
     ir_exit_unless(&m, &a, parent_order.less, exit)
     ir_heap_swap(&m, &a, parent_at, child_at, width, scratch)
     ir_emit(&a.f, IROp.Copy, at, best, -1, -1, a.line)
@@ -144,7 +144,7 @@ fn ir_heap_sift_down(m: &IRModule, a: &IRBuilder, kind: String, data: Int, start
 
 // priority_queue.push(heap, value): takes the value over at the end, then
 // sifts it up.
-fn ir_priority_queue_push_body(m: &IRModule, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, value: Int) Never! {
+fn ir_priority_queue_push_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, value: Int) Never! {
     length :: ir_list_reserve(&m, &a, heap, elem_row)
     data :: ir_load_word(&m, &a, heap, 16)
     stride :: ir_list_stride(m, elem_row)
@@ -154,12 +154,12 @@ fn ir_priority_queue_push_body(m: &IRModule, a: &IRBuilder, kind: String, heap: 
     one :: ir_word_const(&m, &a, 1)
     count :: ir_word_op(&m, &a, IROp.Add, length, one)
     ir_emit(&a.f, IROp.Store, -1, heap, 0, count, a.line)
-    ir_heap_sift_up(&m, &a, kind, data, length, elem_row)
+    ir_heap_sift_up(&m, p, &a, kind, data, length, elem_row)
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
 // priority_queue.heapify(heap): sifts every parent down, the last first.
-fn ir_priority_queue_heapify_body(m: &IRModule, a: &IRBuilder, kind: String, heap: Int, elem_row: Int) Never! {
+fn ir_priority_queue_heapify_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, heap: Int, elem_row: Int) Never! {
     length :: ir_load_word(&m, &a, heap, 0)
     data :: ir_load_word(&m, &a, heap, 16)
     one :: ir_word_const(&m, &a, 1)
@@ -171,7 +171,7 @@ fn ir_priority_queue_heapify_body(m: &IRModule, a: &IRBuilder, kind: String, hea
     ir_exit_unless(&m, &a, more, exit)
     last_parent :: ir_word_op(&m, &a, IROp.Sub, parents, one)
     at :: ir_word_op(&m, &a, IROp.Sub, last_parent, counted)
-    ir_heap_sift_down(&m, &a, kind, data, at, length, elem_row)
+    ir_heap_sift_down(&m, p, &a, kind, data, at, length, elem_row)
     ir_emit(&a.f, IROp.Add, counted, counted, one, IR_OVERFLOW_WRAP, a.line)
     ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
     ir_end(&a.f, a.line)
@@ -181,7 +181,7 @@ fn ir_priority_queue_heapify_body(m: &IRModule, a: &IRBuilder, kind: String, hea
 
 // priority_queue.pop(heap): the root moves into an Option box (null when
 // empty); the last element moves to the root and sifts down.
-fn ir_priority_queue_pop_body(m: &IRModule, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, option_row: Int) Never! {
+fn ir_priority_queue_pop_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, option_row: Int) Never! {
     a.f.result = option_row
     length :: ir_load_word(&m, &a, heap, 0)
     zero :: ir_word_const(&m, &a, 0)
@@ -201,7 +201,7 @@ fn ir_priority_queue_pop_body(m: &IRModule, a: &IRBuilder, kind: String, heap: I
     tail :: ir_element_address(&m, &a, data, last, stride)
     width :: ir_word_const(&m, &a, stride)
     _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{data, tail, width}, -1)
-    ir_heap_sift_down(&m, &a, kind, data, zero, last, elem_row)
+    ir_heap_sift_down(&m, p, &a, kind, data, zero, last, elem_row)
     ir_emit(&a.f, IROp.Return, -1, result, -1, -1, a.line)
 }
 
@@ -212,7 +212,7 @@ fn ir_priority_queue_pop_body(m: &IRModule, a: &IRBuilder, kind: String, heap: I
 // it orders strictly before the left run's (strictly after it for
 // sort_desc), so equal elements keep their input order. Elements move as
 // bytes; nothing is cloned or dropped.
-fn ir_list_sort_body(m: &IRModule, a: &IRBuilder, kind: String, list: Int, elem_row: Int, descending: Bool) Never! {
+fn ir_list_sort_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, list: Int, elem_row: Int, descending: Bool) Never! {
     stride :: ir_list_stride(m, elem_row)
     stride_word :: ir_word_const(&m, &a, stride)
     length :: ir_load_word(&m, &a, list, 0)
@@ -269,7 +269,7 @@ fn ir_list_sort_body(m: &IRModule, a: &IRBuilder, kind: String, list: Int, elem_
     right_at :: ir_element_address(&m, &a, source, right_index, stride)
     left :: ir_load_at(&m, &a, left_at, 0, elem_row)
     right :: ir_load_at(&m, &a, right_at, 0, elem_row)
-    order :: if descending -> ir_map_order(&m, &a, kind, left, right) else -> ir_map_order(&m, &a, kind, right, left)
+    order :: if descending -> ir_map_order(&m, p, &a, kind, left, right) else -> ir_map_order(&m, p, &a, kind, right, left)
     ir_emit(&a.f, IROp.Copy, take_right, order.less, -1, -1, a.line)
     ir_end(&a.f, a.line)
     ir_else(&a.f, a.line)
