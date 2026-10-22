@@ -113,6 +113,75 @@ fn ir_list_insert(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{at, held, width}, -1)
 }
 
+// `xs.reverse()` in place (Lower Lists.jet lower_helper_list_reverse): the
+// elements' bytes swap pairwise from both ends; nothing is cloned or dropped.
+fn ir_list_reverse(m: &IRModule, b: &IRBuilder, list: Int, row: Int) Never! {
+    stride :: ir_list_stride(m, row)
+    if stride == 0 -> return
+    width :: ir_word_const(&m, &b, stride)
+    length :: ir_load_word(&m, &b, list, 0)
+    data :: ir_load_word(&m, &b, list, 16)
+    one :: ir_word_const(&m, &b, 1)
+    half :: ir_word_op(&m, &b, IROp.Shr, length, one)
+    last :: ir_word_op(&m, &b, IROp.Sub, length, one)
+    held :: ir_out_slot(&m, &b, (stride + 7) /% 8)
+    index :: ir_count_open(&m, &b, half)
+    other :: ir_word_op(&m, &b, IROp.Sub, last, index)
+    left :: ir_element_address(&m, &b, data, index, stride)
+    right :: ir_element_address(&m, &b, data, other, stride)
+    ir_list_swap_bytes(&m, &b, left, right, held, width)
+    ir_count_close(&m, &b, index)
+}
+
+// Swaps the `width` bytes at `left` and `right` through the scratch `held`.
+fn ir_list_swap_bytes(m: &IRModule, b: &IRBuilder, left: Int, right: Int, held: Int, width: Int) Never! {
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{held, left, width}, -1)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{left, right, width}, -1)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{right, held, width}, -1)
+}
+
+// `xs.__swap(i, j)` (Lower Lists.jet lower_list_method list_swap): both
+// positions in 0..<len, else the List bounds stop; the elements' complete
+// layouts trade places, with no clone, drop or allocation.
+fn ir_list_swap(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, second: Int, span: Span) Never! {
+    left_index :: ir_native_index(&m, &b, first, span)
+    right_index :: ir_native_index(&m, &b, second, span)
+    if ir_failed(b) -> return
+    length :: ir_load_word(&m, &b, list, 0)
+    ir_list_bounds(&m, &b, left_index, length, false)
+    ir_list_bounds(&m, &b, right_index, length, false)
+    stride :: ir_list_stride(m, row)
+    if stride == 0 -> return
+    width :: ir_word_const(&m, &b, stride)
+    data :: ir_load_word(&m, &b, list, 16)
+    held :: ir_out_slot(&m, &b, (stride + 7) /% 8)
+    left :: ir_element_address(&m, &b, data, left_index, stride)
+    right :: ir_element_address(&m, &b, data, right_index, stride)
+    ir_list_swap_bytes(&m, &b, left, right, held, width)
+}
+
+// `xs.extend(ys)` (Lower Lists.jet lower_helper_list_extend): the consumed
+// List's elements move onto the end of `list` in order, and its header is
+// cleared so its drop releases nothing they own. A frozen source (cap 0)
+// owns nothing, so its elements are copied (Lower lower_list_make_unique).
+fn ir_list_extend(m: &IRModule, b: &IRBuilder, list: Int, row: Int, source: Int) Never! {
+    capacity :: ir_load_word(&m, &b, source, 8)
+    zero :: ir_word_const(&m, &b, 0)
+    frozen :: ir_bool_op(&m, &b, IROp.Eq, capacity, zero)
+    ir_open_if(&b.f, frozen, b.line)
+    copies :: ir_walk_open(&m, &b, source, row)
+    ir_list_push(&m, &b, list, row, copies.item)
+    ir_walk_close(&m, &b, copies)
+    ir_else(&b.f, b.line)
+    moves :: ir_walk_open(&m, &b, source, row)
+    item :: moves.item
+    if item >= 0 && ir_kind_of(m, b, item) != .Aggregate -> b.fresh[item] = true
+    ir_list_push(&m, &b, list, row, item)
+    ir_walk_close(&m, &b, moves)
+    loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, source, offset, zero, b.line)
+    ir_end(&b.f, b.line)
+}
+
 // `xs.remove(value)` (the first equal element, None when there is none)
 // and `xs.remove(at)` (a position in 0..<len, else the List bounds stop),
 // Lower lower_helper_list_remove: the element moves into an Option box and
@@ -225,6 +294,21 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
                 value :: ir_adapt(&m, p, &b, operands[1], element, span)
                 if ir_failed(b) -> return -1
                 ir_list_push(&m, &b, subject, element, value)
+                return -1
+            }
+            .Reverse -> {
+                ir_list_reverse(&m, &b, subject, element)
+                return -1
+            }
+            .SwapList -> {
+                if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return ir_fail_slot(&b, span, "swap without two positions")
+                ir_list_swap(&m, &b, subject, element, operands[1], operands[2], span)
+                return -1
+            }
+            .ExtendList -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "extend without a List")
+                if ir_list_element(&m, p, b, operands[1]) != Val((element)) -> return ir_fail_slot(&b, span, "extend from a List of another element type")
+                ir_list_extend(&m, &b, subject, element, operands[1])
                 return -1
             }
             .Clear -> {
@@ -562,9 +646,14 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
     kind :: ir_map_key_kind(m, key_row)
     if by_key && kind == "" -> return ir_fail_slot(&b, span, "sort_by with a {ir_type_name(key_ty)} key")
+    // A comparator value of a `Ordering Never!` function hands back its
+    // Result carrier (ir_function_value); the order is its Ok payload.
+    order_ty :: ir_never_carrier_success(ret) ?? ret
+    carried :: !by_key && ir_never_carrier_success(ret) != None
+    order_row :: ir_value_type(&m, p, order_ty) ?? return ir_type_fail(&b, span, order_ty)
     less_index := 0
     if !by_key {
-        definition :: ir_enum_def(m, p, ret_row) ?? return ir_fail_slot(&b, span, "sort_by comparator result {ir_type_name(ret)} has no definition")
+        definition :: ir_enum_def(m, p, order_row) ?? return ir_fail_slot(&b, span, "sort_by comparator result {ir_type_name(ret)} has no definition")
         less_index = ir_variant_index(p, definition, "Less") ?? return ir_fail_slot(&b, span, "sort_by comparator result {ir_type_name(ret)} has no Less variant")
     }
     stride :: ir_list_stride(m, element)
@@ -689,7 +778,14 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
         right_item :: ir_load_at(&m, &b, right_address, 0, element)
         left_item :: ir_load_at(&m, &b, left_address, 0, element)
         verdict :: ir_call_closure(&m, &b, callback, [Int]{right_item, left_item}, ret_row)
-        verdict_tag :: ir_enum_tag_of(&m, &b, verdict)
+        decided := verdict
+        if carried {
+            decided = ir_adapt(&m, p, &b, verdict, order_row, span)
+            shell_bytes :: ir_result_box_bytes(&m, p, ret)
+            shell :: ir_word_const(&m, &b, shell_bytes)
+            ir_free(&m, &b, verdict, shell)
+        }
+        verdict_tag :: ir_enum_tag_of(&m, &b, decided)
         less :: ir_temp_like(&m, &b, verdict_tag)
         ir_emit(&b.f, IROp.Const, less, less_index, -1, -1, b.line)
         before = ir_bool_op(&m, &b, IROp.Eq, verdict_tag, less)
@@ -956,8 +1052,10 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         loop slot in inputs -> ir_release(&m, &b, slot)
         return Val(built)
     }
+    if name == "jet_ordering_then" || name == "jet_ordering_reverse" -> return Val(ir_ordering_method(&m, p, &b, name, inputs, span))
+    if name == "jet_std::JetShared::new" -> return Val(ir_shared_new(&m, p, &b, inputs, result, span))
     strings :: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
-    lists :: name == "jet_list_get_opt" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace"
+    lists :: name == "jet_list_get_opt" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace"
     if !strings && !lists -> return None
     loop slot in inputs {
         if slot < 0 -> return Val(ir_fail_slot(&b, span, "runtime route {name} argument without a value"))
@@ -980,7 +1078,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     shown :: ir_type_name(m.types[b.f.slot_type[list]].ty)
     row :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "runtime route {name} on {shown}")
     reducing :: name == "jet_list_sum" || name == "jet_list_product"
-    expected :: if reducing -> 1 else if name == "jet_list_replace" -> 3 else -> 2
+    expected :: if reducing || name == "jet_list_last" -> 1 else if name == "jet_list_replace" || name == "jet_list_slice" -> 3 else -> 2
     if inputs.len() != expected -> return ir_fail_slot(&b, span, "runtime route {name} takes {expected} arguments, not {inputs.len()}")
     stride :: ir_list_stride(m, row)
     if reducing {
@@ -1006,10 +1104,19 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     }
     result_row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
     if name == "jet_list_replace" -> return ir_list_replace(&m, p, &b, list, row, result_row, inputs[1], inputs[2], span)
+    if name == "jet_list_slice" -> return ir_list_slice(&m, &b, list, row, result_row, inputs[1], inputs[2], span)
     found :: ir_fresh_temp(&m, &b, result_row)
     ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
-    if name == "jet_list_get_opt" {
-        index :: ir_native_index(&m, &b, inputs[1], span)
+    if name == "jet_list_get_opt" || name == "jet_list_last" {
+        index := -1
+        if name == "jet_list_last" {
+            // `xs.last()` (Lower Lists.jet `last`): the element at len - 1.
+            size :: ir_load_word(&m, &b, list, 0)
+            one :: ir_word_const(&m, &b, 1)
+            index = ir_word_op(&m, &b, IROp.Sub, size, one)
+        } else {
+            index = ir_native_index(&m, &b, inputs[1], span)
+        }
         if ir_failed(b) -> return -1
         length :: ir_load_word(&m, &b, list, 0)
         inside :: ir_bool_op(&m, &b, IROp.Lt, index, length)
@@ -1043,6 +1150,79 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     ir_end(&b.f, b.line)
     ir_walk_close(&m, &b, walk)
     found
+}
+
+// `xs.slice(start, end)` (Lower Lists.jet lower_list_method_window): both
+// bounds clamp into 0..len, an empty window when end <= start, and the
+// window's elements are copied into a new List.
+fn ir_list_slice(m: &IRModule, b: &IRBuilder, list: Int, row: Int, result_row: Int, start_value: Int, end_value: Int, span: Span) -> Int Never! {
+    start :: ir_native_index(&m, &b, start_value, span)
+    end :: ir_native_index(&m, &b, end_value, span)
+    if ir_failed(b) -> return -1
+    length :: ir_load_word(&m, &b, list, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    first :: ir_word_clamp(&m, &b, start, zero, length)
+    last :: ir_word_clamp(&m, &b, end, first, length)
+    count :: ir_word_op(&m, &b, IROp.Sub, last, first)
+    window :: ir_out_slot(&m, &b, 3)
+    ir_emit(&b.f, IROp.Store, -1, window, 0, count, b.line)
+    ir_emit(&b.f, IROp.Store, -1, window, 8, zero, b.line)
+    data :: ir_load_word(&m, &b, list, 16)
+    stride :: ir_list_stride(m, row)
+    window_data :: ir_element_address(&m, &b, data, first, stride)
+    ir_emit(&b.f, IROp.Store, -1, window, 16, window_data, b.line)
+    ir_list_clone(&m, &b, window, row, result_row)
+}
+
+// The native word `value` clamped into low...high (Lower lower_list_clamp).
+fn ir_word_clamp(m: &IRModule, b: &IRBuilder, value: Int, low: Int, high: Int) -> Int Never! {
+    clamped :: ir_temp_like(&m, &b, value)
+    ir_emit(&b.f, IROp.Copy, clamped, value, -1, -1, b.line)
+    below :: ir_bool_op(&m, &b, IROp.Lt, clamped, low)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Copy, clamped, low, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    above :: ir_bool_op(&m, &b, IROp.Gt, clamped, high)
+    ir_open_if(&b.f, above, b.line)
+    ir_emit(&b.f, IROp.Copy, clamped, high, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    clamped
+}
+
+// `order.then(next)` / `order.reverse()` over the Ordering discriminant
+// (Lower.jet lower_ordering_method): `then` keeps a decided order and takes
+// `next` after Equal; `reverse` swaps Less and Greater.
+fn ir_ordering_method(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], span: Span) -> Int Never! {
+    chained :: name == "jet_ordering_then"
+    if inputs.len() != (if chained -> 2 else -> 1) || inputs[0] < 0 -> return ir_fail_slot(&b, span, "Ordering method {name} with {inputs.len()} arguments")
+    order :: inputs[0]
+    definition :: ir_enum_def(m, p, b.f.slot_type[order]) ?? return ir_fail_slot(&b, span, "Ordering method {name} on a non-enum")
+    less :: ir_variant_index(p, definition, "Less") ?? return ir_fail_slot(&b, span, "Ordering has no Less variant")
+    equal :: ir_variant_index(p, definition, "Equal") ?? return ir_fail_slot(&b, span, "Ordering has no Equal variant")
+    greater :: ir_variant_index(p, definition, "Greater") ?? return ir_fail_slot(&b, span, "Ordering has no Greater variant")
+    result :: ir_temp_like(&m, &b, order)
+    ir_emit(&b.f, IROp.Copy, result, order, -1, -1, b.line)
+    if chained {
+        if inputs[1] < 0 -> return ir_fail_slot(&b, span, "Ordering.then argument without a value")
+        equal_word :: ir_const_like(&m, &b, order, equal)
+        undecided :: ir_bool_op(&m, &b, IROp.Eq, order, equal_word)
+        ir_open_if(&b.f, undecided, b.line)
+        ir_emit(&b.f, IROp.Copy, result, inputs[1], -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        return result
+    }
+    less_word :: ir_const_like(&m, &b, order, less)
+    greater_word :: ir_const_like(&m, &b, order, greater)
+    is_less :: ir_bool_op(&m, &b, IROp.Eq, order, less_word)
+    ir_open_if(&b.f, is_less, b.line)
+    ir_emit(&b.f, IROp.Copy, result, greater_word, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    is_greater :: ir_bool_op(&m, &b, IROp.Eq, order, greater_word)
+    ir_open_if(&b.f, is_greater, b.line)
+    ir_emit(&b.f, IROp.Copy, result, less_word, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    result
 }
 
 // A new List of type row `list_row` holding copies of the elements of the

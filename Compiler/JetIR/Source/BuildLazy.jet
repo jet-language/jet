@@ -879,3 +879,66 @@ fn ir_lazy_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, vari
     ir_end(&b.f, b.line)
     ir_scope_close(&m, &b)
 }
+
+// ---------------------------------------------------------------------------
+// Shared<T> (Lower Tasks.jet, Transaction.jet): an owned runtime cell handle
+// over the value's native slot; a guard is an owned runtime permit whose
+// payload is the cell's slot itself.
+
+// `Shared.new(value)` (Lower Tasks.jet lower_shared_new): the cell takes
+// over an owned copy of the value from its native slot, with the element
+// descriptor and the descriptor's drop role.
+fn ir_shared_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    shared_ty :: ir_subst(p, result)
+    inner :: if ir_untag(shared_ty) == .Shared(value) -> value else -> { return ir_fail_slot(&b, span, "Shared.new producing {ir_type_name(result)}") }
+    if inputs.len() != 1 || inputs[0] < 0 -> return ir_fail_slot(&b, span, "Shared.new with {inputs.len()} arguments")
+    row :: ir_value_type(&m, p, shared_ty) ?? return ir_type_fail(&b, span, shared_ty)
+    value :: inputs[0]
+    owned :: if b.fresh[value] -> value else -> ir_copy_value(&m, p, &b, value, span)
+    if ir_failed(b) -> return -1
+    b.fresh[owned] = false
+    slot :: ir_lazy_value_slot(&m, &b, owned)
+    meta :: ir_lazy_meta(&m, p, &b, inner, span)
+    if meta < 0 -> return -1
+    pointer_row :: ir_pointer_row(&m)
+    drop :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Load, drop, meta, 16, -1, b.line)
+    ir_runtime(&m, &b, "jet_rt_native_shared_new", [Int]{slot, meta, drop}, row)
+}
+
+// `shared.guard_read()` / `shared.guard_edit()` (Lower Transaction.jet
+// lower_shared_guard_new): the runtime takes the lock and hands back the
+// permit; the guard's checked read/edit provenance must match the method.
+fn ir_shared_guard(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, editable: Bool, span: Span) -> Int Never! {
+    if ir_shared_guard_editable(ty) != Val((editable)) -> return ir_fail_slot(&b, span, "Shared guard acquisition without its checked read/edit provenance")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    shared :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || shared < 0 -> return -1
+    guard :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_guard_edit" else -> "jet_rt_native_shared_guard_read", [Int]{shared}, row)
+    ir_release(&m, &b, shared)
+    guard
+}
+
+// `guard.value` (Lower Transaction.jet lower_shared_guard_deref): the
+// permit's payload is the cell's slot, read in place (an aggregate is its
+// address); the guard keeps owning it.
+fn ir_shared_guard_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, guard: TExpr, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    payload :: ir_shared_guard_payload(&m, &p, &b, guard, span)
+    if payload < 0 -> return -1
+    ir_load_at(&m, &b, payload, 0, row)
+}
+
+// The address of the cell's slot a guard lends (Lower Transaction.jet
+// lower_shared_guard_payload): an edit permit's through
+// jet_rt_native_shared_edit_guard_edit, a read permit's through
+// jet_rt_native_shared_read_guard_deref. -1 with `b` failed on an error.
+fn ir_shared_guard_payload(m: &IRModule, p: &IRProgram, b: &IRBuilder, guard: TExpr, span: Span) -> Int Never! {
+    editable :: ir_shared_guard_editable(guard.ty) ?? return ir_fail_slot(&b, span, "Shared guard dereference without its checked read/edit provenance")
+    held :: ir_expr(&m, &p, &b, guard)
+    if ir_failed(b) || held < 0 -> return -1
+    pointer_row :: ir_pointer_row(&m)
+    payload :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_edit_guard_edit" else -> "jet_rt_native_shared_read_guard_deref", [Int]{held}, pointer_row)
+    b.fresh[payload] = false
+    payload
+}

@@ -25,6 +25,25 @@ fn ir_never_type(ty: Type) -> Bool Never! {
     ir_untag(ty) == (Type.Named{name: "Never"})
 }
 
+// Whether `ty` is a SharedGuard that edits, by the read/edit provenance tag
+// it keeps through transparent tags (Lower Transaction.jet
+// lower_shared_guard_editable); None for any other type.
+fn ir_shared_guard_editable(ty: Type) -> Bool? Never! {
+    if ty == .Tagged(marker, inner) {
+        if ir_untag(inner) == .Apply(name, args) {
+            if name != "SharedGuard" || args.len() != 1 -> return None
+        } else {
+            return None
+        }
+        if marker == .Internal(internal_tag) {
+            if internal_tag == .SharedGuardRead -> return Val(false)
+            if internal_tag == .SharedGuardEdit -> return Val(true)
+        }
+        return ir_shared_guard_editable(inner)
+    }
+    None
+}
+
 // The success of a `T Never!` carrier.
 fn ir_never_carrier_success(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Result(ok, err) {
@@ -99,6 +118,13 @@ fn ir_value_type(m: &IRModule, p: IRProgram, written: Type) -> Int? Never! {
 fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Int? Never! {
     ty :: ir_subst(p, written)
     if ir_type_row(&m, ty) == .Val(row) -> return Val(row)
+    if ir_shared_guard_editable(ty) == .Val(editable) {
+        // An owned runtime permit with no Clone; which permit its drop
+        // releases follows its checked read/edit provenance (Lower
+        // Transaction.jet lower_shared_guard_repr).
+        drop :: if editable -> "jet_rt_native_shared_edit_guard_drop" else -> "jet_rt_native_shared_read_guard_drop"
+        return Val(ir_intern_type(&m, "{drop}:{type_carrier_identity(ty)}", ir_owned_layout(IRTypeKind.Pointer, ty, drop, "")))
+    }
     if ty == .Tagged(_, inner) -> return ir_value_type_in(&m, p, inner, laying)
     if ty == .InlineRange(base, _, _) -> return ir_value_type_in(&m, p, base, laying)
     if ty == .Option(inner) {
@@ -206,10 +232,19 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
             return Val(ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "")))
         }
         .Struct(_, _) -> {
+            // A struct instance's row is found by its identity before its
+            // members are laid out again: laying out every member's own type
+            // on each lookup walks the whole reachable type graph per use.
+            // Its layout does not depend on `laying` (a recursive edge
+            // counts 8 bytes either way), so a found row stands for all.
+            laid :: "laid:struct:{identity}"
+            if m.type_rows.get(laid) == .Val(known) -> return Val(known)
             if laying.contains(definition.key) -> return None
             members :: ir_struct_members_in(&m, p, row, args, laying, false) ?? return None
             size :: ir_struct_size(m, members)
-            return Val(ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
+            interned :: ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, ""))
+            m.type_rows[laid] = interned
+            return Val(interned)
         }
         .Distinct(base, _) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, base), laying) }
         .Alias(target) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, target), laying) }
@@ -279,6 +314,31 @@ fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Nev
     atom :: runtime_abi_atom(handle.runtime)
     clone :: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
     Val(ir_intern_type(&m, "handle:{handle.runtime}", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_{atom}", clone)))
+}
+
+// A field of a Jet-owned process carrier behind its handle (Lower Places.jet
+// lower_native_process_place): ProcessReceipt and ProcessPlan hold one word
+// per field at fixed offsets, the Test snapshot (JetTestSuite) its exact-Int
+// iteration and result. A List field's word points at its header, so it
+// reads like a boxed member. None for any other handle or field.
+fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMember? Never! {
+    nominal :: ir_nominal_name(ir_untag(ty)) ?? return None
+    handle :: ir_handle_runtime(p, nominal) ?? return None
+    fields :: if handle.runtime == {
+        "ProcessReceipt" -> [String]{"code", "output", "errors", "success", "signal", "timed_out", "executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs", "redacted", "pid", "limit_hit"}
+        "ProcessPlan" -> [String]{"executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs"}
+        "JetTestSuite" -> [String]{"iteration", "result"}
+        else -> { return None }
+    }
+    declared :: ir_declared_field_type(p, ty, name) ?? return None
+    row :: ir_value_type(&m, p, declared) ?? return None
+    kind :: m.types[row].kind
+    if handle.runtime == "JetTestSuite" && kind != .Int -> return None
+    if kind != .Int && kind != .Bool && kind != .String && kind != .Pointer && kind != .Aggregate -> return None
+    loop (index, field) in fields {
+        if field == name -> return Val(IRMember{name: name, offset: 8 * index, ty: row, boxed: kind == .Aggregate})
+    }
+    None
 }
 
 // Whether a runtime handle row has a record schema: such a type keeps its
@@ -543,6 +603,20 @@ fn ir_variant_index(p: IRProgram, row: Int, name: String) -> Int? Never! {
         }
     }
     None
+}
+
+// The leaf variant names under group `group` of the enum declaration `row`
+// (`.Net` matches `Net.Packet` and `Net.Ping`); empty when `group` names no
+// group.
+fn ir_group_leaves(p: IRProgram, row: Int, group: String) -> [String] Never! {
+    leaves := [String]{}
+    if p.types[row].kind == .Enum(variants, _) {
+        prefix :: "{group}."
+        loop variant in variants {
+            if variant.name.starts_with(prefix) -> &leaves.push(variant.name)
+        }
+    }
+    leaves
 }
 
 fn ir_unit_type(ty: Type) -> Bool Never! {
@@ -1982,8 +2056,119 @@ fn ir_numeric_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             return result
         }
         .FloatToInt(_, _, _, _, _) -> return ir_float_to_int(&m, p, &b, value, ty, span)
+        .TryFrom(_, _, _) -> {
+            result :: ir_try_from(&m, p, &b, value, ty, span)
+            ir_release(&m, &b, value)
+            return result
+        }
         else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
+}
+
+// `U8.from_int(x)`, `I32.from_u64(w)` and the other narrowing integer
+// conversions (Lower Convert.jet lower_convert_try_fixed): Ok(value) when the
+// exact or fixed-width source fits the target's range, else Err of the text
+// "value doesn't fit in destination type". A fixed source is read as its
+// extended 64-bit word (a U64 at or above 2^63 reads negative, so `>= 0`
+// bounds both an unsigned target and a U64 source); an exact source compares
+// exactly, and above I64.MAX a U64 target takes the bits of x - 2^64
+// (lower_convert_try_big).
+fn ir_try_from(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
+    unsupported :: "Prelude conversion try_from into {ir_type_name(ty)} is not lowered at O0 yet"
+    ok_ty :: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, unsupported) }
+    err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, unsupported) }
+    ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    if m.types[err_row].kind != .String || m.types[ok_row].kind != .Word -> return ir_fail_slot(&b, span, unsupported)
+    t_signed :: m.types[ok_row].signed
+    t_bits :: m.types[ok_row].bits
+    if t_bits < 1 || t_bits > 64 -> return ir_fail_slot(&b, span, unsupported)
+    source :: m.types[b.f.slot_type[value]]
+    exact :: source.kind == .Int
+    if !exact && (source.kind != .Word || source.bits > 64) -> return ir_fail_slot(&b, span, unsupported)
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    word_row :: ir_word_row(&m)
+    lowest :: if t_bits == 64 -> (if t_signed -> -9223372036854775807 - 1 else -> 0) else -> (if t_signed -> 0 - (1 << (t_bits - 1)) else -> 0)
+    highest :: if t_bits == 64 -> 9223372036854775807 else -> (if t_signed -> (1 << (t_bits - 1)) - 1 else -> (1 << t_bits) - 1)
+    fits :: ir_temp(&m, &b, bool_row)
+    word :: ir_temp(&m, &b, word_row)
+    if exact {
+        int_row :: b.f.slot_type[value]
+        low :: ir_int_constant(&m, &b, int_row, lowest)
+        high := -1
+        if t_bits == 64 && !t_signed {
+            high = ir_fresh_temp(&m, &b, int_row)
+            ir_emit(&b.f, IROp.ConstBigInt, high, ir_intern_name(&m, "18446744073709551615"), -1, -1, b.line)
+        } else {
+            high = ir_int_constant(&m, &b, int_row, highest)
+        }
+        ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
+        above :: ir_bool_op(&m, &b, IROp.Ge, value, low)
+        ir_open_if(&b.f, above, b.line)
+        below :: ir_bool_op(&m, &b, IROp.Le, value, high)
+        ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_release(&m, &b, low)
+        ir_release(&m, &b, high)
+    } else {
+        wide :: ir_copy_word(&m, &b, value, word_row)
+        ir_emit(&b.f, IROp.Copy, word, wide, -1, -1, b.line)
+        source_u64 :: !source.signed && source.bits == 64
+        if t_bits == 64 && t_signed == !source_u64 {
+            ir_emit(&b.f, IROp.Const, fits, 1, -1, -1, b.line)
+        } else if t_bits == 64 {
+            zero :: ir_const_like(&m, &b, wide, 0)
+            ir_emit(&b.f, IROp.Ge, fits, wide, zero, -1, b.line)
+        } else {
+            ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
+            low :: ir_const_like(&m, &b, wide, lowest)
+            above :: ir_bool_op(&m, &b, IROp.Ge, wide, low)
+            ir_open_if(&b.f, above, b.line)
+            high :: ir_const_like(&m, &b, wide, highest)
+            below :: ir_bool_op(&m, &b, IROp.Le, wide, high)
+            ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+    }
+    found :: ir_fresh_temp(&m, &b, result_row)
+    ir_open_if(&b.f, fits, b.line)
+    if exact {
+        if t_bits == 64 && !t_signed {
+            int_row :: b.f.slot_type[value]
+            signed_max :: ir_int_constant(&m, &b, int_row, 9223372036854775807)
+            low_half :: ir_bool_op(&m, &b, IROp.Le, value, signed_max)
+            ir_release(&m, &b, signed_max)
+            ir_open_if(&b.f, low_half, b.line)
+            direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+            ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
+            ir_else(&b.f, b.line)
+            modulus :: ir_fresh_temp(&m, &b, int_row)
+            ir_emit(&b.f, IROp.ConstBigInt, modulus, ir_intern_name(&m, "18446744073709551616"), -1, -1, b.line)
+            shifted :: ir_fresh_temp(&m, &b, int_row)
+            ir_emit(&b.f, IROp.Sub, shifted, value, modulus, IR_OVERFLOW_TRAP, b.line)
+            wrapped :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{shifted}, word_row)
+            ir_emit(&b.f, IROp.Copy, word, wrapped, -1, -1, b.line)
+            ir_release(&m, &b, shifted)
+            ir_release(&m, &b, modulus)
+            ir_end(&b.f, b.line)
+        } else {
+            direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+            ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
+        }
+    }
+    converted :: ir_numeric_cast(&m, p, &b, word, ok_row, span)
+    success :: ir_result_box(&m, p, &b, ty, true, converted)
+    ir_emit(&b.f, IROp.Copy, found, success, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    string_row :: ir_string_row(&m)
+    text :: ir_temp(&m, &b, string_row)
+    message :: ir_intern_text(&m, "value doesn't fit in destination type")
+    ir_emit(&b.f, IROp.ConstText, text, message, -1, -1, b.line)
+    failure :: ir_result_box(&m, p, &b, ty, false, text)
+    ir_emit(&b.f, IROp.Copy, found, failure, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    found
 }
 
 // `Float{n}` / `Float32{n}` of an integer (Lower Convert.jet

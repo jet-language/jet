@@ -4,7 +4,7 @@
 
 use jet_foundation.[AccessConvention, Span, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TStructFieldValue, TTryConvert, measure_literal_value, tir_each_expr_child, tir_each_stmt_list_child, type_carrier_identity]
 use jet_backend.[lower_float_constant_bits]
-use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route, jet_codegen_handle_receiver_is_mutating]
+use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route]
 
 fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc) Never! {
     b.line = function.line
@@ -956,10 +956,14 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             if ir_default_err(p, receiver.ty) -> return ir_default_err_field(&m, &p, &b, expression.ty, receiver, field.name, span)
             base :: ir_expr(&m, &p, &b, receiver)
             if ir_failed(b) -> return -1
+            if base >= 0 && ir_kind_of(m, b, base) == .Pointer {
+                if ir_process_member(&m, p, receiver.ty, field.name) == .Val(member) -> return ir_member_read(&m, &b, base, member)
+            }
             if base < 0 || ir_kind_of(m, b, base) != .Aggregate -> return ir_fail_slot(&b, span, "field of {ir_type_name(receiver.ty)}")
             member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "field {field.name} of {ir_type_name(receiver.ty)}")
             return ir_member_read(&m, &b, base, member)
         }
+        .SharedGuardValue(guard, _) -> return ir_shared_guard_value(&m, &p, &b, expression.ty, guard, span)
         .HostCall(call) -> {
             if call == .SwitchSubjectValue {
                 subject :: if b.subjects.len() > 0 -> b.subjects[b.subjects.len() - 1] else -> -1
@@ -992,6 +996,11 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
                 return ir_member_read(&m, &b, tuple, members[index])
             }
             if call == .NumericBounds(bound_ty, member) -> return ir_numeric_bound(&m, &b, expression.ty, bound_ty, member, span)
+            if call == .Method(receiver, method, args) {
+                if (method == "guard_read" || method == "guard_edit") && args.len() == 0 && ir_untag(ir_subst(p, receiver.ty)) == .Shared(_) {
+                    return ir_shared_guard(&m, &p, &b, expression.ty, receiver, method == "guard_edit", span)
+                }
+            }
             return ir_fail_slot(&b, span, "host call {ir_host_call_name(call)}")
         }
         .EnumLit(enum_type, variant, payload) -> return ir_enum_value(&m, &p, &b, expression.ty, enum_type, variant, payload, span)
@@ -1139,7 +1148,10 @@ fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiv
     if dedicated -> return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)}")
     carrier :: jet_codegen_failure_carrier_for_type(ty)
     route :: jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier) ?? return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
-    if route.family == .ClosureMethod || jet_codegen_handle_receiver_is_mutating(operation) -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure or mutated receiver")
+    // A mutating receiver (codegen jet_codegen_handle_receiver_is_mutating)
+    // still crosses as its handle: the route mutates the runtime value
+    // behind it (Lower Routes.jet lower_route_args, a HandleMut carrier).
+    if route.family == .ClosureMethod -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure")
     if route.symbol == "jet_dyn_len" || route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" -> return ir_fail_slot(&b, span, "handle method {route.symbol}")
     special :: ir_nominal_name(ir_untag(ir_subst(p, receiver.ty))) ?? ""
     if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" -> return ir_fail_slot(&b, span, "{special} handle method {route.member}")
@@ -1757,6 +1769,16 @@ fn ir_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, place: TExpr, ba
         ir_emit(&b.f, IROp.Offset, address, element, 0, -1, b.line)
         return address
     }
+    if place.kind == .SharedGuardValue(guard, _) {
+        // `&guard.value`: the cell's slot itself, written in place.
+        payload :: ir_shared_guard_payload(&m, &p, &b, guard, span)
+        if payload < 0 -> return -1
+        row :: ir_value_type(&m, p, place.ty) ?? return ir_type_fail(&b, span, place.ty)
+        pointer_row :: ir_pointer_row(&m)
+        address :: if m.types[row].kind == .Aggregate -> ir_temp(&m, &b, row) else -> ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Offset, address, payload, 0, -1, b.line)
+        return address
+    }
     // `f(make())` into a write parameter: the call's fresh aggregate result is
     // its own place, which the call releases after the callee wrote it.
     temporary :: if place.kind == {
@@ -1939,10 +1961,16 @@ fn ir_mixed_switch(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: TExpr, a
 fn ir_pattern_test(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, shape: TPatternShape, span: Span) -> Int Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     if shape == {
-        .Variant(variant, bindings, _, _) -> {
+        .Variant(variant, bindings, leading_dot, variant_span) -> {
             subject_type :: b.f.slot_type[subject]
             subject_args :: ir_row_args(m, subject_type)
             row :: ir_enum_def(m, p, subject_type) ?? return ir_fail_slot(&b, span, "variant pattern on a non-enum subject")
+            leaves :: ir_group_leaves(p, row, variant)
+            if leaves.len() > 0 {
+                alternatives := [TPatternShape]{}
+                loop leaf in leaves -> &alternatives.push(TPatternShape.Variant{variant: leaf, bindings: bindings, leading_dot: leading_dot, span: variant_span})
+                return ir_pattern_test(&m, &p, &b, subject, TPatternShape.Or{alternatives: alternatives, span: variant_span}, span)
+            }
             index :: ir_variant_index(p, row, variant) ?? return ir_fail_slot(&b, span, "variant pattern {variant} not in its enum")
             discriminant :: ir_enum_tag_of(&m, &b, subject)
             index_slot :: ir_temp_like(&m, &b, discriminant)
