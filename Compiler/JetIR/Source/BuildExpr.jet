@@ -431,7 +431,23 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
         .ContextBlock(_, _, span) -> ir_fail(&b, span, "statement ContextBlock")
         .Shield(_, span) -> ir_fail(&b, span, "statement Shield")
-        .ScopeMember(_, _, span) -> ir_fail(&b, span, "statement ScopeMember")
+        // Test scope members (codegen jet_codegen_lower_scope_member): a
+        // `.setup` body runs in the enclosing scope, so its bindings stay
+        // visible after it; a `.measure` body runs as a plain scope (no
+        // runtime action, Lower lower_test_scope_member). `.expect_fail`,
+        // `.timeout` and `.skip` need the runtime's test scope rail.
+        .ScopeMember(kind, body, span) -> {
+            if kind == {
+                .Setup -> {
+                    loop inner in body {
+                        if ir_failed(b) -> break
+                        ir_stmt(&m, &p, &b, inner)
+                    }
+                }
+                .Measure -> ir_stmts(&m, &p, &b, body)
+                else -> ir_fail(&b, span, "statement ScopeMember")
+            }
+        }
         .Transact(handle, snapshots, stm, body, span) -> ir_transact(&m, &p, &b, handle, snapshots, stm, body, span)
         .GCEdit(_, _, _, _, _, _, span) -> ir_fail(&b, span, "statement GCEdit")
         .SplitViews(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, span) -> ir_fail(&b, span, "statement SplitViews")

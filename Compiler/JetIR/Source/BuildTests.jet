@@ -1,0 +1,465 @@
+// The native unit-test harness (`jet test`): the selected checked tests and
+// Check Outputs built with every function they reach, plus the generated
+// callbacks and entry that run them through the test runtime. The parent
+// (JetCli NativeTests.jet) owns selection, order and the final report; a
+// child streams one complete record per test before exiting, so a fatal child
+// cannot erase completed outcomes.
+//
+// Per test:
+//   test.invoke(env) -> String?  calls the body; null on success, else the
+//                                failure message (a Result error's Debug
+//                                text, or "test returned no value" for None)
+//   test.unit(env) -> outcome    jet_rt_test_unit(name, expected, env, invoke)
+// and one shared test.release(env), a no-op (the environment is null).
+// The entry `main`:
+//   JET_NATIVE_TEST_REPORT_PATH set: report the outcome file and exit
+//   (jet_rt_test_read, jet_rt_test_finish_wire; exit 1 when a test failed).
+//   Otherwise: call the package's `fn test(t: Test)` with a fresh suite, read
+//   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), spawn each selected
+//   test (only `JET_NATIVE_TEST_ID`'s when set) and append its record
+//   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
+//   after spawning; then, unfiltered, run each Check Output once.
+
+use jet_foundation.[Span, TConstantDef, TFunc, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type]
+use jet_sema.[SemaCheckedForeignFunction]
+
+// One test the harness runs: its checked function `key`, the identity `id`
+// its outcome record carries, its report name and whether it must fail.
+struct IRTestCase { id: Int, key: String, name: String, expected_failure: Bool }
+
+// A selected Check Output: its name and its checked zero-argument function.
+struct IROutputCheck { name: String, key: String }
+
+// The harness `jet test` runs: `tests` in run order, then (unfiltered) each
+// of `checks`. `serial` streams each test's record before spawning the next;
+// otherwise every test is spawned before any is joined.
+struct IRTestHarness { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool }
+
+// Builds `harness` and every function it reaches.
+fn ir_build_tests(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness) -> IRBuildResult Never! {
+    m := ir_module_new()
+    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+    ir_foreign_index(&p, ^foreign)
+    failures := [IRBuildFailure]{}
+    bodies := [Int]{}
+    loop test in harness.tests {
+        id :: ir_function_id(&m, &p, test.key, [Type]{}) ?? -1
+        if id < 0 -> &failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        &bodies.push(id)
+    }
+    check_ids := [Int]{}
+    loop check in harness.checks {
+        id :: ir_function_id(&m, &p, check.key, [Type]{}) ?? -1
+        if id < 0 -> &failures.push(IRBuildFailure{key: check.key, name: check.name, message: "the output check function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        &check_ids.push(id)
+    }
+    if failures.len() > 0 -> return IRBuildResult{program: m, failures: failures}
+    override :: ir_test_override(&m, &p)
+    built :: ir_build_queue(&m, &p, &failures, 0)
+    m.entry = ir_test_main(&m, &p, harness, bodies, check_ids, override, &failures)
+    // The functions the harness's renders reached (a Printable impl).
+    _ :: ir_build_queue(&m, &p, &failures, built)
+    ir_drop_glues(&m, p)
+    IRBuildResult{program: m, failures: failures}
+}
+
+// The package's `fn test(t: Test)`, when it has one: the project's test
+// entry, called with the suite before the harness runs the discovered tests.
+// -1 when there is none.
+fn ir_test_override(m: &IRModule, p: &IRProgram) -> Int Never! {
+    key := ""
+    loop function in p.functions {
+        if function.name != "test" || function.params.len() != 1 || function.generic_params.len() > 0 || function.module_name.starts_with("core") -> next
+        top_level :: if function.kind == {
+            .TopLevel -> true
+            else -> false
+        }
+        if !top_level -> next
+        name :: ir_nominal_name(ir_untag(function.params[0].ty)) ?? next
+        if ir_short_name(name) != "Test" -> next
+        key = function.key.copy()
+        break
+    }
+    if key == "" -> return -1
+    ir_function_id(&m, &p, key, [Type]{}) ?? -1
+}
+
+// A generated harness function: `name`, keyed and symbolled after the
+// function `from` (`suffix` appended), at its source location; a shared
+// helper (`from` < 0) is keyed `jet_ir_test_<suffix>`.
+fn ir_test_function(m: &IRModule, name: String, from: Int, suffix: String) -> Int Never! {
+    key := "jet_ir_test_{suffix}"
+    symbol := key.copy()
+    source_file := ""
+    line := 0
+    if from >= 0 {
+        key = "{m.functions[from].key}#test.{suffix}"
+        symbol = "{m.functions[from].symbol}__test_{suffix}"
+        source_file = m.functions[from].source_file.copy()
+        line = m.functions[from].line
+    }
+    id :: m.functions.len()
+    function :: ir_function_new(name, key, symbol, source_file, line)
+    &m.functions.push(function)
+    m.function_rows[key] = id
+    id
+}
+
+// Ends a generated function: records its failure, resolves its deferred
+// calls and stores it.
+fn ir_test_finish(m: &IRModule, p: &IRProgram, b: ^IRBuilder, id: Int, failures: &[IRBuildFailure]) Never! {
+    built := ^b
+    if built.error != "" {
+        &failures.push(IRBuildFailure{key: m.functions[id].key, name: m.functions[id].name, message: built.error, source_file: m.functions[id].source_file, span: built.error_span})
+    }
+    ir_resolve_deferred(&m, &p, &built)
+    m.functions[id] = ^built.f
+}
+
+// Drops `slot` when its type has a drop, leaving its freshness alone.
+fn ir_test_drop(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+    if slot >= 0 && ir_has_drop(m, b, slot) -> ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
+}
+
+// A fresh owned String of `text`.
+fn ir_test_text(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
+    string_row :: ir_string_row(&m)
+    pair :: ir_static_text(&m, &b, text)
+    ir_runtime(&m, &b, "jet_rt_string_from_static", pair, string_row)
+}
+
+fn ir_test_bool(m: &IRModule, b: &IRBuilder, value: Bool) -> Int Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    slot :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, slot, if value -> 1 else -> 0, -1, -1, b.line)
+    slot
+}
+
+// The environment variable `name`: a String slot, null when it is unset.
+// String drop accepts null; every other read is guarded by its presence.
+fn ir_test_env(m: &IRModule, b: &IRBuilder, name: String) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    key :: ir_test_text(&m, &b, name)
+    slot :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, slot, 8, 8, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    ir_emit(&b.f, IROp.Store, -1, slot, 0, zero, b.line)
+    _ :: ir_runtime(&m, &b, "jet_std_env_get", [Int]{key, slot}, word_row)
+    ir_test_drop(&m, &b, key)
+    string_row :: ir_string_row(&m)
+    ir_load_at(&m, &b, slot, 0, string_row)
+}
+
+// Whether the pointer-sized `value` is not null: compared as a raw word,
+// since a String `!=` is a text comparison. The word is a Move, a plain
+// transfer (a String Copy clones, which a null text cannot).
+fn ir_test_present(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Move, word, value, -1, -1, b.line)
+    null :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+    ir_bool_op(&m, &b, IROp.Ne, word, null)
+}
+
+// Ends the process with `code`.
+fn ir_test_exit(m: &IRModule, b: &IRBuilder, code: Int) Never! {
+    status :: ir_word_const(&m, &b, code)
+    _ :: ir_runtime(&m, &b, "jet_std_process_exit", [Int]{status}, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+// test.invoke(env) for the test body `body`.
+fn ir_test_invoke(m: &IRModule, p: &IRProgram, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
+    id :: ir_test_function(&m, "test.invoke", body, "invoke")
+    b := ir_builder_new(m.functions[id].copy())
+    b.line = m.functions[body].line
+    span :: Span{start: 0, end: 0}
+    pointer_row :: ir_pointer_row(&m)
+    string_row :: ir_string_row(&m)
+    env_name :: ir_intern_name(&m, "env")
+    _ :: ir_new_slot(&b, pointer_row, IRSlotKind.Param, env_name)
+    b.f.result = pointer_row
+    no_args :: [Int]{}
+    null :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+    row :: m.functions[body].result
+    if m.functions[body].param_count > 0 {
+        ir_fail(&b, span, "native unit tests require a parameterless Unit, Option<Unit>, or Result<Unit, E> body")
+    } else if row < 0 || m.types[row].kind == .Unit {
+        operands :: ir_args(&b.f, no_args)
+        ir_emit(&b.f, IROp.Call, -1, body, operands, 0, b.line)
+    } else {
+        ty :: m.types[row].ty.copy()
+        result :: ir_temp(&m, &b, row)
+        operands :: ir_args(&b.f, no_args)
+        ir_emit(&b.f, IROp.Call, result, body, operands, 0, b.line)
+        if ir_untag(ty) == {
+            .Result(_, err_ty) -> {
+                // A kept `T Never!` carrier never holds an Err.
+                if !ir_never_type(err_ty) {
+                    verdict :: ir_load_word(&m, &b, result, 0)
+                    zero :: ir_word_const(&m, &b, 0)
+                    failed :: ir_bool_op(&m, &b, IROp.Eq, verdict, zero)
+                    ir_open_if(&b.f, failed, b.line)
+                    err_row :: ir_value_type(&m, p, err_ty) ?? pointer_row
+                    error :: ir_load_at(&m, &b, result, 8, err_row)
+                    text :: ir_render(&m, p, &b, err_ty, error, IRRender.Debug, span)
+                    // The returned message outlives the dropped carrier.
+                    owned :: if text >= 0 && b.fresh[text] -> text else -> ir_runtime(&m, &b, "jet_rt_string_clone", [Int]{text}, string_row)
+                    ir_test_drop(&m, &b, result)
+                    ir_emit(&b.f, IROp.Return, -1, owned, -1, -1, b.line)
+                    ir_end(&b.f, b.line)
+                }
+            }
+            .Option(_) -> {
+                if m.types[row].kind != .Pointer {
+                    ir_fail(&b, span, "a test returning {ir_type_name(ty)}")
+                } else {
+                    absent :: ir_bool_op(&m, &b, IROp.Eq, result, null)
+                    ir_open_if(&b.f, absent, b.line)
+                    message :: ir_test_text(&m, &b, "test returned no value")
+                    ir_emit(&b.f, IROp.Return, -1, message, -1, -1, b.line)
+                    ir_end(&b.f, b.line)
+                }
+            }
+            else -> ir_fail(&b, span, "native unit test body does not return Unit or its checked failure carrier")
+        }
+        ir_test_drop(&m, &b, result)
+    }
+    ir_emit(&b.f, IROp.Return, -1, null, -1, -1, b.line)
+    ir_test_finish(&m, &p, ^b, id, &failures)
+    id
+}
+
+// test.unit(env) for `test`, whose body is `body`: the canonical test rail
+// over its test.invoke.
+fn ir_test_unit(m: &IRModule, p: &IRProgram, test: IRTestCase, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
+    invoke :: ir_test_invoke(&m, &p, body, &failures)
+    id :: ir_test_function(&m, "test.unit", body, "unit")
+    b := ir_builder_new(m.functions[id].copy())
+    b.line = m.functions[body].line
+    pointer_row :: ir_pointer_row(&m)
+    env_name :: ir_intern_name(&m, "env")
+    env :: ir_new_slot(&b, pointer_row, IRSlotKind.Param, env_name)
+    b.f.result = pointer_row
+    name :: ir_test_text(&m, &b, test.name)
+    expected :: ir_test_bool(&m, &b, test.expected_failure)
+    code :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.FunctionAddress, code, invoke, -1, -1, b.line)
+    outcome :: ir_runtime(&m, &b, "jet_rt_test_unit", [Int]{name, expected, env, code}, pointer_row)
+    ir_test_drop(&m, &b, name)
+    ir_emit(&b.f, IROp.Return, -1, outcome, -1, -1, b.line)
+    ir_test_finish(&m, &p, ^b, id, &failures)
+    id
+}
+
+// test.release(env): the harness spawns with a null environment, so it owns
+// nothing.
+fn ir_test_release(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) -> Int Never! {
+    id :: ir_test_function(&m, "test.release", -1, "release")
+    b := ir_builder_new(m.functions[id].copy())
+    pointer_row :: ir_pointer_row(&m)
+    env_name :: ir_intern_name(&m, "env")
+    _ :: ir_new_slot(&b, pointer_row, IRSlotKind.Param, env_name)
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    ir_test_finish(&m, &p, ^b, id, &failures)
+    id
+}
+
+// Appends `text` to the records file `path`; a write failure is a protocol
+// failure (exit 103), never a failure of the joined test.
+fn ir_test_append(m: &IRModule, b: &IRBuilder, path: Int, text: Int) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    string_row :: ir_string_row(&m)
+    error_slot :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, error_slot, 8, 8, -1, b.line)
+    status :: ir_runtime(&m, &b, "jet_rt_test_append", [Int]{path, text, error_slot}, word_row)
+    zero :: ir_word_const(&m, &b, 0)
+    failed :: ir_bool_op(&m, &b, IROp.Eq, status, zero)
+    ir_open_if(&b.f, failed, b.line)
+    error :: ir_load_at(&m, &b, error_slot, 0, pointer_row)
+    message :: ir_runtime(&m, &b, "jet_rt_handle_show_io_error", [Int]{error}, string_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_test_eprint", [Int]{message}, -1)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_io_error", [Int]{error}, -1)
+    ir_test_drop(&m, &b, message)
+    ir_test_exit(&m, &b, 103)
+    ir_end(&b.f, b.line)
+}
+
+// Joins the spawned test `handle` and appends its record.
+fn ir_test_stream(m: &IRModule, b: &IRBuilder, handle: Int, id: Int, path: Int) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    string_row :: ir_string_row(&m)
+    outcome :: ir_runtime(&m, &b, "jet_rt_test_join", [Int]{handle}, pointer_row)
+    wire :: ir_runtime(&m, &b, "jet_rt_test_outcome_wire", [Int]{outcome}, string_row)
+    ir_push_static(&m, &b, wire, "\n")
+    identity :: ir_test_text(&m, &b, "JET_NATIVE_TEST {id}\n")
+    ir_test_append(&m, &b, path, identity)
+    ir_test_append(&m, &b, path, wire)
+    ir_test_drop(&m, &b, identity)
+    ir_test_drop(&m, &b, wire)
+}
+
+// Reporter mode: reads the parent's outcome file `path`, prints the
+// canonical report and exits 1 when a test failed.
+fn ir_test_report(m: &IRModule, b: &IRBuilder, path: Int) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    string_row :: ir_string_row(&m)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    cells :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, cells, 16, 8, -1, b.line)
+    error_slot :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Offset, error_slot, cells, 8, -1, b.line)
+    status :: ir_runtime(&m, &b, "jet_rt_test_read", [Int]{path, cells, error_slot}, word_row)
+    ir_test_drop(&m, &b, path)
+    zero :: ir_word_const(&m, &b, 0)
+    failed :: ir_bool_op(&m, &b, IROp.Eq, status, zero)
+    ir_open_if(&b.f, failed, b.line)
+    error :: ir_load_at(&m, &b, cells, 8, pointer_row)
+    text :: ir_runtime(&m, &b, "jet_rt_handle_show_io_error", [Int]{error}, string_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_io_error", [Int]{error}, -1)
+    _ :: ir_runtime(&m, &b, "jet_rt_entry_error_exit", [Int]{text}, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    wire :: ir_load_at(&m, &b, cells, 0, string_row)
+    ok :: ir_runtime(&m, &b, "jet_rt_test_finish_wire", [Int]{wire}, bool_row)
+    ir_test_drop(&m, &b, wire)
+    rejected :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Not, rejected, ok, -1, -1, b.line)
+    ir_open_if(&b.f, rejected, b.line)
+    ir_test_exit(&m, &b, 1)
+    ir_end(&b.f, b.line)
+}
+
+// Calls the package's `fn test(t: Test)` (`override`) with a fresh suite.
+fn ir_test_call_override(m: &IRModule, b: &IRBuilder, override: Int) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    suite :: ir_runtime(&m, &b, "jet_test_suite_new", [Int]{}, pointer_row)
+    row :: m.functions[override].result
+    result :: if row < 0 || m.types[row].kind == .Unit -> -1 else -> ir_temp(&m, &b, row)
+    operands :: ir_args(&b.f, [Int]{suite})
+    ir_emit(&b.f, IROp.Call, result, override, operands, 1, b.line)
+    ir_test_drop(&m, &b, result)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_jet_test_suite", [Int]{suite}, -1)
+}
+
+// The generated function that runs the Check Output `check` (function
+// `function`) once: a Bool `false` stops the program, any other result is
+// dropped unclassified. It carries the check function's name, which the
+// stop report shows.
+fn ir_test_check(m: &IRModule, p: &IRProgram, check: IROutputCheck, function: Int, failures: &[IRBuildFailure]) -> Int Never! {
+    name :: m.functions[function].name.copy()
+    id :: ir_test_function(&m, name, function, "check")
+    b := ir_builder_new(m.functions[id].copy())
+    b.line = m.functions[function].line
+    span :: Span{start: 0, end: 0}
+    if m.functions[function].param_count > 0 {
+        ir_fail(&b, span, "native output check {check.name} requires a checked zero-argument top-level function")
+    } else {
+        row :: m.functions[function].result
+        result :: if row < 0 || m.types[row].kind == .Unit -> -1 else -> ir_temp(&m, &b, row)
+        operands :: ir_args(&b.f, [Int]{})
+        ir_emit(&b.f, IROp.Call, result, function, operands, 0, b.line)
+        if result >= 0 && m.types[row].kind == .Bool {
+            bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+            rejected :: ir_temp(&m, &b, bool_row)
+            ir_emit(&b.f, IROp.Not, rejected, result, -1, -1, b.line)
+            ir_open_if(&b.f, rejected, b.line)
+            message :: ir_test_text(&m, &b, "output check {check.name}")
+            null :: ir_word_const(&m, &b, 0)
+            location :: TPanicLoc{file: m.functions[function].source_file.copy(), source_line: "", line: m.functions[function].line, column: 0, caret: 0, function: name, locals: [TPanicLocal]{}}
+            ir_stop(&m, &p, &b, 2, message, null, null, location)
+            ir_end(&b.f, b.line)
+        }
+        ir_test_drop(&m, &b, result)
+    }
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    ir_test_finish(&m, &p, ^b, id, &failures)
+    id
+}
+
+// The harness entry `main` (see the head of this file).
+fn ir_test_main(m: &IRModule, p: &IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: &[IRBuildFailure]) -> Int Never! {
+    units := [Int]{}
+    loop (index, test) in harness.tests -> &units.push(ir_test_unit(&m, &p, test, bodies[index], &failures))
+    release_id :: ir_test_release(&m, &p, &failures)
+    check_helpers := [Int]{}
+    loop (index, check) in harness.checks -> &check_helpers.push(ir_test_check(&m, &p, check, check_ids[index], &failures))
+    id :: ir_test_function(&m, "main", -1, "main")
+    b := ir_builder_new(m.functions[id].copy())
+    pointer_row :: ir_pointer_row(&m)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    report_path :: ir_test_env(&m, &b, "JET_NATIVE_TEST_REPORT_PATH")
+    reporting :: ir_test_present(&m, &b, report_path)
+    ir_open_if(&b.f, reporting, b.line)
+    ir_test_report(&m, &b, report_path)
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    if override >= 0 -> ir_test_call_override(&m, &b, override)
+    records_path :: ir_test_env(&m, &b, "JET_NATIVE_TEST_RECORDS_PATH")
+    present :: ir_test_present(&m, &b, records_path)
+    missing :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Not, missing, present, -1, -1, b.line)
+    ir_open_if(&b.f, missing, b.line)
+    ir_test_exit(&m, &b, 103)
+    ir_end(&b.f, b.line)
+    selected :: ir_test_env(&m, &b, "JET_NATIVE_TEST_ID")
+    filtered :: ir_test_present(&m, &b, selected)
+    tasks :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, tasks, 8 * (harness.tests.len() + 1), 8, -1, b.line)
+    release :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.FunctionAddress, release, release_id, -1, -1, b.line)
+    null :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+    loop (index, test) in harness.tests {
+        ir_emit(&b.f, IROp.Store, -1, tasks, index * 8, null, b.line)
+        // Unfiltered, every test runs; filtered, only the one named.
+        run :: ir_test_bool(&m, &b, true)
+        ir_open_if(&b.f, filtered, b.line)
+        name :: ir_test_text(&m, &b, "{test.id}")
+        equal :: ir_runtime(&m, &b, "jet_rt_string_eq", [Int]{selected, name}, bool_row)
+        ir_test_drop(&m, &b, name)
+        ir_emit(&b.f, IROp.Copy, run, equal, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_open_if(&b.f, run, b.line)
+        code :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.FunctionAddress, code, units[index], -1, -1, b.line)
+        handle :: ir_runtime(&m, &b, "jet_rt_test_spawn", [Int]{null, code, release}, pointer_row)
+        if harness.serial {
+            ir_test_stream(&m, &b, handle, test.id, records_path)
+        } else {
+            ir_emit(&b.f, IROp.Store, -1, tasks, index * 8, handle, b.line)
+        }
+        ir_end(&b.f, b.line)
+    }
+    if !harness.serial {
+        loop (index, test) in harness.tests {
+            handle :: ir_load_at(&m, &b, tasks, index * 8, pointer_row)
+            exists :: ir_test_present(&m, &b, handle)
+            ir_open_if(&b.f, exists, b.line)
+            ir_test_stream(&m, &b, handle, test.id, records_path)
+            ir_end(&b.f, b.line)
+        }
+    }
+    // Checks observe the process state the test bodies left. A selected
+    // fatal-recovery child runs only its test, never the checks.
+    if check_helpers.len() > 0 {
+        unfiltered :: ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, IROp.Not, unfiltered, filtered, -1, -1, b.line)
+        ir_open_if(&b.f, unfiltered, b.line)
+        loop helper in check_helpers {
+            operands :: ir_args(&b.f, [Int]{})
+            ir_emit(&b.f, IROp.Call, -1, helper, operands, 0, b.line)
+        }
+        ir_end(&b.f, b.line)
+    }
+    ir_test_drop(&m, &b, selected)
+    ir_test_drop(&m, &b, records_path)
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    ir_test_finish(&m, &p, ^b, id, &failures)
+    id
+}

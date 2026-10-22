@@ -4968,6 +4968,45 @@ fn jet_driver_test_artifacts(package_identity: String, test_modules: [String:Boo
     jet_codegen_lower_job_test_artifacts([TJobFact]{}, tests, [THarnessPlanFact]{harness}, test_functions, checked)
 }
 
+// The native Test harness plan over the checked functions `functions`: the
+// named tests of `test_modules` whose bodies checked, and their selected Check
+// Outputs, in declaration order (the same rows jet_driver_test_artifacts
+// reads). A Check Output whose callable did not check is an E0003.
+fn jet_driver_test_plan(test_modules: [String:Bool], graph: SemaGraphResult, functions: [TFunc], tests: &[TTestFact], output_checks: &[TOutputCheckFact], diagnostics: &[Diagnostic]) Never! {
+    checked := [String:Int]{}
+    loop (index, function) in functions -> checked[function.key] = index
+    loop module_index in 0..<graph.modules.len() {
+        graph_module :: graph.modules[module_index]
+        if test_modules.get(graph_module.module_identity) == None -> next
+        loop fact in graph_module.tests {
+            if checked.get(fact.function.key) != None -> &tests.push(fact)
+        }
+        loop constant in graph_module.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if !output.selected || output.kind != OutputKind.Check -> next
+                if output.module_id < 0 || output.module_id >= graph.modules.len() {
+                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected Check Output has no exact checked-module owner", "Output registration retains its authenticated module cursor", "retain the original Output module identity through checking"))
+                    next
+                }
+                owner :: graph.modules[output.module_id]
+                function_key :: symbol_id(SymbolKind.Function, owner.module_identity, "", output.semantic_name).key
+                row :: checked.get(function_key) ?? {
+                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected Check Output entry has no unique checked function identity", "Check Outputs invoke their registered checked callable", "retain the canonical function key through checking"))
+                    next
+                }
+                function :: functions[row]
+                &output_checks.push(TOutputCheckFact{
+                    key: "{graph_module.module_identity}::output-check::{output.output_name}@{output.definition.start}..{output.definition.end}",
+                    // copy: the fact owns its name and function ref; `output`
+                    // and `function` are views of rows the compile keeps.
+                    name: output.output_name.copy(),
+                    function: TFunctionRef{key: function.key.copy(), module_identity: function.module_identity.copy(), name: function.name.copy(), span: function.source_span, visibility: function.visibility},
+                })
+            }
+        }
+    }
+}
+
 // One `#Export(c)` function of the entry module: its symbol key and name.
 struct JetDriverCExportRow {
     key: String
@@ -5614,13 +5653,17 @@ struct JetDriverCheckedProjectionCapture {
 // and keep-going traps; the checked modules (declarations, names) beside
 // them; the checked source files' text by path (the first file of a path);
 // the entry module; the key of the executable entry
-// (jet_driver_resolve_entry_key), None for a program without one.
+// (jet_driver_resolve_entry_key), None for a program without one. A Test
+// compile has no entry: it carries the tests and Check Outputs its harness
+// runs (jet_driver_test_plan) instead.
 struct JetDriverLoweringInputs {
     functions: [TFunc]
     modules: [SemaGraphModuleResult]
     sources: [String:String]
     entry_module_identity: String
     entry_key: String?
+    tests: [TTestFact]{[TTestFact]{}}
+    output_checks: [TOutputCheckFact]{[TOutputCheckFact]{}}
 }
 
 struct JetDriverLoweringInputsResult {
@@ -6474,13 +6517,21 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
     // The native executable route reads what lowering would read and lowers
-    // nothing; its entry resolves over the checked functions.
+    // nothing; its entry resolves over the checked functions. A Test compile
+    // has no entry: its harness plan reads the same checked functions.
     if capture.stop_before_lowering {
         if request.trace_sink == .Val(sink) -> sink.end("lower", sema_functions.len())
         jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.entry")
         entry_diagnostics := load.diagnostics
         load.diagnostics = [Diagnostic]{}
-        entry_key :: jet_driver_resolve_entry_key(load, checked_graph, sema_functions, runtime_semantic_modules, &entry_diagnostics)
+        entry_key := String?{None}
+        tests := [TTestFact]{}
+        output_checks := [TOutputCheckFact]{}
+        if request.mode == JetDriverCompileMode.Test {
+            jet_driver_test_plan(jet_driver_test_modules(load), checked_graph, sema_functions, &tests, &output_checks, &entry_diagnostics)
+        } else {
+            entry_key = jet_driver_resolve_entry_key(load, checked_graph, sema_functions, runtime_semantic_modules, &entry_diagnostics)
+        }
         load.diagnostics = entry_diagnostics
         jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.entry", -1)
         if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
@@ -6490,7 +6541,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks})
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
         result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
         result.foreign_link = foreign_link
