@@ -992,8 +992,10 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             }
             value := -1
             if body[body.len() - 1] == .ExprStmt(tail, _) {
-                // The value outlives the block's variables.
+                // The value outlives the block's variables: a variable it
+                // moves out of no longer closes it at the block's end.
                 tail_value :: ir_expr(&m, &p, &b, tail)
+                ir_close_disarm(&b, tail_value)
                 value = ir_own(&m, &b, tail_value)
             } else if body[body.len() - 1] == .Loop(label, loop_body, _) {
                 value = ir_loop_value(&m, &p, &b, expression.ty, label, loop_body, span)

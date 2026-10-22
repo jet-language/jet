@@ -160,11 +160,17 @@ fn ir_list_swap(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, se
     ir_list_swap_bytes(&m, &b, left, right, held, width)
 }
 
-// `xs.extend(ys)` (Lower Lists.jet lower_helper_list_extend): the consumed
-// List's elements move onto the end of `list` in order, and its header is
-// cleared so its drop releases nothing they own. A frozen source (cap 0)
-// owns nothing, so its elements are copied (Lower lower_list_make_unique).
-fn ir_list_extend(m: &IRModule, b: &IRBuilder, list: Int, row: Int, source: Int) Never! {
+// `xs.extend(ys)` (Lower Lists.jet lower_helper_list_extend): an owned
+// source's elements move onto the end of `list` in order and its buffer is
+// retired (freed, its header cleared so its drop releases nothing). A frozen
+// source (cap 0) owns nothing, and a source its holder keeps (`owned` false)
+// stays untouched: their elements are copied (Lower lower_list_make_unique).
+fn ir_list_extend(m: &IRModule, b: &IRBuilder, list: Int, row: Int, source: Int, owned: Bool) Never! {
+    if !owned {
+        kept :: ir_walk_open(&m, &b, source, row)
+        ir_list_push(&m, &b, list, row, kept.item)
+        return ir_walk_close(&m, &b, kept)
+    }
     capacity :: ir_load_word(&m, &b, source, 8)
     zero :: ir_word_const(&m, &b, 0)
     frozen :: ir_bool_op(&m, &b, IROp.Eq, capacity, zero)
@@ -178,6 +184,14 @@ fn ir_list_extend(m: &IRModule, b: &IRBuilder, list: Int, row: Int, source: Int)
     if item >= 0 && ir_kind_of(m, b, item) != .Aggregate -> b.fresh[item] = true
     ir_list_push(&m, &b, list, row, item)
     ir_walk_close(&m, &b, moves)
+    stride :: ir_list_stride(m, row)
+    if stride > 0 {
+        width :: ir_word_const(&m, &b, stride)
+        held :: ir_word_op(&m, &b, IROp.Mul, capacity, width)
+        align :: ir_word_const(&m, &b, 8)
+        data :: ir_load_word(&m, &b, source, 16)
+        _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{data, held, align}, -1)
+    }
     loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, source, offset, zero, b.line)
     ir_end(&b.f, b.line)
 }
@@ -450,12 +464,12 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
                 if ir_list_element(&m, p, b, operands[1]) != Val((element)) -> return ir_fail_slot(&b, span, "extend from a List of another element type")
                 // The route consumes the source (codegen list_extend borrows
                 // only the receiver): a moved or fresh List gives up its
-                // elements, a read of a place its holder keeps (a field of a
-                // borrowed record, say) is extended from a private copy, as
-                // Lower's consumed operand is a copy of the place.
+                // elements and buffer; a read of a place its holder keeps (a
+                // field of a borrowed record, say) is left whole and its
+                // elements are copied, as Lower's consumed operand is a copy
+                // of the place.
                 owned :: b.fresh[operands[1]] || args[0].kind == .Move(_)
-                source :: if owned -> operands[1] else -> ir_copy_value(&m, p, &b, operands[1], span)
-                ir_list_extend(&m, &b, subject, element, source)
+                ir_list_extend(&m, &b, subject, element, operands[1], owned)
                 return -1
             }
             .TryReserve -> {

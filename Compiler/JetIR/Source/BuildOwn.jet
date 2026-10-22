@@ -54,17 +54,25 @@ fn ir_copy_fixup(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) N
 
 fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
     if ir_buffer_element(&m, p, row) == .Val(element) {
+        // The copy's capacity is its length: an empty copy holds no buffer
+        // (Lower lower_list_buffer), else exactly length * stride bytes, the
+        // layout every later free of the buffer names (capacity * stride).
         length :: ir_load_word(&m, &b, at, 0)
         stride :: ir_list_stride(m, element)
         width :: ir_word_const(&m, &b, stride)
         bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
         ir_emit(&b.f, IROp.Store, -1, at, 8, length, b.line)
         align :: ir_word_const(&m, &b, 8)
-        padded :: ir_word_op(&m, &b, IROp.Add, bytes, align)
         word_row :: ir_word_row(&m)
-        data :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{padded, align}, word_row)
         source :: ir_load_word(&m, &b, at, 16)
+        data :: ir_word_const(&m, &b, 0)
+        zero :: ir_word_const(&m, &b, 0)
+        held :: ir_bool_op(&m, &b, IROp.Ne, bytes, zero)
+        ir_open_if(&b.f, held, b.line)
+        allocated :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+        ir_emit(&b.f, IROp.Copy, data, allocated, -1, -1, b.line)
         _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, source, bytes}, -1)
+        ir_end(&b.f, b.line)
         ir_emit(&b.f, IROp.Store, -1, at, 16, data, b.line)
         if !ir_copy_needs(&m, p, element) -> return
         index :: ir_word_const(&m, &b, 0)
@@ -365,12 +373,23 @@ fn ir_close_arm(m: &IRModule, p: &IRProgram, b: &IRBuilder, slot: Int, members_o
     &b.closes.push(IRClose{slot: slot, armed: armed, glue: glue})
 }
 
-// The value in `slot` moves out of its variable: its scope no longer closes it.
+// The value in `slot` moves out of its variable: its scope no longer closes
+// it. A payload binding's value moves out of its carrier box, so the
+// variable holding the carrier no longer closes it either (Lower's partial
+// move of a matched payload, PartialDrop.jet).
 fn ir_close_disarm(b: &IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 -> return
     loop index in 0..<b.closes.len() {
         close :: b.closes[index]
         if close.slot == slot -> ir_emit(&b.f, IROp.Const, close.armed, 0, -1, -1, b.line)
+    }
+    index := b.bindings.len() - 1
+    loop index >= 0 {
+        binding :: b.bindings[index]
+        index -= 1
+        if binding.slot != slot || binding.indirect >= 0 -> next
+        if binding.carrier >= 0 && binding.carrier != slot -> ir_close_disarm(&b, binding.carrier)
+        return
     }
 }
 
