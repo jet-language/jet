@@ -4420,16 +4420,35 @@ fn sema_name_visibility(value: Int) -> MIRNameVisibility Never! {
 }
 
 // Name facts keep the first row per identity. Rows are appended as found and
-// `sema_name_build_facts` drops later duplicates once, in one indexed pass.
+// `sema_name_build_facts` drops later duplicates once, in one indexed pass;
+// a reference that repeats an added one is dropped before it is formatted
+// (SemaNameReferenceFilter).
 fn sema_name_add_declaration(facts: &MIRNameFacts, module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MIRNameVisibility) Never! {
     &facts.declarations.push(MIRNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility})
 }
 
-fn sema_name_add_reference(facts: &MIRNameFacts, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[String:Int], span: Span, symbol: Symbol, kind: String) Never! {
+// The references sema_name_build_facts has added so far. A reference row is
+// made from its symbol's graph module, owner key, name and definition span
+// and its kind alone, so `seen` keys each added reference by those (the
+// strings interned in `parts`): a reference whose key is seen repeats an
+// earlier row exactly and would be dropped by sema_name_first_references, so
+// it is dropped before its owner and semantic identity are formatted.
+// `called[row]` marks the symbol-index declarations a call fact has added.
+struct SemaNameReferenceFilter {
+    parts: NameTable
+    seen: SemaNameReferenceKeys
+    called: [Bool]
+}
+
+fn sema_name_add_reference(facts: &MIRNameFacts, filter: &SemaNameReferenceFilter, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[String:Int], span: Span, symbol: Symbol, kind: String) Never! {
     module_index :: sema_registration_cached_module_index(graph, symbol.module_name, &module_indices) ?? return
+    owner_key :: symbol.owner ?? ""
+    kind_part :: name_index(name_intern(&filter.parts, kind))
+    owner_part :: name_index(name_intern(&filter.parts, owner_key))
+    name_part :: name_index(name_intern(&filter.parts, symbol.name))
+    if sema_name_reference_seen(&filter.seen, module_index, kind_part, symbol.span.start, symbol.span.end, owner_part, name_part) -> return
     source_module :: graph.modules[module_index]
     declaration_name := symbol.name
-    owner_key :: symbol.owner ?? ""
     if owner_key != "" {
         owner_name :: owner_names.get(sema_name_owner_index_key(module_index, owner_key))
         if owner_name == .Val(name) -> declaration_name = "{name}.{symbol.name}"
@@ -4545,17 +4564,20 @@ fn sema_name_first_aliases(rows: ^[MIRNameAlias]) -> [MIRNameAlias] Never! {
     kept
 }
 
-// The keys of the reference rows seen so far: the interned ids of a row's
-// module path and kind, its definition span, and its semantic identity's id
-// plus one (0 for none), in an open-addressing hash over parallel columns,
-// so a row is deduplicated without formatting and interning one String per
-// row.
+// The keys of the reference rows seen so far: six Int parts per key (for
+// sema_name_first_references the interned ids of a row's module path and
+// kind, its definition span, its semantic identity's id plus one (0 for
+// none) and 0; for SemaNameReferenceFilter the graph module, the kind's id,
+// the definition span and the owner key's and name's ids), in an
+// open-addressing hash over parallel columns, so a row is deduplicated
+// without formatting and interning one String per row.
 struct SemaNameReferenceKeys {
     path: [Int]
     kind: [Int]
     start: [Int]
     end: [Int]
     identity: [Int]
+    member: [Int]
     // 0 is empty, otherwise the key's row plus one.
     slots: [Int]
     mask: Int
@@ -4566,7 +4588,7 @@ SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS :: 1024
 fn sema_name_reference_keys() -> SemaNameReferenceKeys Never! {
     slots := [Int]{}
     loop _ in 0..<SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS -> &slots.push(0)
-    SemaNameReferenceKeys{path: [Int]{}, kind: [Int]{}, start: [Int]{}, end: [Int]{}, identity: [Int]{}, slots: slots, mask: SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS - 1}
+    SemaNameReferenceKeys{path: [Int]{}, kind: [Int]{}, start: [Int]{}, end: [Int]{}, identity: [Int]{}, member: [Int]{}, slots: slots, mask: SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS - 1}
 }
 
 // Only the hash reads a part's magnitude: equality compares the parts
@@ -4576,14 +4598,15 @@ fn sema_name_reference_hash_mix(hash: U64, part: Int) -> U64 Never! {
     (hash.bit_xor(U64{magnitude})).wrapping_mul(U64{0x100000001b3})
 }
 
-// FNV-1a over the five key parts, as a slot index under `mask`.
-fn sema_name_reference_slot(mask: Int, path: Int, kind: Int, start: Int, end: Int, identity: Int) -> Int Never! {
+// FNV-1a over the six key parts, as a slot index under `mask`.
+fn sema_name_reference_slot(mask: Int, path: Int, kind: Int, start: Int, end: Int, identity: Int, member: Int) -> Int Never! {
     hash := U64{0x811c9dc5}
     hash = sema_name_reference_hash_mix(hash, path)
     hash = sema_name_reference_hash_mix(hash, kind)
     hash = sema_name_reference_hash_mix(hash, start)
     hash = sema_name_reference_hash_mix(hash, end)
     hash = sema_name_reference_hash_mix(hash, identity)
+    hash = sema_name_reference_hash_mix(hash, member)
     Int.from_u64(hash.bit_and(U64{mask}))
 }
 
@@ -4593,7 +4616,7 @@ fn sema_name_reference_keys_grow(keys: &SemaNameReferenceKeys) Never! {
     slots := [Int]{}
     loop _ in 0..<capacity -> &slots.push(0)
     loop row in 0..<keys.path.len() {
-        slot := sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row])
+        slot := sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row], keys.member[row])
         loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
         slots[slot] = row + 1
     }
@@ -4602,11 +4625,11 @@ fn sema_name_reference_keys_grow(keys: &SemaNameReferenceKeys) Never! {
 }
 
 // Whether the key is already in `keys`, recording it when it is new.
-fn sema_name_reference_seen(keys: &SemaNameReferenceKeys, path: Int, kind: Int, start: Int, end: Int, identity: Int) -> Bool Never! {
-    slot := sema_name_reference_slot(keys.mask, path, kind, start, end, identity)
+fn sema_name_reference_seen(keys: &SemaNameReferenceKeys, path: Int, kind: Int, start: Int, end: Int, identity: Int, member: Int) -> Bool Never! {
+    slot := sema_name_reference_slot(keys.mask, path, kind, start, end, identity, member)
     loop keys.slots[slot] != 0 {
         row :: keys.slots[slot] - 1
-        if keys.path[row] == path && keys.kind[row] == kind && keys.start[row] == start && keys.end[row] == end && keys.identity[row] == identity -> return true
+        if keys.path[row] == path && keys.kind[row] == kind && keys.start[row] == start && keys.end[row] == end && keys.identity[row] == identity && keys.member[row] == member -> return true
         slot = (slot + 1).bit_and(keys.mask)
     }
     row :: keys.path.len()
@@ -4615,6 +4638,7 @@ fn sema_name_reference_seen(keys: &SemaNameReferenceKeys, path: Int, kind: Int, 
     &keys.start.push(start)
     &keys.end.push(end)
     &keys.identity.push(identity)
+    &keys.member.push(member)
     keys.slots[slot] = row + 1
     if (row + 1) * 2 > keys.mask -> sema_name_reference_keys_grow(&keys)
     false
@@ -4649,7 +4673,7 @@ fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Ne
             kind = name_index(name_intern(&parts, row.kind))
             kinds[row.kind] = kind
         }
-        if sema_name_reference_seen(&seen, path, kind, row.def_span.start, row.def_span.end, identity) -> next
+        if sema_name_reference_seen(&seen, path, kind, row.def_span.start, row.def_span.end, identity, 0) -> next
         &kept.push(row)
     }
     kept
@@ -4850,6 +4874,8 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
     module_indices := [String:Int]{}
+    filter := SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
+    loop _ in 0..<symbol_index.declarations.len() -> &filter.called.push(false)
     module_index := 0
     loop module_index < graph.modules.len() {
         source :: graph.modules[module_index]
@@ -4875,15 +4901,17 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
                 else -> {}
             }
         }
-        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
+        loop reference in checked.name_references -> sema_name_add_reference(&facts, &filter, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
         loop call in checked.call_facts {
             callee :: call.callee ?? next
             row :: sema_name_symbol_row(symbol_index, callee.key)
-            if row >= 0 -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, call.span, symbol_index.declarations[row].symbol, symbol_index.declarations[row].kind)
+            if row < 0 || filter.called[row] -> next
+            filter.called[row] = true
+            sema_name_add_reference(&facts, &filter, graph, owner_names, &module_indices, call.span, symbol_index.declarations[row].symbol, symbol_index.declarations[row].kind)
         }
         module_index += 1
     }
-    loop reference_index in 0..<graph.output_name_references.len() -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, graph.output_name_references[reference_index].kind)
+    loop reference_index in 0..<graph.output_name_references.len() -> sema_name_add_reference(&facts, &filter, graph, owner_names, &module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, graph.output_name_references[reference_index].kind)
     MIRNameFacts{
         modules: facts.modules,
         declarations: sema_name_first_declarations(^facts.declarations),
@@ -7271,7 +7299,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     // `check_fact_tags_and_states`): a tagged value reaching a denied
     // destination is reported, whatever else the bundle reported.
     if trace_sink == .Val(sink) -> sink.begin("sema.taint", "", -1, -1)
-    taint_diagnostics :: sema_taint_check_graph(final_graph, diagnostics)
+    taint_diagnostics := [Diagnostic]{}
+    final_graph = sema_taint_check_graph(^final_graph, diagnostics, threads, &taint_diagnostics)
     if trace_sink == .Val(sink) -> sink.end("sema.taint", taint_diagnostics.len())
     loop diagnostic in taint_diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
