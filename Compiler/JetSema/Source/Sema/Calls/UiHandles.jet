@@ -289,6 +289,45 @@ fn sema_ui_handle_reactive_render(module_name: String, args: [CallArg], type_arg
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
+// `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`: one call
+// over measure/layout/paint, routed to the backend's mount; the two-argument
+// form uses the backend's default viewport.
+fn sema_ui_handle_mount(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if args.len() != 2 && args.len() != 3 {
+        &diagnostics.push(sema_wrong_core_arity("mount", 2, args.len(), span))
+        _ := sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    typed_args :: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if typed_args.len() != args.len() -> return SemaDirectSpecialCheck{handled: true, value: None}
+    backend :: typed_args[0]
+    backend_name :: sema_expr_type_base_name(backend.ty) ?? type_name(backend.ty)
+    valid := true
+    if !sema_ui_backend_owner(backend_name) {
+        &diagnostics.push(sema_error("E0108", args[0].span, "`ui.mount` needs a UI backend, but the first argument is {sema_type_show(backend.ty)}", "pass `ui.null_backend()`, `ui.tui_backend()`, or `ui.gtk_backend()`", "backend :: ui.tui_backend()\nui.mount(backend, tree)"))
+        valid = false
+    }
+    tree_name :: sema_expr_type_base_name(typed_args[1].ty) ?? type_name(typed_args[1].ty)
+    if tree_name != "UINode" {
+        &diagnostics.push(sema_error("E0108", args[1].span, "`ui.mount` needs a `UINode` tree, but the second argument is {sema_type_show(typed_args[1].ty)}", "build the tree with `ui.text` / `ui.box` / `ui.node` / …", "ui.mount(backend, ui.box([ui.text(\"hi\")]))"))
+        valid = false
+    }
+    if args.len() == 3 {
+        constraint_name :: sema_expr_type_base_name(typed_args[2].ty) ?? type_name(typed_args[2].ty)
+        if constraint_name != "SizeConstraint" {
+            &diagnostics.push(sema_error("E0108", args[2].span, "`ui.mount` optional third argument is a `SizeConstraint`, but got {sema_type_show(typed_args[2].ty)}", "use `ui.constraint(min_w, min_h, max_w, max_h)`", "ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))"))
+            valid = false
+        }
+    }
+    if !valid -> return SemaDirectSpecialCheck{handled: true, value: None}
+    method :: if args.len() == 2 -> "mount_default" else -> "mount"
+    rest := [TExpr]{}
+    loop index in 1..<typed_args.len() -> &rest.push(typed_args[index])
+    value := sema_tir_node(sema_ui_handle_unit(), TExprKind.HandleMethod{receiver: backend, operation: THandleOp.UIBackendMethod{method: method}, args: rest}, span)
+    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+}
+
 fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.ui" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if member == "node_role" {
@@ -298,6 +337,7 @@ fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallAr
     if member == "button" -> return sema_ui_handle_button(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if member == "text_input" -> return sema_ui_handle_text_input(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if member == "reactive_render" -> return sema_ui_handle_reactive_render(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if member == "mount" -> return sema_ui_handle_mount(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 
@@ -343,7 +383,8 @@ fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method:
         }
         if method == "set_focus_group" -> sema_call_core_ui_focus_group_lint(args, span, environment, program, &scopes, &diagnostics)
         typed_args :: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: method}, args: typed_args}, span)
+        route_method :: if method == "mount" && args.len() == 1 -> "mount_default" else -> method
+        value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: route_method}, args: typed_args}, span)
         checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
     }
