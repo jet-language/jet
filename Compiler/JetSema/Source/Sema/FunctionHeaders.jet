@@ -167,8 +167,12 @@ fn sema_function_header_check_marker_gates(function: Func, function_allowed_mark
 // that the checker, foreign stage and lowering read, plus `#Arithmetic`,
 // which the body checker reads as the function's arithmetic policy
 // (sema_function_arithmetic_policy); the marker row itself adds nothing.
+// The descriptive rules are read by their own passes, never by the body
+// check: `#Job` by the job artifact and name checks (Jobs.jet), `#Doc` by
+// the job and CLI schema docs, `#Deprecated` by the lifecycle pass
+// (Edition.jet), `#Scalar` by Core usage, and `#Meta` by the marker rules.
 fn sema_function_header_marker_projected(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post"
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta"
 }
 
 // (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
