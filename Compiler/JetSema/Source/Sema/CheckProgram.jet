@@ -854,7 +854,7 @@ fn sema_incremental_registered_impl_headers(implementations: [SemaRegistrationIm
         associated_type_impls: implementation.associated_type_impls, associated_types: implementation.associated_types,
         delegation_field: implementation.delegation_field, compiler_generated: implementation.compiler_generated,
         operator_marker: implementation.operator_marker, operator_rhs: implementation.operator_rhs,
-        target_os: implementation.target_os,
+        target_os: implementation.target_os, target_nominal_key: implementation.target_nominal_key,
     }
 }
 
@@ -4542,13 +4542,27 @@ fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Ne
     parts := name_table()
     seen := sema_name_reference_keys()
     kept := [MIRNameReference]{}
+    // A module's rows are contiguous and the kinds are few, so the current
+    // path and each kind keep their part ids; only identities are interned
+    // row by row.
+    path_text := ""
+    path := -1
+    kinds := [String:Int]{}
     loop row in rows {
         identity :: if row.semantic_identity == {
             .Val(value) -> name_index(name_intern(&parts, value)) + 1
             else -> 0
         }
-        path :: name_index(name_intern(&parts, row.module_path))
-        kind :: name_index(name_intern(&parts, row.kind))
+        if path < 0 || row.module_path != path_text {
+            path = name_index(name_intern(&parts, row.module_path))
+            // copy: the row stays in `rows`; the current path outlives it.
+            path_text = row.module_path.copy()
+        }
+        kind := kinds.get(row.kind) ?? -1
+        if kind < 0 {
+            kind = name_index(name_intern(&parts, row.kind))
+            kinds[row.kind] = kind
+        }
         if sema_name_reference_seen(&seen, path, kind, row.def_span.start, row.def_span.end, identity) -> next
         &kept.push(row)
     }

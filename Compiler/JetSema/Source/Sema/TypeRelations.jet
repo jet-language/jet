@@ -693,8 +693,8 @@ fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: 
     if local != None -> return local
     // The name is cut in place; no part list is built per lookup.
     if name.cut_last("::") == .Val(canonical) {
-        if sema_registration_module_index(graph, canonical.before) != None {
-            return sema_registration_lookup_name(graph, canonical.before, canonical.after)
+        if sema_registration_module_index(graph, canonical.before) == .Val(owner_index) {
+            return sema_registration_lookup_name_at(graph, owner_index, canonical.before, canonical.after)
         }
     }
     if name.split_once(".") == .Val(qualified) {
@@ -798,12 +798,19 @@ fn sema_type_graph_base_name(ty: Type) -> String? {
 // The registered nominal row `actual` names from `caller_module_identity`.
 fn sema_type_resolve_nominal_row(graph: SemaRegistrationGraph, actual: Type, caller_module_identity: String) -> SemaRegistrationRowRef? {
     name :: sema_type_graph_base_name(actual) ?? return None
-    resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? {
-        if caller_module_identity.starts_with("<corelib>/") -> return None
-        return sema_type_unscoped_nominal_row(graph, name)
+    sema_type_lookup_nominal_row(graph, sema_type_graph_lookup_symbol(graph, caller_module_identity, name), name, caller_module_identity)
+}
+
+// The registered nominal row of `name`, given its lookup from
+// `caller_module_identity`: a Type symbol's row; with no binding, the one
+// source nominal of that name (sema_type_unscoped_nominal_row).
+fn sema_type_lookup_nominal_row(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol?, name: String, caller_module_identity: String) -> SemaRegistrationRowRef? {
+    if resolved == .Val(found) {
+        if found.symbol.kind != SymbolKind.Type -> return None
+        return sema_type_graph_resolved_nominal_row(graph, found)
     }
-    if resolved.symbol.kind != SymbolKind.Type -> return None
-    sema_type_graph_resolved_nominal_row(graph, resolved)
+    if caller_module_identity.starts_with("<corelib>/") -> return None
+    sema_type_unscoped_nominal_row(graph, name)
 }
 
 // A value's type can reach a module that never names it: a call into a dependency
@@ -871,8 +878,19 @@ fn sema_type_graph_impl_matches_nominal(graph: SemaRegistrationGraph, implementa
     if implementation.target_identity_key == nominal.identity_key -> return Val(true)
     nominal_module :: nominal.symbol.module_name
     if implementation.target_module_identity == (Val(nominal_module)) && implementation.target_type_name == nominal.symbol.name -> return Val(true)
+    if !graph.impl_traits_indexed {
+        target_key :: sema_type_graph_impl_target_nominal_key(graph, implementation) ?? return None
+        return Val(target_key == nominal.symbol.id.key)
+    }
+    if implementation.target_nominal_key == .Val(target_key) -> return Val(target_key == nominal.symbol.id.key)
+    None
+}
+
+// The symbol key of the nominal an impl's target type names from the impl's
+// module. The trait index stores it on each impl (`target_nominal_key`).
+fn sema_type_graph_impl_target_nominal_key(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> String? {
     row :: sema_type_resolve_nominal_row(graph, implementation.target_type, implementation.source_module_identity) ?? return None
-    Val(graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key)
+    Val(graph.modules[row.module_index].nominals[row.row].symbol.id.key)
 }
 
 fn sema_type_graph_impl_matches_trait(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, trait_symbol: Symbol) -> Bool? {

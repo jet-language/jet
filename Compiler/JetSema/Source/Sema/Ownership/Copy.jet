@@ -8,6 +8,7 @@ use jet_foundation.[
     Diagnostic,
     InternalTag,
     Span,
+    SymbolKind,
     TDeclarationOwnership,
     TGenericParam,
     TagMarker,
@@ -414,9 +415,13 @@ fn sema_copy_named_facts(
         // A part typed by a trait name holds a trait value, which copies like
         // `.TraitObject` (known, never duplicable on its own). The name
         // resolves to a Trait symbol, which the nominal-row lookup (Type
-        // symbols only) never returns, so it is tested first.
-        if sema_type_graph_trait_symbol(registered, caller_module_identity, name) != None -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
-        if sema_type_resolve_nominal_row(registered, ty, caller_module_identity) == .Val(row) {
+        // symbols only) never returns, so it is tested first. One lookup
+        // serves both.
+        resolved :: sema_type_graph_lookup_symbol(registered, caller_module_identity, name)
+        if resolved == .Val(found) {
+            if found.symbol.kind == SymbolKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
+        }
+        if sema_type_lookup_nominal_row(registered, resolved, name, caller_module_identity) == .Val(row) {
             if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
             return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, caller_module_identity, generic_params, &walk)
         }
@@ -566,8 +571,13 @@ fn sema_copy_classify(
     materializes_view :: owned.materialized
     source_walk := sema_copy_walk()
     source_facts :: sema_copy_type_facts(source, program.registration_graph, env.module_identity, generic_params, &source_walk)
-    target_walk := sema_copy_walk()
-    target_facts :: sema_copy_type_facts(owned.ty, program.registration_graph, env.module_identity, generic_params, &target_walk)
+    // Only a materialized view copies into a different type; otherwise the
+    // target is the source and its facts are the ones just walked.
+    target_facts := source_facts
+    if materializes_view {
+        target_walk := sema_copy_walk()
+        target_facts = sema_copy_type_facts(owned.ty, program.registration_graph, env.module_identity, generic_params, &target_walk)
+    }
     lowering :: if {
         materializes_view -> SemaCopyLowering.MaterializeView
         intent == SemaCopyIntent.Explicit -> SemaCopyLowering.ExplicitCopy

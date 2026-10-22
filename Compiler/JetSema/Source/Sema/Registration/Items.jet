@@ -389,6 +389,10 @@ struct SemaRegistrationImpl {
     operator_marker: OperatorMarker?
     operator_rhs: Type?
     target_os: String?
+    // The symbol key of the nominal `target_type` names from the impl's
+    // module, resolved once when the trait index is built
+    // (sema_registration_index_impl_traits); None while unresolved.
+    target_nominal_key: String?{None}
 }
 
 struct SemaRegistrationNominal {
@@ -1231,6 +1235,9 @@ fn sema_registration_index_impl_traits(graph: &SemaRegistrationGraph) {
     graph.impl_trait_name_buckets = [[SemaRegistrationRowRef]]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
+            // Resolved before the row is edited: the lookup reads the graph.
+            target_nominal_key :: sema_type_graph_impl_target_nominal_key(graph, graph.modules[module_index].impls[row])
+            graph.modules[module_index].impls[row].target_nominal_key = target_nominal_key
             reference :: SemaRegistrationRowRef{module_index: module_index, row: row}
             // By spelled name: the declared trait name and the registered
             // trait symbol's name, once when both spell the same name. The
@@ -3649,12 +3656,18 @@ fn sema_registration_bind_namespaces(graph: &SemaRegistrationGraph, own_symbols:
 }
 
 fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    sema_registration_lookup_name_at(graph, module_index, module_identity, name)
+}
+
+// sema_registration_lookup_name in the module row `module_index` (the row of
+// `module_identity`), for a caller that already holds it.
+fn sema_registration_lookup_name_at(graph: SemaRegistrationGraph, module_index: Int, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     if graph.counting {
         counters := graph.lookup_counters
         permit :: counters.guard_edit()
         permit.value.name_lookups += 1
     }
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     // The module is passed as a place to a read parameter: binding it here
     // copied the whole module (its program and tables) on every lookup.
     local :: sema_registration_lookup_module_name(graph.modules[module_index], module_index, module_identity, name)
