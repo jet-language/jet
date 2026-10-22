@@ -2185,7 +2185,7 @@ fn check_program(input: Program, module_name: String, source_file: String, sourc
     memory_plan := sema_function_memory_plan_for_program(source_program, module_name, "")
     // User policies are materialized above and `#allow` is validated, so only
     // other rule applications leave the slice incomplete.
-    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.default_target == None && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && !sema_policy_has_unsupported_applications(source_program)
+    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && !sema_policy_has_unsupported_applications(source_program)
     item_index := 0
     loop item_index < source_program.items.len() {
         item :: source_program.items[item_index]
@@ -3488,7 +3488,6 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     if program.script_body.len() > 0 -> &forms.push("script body")
     if program.web_target_ceiling != None -> &forms.push("web target ceiling")
     if program.no_prelude -> &forms.push("no_prelude")
-    if program.default_target != None -> &forms.push("default target")
     if program.html_path != None -> &forms.push("html path")
     if sema_function_memory_has_unsupported_policies(program.policy_declarations) -> &forms.push("memory policy")
     if sema_policy_has_unsupported_applications(program) -> &forms.push("applied rules")

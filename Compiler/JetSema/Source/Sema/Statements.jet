@@ -5489,7 +5489,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         label_name := String?{None}
                         if label != None {
                             label_name = Val(label.name)
-                            if !sema_scope_push_loop_label(&scopes, label.name) -> valid = false
+                            if !sema_scope_push_loop_label(&scopes, label.name) {
+                                &diagnostics.push(sema_already_defined(label.name, label.span))
+                                valid = false
+                            }
                         }
                         module_name := environment.module_identity
                         owner := sema_scope_local_owner_key(scopes)
@@ -5614,7 +5617,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         label_name := String?{None}
                         if label != None {
                             label_name = Val(label.name)
-                            if !sema_scope_push_loop_label(&scopes, label.name) -> valid = false
+                            if !sema_scope_push_loop_label(&scopes, label.name) {
+                                &diagnostics.push(sema_already_defined(label.name, label.span))
+                                valid = false
+                            }
                         }
                         first_type := item_type
                         second_type := Type?{None}
@@ -5713,7 +5719,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 label_name := String?{None}
                 if label != None {
                     label_name = Val(label.name)
-                    if !sema_scope_push_loop_label(&scopes, label.name) -> loop_scope_valid = false
+                    if !sema_scope_push_loop_label(&scopes, label.name) {
+                        &diagnostics.push(sema_already_defined(label.name, label.span))
+                        loop_scope_valid = false
+                    }
                 }
                 init_tir := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_tir := sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -5776,7 +5785,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         label_name := String?{None}
                         if label != None {
                             label_name = Val(label.name)
-                            if !sema_scope_push_loop_label(&scopes, label.name) -> loop_scope_valid = false
+                            if !sema_scope_push_loop_label(&scopes, label.name) {
+                                &diagnostics.push(sema_already_defined(label.name, label.span))
+                                loop_scope_valid = false
+                            }
                         }
                         loop_frame_index := context.loop_value_frames.len()
                         sema_loop_value_push_frame(&context, label_name)
@@ -5803,7 +5815,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 label_valid := true
                 if label != None {
                     label_name = Val(label.name)
-                    if !sema_scope_push_loop_label(&scopes, label.name) -> label_valid = false
+                    if !sema_scope_push_loop_label(&scopes, label.name) {
+                        &diagnostics.push(sema_already_defined(label.name, label.span))
+                        label_valid = false
+                    }
                 }
                 loop_frame_index := context.loop_value_frames.len()
                 sema_loop_value_push_frame(&context, label_name)

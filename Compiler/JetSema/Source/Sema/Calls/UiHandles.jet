@@ -269,6 +269,26 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
     return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
+// `ui.reactive_render(() -> { … })`: the measure/layout/paint loop keeps its
+// zero-parameter body and re-runs it when a signal read inside changes.
+fn sema_ui_handle_reactive_render(module_name: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if args.len() != 1 {
+        &diagnostics.push(sema_wrong_core_arity("reactive_render", 1, args.len(), span))
+        _ := sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    record :: sema_call_core_record(module_name, "reactive_render", args.len(), span, &diagnostics) ?? {
+        _ := sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    result_type :: sema_ui_handle_unit()
+    callback :: sema_reactive_check_retained_lambda("reactive_render", args[0], Val(result_type), None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIReactiveRender{executable: callback, site: span.start}}, span)
+    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+}
+
 fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.ui" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if member == "node_role" {
@@ -277,6 +297,7 @@ fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallAr
     }
     if member == "button" -> return sema_ui_handle_button(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if member == "text_input" -> return sema_ui_handle_text_input(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if member == "reactive_render" -> return sema_ui_handle_reactive_render(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 

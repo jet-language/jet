@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, Param, ParamZone, Program, Span, SymbolID, SymbolKind, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 fn sema_policy_builtin(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -210,6 +210,9 @@ fn sema_policy_has_unsupported_applications(program: Program) -> Bool Never! {
         if application.marker.name != "allow" -> return true
     }
     loop application in program.rule_facts {
+        // A file `#Target` is lowered by the parser into the Program's target
+        // fields, which are checked on their own.
+        if application.site == .Val(site) && site == RuleSite.File && application.marker.name == "Target" -> next
         if application.marker.name != "allow" -> return true
     }
     false

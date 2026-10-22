@@ -3513,16 +3513,12 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
 
 fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if op == UnOp.Neg {
-        if operand == {
-            .Int(value, _, width, raw) -> return sema_expr_negative_integer(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, program, &diagnostics)
-            // `-1.5` is one exact Decimal literal; the sign
-            // folds into its spelling unless a Float carrier is expected.
-            .Float(_, _, _, raw) -> {
-                if raw == .Val(text) {
-                    if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected_owned(sema_expr_decimal_literal("-{text}", span), expected, environment, program, &diagnostics)
-                }
-            }
-            else -> {}
+        if operand == .Int(value, _, width, raw) -> return sema_expr_negative_integer(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, program, &diagnostics)
+        // `-1.5` is one exact Decimal literal; the sign folds into its
+        // spelling unless a Float carrier is expected. Transparent
+        // parentheses keep the same literal: `-(2.5)` is `-2.5`.
+        if sema_expr_paren_decimal_spelling(operand) == .Val(text) {
+            if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected_owned(sema_expr_decimal_literal("-{text}", span), expected, environment, program, &diagnostics)
         }
     }
     // Rust checks the operand under the surrounding expectation; only a
@@ -3570,6 +3566,15 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
     }
     &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
     None
+}
+
+// The spelling of a decimal literal under any number of parentheses.
+fn sema_expr_paren_decimal_spelling(expr: Expr) -> String? Never! {
+    if expr == {
+        .Float(_, _, _, raw) -> raw
+        .Paren(inner, _) -> sema_expr_paren_decimal_spelling(inner)
+        else -> None
+    }
 }
 
 // An untyped decimal literal is exact Decimal by default
