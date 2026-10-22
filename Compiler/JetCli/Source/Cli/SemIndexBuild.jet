@@ -483,16 +483,23 @@ fn jet_cli_sem_slot_enter(db: &JetCLISemDB, ctx: &JetCLISemWalk, name: String, k
         parent_start :: db.nodes[parent].span.start
         parent_end :: db.nodes[parent].span.end
         exact_parent_end :: db.nodes[parent].class == "arm"
+        // `ctx.block_spans` is sorted by start: from Rust's `partition_point` lower bound,
+        // the first unclaimed candidate is the minimum-start one (`min_by_key` keeps the first).
+        first := 0
+        high := ctx.block_spans.len()
+        loop first < high {
+            middle :: first + (high - first) /% 2
+            if ctx.block_spans[middle].start < parent_start -> first = middle + 1 else -> high = middle
+        }
         chosen := Span?{None}
-        loop span in ctx.block_spans {
-            if span.start < parent_start -> next
+        loop index in first..<ctx.block_spans.len() {
+            // copy: `ctx.block_spans[index]` stays in its list (no move out of an element, E0225);
+            // the binding `span` owns its own.
+            span :: ctx.block_spans[index].copy()
             if exact_parent_end && !(span.end <= parent_end || parent_end <= span.start) -> next
             if ctx.claimed_block_spans.has_key("{span.start}:{span.end}") -> next
-            if chosen == .Val(current) {
-                if span.start < current.start -> chosen = Val(span)
-            } else {
-                chosen = Val(span)
-            }
+            chosen = Val(span)
+            break
         }
         if chosen == .Val(span) {
             ctx.claimed_block_spans["{span.start}:{span.end}"] = true
