@@ -2878,7 +2878,9 @@ fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_r
             if ir_is_option(ret) -> optional = true
         }
     }
-    if optional && !is_result && b.f.result >= 0 {
+    // A Result here is a trait call's propagated carrier (ir_trait_propagate):
+    // its failure leaves an Option function as None, as codegen's does.
+    if optional && b.f.result >= 0 {
         if site == .Val(at) {
             _ :: ir_journey_hop(&m, &p, &b, at, -1, false, span)
             if ir_failed(b) -> return
