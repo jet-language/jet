@@ -3,7 +3,7 @@
 // a dynamic call loads the key and calls the matching implementation, an
 // unknown key stops at jet_rt_unreachable.
 
-use jet_foundation.[Span, TCallArg, TExpr, TExprKind, TMethodRef, Type, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TMethodRef, Type, type_carrier_identity]
 
 // The payload key of concrete type `ty`: one per type identity, from 1.
 fn ir_trait_key(p: &IRProgram, ty: Type) -> Int Never! {
@@ -37,13 +37,27 @@ fn ir_method_key(p: IRProgram, receiver: Type, method: TMethodRef) -> String Nev
     if p.rows.get(method.symbol.key) != None -> return method.symbol.key.copy()
     owner :: method.trait_owner ?? return method.symbol.key.copy()
     concrete :: ir_trait_identity(p, ir_subst(p, receiver))
-    loop function in p.functions {
-        if function.name != method.name -> next
-        if function.kind == .TraitMethod(_, _, owner_type, trait_name, _) {
-            if trait_name.key == owner.key && ir_trait_identity(p, owner_type) == concrete -> return function.key.copy()
-        }
+    candidates :: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
+    loop row in candidates {
+        implementer :: ir_trait_implementer(p, row, owner) ?? next
+        if ir_trait_identity(p, implementer) == concrete -> return p.functions[row].key.copy()
     }
     method.symbol.key.copy()
+}
+
+// The concrete owner of function `row` when it implements a method of the
+// trait `owner` (p.trait_methods lists it under the trait's name): a
+// TraitMethod of that very trait, or a plain Method of an implementation
+// declared outside the trait's module.
+fn ir_trait_implementer(p: IRProgram, row: Int, owner: SymbolID) -> Type? Never! {
+    if p.functions[row].kind == {
+        .Method(_, owner_type) -> return Val(owner_type.copy())
+        .TraitMethod(_, _, owner_type, trait_name, _) -> {
+            if trait_name.key == owner.key -> return Val(owner_type.copy())
+        }
+        .TopLevel -> {}
+    }
+    None
 }
 
 // The list literal values boxed as trait values of `target`.
@@ -99,14 +113,18 @@ fn ir_trait_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, receiver: TExpr, me
     owner :: method.trait_owner ?? return ir_fail_slot(&b, span, "trait call has no trait owner")
     targets := [IRTraitTarget]{}
     returned := Type.Named{name: "Unit"}
-    loop (index, function) in p.functions {
-        if function.name != method.name || function.generic_params.len() > 0 -> next
-        if p.rows.get(function.key) != (Val(index)) -> next
-        if function.kind == .TraitMethod(_, _, owner_type, trait_name, _) {
-            if trait_name.key != owner.key -> next
-            if targets.len() == 0 -> returned = ir_executable_return(function) ?? Type.Named{name: "Unit"}
-            &targets.push(IRTraitTarget{key: function.key.copy(), concrete: owner_type.copy(), access: ir_receiver_access(function.kind)})
-        }
+    seen := [String:Bool]{}
+    candidates :: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
+    loop index in candidates {
+        if p.functions[index].generic_params.len() > 0 -> next
+        if p.rows.get(p.functions[index].key) != (Val(index)) -> next
+        implementer :: ir_trait_implementer(p, index, owner) ?? next
+        // One implementation per concrete type: its payload key selects it.
+        identity :: ir_trait_identity(p, implementer)
+        if seen.get(identity) != None -> next
+        seen[identity] = true
+        if targets.len() == 0 -> returned = ir_executable_return(p.functions[index]) ?? Type.Named{name: "Unit"}
+        &targets.push(IRTraitTarget{key: p.functions[index].key.copy(), concrete: implementer, access: ir_receiver_access(p.functions[index].kind)})
     }
     boxed :: ir_expr(&m, &p, &b, receiver)
     if ir_failed(b) -> return -1

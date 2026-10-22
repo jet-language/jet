@@ -7,6 +7,7 @@
 
 use jet_foundation.[Span, Type, TypeTupleField, TConstantDef, TExpr, TFailureCarrier, TFunc, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
 use jet_backend.[lower_int_inline]
+use jet_codegen.[jet_codegen_impl_method_leaf]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -118,6 +119,9 @@ struct IRProgram {
     close_glue: [String:Int]
     // A boxed trait value's payload key by concrete type identity (from 1).
     trait_keys: [String:Int]
+    // The implementation methods a dynamic trait call may select, by
+    // "<trait>|<method>" (function rows; see ir_trait_methods).
+    trait_methods: [String:[Int]]
     // The checked source files' bytes and line starts by row, and each
     // path's row: a source location reads the file in place.
     source_bytes: [[U8]]
@@ -260,11 +264,29 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
     // The Display, Printable and Close implementations of the host target
     // (Lower lower_render_impl_applies, lower_close_index), and the user
     // Comparable ones (a derived Comparable orders structurally: Lower
-    // lower_order_user_impl).
+    // lower_order_user_impl). Every trait implementation of the host target
+    // also names its methods' traits for ir_trait_methods.
     close_methods := [String:Int]{}
+    impl_slots := [String:Int]{}
+    impl_traits := [[String]]{}
     loop implementation in ^impl_defs {
         trait_name :: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
+        if trait_name == "" -> next
+        if implementation.target_os == .Val(os) {
+            if os != .Linux -> next
+        }
         trait_short :: ir_short_name(trait_name)
+        owner_key :: ir_render_type_key(type_rows, types, implementation.self_type)
+        loop key in implementation.methods {
+            slot_key :: "{implementation.module_identity}|{owner_key}|{jet_codegen_impl_method_leaf(key)}"
+            slot := impl_slots.get(slot_key) ?? -1
+            if slot < 0 {
+                slot = impl_traits.len()
+                impl_slots[slot_key] = slot
+                &impl_traits.push([String]{})
+            }
+            &impl_traits[slot].push(trait_short.copy())
+        }
         method :: if trait_short == {
             "Display" -> "display"
             "Printable" -> "show"
@@ -273,10 +295,6 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
             else -> ""
         }
         if method == "" -> next
-        if implementation.target_os == .Val(os) {
-            if os != .Linux -> next
-        }
-        owner_key :: ir_render_type_key(type_rows, types, implementation.self_type)
         row :: owner_methods.get("{method}|{trait_short}|{owner_key}") ?? owner_methods.get("{method}||{owner_key}") ?? -1
         if row < 0 -> next
         if trait_short == "Close" {
@@ -286,9 +304,50 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
         }
     }
-    p := IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}}
+    trait_methods :: ir_trait_methods(owned, type_rows, types, impl_slots, impl_traits)
+    p := IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, trait_methods: trait_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}}
     ir_source_index(&p, ^sources)
     p
+}
+
+// The implementation methods of every trait by "<trait>|<method>" (codegen
+// jet_codegen_lower_impl_definition): an implementation's method is the
+// same-module method of that name on the implementation's owner. It is
+// checked as a TraitMethod when its trait resolves in the implementing
+// module, else as a plain Method of the owner, which `impl_slots` (by
+// "<module>|<owner key>|<method>") and `impl_traits` name the traits of.
+fn ir_trait_methods(functions: [TFunc], type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
+    slots := [String:Int]{}
+    keys := [String]{}
+    rows := [[Int]]{}
+    loop (index, function) in functions {
+        traits := [String]{}
+        if function.kind == {
+            .TraitMethod(_, _, _, trait_name, _) -> &traits.push(ir_short_name(trait_name.key))
+            .Method(_, owner_type) -> {
+                owner_key :: ir_render_type_key(type_rows, types, owner_type)
+                slot :: impl_slots.get("{function.module_identity}|{owner_key}|{function.name}") ?? -1
+                if slot >= 0 {
+                    loop trait_short in impl_traits[slot] -> &traits.push(trait_short.copy())
+                }
+            }
+            .TopLevel -> {}
+        }
+        loop trait_short in traits {
+            key :: "{trait_short}|{function.name}"
+            slot := slots.get(key) ?? -1
+            if slot < 0 {
+                slot = rows.len()
+                slots[key] = slot
+                &keys.push(key)
+                &rows.push([Int]{})
+            }
+            &rows[slot].push(index)
+        }
+    }
+    methods := [String:[Int]]{}
+    loop (slot, key) in keys -> methods[key] = rows[slot]
+    methods
 }
 
 // The last segment of a qualified key (`trait:<m>::Display` is `Display`).
