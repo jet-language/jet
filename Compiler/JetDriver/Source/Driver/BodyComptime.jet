@@ -349,7 +349,7 @@ fn jet_driver_validate_checked_text(
         return jet_driver_comptime_body_returning(^result, ^registration)
     }
     merged_graph := ^initial_graph
-    if !jet_driver_merge_checked_text_functions(&merged_graph, registration, run.functions) {
+    if !jet_driver_merge_checked_text_functions(&merged_graph, run.functions) {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
             ^merged_graph,
             run.values,
@@ -358,6 +358,7 @@ fn jet_driver_validate_checked_text(
             Val("checked text method closure lost its checked function or registered owner"),
         ), ^registration)
     }
+    registration = jet_driver_merged_names(&merged_graph, ^registration, request.compiler_threads)
     jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^merged_graph, run.values, run.functions, trace, true, false), ^registration)
 }
 

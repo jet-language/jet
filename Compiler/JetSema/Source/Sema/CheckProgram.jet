@@ -17,6 +17,7 @@ use jet_foundation.[
     Item,
     MIRNameAlias,
     MIRNameDeclaration,
+    MIRNameDisplayPath,
     MIRNameFacts,
     MIRNameModule,
     MIRNameReference,
@@ -4865,19 +4866,28 @@ fn sema_name_loaded_facts(modules: [MIRNameModule], programs: [Program], aliases
     facts
 }
 
+// Every module's name facts, then the graph's output references, each row
+// kept once (sema_name_build_facts_threads on one thread).
 fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
-    facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
-    loop graph_module_index in 0..<graph.modules.len() {
-        namespace :: if sema_registration_package_is_namespace(graph.modules[graph_module_index].package_identity) -> Val(graph.modules[graph_module_index].package_identity) else -> None
-        &facts.modules.push(MIRNameModule{alias: graph.modules[graph_module_index].module_name, path: graph.modules[graph_module_index].module_path, package: graph.modules[graph_module_index].package_identity, namespace: namespace})
-    }
     owner_names :: sema_name_owner_index(graph)
-    symbol_index :: sema_name_symbol_index(graph)
+    parts := [MIRNameFacts]{}
+    &parts.push(sema_name_part_facts(graph, modules, owner_names, sema_name_symbol_index(graph), 0, graph.modules.len()))
+    sema_name_join_facts(graph, owner_names, &parts, structure_facts)
+}
+
+// The name facts of graph modules `from..<to`, in module order: each
+// module's declarations, display paths, aliases and references, before the
+// first-row passes. The part's reference filter is its own, so it drops only
+// rows that repeat an earlier row of the part, which the first-row pass of
+// sema_name_join_facts drops anyway: the joined parts keep every row's first
+// occurrence at the place one part over every module keeps it.
+fn sema_name_part_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], owner_names: [String:String], symbol_index: SemaNameSymbolIndex, from: Int, to: Int) -> MIRNameFacts Never! {
+    facts := sema_name_facts_empty()
     module_indices := [String:Int]{}
     filter := SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
     loop _ in 0..<symbol_index.declarations.len() -> &filter.called.push(false)
-    module_index := 0
-    loop module_index < graph.modules.len() {
+    module_index := from
+    loop module_index < to {
         source :: graph.modules[module_index]
         checked :: modules[module_index]
         sema_name_add_tir_declarations(&facts, module_index, source.module_path, checked.declarations)
@@ -4911,6 +4921,25 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         }
         module_index += 1
     }
+    facts
+}
+
+// The parts' facts joined in part order, the graph's output references after
+// them, and every row's first occurrence kept.
+fn sema_name_join_facts(graph: SemaRegistrationGraph, owner_names: [String:String], parts: &[MIRNameFacts], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
+    facts := sema_name_facts_empty()
+    loop graph_module_index in 0..<graph.modules.len() {
+        namespace :: if sema_registration_package_is_namespace(graph.modules[graph_module_index].package_identity) -> Val(graph.modules[graph_module_index].package_identity) else -> None
+        &facts.modules.push(MIRNameModule{alias: graph.modules[graph_module_index].module_name, path: graph.modules[graph_module_index].module_path, package: graph.modules[graph_module_index].package_identity, namespace: namespace})
+    }
+    loop part in 0..<parts.len() {
+        compiler_transfer_rows<MIRNameDeclaration>(&facts.declarations, &parts[part].declarations)
+        compiler_transfer_rows<MIRNameDisplayPath>(&facts.display_paths, &parts[part].display_paths)
+        compiler_transfer_rows<MIRNameAlias>(&facts.aliases, &parts[part].aliases)
+        compiler_transfer_rows<MIRNameReference>(&facts.references, &parts[part].references)
+    }
+    module_indices := [String:Int]{}
+    filter := SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
     loop reference_index in 0..<graph.output_name_references.len() -> sema_name_add_reference(&facts, &filter, graph, owner_names, &module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, graph.output_name_references[reference_index].kind)
     MIRNameFacts{
         modules: facts.modules,
@@ -4920,6 +4949,127 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         structure_facts: structure_facts,
         display_paths: facts.display_paths,
     }
+}
+
+// A compiler thread is admitted for at least this many name rows (items,
+// references and call facts) to collect.
+SEMA_NAME_MIN_ROWS_PER_THREAD :: 16384
+// Parts per admitted thread, claimed dynamically.
+SEMA_NAME_PARTS_PER_THREAD :: 4
+
+// sema_name_build_facts on up to `threads` compiler threads, into `names`.
+// The modules are cut into consecutive parts of about equal rows; each
+// thread collects the parts it claims (sema_name_part_facts reads only the
+// graph, the module results and the two indexes), and the parts are joined
+// in part order, so the facts are the same for any thread count. The graph
+// and the module results move into the threads' shared state and back; the
+// graph is returned.
+fn sema_name_build_facts_threads(graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], structure_facts: [MIRStructureFact], threads: CompilerThreads, names: &MIRNameFacts) -> SemaRegistrationGraph {
+    owned := ^graph
+    owner_names := sema_name_owner_index(owned)
+    weights := [Int]{}
+    work := 0
+    loop module_index in 0..<owned.modules.len() {
+        weight :: 1 + owned.modules[module_index].program.items.len() + modules[module_index].name_references.len() + modules[module_index].call_facts.len()
+        &weights.push(weight)
+        work += weight
+    }
+    workers :: compiler_threads_admit(threads, weights.len(), work, SEMA_NAME_MIN_ROWS_PER_THREAD, 0, 0)
+    parts := [MIRNameFacts]{}
+    if workers <= 1 {
+        &parts.push(sema_name_part_facts(owned, modules, owner_names, sema_name_symbol_index(owned), 0, owned.modules.len()))
+        names = sema_name_join_facts(owned, owner_names, &parts, structure_facts)
+        return owned
+    }
+    count := workers * SEMA_NAME_PARTS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    loop _ in 0..<count -> &parts.push(sema_name_facts_empty())
+    shared_state :: shared SemaNameShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, owner_names: [[String:String]]{}, symbol_indexes: [SemaNameSymbolIndex]{}, bounds: compiler_threads_partition(weights, count)}
+    symbol_index := sema_name_symbol_index(owned)
+    sema_name_shared_fill(shared_state, ^owned, &modules, ^owner_names, ^symbol_index)
+    queue :: shared SemaNameQueue{next: 0}
+    sema_name_part_builders(shared_state, queue, 0, workers, &parts)
+    returned := sema_name_shared_take(shared_state, &modules)
+    returned_owner_names := sema_name_shared_take_owner_names(shared_state)
+    names = sema_name_join_facts(returned, returned_owner_names, &parts, structure_facts)
+    returned
+}
+
+// What every name-collecting thread reads: the graph, the module results and
+// the owner and symbol indexes (each moved in, the graph, the results and the
+// owner index moved back out), and the parts' module bounds.
+struct SemaNameShared {
+    graphs: [SemaRegistrationGraph]
+    modules: [SemaGraphModuleResult]
+    owner_names: [[String:String]]
+    symbol_indexes: [SemaNameSymbolIndex]
+    bounds: [Int]
+}
+
+// The next unclaimed part of the name collection.
+struct SemaNameQueue {
+    next: Int
+}
+
+// One collected part: its number and its facts.
+struct SemaNamePart {
+    part: Int
+    facts: MIRNameFacts
+}
+
+fn sema_name_shared_fill(shared_state: Shared<SemaNameShared>, graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], owner_names: ^[String:String], symbol_index: ^SemaNameSymbolIndex) {
+    permit :: shared_state.guard_edit()
+    &permit.value.graphs.push(^graph)
+    compiler_transfer_rows<SemaGraphModuleResult>(&permit.value.modules, &modules)
+    &permit.value.owner_names.push(^owner_names)
+    &permit.value.symbol_indexes.push(^symbol_index)
+}
+
+// Moves the module results back and returns the graph.
+fn sema_name_shared_take(shared_state: Shared<SemaNameShared>, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaGraphModuleResult>(&modules, &permit.value.modules)
+    &permit.value.graphs.pop() ?? panic("the name collection lost its registration graph")
+}
+
+fn sema_name_shared_take_owner_names(shared_state: Shared<SemaNameShared>) -> [String:String] {
+    permit :: shared_state.guard_edit()
+    &permit.value.owner_names.pop() ?? panic("the name collection lost its owner index")
+}
+
+// Runs threads `from..<workers`, each collecting the parts it claims, and
+// places each collected part at its number in `parts`.
+fn sema_name_part_builders(shared_state: Shared<SemaNameShared>, queue: Shared<SemaNameQueue>, from: Int, workers: Int, parts: &[MIRNameFacts]) {
+    if from >= workers -> return
+    task.group sema_name_threads {
+        head :: task sema_name_parts_claimed(shared_state, queue)
+        sema_name_part_builders(shared_state, queue, from + 1, workers, &parts)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            parts[done.part] = ^done.facts
+        }
+    }
+}
+
+// One thread: collects the parts it claims until none is left.
+fn sema_name_parts_claimed(shared_state: Shared<SemaNameShared>, queue: Shared<SemaNameQueue>) -> [SemaNamePart] {
+    inputs :: shared_state.guard_read()
+    claimed := [SemaNamePart]{}
+    loop {
+        part :: sema_name_claim_part(queue)
+        if part >= inputs.value.bounds.len() - 1 -> break
+        // Passed straight through: a local binding of a guarded row would copy it.
+        &claimed.push(SemaNamePart{part: part, facts: sema_name_part_facts(inputs.value.graphs[0], inputs.value.modules, inputs.value.owner_names[0], inputs.value.symbol_indexes[0], inputs.value.bounds[part], inputs.value.bounds[part + 1])})
+    }
+    claimed
+}
+
+fn sema_name_claim_part(queue: Shared<SemaNameQueue>) -> Int {
+    permit :: queue.guard_edit()
+    part :: permit.value.next
+    permit.value.next = part + 1
+    part
 }
 
 // The structure facts the registration graph alone proves: one resolved
@@ -7395,7 +7545,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     structure_facts := sema_name_structure_facts(final_graph)
     loop fact in lifecycle.facts -> &structure_facts.push(fact)
     loop fact in liveness.facts -> &structure_facts.push(fact)
-    names :: sema_name_build_facts(final_graph, modules, structure_facts)
+    names := sema_name_facts_empty()
+    final_graph = sema_name_build_facts_threads(^final_graph, &modules, structure_facts, threads, &names)
     if trace_sink == .Val(sink) -> sink.end("sema.names", names.references.len())
     // Core modules are checked in the same bundle so their errors keep the
     // program honest, but Core is library source: its lints are not the

@@ -317,7 +317,7 @@ struct SemaPreludeDemandWalk {
 // this module's prelude routine for a Core error family member reaching `Err`
 // demands it (first site per routine), then its children are walked in place
 // (sema_effect_walk_expr_children), in the order tir_each_expr_child visits them.
-fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
+fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, expression: TExpr) {
     conversion :: if expression.kind == {
         // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
         .Try(_, value, _) -> Val(value.copy())
@@ -364,10 +364,10 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
     walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
     walk :: SemaEffectWalk.PreludeDemands{state: walk_state}
     nodes := [SemaEffectNode]{}
-    facts :: SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
+    facts :: SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
     ignored := [Diagnostic]{}
     loop function in functions {
-        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, function.key), statement)
+        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, 0, function.key), statement)
     }
     demands :: sema_prelude_demand_walk_take(walk_state)
     complete := true

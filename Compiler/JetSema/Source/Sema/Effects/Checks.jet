@@ -974,11 +974,10 @@ fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, spa
 
 // Indices store positions, not copied semantic facts. Caller buckets retain
 // source order, including equal-width interval ties; exact duplicates use the
-// first row just as the original search did. One index serves every module:
-// `current_module` selects the module whose call facts the walks read, so the
-// function-node map is shared rather than copied per module.
+// first row just as the original search did. One index serves every module;
+// each walk names its module in its caller (SemaEffectCaller), so walks of
+// different modules read the one index at once.
 struct SemaEffectCallIndex {
-    current_module: Int
     modules: [SemaEffectModuleCalls]
     node_by_key: [String:Int]
     // Rust `seed_trait_dispatch_effects` `<static>` inputs: implementing type
@@ -992,6 +991,16 @@ struct SemaEffectCallIndex {
     // implementation's own summary key, one flat map (no per-trait map copied
     // on every insert).
     trait_impls: [String:String]{[String:String]{}}
+    // The name of the node each `#Unsafe` function's key names
+    // (`node_by_key`), so an unsafe-call check reads no node.
+    unsafe_names: [String:String]{[String:String]{}}
+}
+
+// The caller a walk reads its call facts under: its module's row in the call
+// index and its slot among that module's callers (-1 when it owns no facts).
+struct SemaEffectCaller {
+    module_index: Int
+    slot: Int
 }
 
 struct SemaEffectModuleCalls {
@@ -1030,26 +1039,26 @@ fn sema_effect_module_calls(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls 
     calls
 }
 
-// The slot of `key` among the current module's callers, or -1 when it owns
-// no facts there (or the index has no modules: FailureLaw's structure-only
-// walk). A walk resolves its caller once, so the per-expression fact lookups
-// below never search the caller map.
-fn sema_effect_caller_slot(index: SemaEffectCallIndex, key: String) -> Int Never! {
-    if index.current_module < 0 || index.current_module >= index.modules.len() -> return -1
-    index.modules[index.current_module].caller_slots.get(key) ?? -1
+// The caller `key` of module `module`; its slot is -1 when it owns no facts
+// there (or the index has no such module: FailureLaw's structure-only walk).
+// A walk resolves its caller once, so the per-expression fact lookups below
+// never search the caller map.
+fn sema_effect_caller_slot(index: SemaEffectCallIndex, module_index: Int, key: String) -> SemaEffectCaller Never! {
+    if module_index < 0 || module_index >= index.modules.len() -> return SemaEffectCaller{module_index: module_index, slot: -1}
+    SemaEffectCaller{module_index: module_index, slot: index.modules[module_index].caller_slots.get(key) ?? -1}
 }
 
-// The position, in the current module's facts, of the narrowest fact of the
-// caller in slot `caller` whose span contains or is contained by `span`; the
-// caller reads the fact in place.
-fn sema_effect_find_fact(index: SemaEffectCallIndex, caller: Int, span: Span) -> Int? Never! {
-    if caller < 0 -> return None
-    calls :: index.modules[index.current_module]
-    exact :: sema_effect_exact_position(calls.callers[caller], calls.facts, span)
+// The position, in the caller's module facts, of the narrowest fact of the
+// caller whose span contains or is contained by `span`; the caller reads the
+// fact in place (sema_effect_fact_at).
+fn sema_effect_find_fact(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
+    if caller.slot < 0 -> return None
+    calls :: index.modules[caller.module_index]
+    exact :: sema_effect_exact_position(calls.callers[caller.slot], calls.facts, span)
     if exact != None -> return exact
     best := Int?{None}
     best_width := 2147483647
-    loop position in calls.callers[caller].positions {
+    loop position in calls.callers[caller.slot].positions {
         fact_span :: calls.facts[position].span
         if sema_effect_span_contains(fact_span, span) || sema_effect_span_contains(span, fact_span) {
             width :: fact_span.end - fact_span.start
@@ -1062,10 +1071,10 @@ fn sema_effect_find_fact(index: SemaEffectCallIndex, caller: Int, span: Span) ->
     best
 }
 
-fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller: Int, span: Span) -> Int? Never! {
-    if caller < 0 -> return None
-    calls :: index.modules[index.current_module]
-    sema_effect_exact_position(calls.callers[caller], calls.facts, span)
+fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
+    if caller.slot < 0 -> return None
+    calls :: index.modules[caller.module_index]
+    sema_effect_exact_position(calls.callers[caller.slot], calls.facts, span)
 }
 
 // The first of the caller's facts whose span is exactly `span`.
@@ -1279,13 +1288,13 @@ fn sema_effect_symbol_module(key: String) -> String? Never! {
     Val(kind_and_module.after)
 }
 
-fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int) {
+fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
     if {
         sema_effect_is_call(expression) -> {
             found :: sema_effect_find_fact(facts, caller, expression.span)
             if found == {
                 .Val(position) -> {
-                    value :: facts.modules[facts.current_module].facts[position]
+                    value :: facts.modules[caller.module_index].facts[position]
                     nondeterministic :: sema_effect_nondeterministic_core(nodes[node_index], expression, value)
                     if nondeterministic == .Val(api) {
                         // Rust returns before recording the call's effects, so
@@ -1312,7 +1321,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
         }
         else -> {
             found :: sema_effect_find_exact_fact(facts, caller, expression.span)
-            if found == .Val(position) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, facts.modules[facts.current_module].facts[position], &diagnostics)
+            if found == .Val(position) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, facts.modules[caller.module_index].facts[position], &diagnostics)
         }
     }
     if expression.kind == {
@@ -1379,22 +1388,19 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
     sema_effect_walk_expr_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller, expression)
 }
 
-fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic]) {
-    caller :: sema_effect_caller_slot(facts, function.key)
+fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, facts: SemaEffectCallIndex, module_index: Int, diagnostics: &[Diagnostic]) {
+    caller :: sema_effect_caller_slot(facts, module_index, function.key)
     loop statement in function.body {
         sema_effect_walk_stmt_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller, statement)
     }
 }
 
-fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
     if sema_effect_is_call(expression) {
         found :: sema_effect_find_fact(facts, caller, expression.span)
         if found == .Val(position) {
-            if facts.modules[facts.current_module].facts[position].callee == .Val(callee) {
-                target_index :: sema_effect_node_index(facts.node_by_key, callee.key)
-                if target_index == .Val(index) {
-                    if nodes[index].is_unsafe -> sema_effect_require_unsafe_call(nodes[index].name, true, audited, expression.span, &diagnostics)
-                }
+            if facts.modules[caller.module_index].facts[position].callee == .Val(callee) {
+                if facts.unsafe_names.get(callee.key) == .Val(name) -> sema_effect_require_unsafe_call(name, true, audited, expression.span, &diagnostics)
             }
         }
     }
@@ -1415,7 +1421,7 @@ fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCall
     sema_effect_walk_expr_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller, expression)
 }
 
-fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, condition: TIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, condition: TIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
     if condition == {
         .Plain(value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
         .And(left, right) -> {
@@ -1430,14 +1436,14 @@ fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffec
     }
 }
 
-fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, contracts: [TContract], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, contracts: [TContract], audited: Bool, diagnostics: &[Diagnostic]) {
     loop contract in contracts {
         sema_effect_check_unsafe_expr(&nodes, facts, caller, contract.condition, audited, &diagnostics)
         sema_effect_check_unsafe_expr(&nodes, facts, caller, contract.message, audited, &diagnostics)
     }
 }
 
-fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, statements: [TStmt], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, statements: [TStmt], audited: Bool, diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .Contract(contract) -> {
@@ -2137,7 +2143,7 @@ fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> 
 }
 
 // The part of `expression` inside `region` (a `#FX` block span).
-fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int) {
+fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
     if sema_effect_span_contains(region, expression.span) {
         sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller)
         return
@@ -2150,7 +2156,7 @@ fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expre
 // its own sites, everything its callees reach, and every effect when it makes
 // an unknown call. The region's node is appended to `nodes` for the walk
 // (which writes only that node) and removed again before returning.
-fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: TFunc, region: SemaEffectFxRegion, facts: SemaEffectCallIndex) -> [String] {
+fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: TFunc, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_index: Int) -> [String] {
     // copy: the region node starts from its owner's declared row and spans;
     // the owner node stays in the graph.
     region_node := nodes[owner].copy()
@@ -2165,7 +2171,7 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
     &nodes.push(^region_node)
     region_index :: nodes.len() - 1
     ignored := [Diagnostic]{}
-    caller :: sema_effect_caller_slot(facts, function.key)
+    caller :: sema_effect_caller_slot(facts, module_index, function.key)
     loop statement in function.body {
         sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: region.span}, &nodes, facts, &ignored, caller, statement)
     }
@@ -2186,9 +2192,9 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
 // `modules` are the checked modules; each input names its module, whose
 // functions and call facts are read in place. The solved effect row of every
 // input module's function is stamped onto `modules` at the end. The effect
-// sites of each module's functions are collected on up to `threads` compiler
-// threads (sema_effect_collect_module_threads); the result is the same for any
-// thread count.
+// sites of every module's functions are collected at once on up to `threads`
+// compiler threads (sema_effect_collect_threads); the result is the same for
+// any thread count.
 fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], package_memory_denials: [String], threads: CompilerThreads) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
@@ -2240,21 +2246,16 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         &rows.push(key)
         close_methods[split.after] = rows
     }
-    calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods}
+    unsafe_names := [String:String]{}
+    loop (key, node_index) in node_by_key {
+        if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
+    }
+    calls := SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods, unsafe_names: ^unsafe_names}
     loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
     any_unsafe :: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
-
-    // The graph's nodes move into the collecting threads' shared state once,
-    // for every module's collection, and back after the last module.
-    collect_state :: shared SemaEffectCollectShared{functions: [TFunc]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, rows: [Int]{}, any_unsafe: any_unsafe}
-    sema_effect_collect_nodes_fill(collect_state, &nodes)
-    loop module_index in 0..<inputs.len() {
-        calls.current_module = module_index
-        calls = sema_effect_collect_module_threads(collect_state, &modules[inputs[module_index].module_index].functions, inputs[module_index], ^calls, any_unsafe, &diagnostics, threads)
-    }
-    sema_effect_collect_nodes_take(collect_state, &nodes)
+    calls = sema_effect_collect_threads(&modules, inputs, &nodes, ^calls, any_unsafe, &diagnostics, threads)
     solved :: sema_effect_solve(nodes, calls.node_by_key)
     loop module_index in 0..<inputs.len() {
         sites := [String:MIRSharedLifetime]{}
@@ -2330,8 +2331,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         }
     }
     loop module_index in 0..<inputs.len() {
-        calls.current_module = module_index
-        sema_effect_check_module_regions(modules[inputs[module_index].module_index].functions, inputs[module_index], source_indices[module_index], solved, calls, &nodes, &diagnostics)
+        sema_effect_check_module_regions(modules[inputs[module_index].module_index].functions, inputs[module_index], module_index, source_indices[module_index], solved, calls, &nodes, &diagnostics)
     }
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, solved, &diagnostics)
@@ -2371,161 +2371,178 @@ fn sema_effect_add_trait_impls(functions: [TFunc], module_row: SemaEffectModuleI
     }
 }
 
-// Collects every function's effect sites of the current module
-// (`calls.current_module`) into its node, and checks its unsafe calls.
-fn sema_effect_collect_module(functions: [TFunc], module_row: SemaEffectModuleInput, calls: SemaEffectCallIndex, any_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
+// Collects every function's effect sites of input module `module_index` into
+// its node, and checks its unsafe calls.
+fn sema_effect_collect_module(functions: [TFunc], module_row: SemaEffectModuleInput, module_index: Int, calls: SemaEffectCallIndex, any_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
     loop function in functions {
         node_index :: sema_effect_node_index(calls.node_by_key, function.key) ?? next
         function_diagnostics := [Diagnostic]{}
-        sema_effect_collect_one(&nodes, node_index, function, calls, any_unsafe, &function_diagnostics)
+        sema_effect_collect_one(&nodes, node_index, function, calls, module_index, any_unsafe, &function_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^function_diagnostics)
     }
 }
 
-// One function's effect sites into its node `node_index`, and its unsafe calls.
-fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, calls: SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
-    sema_effect_collect_function(&nodes, node_index, function, calls, &diagnostics)
+// One function's effect sites into its node `node_index`, and its unsafe
+// calls; `module_index` is the function's input module (its call facts' row).
+fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, calls: SemaEffectCallIndex, module_index: Int, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
+    sema_effect_collect_function(&nodes, node_index, function, calls, module_index, &diagnostics)
     // A call needs an audited region only when its callee is an
     // `#Unsafe` function; with none in the graph the walk finds nothing.
     if any_unsafe {
         audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-        sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, function.key), function.body, audited, &diagnostics)
+        sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, module_index, function.key), function.body, audited, &diagnostics)
     }
 }
 
 // A compiler thread is admitted for at least this many bytes of function
-// source, so a small module collects on the calling thread.
+// source, so a small program collects on the calling thread.
 SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD :: 65536
-// Estimated bytes of one collecting thread's copy of one graph node.
+// Estimated bytes of one collected copy of one graph node.
 SEMA_EFFECT_NODE_BYTES :: 1024
 // Parts per admitted thread, claimed dynamically.
 SEMA_EFFECT_COLLECT_PARTS_PER_THREAD :: 8
 
-// sema_effect_collect_module on up to `threads` compiler threads.
-// A function's collection writes only its own node (`node_by_key` of its
-// key) and reads of the other nodes only what node construction set
-// (`is_unsafe`, `name`), so with no two functions of the module on one node,
-// each thread collects its claimed consecutive parts of the functions into
-// its own copy of the graph's nodes, and the caller moves each function's
-// node row back and publishes its reports in function order, exactly as one
-// thread does. The graph's nodes stay in `shared_state` (moved in once for
-// every module); the module's functions and the call index move in and back,
-// and the call index is returned. A module whose functions share a node, or
-// whose work admits one thread, collects on the calling thread.
-fn sema_effect_collect_module_threads(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], module_row: SemaEffectModuleInput, calls: ^SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic], threads: CompilerThreads) -> SemaEffectCallIndex {
+// sema_effect_collect_module for every input module, on up to `threads`
+// compiler threads. A function's collection writes only its own node
+// (`node_by_key` of its key) and reads the call index under its own module's
+// caller, never another node. The functions that name one node form one unit
+// (almost always a single function), collected in module and function order
+// into a copy of that node's row; units are independent. Threads claim
+// consecutive parts of the units dynamically; the caller then moves each
+// unit's row back into the graph's nodes and publishes every function's
+// reports in module and function order, exactly as one thread collecting
+// the modules in order does. The modules, the graph's nodes and the call
+// index move into the threads' shared state and back; the index is returned.
+fn sema_effect_collect_threads(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: &[SemaEffectNode], calls: ^SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic], threads: CompilerThreads) -> SemaEffectCallIndex {
     index := ^calls
-    rows := [Int]{}
-    weights := [Int]{}
+    // One job per function with a node, in module and function order; a
+    // unit's jobs chain through `job_next` from `unit_first`.
+    job_input := [Int]{}
+    job_function := [Int]{}
+    job_next := [Int]{}
+    unit_first := [Int]{}
+    unit_last := [Int]{}
+    unit_nodes := [Int]{}
+    unit_weights := [Int]{}
+    unit_of_node := [Int:Int]{}
     work := 0
-    claimed := [Int:Bool]{}
-    shared_node := false
-    loop function in functions {
-        node_index :: sema_effect_node_index(index.node_by_key, function.key) ?? -1
-        if node_index >= 0 {
-            if claimed.get(node_index) != None -> shared_node = true
-            claimed[node_index] = true
+    loop (input_position, module_row) in inputs {
+        loop (function_index, function) in modules[module_row.module_index].functions {
+            node_index :: sema_effect_node_index(index.node_by_key, function.key) ?? next
+            job :: job_input.len()
+            &job_input.push(input_position)
+            &job_function.push(function_index)
+            &job_next.push(-1)
+            weight :: function.source_span.end - function.source_span.start
+            work += weight
+            unit :: unit_of_node.get(node_index) ?? -1
+            if unit < 0 {
+                unit_of_node[node_index] = unit_first.len()
+                &unit_first.push(job)
+                &unit_last.push(job)
+                &unit_nodes.push(node_index)
+                &unit_weights.push(weight)
+            } else {
+                job_next[unit_last[unit]] = job
+                unit_last[unit] = job
+                unit_weights[unit] = unit_weights[unit] + weight
+            }
         }
-        &rows.push(node_index)
-        weight :: function.source_span.end - function.source_span.start
-        &weights.push(weight)
-        work += weight
     }
-    workers :: if shared_node -> 1 else -> compiler_threads_admit(threads, functions.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, sema_effect_collect_node_count(shared_state) * SEMA_EFFECT_NODE_BYTES, 0)
+    workers :: compiler_threads_admit(threads, unit_first.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, 0, unit_first.len() * SEMA_EFFECT_NODE_BYTES)
     if workers <= 1 {
-        sema_effect_collect_module_inline(shared_state, functions, module_row, index, any_unsafe, &diagnostics)
+        loop (input_position, module_row) in inputs {
+            sema_effect_collect_module(modules[module_row.module_index].functions, module_row, input_position, index, any_unsafe, &nodes, &diagnostics)
+        }
         return index
     }
     count := workers * SEMA_EFFECT_COLLECT_PARTS_PER_THREAD
-    if count > functions.len() -> count = functions.len()
-    bounds :: compiler_threads_partition(weights, count)
-    sema_effect_collect_fill(shared_state, &functions, ^index, rows)
+    if count > unit_first.len() -> count = unit_first.len()
+    bounds :: compiler_threads_partition(unit_weights, count)
+    module_rows := loop module_row in inputs -> module_row.module_index
+    shared_state :: shared SemaEffectCollectShared{modules: [SemaGraphModuleResult]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, module_rows: ^module_rows, job_input: ^job_input, job_function: ^job_function, job_next: ^job_next, unit_first: ^unit_first, unit_nodes: ^unit_nodes, any_unsafe: any_unsafe}
+    sema_effect_collect_fill(shared_state, &modules, &nodes, ^index)
     queue :: shared SemaEffectCollectQueue{next: 0}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> &parts.push([SemaEffectCollected]{})
     sema_effect_collect_claimers(shared_state, bounds, queue, 0, workers, &parts)
-    returned := sema_effect_collect_take(shared_state, &functions)
-    sema_effect_collect_place(shared_state, rows, bounds, &parts, module_row, &diagnostics)
-    returned
+    sema_effect_collect_place(shared_state, bounds, &parts, inputs, &diagnostics)
+    sema_effect_collect_take(shared_state, &modules, &nodes)
 }
 
-// What every collecting thread reads: the graph's nodes, the module's
-// functions and the call index (each the one row of its list, moved in and
-// back out), each function's node (-1 for none) and whether the graph has an
-// `#Unsafe` function.
+// What every collecting thread reads: the modules, the graph's nodes and the
+// call index (its one row), moved in and back out; each input module's row
+// in `modules`; each job's input module, function and next job of its unit;
+// each unit's first job and node; and whether the graph has an `#Unsafe`
+// function.
 struct SemaEffectCollectShared {
-    functions: [TFunc]
+    modules: [SemaGraphModuleResult]
     calls: [SemaEffectCallIndex]
     nodes: [SemaEffectNode]
-    rows: [Int]
+    module_rows: [Int]
+    job_input: [Int]
+    job_function: [Int]
+    job_next: [Int]
+    unit_first: [Int]
+    unit_nodes: [Int]
     any_unsafe: Bool
 }
 
-// The next unclaimed part of a module's collection.
+// The next unclaimed part of the collection.
 struct SemaEffectCollectQueue {
     next: Int
 }
 
-// One function's collected node row and its reports, not yet located.
-struct SemaEffectCollected {
-    node: SemaEffectNode
+// One function's reports, not yet located.
+struct SemaEffectCollectReport {
+    job: Int
     diagnostics: [Diagnostic]
 }
 
-// A part one thread collected: its number and, last first, its functions'
-// rows (functions without a node have none).
+// One unit's collected node row and its functions' nonempty reports.
+struct SemaEffectCollected {
+    node: SemaEffectNode
+    reports: [SemaEffectCollectReport]
+}
+
+// A part one thread collected: its number and, last first, its units' rows.
 struct SemaEffectCollectedPart {
     part: Int
     collected: [SemaEffectCollected]
 }
 
-fn sema_effect_collect_nodes_fill(shared_state: Shared<SemaEffectCollectShared>, nodes: &[SemaEffectNode]) {
+fn sema_effect_collect_fill(shared_state: Shared<SemaEffectCollectShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode], calls: ^SemaEffectCallIndex) {
     permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaGraphModuleResult>(&permit.value.modules, &modules)
     compiler_transfer_rows<SemaEffectNode>(&permit.value.nodes, &nodes)
-}
-
-fn sema_effect_collect_nodes_take(shared_state: Shared<SemaEffectCollectShared>, nodes: &[SemaEffectNode]) {
-    permit :: shared_state.guard_edit()
-    compiler_transfer_rows<SemaEffectNode>(&nodes, &permit.value.nodes)
-}
-
-fn sema_effect_collect_node_count(shared_state: Shared<SemaEffectCollectShared>) -> Int {
-    inputs :: shared_state.guard_read()
-    inputs.value.nodes.len()
-}
-
-// One module's collection on the calling thread, into the graph's nodes in place.
-fn sema_effect_collect_module_inline(shared_state: Shared<SemaEffectCollectShared>, functions: [TFunc], module_row: SemaEffectModuleInput, calls: SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
-    permit :: shared_state.guard_edit()
-    sema_effect_collect_module(functions, module_row, calls, any_unsafe, &permit.value.nodes, &diagnostics)
-}
-
-fn sema_effect_collect_fill(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], calls: ^SemaEffectCallIndex, rows: [Int]) {
-    permit :: shared_state.guard_edit()
-    compiler_transfer_rows<TFunc>(&permit.value.functions, &functions)
     &permit.value.calls.push(^calls)
-    // copy: the threads read the rows while the caller places the collected nodes by them.
-    permit.value.rows = rows.copy()
 }
 
-// Moves the functions back and returns the call index.
-fn sema_effect_collect_take(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc]) -> SemaEffectCallIndex {
+// Moves the modules and the nodes back and returns the call index.
+fn sema_effect_collect_take(shared_state: Shared<SemaEffectCollectShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode]) -> SemaEffectCallIndex {
     permit :: shared_state.guard_edit()
-    compiler_transfer_rows<TFunc>(&functions, &permit.value.functions)
+    compiler_transfer_rows<SemaGraphModuleResult>(&modules, &permit.value.modules)
+    compiler_transfer_rows<SemaEffectNode>(&nodes, &permit.value.nodes)
     &permit.value.calls.pop() ?? panic("the effect call index left the threads' shared state")
 }
 
-// Moves each collected function's node row into the graph's nodes and
-// publishes its reports, in function order.
-fn sema_effect_collect_place(shared_state: Shared<SemaEffectCollectShared>, rows: [Int], bounds: [Int], parts: &[[SemaEffectCollected]], module_row: SemaEffectModuleInput, diagnostics: &[Diagnostic]) {
+// Moves each unit's collected node row into the graph's nodes, then
+// publishes every function's reports in job (module and function) order.
+fn sema_effect_collect_place(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], parts: &[[SemaEffectCollected]], inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
     permit :: shared_state.guard_edit()
+    reports := [SemaEffectCollectReport]{}
     loop part in 0..<bounds.len() - 1 {
-        loop position in bounds[part]..<bounds[part + 1] {
-            if rows[position] < 0 -> next
+        loop unit in bounds[part]..<bounds[part + 1] {
             collected := &parts[part].pop() ?? panic("a collected effect node left its part")
-            permit.value.nodes[rows[position]] = ^collected.node
-            sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^collected.diagnostics)
+            permit.value.nodes[permit.value.unit_nodes[unit]] = ^collected.node
+            loop collected.reports.len() > 0 {
+                report := &collected.reports.pop() ?? break
+                &reports.push(^report)
+            }
         }
     }
+    &reports.sort_by((left: SemaEffectCollectReport, right: SemaEffectCollectReport) -> left.job <=> right.job)
+    loop report in ^reports -> sema_effect_publish_diagnostics(&diagnostics, inputs[permit.value.job_input[report.job]].source_segments, ^report.diagnostics)
 }
 
 // Runs collecting threads `from..<workers`, one task each, and moves every
@@ -2543,27 +2560,31 @@ fn sema_effect_collect_claimers(shared_state: Shared<SemaEffectCollectShared>, b
     }
 }
 
-// One thread: collects the parts it claims, in order, into its own copy of
-// the nodes.
+// One thread: collects the parts it claims, in order, each unit into its own
+// copy of the unit's node row.
 fn sema_effect_collect_claimed(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
     inputs :: shared_state.guard_read()
-    // copy: each thread writes its functions' rows into its own nodes, while
-    // the graph's nodes (owner: the shared state) stay as every thread reads them.
-    own := inputs.value.nodes.copy()
     claimed := [SemaEffectCollectedPart]{}
     loop {
         part :: sema_effect_collect_claim(queue)
         if part >= bounds.len() - 1 -> break
         collected := [SemaEffectCollected]{}
-        loop position in bounds[part]..<bounds[part + 1] {
-            node_index :: inputs.value.rows[position]
-            if node_index < 0 -> next
-            function_diagnostics := [Diagnostic]{}
-            // Passed straight through: a local binding of a guarded row would copy it.
-            sema_effect_collect_one(&own, node_index, inputs.value.functions[position], inputs.value.calls[0], inputs.value.any_unsafe, &function_diagnostics)
-            // copy: the row leaves this thread's nodes for the graph's; the
-            // thread's list keeps its slot.
-            &collected.push(SemaEffectCollected{node: own[node_index].copy(), diagnostics: ^function_diagnostics})
+        loop unit in bounds[part]..<bounds[part + 1] {
+            // copy: the unit's functions write their own row, while the
+            // graph's row (owner: the shared state) stays in place.
+            own := [SemaEffectNode]{inputs.value.nodes[inputs.value.unit_nodes[unit]].copy()}
+            reports := [SemaEffectCollectReport]{}
+            job := inputs.value.unit_first[unit]
+            loop job >= 0 {
+                function_diagnostics := [Diagnostic]{}
+                input_position :: inputs.value.job_input[job]
+                // Passed straight through: a local binding of a guarded row would copy it.
+                sema_effect_collect_one(&own, 0, inputs.value.modules[inputs.value.module_rows[input_position]].functions[inputs.value.job_function[job]], inputs.value.calls[0], input_position, inputs.value.any_unsafe, &function_diagnostics)
+                if function_diagnostics.len() > 0 -> &reports.push(SemaEffectCollectReport{job: job, diagnostics: ^function_diagnostics})
+                job = inputs.value.job_next[job]
+            }
+            node := &own.pop() ?? panic("a collected effect node left its unit")
+            &collected.push(SemaEffectCollected{node: ^node, reports: ^reports})
         }
         &collected.reverse()
         &claimed.push(SemaEffectCollectedPart{part: part, collected: ^collected})
@@ -2588,16 +2609,16 @@ fn sema_effect_shared_facts(call_facts: [SemaCallSiteFact]) -> [SemaCallSiteFact
     facts
 }
 
-// Every `#FX(…)` region of the current module's functions stays
+// Every `#FX(…)` region of the functions of input module `module_index` stays
 // within its caps.
-fn sema_effect_check_module_regions(functions: [TFunc], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
+fn sema_effect_check_module_regions(functions: [TFunc], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
     region_diagnostics := [Diagnostic]{}
     loop function in functions {
         at :: sema_effect_source_position(function, source_index) ?? next
         if module_row.sources[at].fx_regions.len() == 0 -> next
         node_index :: sema_effect_node_index(calls.node_by_key, function.key) ?? next
         loop region in module_row.sources[at].fx_regions {
-            inferred :: sema_effect_region_inferred(&nodes, solved, node_index, function, region, calls)
+            inferred :: sema_effect_region_inferred(&nodes, solved, node_index, function, region, calls, module_index)
             over :: sema_effect_uncovered(inferred, region.caps)
             if over.len() > 0 -> &region_diagnostics.push(sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
         }
@@ -2692,7 +2713,7 @@ enum SemaEffectWalk {
     PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
 }
 
-fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
+fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, expression: TExpr) {
     if walk == {
         .Collect(node_index) -> sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller)
         .Unsafe(audited) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, expression, audited, &diagnostics)
@@ -2707,7 +2728,7 @@ fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts:
 // each variant and has no wildcard arm, so a new TIR variant fails to compile
 // here instead of being silently skipped; add it here in the order TIR.jet's
 // child visitors give it.
-fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
+fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, expression: TExpr) {
     if expression.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .DefaultLit | .Uninit | .CtLit(_) | .ConstRef(_) | .GlobalShared(_, _) | .ResourceTake(_) | .Todo(_) | .InvariantViolation(_, _) | .Unreachable(_) | .Absent | .SelectStart | .Never(_) -> {}
         .StrLit(parts) -> loop part in parts {
@@ -2921,7 +2942,7 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
 }
 
 // tir_each_stmt_child's children in place (see sema_effect_walk_expr_children).
-fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, statement: TStmt) {
+fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, statement: TStmt) {
     if statement == {
         .Contract(contract) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.condition)
@@ -3060,11 +3081,11 @@ fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
     }
 }
 
-fn sema_effect_walk_stmt_list_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, statements: [TStmt]) {
+fn sema_effect_walk_stmt_list_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, statements: [TStmt]) {
     loop statement in statements -> sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller, statement)
 }
 
-fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, condition: TIfCond) {
+fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, condition: TIfCond) {
     if condition == {
         .Plain(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .And(left, right) -> {
@@ -3085,7 +3106,7 @@ fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
 
 // Visit the canonical tir_each_pattern_child expressions in place, including
 // nested payloads and map keys, without materializing child lists.
-fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, shape: TPatternShape) {
+fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, shape: TPatternShape) {
     if shape == {
         .Or(alternatives, _) -> loop alternative in alternatives -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, alternative)
         .Struct(fields, _, _) -> loop field in fields {
@@ -3117,7 +3138,7 @@ fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
     }
 }
 
-fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, arms: [TMatchArm]) {
+fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, arms: [TMatchArm]) {
     loop arm in arms {
         sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, arm.pattern.shape)
         sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, arm.body)
@@ -3132,25 +3153,25 @@ fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffect
 // unknown callee (the maximal row). Rust records these bodies' effects on the
 // enclosing function as it checks them. A compiler-private loop carrier keeps
 // the enclosing key, so the lambda key applies only when it owns facts.
-fn sema_effect_walk_lambda_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, lambda: TLambda) {
+fn sema_effect_walk_lambda_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, lambda: TLambda) {
     // A structure-only walk (FailureLaw) builds its index with no modules; its
     // lambda bodies keep the enclosing caller, as for a lambda that owns no facts.
-    lambda_slot :: sema_effect_caller_slot(facts, "lambda@{lambda.source_span.start}")
-    body_caller :: if lambda_slot >= 0 -> lambda_slot else -> caller
+    lambda_caller :: sema_effect_caller_slot(facts, caller.module_index, "lambda@{lambda.source_span.start}")
+    body_caller :: SemaEffectCaller{module_index: caller.module_index, slot: if lambda_caller.slot >= 0 -> lambda_caller.slot else -> caller.slot}
     if lambda.executable == {
         .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, body_caller, value)
         .Block(body) | .SharedBlock(body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, body_caller, body)
     }
 }
 
-fn sema_effect_walk_place_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, place: TPlace) {
+fn sema_effect_walk_place_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, place: TPlace) {
     if place == {
         .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .Local(_) -> {}
     }
 }
 
-fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, requirement: TRequireKind) {
+fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, requirement: TRequireKind) {
     if requirement == {
         .Require(condition, message) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
@@ -3164,7 +3185,7 @@ fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
     }
 }
 
-fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, call: THostCall) {
+fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, call: THostCall) {
     if call == {
         .Method(receiver, _, args) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
@@ -3196,7 +3217,7 @@ fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffect
     }
 }
 
-fn sema_effect_walk_core_closure_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, kind: TCoreClosureKind) {
+fn sema_effect_walk_core_closure_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, kind: TCoreClosureKind) {
     if kind == {
         .Spawn(group, _, _, executable) -> {
             if group == .Val(group_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, group_value)
