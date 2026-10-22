@@ -1,5 +1,5 @@
 use core.text as units_unicode
-use jet_foundation.[Span, name_find_bytes, name_intern, name_table]
+use jet_foundation.[NameTable, Span, name_find_bytes]
 
 // Rust Bundle/Units.rs::SourceMentions. Offsets are UTF-8 bytes, never
 // String scalar indices. The source is indexed once, not once per catalog member.
@@ -38,14 +38,12 @@ fn sema_units_mention_suffix(rows: &[String:SemaUnitSuffixMention], bytes: [U8],
     rows[text] = row
 }
 // Only identifiers named in `wanted` (the catalog's family names and member
-// type names, the only names ever looked up) are indexed: the maps stay
-// catalog-sized instead of holding every identifier of the source. The
-// wanted names are interned once, so an identifier run is looked up by its
-// bytes and only a wanted one is built as a String.
-fn sema_units_source_mentions(source: String, wanted: [String:Bool]) -> SemaUnitSourceMentions Never! {
+// type names, the only names ever looked up; sema_units_catalog_names) are
+// indexed: the maps stay catalog-sized instead of holding every identifier
+// of the source. An identifier run is looked up by its bytes and only a
+// wanted one is built as a String.
+fn sema_units_source_mentions(source: String, wanted: NameTable) -> SemaUnitSourceMentions Never! {
     bytes :: source.bytes()
-    wanted_names := name_table()
-    loop (name, _) in wanted -> _ := name_intern(&wanted_names, name)
     identifiers := [String:Span]{}
     unqualified := [String:Bool]{}
     suffixes := [String:SemaUnitSuffixMention]{}
@@ -62,7 +60,7 @@ fn sema_units_source_mentions(source: String, wanted: [String:Bool]) -> SemaUnit
             if !sema_units_ident(bytes, at, end) -> break
             at = end
         }
-        if name_find_bytes(wanted_names, bytes, start, at) != None {
+        if name_find_bytes(wanted, bytes, start, at) != None {
             run :: String.from_bytes(bytes[start..<at]) ?? ""
             if identifiers.get(run) == None -> identifiers[run] = Span{start: start, end: at}
             if (start == 0 || bytes[start - 1] != (U8{46})) && unqualified.get(run) == None -> unqualified[run] = true
@@ -97,8 +95,10 @@ fn sema_units_suffix_start(mentions: SemaUnitSourceMentions, member: String) -> 
     }
     low
 }
-fn sema_units_member(mentions: SemaUnitSourceMentions, member: String) -> Bool Never! {
-    if mentions.unqualified.get(sema_registration_unit_type_name(member)) != None -> return true
+// Whether the source mentions catalog member `member`, whose type name
+// (sema_registration_unit_type_name) is `type_name`.
+fn sema_units_member(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Bool Never! {
+    if mentions.unqualified.get(type_name) != None -> return true
     at :: sema_units_suffix_start(mentions, member)
     at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member)
 }
@@ -107,8 +107,9 @@ fn sema_units_identifier_span(mentions: SemaUnitSourceMentions, name: String) ->
 }
 // Rust source_unit_member_span: whole type name, then earliest from_, then
 // earliest digit suffix. Prefix suffix matches deliberately need no end boundary.
-fn sema_units_member_span(mentions: SemaUnitSourceMentions, member: String) -> Span? {
-    if mentions.identifiers.get(sema_registration_unit_type_name(member)) == .Val(span) -> return Val(span)
+// `type_name` is the member's type name (sema_registration_unit_type_name).
+fn sema_units_member_span(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Span? {
+    if mentions.identifiers.get(type_name) == .Val(span) -> return Val(span)
     from := Span?{None}
     digit := Span?{None}
     at := sema_units_suffix_start(mentions, member)

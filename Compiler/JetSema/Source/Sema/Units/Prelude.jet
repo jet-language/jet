@@ -1,4 +1,4 @@
-use jet_foundation.[Diagnostic, Item, Span, UnitFamilyDef, UnitFamilyMember]
+use jet_foundation.[CompilerThreads, Diagnostic, Item, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
 use jet_parser.[parse_generated_source]
 
 // Rust Bundle/Units.rs::inject_units_prelude: the only catalog is the ordinary
@@ -32,27 +32,150 @@ fn sema_units_local_names(items: [Item], occupied: &[String:Bool], local_familie
     }
 }
 
-// The names a source mention scan looks up (sema_units_source_mentions):
-// every catalog family name and member type name. Built once per graph,
-// sorted first so each insert appends to the sorted entry list.
-fn sema_units_catalog_names(catalog: [UnitFamilyDef]) -> [String:Bool] Never! {
-    names := [String]{}
-    loop family in catalog {
-        &names.push(family.family)
-        loop member in family.members -> &names.push(sema_registration_unit_type_name(member.name))
-    }
-    &names.sort_by((left: String, right: String) -> left <=> right)
-    wanted := [String:Bool]{}
-    loop name in names -> wanted[name] = true
-    wanted
+// What each module's unit scan reads, built once per graph: `wanted` interns
+// the names a source mention scan looks up (sema_units_source_mentions),
+// every catalog family name and member type name, and
+// `type_names[family][member]` is each catalog member's type name
+// (sema_registration_unit_type_name).
+struct SemaUnitsCatalogNames {
+    wanted: NameTable
+    type_names: [[String]]
 }
 
-fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], wanted: [String:Bool]) Never! {
+fn sema_units_catalog_names(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames Never! {
+    wanted := name_table()
+    type_names := [[String]]{}
+    loop family in catalog {
+        _ := name_intern(&wanted, family.family)
+        members := [String]{}
+        loop member in family.members {
+            type_name :: sema_registration_unit_type_name(member.name)
+            _ := name_intern(&wanted, type_name)
+            &members.push(type_name)
+        }
+        &type_names.push(^members)
+    }
+    SemaUnitsCatalogNames{wanted: ^wanted, type_names: ^type_names}
+}
+
+// A compiler thread is admitted for at least this many bytes of module
+// source to scan for unit mentions.
+SEMA_UNITS_SCAN_MIN_BYTES_PER_THREAD :: 262144
+
+// Whether input `index` takes the catalog families: every source module
+// (the compiler-owned effect module `skipped` is none) that keeps its prelude.
+fn sema_units_scanned(inputs: [SemaRegistrationModuleInput], index: Int, skipped: String) -> Bool Never! {
+    !inputs[index].program.no_prelude && inputs[index].module_identity != skipped
+}
+
+// The unit mentions of every input sema_units_scanned marks, by input, and an
+// empty row for the others. A scan reads nothing but its input's source, so
+// the inputs move into the threads' shared state, up to `threads` compiler
+// threads scan the sources in place, claimed largest first, and the inputs
+// move back in order. Each row lands at its input, so the rows are the same
+// for any thread count.
+fn sema_units_scan_mentions(inputs: &[SemaRegistrationModuleInput], skipped: String, wanted: NameTable, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
+    rows := [SemaUnitSourceMentions]{}
+    jobs := [Int]{}
+    weights := [Int]{}
+    work := 0
+    loop index in 0..<inputs.len() {
+        &rows.push(SemaUnitSourceMentions{identifiers: [String:Span]{}, unqualified: [String:Bool]{}, suffixes: [SemaUnitSuffixMention]{}})
+        if !sema_units_scanned(inputs, index, skipped) -> next
+        bytes :: inputs[index].source.count_bytes()
+        &jobs.push(index)
+        &weights.push(bytes)
+        work += bytes
+    }
+    workers :: compiler_threads_admit(threads, jobs.len(), work, SEMA_UNITS_SCAN_MIN_BYTES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop index in jobs -> rows[index] = sema_units_source_mentions(inputs[index].source, wanted)
+        return rows
+    }
+    order := [Int]{}
+    loop rank in compiler_threads_heaviest_first(weights) -> &order.push(jobs[rank])
+    // copy: the table is catalog-sized and every scanning thread reads it.
+    shared_state :: shared SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, wanted: [NameTable]{wanted.copy()}, order: ^order}
+    sema_units_scan_fill(shared_state, &inputs)
+    queue :: shared SemaUnitsScanQueue{next: 0}
+    sema_units_scanners(shared_state, queue, 0, workers, &rows)
+    sema_units_scan_take(shared_state, &inputs)
+    rows
+}
+
+// What every scanning thread reads: the inputs (moved in and back out; each
+// source is read in place), the wanted names (the one row of its list) and
+// the input index claimed at each rank.
+struct SemaUnitsScanShared {
+    inputs: [SemaRegistrationModuleInput]
+    wanted: [NameTable]
+    order: [Int]
+}
+
+// The next unclaimed rank.
+struct SemaUnitsScanQueue {
+    next: Int
+}
+
+// One input's mentions, scanned by one thread.
+struct SemaUnitsScanned {
+    module_index: Int
+    mentions: SemaUnitSourceMentions
+}
+
+fn sema_units_scan_fill(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaRegistrationModuleInput>(&permit.value.inputs, &inputs)
+}
+
+fn sema_units_scan_take(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaRegistrationModuleInput>(&inputs, &permit.value.inputs)
+}
+
+// Runs scanning threads `from..<workers`, one task each, and moves every row
+// a thread returned into its input's slot of `rows`.
+fn sema_units_scanners(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>, from: Int, workers: Int, rows: &[SemaUnitSourceMentions]) {
+    if from >= workers -> return
+    task.group sema_units_scan_threads {
+        head :: task sema_units_scan_claimed(shared_state, queue)
+        sema_units_scanners(shared_state, queue, from + 1, workers, &rows)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            rows[done.module_index] = ^done.mentions
+        }
+    }
+}
+
+// One thread: scans the inputs it claims.
+fn sema_units_scan_claimed(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>) -> [SemaUnitsScanned] {
+    inputs :: shared_state.guard_read()
+    claimed := [SemaUnitsScanned]{}
+    loop {
+        rank :: sema_units_scan_claim(queue)
+        if rank >= inputs.value.order.len() -> break
+        module_index :: inputs.value.order[rank]
+        // Passed straight through: a local binding of a guarded row would copy it.
+        mentions := sema_units_source_mentions(inputs.value.inputs[module_index].source, inputs.value.wanted[0])
+        &claimed.push(SemaUnitsScanned{module_index: module_index, mentions: ^mentions})
+    }
+    claimed
+}
+
+fn sema_units_scan_claim(queue: Shared<SemaUnitsScanQueue>) -> Int {
+    permit :: queue.guard_edit()
+    rank :: permit.value.next
+    permit.value.next = rank + 1
+    rank
+}
+
+// `mentions` is the input's sema_units_scan_mentions row.
+fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) Never! {
     if input.program.no_prelude -> return
     occupied := [String:Bool]{}
     local_families := [String:Bool]{}
     sema_units_local_names(input.program.items, &occupied, &local_families)
-    mentions :: sema_units_source_mentions(input.source, wanted)
     rows := [String:Int]{}
     selected := [String:Bool]{}
     queue := [Int]{}
@@ -60,8 +183,11 @@ fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDe
         rows[family.family] = index
         used := sema_units_identifier(mentions, family.family)
         if !used {
-            loop member in family.members {
-                if sema_units_member(mentions, member.name) -> used = true
+            loop (member_index, member) in family.members {
+                if sema_units_member(mentions, member.name, names.type_names[index][member_index]) {
+                    used = true
+                    break
+                }
             }
         }
         if used {
@@ -86,24 +212,30 @@ fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDe
             }
         }
     }
-    loop standard in catalog {
+    loop (family_index, standard) in catalog {
         if local_families.get(standard.family) != None || selected.get(standard.family) == None -> next
         family := standard
         members := [UnitFamilyMember]{}
-        loop member in family.members {
+        // The type name of each kept member, by its index in `members`.
+        member_types := [String]{}
+        loop (member_index, member) in family.members {
             base :: if family.base == .Val(value) -> value.name == member.name else -> false
-            if (base || sema_units_member(mentions, member.name)) && occupied.get(sema_registration_unit_type_name(member.name)) == None -> &members.push(member)
+            type_name :: names.type_names[family_index][member_index]
+            if (base || sema_units_member(mentions, member.name, type_name)) && occupied.get(type_name) == None {
+                &members.push(member)
+                &member_types.push(type_name)
+            }
         }
         family.members = members
         anchor := Span?{None}
-        loop member in family.members {
-            if sema_units_member_span(mentions, member.name) == .Val(span) {
+        loop (member_index, member) in family.members {
+            if sema_units_member_span(mentions, member.name, member_types[member_index]) == .Val(span) {
                 anchor = Val(span)
                 break
             }
         }
         family_anchor :: anchor ?? sema_units_identifier_span(mentions, family.family) ?? Span{start: 0, end: 0}
-        loop index in 0..<family.members.len() -> family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name) ?? family_anchor
+        loop index in 0..<family.members.len() -> family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name, member_types[index]) ?? family_anchor
         &input.program.items.push(Item.UnitFamily{value: family})
     }
 }
