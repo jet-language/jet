@@ -3549,6 +3549,7 @@ fn sema_check_pass_environment(graph: ^SemaRegistrationGraph, checked_types: [TT
     environment.checked_type_name_slots = ^tables.checked_type_name_slots
     environment.checked_type_name_rows = ^tables.checked_type_name_rows
     environment.boxed_edges = ^tables.boxed_edges
+    environment.copy_facts = ^tables.copy_facts
     // Every module's functions, so the length-preserving
     // fact covers calls into other modules like the Rust bundle-wide fact.
     environment.fixed_length_write_params = ^fixed_length_write_params
@@ -3658,6 +3659,11 @@ struct SemaPreparedBodies {
     bodies: [SemaPreparedBody]
     memo: SemaModuleMemo?{None}
     queries: [Int:SemaBodyMemoQuery]{[Int:SemaBodyMemoQuery]{}}
+    // A body wave's checks of the module's parallel method jobs
+    // (sema_check_registered_parallel_method_jobs), last first like `bodies`;
+    // `methods_prepared` when the wave selected those jobs.
+    methods: [SemaPreparedBody]{[SemaPreparedBody]{}}
+    methods_prepared: Bool{false}
 }
 
 fn sema_check_prepared_none() -> SemaPreparedBodies Never! {
@@ -4406,7 +4412,12 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
         }
         all_method_jobs := sema_check_registered_method_jobs(environment, program, module_index, &impl_rows_scanned, count_work)
         method_ready := sema_check_prepared_none()
-        if scheduling == .Val(schedule) {
+        if ready.methods_prepared && !scopes_changed {
+            // The body wave checked the module's parallel method jobs against
+            // the post-summary scope, which the top-level checks left as it was.
+            method_ready.bodies = ^ready.methods
+            ready.methods = [SemaPreparedBody]{}
+        } else if scheduling == .Val(schedule) {
             weights := [Int]{}
             jobs := sema_check_registered_parallel_method_jobs(environment, program, module_index, memory_plan, all_method_jobs, comptime_rows, &weights)
             work := 0
@@ -6257,6 +6268,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
         checked_type_name_slots: ^initial_environment.checked_type_name_slots,
         checked_type_name_rows: ^initial_environment.checked_type_name_rows,
         boxed_edges: ^initial_environment.boxed_edges,
+        copy_facts: ^initial_environment.copy_facts,
     }
     initial_environment.registration_graph = None
     initial_environment.checked_types = [TTypeDef]{}
@@ -6264,6 +6276,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     initial_environment.checked_type_name_slots = [String:Int]{}
     initial_environment.checked_type_name_rows = [[Int]]{}
     initial_environment.boxed_edges = [String:[String]]{}
+    initial_environment.copy_facts = sema_copy_facts_table_empty()
     module_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
     sema_check_shared_fill(module_state, ^initial_environment, ^initial_program, ^initial_memory_plan)
     module_index := 0
@@ -6471,6 +6484,7 @@ fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptim
     environment.checked_type_name_slots = ^tables.checked_type_name_slots
     environment.checked_type_name_rows = ^tables.checked_type_name_rows
     environment.boxed_edges = ^tables.boxed_edges
+    environment.copy_facts = ^tables.copy_facts
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
@@ -6879,6 +6893,7 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
         checked_type_name_slots: ^environment.checked_type_name_slots,
         checked_type_name_rows: ^environment.checked_type_name_rows,
         boxed_edges: ^environment.boxed_edges,
+        copy_facts: ^environment.copy_facts,
     }
     environment.registration_graph = None
     environment.checked_types = [TTypeDef]{}
@@ -6886,6 +6901,7 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     environment.checked_type_name_slots = [String:Int]{}
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
+    environment.copy_facts = sema_copy_facts_table_empty()
     shared_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
     sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
     comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
@@ -7053,15 +7069,37 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
 // module first, as the wave's module checks pop them.
 fn sema_check_body_wave_prepare(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_indexes: ^[Int], firsts: [Int], jobs: ^[SemaBodyJob], job_modules: ^[Int], order: ^[Int], workers: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> [SemaPreparedBodies] {
     module_count :: module_indexes.len()
-    total :: jobs.len()
+    wave_jobs := ^jobs
+    wave_job_modules := ^job_modules
+    top_order := ^order
+    // Each module's top-level ranks, then its parallel method jobs (appended
+    // after every top-level job), heaviest first; method_firsts[k] is wave
+    // module k's first method job and its last entry the wave's job count.
+    wave_order := [Int]{}
+    method_firsts := [Int]{}
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
     environments := [SemaScopeEnvironment]{}
     loop wave_module in 0..<module_count {
+        &method_firsts.push(wave_jobs.len())
+        loop rank in firsts[wave_module]..<firsts[wave_module + 1] -> &wave_order.push(top_order[rank])
         if firsts[wave_module + 1] > firsts[wave_module] {
             scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_indexes[wave_module], comptime_functions, comptime_rows, counter_phase, trace_sink)
             entered := environment.copy()
+            // The method jobs the module check would hand a method wave
+            // (sema_check_registration_module), selected against the same
+            // entered environment.
+            scanned := 0
+            all_method_jobs :: sema_check_registered_method_jobs(entered, program, module_indexes[wave_module], &scanned, false)
+            weights := [Int]{}
+            method_jobs :: sema_check_registered_parallel_method_jobs(entered, program, module_indexes[wave_module], memory_plan, all_method_jobs, comptime_rows, &weights)
+            first :: wave_jobs.len()
+            loop index in compiler_threads_heaviest_first(weights) -> &wave_order.push(first + index)
+            loop job in method_jobs {
+                &wave_jobs.push(job)
+                &wave_job_modules.push(wave_module)
+            }
             entered.module_scope = Val(^scopes)
             &environments.push(^entered)
         } else {
@@ -7069,12 +7107,13 @@ fn sema_check_body_wave_prepare(shared_state: Shared<SemaCheckShared>, host_hook
             &environments.push(sema_scope_environment_init("", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{}))
         }
     }
+    &method_firsts.push(wave_jobs.len())
     sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
     sema_check_shared_lend_module_environments(shared_state, ^environments)
     replay := [Bool]{}
     plan :: shared SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: false}
-    sema_check_body_plan_fill(plan, ^jobs, ^order, ^replay)
-    sema_check_body_plan_fill_wave(plan, ^job_modules, ^module_indexes)
+    sema_check_body_plan_fill(plan, ^wave_jobs, ^wave_order, ^replay)
+    sema_check_body_plan_fill_wave(plan, ^wave_job_modules, ^module_indexes)
     queue :: shared SemaBodyQueue{next: 0}
     slots := [Shared<SemaBodyPart>]{}
     loop _ in 0..<workers {
@@ -7083,19 +7122,42 @@ fn sema_check_body_wave_prepare(shared_state: Shared<SemaCheckShared>, host_hook
     }
     _ := sema_check_body_wave_parts(shared_state, slots, plan, queue, 0)
     placed := [SemaPreparedBody?]{}
-    loop _ in 0..<total -> &placed.push(None)
+    loop _ in 0..<method_firsts[module_count] -> &placed.push(None)
     loop slot in slots -> sema_check_body_part_place(slot, &placed)
+    // Each module's method bodies end the placed list, last module first;
+    // moved to `methods_by_module` first module first, so the loop below,
+    // last module first, pops each module's own.
+    reversed_methods := [[SemaPreparedBody]]{}
+    method_module := module_count
+    loop method_module > 0 {
+        method_module -= 1
+        methods := [SemaPreparedBody]{}
+        loop placed.len() > method_firsts[method_module] {
+            popped := &placed.pop() ?? break
+            body := ^popped ?? next
+            &methods.push(^body)
+        }
+        &reversed_methods.push(^methods)
+    }
+    methods_by_module := [[SemaPreparedBody]]{}
+    loop reversed_methods.len() > 0 {
+        methods := &reversed_methods.pop() ?? break
+        &methods_by_module.push(^methods)
+    }
     prepared := [SemaPreparedBodies]{}
     wave_module := module_count
     loop wave_module > 0 {
         wave_module -= 1
         entered := sema_check_shared_pop_module_environment(shared_state)
         bodies := sema_check_prepared_none()
+        module_methods := &methods_by_module.pop() ?? panic("a body-wave module lost its method bodies")
         if firsts[wave_module + 1] > firsts[wave_module] {
             taken := ^entered.module_scope
             entered.module_scope = None
             restored := ^taken ?? panic("a body-wave module scope left its environment")
             &bodies.scopes.push(^restored)
+            bodies.methods = ^module_methods
+            bodies.methods_prepared = true
             // The module's jobs end the placed list; popped last first.
             loop placed.len() > firsts[wave_module] {
                 popped := &placed.pop() ?? break
