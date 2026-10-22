@@ -415,6 +415,27 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map top_n without a count"))
         return Val(ir_map_top_n(&m, p, &b, ir_subst(p, ty), shape, subject, operands[1], span))
     }
+    // `equal(other)` is the maps' equality; `merge(other)` (Lower
+    // lower_map_method_more) is a copy of the receiver with each entry of
+    // `other`, in key order, set as a copy: the right side wins.
+    if symbol == "jet_map_equal" || symbol == "jet_map_merge" {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        other :: ir_adapt(&m, p, &b, operands[1], row, span)
+        if ir_failed(b) -> return Val(-1)
+        if symbol == "jet_map_equal" {
+            same :: ir_equal(&m, p, &b, subject, other, span)
+            ir_release(&m, &b, other)
+            return Val(same)
+        }
+        target :: ir_copy_value(&m, p, &b, subject, span)
+        walk :: ir_walk_open(&m, &b, other, shape.entry)
+        key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
+        value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
+        ir_map_set(&m, p, &b, row, target, key, value)
+        ir_walk_close(&m, &b, walk)
+        ir_release(&m, &b, other)
+        return Val(target)
+    }
     keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
     if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_add_new" -> return None
     if operands.len() < 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "map builtin {symbol} without a key"))
