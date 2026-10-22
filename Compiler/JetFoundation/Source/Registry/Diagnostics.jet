@@ -139,6 +139,173 @@ fn diagnostic_sentence_case_line(value: String) -> String Never! {
     String.from_bytes(bytes) ?? value
 }
 
+// One type identity in diagnostic prose: `module:<len>:<package>:<path>::Name`
+// (the driver's key for a source type) or `<corelib>/<module>::Name` (a Core
+// type). `start..end` is its whole spelling and `name` the name the source
+// wrote, after the last `::`. `head` is the name's first identifier, which a
+// clash compares, and `qualifier` the module as the user writes it: `crypto`
+// for `<corelib>/core.crypto::Secret`, the file stem for a source module.
+struct DiagnosticIdentity {
+    start: Int
+    end: Int
+    name: String
+    head: String
+    qualifier: String
+}
+
+// A message names a type by its plain name. Only when two different types in
+// one message share that name does each print as `module.Name`.
+fn diagnostic_display_identities(value: String, clashes: [String]) -> String Never! {
+    bytes :: value.bytes()
+    identities :: diagnostic_identities_in(bytes)
+    // copy: the caller keeps its text; the displayed line is a new value.
+    if identities.len() == 0 -> return value.copy()
+    out := [U8]{}
+    index := 0
+    loop identity in identities {
+        loop index < identity.start {
+            &out.push(bytes[index])
+            index += 1
+        }
+        if clashes.contains(identity.head) && identity.qualifier != "" {
+            loop byte in identity.qualifier.bytes() -> &out.push(byte)
+            loop byte in ".".bytes() -> &out.push(byte)
+        }
+        loop byte in identity.name.bytes() -> &out.push(byte)
+        index = identity.end
+    }
+    loop index < bytes.len() {
+        &out.push(bytes[index])
+        index += 1
+    }
+    String.from_bytes(out) ?? value.copy()
+}
+
+// The names in `context` (a whole message) that two different types share:
+// two identities from different modules, or an identity and a type the
+// message already prints by its plain name.
+fn diagnostic_identity_clashes(context: [U8]) -> [String] Never! {
+    identities :: diagnostic_identities_in(context)
+    clashes := [String]{}
+    loop identity in identities {
+        if clashes.contains(identity.head) -> next
+        clash := diagnostic_identity_plain_use(context, identities, identity.head)
+        loop other in identities {
+            if other.head == identity.head && other.qualifier != identity.qualifier -> clash = true
+        }
+        if clash -> &clashes.push(identity.head.copy())
+    }
+    clashes
+}
+
+fn diagnostic_identities_in(bytes: [U8]) -> [DiagnosticIdentity] Never! {
+    found := [DiagnosticIdentity]{}
+    index := 0
+    loop index < bytes.len() {
+        end :: diagnostic_identity_push(bytes, index, &found)
+        index = if end > index -> end else -> index + 1
+    }
+    found
+}
+
+// Reads the identity starting at `index` into `found` and returns its end, or
+// -1 when no identity starts there. A module identity's package part is
+// skipped by its length prefix, since it may hold `:`.
+fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity]) -> Int Never! {
+    module_form :: diagnostic_bytes_at(bytes, index, "module:")
+    if !module_form && !diagnostic_bytes_at(bytes, index, "<corelib>/") -> return -1
+    cursor := -1
+    qualifier := ""
+    if module_form {
+        cursor = index + 7
+        length := 0
+        digits := 0
+        loop diagnostic_is_sentence_digit(diagnostic_byte_at(bytes, cursor)) {
+            length = length * 10 + diagnostic_byte_at(bytes, cursor) - 48
+            digits += 1
+            cursor += 1
+        }
+        if digits == 0 || diagnostic_byte_at(bytes, cursor) != 58 -> return -1
+        cursor += 1 + length
+        if diagnostic_byte_at(bytes, cursor) != 58 -> return -1
+        cursor += 1
+        path_start :: cursor
+        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_bytes_at(bytes, cursor, "::") -> cursor += 1
+        stem_start := path_start
+        stem_end := cursor
+        loop at in path_start..<cursor {
+            if diagnostic_byte_at(bytes, at) == 47 -> stem_start = at + 1
+        }
+        loop at in stem_start..<cursor {
+            if diagnostic_byte_at(bytes, at) == 46 -> stem_end = at
+        }
+        qualifier = diagnostic_bytes_text(bytes, stem_start, stem_end)
+    } else {
+        cursor = index + 10
+        segment := cursor
+        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_bytes_at(bytes, cursor, "::") && diagnostic_byte_at(bytes, cursor) != 47 {
+            if diagnostic_byte_at(bytes, cursor) == 46 -> segment = cursor + 1
+            cursor += 1
+        }
+        qualifier = diagnostic_bytes_text(bytes, segment, cursor)
+    }
+    leaf := -1
+    loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) {
+        if diagnostic_bytes_at(bytes, cursor, "::") {
+            leaf = cursor + 2
+            cursor += 2
+            next
+        }
+        cursor += 1
+    }
+    if leaf < 0 || leaf >= cursor -> return -1
+    head_end := leaf
+    loop head_end < cursor && diagnostic_byte_at(bytes, head_end) != 46 -> head_end += 1
+    &found.push(DiagnosticIdentity{start: index, end: cursor, name: diagnostic_bytes_text(bytes, leaf, cursor), head: diagnostic_bytes_text(bytes, leaf, head_end), qualifier: qualifier})
+    cursor
+}
+
+// Whether `head` also appears in `context` as a plain type name outside every
+// identity: a whole word, not part of a path (`.`, `/`, `:` before it) and not
+// a prose compound (`Secret-bearing`).
+fn diagnostic_identity_plain_use(context: [U8], identities: [DiagnosticIdentity], head: String) -> Bool Never! {
+    word :: head.bytes()
+    if word.len() == 0 -> return false
+    index := 0
+    loop index + word.len() <= context.len() {
+        inside := false
+        loop identity in identities {
+            if index >= identity.start && index < identity.end -> inside = true
+        }
+        if !inside && diagnostic_bytes_at(context, index, head) {
+            before :: diagnostic_byte_at(context, index - 1)
+            after :: diagnostic_byte_at(context, index + word.len())
+            if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 -> return true
+        }
+        index += 1
+    }
+    false
+}
+
+fn diagnostic_bytes_at(bytes: [U8], index: Int, text: String) -> Bool Never! {
+    expected :: text.bytes()
+    if index < 0 || index + expected.len() > bytes.len() -> return false
+    loop offset in 0..<expected.len() {
+        if bytes[index + offset] != expected[offset] -> return false
+    }
+    true
+}
+
+fn diagnostic_is_word_byte(value: Int) -> Bool Never! {
+    (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95
+}
+
+// A byte that ends a type name in prose: whitespace, a quote, or punctuation
+// around a type (`<>`, `()`, `[]`, `{}`, `,`, `|`, `?`, `!`).
+fn diagnostic_identity_ends(value: Int) -> Bool Never! {
+    value < 0 || value <= 32 || value == 96 || value == 34 || value == 39 || value == 60 || value == 62 || value == 40 || value == 41 || value == 91 || value == 93 || value == 123 || value == 125 || value == 44 || value == 124 || value == 63 || value == 33
+}
+
 fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? Never! {
     loop row in rows {
         if row.code == code -> return Val(row)
@@ -188,16 +355,19 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 
 // Canonical Source-side constructor. The raise site owns the filled prose and
 // span; the generated registry row owns protocol metadata and static edits.
+// Every type in the prose prints by the shared display rule
+// (diagnostic_display_identities), with clashes judged over the whole message.
 fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    clashes :: diagnostic_identity_clashes("{what}\n{why}\n{fix}".bytes())
     diagnostic :: Diagnostic{
         moment: row.moment,
         severity: row.severity,
         code: code,
         span: span,
-        what: diagnostic_sentence_case_line(what),
-        why: diagnostic_sentence_case_line(why),
-        fix: diagnostic_sentence_case_line(fix),
+        what: diagnostic_sentence_case_line(diagnostic_display_identities(what, clashes)),
+        why: diagnostic_sentence_case_line(diagnostic_display_identities(why, clashes)),
+        fix: diagnostic_sentence_case_line(diagnostic_display_identities(fix, clashes)),
     }
     diagnostic_registry_project_row(^diagnostic, row)
 }

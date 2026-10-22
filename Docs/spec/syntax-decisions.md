@@ -10092,3 +10092,9 @@ Canonical Core sources may name another Core source's private declarations
 and native carriers without making them public. Source-only functions resolve
 through the loaded declaration and its signature even without a native
 catalog row; native provider rows retain their existing dispatch.
+
+
+**2026-10-22 — D-DIAG-CORE-NAME1=A** *(card #5091)*: diagnostics name a type
+by its plain name. When two different types in one message share that name,
+each prints with its module path as the user writes it (`crypto.Secret`).
+Internal module identities never appear in a message.

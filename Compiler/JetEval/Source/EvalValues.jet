@@ -1219,13 +1219,15 @@ fn jet_eval_source_fail(machine: &JetEvalMachine, span: Span, what: String) {
     }
 }
 
-// A source failure: a runtime stop when the machine runs a program, a
-// compile-time evaluation failure otherwise.
+// A source failure is the program's own stop (E3010). Running a program, it
+// names the runtime result; computing a compile-time value, it is the same
+// stop the program would make at run time, reported once in the registry's
+// words, with no compile-time cascade.
 fn jet_eval_source_error(runtime_execution: Bool, span: Span, what: String) -> JetEvalError Never! {
-    code := if runtime_execution -> "E3010" else -> "E0956"
-    why := if runtime_execution -> "the operands or position do not produce a valid runtime result" else -> "the canonical MIR evaluator reached the operation while computing a compile-time value"
-    fix := if runtime_execution -> "check the operands or bounds before the operation" else -> "change the compile-time input or checked operation"
-    JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)}
+    if !runtime_execution {
+        return JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(span), "`{what}`", "the operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.", "check the operands or bounds before the operation, or use a checked operation that returns an outcome.")}
+    }
+    JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(span), what, "the operands or position do not produce a valid runtime result", "check the operands or bounds before the operation")}
 }
 
 fn jet_eval_compiler_fail(machine: &JetEvalMachine, span: Span, what: String) Never! {

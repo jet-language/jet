@@ -315,6 +315,8 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     reference_starts := [Int]{}
     take_indices := [Int]{}
     take_keys := [String]{}
+    // Every argument is checked, so each mismatched one is reported.
+    complete := true
     loop index in 0..<args.len() {
         &reference_starts.push(context.name_references.len())
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
@@ -355,6 +357,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         borrowed_trait :: trait_parameter && parameter.convention != AccessConvention.Move
         argument_expected := Type?{None}
         if !self_typed && !borrowed_trait -> argument_expected = Val(required)
+        diagnostic_start :: diagnostics.len()
         checked_argument :: if {
             default_in_owner -> sema_call_check_owner_default(^owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, &tail_store, &context, span, &binder_keys, &diagnostics)
             apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, program, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics)
@@ -367,7 +370,11 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 binder_site = args[index].flags.binder_site ?? span.start
             }
         }
-        checked_value :: checked_argument ?? return None
+        checked_value :: checked_argument ?? {
+            if !default_in_owner && binder_refs.len() == 0 -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            complete = false
+            next
+        }
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
         value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
         compatible :: if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
@@ -391,8 +398,9 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 }
                 return None
             }
-            &diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
-            return None
+            &diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), expr_span(args[index].expr)))
+            complete = false
+            next
         }
         // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
@@ -424,11 +432,30 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         &required_types.push(required)
         &source_indices.push(args[index].flags.source_index ?? -1)
     }
+    if !complete -> return None
     &reference_starts.push(context.name_references.len())
     loop position in 0..<take_indices.len() {
         if sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, context) -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[take_indices[position]].expr))
     }
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: source_indices, pin_arguments: pin_arguments, binder_site: binder_site})
+}
+
+// (Rust `check_call_args`): an argument that does not fit its parameter is
+// E0112 about the call, after a checked typed-text rejection.
+fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
+    if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
+}
+
+// The argument's own check rejected it against its parameter with the generic
+// E0108 at the value; that report becomes the call's E0112, with the value's
+// own type inferred without the parameter as a target.
+fn sema_call_argument_replace_mismatch(callee: String, index: Int, required: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    value_span :: expr_span(value)
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+    probe_diagnostics := [Diagnostic]{}
+    offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(offered.ty, environment, program), value_span)
 }
 
 // Whether an argument other than `own` references the binding `key`;

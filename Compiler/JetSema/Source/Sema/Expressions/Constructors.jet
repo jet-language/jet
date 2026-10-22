@@ -954,16 +954,7 @@ fn sema_expression_enum_payload_mismatch(enum_name: String, variant: String, fie
 // with the value's own type inferred without the slot as a target.
 fn sema_expression_enum_payload_replace_mismatch(enum_name: String, variant: String, field: String?, declared: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     value_span :: expr_span(value)
-    found := Int?{None}
-    index := diagnostic_start
-    loop index < diagnostics.len() {
-        if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(value_span)) {
-            found = Val(index)
-            break
-        }
-        index += 1
-    }
-    mismatch_index :: found ?? return
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
     probe_diagnostics := [Diagnostic]{}
     offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
     diagnostics[mismatch_index] = sema_expression_enum_payload_mismatch(enum_name, variant, field, declared, offered.ty, value_span, environment, program)

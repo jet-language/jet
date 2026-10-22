@@ -483,8 +483,8 @@ fn sema_call_http_json_target(type_args: [Type], expected: Type?, environment: S
 fn sema_call_http_check_serde(direction: SemaSerdeDirection, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if sema_serde_type_is_admissible(environment, program, ty, direction) -> return
     encode := direction == SemaSerdeDirection.Encode
-    shown := sema_type_show(ty)
-    &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be {if encode -> "serialized" else -> "decoded"}", "only types that opt in (and their fields) have a wire form; `{shown}` does not", if encode -> "add `#[Codable]` or `#[Encode]` to `{shown}`, or remove it from the encoded value" else -> "add `#[Codable]` or `#[Decode]` to `{shown}`, or remove it from the decoded value"))
+    shown := sema_type_show_quoted(ty)
+    &diagnostics.push(sema_error("E2411", span, "{shown} can't be {if encode -> "serialized" else -> "decoded"}", "only types that opt in (and their fields) have a wire form; {shown} does not", if encode -> "add `#[Codable]` or `#[Encode]` to {shown}, or remove it from the encoded value" else -> "add `#[Codable]` or `#[Decode]` to {shown}, or remove it from the decoded value"))
 }
 
 // Preserve the existing server JSON admission diagnostic while its ordinary

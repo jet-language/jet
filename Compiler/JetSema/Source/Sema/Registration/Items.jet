@@ -2741,12 +2741,12 @@ fn sema_registration_serde_any_explicit(items: [Item]) -> Bool Never! {
 // type is shown only for a report.
 fn sema_registration_serde_wire_form(items: [Item], facts: SemaDeriveItemIndex, no_auto: [String:Bool], ty: Type, encode: Bool, decode: Bool, span: Span, diagnostics: &[Diagnostic]) {
     if encode && !sema_serde_items_codable(items, facts, ty, "Encode", no_auto) {
-        shown :: sema_type_show(ty)
-        &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be serialized", "only types that opt in (and their fields) have a wire form; `{shown}` does not", "add `#[Codable]` or `#[Encode]` to `{shown}`, or remove it from the encoded value"))
+        shown :: sema_type_show_quoted(ty)
+        &diagnostics.push(sema_error("E2411", span, "{shown} can't be serialized", "only types that opt in (and their fields) have a wire form; {shown} does not", "add `#[Codable]` or `#[Encode]` to {shown}, or remove it from the encoded value"))
     }
     if decode && !sema_serde_items_codable(items, facts, ty, "Decode", no_auto) {
-        shown :: sema_type_show(ty)
-        &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be decoded", "only types that opt in (and their fields) have a wire form; `{shown}` does not", "add `#[Codable]` or `#[Decode]` to `{shown}`, or remove it from the decoded value"))
+        shown :: sema_type_show_quoted(ty)
+        &diagnostics.push(sema_error("E2411", span, "{shown} can't be decoded", "only types that opt in (and their fields) have a wire form; {shown} does not", "add `#[Codable]` or `#[Decode]` to {shown}, or remove it from the decoded value"))
     }
 }
 

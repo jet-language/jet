@@ -5058,16 +5058,7 @@ fn sema_stmt_return_is_view_boundary(return_type: Type?) -> Bool Never! {
 fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if sema_stmt_return_success_type(return_type) == (Type.Named{name: "Unit"}) -> return
     value_span :: expr_span(value)
-    found := Int?{None}
-    index := diagnostic_start
-    loop index < diagnostics.len() {
-        if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(value_span)) {
-            found = Val(index)
-            break
-        }
-        index += 1
-    }
-    mismatch_index :: found ?? return
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
     // The value's own type, inferred without the return type as a target.
     probe_diagnostics := [Diagnostic]{}
     offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return

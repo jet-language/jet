@@ -556,7 +556,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
             hole :: error == (Type.Named{name: "_"})
             if hole -> &diagnostics.push(sema_type_hole(span))
             if !hole && !generic && !sema_failure_domain_is_error(error, [String]{}, environment, program) {
-                &diagnostics.push(sema_error("E2417", span, "Explicit failure domain `{type_name(error)}` is not an Error type", "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.", "use a Core error, add `#Error` to a local error type, or remove the explicit error contract."))
+                &diagnostics.push(sema_error("E2417", span, "Explicit failure domain {sema_type_show_quoted(error)} is not an Error type", "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.", "use a Core error, add `#Error` to a local error type, or remove the explicit error contract."))
             }
         }
         .Fn(params, ret, _, _, _, _) -> {
