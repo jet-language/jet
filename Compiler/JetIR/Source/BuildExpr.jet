@@ -178,6 +178,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         .LineMarker(line) -> b.line = line
         .SourceSpan(_) -> {}
         .Let(local, let_ty, init, _, _, span) -> {
+            if local.deref && local.address_lifetime == None && local.persist_key == None && init.kind == .Borrow(_, _) -> return ir_bind_pin(&m, &p, &b, local, init, span)
             if local.deref || local.address_lifetime != None || local.persist_key != None -> return ir_fail(&b, span, "addressed or persistent binding")
             // A GC-promoted or automatic-root binding binds as a plain local
             // (codegen only marks the root, which Lower never reads); codegen
@@ -408,6 +409,21 @@ fn ir_bind_local(m: &IRModule, b: &IRBuilder, local: TLocal, value: Int) Never! 
     if b.cells.contains(local.name) && ir_kind_of(m, b, slot) != .Aggregate {
         _ :: ir_cell_binding(&m, &b, local.name)
     }
+}
+
+// A pinned borrowed argument or receiver (`pin = &place`, sema's
+// evaluation-order pin): an alias of the place, as codegen's
+// jet_codegen_lower_local_place binds it, which never owns the value. A
+// read aliases the place's value; a write aliases an aggregate's storage.
+fn ir_bind_pin(m: &IRModule, p: &IRProgram, b: &IRBuilder, local: TLocal, init: TExpr, span: Span) Never! {
+    access :: if init.kind == .Borrow(_, borrowed) -> borrowed else -> AccessConvention.Read
+    value :: ir_expr(&m, &p, &b, init)
+    if ir_failed(b) || value < 0 -> return
+    // A borrow of a temporary owns that temporary: the pin keeps it.
+    if b.fresh[value] -> return ir_bind_local(&m, &b, local, value)
+    if access != .Read && ir_kind_of(m, b, value) != .Aggregate -> return ir_fail(&b, span, "write pin of {ir_type_name(init.ty)}")
+    symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
+    &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
 
 // `task.group(group) { .. }` (codegen jet_codegen_lower_task_group, Lower
@@ -1193,8 +1209,10 @@ fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiv
         .SerdeEncode | .Hardware(_) | .ReceiptAttach | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
         .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
-        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered -> true
-        .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> true
+        // Their Err is a List of FieldError records, which no route here
+        // converts; to_text and equal_unordered cross the Dyn as a tree.
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
+        .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> true
         .GameSceneOnFrame(_, _) | .TaskJoin | .TaskDetach -> true
         else -> false
@@ -2399,12 +2417,14 @@ fn ir_json_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, variant
         pair_ty :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: ty}}}
         pairs := [TExpr]{}
         loop entry in entries {
-            if ir_untag(entry.key.ty) != Type.String || ir_untag(entry.value.ty) != ir_untag(ty) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
+            // A value spelled through another name of the Dyn declaration
+            // is that Dyn (codegen encodes it, which is the value itself).
+            if ir_untag(entry.key.ty) != Type.String || ir_dyn_def(p, entry.value.ty) == None -> return ir_fail_slot(&b, span, "Dyn.Object entry {ir_type_name(entry.key.ty)}: {ir_type_name(entry.value.ty)}")
             &pairs.push(TExpr{ty: pair_ty, kind: TExprKind.Tuple{values: [TExpr]{entry.key, entry.value}}, span: span, integer_bounds: None, cost: None})
         }
         value = TExpr{ty: Type.List{element: pair_ty}, kind: TExprKind.ListLit{values: pairs}, span: span, integer_bounds: None, cost: None}
     }
-    if variant == "Object" && !(value.ty == .List(_)) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
+    if variant == "Object" && !(ir_untag(value.ty) == .List(_)) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
     ir_enum_value(&m, &p, &b, ty, "Dyn", variant, TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: value}}}, span)
 }
 

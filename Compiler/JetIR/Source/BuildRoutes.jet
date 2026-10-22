@@ -2,7 +2,7 @@
 // the old path's route table (argument and result carriers, payloads).
 
 use jet_foundation.[CoreCallRecord, Span, Type, TypeTupleField, TBuiltinOp, TClosureOp, TExpr, core_call_native_return_labels, tir_builtin_mutates_receiver]
-use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_runtime_route]
+use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_native_type, lower_runtime_route]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
@@ -1513,6 +1513,7 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
     }
     lowered := [Int]{}
     temporaries := [Int]{}
+    trees := [Int]{}
     loop (index, slot) in args {
         carrier :: route.params[index]
         if carrier == .Unit -> next
@@ -1526,9 +1527,11 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
                     &lowered.push(slot)
                 } else if kind == .Word {
                     row :: m.types[slot_row]
-                    if !row.signed && row.bits == 64 -> return ir_fail_slot(&b, span, "runtime route {name} U64 argument")
                     int_row :: ir_type_row(&m, Type.Int) ?? 0
-                    exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{slot}, int_row)
+                    // A U64 word crosses as its owned exact Int (Lower
+                    // lower_convert_u64_exact), as a narrower one does.
+                    exact :: if !row.signed && row.bits == 64 -> ir_numeric_cast(&m, p, &b, slot, int_row, span) else -> ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{slot}, int_row)
+                    if exact < 0 -> return -1
                     &lowered.push(exact)
                     &temporaries.push(exact)
                 } else if ir_word_record(m, p, slot_row) == .Val(record) {
@@ -1567,6 +1570,25 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
                 &lowered.push(ir_load_word(&m, &b, slot, 0))
             }
             .Handle(_) | .HandleMut(_) -> {
+                // The checked Dyn enum crosses as a runtime tree built for
+                // the call and dropped after it (Lower lower_route_dyn).
+                if carrier == .Handle(handle_name) {
+                    if handle_name == "Dyn" && ir_dyn_def(p, shown) == .Val(dyn_row) {
+                        tree :: ir_dyn_to_runtime(&m, p, &b, dyn_row, slot, span)
+                        if tree < 0 -> return -1
+                        &lowered.push(tree)
+                        &trees.push(tree)
+                        next
+                    }
+                }
+                // A native source record (FileReader, FileWriter) crosses as
+                // its bytes, which are the runtime's shell layout: the route
+                // borrows them, or mutates them in place (Lower passes the
+                // value itself where no record schema converts it).
+                if kind == .Aggregate && ir_route_shell(&m, p, shown, carrier) {
+                    &lowered.push(slot)
+                    next
+                }
                 // A runtime handle crosses as itself (a mutable one too: the
                 // route mutates the runtime value behind it).
                 if !ir_is_handle(m, slot_row) -> return ir_fail_slot(&b, span, "runtime route {name} handle argument of {shown}")
@@ -1584,6 +1606,9 @@ fn ir_route_labeled(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, 
     }
     if ir_failed(b) -> return -1
     loop temporary in temporaries -> ir_release(&m, &b, temporary)
+    loop tree in trees {
+        _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
+    }
     loop (index, slot) in args {
         if slot < 0 -> next
         if index < borrowed.len() && !borrowed[index] {
@@ -1648,7 +1673,29 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         ir_route_list_header(&m, &b, storage, 0, data, length)
         return storage
     }
+    if carrier == .Handle(handle_name) {
+        if handle_name == "Dyn" && ir_dyn_def(p, result) == .Val(dyn_row) {
+            pointer_row :: ir_pointer_row(&m)
+            tree :: ir_runtime(&m, &b, export, args, pointer_row)
+            return ir_dyn_from_runtime(&m, p, &b, dyn_row, tree, row, span)
+        }
+    }
     if carrier == .Handle(_) || carrier == .HandleMut(_) {
+        // A native source record's owned shell (Lower
+        // lower_record_from_runtime): its bytes move into fresh storage and
+        // the shell is freed.
+        if m.types[row].kind == .Aggregate && ir_route_shell(&m, p, result, carrier) {
+            pointer_row :: ir_pointer_row(&m)
+            shell :: ir_runtime(&m, &b, export, args, pointer_row)
+            size :: m.types[row].size
+            storage :: ir_fresh_temp(&m, &b, row)
+            ir_emit(&b.f, IROp.StackAddress, storage, size, 8, -1, b.line)
+            ir_emit(&b.f, IROp.CopyBytes, -1, storage, shell, size, b.line)
+            bytes :: ir_word_const(&m, &b, if size < 8 -> 8 else -> size)
+            align :: ir_word_const(&m, &b, 8)
+            _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{shell, bytes, align}, -1)
+            return storage
+        }
         if !ir_is_handle(m, row) -> return ir_fail_slot(&b, span, "runtime route {export} handle result as {result}")
     }
     if carrier == .Option(_) -> return ir_fail_slot(&b, span, "runtime route {export} result carrier {carrier}")
@@ -1679,13 +1726,28 @@ fn ir_route_list_header(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, dat
 // The payload a route wrote to `out` stored at `offset` of the box `base`.
 fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, carrier: LowerRouteCarrier, out: Int, span: Span) Never! {
     if carrier == .Unit -> return
-    if carrier == .List(_) {
+    if carrier == .List(element) {
+        // A List of records crosses as record handles (Lower
+        // lower_route_store_payload converts them); none is converted here.
+        if element == .List(_) || element == .Handle(_) -> return ir_fail(&b, span, "runtime route List of {element} payload")
         data :: ir_load_word(&m, &b, out, 0)
         length :: ir_load_word(&m, &b, out, 8)
         return ir_route_list_header(&m, &b, base, offset, data, length)
     }
     if carrier == .Option(some) -> return ir_route_store_option(&m, p, &b, base, offset, payload, some, out, span)
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "payload type {payload}")
+    if carrier == .Handle(handle_name) {
+        if handle_name == "Dyn" && ir_dyn_def(p, payload) == .Val(dyn_row) {
+            pointer_row :: ir_pointer_row(&m)
+            tree :: ir_temp(&m, &b, pointer_row)
+            ir_emit(&b.f, IROp.Load, tree, out, 0, -1, b.line)
+            native :: ir_dyn_from_runtime(&m, p, &b, dyn_row, tree, row, span)
+            if native < 0 -> return
+            b.fresh[native] = false
+            ir_emit(&b.f, IROp.Store, -1, base, offset, native, b.line)
+            return
+        }
+    }
     if carrier == .Handle(_) || carrier == .HandleMut(_) {
         if !ir_is_handle(m, row) && ir_record_runtime(&m, p, payload) != None -> return ir_route_record_in(&m, p, &b, base, offset, payload, out, span)
         // A handle word that is no record handle points at the declared
@@ -1695,7 +1757,17 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
         if m.types[row].kind == .Aggregate {
             source :: ir_temp(&m, &b, row)
             ir_emit(&b.f, IROp.Load, source, out, 0, -1, b.line)
-            return ir_store_at(&m, &b, base, offset, source)
+            ir_store_at(&m, &b, base, offset, source)
+            // A native source record's owned shell: its bytes moved into
+            // the box, so only the shell is freed (Lower record.in clones
+            // them and drops the shell).
+            if ir_route_shell(&m, p, payload, carrier) {
+                size :: m.types[row].size
+                bytes :: ir_word_const(&m, &b, if size < 8 -> 8 else -> size)
+                align :: ir_word_const(&m, &b, 8)
+                _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{source, bytes, align}, -1)
+            }
+            return
         }
     }
     if carrier == .Word && ir_word_record(m, p, row) == .Val(record) {
@@ -1711,6 +1783,100 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     value :: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Load, value, out, 0, -1, b.line)
     ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
+}
+
+// Whether `ty` is a native source record (Lower Records.jet
+// lower_native_shell_record) whose runtime handle is the route `carrier`'s:
+// a Core-declared shape with no record schema, which crosses as a heap
+// shell holding its declared bytes.
+fn ir_route_shell(m: &IRModule, p: IRProgram, ty: Type, carrier: LowerRouteCarrier) -> Bool Never! {
+    carrier_name :: if carrier == {
+        .Handle(name) | .HandleMut(name) -> name
+        else -> { return false }
+    }
+    name :: ir_nominal_name(ir_untag(ty)) ?? return false
+    handle :: ir_handle_runtime(p, name) ?? return false
+    if handle.runtime != carrier_name -> return false
+    if lower_native_type(handle.jet_name) == None -> return false
+    ir_record_runtime(&m, p, ty) == None
+}
+
+// The declaration row of the checked Dyn enum `ty` names, through an alias
+// (Lower Dyn.jet lower_dyn_type); None for any other type.
+fn ir_dyn_def(p: IRProgram, ty: Type) -> Int? Never! {
+    name :: ir_nominal_name(ir_untag(ty)) ?? return None
+    row :: ir_type_def(p, name) ?? return None
+    definition :: p.types[row]
+    if definition.kind == .Alias(target) -> return ir_dyn_def(p, target)
+    if definition.key == "Dyn" && definition.name == "Dyn" -> return Val(row)
+    None
+}
+
+// The read-only storage descriptor of the Dyn enum `row` the runtime walks
+// (Lower Dyn.jet lower_dyn_schema): two header words [box bytes, row count],
+// then per runtime variant, in the runtime's order, [tag, payload offset,
+// boxed, payload bytes, element stride, key offset, value offset, element
+// bytes]. The pointer slot of its data row, or -1 after a failure.
+fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
+    box_size :: ir_enum_box_size(&m, p, row, [Type]{}) ?? return ir_fail_slot(&b, span, "Dyn marshaling has no box layout")
+    names :: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}
+    words := [Int]{box_size, names.len()}
+    loop name in names {
+        index :: ir_variant_index(p, row, name) ?? return ir_fail_slot(&b, span, "Dyn marshaling has no {name} variant")
+        schema := [Int]{index, 0, 0, 0, 0, 0, 0, 0}
+        if name != "Null" {
+            members :: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "Dyn.{name} marshaling has no payload layout")
+            if members.len() == 0 -> return ir_fail_slot(&b, span, "Dyn.{name} marshaling has no payload layout")
+            payload :: members[0].ty
+            schema[1] = members[0].offset
+            schema[2] = if members[0].boxed -> 1 else -> 0
+            schema[3] = m.types[payload].size
+            if name == "Bytes" || name == "Array" || name == "Object" {
+                element_ty :: if ir_untag(m.types[payload].ty) == .List(element) -> element else -> { return ir_fail_slot(&b, span, "Dyn.{name} marshaling requires a List payload") }
+                element :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
+                schema[4] = ir_list_stride(m, element)
+                schema[7] = m.types[element].size
+                if name == "Object" {
+                    entry :: ir_inline_members(&m, p, element) ?? return ir_fail_slot(&b, span, "Dyn.Object marshaling requires checked key/value entries")
+                    if entry.len() != 2 || entry[0].name != "key" || entry[1].name != "value" -> return ir_fail_slot(&b, span, "Dyn.Object marshaling requires checked key/value entries")
+                    schema[5] = entry[0].offset
+                    schema[6] = entry[1].offset
+                }
+            }
+        }
+        loop word in schema -> &words.push(word)
+    }
+    bytes := [U8]{}
+    loop word in words {
+        rest := word
+        loop _ in 0..<8 {
+            &bytes.push(U8{rest.bit_and(255)})
+            rest = rest >> 8
+        }
+    }
+    pointer_row :: ir_pointer_row(&m)
+    address :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.DataAddress, address, ir_intern_bytes(&m, bytes), -1, -1, b.line)
+    address
+}
+
+// A runtime tree of the native Dyn `value` (Lower lower_dyn_to_runtime);
+// the caller drops it with jet_rt_handle_drop_dyn. -1 after a failure.
+fn ir_dyn_to_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) -> Int Never! {
+    schema :: ir_dyn_schema(&m, p, &b, row, span)
+    if schema < 0 -> return -1
+    pointer_row :: ir_pointer_row(&m)
+    ir_runtime(&m, &b, "jet_rt_dyn_from_native", [Int]{schema, value}, pointer_row)
+}
+
+// The fresh native Dyn of value row `value_row` for the runtime `tree` a
+// route returned, which is dropped (Lower lower_dyn_from_runtime).
+fn ir_dyn_from_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, tree: Int, value_row: Int, span: Span) -> Int Never! {
+    schema :: ir_dyn_schema(&m, p, &b, row, span)
+    if schema < 0 -> return -1
+    native :: ir_runtime(&m, &b, "jet_rt_dyn_to_native", [Int]{schema, tree}, value_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
+    native
 }
 
 // An Option item a route wrote as a selector word at `out` and its payload
