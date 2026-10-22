@@ -1242,6 +1242,7 @@ fn ir_defer_close(m: &IRModule, p: &IRProgram, b: &IRBuilder, close: TExpr, span
 fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: THandleOp, args: [TExpr], span: Span) -> Int Never! {
     if operation == .TaskDetach -> return ir_task_detach(&m, &p, &b, receiver, span)
     if operation == .TaskJoin -> return ir_task_join(&m, &p, &b, ty, receiver, span)
+    if operation == .DynLen(site, location) -> return ir_dyn_len(&m, &p, &b, ty, receiver, site, location, span)
     // Encoding a Dyn is the Dyn itself (codegen jet_codegen_lower_serde_encode).
     if operation == .SerdeEncode && (ir_nominal_name(ir_untag(ir_subst(p, receiver.ty))) ?? "") == "Dyn" -> return ir_expr(&m, &p, &b, receiver)
     dedicated :: if operation == {
@@ -1284,7 +1285,7 @@ fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiv
     // still crosses as its handle: the route mutates the runtime value
     // behind it (Lower Routes.jet lower_route_args, a HandleMut carrier).
     if route.family == .ClosureMethod -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure")
-    if route.symbol == "jet_dyn_len" || route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" -> return ir_fail_slot(&b, span, "handle method {route.symbol}")
+    if route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" -> return ir_fail_slot(&b, span, "handle method {route.symbol}")
     special :: ir_nominal_name(ir_untag(ir_subst(p, receiver.ty))) ?? ""
     if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" -> return ir_fail_slot(&b, span, "{special} handle method {route.member}")
     static_call :: if operation == {
@@ -3214,8 +3215,19 @@ fn ir_slice(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, base: TExpr, s
     }
     element_row :: ir_list_element(&m, p, b, source) ?? return ir_fail_slot(&b, span, "slice of {ir_type_name(base.ty)}")
     view :: ir_is_view(ty)
+    window :: ir_list_window(&m, &b, row, source, element_row, bounds, location.line, view)
+    if view -> return window
+    owned :: ir_copy_value(&m, p, &b, window, span)
+    ir_release(&m, &b, source)
+    owned
+}
+
+// The window header of a List or View `source` over the native `bounds`
+// (Lower lower_slice_window): the runtime checks them and picks the stop;
+// a View's window keeps borrowing the source buffer.
+fn ir_list_window(m: &IRModule, b: &IRBuilder, row: Int, source: Int, element_row: Int, bounds: [Int], line: Int, view: Bool) -> Int Never! {
     stop_args := [Int]{bounds[0], bounds[1], bounds[2], ir_load_word(&m, &b, source, 0)}
-    loop value in ir_location(&m, &b, location.line) -> &stop_args.push(value)
+    loop value in ir_location(&m, &b, line) -> &stop_args.push(value)
     word_row :: ir_word_row(&m)
     stop :: ir_runtime(&m, &b, if view -> "jet_rt_view_end" else -> "jet_rt_slice_end", stop_args, word_row)
     window :: ir_temp(&m, &b, row)
@@ -3228,10 +3240,26 @@ fn ir_slice(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, base: TExpr, s
     stride :: ir_list_stride(m, element_row)
     first :: ir_element_address(&m, &b, data, bounds[0], stride)
     ir_emit(&b.f, IROp.Store, -1, window, 16, first, b.line)
-    if view -> return window
-    owned :: ir_copy_value(&m, p, &b, window, span)
-    ir_release(&m, &b, source)
-    owned
+    window
+}
+
+// `base.view(range)` / a declared view's subrange (Lower lower_view_new):
+// the View window of the List or View receiver, which it borrows.
+fn ir_view_new(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, args: [TExpr], line: Int, span: Span) -> Int Never! {
+    if ir_view_element(ty) == None -> return ir_fail_slot(&b, span, "a view of type {ir_type_name(ty)}")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    source :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || source < 0 -> return -1
+    element_row :: ir_list_element(&m, p, b, source) ?? return ir_fail_slot(&b, span, "a view of {ir_type_name(receiver.ty)}")
+    // copy: `args[0]` stays in the read parameter `args`; the optional range owns this one
+    bounds :: if args.len() == {
+        1 -> ir_slice_bounds(&m, &p, &b, args[0], args[0], Val(args[0].copy()), false, span)
+        2 -> ir_slice_bounds(&m, &p, &b, args[0], args[1], None, false, span)
+        else -> { return ir_fail_slot(&b, span, "a view with {args.len()} bounds") }
+    }
+    if ir_failed(b) || bounds.len() != 3 -> return -1
+    if line > 0 -> b.line = line
+    ir_list_window(&m, &b, row, source, element_row, bounds, line, true)
 }
 
 fn ir_is_view(ty: Type) -> Bool Never! {
