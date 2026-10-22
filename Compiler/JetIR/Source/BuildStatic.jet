@@ -61,12 +61,14 @@ fn ir_static_put(s: &IRStaticBuild, object: Int, offset: Int, value: IRStaticWor
 }
 
 // The static object of module constant `key` read as type `ty`: its data
-// row, or -1 when its value is built at each read. Built on first use.
+// row, or -1 when its value is built at each read. Built on first use and
+// kept in m.constant_rows by the constant and the type's content key, which
+// is how a merge (BuildMerge.jet) shares one object between build threads.
 fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: TComptimeValue) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return -1
     kind :: m.types[row].kind
     if kind != .Aggregate && kind != .Pointer -> return -1
-    memo :: "{key}|{row}"
+    memo :: "{key}|{ir_row_key(m, row)}"
     known :: m.constant_rows.get(memo) ?? -2
     if known != -2 -> return known
     s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}

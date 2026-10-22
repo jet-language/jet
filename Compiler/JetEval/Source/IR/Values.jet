@@ -4,7 +4,7 @@
 // value (jet_eval_data): a struct by its declaration's name, an enum case by
 // its variant name, Some/Ok as Present, None as a clean failure and Err as a
 // told one, a fixed-width integer as an Int.
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, TFunc, TImplDef, TTypeDef, Type, type_name]
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, TFunc, TImplDef, TTypeDef, Type, compiler_threads_single, type_name]
 use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IRTypeKind, ir_build_program, ir_enum_def, ir_list_stride, ir_program_new, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 use jet_sema.[SemaCheckedForeignFunction]
 
@@ -33,7 +33,7 @@ fn jet_eval_ir_comptime(closure: ^[TFunc], item: ^TFunc, type_defs: ^[TTypeDef],
     // copy: the builder consumes its own type rows; transport lays values out by them again.
     layouts :: type_defs.copy()
     // An evaluation links no C closure: it has no foreign functions to call.
-    built := ir_build_program(^functions, ^type_defs, ^impls, [String:String]{}, ^constants, [SemaCheckedForeignFunction]{}, key)
+    built := ir_build_program(^functions, ^type_defs, ^impls, [String:String]{}, ^constants, [SemaCheckedForeignFunction]{}, key, compiler_threads_single())
     if built.failures.len() > 0 {
         lines := [String]{}
         loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))

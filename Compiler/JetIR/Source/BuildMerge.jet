@@ -1,205 +1,327 @@
-// The canonical numbering of a built module: functions, type rows, names
-// and data rows renumbered by first use in a walk from the build's jobs, so
-// a row's number depends on what the program reaches and in what order the
-// jobs run, never on which module memo happened to intern it first. Rows
-// nothing reachable uses are dropped. The walk visits the job functions in
-// order, then each function it reached, in the order it reached them: a
-// function's slot types and names, then its instructions' operands in
-// order (IR.jet's operand table: ConstText/DataAddress a=data row,
-// ConstBigInt/CallRuntime a=name, Close b=name, Call/FunctionAddress
+// The merge of built parts into the program's module (BuildWaves.jet builds
+// one part per thread). Every function, type row, name and data row gets
+// its number by first use in a walk from the build's jobs, so a number
+// depends on what the program reaches and on the job order, never on which
+// part built a row or which memo interned it first. The walk visits the job
+// functions in job order, then each function it reached, in the order it
+// reached them: a function's slot types and names, then its instructions'
+// operands in order (IR.jet's operand table: ConstText/DataAddress a=data
+// row, ConstBigInt/CallRuntime a=name, Close b=name, Call/FunctionAddress
 // a=function); a type row reaches the module function its drop names, a
-// data row the rows its relocations name.
+// data row the rows its relocations name. Rows nothing reaches are dropped.
+//
+// Parts share a row by content: a function by key (a job's body is the part
+// that built it; any other function is a helper its part built whole), a
+// type row by its intern key, a name by its text, a data row by its text or
+// bytes key or, for a constant's static object, by the constant and type
+// (m.constant_rows). A data row with no key belongs to its part alone.
 
 use jet_foundation.[compiler_apply_order]
 
-struct IRCanon {
-    // functions[new] is the old id; function_new[old] the new one (-1: unreached).
-    functions: [Int]
+// A function the walk starts from: function `local` of part `part`.
+struct IRMergeRoot { part: Int, local: Int }
+
+// One part's rows under the merged numbering (-1: not reached), and its
+// data rows' sharing keys ("" for a row only its part holds).
+struct IRMergeSide {
     function_new: [Int]
-    types: [Int]
     type_new: [Int]
-    names: [Int]
     name_new: [Int]
-    data: [Int]
     data_new: [Int]
+    data_keys: [String]
 }
 
-// Renumbers `built` canonically from the job functions `roots` (in job
-// order). The layout and build memos refer to old rows, so they start
-// empty; the key maps are rebuilt over the new rows.
-fn ir_canonical(built: ^IRModule, roots: [Int]) -> IRModule Never! {
+// The merged rows (each one's part and row there) and the keys that share
+// a row between parts. `jobs` maps a root's function key to its root.
+struct IRMerge {
+    sides: [IRMergeSide]
+    roots: [IRMergeRoot]
+    jobs: [String:Int]
+    function_part: [Int]
+    function_local: [Int]
+    functions: [String:Int]
+    type_part: [Int]
+    type_local: [Int]
+    types: [String:Int]
+    name_part: [Int]
+    name_local: [Int]
+    names: [String:Int]
+    data_part: [Int]
+    data_local: [Int]
+    data: [String:Int]
+}
+
+// The module of one part built in queue order (ir_build_tests): its queue,
+// then its entry, are the roots.
+fn ir_merge_serial(built: ^IRModule) -> IRModule Never! {
     m := ^built
-    c := IRCanon{functions: [Int]{}, function_new: [Int]{}, types: [Int]{}, type_new: [Int]{}, names: [Int]{}, name_new: [Int]{}, data: [Int]{}, data_new: [Int]{}}
-    loop _ in 0..<m.functions.len() -> &c.function_new.push(-1)
-    loop _ in 0..<m.types.len() -> &c.type_new.push(-1)
-    loop _ in 0..<m.names.len() -> &c.name_new.push(-1)
-    loop _ in 0..<m.data.len() -> &c.data_new.push(-1)
-    loop root in roots -> ir_canon_function(&c, root)
+    roots := [IRMergeRoot]{}
+    loop queued in m.queue -> &roots.push(IRMergeRoot{part: 0, local: queued.id})
+    entry := -1
+    if m.entry >= 0 {
+        entry = roots.len()
+        &roots.push(IRMergeRoot{part: 0, local: m.entry})
+    }
+    parts := [IRModule]{}
+    &parts.push(^m)
+    ir_merge(^parts, roots, entry)
+}
+
+// Merges `built` from the job functions `roots` (in job order); `entry` is
+// the root of the program entry (-1: none). The merged module's layout and
+// build memos start empty (they name part rows); its key maps name the
+// merged rows.
+fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Never! {
+    parts := ^built
+    g := ir_merge_new(parts, roots)
+    loop root in roots {
+        _ :: ir_merge_function(&g, parts, root.part, root.local)
+    }
     cursor := 0
-    loop cursor < c.functions.len() {
-        old :: c.functions[cursor]
-        ir_canon_scan(&c, m, m.functions[old])
+    loop cursor < g.function_part.len() {
+        part :: g.function_part[cursor]
+        local :: g.function_local[cursor]
+        ir_merge_scan(&g, parts, part, parts[part].functions[local])
         cursor += 1
     }
-    loop old in c.functions -> ir_canon_rewrite(c, &m.functions[old])
-    ir_canon_apply_functions(&m.functions, c.functions, c.function_new)
-    ir_canon_apply_types(&m, c.types, c.type_new)
-    ir_canon_apply_names(&m.names, c.names, c.name_new)
-    ir_canon_apply_data(&m.data, c.data, c.data_new)
-    relocs := [Int:[IRDataReloc]]{}
-    loop (old, words) in m.data_relocs {
-        row :: c.data_new[old]
-        if row < 0 -> next
-        relocs[row] = loop word in words -> IRDataReloc{offset: word.offset, target: c.data_new[word.target], addend: word.addend, text: word.text}
+    out := ir_module_new()
+    loop (id, part) in g.function_part {
+        local :: g.function_local[id]
+        ir_merge_rewrite(g.sides[part], &parts[part].functions[local])
     }
-    m.data_relocs = relocs
-    data_rows := [String:Int]{}
-    loop (key, old) in m.data_rows {
-        if c.data_new[old] >= 0 -> data_rows[key] = c.data_new[old]
+    ir_merge_take_functions(&parts, g, &out.functions)
+    if entry >= 0 -> out.entry = g.sides[roots[entry].part].function_new[roots[entry].local]
+    loop (row, part) in g.type_part {
+        local :: g.type_local[row]
+        &out.types.push(parts[part].types[local].copy())
+        &out.type_keys.push(parts[part].type_keys[local].copy())
     }
-    m.data_rows = data_rows
-    function_rows := [String:Int]{}
-    loop (key, old) in m.function_rows {
-        if old >= 0 && c.function_new[old] >= 0 -> function_rows[key] = c.function_new[old]
+    loop (row, part) in g.name_part -> &out.names.push(parts[part].names[g.name_local[row]].copy())
+    loop (row, part) in g.data_part {
+        local :: g.data_local[row]
+        &out.data.push(parts[part].data[local].copy())
+        if parts[part].data_relocs.get(local) == .Val(words) {
+            out.data_relocs[row] = loop word in words -> IRDataReloc{offset: word.offset, target: g.sides[part].data_new[word.target], addend: word.addend, text: word.text}
+        }
     }
-    m.function_rows = function_rows
-    type_rows := [String:Int]{}
-    loop (row, key) in m.type_keys -> type_rows[key] = row
-    m.type_rows = type_rows
-    name_rows := [String:Int]{}
-    loop (row, name) in m.names -> name_rows[name] = row
-    m.name_rows = name_rows
-    if m.entry >= 0 -> m.entry = c.function_new[m.entry]
-    m.constant_rows = [String:Int]{}
-    m.layouts = [String:Int]{}
-    m.layout_low = 0
-    m.struct_members = [String:[IRMember]]{}
-    m.variant_members = [String:[IRMember]]{}
-    m.enum_sizes = [String:Int]{}
-    m.handle_rows = [String:Int]{}
-    m.close_free = [Int:Bool]{}
-    m.scalar_rows = [Int]{}
-    m.ids = [Int]{}
-    m.instances = [String:Int]{}
-    m.queue = [IRQueued]{}
-    m.lambdas = [IRLambdaJob]{}
-    m.close_glue = [String:Int]{}
-    m
-}
-
-// The job functions of `m` in job order: its queue, then its entry.
-fn ir_canon_roots(m: IRModule) -> [Int] Never! {
-    roots := [Int]{}
-    loop queued in m.queue -> &roots.push(queued.id)
-    if m.entry >= 0 -> &roots.push(m.entry)
-    roots
-}
-
-fn ir_canon_function(c: &IRCanon, id: Int) Never! {
-    if id < 0 || c.function_new[id] >= 0 -> return
-    c.function_new[id] = c.functions.len()
-    &c.functions.push(id)
-}
-
-fn ir_canon_type(c: &IRCanon, m: IRModule, row: Int) Never! {
-    if row < 0 || c.type_new[row] >= 0 -> return
-    c.type_new[row] = c.types.len()
-    &c.types.push(row)
-    drop :: m.types[row].drop
-    if drop == "" -> return
-    glue :: m.function_rows.get(drop) ?? -1
-    ir_canon_function(&c, glue)
-}
-
-fn ir_canon_name(c: &IRCanon, name: Int) Never! {
-    if name < 0 || c.name_new[name] >= 0 -> return
-    c.name_new[name] = c.names.len()
-    &c.names.push(name)
-}
-
-fn ir_canon_data(c: &IRCanon, m: IRModule, row: Int) Never! {
-    if row < 0 || c.data_new[row] >= 0 -> return
-    c.data_new[row] = c.data.len()
-    &c.data.push(row)
-    if m.data_relocs.get(row) == .Val(words) {
-        loop word in words -> ir_canon_data(&c, m, word.target)
+    loop part in 0..<parts.len() {
+        loop (key, local) in parts[part].data_rows {
+            row :: g.sides[part].data_new[local]
+            if row >= 0 -> out.data_rows[key.copy()] = row
+        }
     }
+    given := [Int:String]{}
+    loop part in 0..<parts.len() {
+        loop (identity, key) in parts[part].trait_keys {
+            if given.get(key) == .Val(other) {
+                if other != identity -> panic("trait payload keys of {other} and {identity} collide")
+                next
+            }
+            given[key] = identity.copy()
+            out.trait_keys[identity.copy()] = key
+        }
+    }
+    out.type_rows = ^g.types
+    out.name_rows = ^g.names
+    out.function_rows = ^g.functions
+    out
 }
 
-// Numbers what function `f` uses, in order.
-fn ir_canon_scan(c: &IRCanon, m: IRModule, f: IRFunction) Never! {
+fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
+    sides := [IRMergeSide]{}
+    loop part in 0..<parts.len() {
+        side := IRMergeSide{function_new: [Int]{}, type_new: [Int]{}, name_new: [Int]{}, data_new: [Int]{}, data_keys: [String]{}}
+        loop _ in 0..<parts[part].functions.len() -> &side.function_new.push(-1)
+        loop _ in 0..<parts[part].types.len() -> &side.type_new.push(-1)
+        loop _ in 0..<parts[part].names.len() -> &side.name_new.push(-1)
+        loop _ in 0..<parts[part].data.len() {
+            &side.data_new.push(-1)
+            &side.data_keys.push("")
+        }
+        loop (key, row) in parts[part].data_rows -> side.data_keys[row] = "text:{key}"
+        loop (memo, row) in parts[part].constant_rows {
+            if row >= 0 -> side.data_keys[row] = "constant:{memo}"
+        }
+        &sides.push(^side)
+    }
+    jobs := [String:Int]{}
+    loop (index, root) in roots {
+        key :: parts[root.part].functions[root.local].key
+        if jobs.get(key) == None -> jobs[key.copy()] = index
+    }
+    IRMerge{sides: sides, roots: roots.copy(), jobs: jobs, function_part: [Int]{}, function_local: [Int]{}, functions: [String:Int]{}, type_part: [Int]{}, type_local: [Int]{}, types: [String:Int]{}, name_part: [Int]{}, name_local: [Int]{}, names: [String:Int]{}, data_part: [Int]{}, data_local: [Int]{}, data: [String:Int]{}}
+}
+
+// The merged id of function `local` of part `part`. A job's id stands for
+// the body the job's own part built.
+fn ir_merge_function(g: &IRMerge, parts: [IRModule], part: Int, local: Int) -> Int Never! {
+    if local < 0 -> return -1
+    known :: g.sides[part].function_new[local]
+    if known >= 0 -> return known
+    key :: parts[part].functions[local].key.copy()
+    id := g.functions.get(key) ?? -1
+    if id < 0 {
+        source_part := part
+        source_local := local
+        if g.jobs.get(key) == .Val(job) {
+            source_part = g.roots[job].part
+            source_local = g.roots[job].local
+        }
+        id = g.function_part.len()
+        &g.function_part.push(source_part)
+        &g.function_local.push(source_local)
+        g.functions[key] = id
+        g.sides[source_part].function_new[source_local] = id
+    }
+    g.sides[part].function_new[local] = id
+    id
+}
+
+// The merged row of type row `row` of part `part`. Parts that interned the
+// same key must agree on its layout and ownership.
+fn ir_merge_type(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Never! {
+    if row < 0 -> return row
+    known :: g.sides[part].type_new[row]
+    if known >= 0 -> return known
+    key :: parts[part].type_keys[row].copy()
+    id :: g.types.get(key) ?? -1
+    if id >= 0 {
+        if !ir_merge_same_type(parts[g.type_part[id]].types[g.type_local[id]], parts[part].types[row]) -> panic("type {key} differs between build parts")
+        g.sides[part].type_new[row] = id
+        return id
+    }
+    added :: g.type_part.len()
+    &g.type_part.push(part)
+    &g.type_local.push(row)
+    g.types[key] = added
+    g.sides[part].type_new[row] = added
+    drop :: parts[part].types[row].drop
+    if drop != "" {
+        glue :: parts[part].function_rows.get(drop) ?? -1
+        _ :: ir_merge_function(&g, parts, part, glue)
+    }
+    added
+}
+
+fn ir_merge_same_type(a: IRType, b: IRType) -> Bool Never! {
+    a.kind == b.kind && a.size == b.size && a.align == b.align && a.drop == b.drop && a.clone == b.clone
+}
+
+fn ir_merge_name(g: &IRMerge, parts: [IRModule], part: Int, name: Int) -> Int Never! {
+    if name < 0 -> return name
+    known :: g.sides[part].name_new[name]
+    if known >= 0 -> return known
+    text :: parts[part].names[name].copy()
+    id := g.names.get(text) ?? -1
+    if id < 0 {
+        id = g.name_part.len()
+        &g.name_part.push(part)
+        &g.name_local.push(name)
+        g.names[text] = id
+    }
+    g.sides[part].name_new[name] = id
+    id
+}
+
+fn ir_merge_data(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Never! {
+    if row < 0 -> return row
+    known :: g.sides[part].data_new[row]
+    if known >= 0 -> return known
+    key :: g.sides[part].data_keys[row].copy()
+    if key != "" {
+        if g.data.get(key) == .Val(found) {
+            g.sides[part].data_new[row] = found
+            return found
+        }
+    }
+    id :: g.data_part.len()
+    &g.data_part.push(part)
+    &g.data_local.push(row)
+    if key != "" -> g.data[key] = id
+    g.sides[part].data_new[row] = id
+    if parts[part].data_relocs.get(row) == .Val(words) {
+        loop word in words {
+            _ :: ir_merge_data(&g, parts, part, word.target)
+        }
+    }
+    id
+}
+
+// Numbers what function `f` of part `part` uses, in order.
+fn ir_merge_scan(g: &IRMerge, parts: [IRModule], part: Int, f: IRFunction) Never! {
     loop slot in 0..<f.slot_type.len() {
-        ir_canon_type(&c, m, f.slot_type[slot])
-        ir_canon_name(&c, f.slot_name[slot])
+        _ :: ir_merge_type(&g, parts, part, f.slot_type[slot])
+        _ :: ir_merge_name(&g, parts, part, f.slot_name[slot])
     }
-    ir_canon_type(&c, m, f.result)
+    _ :: ir_merge_type(&g, parts, part, f.result)
     loop at in 0..<f.op.len() {
         if f.op[at] == {
-            .ConstText | .DataAddress -> ir_canon_data(&c, m, f.a[at])
-            .ConstBigInt | .CallRuntime -> ir_canon_name(&c, f.a[at])
-            .Close -> ir_canon_name(&c, f.b[at])
-            .Call | .FunctionAddress -> ir_canon_function(&c, f.a[at])
+            .ConstText | .DataAddress -> { _ :: ir_merge_data(&g, parts, part, f.a[at]) }
+            .ConstBigInt | .CallRuntime -> { _ :: ir_merge_name(&g, parts, part, f.a[at]) }
+            .Close -> { _ :: ir_merge_name(&g, parts, part, f.b[at]) }
+            .Call | .FunctionAddress -> { _ :: ir_merge_function(&g, parts, part, f.a[at]) }
             else -> {}
         }
     }
 }
 
-// Rewrites a reached function's operands to the new numbers.
-fn ir_canon_rewrite(c: IRCanon, f: &IRFunction) Never! {
+// Rewrites a merged function's operands from its part's rows to the merged ones.
+fn ir_merge_rewrite(side: IRMergeSide, f: &IRFunction) Never! {
     loop slot in 0..<f.slot_type.len() {
         ty :: f.slot_type[slot]
-        if ty >= 0 -> f.slot_type[slot] = c.type_new[ty]
+        if ty >= 0 -> f.slot_type[slot] = side.type_new[ty]
         name :: f.slot_name[slot]
-        if name >= 0 -> f.slot_name[slot] = c.name_new[name]
+        if name >= 0 -> f.slot_name[slot] = side.name_new[name]
     }
     if f.result >= 0 {
-        result :: c.type_new[f.result]
+        result :: side.type_new[f.result]
         f.result = result
     }
     loop at in 0..<f.op.len() {
         a :: f.a[at]
         if f.op[at] == {
-            .ConstText | .DataAddress -> { if a >= 0 -> f.a[at] = c.data_new[a] }
-            .ConstBigInt | .CallRuntime -> { if a >= 0 -> f.a[at] = c.name_new[a] }
+            .ConstText | .DataAddress -> { if a >= 0 -> f.a[at] = side.data_new[a] }
+            .ConstBigInt | .CallRuntime -> { if a >= 0 -> f.a[at] = side.name_new[a] }
             .Close -> {
                 name :: f.b[at]
-                if name >= 0 -> f.b[at] = c.name_new[name]
+                if name >= 0 -> f.b[at] = side.name_new[name]
             }
-            .Call | .FunctionAddress -> { if a >= 0 -> f.a[at] = c.function_new[a] }
+            .Call | .FunctionAddress -> { if a >= 0 -> f.a[at] = side.function_new[a] }
             else -> {}
         }
     }
 }
 
-// The full permutation that puts the reached rows `order` first (in the new
-// order) and every unreached row after them, in its old order.
-fn ir_canon_order(order: [Int], new: [Int]) -> [Int] Never! {
-    full := order.copy()
-    loop (old, row) in new {
-        if row < 0 -> &full.push(old)
+// Moves the merged functions out of their parts into `functions`, in merged
+// order (no function is copied): each part first orders its merged
+// functions by merged id and drops the rest, then the merged rows pop off
+// their parts from the last id down and are reversed.
+fn ir_merge_take_functions(parts: &[IRModule], g: IRMerge, functions: &[IRFunction]) Never! {
+    count :: g.function_part.len()
+    loop part in 0..<parts.len() {
+        order := [Int]{}
+        merged := [Bool]{}
+        loop _ in 0..<parts[part].functions.len() -> &merged.push(false)
+        loop id in 0..<count {
+            if g.function_part[id] == part {
+                &order.push(g.function_local[id])
+                merged[g.function_local[id]] = true
+            }
+        }
+        kept :: order.len()
+        loop (local, taken) in merged {
+            if !taken -> &order.push(local)
+        }
+        compiler_apply_order<IRFunction>(&parts[part].functions, order)
+        loop parts[part].functions.len() > kept {
+            _ := &parts[part].functions.pop()
+        }
     }
-    full
-}
-
-fn ir_canon_apply_functions(rows: &[IRFunction], order: [Int], new: [Int]) Never! {
-    compiler_apply_order<IRFunction>(&rows, ir_canon_order(order, new))
-    loop rows.len() > order.len() -> _ := &rows.pop()
-}
-
-fn ir_canon_apply_types(m: &IRModule, order: [Int], new: [Int]) Never! {
-    full :: ir_canon_order(order, new)
-    compiler_apply_order<IRType>(&m.types, full)
-    compiler_apply_order<String>(&m.type_keys, full)
-    loop m.types.len() > order.len() -> _ := &m.types.pop()
-    loop m.type_keys.len() > order.len() -> _ := &m.type_keys.pop()
-}
-
-fn ir_canon_apply_names(rows: &[String], order: [Int], new: [Int]) Never! {
-    compiler_apply_order<String>(&rows, ir_canon_order(order, new))
-    loop rows.len() > order.len() -> _ := &rows.pop()
-}
-
-fn ir_canon_apply_data(rows: &[[U8]], order: [Int], new: [Int]) Never! {
-    compiler_apply_order<[U8]>(&rows, ir_canon_order(order, new))
-    loop rows.len() > order.len() -> _ := &rows.pop()
+    id := count - 1
+    loop id >= 0 {
+        row := &parts[g.function_part[id]].functions.pop() ?? panic("a merged function left its part")
+        &functions.push(^row)
+        id -= 1
+    }
+    &functions.reverse()
 }

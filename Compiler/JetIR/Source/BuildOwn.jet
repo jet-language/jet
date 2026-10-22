@@ -715,7 +715,8 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
     key :: if members_only -> "#close.members<{ir_row_key(m, row)}>" else -> "#close<{ir_row_key(m, row)}>"
     known :: m.close_glue.get(key) ?? -3
     if known == -2 {
-        ir_fail(&b, span, "close of {ir_type_name(m.types[row].ty)}")
+        message :: m.helper_errors.get(key) ?? panic("a failed close glue lost its message")
+        ir_fail(&b, span, message)
         return -1
     }
     if known != -3 -> return known
@@ -748,6 +749,7 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
         ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = ^a.f
         m.close_glue[key] = -2
+        m.helper_errors[key] = a.error.copy()
         ir_fail(&b, span, a.error)
         return -1
     }

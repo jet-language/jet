@@ -74,7 +74,7 @@ fn jet_cli_emit_ir_result(file: String, source: String, color: Bool, json: Bool,
         compiler_transfer_rows<TConstantDef>(&constants, &checked.modules[index].declarations.constants)
         compiler_transfer_rows<SemaCheckedForeignFunction>(&foreign, &checked.modules[index].foreign_functions)
     }
-    built :: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign, entry_key) else -> ir_build_all(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign)
+    built :: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign, entry_key, result.compiler_threads) else -> ir_build_all(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign, result.compiler_threads)
     if built.failures.len() > 0 {
         rows :: loop failure in built.failures -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), "correct the reported native backend problems, then retry `jet emit --ir {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}

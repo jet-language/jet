@@ -192,7 +192,7 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `type_keys[row]` is type row `row`'s intern key (ir_row_key).
 // `data_relocs` names the data rows that are static objects (8-byte
 // aligned; BuildStatic.jet) and the words in them that hold an address;
-// `constant_rows` maps "<constant key>|<type row>" to the static object
+// `constant_rows` maps "<constant key>|<type key>" to the static object
 // holding that constant's value (-1: it is built at each read).
 // `function_rows` maps a function key to its id (row of `functions`);
 // `entry` is the program entry (`fn run`), -1 for a library. `layouts`,
@@ -212,9 +212,11 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `queue` holds the functions waiting to be built and `lambdas` the lambda
 // bodies they build; `close_glue` the close glue built per glue key
 // (BuildOwn.jet; -1: the type closes nothing, -2: its glue failed);
-// `trait_keys` a boxed trait value's payload key by concrete type identity
-// (BuildTraits.jet ir_trait_key); `subst_names`/`subst_types` the type parameters of the
-// instance being built and their arguments.
+// `helper_errors` the message of a helper whose body failed, by helper key,
+// which every later use reports again; `trait_keys` a boxed trait value's
+// payload key by concrete type identity (BuildTraits.jet ir_trait_key);
+// `subst_names`/`subst_types` the type parameters of the instance being
+// built and their arguments.
 struct IRModule {
     types: [IRType]
     type_keys: [String]
@@ -241,13 +243,14 @@ struct IRModule {
     queue: [IRQueued]
     lambdas: [IRLambdaJob]
     close_glue: [String:Int]
+    helper_errors: [String:String]
     trait_keys: [String:Int]
     subst_names: [String]
     subst_types: [Type]
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
+    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, helper_errors: [String:String]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {

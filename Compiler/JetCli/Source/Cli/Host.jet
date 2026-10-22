@@ -399,7 +399,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     closure_symbols := [String:Bool]{}
     loop row in foreign_rows -> closure_symbols[row.symbol.copy()] = true
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, plan) else -> ir_build_program(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, checked.entry_key ?? "")
+    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, plan) else -> ir_build_program(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, checked.entry_key ?? "", result.compiler_threads)
     function_count :: built.program.functions.len()
     if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
     rows := [String]{}
