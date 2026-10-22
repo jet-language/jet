@@ -185,8 +185,9 @@ fn ir_list_extend(m: &IRModule, b: &IRBuilder, list: Int, row: Int, source: Int)
 // `xs.try_reserve(additional)` (Lower lower_helper_list_try_reserve): room
 // for `additional` more elements, or `Err(AllocError)` naming the requested
 // bytes with the List untouched. A negative request asks for 0 bytes; one
-// above I64.MAX, or whose bytes would pass I64.MAX, saturates there.
-fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, additional: Int, span: Span) -> Int Never! {
+// above I64.MAX, or whose bytes would pass I64.MAX, saturates there. The Ok
+// payload is `payload` (-1: Unit).
+fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, additional: Int, payload: Int, span: Span) -> Int Never! {
     err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "try_reserve without its checked Result") }
     if ir_kind_of(m, b, additional) != .Int {
         capacity_ty :: m.types[b.f.slot_type[additional]].ty
@@ -294,11 +295,31 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     ir_emit(&b.f, IROp.Copy, result, refused, -1, -1, b.line)
     b.fresh[refused] = false
     ir_else(&b.f, b.line)
-    reserved :: ir_result_box(&m, p, &b, ty, true, -1)
+    // A new List of Unit elements holds any count (Lower
+    // lower_helper_try_capacity).
+    if unit_element && payload >= 0 {
+        unbounded :: ir_word_const(&m, &b, largest)
+        ir_emit(&b.f, IROp.Store, -1, list, 8, unbounded, b.line)
+    }
+    reserved :: ir_result_box(&m, p, &b, ty, true, payload)
     ir_emit(&b.f, IROp.Copy, result, reserved, -1, -1, b.line)
     b.fresh[reserved] = false
     ir_end(&b.f, b.line)
     result
+}
+
+// `List<T>.try_with_capacity(capacity)` (Lower lower_helper_try_capacity):
+// a new empty List with room for `capacity` elements, or the try_reserve
+// `Err(AllocError)`.
+fn ir_list_try_with_capacity(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, args: [TExpr], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "List.try_with_capacity with {args.len()} arguments")
+    list_ty :: if ir_untag(ir_subst(p, ty)) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}") }
+    list_row :: ir_value_type(&m, p, list_ty) ?? return ir_type_fail(&b, span, list_ty)
+    capacity :: ir_expr(&m, &p, &b, args[0])
+    if ir_failed(b) || capacity < 0 -> return -1
+    list :: ir_list_empty(&m, &b, list_row)
+    element :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}")
+    ir_list_try_reserve(&m, p, &b, ir_subst(p, ty), list, element, capacity, list, span)
 }
 
 // `xs.remove(value)` (the first equal element, None when there is none)
@@ -371,8 +392,10 @@ fn ir_route_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: I
 // Strings through the runtime routes the old path calls.
 fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TBuiltinOp, args: [TExpr], span: Span) -> Int Never! {
     if operation == .IterNext -> return ir_lazy_next(&m, &p, &b, ty, receiver, span)
+    if operation == .ListTryWithCapacity -> return ir_list_try_with_capacity(&m, &p, &b, ty, args, span)
     subject :: ir_expr(&m, &p, &b, receiver)
-    if ir_failed(b) || subject < 0 -> return -1
+    if ir_failed(b) -> return -1
+    if subject < 0 -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} on a Unit receiver")
     kind :: ir_kind_of(m, b, subject)
     element := -1
     if ir_list_element(&m, p, b, subject) == .Val(row) -> element = row
@@ -429,7 +452,7 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
             }
             .TryReserve -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "try_reserve without a capacity")
-                return ir_list_try_reserve(&m, p, &b, ty, subject, element, operands[1], span)
+                return ir_list_try_reserve(&m, p, &b, ty, subject, element, operands[1], -1, span)
             }
             .Clear -> {
                 zero :: ir_word_const(&m, &b, 0)
