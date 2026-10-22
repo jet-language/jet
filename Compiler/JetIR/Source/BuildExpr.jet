@@ -764,7 +764,31 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: TExpr, op: 
         if line > 0 -> b.line = line
         return ir_list_index_assign(&m, p, &b, base, index, op, value, uninit && op == None, span)
     }
+    if place.kind == .Local(local) {
+        if local.persist_key == .Val(key) -> return ir_storage_assign(&m, p, &b, key, op, value, span)
+    }
     ir_fail(&b, span, "assignment to {ir_expr_kind_name(place.kind)} place")
+}
+
+// `storage (op)= value` for module storage `key` (Lower lower_static_walk):
+// the value, then the read-modify-write through the storage cell.
+fn ir_storage_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op: TBinaryOp?, value: TExpr, span: Span) Never! {
+    definition :: p.constants.get(key) ?? return ir_fail(&b, span, "module storage {key} without a declaration")
+    if !definition.is_storage -> return ir_fail(&b, span, "assignment to module constant {definition.name}")
+    right :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || right < 0 -> return
+    address :: ir_storage_address(&m, p, &b, definition, span)
+    if address < 0 -> return
+    result := right
+    if op == .Val(binary) {
+        row :: ir_value_type(&m, p, definition.ty) ?? return ir_fail(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
+        current :: ir_load_at(&m, &b, address, 0, row)
+        site :: b.line
+        result = ir_binary(&m, p, &b, binary, false, site, definition.ty, current, right, value.ty, span)
+        ir_release(&m, &b, right)
+        if ir_failed(b) -> return
+    }
+    ir_store_at(&m, p, &b, address, 0, result)
 }
 
 fn ir_loop_frame(b: IRBuilder, label: String?) -> IRLoopFrame? Never! {
@@ -3801,10 +3825,17 @@ fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: TExpr, ar
 }
 
 // A checked constant read: a borrow of its static object (BuildStatic.jet)
-// when its value freezes, else its compile-time value built in place.
+// when its value freezes, else its compile-time value built in place. A
+// read of module storage loads its cell.
 fn ir_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if p.rows.get(key) != None -> return ir_function_value(&m, p, &b, ty, key, span)
     definition :: p.constants.get(key) ?? return ir_fail_slot(&b, span, "constant {key} without a declaration")
+    if definition.is_storage {
+        address :: ir_storage_address(&m, p, &b, definition, span)
+        if address < 0 -> return -1
+        row :: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
+        return ir_load_at(&m, &b, address, 0, row)
+    }
     borrowed :: ir_static_read(&m, p, &b, ty, key, definition.value)
     if borrowed >= 0 -> return borrowed
     ir_comptime(&m, p, &b, ty, definition.value, span)

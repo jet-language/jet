@@ -13,7 +13,7 @@
 // range: both runtime-owned, built at startup by the old path) keeps the
 // constant on ir_comptime, built at each read.
 
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type]
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, Type]
 use jet_backend.[lower_constant_u64_bits, lower_float_constant_bits, lower_int_inline]
 
 // Bytes before a box's payload: the allocator's block header, whose first
@@ -110,6 +110,33 @@ fn ir_static_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: Stri
     slot :: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Offset, slot, address, IR_STATIC_BOX_HEADER, -1, b.line)
     slot
+}
+
+// The address of module storage `definition` (a mutable module binding;
+// Lower lower_static_storage): one 8-byte data row per declaration in the
+// object's writable data, holding the initial value's word, that every read
+// loads and every assignment stores. As on the old path, storage holds one
+// plain word (a Bool, fixed-width or Char word, or a Float); -1 on failure.
+fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
+    kind :: m.types[row].kind
+    if kind != .Bool && kind != .Word && kind != .Char && kind != .Float && kind != .Float32 -> return ir_fail_slot(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
+    memo :: "storage:{definition.key}"
+    object := m.constant_rows.get(memo) ?? -1
+    if object < 0 {
+        s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
+        cell :: ir_static_new(&s, 8)
+        if !ir_static_into(&m, p, &s, cell, 0, definition.ty, row, definition.value) -> return ir_fail_slot(&b, span, "module storage {definition.name}: initial value does not freeze")
+        object = m.data.len()
+        &m.data.push(s.bytes[cell].copy())
+        // No address words; the entry marks a word-aligned static object.
+        m.data_relocs[object] = [IRDataReloc]{}
+        m.constant_rows[memo] = object
+    }
+    pointer :: ir_pointer_row(&m)
+    address :: ir_temp(&m, &b, pointer)
+    ir_emit(&b.f, IROp.DataAddress, address, object, -1, -1, b.line)
+    address
 }
 
 // Lays `value` of `ty` (type row `row`) at `offset` of local object
