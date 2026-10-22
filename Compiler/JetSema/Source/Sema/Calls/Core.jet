@@ -586,6 +586,20 @@ fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
 }
 
+// Rust core_call.rs `("core.math", "is_nan" | "is_inf" | "is_finite")`:
+// floating-point classification takes Float or F32. A float argument stays the
+// ordinary source call; any other checked argument type is refused here.
+fn sema_call_try_core_math_float_class(module_name: String, member: String, type_args: [Type], args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.math" || (member != "is_nan" && member != "is_inf" && member != "is_finite") || args.len() != 1 || type_args.len() != 0 -> return unhandled
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return unhandled
+    if probed.ty == Type.Float || probed.ty == Type.Float32 -> return unhandled
+    value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{member}` needs Float or F32, not {sema_type_show(value.ty)}", "floating-point classification only applies to floats", "pass a Float or F32 value"))
+    SemaDirectSpecialCheck{handled: true, value: None}
+}
+
 // Width selection is the existing checked mathematical normalization; it is
 // separate from source forwarding and never widens F32 values.
 fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {

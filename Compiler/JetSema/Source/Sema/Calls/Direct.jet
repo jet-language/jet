@@ -799,6 +799,8 @@ fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: Sema
         .Source(target) -> {
             math_abs :: sema_call_try_core_math_abs(module_name, member, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if math_abs.handled -> return math_abs
+            float_class :: sema_call_try_core_math_float_class(module_name, member, call.type_args, call.args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if float_class.handled -> return float_class
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1
