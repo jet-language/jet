@@ -1079,7 +1079,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             }
             return ir_fail_slot(&b, span, "host call {ir_host_call_name(call)}")
         }
-        .PreciseBuiltin(type_name, function, args) -> return ir_precise_builtin(&m, &p, &b, type_name, function, args, span)
+        .PreciseBuiltin(type_name, function, args) -> return ir_precise_builtin(&m, &p, &b, expression.ty, type_name, function, args, span)
         .EnumLit(enum_type, variant, payload) -> return ir_enum_value(&m, &p, &b, expression.ty, enum_type, variant, payload, span)
         .EnumCtor(owner, variant, payload) -> return ir_enum_value(&m, &p, &b, expression.ty, owner.key, variant.key, payload, span)
         .JSONLit(variant, argument, _) -> return ir_json_literal(&m, &p, &b, expression.ty, variant, argument, span)
@@ -1882,10 +1882,31 @@ fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [
 
 // A precise numeric builtin (`Fraction`/`Decimal`/`Complex` arithmetic and
 // conversions) calls its core.math source helper, as codegen
-// jet_codegen_lower_precise_builtin does.
-fn ir_precise_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, type_name: String, function: String, args: [TExpr], span: Span) -> Int Never! {
-    helper :: jet_codegen_precise_source_helper(type_name, function) ?? return ir_fail_slot(&b, span, "precise builtin {type_name}.{function} without a core.math helper")
+// jet_codegen_lower_precise_builtin does; when the program holds no core.math
+// (the type is then its runtime handle) it is the `jet_<type>_<function>`
+// route, its constructors taking their arguments by value.
+fn ir_precise_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, args: [TExpr], span: Span) -> Int Never! {
+    helper :: jet_codegen_precise_source_helper(type_name, function) ?? ""
     key :: "function:<corelib>/core.math::{helper}"
+    if helper == "" || p.rows.get(key) == None {
+        type_key :: if type_name == {
+            "Decimal" -> "decimal"
+            "Fraction" -> "fraction"
+            "Complex" -> "complex"
+            "Measurement" -> "measurement"
+            else -> { return ir_fail_slot(&b, span, "precise builtin {type_name}.{function}") }
+        }
+        by_value :: function == "new" || function == "from_parts" || (function.starts_with("from_") && function != "from_str")
+        slots := [Int]{}
+        borrowed := [Bool]{}
+        loop argument in args {
+            slot :: ir_expr(&m, &p, &b, argument)
+            if ir_failed(b) -> return -1
+            &slots.push(slot)
+            &borrowed.push(!by_value)
+        }
+        return ir_route(&m, &p, &b, "jet_{type_key}_{function}", slots, borrowed, ty, span)
+    }
     call_args := [TCallArg]{}
     loop argument in args {
         // copy: `argument` is an element of read parameter `args`, which keeps the original; the call argument owns this one

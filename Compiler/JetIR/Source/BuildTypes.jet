@@ -2384,8 +2384,28 @@ fn ir_numeric_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             ir_release(&m, &b, value)
             return result
         }
+        .Predicate(method) -> return ir_float_predicate(&m, &b, value, method, receiver.ty, span)
         else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
+}
+
+// `x.is_nan()`, `x.is_infinite()`, `x.is_finite()` on Float and F32 (Lower
+// lower_numeric_method): NaN is the one value unequal to itself; `x - x` is
+// NaN precisely for infinities and NaNs, zero for every finite value.
+fn ir_float_predicate(m: &IRModule, b: &IRBuilder, value: Int, method: String, ty: Type, span: Span) -> Int Never! {
+    kind :: ir_kind_of(m, b, value)
+    if kind != .Float && kind != .Float32 -> return ir_fail_slot(&b, span, "numeric predicate {method} of {ir_type_name(ty)}")
+    if method == "is_nan" -> return ir_bool_op(&m, &b, IROp.Ne, value, value)
+    if method != "is_finite" && method != "is_infinite" -> return ir_fail_slot(&b, span, "numeric predicate {method}")
+    difference :: ir_temp_like(&m, &b, value)
+    ir_emit(&b.f, IROp.Sub, difference, value, value, -1, b.line)
+    finite :: ir_bool_op(&m, &b, IROp.Eq, difference, difference)
+    if method == "is_finite" -> return finite
+    infinite :: ir_bool_op(&m, &b, IROp.Eq, value, value)
+    ir_open_if(&b.f, finite, b.line)
+    ir_emit(&b.f, IROp.Const, infinite, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    infinite
 }
 
 // `U8.from_int(x)`, `I32.from_u64(w)` and the other narrowing integer

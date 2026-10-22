@@ -2124,6 +2124,9 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
 // arguments to the record's runtime route.
 fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [TExpr], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
     canonical :: jet_codegen_canonical_core_record(record)
+    if canonical.module_name == "core.mem" && (canonical.member == "__list_capacity" || canonical.member == "__list_reserve_exact" || canonical.member == "__type_size") {
+        return ir_core_list_leaf(&m, &p, &b, ty, canonical.member, args, type_args, span)
+    }
     if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic Core call {canonical.module_name}.{canonical.member}")
     loop flag in widen {
         if flag -> return ir_fail_slot(&b, span, "Core call {canonical.module_name}.{canonical.member} widening a fixed list")
@@ -2133,6 +2136,7 @@ fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: Co
         .Rust(name) -> name
         .SourceOwned -> { return ir_fail_slot(&b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
+    if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(&m, &p, &b, ty, args, span)
     if ir_lazy_core_call(&m, &p, &b, symbol, ty, args, span) == .Val(result) -> return result
     slots := [Int]{}
     borrow_mask :: canonical.signature.borrow_mask
@@ -2153,6 +2157,51 @@ fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: Co
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     labels :: core_call_native_return_labels(canonical.module_name, canonical.member)
     ir_route_labeled(&m, &p, &b, symbol, slots, borrow_mask, result, labels, span)
+}
+
+// The raw List layout leaves (Lower lower_encoding_list_leaf):
+// `__type_size<T>()` is T's List stride, `__list_capacity<T>(xs)` the header's
+// capacity, `__list_reserve_exact<T>(&xs, n)` grows the written header to
+// exactly len + n elements (jet_rt_encoding_list_reserve_exact).
+fn ir_core_list_leaf(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, member: String, args: [TExpr], type_args: [Type], span: Span) -> Int Never! {
+    if type_args.len() != 1 -> return ir_fail_slot(&b, span, "raw List layout leaf requires its checked element type")
+    element_ty :: ir_subst(p, type_args[0])
+    element :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    stride :: if m.types[element].kind == .Unit -> 1 else -> ir_list_stride(m, element)
+    if member == "__type_size" -> return ir_int_constant(&m, &b, result_row, stride)
+    if args.len() != (if member == "__list_reserve_exact" -> 2 else -> 1) -> return ir_fail_slot(&b, span, "raw List layout leaf has invalid checked arity")
+    if member == "__list_capacity" {
+        list :: ir_expr(&m, &p, &b, args[0])
+        if ir_failed(b) || list < 0 -> return -1
+        capacity :: ir_load_word(&m, &b, list, 8)
+        ir_release(&m, &b, list)
+        if m.types[result_row].kind == .Int -> return ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{capacity}, result_row)
+        return capacity
+    }
+    backs := [IRWriteBack]{}
+    list :: ir_place_address(&m, &p, &b, args[0], &backs, span)
+    if ir_failed(b) || list < 0 -> return -1
+    additional :: ir_expr(&m, &p, &b, args[1])
+    if ir_failed(b) || additional < 0 -> return -1
+    native :: ir_native_index(&m, &b, additional, span)
+    if ir_failed(b) -> return -1
+    ir_release(&m, &b, additional)
+    width :: ir_word_const(&m, &b, stride)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    reserved :: ir_runtime(&m, &b, "jet_rt_encoding_list_reserve_exact", [Int]{list, width, native}, bool_row)
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_release(&m, &b, list)
+    reserved
+}
+
+// `encoding.from_entries(entries)` (Lower lower_native_value_call): the
+// canonical Dyn's Object over the checked ordered entry List, which the box
+// takes (a read argument is copied).
+fn ir_object_from_entries(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, args: [TExpr], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "native value kernel jet_raw_object_from_entries requires one checked argument")
+    if ir_dyn_def(p, ty) == None -> return ir_fail_slot(&b, span, "native Object kernel requires the canonical Dyn")
+    ir_enum_value(&m, &p, &b, ty, "Dyn", "Object", TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: args[0]}}}, span)
 }
 
 // An exact Int Core operand narrowed to its I64 slot: the checked fixed
