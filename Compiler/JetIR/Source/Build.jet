@@ -401,8 +401,17 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
 // declared elsewhere (an implementation of another module's type) is already
 // spelled by its key or alias and stays as it is.
 fn ir_declared_owners(functions: &[FnBody], types: [TTypeDef]) Never! {
+    // Only a name some method's owner spells is ever looked up, so only the
+    // types of those names are keyed.
+    owners := [String:Bool]{}
+    loop index in 0..<functions.len() {
+        name :: ir_declared_owner_name(functions[index].kind) ?? next
+        owners[name] = true
+    }
+    if owners.len() == 0 -> return
     declared := [String:String]{}
     loop definition in types {
+        if owners.get(definition.name) == None -> next
         scoped :: "{definition.module_identity}|{definition.name}"
         if declared.get(scoped) == None -> declared[scoped] = definition.key.copy()
     }
@@ -418,6 +427,16 @@ fn ir_declared_owners(functions: &[FnBody], types: [TTypeDef]) Never! {
             }
             .TopLevel -> {}
         }
+    }
+}
+
+// The name a method's owner spells (ir_declared_owner looks up), or None
+// for a top-level function or an owner that is not a nominal type.
+fn ir_declared_owner_name(kind: TFuncKind) -> String? Never! {
+    if kind == {
+        .Method(_, owner) -> ir_nominal_name(owner)
+        .TraitMethod(_, _, owner, _, _) -> ir_nominal_name(owner)
+        .TopLevel -> None
     }
 }
 
@@ -533,15 +552,18 @@ fn ir_trait_methods(functions: [FnBody], type_rows: [String:Int], types: [TTypeD
     methods
 }
 
-// The last segment of a qualified key (`trait:<m>::Display` is `Display`).
+// The last segment of a qualified key (`trait:<m>::Display` is `Display`):
+// what follows its last `.` or `:`.
 fn ir_short_name(key: String) -> String Never! {
-    short := key
-    separators :: [String]{"::", ".", ":"}
-    loop separator in separators {
-        parts :: short.split(separator).to_list()
-        short = parts[parts.len() - 1]
+    bytes :: key.bytes()
+    at := bytes.len()
+    loop at > 0 {
+        byte :: bytes[at - 1]
+        if byte == (U8{46}) || byte == (U8{58}) -> break
+        at -= 1
     }
-    short
+    if at == 0 -> return key.copy()
+    String.from_bytes(bytes.slice(at, bytes.len())) ?? key.copy()
 }
 
 // The declaration a nominal type name or key names.

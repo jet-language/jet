@@ -2264,14 +2264,24 @@ fn ir_add_union_types(types: &[TTypeDef], functions: [FnBody]) Never! {
             else -> {}
         }
     }
-    declared := [String:Bool]{}
-    loop definition in types -> declared[definition.key] = true
-    module_identity :: types[0].module_identity.copy()
+    if found.len() == 0 -> return
+    // A found union is added unless a type of its key exists or an earlier
+    // one of the same key was added.
+    keys := [String]{}
+    pending := [String:Bool]{}
     loop ty in found {
         key :: ir_union_key(ty)
-        if declared.get(key) != None -> next
-        declared[key] = true
-        if ty == .Union(members) -> &types.push(ir_union_def(module_identity, key, members))
+        pending[key.copy()] = true
+        &keys.push(key)
+    }
+    loop definition in types {
+        if pending.get(definition.key) != None -> pending[definition.key.copy()] = false
+    }
+    module_identity :: types[0].module_identity.copy()
+    loop index in 0..<found.len() {
+        if !(pending.get(keys[index]) ?? false) -> next
+        pending[keys[index].copy()] = false
+        if found[index] == .Union(members) -> &types.push(ir_union_def(module_identity, keys[index], members))
     }
 }
 
