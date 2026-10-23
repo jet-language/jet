@@ -1,0 +1,14 @@
+# tests/tir_modules_and_enums.rs::inline_module_file_use_list_matches_all_tiers at tests/tir_modules_and_enums.rs:491; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: inline_module_file_use_list_matches_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "x:7\ny:8\n" # tests/tir_modules_and_enums.rs:515 tir_support::build_and_run_multi("tir_inline_file_use","main.jet",files)
+step r2: jet run main.jet
+exit: 0
+stdout: = "x:7\ny:8\n" # tests/tir_modules_and_enums.rs:519 tir_support::run_default_multi("inline_file_use","main.jet",files)

@@ -1,0 +1,52 @@
+package {
+    name: "pattern_field_owner_shapes"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }
+}
+// Indexed/optional fields and read/write-window owners all use one checked
+// field-ID resolver. A view's tag must not become a nominal owner spelling.
+
+struct Box<T> { value: T }
+struct Pair { left: Int, right: Int }
+
+fn absent() -> (left: Int, right: Int)? { None }
+
+fn tuple_first(pair: (left: Int, right: Int)) -> Int {
+    (first, second) :: pair
+    first
+}
+
+fn indexed(rows: [(left: Int, right: Int)]) -> Int {
+    rows[0].left + rows[0].right
+}
+
+fn edit_indexed(rows: &[(left: Int, right: Int)]) {
+    rows[0].left += 1
+}
+
+fn read_shared(state: Shared<Pair>) -> Int {
+    guard :: state.guard_read()
+    guard.value.left
+}
+
+fn edit_shared(state: Shared<Pair>) -> Int {
+    guard :: state.guard_edit()
+    guard.value.left += 1
+    guard.value.left
+}
+
+fn run() {
+    rows := [(left: 2, right: 3)]
+    print(indexed(rows))
+    edit_indexed(&rows)
+    print(indexed(rows))
+    some :: Val((left: 7, right: 8))
+    none :: absent()
+    print(some?.left ?? -1)
+    print(none?.left ?? -1)
+    print(Box<Int>{value: 11}.value)
+    state :: shared Pair{left: 17, right: 18}
+    print(read_shared(state))
+    print(edit_shared(state))
+    print(tuple_first((left: 23, right: 24)))
+}

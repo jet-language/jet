@@ -1,0 +1,11 @@
+# tests/tir_modules_and_enums.rs::user_same_leaf_enum_keeps_its_own_payload_projection at tests/tir_modules_and_enums.rs:79; hand-port
+# The nominal-owner fact assertions read Rust Driver internals; the observable is that both same-leaf enums check and lower.
+# Fixture migrated: files of one package share a namespace (E0623), so local.jet and main.jet are loose files reached by `use "local"`.
+fixture: user_same_leaf_enum_keeps_its_own_payload_projection.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/tir_modules_and_enums.rs:98 no error diagnostics
+step: jet build main.jet
+exit: 0 # tests/tir_modules_and_enums.rs:98 the checked program lowers

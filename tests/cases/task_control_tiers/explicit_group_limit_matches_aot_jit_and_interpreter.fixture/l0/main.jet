@@ -1,0 +1,23 @@
+
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    (sender, receiver) :: channel<Int>()
+    second_sender :: sender.copy()
+    task.group limited(limit: 0) {
+        first :: task {
+            sender.send(1)
+            time.sleep(25ms)
+            sender.send(2)
+        }
+        receiver.receive() ?? 0
+        second :: task {
+            second_sender.send(3)
+        }
+        print(receiver.receive() ?? 0)
+        print(receiver.receive() ?? 0)
+        first.join() ?? panic("first task failed")
+        second.join() ?? panic("second task failed")
+    }
+}

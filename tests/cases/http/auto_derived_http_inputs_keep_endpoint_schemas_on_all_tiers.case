@@ -1,0 +1,11 @@
+# tests/http.rs::auto_derived_http_inputs_keep_endpoint_schemas_on_all_tiers at tests/http.rs:183; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: auto_derived_http_inputs_keep_endpoint_schemas_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build http_auto_decode.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\n" # tests/http.rs:215 common::build_and_run("http_auto_decode", "http_auto_decode", &source) (AOT tier)

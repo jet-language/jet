@@ -1,0 +1,12 @@
+# tests/layout.rs::infeasible_value_read_panics_loudly at tests/layout.rs:251; hand-port
+fixture: infeasible_value_read_panics_loudly.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet
+exit: 0 # tests/layout.rs:264 compiles
+step: jet build fixture.jet
+exit: 0 # tests/layout.rs:283 builds
+step: built
+exit: nonzero # tests/layout.rs:285 reading an infeasible value stops
+stderr: ~ "no feasible solution" # tests/layout.rs:287 the stop names the conflict

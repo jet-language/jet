@@ -1,0 +1,70 @@
+
+#Error
+enum TypedFailure {
+    Bad
+}
+
+#Error
+enum StoreFailure {
+    Missing
+}
+
+fn implicit(value: Int) -> Int {
+    if value == 0 {
+        return Err("implicit")
+    }
+    return value
+}
+
+fn explicit(value: Int) -> Int TypedFailure! {
+    if value == 0 {
+        return Err(TypedFailure.Bad)
+    }
+    return value
+}
+
+impl StoreFailure -> Err {
+    return Err("converted")
+}
+
+fn converted(value: Int) -> Int StoreFailure! {
+    if value == 0 {
+        return Err(StoreFailure.Missing)
+    }
+    return value
+}
+
+fn contextual_source() -> Int { Err("context", code: "E_CONTEXT", cause: Err("root")) }
+
+fn contextual() -> Int { contextual_source()?("loading") }
+
+fn optional_success(value: Int) -> Int? {
+    if value == 0 {
+        return None
+    }
+    return Val(value)
+}
+
+fn unit_success(fail: Bool) {
+    if fail {
+        return Err("unit")
+    }
+}
+
+fn unit_caller(fail: Bool) -> Int {
+    unit_success(fail)
+    return 7
+}
+
+fn impossible() -> Int Never! { 7 }
+
+fn matrix() -> String {
+    return "{implicit(2) ?? -1}|{implicit(0) ?? -1}|{explicit(2) ?? -2}|{explicit(0) ?? -2}|{converted(2) ?? -3}|{converted(0) ?? -3}|{contextual() ?? -4}|{optional_success(2) ?? -5}|{optional_success(0) ?? -5}|{unit_caller(false) ?? -6}|{unit_caller(true) ?? -6}|{impossible() ?? -7}"
+}
+
+COMPTIME_MATRIX :: comptime { matrix() }
+
+fn run() {
+    print(COMPTIME_MATRIX)
+    print(matrix())
+}

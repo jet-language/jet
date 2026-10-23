@@ -1,0 +1,17 @@
+# tests/http.rs::mounted_routes_keep_declaration_order_at_the_call_site at tests/http.rs:106; hand-port
+# Rust walked the checked AST for the mount registrations; the route-order observable is the example run, whose golden pins
+# the mounted routes served in declaration order (`mounted-order:second`, `value-before:late`). The grouped-marker spelling must check and run the same.
+fixture: mounted_routes_keep_declaration_order_at_the_call_site.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check plain/http_route_markers.jet
+exit: 0 # tests/http.rs:122-125 the route example checks without errors
+step: jet check grouped/http_route_markers.jet
+exit: 0 # tests/http.rs:122-125 the grouped-marker spelling checks without errors
+step: jet run plain/http_route_markers.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/net/http_route_markers.out # tests/http.rs:147-155 mounted routes keep declaration order
+step: jet run grouped/http_route_markers.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/net/http_route_markers.out # tests/http.rs:147-155 the grouped marker keeps the same order

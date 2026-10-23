@@ -1,0 +1,13 @@
+# tests/outcome_carrier.rs::the_web_tier_reads_the_same_carrier at tests/outcome_carrier.rs:259; hand-port
+# The wasm_rust/emitter text claims retire with the Rust backend; the web tier must run the program on the carrier.
+fixture: the_web_tier_reads_the_same_carrier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+requires: tool:node
+step: jet build --target web main.jet
+exit: 0 # tests/outcome_carrier.rs:270 the web fixture compiles
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "8\n" # tests/outcome_carrier.rs:259 the Wasm export result reaches JS

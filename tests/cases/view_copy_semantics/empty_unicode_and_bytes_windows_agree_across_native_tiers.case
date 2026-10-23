@@ -1,0 +1,15 @@
+# tests/view_copy_semantics.rs::empty_unicode_and_bytes_windows_agree_across_native_tiers at tests/view_copy_semantics.rs:324; hand-port
+fixture: empty_unicode_and_bytes_windows_agree_across_native_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run view_copy_empty_unicode_bytes.jet
+exit: 0
+stdout: = "0\ntrue\n0\n6\n" # tests/view_copy_semantics.rs:329 assert_tiers_agree
+step: jet build view_copy_empty_unicode_bytes.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "0\ntrue\n0\n6\n" # tests/view_copy_semantics.rs:329 assert_tiers_agree
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

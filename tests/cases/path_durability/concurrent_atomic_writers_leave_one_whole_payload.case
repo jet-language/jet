@@ -1,0 +1,16 @@
+# tests/path_durability.rs::concurrent_atomic_writers_leave_one_whole_payload at tests/path_durability.rs:272; hand-port
+# The per-case work directory replaces the Rust temp directory, so the program names its files relative to it.
+# The final payload is compared by sha256 of 257 x "A" and 263 x "B".
+# Fixture migrated: group tasks are joined explicitly (an unjoined task is L1101), and file effects are FS.Write/FS.Read rather than IO (E0740).
+fixture: concurrent_atomic_writers_leave_one_whole_payload.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build atomic_concurrent.jet
+exit: 0
+step: built
+exit: 0 # tests/path_durability.rs:337 no observer saw a torn payload
+step: sha256sum target.bin
+exit: 0
+stdout: ~any "77608f24da6140277bd789efec57a179b1c1e57f44045ebd2b39e3c1e7e18d42" "8a8c091d90c168abd984a1dcc429353889ae337e935821c25f8759267d80158f" # tests/path_durability.rs:338-342 final payload is one whole writer payload
+entries: . kind file name ^= ".jet_tmp_" = 0 # tests/path_durability.rs:344-351 no temporary debris

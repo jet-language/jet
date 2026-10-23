@@ -1,0 +1,15 @@
+# tests/tir_operators_and_runtime.rs::sized_integer_locals_widen_to_int_at_i64_u64_boundaries at tests/tir_operators_and_runtime.rs:444; hand-port
+fixture: sized_integer_locals_widen_to_int_at_i64_u64_boundaries.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run tir_sized_integer_argument_boundaries.jet
+exit: 0
+stdout: = sized_integer_locals_widen_to_int_at_i64_u64_boundaries.out # tests/tir_operators_and_runtime.rs:465 assert_tiers_agree
+step: jet build tir_sized_integer_argument_boundaries.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = sized_integer_locals_widen_to_int_at_i64_u64_boundaries.out # tests/tir_operators_and_runtime.rs:465 assert_tiers_agree
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

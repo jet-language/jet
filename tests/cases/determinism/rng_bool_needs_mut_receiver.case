@@ -1,0 +1,8 @@
+# tests/determinism.rs::rng_bool_needs_mut_receiver at tests/determinism.rs:605; hand-port
+fixture: rng_bool_needs_mut_receiver.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/determinism.rs:617 is rejected
+json: stdout doc $.reports[?code="E0202"] #>= 1 # tests/determinism.rs:617 reports E0202

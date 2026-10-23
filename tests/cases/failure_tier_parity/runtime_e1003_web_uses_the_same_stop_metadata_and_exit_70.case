@@ -1,0 +1,13 @@
+# tests/failure_tier_parity.rs::runtime_e1003_web_uses_the_same_stop_metadata_and_exit_70 at tests/failure_tier_parity.rs:157; hand-port
+# The web build lands in .jet/build; run.mjs adds the export line the Rust harness appended to app.js.
+fixture: runtime_e1003_web_uses_the_same_stop_metadata_and_exit_70.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+requires: tool:node
+step: jet build --target web main.jet
+exit: 0 # tests/failure_tier_parity.rs:163 the web E1003 fixture compiles
+step: node run.mjs
+exit: 0 # tests/failure_tier_parity.rs:183 the web stop throws JetError E1003 with runtime exit 70 metadata
+stderr: empty
+stdout.filter(!= ""): = runtime_e1003.report # tests/failure_tier_parity.rs:187-189 the web stop frame is the registered report

@@ -1,0 +1,17 @@
+
+use core.http.server as server
+use core.web as web
+struct JokeID { value: Int }
+struct Jokes {
+    #server.Get("/mounted/:id")
+    fn joke(self, id: JokeID) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "joke={id.value}"))
+    }
+}
+fn run() {
+    mux :: server.mux()
+    mux.get("/direct/:id", (id: JokeID) -> Ok(server.response(200, "joke={id.value}")))
+    mux.mount(Jokes{})
+    schema :: web.openapi(mux)
+    print(schema.contains("\"value\"") && schema.contains("/mounted/") && schema.contains("/direct/"))
+}

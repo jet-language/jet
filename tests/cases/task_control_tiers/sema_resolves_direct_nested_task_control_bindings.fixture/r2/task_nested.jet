@@ -1,0 +1,22 @@
+
+use core.time as time
+
+fn slow_one() -> Int {
+    time.sleep(100ms)
+    return 1
+}
+
+fn slow_three() -> Int {
+    time.sleep(100ms)
+    return 3
+}
+
+fn run() {
+    task.group workers {
+        nested :: task.all {
+            task.race { slow_one(), 2 } ?? 0,
+            task.any { slow_three(), 4 } ?? 0
+        } ?? []
+        print(nested)
+    }
+}

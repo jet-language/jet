@@ -1,0 +1,56 @@
+enum Pair { Values(left: Int, right: Int) }
+enum Payload { A(value: Int) B(value: Int) }
+#Error enum Failure { Expected(value: Int) Other(value: Int) }
+
+fn first_binding(value: Pair) -> Int Never! {
+    if value == {
+        .Values(n, _) | .Values(_, n) -> n
+    }
+}
+
+fn produce_option(kind: Int) -> Payload? Never! {
+    if kind == 1 -> return Val(Payload.A{value: 3})
+    if kind == 2 -> return Val(Payload.B{value: 7})
+    None
+}
+
+fn option_binding(kind: Int) -> Int Never! {
+    if produce_option(kind) == {
+        .Val(.A(n)) | .Val(.B(n)) -> n
+        else -> 0
+    }
+}
+
+fn produce_result(kind: Int) -> Int Failure! {
+    if kind == 0 -> return 11
+    if kind == 1 -> return Err(Failure.Expected{value: 13})
+    return Err(Failure.Other{value: 17})
+}
+
+fn result_binding(kind: Int) -> Int Never! {
+    if produce_result(kind) == {
+        .Ok(n) | .Err(.Expected(n)) -> n
+        else -> 0
+    }
+}
+
+fn result_nested_binding(kind: Int) -> Int Never! {
+    if produce_result(kind) == {
+        .Err(.Other(n)) | .Err(.Expected(n)) -> n
+        else -> 0
+    }
+}
+
+fn run() {
+    print(first_binding(Pair.Values{left: 1, right: 2}))
+    print(first_binding(Pair.Values{left: 8, right: 4}))
+    print(option_binding(1))
+    print(option_binding(2))
+    print(option_binding(0))
+    print(result_binding(0))
+    print(result_binding(1))
+    print(result_binding(2))
+    print(result_nested_binding(0))
+    print(result_nested_binding(1))
+    print(result_nested_binding(2))
+}

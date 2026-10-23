@@ -1,0 +1,30 @@
+
+use core.time as time
+
+struct ClockBox {
+    clock: Clock
+}
+
+fn run() {
+    clock := Clock.system()
+    before := clock.now()
+    fork := clock.copy()
+    fork_before := fork.now()
+    time.sleep(2ms)
+    after := clock.now()
+    print(after > before)
+    print(fork.now() > fork_before)
+    reported := &clock.tick(-1000000)
+    print(clock.now() >= after)
+    print(clock.now() >= reported)
+    manual := Clock.new(1000)
+    copied := manual.copy()
+    &copied.tick(5000)
+    print(manual.now())
+    print(copied.now())
+    boxed := ClockBox{ clock: Clock.new(7) }
+    copied_box := boxed.copy()
+    &copied_box.clock.tick(3)
+    print(boxed.clock.now())
+    print(copied_box.clock.now())
+}

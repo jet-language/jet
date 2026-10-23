@@ -1,0 +1,17 @@
+# tests/shared_transaction.rs::shared_map_entry_compound_updates_keep_the_total_update_diagnostic at tests/shared_transaction.rs:77; hand-port
+fixture: shared_map_entry_compound_updates_keep_the_total_update_diagnostic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check c1/run.jet
+exit: 1 # tests/shared_transaction.rs:93 += is rejected
+stderr: ~ "Error [E0164]" # tests/shared_transaction.rs:95 E0164
+step: jet check c2/run.jet
+exit: 1 # tests/shared_transaction.rs:93 += in #Transact is rejected
+stderr: ~ "Error [E0164]" # tests/shared_transaction.rs:95 E0164
+step: jet check c3/run.jet
+exit: 1 # tests/shared_transaction.rs:93 -= is rejected
+stderr: ~ "Error [E0164]" # tests/shared_transaction.rs:95 E0164
+step: jet check c4/run.jet
+exit: 1 # tests/shared_transaction.rs:93 -= in #Transact is rejected
+stderr: ~ "Error [E0164]" # tests/shared_transaction.rs:95 E0164

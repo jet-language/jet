@@ -1,0 +1,10 @@
+
+use core.files as fs
+
+fn run() {
+    bytes :: [U8]{ 110, 101, 119 }
+    fs.write_atomic("relative.bin", bytes) ?? panic("relative atomic write failed")
+    written :: fs.read("relative.bin") ?? panic("relative read failed")
+    fs.remove("relative.bin") ?? panic("relative cleanup failed")
+    print(written)
+}

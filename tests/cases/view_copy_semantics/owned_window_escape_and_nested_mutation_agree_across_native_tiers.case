@@ -1,0 +1,15 @@
+# tests/view_copy_semantics.rs::owned_window_escape_and_nested_mutation_agree_across_native_tiers at tests/view_copy_semantics.rs:346; hand-port
+fixture: owned_window_escape_and_nested_mutation_agree_across_native_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run view_copy_owned_window.jet
+exit: 0
+stdout: = "8\n9\n6\n7\n" # tests/view_copy_semantics.rs:351 assert_tiers_agree
+step: jet build view_copy_owned_window.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "8\n9\n6\n7\n" # tests/view_copy_semantics.rs:351 assert_tiers_agree
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

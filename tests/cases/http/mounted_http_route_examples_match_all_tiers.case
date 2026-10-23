@@ -1,0 +1,26 @@
+# tests/http.rs::mounted_http_route_examples_match_all_tiers at tests/http.rs:174; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: mounted_http_route_examples_match_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run http_route_markers.jet
+exit: 0 # tests/http.rs:146 default exit code
+stdout: = ../../../Examples/features/expected/net/http_route_markers.out # tests/http.rs:144 default stdout
+stderr: empty # tests/http.rs:145
+step: jet build http_route_markers.jet
+exit: 0
+step: built
+exit: 0 # tests/http.rs:150 AOT exit code
+stdout: = ../../../Examples/features/expected/net/http_route_markers.out # tests/http.rs:151 AOT stdout
+stderr: empty # tests/http.rs:152
+step: jet run http_routes.jet
+exit: 0 # tests/http.rs:146 default exit code
+stdout: = ../../../Examples/features/expected/net/http_routes.out # tests/http.rs:144 default stdout
+stderr: empty # tests/http.rs:145
+step: jet build http_routes.jet
+exit: 0
+step: built
+exit: 0 # tests/http.rs:150 AOT exit code
+stdout: = ../../../Examples/features/expected/net/http_routes.out # tests/http.rs:151 AOT stdout
+stderr: empty # tests/http.rs:152

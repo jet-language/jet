@@ -1,0 +1,14 @@
+# tests/task_control_tiers.rs::stream_drop_uses_task_cancel_cleanup_path at tests/task_control_tiers.rs:184; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: stream_drop_uses_task_cancel_cleanup_path.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/streams/generators.out # tests/task_control_tiers.rs:194 run_default_multi
+step: jet build r2/stream_cancel.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = ../../../Examples/features/expected/streams/generators.out # tests/task_control_tiers.rs:203 build_and_run
