@@ -30,7 +30,7 @@ struct EvidenceProjection {
     source: EvidenceSource
     completeness: EvidenceCompleteness
     chain: [EvidenceChainLink]
-    derivation: MIRDerivationRef?
+    derivation: DerivationRef?
 }
 
 #Error
@@ -369,10 +369,10 @@ fn evidence_record_state_code(record: EvidenceRecord) -> Int Never! {
 }
 
 fn evidence_record_checked_derivation(record: EvidenceRecord) -> DerivationRecord Never! {
-    method :: if record.kind == EvidenceKind.Property -> MIRDerivationMethod.SampledAgreement else -> MIRDerivationMethod.RecordedExecution
+    method :: if record.kind == EvidenceKind.Property -> DerivationMethod.SampledAgreement else -> DerivationMethod.RecordedExecution
     value := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), method, "evidence-record", [String]{record.identity.claim_id, record.identity.evidence_id}, derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target))
     if evidence_outcome_is_incomplete(record.outcome) || record.outcome == EvidenceOutcome.Unchecked {
-        value.disposition = MIRDerivationDisposition.Unavailable
+        value.disposition = DerivationDisposition.Unavailable
     }
     value
 }
@@ -381,14 +381,14 @@ fn evidence_report_new(report_id: String, producer: EvidenceProducerKind, source
     EvidenceReport{schema_version: EVIDENCE_REPORT_VERSION, identity: EvidenceIdentity{report_id: report_id, claim_id: "", evidence_id: ""}, producer: producer, source: source, build: build, revision: revision, records: [EvidenceRecord]{}, derivations: [DerivationRecord]{}, attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: EvidenceCompleteness.Complete}
 }
 
-fn evidence_report_derivation(report: EvidenceReport, reference: MIRDerivationRef) -> DerivationRecord? Never! {
+fn evidence_report_derivation(report: EvidenceReport, reference: DerivationRef) -> DerivationRecord? Never! {
     loop item in report.derivations {
         if item.id == reference.id -> return Val(item)
     }
     None
 }
 
-fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> MIRDerivationRef Never! {
+fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> DerivationRef Never! {
     loop item in report.derivations {
         if item.id == derivation.id -> return derivation_record_reference(item)
     }

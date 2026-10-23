@@ -1,7 +1,7 @@
 // TOOLS-S11: real leaf byte-span claims plus unregistered full-walker oracles.
 // C4/CP-NAMES/S12/CP-AST/#4397 gate actual checked products. No prefilled index,
 // empty registration graph or fake parser/name provider substitutes for them.
-use jet_foundation.[AST_NODE_GENERATED, Stmt, Expr, Binding, CallArg, CallLabel, Span, NamedSpan, Program, MIRNameFacts, AccessConvention, ast_empty_call_arg_flags, type_name]
+use jet_foundation.[AST_NODE_GENERATED, Stmt, Expr, Binding, CallArg, CallLabel, Span, NamedSpan, Program, NameFacts, AccessConvention, ast_empty_call_arg_flags, type_name]
 
 #Test("semindex_loop_label_reference_span_uses_utf8_bytes") {
     assert_eq(semindex_loop_label_span("outer", Span{start: 7, end: 99}), Span{start: 7, end: 12})
@@ -134,7 +134,7 @@ fn semindex_s11_loop_label_defs_use_ordinary_namespace_and_scope() {
 // Harness supplies a REAL checked body + names/program/source and lexical spans.
 // The algorithm must restore the initial parent/slot stack even for empty bodies
 // and conditional optional slots. This never supplies an empty sema provider.
-fn semindex_s11_body_restoration_assertions(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, body: [Stmt], mp: String) {
+fn semindex_s11_body_restoration_assertions(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, body: [Stmt], mp: String) {
     parents :: ctx.structural_parents.copy()
     slot :: ctx.structural_slot
     kind :: ctx.structural_slot_kind
@@ -147,7 +147,7 @@ fn semindex_s11_body_restoration_assertions(db: &SymbolDB, ctx: &WalkCtx, names:
 }
 // Sema supplies actual Binding including its inferred ty; explicit source
 // annotation means no type hint. Spans remain the real name token, never sigil.
-fn semindex_s11_binding_assertions(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, binding: Binding, mp: String) {
+fn semindex_s11_binding_assertions(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, binding: Binding, mp: String) {
     first_def :: db.defs.len()
     first_hover :: db.hover.len()
     first_inlay :: db.inlay.len()

@@ -511,12 +511,10 @@ fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
     }
 }
 
+// An Int outside the i64 word is keyed by its BigInt decimal.
 fn ast_comptime_integer_key(number: Int) -> CtKey Never! {
-    if mir_integer_constant(number, None, None) == {
-        .Int(value, _, _) -> CtKey.Int{value: value}
-        .BigInt(decimal) -> CtKey.BigInt{decimal: decimal}
-        else -> panic("integer key materialization is not an integer")
-    }
+    if number < -9223372036854775807 - 1 || number > 9223372036854775807 -> return CtKey.BigInt{decimal: "{number}"}
+    CtKey.Int{value: number}
 }
 
 // Rust `CtKey::to_value`.
@@ -562,7 +560,7 @@ fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
         if right == .BigInt(decimal) -> return if decimal.starts_with("-") -> 1 else -> -1
     }
     if left == .BigInt(decimal) {
-        if right == .BigInt(right_decimal) -> return mir_big_integer_key_compare(decimal, right_decimal)
+        if right == .BigInt(right_decimal) -> return big_integer_key_compare(decimal, right_decimal)
         if right == .Int(_) -> return if decimal.starts_with("-") -> -1 else -> 1
     }
     if left == .Bool(left_flag) {

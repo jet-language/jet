@@ -8,7 +8,7 @@
 // Original full arithmetic/state/dossier/output/generic/import/ancestry/rename
 // source bytes and wire assertions stay in Build/Items/Signatures/Queries/Convert
 // and Codec tests; none are replaced or narrowed by this packet.
-use jet_foundation.[mir_sha256_hex]
+use jet_foundation.[sha256_hex]
 use jet_sema.[SemaRegistrationGraph, SemaGraphResult, SemaCompilerModuleSource]
 use jet_pkg_model.[EffectBudgetProgram, PackageEffectSummary]
 
@@ -166,7 +166,7 @@ fn semindex_finalize_test_checked_definition_derivations(registration: SemaRegis
         source_index :: sources.get(definition.module_path) ?? panic("definition must belong to the loaded bundle")
         bytes := module_sources[source_index].loaded_source.bytes()
         authored :: String.from_bytes(bytes[definition.span.start..<definition.span.end]) ?? panic("definition span must delimit loaded UTF8 source")
-        assert_eq(definition.content_id, "sha256:{mir_sha256_hex(semindex_normalize_definition(authored))}")
+        assert_eq(definition.content_id, "sha256:{sha256_hex(semindex_normalize_definition(authored))}")
         found := false
         loop derivation in db.index.derivations() {
             if derivation.subject != definition.stable_id -> next

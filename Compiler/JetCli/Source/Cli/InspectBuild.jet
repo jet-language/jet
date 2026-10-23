@@ -6,7 +6,7 @@ use jet_driver.[
     jet_driver_report_problems, JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
 ]
-use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIRSourceFile]
+use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, SourceFile]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
 use core.files as build_files
 use core.math as build_math
@@ -39,7 +39,7 @@ fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json
 
 fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [MIRSourceFile]{})
+    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [SourceFile]{})
     errors :: jet_cli_errors(diagnostics)
     if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
     source := ""

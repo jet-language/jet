@@ -2,8 +2,6 @@
 // the HTTPClientMethod TIR spelling, while Browser handles use HTTPServerMethod.
 use jet_foundation.[
     Effect,
-    MIRPreludeABI,
-    MIRPreludeFamily,
 ]
 
 fn ir_browser_test_handle_kind(kind: String) -> Bool Never! {
@@ -413,7 +411,7 @@ fn ir_browser_handle_route(kind: String, method: String, argument_count: Int, se
         }
         }
         if argument_count + 1 != mask.len() -> return None
-        return Val(ir_handle_route(MIRPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MIRPreludeABI.Value))
+        return Val(ir_handle_route(false, "core.web.browser", member, symbol, mask, route_effect))
     }
 
     if !ir_browser_test_handle_kind(kind) -> return None
@@ -507,5 +505,5 @@ fn ir_browser_handle_route(kind: String, method: String, argument_count: Int, se
         }
     }
     if server_method || argument_count + 1 != mask.len() -> return None
-    Val(ir_handle_route(MIRPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MIRPreludeABI.Value))
+    Val(ir_handle_route(false, "core.web.browser", member, symbol, mask, route_effect))
 }

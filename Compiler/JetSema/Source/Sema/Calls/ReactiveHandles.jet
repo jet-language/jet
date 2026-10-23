@@ -90,7 +90,7 @@ fn sema_reactive_call_fact(environment: SemaScopeEnvironment, program: SemaProgr
 }
 
 fn sema_reactive_core_call_value(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    value :: sema_call_core_tir(record, args, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tir(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     Val(value)
 }

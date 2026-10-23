@@ -3,7 +3,7 @@ use core.files as cli_files
 use core.process as cli_process
 use core.text as cli_struct_text
 use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[Diagnostic, mir_sha256_hex]
+use jet_foundation.[Diagnostic, sha256_hex]
 use jet_parser.[jet_format_source]
 
 struct JetCLIStructUnit {
@@ -99,7 +99,7 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
                 units[row].leading = if cursor <= units[row].fact.span.start -> jet_cli_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
                 cursor = units[row].fact.span.end
             }
-            hash :: mir_sha256_hex(source)
+            hash :: sha256_hex(source)
             return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: jet_cli_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash)}}
         }
     }
@@ -234,7 +234,7 @@ fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, bas
     // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if theirs == base -> return ours.copy()
-    &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{mir_sha256_hex(ours)}", theirs: "sha256:{mir_sha256_hex(theirs)}"})
+    &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{sha256_hex(ours)}", theirs: "sha256:{sha256_hex(theirs)}"})
     // copy: `base` stays with the caller (`base` is a read parameter: no move out of it, E0201) and
     // the returned value owns its own.
     base.copy()

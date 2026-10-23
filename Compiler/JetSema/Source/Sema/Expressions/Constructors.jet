@@ -14,8 +14,8 @@ use jet_foundation.[
     ExprField,
     ExprPair,
     Field,
-    MIRTargetHardwareUse,
-    MIRTypedHeadKind,
+    TargetHardwareUse,
+    TypedHeadKind,
     ParamZone,
     PlaceAccess,
     Span,
@@ -50,7 +50,7 @@ use jet_foundation.[
     core_source_owns_type,
     core_type_modules,
     expr_span,
-    mir_typed_head_kind,
+    typed_head_kind_of,
     regex_syntax_validate,
     symbol_id,
     type_identity_key,
@@ -1293,7 +1293,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         source_file: source_file,
         source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
         expression: checked,
-        hardware_use: MIRTargetHardwareUse{
+        hardware_use: TargetHardwareUse{
             register_accesses: loop index in register_access_start..<context.hardware_use.register_accesses.len() -> context.hardware_use.register_accesses[index],
             interrupt_handlers: loop index in interrupt_handler_start..<context.hardware_use.interrupt_handlers.len() -> context.hardware_use.interrupt_handlers[index],
             dma_operations: loop index in dma_operation_start..<context.hardware_use.dma_operations.len() -> context.hardware_use.dma_operations[index],
@@ -1347,7 +1347,7 @@ fn sema_expression_typed_literal_is_byte_list(head: Type) -> Bool Never! {
     false
 }
 
-fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHeadKind, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionTypedTextParts? {
+fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: TypedHeadKind, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionTypedTextParts? {
     literals := [String]{""}
     holes := [TExpr]{}
     trusted_html := [Bool]{}
@@ -1362,7 +1362,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHead
                 literals[last] = "{literals[last]}{sema_expr_byte_text(value)}"
             }
             .Interp(value, _) -> {
-                if kind == MIRTypedHeadKind.DateTime {
+                if kind == TypedHeadKind.DateTime {
                     &diagnostics.push(sema_error("E0155", expr_span(value), "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
                     return None
                 }
@@ -1374,7 +1374,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHead
                 context.borrow_ctx = old_borrow
                 context.allow_string_view_read = old_string_view
                 hole :: checked ?? return None
-                trusted := kind == MIRTypedHeadKind.HTML && hole.ty == Type.Named{name: "HTML"}
+                trusted := kind == TypedHeadKind.HTML && hole.ty == Type.Named{name: "HTML"}
                 if !trusted && !sema_expression_typed_literal_printable(hole.ty, environment, program) {
                     &diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
                     return None
@@ -1388,7 +1388,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHead
     Val(SemaExpressionTypedTextParts{literals: literals, holes: holes, trusted_html: trusted_html})
 }
 
-fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [StrPart], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_expression_validate_boundary_literal(kind: TypedHeadKind, parts: [StrPart], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     name := if kind == {
         .URL -> "URL"
         .Path -> "Path"
@@ -1407,7 +1407,7 @@ fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [Str
                 literals[last] = "{literals[last]}{sema_expr_byte_text(byte)}"
             }
             .Interp(_, _) -> {
-                if kind == MIRTypedHeadKind.DateTime {
+                if kind == TypedHeadKind.DateTime {
                     &diagnostics.push(sema_error("E0155", span, "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
                     return false
                 }
@@ -1425,7 +1425,7 @@ fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [Str
 // Why the literal text of a typed boundary head is invalid, or None when it
 // is valid. URL and DateTime use the same Core parsers that build the value
 // at runtime, so a literal accepted here never fails there.
-fn sema_expression_boundary_literal_reason(kind: MIRTypedHeadKind, literals: [String]) -> String? {
+fn sema_expression_boundary_literal_reason(kind: TypedHeadKind, literals: [String]) -> String? {
     if kind == {
         .URL -> sema_expression_url_literal_reason(literals)
         .Path -> {
@@ -1514,7 +1514,7 @@ fn sema_expression_url_skeleton_reason(skeleton: String) -> String? {
     None
 }
 
-fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_typed_literal_text(kind: TypedHeadKind, head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     parts := if value == {
         .Str(rows, _, _) -> rows
         else -> {
@@ -1523,7 +1523,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         }
     }
     if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), &diagnostics) -> return None
-    if kind == MIRTypedHeadKind.DateTime {
+    if kind == TypedHeadKind.DateTime {
         argument :: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         constructor :: Expr.MethodCall{
             receiver: Expr.Ident{name: "DateTime", span: span, id: AST_NODE_GENERATED},
@@ -1537,7 +1537,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     checked :: sema_expression_typed_literal_text_parts(parts, kind, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if kind == MIRTypedHeadKind.URL {
+    if kind == TypedHeadKind.URL {
         literal_exprs := [Expr]{}
         hole_exprs := [Expr]{}
         loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED})
@@ -1557,7 +1557,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         return sema_expr_expected(url, expected, environment, program, &diagnostics)
     }
     result := sema_tir_node(head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
-    if kind == MIRTypedHeadKind.HTML && checked.holes.len() == 0 {
+    if kind == TypedHeadKind.HTML && checked.holes.len() == 0 {
         result = sema_tir_node(head, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: checked.literals[0]}}}, span)
     }
     sema_expr_expected(result, expected, environment, program, &diagnostics)
@@ -1709,10 +1709,10 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         &diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
         return None
     })
-    source_kind := mir_typed_head_kind(written_head)
+    source_kind := typed_head_kind_of(written_head)
     result_head := sema_expr_expected_type(sema_expr_unwrap_tag(written_head), environment, program)
     kind := source_kind
-    if kind == None -> kind = mir_typed_head_kind(result_head)
+    if kind == None -> kind = typed_head_kind_of(result_head)
     checked_text := sema_expression_checked_text_literal(result_head, head, body, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if checked_text.handled -> return checked_text.value
 
@@ -1804,7 +1804,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     if body == {
         .Value(value) -> {
             if kind == .Val(head_kind) {
-                if head_kind == MIRTypedHeadKind.SQL || head_kind == MIRTypedHeadKind.HTML || head_kind == MIRTypedHeadKind.Sh || head_kind == MIRTypedHeadKind.URL || head_kind == MIRTypedHeadKind.Path || head_kind == MIRTypedHeadKind.DateTime {
+                if head_kind == TypedHeadKind.SQL || head_kind == TypedHeadKind.HTML || head_kind == TypedHeadKind.Sh || head_kind == TypedHeadKind.URL || head_kind == TypedHeadKind.Path || head_kind == TypedHeadKind.DateTime {
                     return sema_expression_typed_literal_text(head_kind, result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 }
             }

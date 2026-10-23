@@ -19,7 +19,6 @@ cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-
 cheap.push(start('trap-messages-test', [node, '--test', 'Tools/agent/gen-runtime-trap-messages.test.mjs']));
 cheap.push(start('lexer-keyword-rows-test', [node, '--test', 'Tools/agent/lexer-keyword-rows.test.mjs']));
 cheap.push(start('compiler-packages', [node, '--test', 'Tools/agent/compiler-packages.test.mjs']));
-cheap.push(start('mir-schema-grammar', [node, '--test', 'Compiler/JetBackend/Tests/mir-schema.test.mjs']));
 cheap.push(start('proof-source-guard', [node, '--test', 'Tools/agent/proof-source.test.mjs']));
 cheap.push(start('core-type-references', [node, '--test', 'Tools/agent/core-type-references.test.mjs']));
 cheap.push(start('core-runtime-wrapper', [node, '--test', 'Tools/agent/core-runtime-wrapper.test.mjs']));

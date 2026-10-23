@@ -7,7 +7,7 @@
 use jet_foundation.[
     Diagnostic,
     DiagnosticOrigin,
-    MIRSourceFile,
+    SourceFile,
     Span,
     TextEdit,
     DIAGNOSTIC_ERROR,
@@ -17,7 +17,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_render_all,
     diagnostic_theme_dim,
-    mir_sha256_hex,
+    sha256_hex,
 ]
 
 // crates/jet-foundation/src/ExitCodes.rs
@@ -74,17 +74,17 @@ fn jet_driver_shift_span(span: Span, shift: Int) -> Span Never! {
 // `path` is the diagnostic's display path (`jet_driver_display_path`); a disk
 // origin keeps its canonical path beside the root-relative display, as the
 // Rust driver's origins do.
-fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> DiagnosticOrigin? Never! {
+fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> DiagnosticOrigin? Never! {
     loop file in generated {
-        if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+        if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: sha256_hex(file.source)})
     }
     physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     loop root in snapshot.roots {
         loop file in root.files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: mir_sha256_hex(file.source)})
+            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: sha256_hex(file.source)})
         }
         loop file in root.foreign_cache_files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: mir_sha256_hex(file.source)})
+            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: sha256_hex(file.source)})
         }
     }
     None
@@ -94,7 +94,7 @@ fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSn
 // of a file carries that file's exact bytes, so the file is hashed once, not
 // once per diagnostic (the compiler unit is one 12.8 MB file with thousands of
 // lints). The Rust driver shares one origin per module the same way.
-fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile], origins: &[String:DiagnosticOrigin]) -> DiagnosticOrigin? Never! {
+fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> DiagnosticOrigin? Never! {
     if origins.get(path) == .Val(origin) -> return Val(origin)
     origin :: jet_driver_present_origin(path, snapshot, generated) ?? return None
     origins[path] = origin
@@ -106,7 +106,7 @@ fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSou
 // source path becomes the origin (root-relative display; a generated source
 // shows its path), and the span, edit, and labels move from aggregate offsets
 // to offsets in that file's exact bytes.
-fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
+fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
     // copy: `presented` is the shifted copy returned for display, while `diagnostic` stays the
     // caller's raw row (a read parameter). Its source_start/offset/span/edit are read below to
     // compute the shift.
@@ -128,7 +128,7 @@ fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuth
     presented
 }
 
-fn jet_driver_present_diagnostics(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> [Diagnostic] Never! {
+fn jet_driver_present_diagnostics(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> [Diagnostic] Never! {
     origins := [String:DiagnosticOrigin]{}
     presented :: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, &origins)
     presented

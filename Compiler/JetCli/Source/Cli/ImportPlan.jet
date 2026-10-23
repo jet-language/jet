@@ -7,7 +7,7 @@ use core.files as import_files
 use core.sys as import_sys
 use jet_foundation.[
     EvidenceAttachment, EvidenceBuild, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceReport, EvidenceRevision,
-    EvidenceSource, MIRDerivationDisposition, MIRDerivationMethod, ast_comptime_bytes_compare, derivation_identity,
+    EvidenceSource, DerivationDisposition, DerivationMethod, ast_comptime_bytes_compare, derivation_identity,
     derivation_record, evidence_identity_for_record, evidence_merge_error_text, evidence_producer_name, evidence_record_new,
     evidence_report_add_record_with_derivation, evidence_report_new,
 ]
@@ -221,8 +221,8 @@ fn jet_cli_import_evidence(boundary: ForeignBoundaryContract, source: String, ta
         {name: "import-report", value: import_files.join(target, "import-report.json")},
     }
     loop assumption in boundary.assumptions -> &record.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
-    derivation := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), MIRDerivationMethod.StaticDerivation, "foreign-source-import", [String]{boundary_digest, boundary.artifact_coverage.digest(), source_digest, replacement_digest}, derivation_identity)
-    if omission_count != 0 -> derivation.disposition = MIRDerivationDisposition.Unavailable
+    derivation := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), DerivationMethod.StaticDerivation, "foreign-source-import", [String]{boundary_digest, boundary.artifact_coverage.digest(), source_digest, replacement_digest}, derivation_identity)
+    if omission_count != 0 -> derivation.disposition = DerivationDisposition.Unavailable
     report := evidence_report_new(report_id, EvidenceProducerKind.Compile, source_ref, build, revision)
     evidence_report_add_record_with_derivation(&report, ^record, ^derivation) ?? return Err(jet_cli_import_plan_error(evidence_merge_error_text(err)))
     Ok(report)

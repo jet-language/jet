@@ -8,7 +8,7 @@ use core.crypto as import_update_crypto
 use core.files as import_update_files
 use jet_foundation.[
     CanonicalJSON, CanonicalJSONField, ComparisonRecord, DerivationRecord, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
-    EvidenceReport, MIRDerivationDisposition, MIRDerivationMethod, canonical_json_object, canonical_json_bytes, canonical_json_parse,
+    EvidenceReport, DerivationDisposition, DerivationMethod, canonical_json_object, canonical_json_bytes, canonical_json_parse,
     comparison_assertion_error_text, comparison_record_artifact_id, comparison_record_assert_equal, comparison_record_from_json,
     derivation_identity, derivation_record_validate, evidence_expectation_error_text, evidence_outcome_name,
     evidence_producer_name, evidence_record_checked_derivation, evidence_record_validate, evidence_report_derivation,
@@ -96,7 +96,7 @@ fn jet_cli_import_indexed_import_evidence(index: JetCLIRecordIndex, root: String
     derivation :: evidence_report_derivation(report, reference) ?? return Err(jet_cli_import_update_error("indexed import evidence has no derivation payload"))
     if !derivation_record_validate(derivation) -> return Err(jet_cli_import_update_error("derivation {derivation.id} has a non-canonical identity"))
     if derivation.identity != boundary.identity.derivation_identity() -> return Err(jet_cli_import_update_error("indexed import derivation identity is stale"))
-    if derivation.method != MIRDerivationMethod.StaticDerivation || derivation.rule != "foreign-source-import" || derivation.disposition != MIRDerivationDisposition.Current -> return Err(jet_cli_import_update_error("indexed import derivation is not current"))
+    if derivation.method != DerivationMethod.StaticDerivation || derivation.rule != "foreign-source-import" || derivation.disposition != DerivationDisposition.Current -> return Err(jet_cli_import_update_error("indexed import derivation is not current"))
     premises := [String]{boundary_digest.copy(), boundary.artifact_coverage.digest(), source_digest.copy(), replacement_digest.copy()}
     &premises.sort()
     unique := [String]{}
@@ -183,7 +183,7 @@ fn jet_cli_import_indexed_comparison(index: JetCLIRecordIndex, root: String, cwd
                 if evidence.outcome != EvidenceOutcome.Passed -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` is not accepted: evidence outcome is {evidence_outcome_name(evidence.outcome)}"))
                 reference :: evidence.derivation ?? return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has no checked derivation"))
                 derivation :: evidence_report_derivation(evidence_report, reference) ?? return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has a missing derivation payload"))
-                if derivation.disposition != MIRDerivationDisposition.Current -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has stale derivation evidence"))
+                if derivation.disposition != DerivationDisposition.Current -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has stale derivation evidence"))
                 if derivation != evidence_record_checked_derivation(evidence) -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` derivation does not match its evidence"))
             }
         }

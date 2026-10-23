@@ -25,7 +25,7 @@ use jet_foundation.[
     core_bare_source_module,
     core_module_export,
     core_root_type,
-    mir_typed_head_kind,
+    typed_head_kind_of,
     symbol_id,
     type_identity_equal,
     type_is_unit_callable_return,
@@ -756,7 +756,7 @@ fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaR
 fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index: Int, name: String) -> SemaRegistrationResolvedSymbol? {
     rows :: sema_registration_nominal_rows_named(graph, name)
     if rows.len() == 0 -> return None
-    if mir_typed_head_kind(Type.Named{name: name}) != None {
+    if typed_head_kind_of(Type.Named{name: name}) != None {
         carrier :: if {
             name == "URL" -> "core.net.url"
             name == "DateTime" -> "core.time"

@@ -177,7 +177,7 @@ fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, 
     if check.module_name != "core.compiler" -> return None
     record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, [Type]{}, check.result_type, check.failure_carrier, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
-    sema_call_core_tir(record, check.arguments, span, [Type]{}, [Bool]{}, None, check.result_type, check.failure_carrier, expected, environment, program, &diagnostics)
+    sema_call_core_tir(record, check.arguments, span, [Type]{}, [Bool]{}, check.result_type, check.failure_carrier, expected, environment, program, &diagnostics)
 }
 fn sema_call_compiler_value_owner(ty: Type) -> String? {
     if ty == {

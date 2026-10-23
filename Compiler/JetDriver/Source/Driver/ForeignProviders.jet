@@ -14,7 +14,7 @@ use jet_foundation.[
     ImportDecl,
     ImportKind,
     Item,
-    MIRSourceFile,
+    SourceFile,
     NamedSpan,
     PolicyDeclaration,
     Program,
@@ -24,7 +24,7 @@ use jet_foundation.[
     Type,
     UserPolicyDecl,
     diagnostic_with_source_path,
-    mir_source_file_id,
+    source_file_id,
 ]
 use jet_lexer.[
     lex_generated,
@@ -91,7 +91,7 @@ struct JetDriverForeignCanonicalAssembly {
     overlay_functions: [ExternFn]
     adapter_functions: [Func]
     source_segments: [SemaSourceSegment]
-    generated_source_files: [MIRSourceFile]
+    generated_source_files: [SourceFile]
 }
 
 struct JetDriverForeignProvenance {
@@ -1099,12 +1099,12 @@ fn jet_driver_foreign_canonical_assembly(load: JetDriverLoadResult, surface: Jet
         &source_segments.push(SemaSourceSegment{generated: Span{start: adapter_bases[adapter_index], end: adapter_bases[adapter_index] + adapter_sources[adapter_index].len()}, source_file: adapter_path, source_start: 0, origin: SemaSourceOrigin.CompilerGenerated, line_starts: jet_driver_foreign_fragment_line_starts(adapter_sources[adapter_index])})
     }
     aggregate_path :: jet_driver_foreign_aggregate_path(surface)
-    generated_source_files := [MIRSourceFile]{
-        {id: mir_source_file_id(aggregate_path), path: aggregate_path, source: canonical},
+    generated_source_files := [SourceFile]{
+        {id: source_file_id(aggregate_path), path: aggregate_path, source: canonical},
     }
     loop adapter_index in 0..<adapter_sources.len() {
         adapter_path :: jet_driver_foreign_adapter_path(surface, adapter_index)
-        &generated_source_files.push(MIRSourceFile{id: mir_source_file_id(adapter_path), path: adapter_path, source: adapter_sources[adapter_index]})
+        &generated_source_files.push(SourceFile{id: source_file_id(adapter_path), path: adapter_path, source: adapter_sources[adapter_index]})
     }
     Val(JetDriverForeignCanonicalAssembly{source: canonical, overlay_functions: canonical_overlays, adapter_functions: canonical_adapters, source_segments: source_segments, generated_source_files: generated_source_files})
 }

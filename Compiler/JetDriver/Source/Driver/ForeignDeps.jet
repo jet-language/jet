@@ -1,7 +1,7 @@
 // Host foreign-library declarations use the same inline/package parser as
 // source loading. C dependencies are not Jet source roots.
 use jet_lexer.[lex_config, token_decoded, TOKEN_STRING, TOKEN_RAW_STRING]
-use jet_foundation.[AccessConvention, Diagnostic, MIRSourceFile, Type, stable_id]
+use jet_foundation.[AccessConvention, Diagnostic, SourceFile, Type, stable_id]
 use jet_sema.[SemaGraphModuleResult]
 
 struct JetDriverCDependency {
@@ -81,7 +81,7 @@ fn jet_driver_foreign_language_head(language: String) -> String Never! {
 }
 
 // The triple-quoted body within `span` of the source file `path`.
-fn jet_driver_inline_c_body(source_files: [MIRSourceFile], path: String, start: Int, end: Int) -> String? Never! {
+fn jet_driver_inline_c_body(source_files: [SourceFile], path: String, start: Int, end: Int) -> String? Never! {
     loop source_file in source_files {
         if source_file.path != path -> next
         bytes :: source_file.source.bytes()
@@ -106,7 +106,7 @@ fn jet_driver_inline_c_body(source_files: [MIRSourceFile], path: String, start: 
 
 // The foreign link facts of the checked modules `modules`; inline bodies
 // read their declaration span in `source_files`.
-fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetDriverForeignLinkFacts Never! {
+fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files: [SourceFile]) -> JetDriverForeignLinkFacts Never! {
     facts := jet_driver_foreign_link_empty()
     direct := [String]{}
     transitive := [String]{}

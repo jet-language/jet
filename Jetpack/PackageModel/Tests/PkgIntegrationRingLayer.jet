@@ -3,19 +3,19 @@ use jet_pkg_model.[
     LockFile, LockSource, LockedPackage, PackageFacts, pkg_lock_parse, pkg_lock_write,
     pkg_to_manifest,
 ]
-use jet_foundation.[MIRRuntimeLayer]
+use jet_foundation.[RuntimeLayer]
 
 #Test("manifest runtime ceiling parses and reaches manifest") {
     raw :: "\nname: \"embed\"\nversion: \"0.1.0\"\nruntime: alloc\n"
     facts :: PackageFacts.parse(raw, "test") ?? panic("parse")
     layer_matches :: if facts.layer == {
-        .Val(layer) -> layer == MIRRuntimeLayer.Alloc
+        .Val(layer) -> layer == RuntimeLayer.Alloc
         .None -> false
     }
     assert(layer_matches)
     manifest :: pkg_to_manifest(facts, raw) ?? panic("manifest")
     manifest_matches :: if manifest.package.layer == {
-        .Val(layer) -> layer == MIRRuntimeLayer.Alloc
+        .Val(layer) -> layer == RuntimeLayer.Alloc
         .None -> false
     }
     assert(manifest_matches)
@@ -43,18 +43,18 @@ use jet_foundation.[MIRRuntimeLayer]
     assert(invalid)
 }
 #Test("lock roundtrip retains explicit and inferred runtime layers") {
-    package :: LockedPackage{name: "embed", version: "0.1.0", source: LockSource.Root, layer: Val(MIRRuntimeLayer.Alloc), inferred_layer: Val(MIRRuntimeLayer.Std)}
+    package :: LockedPackage{name: "embed", version: "0.1.0", source: LockSource.Root, layer: Val(RuntimeLayer.Alloc), inferred_layer: Val(RuntimeLayer.Std)}
     lock := LockFile.empty()
     lock.version = 1
     lock.packages = [LockedPackage]{package}
     raw :: pkg_lock_write(lock)
     parsed :: pkg_lock_parse(raw) ?? panic("parse")
     explicit_matches :: if parsed.packages[0].layer == {
-        .Val(layer) -> layer == MIRRuntimeLayer.Alloc
+        .Val(layer) -> layer == RuntimeLayer.Alloc
         .None -> false
     }
     inferred_matches :: if parsed.packages[0].inferred_layer == {
-        .Val(layer) -> layer == MIRRuntimeLayer.Std
+        .Val(layer) -> layer == RuntimeLayer.Std
         .None -> false
     }
     assert(explicit_matches)

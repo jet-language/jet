@@ -33,10 +33,8 @@ function render(kind,files){
  for(const [name,value]of Object.entries(fields))text=text.replaceAll('{'+name+':?}',value).replaceAll('{'+name+'}',value);
  return text.replaceAll('{{','{').replaceAll('}}','}')+'\n';
 }
-const session=readFileSync(join(root,'Compiler/JetBackend/Source/OS/SessionTransport.jet'),'utf8');
-const sessionBody=name=>session.match(new RegExp('fn '+name+'\\([^]*?"""([^]*?)"""'))[1];
 const cases=[
- {name:'shared-mutex',files:[{name:'lock.c',source:sessionBody('os_session_lock'),cpp:false},{name:'unlock.c',source:sessionBody('os_session_unlock'),cpp:false}],main:'void os_session_lock(void); void os_session_unlock(void); int main(void){for(int i=0;i<3;i++){os_session_lock();os_session_unlock();}return 0;}'},
+ {name:'shared-mutex',files:[{name:'lock.c',source:'#include <pthread.h>\npthread_mutex_t jet_execution_mutex = PTHREAD_MUTEX_INITIALIZER;\nvoid os_session_lock(void) { pthread_mutex_lock(&jet_execution_mutex); }\n',cpp:false},{name:'unlock.c',source:'#include <pthread.h>\nextern pthread_mutex_t jet_execution_mutex;\nvoid os_session_unlock(void) { pthread_mutex_unlock(&jet_execution_mutex); }\n',cpp:false}],main:'void os_session_lock(void); void os_session_unlock(void); int main(void){for(int i=0;i<3;i++){os_session_lock();os_session_unlock();}return 0;}'},
  {name:'mixed-cpp',files:[{name:'owner.c',source:'#include <stdint.h>\nint64_t inline_shared_word=40;',cpp:false},{name:'read.cpp',source:'#include <stdint.h>\n#include <string>\nextern "C" { extern int64_t inline_shared_word; int64_t inline_read(void){return inline_shared_word+(int64_t)std::string("a").size();}}',cpp:true}],main:'#include <stdint.h>\nint64_t inline_read(void); int main(void){return inline_read()!=41;}'},
  {name:'missing-definition',files:[{name:'missing.c',source:'#include <stdint.h>\nextern int64_t inline_missing_definition; int64_t inline_read(void){return inline_missing_definition;}',cpp:false}],reject:true},
 ];

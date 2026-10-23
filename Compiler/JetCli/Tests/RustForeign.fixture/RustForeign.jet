@@ -3,7 +3,7 @@
 use jet_parser.[parse_source]
 use jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
 use core.sys as rust_foreign_test_sys
-use jet_foundation.[mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_foundation.[sha256_bytes, sha256_hex_bytes]
 
 fn cli_rust_foreign_test_plan(name: String) -> JetDriverRustForeignPlan {
     parsed :: parse_source("extern rust \"base64@0.22\" {{ fn {name}(s: String) -> String = \"base64::encode\" }}".bytes())
@@ -20,7 +20,7 @@ fn cli_rust_foreign_test_plan(name: String) -> JetDriverRustForeignPlan {
 }
 fn cli_rust_foreign_test_digest(text: String) -> String Never! {
     bytes :: text.bytes()
-    mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+    sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
 fn cli_rust_foreign_test_detail(plan: JetDriverRustForeignPlan) Never! {
     cache :: "/home/test/.cache/jet/ffi"

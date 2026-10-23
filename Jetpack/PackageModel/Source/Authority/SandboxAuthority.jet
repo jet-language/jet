@@ -3,7 +3,7 @@
 // rights carrier is Foundation's CanonicalAuthority; a guest's declared
 // `needs` only stop a host from lending unrelated capability.
 use jet_foundation.[
-    AuthorityTightenError, AuthorityVerdict, CanonicalAuthority, MIRHostImportFact,
+    AuthorityTightenError, AuthorityVerdict, CanonicalAuthority, HostImportFact,
     authority_covers, authority_covers_any, authority_holds, authority_parse_right,
 ]
 
@@ -32,10 +32,10 @@ enum SandboxAuthorityError {
 // The typed result of checking one host import (Rust `HostImportDecision`):
 // data only, so every tier marshals the same verdict.
 struct HostImportDecision {
-    import: MIRHostImportFact
+    import: HostImportFact
     verdict: AuthorityVerdict
 
-    fn check(authority: CanonicalAuthority, import: MIRHostImportFact) -> HostImportDecision Never! {
+    fn check(authority: CanonicalAuthority, import: HostImportFact) -> HostImportDecision Never! {
         HostImportDecision{import: import, verdict: pkg_authority_decide_import(authority, import)}
     }
 
@@ -46,7 +46,7 @@ struct HostImportDecision {
 
 // `Authority::decide_import`: one typed host import against an authority,
 // without letting an adapter reinterpret the right.
-fn pkg_authority_decide_import(authority: CanonicalAuthority, import: MIRHostImportFact) -> AuthorityVerdict Never! {
+fn pkg_authority_decide_import(authority: CanonicalAuthority, import: HostImportFact) -> AuthorityVerdict Never! {
     if authority.allows_operation(import.required_right) -> return AuthorityVerdict.Allowed
     AuthorityVerdict.Missing
 }
@@ -106,7 +106,7 @@ struct SandboxAuthority {
 
     // Check the exact right one host import requests; the foundation
     // authority computes the verdict, and the guest must have declared it.
-    fn authorize_import(self, import: MIRHostImportFact) SandboxAuthorityError! {
+    fn authorize_import(self, import: HostImportFact) SandboxAuthorityError! {
         if pkg_authority_decide_import(self.authority, import) != AuthorityVerdict.Allowed {
             return Err(SandboxAuthorityError.MissingNeed(import.required_right))
         }
@@ -117,12 +117,12 @@ struct SandboxAuthority {
 
     // The canonical typed decision for a host import; adapters use this row
     // instead of reconstructing a policy from `needs` or a resource path.
-    fn import_decision(self, import: MIRHostImportFact) -> HostImportDecision Never! {
+    fn import_decision(self, import: HostImportFact) -> HostImportDecision Never! {
         HostImportDecision.check(self.authority, import)
     }
 
     // Authorize and open a file import through a matching no-follow root.
-    fn checked_file(self, import: MIRHostImportFact, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
+    fn checked_file(self, import: HostImportFact, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
         self.authorize_import(import)
         loop root in self.roots {
             if authority_covers(root.right, import.required_right) || authority_covers(import.required_right, root.right) {

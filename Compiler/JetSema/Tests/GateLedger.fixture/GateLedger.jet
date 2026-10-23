@@ -8,7 +8,7 @@ fn gate_test_entry(kind: GateKind, source: String, offset: Int) -> GateEntry Nev
 }
 
 fn gate_test_names() -> NameLedger Never! {
-    name_ledger_from_facts(MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: []})
+    name_ledger_from_facts(NameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: []})
 }
 
 fn gate_test_same_entry(left: GateEntry, right: GateEntry) -> Bool Never! {
@@ -73,7 +73,7 @@ fn run() Never! {
     gate_ledger_push(&duplicate, ^written)
     gate_test_require(duplicate.rows.len() == 2 && duplicate.rows[1].reason == (Val("verified publisher")), "spanless writer coalescing and reason enrichment")
     names := gate_test_names()
-    &names.facts.structure_facts.push(MIRStructureFact{kind: MIRStructureFactKind.Liveness, subject: "files", source: "app.jet", span: Span{start: 4, end: 9}, status: "unused", detail: "remove or rename to _files", gate: Val("_name")})
+    &names.facts.structure_facts.push(StructureFact{kind: StructureFactKind.Liveness, subject: "files", source: "app.jet", span: Span{start: 4, end: 9}, status: "unused", detail: "remove or rename to _files", gate: Val("_name")})
     structure := GateLedger{}
     sema_gate_append_structure(&structure, names)
     gate_test_require(structure.rows.len() == 1 && structure.rows[0].kind == GateKind.Structure && structure.rows[0].reason == (Val("_name")), "structure facts use canonical ledger")

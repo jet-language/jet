@@ -16,8 +16,8 @@ use jet_foundation.[
     Func,
     Item,
     LValue,
-    MIRDerivationDisposition,
-    MIRDerivationMethod,
+    DerivationDisposition,
+    DerivationMethod,
     OutputKind,
     ParamZone,
     ResolvedOutput,
@@ -45,7 +45,7 @@ use jet_foundation.[
     expr_span,
     failure_contract_effective_type,
     failure_contract_source,
-    mir_sha256_hex,
+    sha256_hex,
     type_name,
 ]
 
@@ -1461,20 +1461,20 @@ struct SemaCompilerIndexDerivationFacts {
 
 fn sema_compiler_index_derivation_value(record: DerivationRecord) -> TComptimeValue Never! {
     method := if {
-        record.method == MIRDerivationMethod.StaticDerivation -> "static_derivation"
-        record.method == MIRDerivationMethod.FormalProof -> "formal_proof"
-        record.method == MIRDerivationMethod.RecordedExecution -> "recorded_execution"
-        record.method == MIRDerivationMethod.SampledAgreement -> "sampled_agreement"
+        record.method == DerivationMethod.StaticDerivation -> "static_derivation"
+        record.method == DerivationMethod.FormalProof -> "formal_proof"
+        record.method == DerivationMethod.RecordedExecution -> "recorded_execution"
+        record.method == DerivationMethod.SampledAgreement -> "sampled_agreement"
         else -> "external_assumption"
     }
     disposition := if {
-        record.disposition == MIRDerivationDisposition.Current -> "current"
-        record.disposition == MIRDerivationDisposition.Stale -> "stale"
-        record.disposition == MIRDerivationDisposition.Expired -> "expired"
-        record.disposition == MIRDerivationDisposition.Redacted -> "redacted"
-        record.disposition == MIRDerivationDisposition.Unavailable -> "unavailable"
-        record.disposition == MIRDerivationDisposition.Unsupported -> "unsupported"
-        record.disposition == MIRDerivationDisposition.BudgetExhausted -> "budget_exhausted"
+        record.disposition == DerivationDisposition.Current -> "current"
+        record.disposition == DerivationDisposition.Stale -> "stale"
+        record.disposition == DerivationDisposition.Expired -> "expired"
+        record.disposition == DerivationDisposition.Redacted -> "redacted"
+        record.disposition == DerivationDisposition.Unavailable -> "unavailable"
+        record.disposition == DerivationDisposition.Unsupported -> "unsupported"
+        record.disposition == DerivationDisposition.BudgetExhausted -> "budget_exhausted"
         else -> "unknown"
     }
     observation := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerDerivationObservation"}}}
@@ -1547,17 +1547,17 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
         definition :: symbol ?? next
         kind := sema_compiler_index_definition_kind(definition, registration)
         structural_key := "{kind}|{definition.id.key}"
-        stable_id := "def:{mir_sha256_hex(structural_key).slice(0, 16)}"
+        stable_id := "def:{sha256_hex(structural_key).slice(0, 16)}"
         signature := sema_compiler_index_definition_signature(definition, registered_module, registration)
         signature_key := "{kind}|{signature}"
-        signature_id := "sig:{mir_sha256_hex(signature_key).slice(0, 16)}"
+        signature_id := "sig:{sha256_hex(signature_key).slice(0, 16)}"
         normalized := sema_compiler_index_normalize_definition(definition_source)
-        content_id := "sha256:{mir_sha256_hex(normalized)}"
+        content_id := "sha256:{sha256_hex(normalized)}"
         record := derivation_record(
             stable_id,
             definition.id.key,
             "jet-sema",
-            MIRDerivationMethod.StaticDerivation,
+            DerivationMethod.StaticDerivation,
             "checked-definition",
             [String]{signature_id, content_id},
             derivation_identity(content_id, signature_id, "", registered_module.module_path),
@@ -1716,7 +1716,7 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
     if !derivations.complete -> complete = false
     index := TComptimeValue.Struct{type_name: "CompilerSemanticIndex", fields: [TComptimeField]{
         TComptimeField{name: "schema_version", value: sema_compiler_index_int(20)},
-        TComptimeField{name: "source_digest", value: sema_compiler_index_string(mir_sha256_hex(source))},
+        TComptimeField{name: "source_digest", value: sema_compiler_index_string(sha256_hex(source))},
         TComptimeField{name: "definitions", value: TComptimeValue.List{values: definitions}},
         TComptimeField{name: "references", value: TComptimeValue.List{values: references}},
         TComptimeField{name: "calls", value: TComptimeValue.List{values: calls}},

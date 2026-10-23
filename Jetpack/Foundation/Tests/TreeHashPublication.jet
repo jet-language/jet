@@ -13,7 +13,7 @@ use jetpack_foundation.[
     foundation_remove_held_tree, foundation_stage_and_rename,
     foundation_write_file_nofollow_at_root,
 ]
-use jet_foundation.[mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_foundation.[sha256_bytes, sha256_hex_bytes]
 use core.files as files
 use core.sys as sys
 
@@ -771,7 +771,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     loop length in lengths {
         bytes :: loop index in 0..<length -> U8{index % 251}
         view :: bytes[0..<bytes.len()]
-        expected :: mir_sha256_hex_bytes(mir_sha256_bytes(view))
+        expected :: sha256_hex_bytes(sha256_bytes(view))
         loop chunk_size in chunk_sizes {
             hasher := StreamingSHA256.new()
             offset := 0
@@ -794,13 +794,13 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     &hasher.update([U8]{98, 99})
     bytes :: "abc".bytes()
     view :: bytes[0..<bytes.len()]
-    assert_eq(hasher.finalize(), mir_sha256_bytes(view))
+    assert_eq(hasher.finalize(), sha256_bytes(view))
 }
 
 #Test("canonical SHA256 hashes only the retained input window") {
     bytes :: "xabcx".bytes()
     middle :: bytes[1..<4]
     empty :: bytes[2..<2]
-    assert_eq(mir_sha256_hex_bytes(mir_sha256_bytes(middle)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-    assert_eq(mir_sha256_hex_bytes(mir_sha256_bytes(empty)), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    assert_eq(sha256_hex_bytes(sha256_bytes(middle)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert_eq(sha256_hex_bytes(sha256_bytes(empty)), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 }

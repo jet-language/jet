@@ -1,7 +1,7 @@
 // crates/jet-repl/src/Notebook/document.rs:1-469.
 // Persisted source graph/cache only: no runtime values or execution engine.
 use core.crypto.uuid as notebook_document_uuid
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_sha256, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_sha256, sha256_bytes, sha256_hex_bytes]
 
 NOTEBOOK_OUTPUT_CACHE_POLICY :: "closure-v2"
 
@@ -167,7 +167,7 @@ struct JetNotebook {
             notebook_document_append_nul(&material, cell.source)
             loop dependency in cell.depends_on -> notebook_document_append_nul(&material, dependency)
         }
-        mir_sha256_hex_bytes(mir_sha256_bytes(material))
+        sha256_hex_bytes(sha256_bytes(material))
     }
 
     // Rust remove_cell: retain stale bundles while removing cache authority,

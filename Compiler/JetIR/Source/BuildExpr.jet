@@ -1279,7 +1279,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             loop index in 0..<values.len() -> &names.push("{index}")
             return ir_tuple_literal(&m, p, &b, expression.ty, names, values, span)
         }
-        .CoreCall(record, args, _, type_args, widen_to_vec, _, _) -> return ir_core_call(&m, p, &b, expression.ty, record, args, type_args, widen_to_vec, span)
+        .CoreCall(record, args, _, type_args, widen_to_vec, _) -> return ir_core_call(&m, p, &b, expression.ty, record, args, type_args, widen_to_vec, span)
         .NumericMethod(receiver, operation) -> return ir_numeric_method(&m, p, &b, expression.ty, receiver, operation, span)
         .Never(reason) -> {
             // codegen jet_codegen_lower_never: Lower stops through jet_rt_unreachable.
@@ -1452,7 +1452,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     // A mutating receiver (codegen jet_codegen_handle_receiver_is_mutating)
     // still crosses as its handle: the route mutates the runtime value
     // behind it (Lower Routes.jet lower_route_args, a HandleMut carrier).
-    if route.family == .ClosureMethod -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure")
+    if route.closure_method -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure")
     if route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" -> return ir_fail_slot(&b, span, "handle method {route.symbol}")
     special :: ir_nominal_name(ir_untag(ir_subst(m, receiver.ty))) ?? ""
     if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" -> return ir_fail_slot(&b, span, "{special} handle method {route.member}")
@@ -2955,7 +2955,7 @@ struct IRTrySite { note: TExpr?, file: String, line: Int, function: String, fres
 // A Core call runs no program code, so its failure starts at the call; one
 // that takes a callback may carry a failure out of program code instead.
 fn ir_try_starts_failure(operand: TExpr) -> Bool Never! {
-    if operand.kind == .CoreCall(_, args, _, _, _, _, _) {
+    if operand.kind == .CoreCall(_, args, _, _, _, _) {
         loop arg in args {
             if arg.ty == .Fn(_, _, _, _, _, _) -> return false
         }

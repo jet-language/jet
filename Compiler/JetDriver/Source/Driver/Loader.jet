@@ -14,10 +14,10 @@ use jet_foundation.[
     ImportKind,
     InlineVersion,
     Item,
-    MIRAllocatorPolicy,
-    MIRByteSize,
-    MIRRuntimeLayer,
-    MIRSourceFile,
+    AllocatorPolicy,
+    ByteSize,
+    RuntimeLayer,
+    SourceFile,
     NamedSpan,
     Param,
     ParseResult,
@@ -35,7 +35,7 @@ use jet_foundation.[
     core_module_has_member,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
-    mir_source_file_id,
+    source_file_id,
     name_find,
     name_index,
     name_intern,
@@ -614,9 +614,9 @@ fn jet_driver_top_level_commas(body: String) -> [String] Never! {
     parts
 }
 
-fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[Diagnostic]) -> MIRAllocatorPolicy? {
+fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[Diagnostic]) -> AllocatorPolicy? {
     compact :: value.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
-    if compact == "mem.Heap" -> return Val(MIRAllocatorPolicy.HostedDefault)
+    if compact == "mem.Heap" -> return Val(AllocatorPolicy.HostedDefault)
     prefix :: "mem.Counting.over("
     if compact.starts_with(prefix) && compact.ends_with(")") {
         bytes :: compact.bytes()
@@ -627,16 +627,16 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
             &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`"))
             return None
         }
-        cap := MIRByteSize?{None}
+        cap := ByteSize?{None}
         if args.len() == 2 {
             if !args[1].starts_with("cap:") {
                 &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "the counting allocator's optional argument is spelled `cap:`", "use `cap:` for the counting allocator's optional limit"))
                 return None
             }
             bytes_value :: jet_driver_parse_allocator_bytes(args[1].slice(4, args[1].len()), span, &diagnostics) ?? return None
-            cap = Val(MIRByteSize{bytes: bytes_value})
+            cap = Val(ByteSize{bytes: bytes_value})
         }
-        return Val(MIRAllocatorPolicy.Counting{cap: cap})
+        return Val(AllocatorPolicy.Counting{cap: cap})
     }
     &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`", "use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`"))
     None
@@ -998,7 +998,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
-        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
+        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_EDITION, runtime_ceiling: None, allocator_policy: AllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     // An inline Package feeds its body, at its original offsets, to the same
     // field parser as `package.jet`; its carrier file is the manifest path.
@@ -1016,8 +1016,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     name := ""
     version := String?{None}
     edition := JET_DRIVER_EDITION
-    runtime_ceiling := MIRRuntimeLayer?{None}
-    allocator_policy := MIRAllocatorPolicy.HostedDefault
+    runtime_ceiling := RuntimeLayer?{None}
+    allocator_policy := AllocatorPolicy.HostedDefault
     authority_allow := [String]?{None}
     authority_deny := [String]?{None}
     authority_needs := [String]{}
@@ -1134,7 +1134,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     allocator_seen = true
                     allocator_value :: jet_driver_manifest_field_value(source, tokens, value_index)
                     parsed_allocator := jet_driver_parse_program_allocator(allocator_value.text, token.span, &diagnostics)
-                    if parsed_allocator != None -> allocator_policy = parsed_allocator ?? MIRAllocatorPolicy.HostedDefault
+                    if parsed_allocator != None -> allocator_policy = parsed_allocator ?? AllocatorPolicy.HostedDefault
                     index = allocator_value.next_index - 1
                 }
                 "deps" -> {
@@ -1455,16 +1455,16 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
     }
 }
 
-fn jet_driver_source_file_index(files: [MIRSourceFile], path: String) -> Int? {
+fn jet_driver_source_file_index(files: [SourceFile], path: String) -> Int? {
     loop index in 0..<files.len() {
         if files[index].path == path -> return Val(index)
     }
     None
 }
 
-fn jet_driver_add_source_file(files: &[MIRSourceFile], file: MIRSourceFile, diagnostics: &[Diagnostic]) {
-    if file.id.value != mir_source_file_id(file.path).value {
-        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source-file identity does not match its canonical path", "MIR source identities are stable functions of the path", "rebuild the source-file identity with mir_source_file_id(path)"))
+fn jet_driver_add_source_file(files: &[SourceFile], file: SourceFile, diagnostics: &[Diagnostic]) {
+    if file.id.value != source_file_id(file.path).value {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source-file identity does not match its canonical path", "MIR source identities are stable functions of the path", "rebuild the source-file identity with source_file_id(path)"))
         return
     }
     loop existing in files {
@@ -1614,8 +1614,8 @@ fn jet_driver_source_path_is_authorized(snapshot: JetDriverAuthorizedSourceSnaps
     false
 }
 
-fn jet_driver_find_generated_source_file(generated_sources: [MIRSourceFile], path: String, diagnostics: &[Diagnostic]) -> MIRSourceFile? {
-    found := MIRSourceFile?{None}
+fn jet_driver_find_generated_source_file(generated_sources: [SourceFile], path: String, diagnostics: &[Diagnostic]) -> SourceFile? {
+    found := SourceFile?{None}
     loop file in generated_sources {
         if file.path == path {
             if found != None {
@@ -1640,9 +1640,9 @@ fn jet_driver_source_segment_bytes_match(aggregate_bytes: [U8], segment: SemaSou
     true
 }
 
-fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], generated_sources: [MIRSourceFile]) -> JetDriverSourceFileCollection {
+fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], generated_sources: [SourceFile]) -> JetDriverSourceFileCollection {
     entry_root :: jet_driver_entry_root_path(snapshot)
-    files := [MIRSourceFile]{}
+    files := [SourceFile]{}
     diagnostics := [Diagnostic]{}
     loop loaded_module in modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= source_units.len() {
@@ -1673,7 +1673,7 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module's provenance does not match its pinned source root and package", "source-unit identity, package identity, and bytes stay attached to one root", "rebuild the loaded module from its catalog source unit"))
             next
         }
-        aggregate_file := MIRSourceFile?{None}
+        aggregate_file := SourceFile?{None}
         if unit.source_origin == {
             .Snapshot -> {
                 if unit.file_index < 0 || unit.file_index >= root.files.len() {
@@ -1685,7 +1685,7 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source unit's path differs from its authorized file", "physical bytes and source identity remain attached to one checked file", "rebuild the source unit from its exact authorized file"))
                     next
                 }
-                aggregate_file = Val(MIRSourceFile{id: mir_source_file_id(unit.path), path: unit.path, source: file.source})
+                aggregate_file = Val(SourceFile{id: source_file_id(unit.path), path: unit.path, source: file.source})
             }
             else -> {
                 if unit.file_index != -1 || jet_driver_source_path_is_authorized(snapshot, unit.path) {
@@ -1746,7 +1746,7 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                         next
                     }
                     raw_path :: jet_driver_display_path(entry_root, raw.path)
-                    jet_driver_add_source_file(&files, MIRSourceFile{id: mir_source_file_id(raw_path), path: raw_path, source: raw.source}, &diagnostics)
+                    jet_driver_add_source_file(&files, SourceFile{id: source_file_id(raw_path), path: raw_path, source: raw.source}, &diagnostics)
                 }
                 else -> {
                     if jet_driver_source_path_is_authorized(snapshot, segment.source_file) {
@@ -3479,9 +3479,9 @@ fn jet_driver_core_source_segments(path: String, source: String) -> [SemaSourceS
     segments
 }
 
-fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[MIRSourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {
+fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[SourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {
     path :: "{JET_DRIVER_CORE_SOURCE_ROOT}/{relative_path}"
-    &generated.push(MIRSourceFile{id: mir_source_file_id(path), path: path, source: source})
+    &generated.push(SourceFile{id: source_file_id(path), path: path, source: source})
     &source_units.push(jet_driver_core_source_unit(module_name, relative_path, file_index, source))
     &queued.push(false)
     source_units.len() - 1
@@ -3514,7 +3514,7 @@ fn jet_driver_core_unit(
     source_units: &[JetDriverSourceUnit],
     queued: &[Bool],
     pending: &[Int],
-    generated: &[MIRSourceFile],
+    generated: &[SourceFile],
     core_sources: [JetDriverCoreSource],
     module_name: String,
     importer_core: Bool,
@@ -3708,8 +3708,8 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             entry_module_identity: "",
             modules: [JetDriverLoadedModule]{},
             imports: [SemaRegistrationImportEdge]{},
-            source_files: [MIRSourceFile]{},
-            generated_source_files: [MIRSourceFile]{},
+            source_files: [SourceFile]{},
+            generated_source_files: [SourceFile]{},
             diagnostics: diagnostics,
             failed_stage: failed_stage,
             complete: false,
@@ -3757,7 +3757,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     resolved_imports := [SemaRegistrationImportEdge]{}
     module_edges := jet_driver_module_edges()
     // Exact virtual text records; these are never added to disk authorities.
-    core_generated := [MIRSourceFile]{}
+    core_generated := [SourceFile]{}
     bare_modules := [String]{}
     pending_index := 0
     // The current parse wave's results, last-first: every unit queued when

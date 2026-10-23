@@ -2,7 +2,7 @@
 // lifecycle collector, including the dormant and expired edition boundaries.
 use jet_sema.[SemaLifecycleResult, sema_lifecycle_edition_label, sema_lifecycle_record]
 use jet_foundation.[
-    CoreMarkerApplication, DIAGNOSTIC_ERROR, Diagnostic, MIRStructureFact, Span, TextEdit,
+    CoreMarkerApplication, DIAGNOSTIC_ERROR, Diagnostic, StructureFact, Span, TextEdit,
 ]
 
 fn structure_lifecycle_require(ok: Bool, message: String) Never! {
@@ -10,7 +10,7 @@ fn structure_lifecycle_require(ok: Bool, message: String) Never! {
 }
 
 #Test("structure_lifecycle") {
-    result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     seen := [String:Bool]{}
     payload :: CoreMarkerApplication{member: "old", since: "2027", replacement: "cbor.to_bytes", removed_in: Val("2028")}
     span :: Span{start: 10, end: 13}

@@ -11,27 +11,27 @@ use jet_foundation.[
     Program,
     Span,
     TextEdit,
-    MIRStructureFact,
-    MIRStructureFactKind,
+    StructureFact,
+    StructureFactKind,
     diagnostic_with_edit,
 ]
 
 struct SemaLivenessVerdict {
     code: String
     diagnostic: Diagnostic
-    fact: MIRStructureFact
+    fact: StructureFact
 }
 
 struct SemaLivenessResult {
     diagnostics: [Diagnostic]
-    facts: [MIRStructureFact]
+    facts: [StructureFact]
 }
 
 fn sema_liveness_verdict(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
     &verdicts.push(SemaLivenessVerdict{
         code: code,
         diagnostic: diagnostic,
-        fact: MIRStructureFact{kind: MIRStructureFactKind.Liveness, subject: name, source: source, span: span, status: "unreachable", detail: detail, gate: None},
+        fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unreachable", detail: detail, gate: None},
     })
 }
 
@@ -140,7 +140,7 @@ fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: 
 
 fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
     verdicts := [SemaLivenessVerdict]{}
-    if modules.len() != graph.modules.len() -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    if modules.len() != graph.modules.len() -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     candidates := [String:SemaLivenessCandidate]{}
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
@@ -207,7 +207,7 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
             }
         }
     })
-    result := SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    result := SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     loop verdict in verdicts {
         &result.diagnostics.push(verdict.diagnostic)
         &result.facts.push(verdict.fact)

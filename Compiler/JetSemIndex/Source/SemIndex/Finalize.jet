@@ -12,11 +12,11 @@
 use jet_foundation.[
     EffectRowEntry,
     Item,
-    MIRNameFacts,
+    NameFacts,
     NamedSpan,
     Span,
     failure_contract_effective_type,
-    mir_sha256_hex,
+    sha256_hex,
 ]
 use jet_sema.[
     SemaCompilerModuleSource,
@@ -160,7 +160,7 @@ fn semindex_add_state_graph_hovers(db: &SymbolDB, registration: SemaRegistration
 
 // Imported alias definitions live ONLY here (Rust1460–1488), never in S10.
 // Sort indices, not cloned alias/name-ledger records.
-fn semindex_add_import_alias_definitions(db: &SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+fn semindex_add_import_alias_definitions(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     sources := [Int:Int]{}
     loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
     order := [Int]{}
@@ -243,7 +243,7 @@ fn semindex_inferred_hover_tail(text: String) -> String Never! {
 
 // Rust1614–1717: per-module ordered index rows/cursors avoid cloning definitions
 // or rescanning every definition for each root. Only root item nodes qualify.
-fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [DefinitionFact] Never! {
+fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [DefinitionFact] Never! {
     by_module := [String:[Int]]{}
     loop index in 0..<defs.len() {
         if by_module.get(defs[index].module_path) == None -> by_module[defs[index].module_path] = [Int]{}
@@ -285,12 +285,12 @@ fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], r
             source := ""
             if source_bytes.get(source_index) == None -> source_bytes[source_index] = module_sources[source_index].loaded_source.bytes()
             if node.span.start >= 0 && node.span.end >= node.span.start && node.span.end <= source_bytes[source_index].len() -> source = String.from_bytes(source_bytes[source_index][node.span.start..<node.span.end]) ?? ""
-            identity_hash :: mir_sha256_hex(structural)
-            signature_hash :: mir_sha256_hex(signature)
+            identity_hash :: sha256_hex(structural)
+            signature_hash :: sha256_hex(signature)
             &out.push(DefinitionFact{
                 stable_id: "def:{identity_hash.slice(0, 16)}",
                 signature_id: "sig:{signature_hash.slice(0, 16)}",
-                content_id: "sha256:{mir_sha256_hex(semindex_normalize_definition(source))}",
+                content_id: "sha256:{sha256_hex(semindex_normalize_definition(source))}",
                 human_identity: definition.identity,
                 name: semantic_canonical_symbol_name(names, Val(semindex_loaded_registration_index(registration, module_sources[source_index])), definition.name, None, Val(definition.def_span)),
                 kind: kind, module_path: definition.module_path, span: node.span,

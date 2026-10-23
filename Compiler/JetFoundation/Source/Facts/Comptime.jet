@@ -17,12 +17,10 @@ enum TComptimeKey {
     Enum(type_name: String, variant: String)
 }
 
+// An Int outside the i64 word is keyed by its BigInt decimal.
 fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
-    if mir_integer_constant(number, None, None) == {
-        .Int(value, _, _) -> TComptimeKey.Int{value: value}
-        .BigInt(decimal) -> TComptimeKey.BigInt{decimal: decimal}
-        else -> panic("integer key materialization is not an integer")
-    }
+    if number < -9223372036854775807 - 1 || number > 9223372036854775807 -> return TComptimeKey.BigInt{decimal: "{number}"}
+    TComptimeKey.Int{value: number}
 }
 
 struct TComptimeKeyField {
@@ -60,12 +58,4 @@ enum TComptimeValue {
     Present(value: TComptimeValue)
     Failed(report: TComptimeReport)
     Unit
-    Closure(value: TComptimeClosure)
-}
-
-// A closure a comptime run produced: its checked function and the detached
-// values of its captures, in capture order.
-struct TComptimeClosure {
-    function: MIRFunctionID
-    captures: [TComptimeValue]
 }

@@ -7,7 +7,7 @@ use jet_foundation.[
     Expr,
     EffectRowEntry,
     FunctionDefaultRef,
-    MIRCopyFact,
+    CopyFact,
     ParamZone,
     PlaceAccess,
     Span,
@@ -670,7 +670,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                 if type_args.len() != 0 -> sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics)
                 sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(Type.String, TExprKind.Clone{value: receiver_value, fact: MIRCopyFact.Materialize}, span), expected, environment, program, &diagnostics)}
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(Type.String, TExprKind.Clone{value: receiver_value, fact: CopyFact.Materialize}, span), expected, environment, program, &diagnostics)}
             }
             if name == "RealtimeStream" {
                 ret := if {
@@ -989,7 +989,7 @@ fn sema_call_try_data_stream_core_call(module_name: String, member: String, args
     if !ownership.accepted || !ownership.complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     widen_to_vec := (loop _ in call_args -> false)
     if !sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, call_args, span, effective_type_args, widen_to_vec, None, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, call_args, span, effective_type_args, widen_to_vec, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
@@ -1043,7 +1043,7 @@ fn sema_data_core_emit_with_accesses(record: CoreCallRecord, call_name: String, 
     widen_to_vec := (loop _ in arguments -> false)
     // A checked call finishes like the fixed Core route: inside a fallible
     // body's success view a Result call is compared by its success side.
-    value :: sema_call_core_tir(record, arguments, span, type_args, widen_to_vec, None, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tir(record, arguments, span, type_args, widen_to_vec, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
     sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)
 }
 

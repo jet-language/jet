@@ -1,0 +1,247 @@
+// Target machine facts: memory, providers, policies, hardware registers, interrupts and DMA, and the
+// layout facts the selected target supplies.
+
+struct LayoutAlignmentFact {
+    requested_alignment: Int
+    effective_alignment: Int
+    target_mode: Bool
+    target_profile: String
+    fact_identity: String
+}
+
+enum RegisterWidth { U8 U16 U32 U64 }
+
+struct ByteSize { bytes: Int }
+
+enum TargetRegisterAccessMode { ReadOnly WriteOnly ReadWrite }
+
+struct SVDProvenance { source: String, sha256: String }
+
+struct TargetRegisterFact {
+    name: String
+    offset: Int
+    width: RegisterWidth
+    access: TargetRegisterAccessMode
+    volatile: Bool
+}
+
+struct TargetRegisterBlockFact {
+    name: String
+    base: Int
+    size: ByteSize
+    registers: [TargetRegisterFact]
+}
+
+enum TargetRegisterOperation { Read Write }
+
+struct TargetRegisterAccessFact {
+    block: String
+    register: String
+    operation: TargetRegisterOperation
+    width: RegisterWidth
+}
+
+struct TargetInterruptFact {
+    name: String
+    vector: Int
+    forbidden_effects: [String]
+    bounded: Bool
+}
+
+struct TargetInterruptHandlerFact {
+    interrupt: String
+    handler: String
+    effects: [String]
+    forbidden_effects: [String]
+    bounded: Bool
+}
+
+enum TargetDMAOwnership { Borrowed Transfer }
+
+struct TargetDMAChannelFact {
+    name: String
+    channel: Int
+    transfer_width: RegisterWidth
+    ownership: TargetDMAOwnership
+    max_transfer_bytes: Int?
+}
+
+enum TargetDMAOperation { Start Wait UseBuffer }
+
+enum TargetDMAOwner { CPU Device }
+
+struct TargetDMAOperationFact {
+    channel: String
+    buffer: String
+    operation: TargetDMAOperation
+    owner: TargetDMAOwner
+}
+
+enum TargetHardwareUnresolvedReference {
+    RegisterBlock(block: String)
+    Register(block: String, register: String)
+    DMAChannel(channel: String)
+    Interrupt(interrupt: String)
+}
+
+struct TargetHardwareFacts {
+    svd: SVDProvenance?
+    register_blocks: [TargetRegisterBlockFact]
+    interrupts: [TargetInterruptFact]
+    dma_channels: [TargetDMAChannelFact]
+}
+
+struct TargetHardwareUse {
+    register_accesses: [TargetRegisterAccessFact]
+    interrupt_handlers: [TargetInterruptHandlerFact]
+    dma_operations: [TargetDMAOperationFact]
+    unresolved_references: [TargetHardwareUnresolvedReference]
+}
+
+enum TargetProgrammerAdapter { Emulator ProbeRs OpenOcd }
+
+struct TargetProgrammerFacts {
+    adapter: TargetProgrammerAdapter
+    executable: String
+    chip: String?
+    interface: String?
+    config: [String]
+    speed_khz: Int?
+    reset: Bool
+    machine: String?
+    cpu: String?
+}
+
+struct LayoutSupportFacts {
+    proven: Bool
+    alignments: [Int]
+    max_size: Int?
+    max_address: Int?
+    abi: String?
+    provenance: String
+}
+
+struct LayoutCapabilityFacts {
+    fact_version: String
+    target_profile: String
+    execution_modes: [String]
+    backend: String
+    toolchain: String
+    linker: String
+    allocator_provider: String
+    type_representation: LayoutSupportFacts
+    stack_placement: LayoutSupportFacts
+    global_placement: LayoutSupportFacts
+    heap_allocator: LayoutSupportFacts
+    foreign_by_value_abi: LayoutSupportFacts
+}
+
+enum MemoryKind { Flash Ram MMIO Reserved }
+
+enum MemoryAccess { R Rw Rx Rwx }
+
+struct MemoryRegion {
+    name: String
+    origin: Int
+    size: ByteSize
+    kind: MemoryKind
+    access: MemoryAccess
+}
+
+enum LinkerInput {
+    HostedDefault
+    Unspecified
+    Generated
+    File(path: String, sha256: String)
+}
+
+struct ProviderABI { calling_convention: String, version: String }
+
+struct ProviderLimits {
+    max_request_bytes: Int?
+    max_response_bytes: Int?
+    max_calls: Int?
+}
+
+struct ProviderContract {
+    provider: String
+    sha256: String
+    provenance: String
+    abi: ProviderABI
+    limits: ProviderLimits
+}
+
+enum AllocatorPolicy {
+    HostedDefault
+    Unspecified
+    NoAllocator
+    Provider(provider: ProviderContract)
+    Fixed(region: String, size: ByteSize)
+    Counting(cap: ByteSize?)
+}
+
+enum PanicPolicy {
+    HostedDefault
+    Unspecified
+    Abort
+    Report(provider: ProviderContract)
+}
+
+enum ClockPolicy { HostedDefault Unspecified NoClock Provider(provider: ProviderContract) }
+
+enum EntropyPolicy { HostedDefault Unspecified NoEntropy Provider(provider: ProviderContract) }
+
+enum SchedulerPolicy {
+    HostedDefault
+    Unspecified
+    NoScheduler
+    Cooperative(provider: ProviderContract)
+    InterruptDriven(provider: ProviderContract)
+    BoardRuntime(provider: ProviderContract)
+}
+
+enum MMIOPolicy { HostedDefault Unspecified NoMMIO Provider(provider: ProviderContract) }
+
+enum ByteSinkPolicy {
+    HostedDefault
+    Unspecified
+    NoByteSink
+    Provider(read: ProviderContract?, write: ProviderContract?, report: ProviderContract?)
+}
+
+enum StartupPolicy {
+    HostedDefault
+    Unspecified
+    Generated(provider: ProviderContract)
+}
+
+struct AuditPolicy { build_artifact: Bool, dossier_lens: Bool }
+
+struct TargetMachine {
+    name: String
+    triple: String
+    layout: LayoutCapabilityFacts
+    no_os: Bool
+    memory: [MemoryRegion]
+    linker: LinkerInput
+    allocator: AllocatorPolicy
+    panic: PanicPolicy
+    mmio: MMIOPolicy
+    wall_clock: ClockPolicy
+    monotonic_clock: ClockPolicy
+    zone_data: ClockPolicy
+    sleep: ClockPolicy
+    entropy: EntropyPolicy
+    scheduler: SchedulerPolicy
+    byte_sink: ByteSinkPolicy
+    startup: StartupPolicy
+    startup_entry: String
+    startup_vectors: String
+    startup_abi: ProviderABI
+    startup_placement: String
+    hardware: TargetHardwareFacts
+    programmers: [TargetProgrammerFacts]
+    audit: AuditPolicy
+}
+
+enum RuntimeLayer { Core Alloc Std }

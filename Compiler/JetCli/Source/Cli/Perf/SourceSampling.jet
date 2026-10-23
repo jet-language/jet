@@ -3,12 +3,12 @@
 use jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
 use jet_foundation.[
     Span, TraceProfile, TraceProfileRow, TraceProfileSource, trace_profile_unsupported,
-    SourceIdentity, mir_sha256_hex, JetSymbolRef,
+    SourceIdentity, sha256_hex, JetSymbolRef,
 ]
 
 struct JetCLIPerfSource { identity: SourceIdentity, run_span: Span?, text: String }
 fn jet_cli_perf_source(path: String, text: String) -> JetCLIPerfSource Never! {
-    identity := SourceIdentity{path: path, sha256: mir_sha256_hex(text), symbols: [(kind: String, name: String)]{}}
+    identity := SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [(kind: String, name: String)]{}}
     block :: jet_driver_inline_package(text)
     if block.error != None -> return JetCLIPerfSource{identity: identity, run_span: None, text: text}
     masked :: jet_driver_mask_inline_package(text, block)

@@ -34,10 +34,10 @@ fn package_key_source_digest(files: [PackageKeySourceFile], manifest: String?) -
     paths :: loop file in files -> file.relative_path
     loop index in package_key_byte_order(paths) {
         &fields.push(files[index].relative_path)
-        &fields.push(mir_sha256_hex(files[index].source))
+        &fields.push(sha256_hex(files[index].source))
     }
     manifest_digest :: if manifest == {
-        Val(bytes) -> mir_sha256_hex(bytes)
+        Val(bytes) -> sha256_hex(bytes)
         None -> ""
     }
     &fields.push("manifest")

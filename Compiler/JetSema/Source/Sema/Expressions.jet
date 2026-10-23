@@ -19,7 +19,7 @@ use jet_foundation.[
     Func,
     Item,
     IntegerWidth,
-    MIRCopyFact,
+    CopyFact,
     OperatorMarker,
     ParamZone,
     QuantityKind,
@@ -4031,9 +4031,9 @@ fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, envir
         return None
     }
     if sema_copy_memory_operation(facts) != None && effect_name == None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
-    result_kind := if share -> TExprKind.Clone{value: checked, fact: MIRCopyFact.Share} else -> TExprKind.ExplicitCopy{value: checked}
+    result_kind := if share -> TExprKind.Clone{value: checked, fact: CopyFact.Share} else -> TExprKind.ExplicitCopy{value: checked}
     if facts.lowering == {
-        .Clone -> result_kind = TExprKind.Clone{value: checked, fact: if share -> MIRCopyFact.Share else -> MIRCopyFact.Explicit}
+        .Clone -> result_kind = TExprKind.Clone{value: checked, fact: if share -> CopyFact.Share else -> CopyFact.Explicit}
         .MaterializeView -> result_kind = TExprKind.MaterializeView{value: checked}
         else -> {}
     }

@@ -3259,19 +3259,18 @@ fn ir_numeric_bound(m: &IRModule, b: &IRBuilder, result: Type, ty: Type, member:
     constant :: ir_numeric_bound_constant(ty, member) ?? return ir_fail_slot(&b, span, "numeric bound {member} of {ir_type_name(ty)}")
     row :: ir_type_row(&m, result) ?? return ir_type_fail(&b, span, result)
     if constant == {
-        .Float(value, f32, _) -> {
+        .Float(value, f32) -> {
             slot :: ir_temp(&m, &b, row)
             line :: b.line
             ir_emit(&b.f, IROp.Const, slot, ir_float_constant_bits(value, f32), -1, -1, line)
             return slot
         }
-        .Int(value, _, _) -> {
+        .Int(value) -> {
             if m.types[row].kind == .Int -> return ir_int_constant(&m, &b, row, value)
             slot :: ir_temp(&m, &b, row)
             line :: b.line
             ir_emit(&b.f, IROp.Const, slot, value, -1, -1, line)
             return slot
         }
-        else -> return ir_fail_slot(&b, span, "numeric bound {member} of {ir_type_name(ty)}")
     }
 }

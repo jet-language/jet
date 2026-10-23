@@ -13,7 +13,7 @@ use jet_foundation.[
     Expr,
     ExprField,
     FunctionDefaultRef,
-    MIRCopyFact,
+    CopyFact,
     Span,
     StrPart,
     SymbolKind,
@@ -241,7 +241,7 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     traced := checked
     if !sema_call_is_scalar(checked.ty) {
         if checked.kind == {
-            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_node(checked.ty, TExprKind.Clone{value: checked, fact: MIRCopyFact.Materialize}, checked.span)
+            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_node(checked.ty, TExprKind.Clone{value: checked, fact: CopyFact.Materialize}, checked.span)
             else -> {}
         }
     }
@@ -257,7 +257,7 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     // pure (`-[]>`) and memoized functions keep their rows (Rust sema records
     // no effect for `debug`).
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "debug", call.name_span, [EffectRowEntry]{}, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    write :: sema_tir_node(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, data_plan: None, fallibility: TFailureCarrier.Infallible}, call.name_span)
+    write :: sema_tir_node(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, fallibility: TFailureCarrier.Infallible}, call.name_span)
     body :: [TStmt]{
         TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
         TStmt.ExprStmt{value: write, span: call.name_span},
@@ -567,7 +567,7 @@ fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Sp
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     joined :: sema_tir_node(Type.String, TExprKind.StrLit{parts: parts}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, None, unit, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, unit, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
 }
 
 fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -586,7 +586,7 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     failure :: sema_call_failure_carrier(Val(result))
     if !sema_call_core_record_effects(record, span, [Type]{}, result, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     widen_to_vec :: loop _ in values -> false
-    value :: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, None, result, failure, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, result, failure, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
@@ -605,7 +605,7 @@ fn sema_call_try_reflect_core_call(record: CoreCallRecord, args: [CallArg], span
     if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Named{name: "Value"}
     if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{checked}, span, [Type]{}, [Bool]{false}, None, result, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{checked}, span, [Type]{}, [Bool]{false}, result, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
 }
 
 // `panic(message)` stops with one String message; the stop is a `Never`
@@ -1268,7 +1268,7 @@ fn sema_call_check_freeze(call: Call, expected: Type?, environment: SemaScopeEnv
     result := checked
     if !already_frozen {
         if sema_copy_memory_operation(facts) != None || sema_copy_effect_name(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: call.name_span, facts: facts})
-        kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: MIRCopyFact.Explicit}
+        kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: CopyFact.Explicit}
         result = sema_tir_expr(facts.target, kind, call.name_span)
     }
     &state.freeze_sites.push(SemaOwnershipFreezeSite{span: call.name_span, line: sema_source_line_at(environment.source_segments, call.name_span) ?? 1, column: sema_source_column_at(environment.source_segments, call.name_span) ?? 1})

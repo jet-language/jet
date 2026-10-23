@@ -24,7 +24,7 @@ use jet_foundation.[
     Func,
     Item,
     LValue,
-    MIRDerivationMethod,
+    DerivationMethod,
     Marker,
     NamedSpan,
     OutputKind,
@@ -44,7 +44,7 @@ use jet_foundation.[
     failure_contract_effective_type,
     failure_contract_of_function,
     failure_contract_source,
-    mir_sha256_hex,
+    sha256_hex,
     type_name,
 ]
 use jet_sema.[
@@ -1941,9 +1941,9 @@ fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetC
         signature :: "{kind}|{jet_cli_sem_definition_signature(definition)}"
         text :: if node.span.end > sources[slot].len() -> "" else -> jet_cli_doc_text(sources[slot], node.span.start, node.span.end)
         &output.push(JetCLISemDefinitionFact{
-            stable_id: "def:{mir_sha256_hex(structural).slice(0, 16)}",
-            signature_id: "sig:{mir_sha256_hex(signature).slice(0, 16)}",
-            content_id: "sha256:{mir_sha256_hex(jet_cli_sem_normalize_definition(text))}",
+            stable_id: "def:{sha256_hex(structural).slice(0, 16)}",
+            signature_id: "sig:{sha256_hex(signature).slice(0, 16)}",
+            content_id: "sha256:{sha256_hex(jet_cli_sem_normalize_definition(text))}",
             human_identity: definition.def.identity,
             name: definition.def.qualified_name,
             kind: kind,
@@ -2240,7 +2240,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
     jet_cli_sem_align_reference_targets(&db)
     definitions :: jet_cli_sem_convert_defs(db, modules)
     definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)
-    derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+    derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := ^db.arithmetic
     arithmetic = loop fresh_item in arithmetic -> fresh_item
     &arithmetic.sort_by((left: JetCLISemArithmetic, right: JetCLISemArithmetic) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))

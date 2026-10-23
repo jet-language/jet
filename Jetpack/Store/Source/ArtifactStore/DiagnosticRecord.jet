@@ -17,7 +17,7 @@ use jet_foundation.[
     DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment,
     DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured,
     JetErrorContextFrame, JetErrorConversion, JetErrorDetails, JetErrorField, JetErrorJourneyFrame,
-    JetErrorReport, JetErrorSpan, RecordField, RecordValue, Span, TextEdit, mir_sha256_hex,
+    JetErrorReport, JetErrorSpan, RecordField, RecordValue, Span, TextEdit, sha256_hex,
     record_value_as_list, record_value_as_optional_str, record_value_as_str, record_value_as_usize,
     record_value_field, record_value_is_null, record_value_list_of_str, record_value_optional_str,
     record_value_str_list,
@@ -77,7 +77,7 @@ fn store_decode_diagnostics(origins: [RecordValue], diagnostics: [RecordValue], 
             .Val(text) -> text
             .None -> source_for_revision(revision) ?? return Err(store_diagnostic_error("diagnostic origin `{path}` is not in the closure"))
         }
-        decoded :: DiagnosticOrigin{display: display, path: path, source: source, revision: mir_sha256_hex(source)}
+        decoded :: DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
         if decoded.revision != revision -> return Err(store_diagnostic_error("diagnostic origin `{decoded.path}` revision mismatch"))
         &table.push(decoded)
     }
@@ -297,7 +297,6 @@ fn store_diagnostic_structured(structured: DiagnosticStructured) -> RecordValue 
 
 // Rust diagnostic_record.rs:250 `encode_diagnostic`.
 fn store_diagnostic_encode(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]) -> RecordValue StoreDiagnosticRecordError! {
-    if diagnostic.decision_row != None -> return Err(store_diagnostic_error("diagnostic `{diagnostic.code}` carries a decision row"))
     labels := [RecordValue]{}
     loop label in diagnostic.labels {
         &labels.push(RecordValue.List{values: [RecordValue]{RecordValue.Int{value: label.span.start}, RecordValue.Int{value: label.span.end}, RecordValue.Str{value: label.message}}})
@@ -475,7 +474,6 @@ fn store_diagnostic_decode(value: RecordValue, origins: [DiagnosticOrigin]) -> D
         no_fix_reason: no_fix,
         detail: store_diagnostic_optional_text(value, "detail"),
         structured: structured,
-        decision_row: None,
         denial_kind: store_diagnostic_optional_text(value, "denial_kind"),
         call_chain: store_diagnostic_strings(value, "call_chain"),
         scope_chain: store_diagnostic_strings(value, "scope_chain"),

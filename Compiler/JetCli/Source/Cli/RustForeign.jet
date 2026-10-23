@@ -9,7 +9,7 @@ use core.encoding.json as cli_rust_json
 use core.encoding.json.[pointer]
 use core.encoding.[Dyn]
 use jet_driver.[JetDriverForeignLinkFacts, JetDriverRustForeignFacts, JetDriverRustForeignPlan, JetDriverRustForeignError, jet_driver_foreign_link_cache_identity, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_TARGET]
-use jet_foundation.[stable_id, mir_sha256_bytes, mir_sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+use jet_foundation.[stable_id, sha256_bytes, sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
 
 JET_CLI_RUST_ARTIFACT_SCHEMA :: "jet-ffi-artifacts-v2"
 JET_CLI_RUST_PROVENANCE_SCHEMA :: "jet-ffi-bridge-provenance-v1"
@@ -34,7 +34,7 @@ fn jet_cli_rust_foreign_sandbox_error(detail: String) -> JetDriverRustForeignErr
     JetDriverRustForeignError{code: "E1275", what: "build sandboxing is required but unavailable", why: detail, fix: "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"}
 }
 fn jet_cli_rust_foreign_digest(bytes: [U8]) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+    sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
 fn jet_cli_rust_foreign_hex(value: String) -> Bool Never! {
     if value.len() != 64 -> return false

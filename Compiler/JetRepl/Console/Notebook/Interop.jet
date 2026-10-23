@@ -2,7 +2,7 @@
 // Canonical Foundation JSON first; general Core Dyn fallback has seven
 // public variants (exact Int and Float), not Rust's typed-decoder-only tags.
 use core.encoding.[Dyn]
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_bytes, mir_sha256_hex]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_bytes, sha256_hex]
 
 struct NotebookImportResult { notebook: JetNotebook, loss: NotebookLossReport }
 struct NotebookExportResult { text: String, loss: NotebookLossReport }
@@ -86,7 +86,7 @@ fn notebook_import_ipynb(text: String) -[Rand]> NotebookImportResult NotebookErr
         }
     }
     if format < 4 -> &loss.push("nbformat {format} upgraded to 4.5 semantics")
-    nb := JetNotebook.new(mir_sha256_hex("ipynb-import"))
+    nb := JetNotebook.new(sha256_hex("ipynb-import"))
     cells_index :: notebook_codec_required_index(root, "cells", "ipynb missing cells array")
     cells :: if root[cells_index].value == {
         .Array(values) -> values

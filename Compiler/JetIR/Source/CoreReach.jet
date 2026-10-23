@@ -232,7 +232,7 @@ fn ir_precise_expr_helper(expression: TExpr) -> String? Never! {
     if expression.kind == {
         .PreciseBuiltin(owner, operation, _) -> ir_precise_source_helper(owner, operation)
         .MathBuiltin(owner, operation, _) -> if owner == "Int" -> ir_precise_source_helper(owner, operation) else -> None
-        .CoreCall(record, _, _, _, _, _, _) -> {
+        .CoreCall(record, _, _, _, _, _) -> {
             canonical :: ir_canonical_core_record(record)
             if canonical.module_name != "core.math" -> return None
             if canonical.member == "fraction" -> return ir_precise_source_helper("Fraction", "new")

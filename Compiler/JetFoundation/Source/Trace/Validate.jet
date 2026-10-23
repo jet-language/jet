@@ -336,8 +336,8 @@ fn jettrace_validate_source_maps(value: CanonicalJSON) JetTraceError! {
                 hash :: jettrace_text(fields[jettrace_get(fields, "sha256")].value, "{label}.sha256")
                 if !jettrace_hex64(hash) -> return Err(jettrace_error("{label}.sha256 is not lowercase Hex64"))
                 raw :: map.bytes()
-                actual :: mir_sha256_bytes(raw[0..<raw.len()])
-                if hash != mir_sha256_hex_bytes(actual[0..<actual.len()]) -> return Err(jettrace_error("{label}.sha256 does not match map bytes"))
+                actual :: sha256_bytes(raw[0..<raw.len()])
+                if hash != sha256_hex_bytes(actual[0..<actual.len()]) -> return Err(jettrace_error("{label}.sha256 does not match map bytes"))
             }
             else -> return Err(jettrace_error("{label}.map is not text"))
         }

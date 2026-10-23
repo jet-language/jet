@@ -205,7 +205,7 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
     if args.len() == 1 {
         label :: sema_ui_handle_typed_arg(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         result_type := Type.Named{name: "UINode"}
-        value :: sema_call_core_tir(record, [TExpr]{label}, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics)
+        value :: sema_call_core_tir(record, [TExpr]{label}, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics)
         if value == None -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: value}
@@ -258,7 +258,7 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
     result_type := Type.Named{name: "UINode"}
     on_drop_absent :: sema_expression_absent_none(bound[2].expr)
     if on_drop_absent {
-        value :: sema_call_core_tir(record, [TExpr]{state_value, ime_value}, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics)
+        value :: sema_call_core_tir(record, [TExpr]{state_value, ime_value}, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics)
         if value == None -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: value}

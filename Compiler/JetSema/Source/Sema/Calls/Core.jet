@@ -25,8 +25,7 @@ use jet_foundation.[
     EnumLitArg,
     Expr,
     FunctionDefaultRef,
-    MIRDataPlan,
-    MIRSharedLifetime,
+    SharedLifetime,
     Span,
     StrPart,
     SymbolID,
@@ -60,7 +59,7 @@ use jet_foundation.[
     expr_span,
     sema_effect_covers,
     type_name,
-    mir_shared_lifetime_core_member,
+    shared_lifetime_core_member,
     CORE_CALLS,
 ]
 
@@ -77,7 +76,7 @@ struct SemaCallImportTarget {
 enum SemaCoreCallRoute {
     Source(target: SemaCallDirectTarget)
     Core(record: CoreCallRecord)
-    SharedSite(lifetime: MIRSharedLifetime)
+    SharedSite(lifetime: SharedLifetime)
 }
 
 fn sema_call_core_import_target(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
@@ -480,7 +479,7 @@ fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, progra
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return None
     if imported.module_name == "core.mem" {
-        if mir_shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
+        if shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
     }
     diagnostic_count := diagnostics.len()
     // `core.term` owns only the one-argument print, eprint
@@ -634,7 +633,7 @@ fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params
     result
 }
 
-fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         maximum := record.signature.max_arity
@@ -683,7 +682,7 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
-    value := sema_tir_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
+    value := sema_tir_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, fallibility: fallibility}, span)
     // Rust (fallible.rs `infer_or_fallback`) passes the slot type to a call
     // only as an inference hint: a Core call that returns `Never` produces no
     // value, and the enclosing `??` or branch accepts its divergence.
@@ -944,7 +943,7 @@ fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: 
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
     sema_tir_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
         source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false},
-        data_plan: None, fallibility: TFailureCarrier.Infallible}, span)
+        fallibility: TFailureCarrier.Infallible}, span)
 }
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1050,7 +1049,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         facts :: sema_call_return_view_facts(callable, None, args, binding, scopes, &state, span)
         &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
     }
-    value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, program, context, &diagnostics)
 }
 
@@ -1077,7 +1076,7 @@ fn sema_call_core_shared_reject(member: String, span: Span, diagnostics: &[Diagn
 // The trusted Core body supplies a side-effect-free constructor. Ordinary
 // zero-argument call checking owns its failure/effect facts; this node only
 // changes the storage lifetime and preserves its declared Shared payload type.
-fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_global_shared(lifetime: SharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !environment.module_identity.starts_with("<corelib>/") {
         &diagnostics.push(sema_error("E0067", span, "`{member}` is reserved for Jet", "Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "Rename it without the second leading underscore"))
         return None

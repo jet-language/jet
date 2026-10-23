@@ -2,7 +2,7 @@
 // BudgetView.read_compatible is a required canonical Driver publication: this
 // consumer never measures, manufactures a report, or replaces failed reads.
 use core.encoding.[Dyn]
-use jet_foundation.[foundation_json_quote, mir_sha256_hex_bytes]
+use jet_foundation.[foundation_json_quote, sha256_hex_bytes]
 use jet_impact.[ImpactReport]
 use core.files.runtime.kernel_path_components as lsp_command_path
 use core.files.host.retained_descriptor as lsp_command_fs
@@ -63,7 +63,7 @@ fn lsp_execute_command_response(server: LSPServer, params: Dyn?, id: Dyn) -> Str
                     loop (path, text) in lsp_workspace_sources(server, Val(doc.path)) {
                         extent :: lsp_command_path.strip_prefix_span(path, native_root) ?? lsp_command_path.PathSpan{start: 0, end: path.encoded.len()}
                         relative :: lsp_command_path.display_span(path, extent).replace("\\", "/")
-                        &sources.push((relative, mir_sha256_hex_bytes(text.bytes())))
+                        &sources.push((relative, sha256_hex_bytes(text.bytes())))
                     }
                     projection :: budget_view_read_compatible(native_root, sources)
                     return Val(lsp_response(id, projection.to_json()))

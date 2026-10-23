@@ -650,7 +650,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         fallibility := sema_call_failure_carrier(Val(result))
         if !sema_call_core_record_effects(record, span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         widen_to_vec :: loop _ in values -> false
-        return SemaMethodSpecialCheck{handled: true, value: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, None, result, fallibility, expected, environment, program, &diagnostics)}
+        return SemaMethodSpecialCheck{handled: true, value: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, result, fallibility, expected, environment, program, &diagnostics)}
     }
 
     kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span) ?? {

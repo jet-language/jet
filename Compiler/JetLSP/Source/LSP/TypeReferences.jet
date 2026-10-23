@@ -1,7 +1,7 @@
 // Source/LSP/Server.rs:4845–5264. The checked SemIndex builder is the
 // sole index producer; type annotations borrow CompW36's ORIGINAL loaded AST
 // through result.bundle, not expanded registration items or an AST replica.
-use jet_foundation.[Item, Func, Type, Span, NameLedger, MIRNameDeclaration, name_ledger_declaration, name_ledger_semantic_identity]
+use jet_foundation.[Item, Func, Type, Span, NameLedger, NameDeclaration, name_ledger_declaration, name_ledger_semantic_identity]
 use jet_driver.[JetDriverCompilerCheckResult]
 use jet_semindex.[SymbolDB, SymKind, SymRef, DefinitionAnchor, SourceSpan]
 
@@ -151,7 +151,7 @@ fn lsp_add_named_type_reference(name: String, span: Span, module_idx: Int, modul
 }
 
 // Foundation's ledger methods determine exact alias/nominal precedence.
-fn lsp_checked_type_declaration(ledger: NameLedger, module_idx: Int, name: String) -> (module_idx: Int, declaration: MIRNameDeclaration)? Never! {
+fn lsp_checked_type_declaration(ledger: NameLedger, module_idx: Int, name: String) -> (module_idx: Int, declaration: NameDeclaration)? Never! {
     if name_ledger_declaration(ledger, module_idx, name) == .Val(declaration) -> return Val((module_idx: module_idx, declaration: declaration))
     if name_ledger_nominal_module(ledger, name) == .Val(target_module) {
         parts :: name.split("::")

@@ -9,7 +9,7 @@ use jet_foundation.[
     Expr,
     Stmt,
     Program,
-    MIRNameFacts,
+    NameFacts,
     Span,
     Type,
     CallArg,
@@ -66,7 +66,7 @@ fn semindex_comptime_origin_reference(name: String, span: Span, source: String) 
 }
 
 // This is the existing structural_slot callback, not a second AST visitor.
-fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, expr: Expr, mp: String, slot: String) {
+fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, expr: Expr, mp: String, slot: String) {
     semindex_structural_slot(&db, &ctx, slot, StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
         semindex_collect_expr(&db, &ctx, names, program, source, expr, mp)
     })
@@ -76,7 +76,7 @@ fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, progra
 // Complete synchronous CallValue/OptField projection before generic node insertion.
 enum SemIndexOptionalCallVisitor { Borrowed }
 impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor {
-    fn visit_optional_method_call(self, db: &SymbolDB, context: &WalkCtx, names: MIRNameFacts, program: Program, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
+    fn visit_optional_method_call(self, db: &SymbolDB, context: &WalkCtx, names: NameFacts, program: Program, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
         call_id :: semindex_record_node(&db, context, "expr", "Discriminant(45)", module_path, call_span)
         if call_id == .Val(id) -> &context.structural_parents.push(id)
         semindex_structural_slot(&db, &context, "callee", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
@@ -95,8 +95,8 @@ impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor {
     }
 }
 
-fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, expr: Expr, mp: String) {
-    if canonical_ast_visit_optional_method_call<SemIndexOptionalCallVisitor, SymbolDB, WalkCtx, MIRNameFacts, Program, String, String>(expr, SemIndexOptionalCallVisitor.Borrowed, &db, &ctx, names, program, source, mp) -> return
+fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, expr: Expr, mp: String) {
+    if canonical_ast_visit_optional_method_call<SemIndexOptionalCallVisitor, SymbolDB, WalkCtx, NameFacts, Program, String, String>(expr, SemIndexOptionalCallVisitor.Borrowed, &db, &ctx, names, program, source, mp) -> return
     // Implicit owning copies reuse the operand span; authored ~ includes its sigil.
     if expr == .Copy(inner, span, _) {
         if span == expr_span(inner) -> &db.inlay.push(InlayHint{span: span, module_path: mp, label: " ~ copy"})
@@ -329,7 +329,7 @@ fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
 
 // Lambda/if expression bodies intentionally visit only Val, Expr and DeferClose,
 // exactly Rust collect_expr_stmt, not the full statement walker.
-fn semindex_collect_expr_stmt(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
+fn semindex_collect_expr_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
     if stmt == {
         .Expr(expr) -> semindex_collect_expr(&db, &ctx, names, program, source, expr, mp)
         .DeferClose(close, _) -> semindex_collect_expr(&db, &ctx, names, program, source, close, mp)

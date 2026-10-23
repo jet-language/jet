@@ -528,7 +528,7 @@ fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeResul
         loop byte in body -> &out.push(byte)
     }
     view :: out[0..<out.len()]
-    checksum :: mir_sha256_bytes(view)
+    checksum :: sha256_bytes(view)
     loop byte in checksum -> &out.push(byte)
     RecordEncodeResult{bytes: Val(out), problem: None}
 }
@@ -643,7 +643,7 @@ fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     }
     checksum :: bytes.slice(body_end, bytes.len())
     body :: bytes[0..<body_end]
-    if mir_sha256_bytes(body) != checksum -> return record_reader_failure("record checksum does not match its bytes")
+    if sha256_bytes(body) != checksum -> return record_reader_failure("record checksum does not match its bytes")
     cursor := RecordCursor{at: 4, end: body_end, problem: None}
     format :: record_read_uvarint(bytes, &cursor)
     if cursor.problem == None && format != RECORD_FORMAT -> return record_reader_failure("record format {format} is not supported")
@@ -825,7 +825,7 @@ fn record_digest(schema: String, sections: [RecordSection]) -> RecordDigestResul
 
 // Lowercase hex of a digest.
 fn record_digest_hex(digest: [U8]) -> String Never! {
-    mir_sha256_hex_bytes(digest)
+    sha256_hex_bytes(digest)
 }
 
 // Parse a 64-character lowercase hex digest.
@@ -872,7 +872,7 @@ fn record_value_json(out: &[U8], value: RecordValue) Never! {
         .Bool(flag) -> foundation_json_append(&out, if flag -> "true" else -> "false")
         .Int(number) -> foundation_json_append(&out, "{number}")
         .Str(text) -> foundation_json_append(&out, "\"{foundation_json_escape(text)}\"")
-        .Bytes(raw) -> foundation_json_append(&out, "{{\"bytes\":\"{mir_sha256_hex_bytes(raw)}\"}}")
+        .Bytes(raw) -> foundation_json_append(&out, "{{\"bytes\":\"{sha256_hex_bytes(raw)}\"}}")
         .List(values) -> {
             foundation_json_append(&out, "[")
             loop (index, item) in values {
@@ -890,7 +890,7 @@ fn record_value_json(out: &[U8], value: RecordValue) Never! {
             }
             foundation_json_append(&out, "}}")
         }
-        .Digest(digest) -> foundation_json_append(&out, "{{\"digest\":\"{mir_sha256_hex_bytes(digest)}\"}}")
+        .Digest(digest) -> foundation_json_append(&out, "{{\"digest\":\"{sha256_hex_bytes(digest)}\"}}")
     }
 }
 
@@ -903,10 +903,10 @@ fn record_key_digest(fields: [String]) -> String Never! {
     framed := [U8]{}
     loop field in fields -> record_put_str(&framed, field)
     view :: framed[0..<framed.len()]
-    mir_sha256_hex_bytes(mir_sha256_bytes(view))
+    sha256_hex_bytes(sha256_bytes(view))
 }
 
 // The store key of a blob record: lowercase hex SHA-256 of its whole bytes.
 fn record_blob_key(bytes: View<U8>) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+    sha256_hex_bytes(sha256_bytes(bytes))
 }

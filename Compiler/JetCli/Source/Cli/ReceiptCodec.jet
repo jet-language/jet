@@ -1,6 +1,6 @@
 // Source/ReceiptStore.rs wire codec and ReceiptSections.rs validation.
 // This is the same content-addressed receipt, not a CLI-specific store.
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, mir_sha256_hex]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, sha256_hex]
 use core.text as receipt_text
 use core.crypto as receipt_crypto
 
@@ -66,7 +66,7 @@ fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
 }
 
 fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReadError! {
-    section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: mir_sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
+    section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
     jet_cli_receipt_section_validate(section)
     Ok(section)
 }

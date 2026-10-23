@@ -208,10 +208,9 @@ fn jet_eval_ir_transport_fail(s: &JetEvalIRState, ty: Type) -> TComptimeValue? N
     None
 }
 
-// The display name a clean absence names its element by, as the MIR
-// evaluator spells it (mir_type_display_name): a nominal is an application
-// in MIR (Codegen Types.jet lowers `Named` to `Apply` with no arguments), so
-// it names its arguments in angle brackets, none as `Name<>`.
+// The display name a clean absence names its element by: a nominal names its
+// arguments in angle brackets, none as `Name<>`, so the message is the same
+// for a bare nominal and its applications.
 fn jet_eval_ir_type_display(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> "{name}<>"

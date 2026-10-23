@@ -14,7 +14,7 @@ use jet_pkg_model.[
     pkg_lock_record_rust_bridge, pkg_lock_record_source_channel, pkg_lock_validate_package_nix,
     pkg_lock_write, pkg_lock_write_atomically,
 ]
-use jet_foundation.[Diagnostic, MIRRuntimeLayer]
+use jet_foundation.[Diagnostic, RuntimeLayer]
 use jetpack_foundation.[UNIFIED_LOCK_FILE]
 
 fn pkg_lock_test_tricky(label: String) -> String Never! {
@@ -197,8 +197,8 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
     partial.fingerprint = Val("fingerprint")
     partial.content_hash = Val("content")
     partial.dependencies = [String]{"dep"}
-    partial.layer = Val(MIRRuntimeLayer.Std)
-    partial.inferred_layer = Val(MIRRuntimeLayer.Alloc)
+    partial.layer = Val(RuntimeLayer.Std)
+    partial.inferred_layer = Val(RuntimeLayer.Alloc)
     partial.effects = [String]{"FS.Read"}
     partial.effect_grants = [String]{"FS"}
     partial.required_effects = [String]{"Net.Connect"}
@@ -216,7 +216,7 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
         locked: Val(LockedRevision{rev: "revision", tree_hash: "tree", last_modified: 42}),
         fingerprint: "fingerprint", content_hash: Val("content"),
         dependencies: [String]{"dep"},
-        layer: Val(MIRRuntimeLayer.Std), inferred_layer: Val(MIRRuntimeLayer.Alloc),
+        layer: Val(RuntimeLayer.Std), inferred_layer: Val(RuntimeLayer.Alloc),
         effects: [String]{"FS.Read"}, effect_grants: [String]{"FS"},
         required_effects: [String]{"Net.Connect"}, granted_effects: [String]{"Net"},
         denied_effects: [String]{"Exec"}, effect_authority: Val("manifest"),

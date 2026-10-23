@@ -6,7 +6,7 @@ use core.files as cli_files
 use core.process as cli_process
 use core.sys as cli_sys
 use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
-use jet_foundation.[Type, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_foundation.[Type, sha256_bytes, sha256_hex_bytes]
 
 #Error
 struct JetCLIForeignLinkError { message: String }
@@ -130,7 +130,7 @@ fn jet_cli_native_c_identity(identity: &[U8], schema: String, tools: JetCLINativ
 fn jet_cli_native_c_cached(archive: String) -[FS]> Bool Never! {
     bytes :: cli_files.read_bytes(archive) ?? return false
     digest :: cli_files.read("{archive}.sha256") ?? ""
-    digest.trim() == mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+    digest.trim() == sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
 
 // Archive `objects` deterministically and publish it with its digest
@@ -142,7 +142,7 @@ fn jet_cli_native_c_publish(tools: JetCLINativeCTools, lib: String, temporary: S
     receipt :: cli_process.cmd(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't archive C dependency `{lib}`: {err}"))
     if !receipt.success -> return Err(jet_cli_foreign_link_error("C archiver rejected `{lib}`: {receipt.errors}"))
     bytes :: cli_files.read_bytes(staged) ?? return Err(jet_cli_foreign_link_error("couldn't read compiled C archive: {err}"))
-    digest :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+    digest :: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
     cli_files.rename(staged, archive) ?? return Err(jet_cli_foreign_link_error("couldn't publish C archive: {err}"))
     cli_files.write("{temporary}/digest", digest) ?? return Err(jet_cli_foreign_link_error("couldn't write C archive digest: {err}"))
     cli_files.rename("{temporary}/digest", "{archive}.sha256") ?? return Err(jet_cli_foreign_link_error("couldn't publish C archive digest: {err}"))
@@ -226,7 +226,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
         jet_cli_foreign_hash_field(&identity, "preprocessed", receipt.output.bytes())
         &preprocessed.push(receipt.output)
     }
-    key :: mir_sha256_hex_bytes(mir_sha256_bytes(identity[0..<identity.len()]))
+    key :: sha256_hex_bytes(sha256_bytes(identity[0..<identity.len()]))
     store :: "{cache}/{key}"
     archive :: "{store}/lib{lib}.a"
     if jet_cli_native_c_cached(archive) -> return Ok(archive)
@@ -347,7 +347,7 @@ fn jet_cli_native_inline_c(facts: JetDriverForeignLinkFacts, cache: String) -[FS
         jet_cli_foreign_hash_field(&identity, "preprocessed", receipt.output.bytes())
     }
     if staging_failure == .Val(failure) -> return Err(jet_cli_foreign_link_error(failure))
-    key :: mir_sha256_hex_bytes(mir_sha256_bytes(identity[0..<identity.len()]))
+    key :: sha256_hex_bytes(sha256_bytes(identity[0..<identity.len()]))
     store :: "{store_root}/{key}"
     archive :: "{store}/libjet_inline_native.a"
     if jet_cli_native_c_cached(archive) {

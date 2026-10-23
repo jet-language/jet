@@ -1,10 +1,7 @@
-// Typed expression lowering preserves checked MIR types and ownership facts.
-// Every produced MIR value retains its checked type, span, and ownership.
+// Typed expression lowering helpers: string format routes, precise builtin
+// keys, and checked numeric bounds.
 use core.math as math
 use jet_foundation.[
-    MIRConstant,
-    mir_integer_constant,
-    MIRIntegerWidth,
     TFailureCarrier,
     Type,
     type_name,
@@ -126,31 +123,34 @@ fn ir_canonical_nan() -> Float Never! {
     math.from_bits(0x7FF8000000000000)
 }
 
-fn ir_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {
+// A checked numeric bound (`Int.MAX`, `U64.MAX`, `Float.NAN`, ...). Every integer bound fits a
+// word: `U64.MAX` keeps its two-complement bits (-1).
+enum IRNumericBound { Float(value: Float, f32: Bool) Int(value: Int) }
+
+fn ir_numeric_bound_constant(ty: Type, member: String) -> IRNumericBound? {
     if ty == Type.Float32 {
-        if member == "MAX" -> return Val(MIRConstant.Float{value: 3.4028234663852886e38, f32: true, spelling: None})
-        if member == "MIN" -> return Val(MIRConstant.Float{value: -3.4028234663852886e38, f32: true, spelling: None})
-        if member == "NAN" -> return Val(MIRConstant.Float{value: ir_canonical_nan(), f32: true, spelling: None})
-        if member == "INFINITY" -> return Val(MIRConstant.Float{value: 1.0 / 0.0, f32: true, spelling: None})
-        if member == "NEG_INFINITY" -> return Val(MIRConstant.Float{value: -(1.0 / 0.0), f32: true, spelling: None})
-        if member == "EPSILON" -> return Val(MIRConstant.Float{value: 1.1920928955078125e-7, f32: true, spelling: None})
+        if member == "MAX" -> return Val(IRNumericBound.Float{value: 3.4028234663852886e38, f32: true})
+        if member == "MIN" -> return Val(IRNumericBound.Float{value: -3.4028234663852886e38, f32: true})
+        if member == "NAN" -> return Val(IRNumericBound.Float{value: ir_canonical_nan(), f32: true})
+        if member == "INFINITY" -> return Val(IRNumericBound.Float{value: 1.0 / 0.0, f32: true})
+        if member == "NEG_INFINITY" -> return Val(IRNumericBound.Float{value: -(1.0 / 0.0), f32: true})
+        if member == "EPSILON" -> return Val(IRNumericBound.Float{value: 1.1920928955078125e-7, f32: true})
     }
     if ty == Type.Float {
-        if member == "MAX" -> return Val(MIRConstant.Float{value: 1.7976931348623157e308, f32: false, spelling: None})
-        if member == "MIN" -> return Val(MIRConstant.Float{value: -1.7976931348623157e308, f32: false, spelling: None})
-        if member == "NAN" -> return Val(MIRConstant.Float{value: ir_canonical_nan(), f32: false, spelling: None})
-        if member == "INFINITY" -> return Val(MIRConstant.Float{value: 1.0 / 0.0, f32: false, spelling: None})
-        if member == "NEG_INFINITY" -> return Val(MIRConstant.Float{value: -(1.0 / 0.0), f32: false, spelling: None})
-        if member == "EPSILON" -> return Val(MIRConstant.Float{value: 2.220446049250313e-16, f32: false, spelling: None})
+        if member == "MAX" -> return Val(IRNumericBound.Float{value: 1.7976931348623157e308, f32: false})
+        if member == "MIN" -> return Val(IRNumericBound.Float{value: -1.7976931348623157e308, f32: false})
+        if member == "NAN" -> return Val(IRNumericBound.Float{value: ir_canonical_nan(), f32: false})
+        if member == "INFINITY" -> return Val(IRNumericBound.Float{value: 1.0 / 0.0, f32: false})
+        if member == "NEG_INFINITY" -> return Val(IRNumericBound.Float{value: -(1.0 / 0.0), f32: false})
+        if member == "EPSILON" -> return Val(IRNumericBound.Float{value: 2.220446049250313e-16, f32: false})
     }
     if ty == Type.Int {
-        if member == "MAX" -> return Val(mir_integer_constant(9223372036854775807, None, None))
-        if member == "MIN" -> return Val(mir_integer_constant(-9223372036854775808, None, None))
+        if member == "MAX" -> return Val(IRNumericBound.Int{value: 9223372036854775807})
+        if member == "MIN" -> return Val(IRNumericBound.Int{value: -9223372036854775808})
     }
     if ty == {
         .IntN(signed, bits) -> {
             if bits < 1 || bits > 64 || (member != "MAX" && member != "MIN") -> return None
-            width := Val(MIRIntegerWidth{signed: signed, bits: bits})
             value := 0
             if {
                 member == "MAX" -> {
@@ -203,7 +203,7 @@ fn ir_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {
                     }
                 }
             }
-            return Val(mir_integer_constant(value, width, None))
+            return Val(IRNumericBound.Int{value: value})
         }
         else -> {}
     }

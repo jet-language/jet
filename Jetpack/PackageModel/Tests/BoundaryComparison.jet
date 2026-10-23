@@ -14,7 +14,7 @@ use jet_foundation.[
     ComparisonIdentity, ComparisonObservation, ComparisonRecord, ComparisonSample, ComparisonStatus,
     DerivationRecord, EvidenceBuild, EvidenceExpectation, EvidenceIdentity, EvidenceKind,
     EvidenceOutcome, EvidenceProducerKind, EvidenceRecord, EvidenceRevision, EvidenceSource,
-    MIRDerivationMethod, MIRDerivationRef, ObservationRelation, TEST_COMPARISON_SCHEMA_VERSION,
+    DerivationMethod, DerivationRef, ObservationRelation, TEST_COMPARISON_SCHEMA_VERSION,
     comparison_assertion_error_text, comparison_record_artifact_id, comparison_record_assert_equal,
     comparison_status_as_str, derivation_identity, derivation_record, derivation_record_reference,
     evidence_outcome_name, evidence_record_new, observation_relation_as_str,
@@ -31,7 +31,7 @@ fn pkg_boundary_test_contract(language: ForeignLanguage) -> ForeignBoundaryContr
     ForeignBoundaryContract.new(descriptor, "probe", identity).with_artifact_coverage(coverage)
 }
 fn pkg_boundary_test_derivation(contract: ForeignBoundaryContract) -> DerivationRecord Never! {
-    derivation_record("probe", "replacement", "jet-test", MIRDerivationMethod.SampledAgreement, "comparison", [String]{}, contract.identity.derivation_identity())
+    derivation_record("probe", "replacement", "jet-test", DerivationMethod.SampledAgreement, "comparison", [String]{}, contract.identity.derivation_identity())
 }
 fn pkg_boundary_test_evidence(derivation: DerivationRecord) -> EvidenceRecord Never! {
     identity :: EvidenceIdentity{report_id: "report", claim_id: "replacement", evidence_id: "observation"}
@@ -287,7 +287,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
         .Err(error) -> error.message
     }
     assert_eq(error, "derivation forged has a non-canonical identity")
-    wrong :: derivation_record("probe", "replacement", "jet-test", MIRDerivationMethod.SampledAgreement, "comparison", [String]{}, derivation_identity("wrong", "build", "run", "target"))
+    wrong :: derivation_record("probe", "replacement", "jet-test", DerivationMethod.SampledAgreement, "comparison", [String]{}, derivation_identity("wrong", "build", "run", "target"))
     wrong_error :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, wrong, evidence, record, "replacement") == {
         .Ok(_) -> panic("wrong derivation identity")
         .Err(fault) -> fault.message
@@ -300,7 +300,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
         .Err(fault) -> fault.message
     }
     assert_eq(missing, "foreign boundary evidence must reference a checked derivation")
-    evidence.derivation = Val(MIRDerivationRef{id: "wrong"})
+    evidence.derivation = Val(DerivationRef{id: "wrong"})
     disagreement :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
         .Ok(_) -> panic("disagreeing reference")
         .Err(fault) -> fault.message

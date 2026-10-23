@@ -3,7 +3,7 @@
 // a dynamic call loads the key and calls the matching implementation, an
 // unknown key stops at jet_rt_unreachable.
 
-use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TMethodRef, TTryConvert, Type, mir_sha256_bytes, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TMethodRef, TTryConvert, Type, sha256_bytes, type_carrier_identity]
 
 // The payload key of concrete type `ty`: a function of its identity alone
 // (56 bits of the identity's SHA-256, from 1), so it does not depend on the
@@ -13,7 +13,7 @@ fn ir_trait_key(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
     identity :: ir_trait_identity(p, ty)
     if m.trait_keys.get(identity) == .Val(key) -> return key
     bytes :: identity.bytes()
-    digest :: mir_sha256_bytes(bytes[0..<bytes.len()])
+    digest :: sha256_bytes(bytes[0..<bytes.len()])
     key := 0
     loop index in 0..<7 -> key = key * 256 + Int.from_u8(digest[index])
     key += 1

@@ -3,7 +3,7 @@
 // function here consumes published paused facts only; it never runs program
 // code, an interpreter, a native debugger, a process or a host callback.
 use core.math as debug_snapshot_math
-use jet_foundation.[mir_sha256_hex, Record, Variant]
+use jet_foundation.[sha256_hex, Record, Variant]
 
 // Rust split_debug_expression's 16 KiB UTF-8 byte bound.
 DEBUG_EXPRESSION_MAX_BYTES :: 16384
@@ -38,7 +38,7 @@ struct DebugSnapshot {
 
     // Stable identity for the current frame in this paused fact set.
     fn frame_id(self) -> String Never! {
-        digest :: mir_sha256_hex(debug_snapshot_frame_key(self).join(""))
+        digest :: sha256_hex(debug_snapshot_frame_key(self).join(""))
         "frame-{digest.slice(0, 24)}"
     }
 
@@ -52,7 +52,7 @@ struct DebugSnapshot {
             &key.push("=")
             &key.push(local.value)
         }
-        mir_sha256_hex(key.join(""))
+        sha256_hex(key.join(""))
     }
 }
 

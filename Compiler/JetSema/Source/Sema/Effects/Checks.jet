@@ -15,7 +15,7 @@ use jet_foundation.[
     Diagnostic,
     EffectRowEntry,
     Func,
-    MIRSharedLifetime,
+    SharedLifetime,
     FunctionDefaultRef,
     Item,
     NamedSpan,
@@ -301,7 +301,7 @@ fn sema_effect_collect_statement_spans(statements: [Stmt], assume_det: Bool, spa
 fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: TExpr, fact: SemaCallSiteFact) -> String? {
     if !node.is_pure || fact.callee != None -> return None
     api := ""
-    if expression.kind == .CoreCall(record, _, _, _, _, _, _) {
+    if expression.kind == .CoreCall(record, _, _, _, _, _) {
         parts :: record.module_name.split(".").to_list()
         if parts.len() > 0 -> api = "{parts[parts.len() - 1]}.{record.member}"
     }
@@ -564,7 +564,7 @@ fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program
 
 fn sema_effect_call_api(value: TExpr) -> String Never! {
     if value.kind == {
-        .CoreCall(record, _, _, _, _, _, _) -> "{record.module_name}.{record.member}"
+        .CoreCall(record, _, _, _, _, _) -> "{record.module_name}.{record.member}"
         .Call(callee, _, _) -> callee.key
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
@@ -1091,7 +1091,7 @@ fn sema_effect_is_call(expression: TExpr) -> Bool Never! {
         | .IndirectCall(_, _, _, _)
         | .MethodCall(_, _, _, _)
         | .StaticCall(_, _, _, _, _)
-        | .CoreCall(_, _, _, _, _, _, _)
+        | .CoreCall(_, _, _, _, _, _)
         | .MathBuiltin(_, _, _)
         | .PreciseBuiltin(_, _, _)
         | .Print(_)
@@ -1304,7 +1304,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                     // A Core call checked without a call-site fact still
                     // carries its record: its declared root and leaf are its
                     // effects, never an unknown callee's maximal row.
-                    if expression.kind == .CoreCall(record, _, _, _, _, _, _) {
+                    if expression.kind == .CoreCall(record, _, _, _, _, _) {
                         sema_effect_record_core_row(&nodes, node_index, record, expression.span)
                     } else if !sema_effect_is_compiler_intrinsic(expression) {
                         sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, expression)
@@ -2224,7 +2224,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     calls = sema_effect_collect_threads(&modules, inputs, &nodes, ^calls, any_unsafe, &diagnostics, threads)
     solved :: sema_effect_solve(nodes, calls.node_by_key)
     loop module_index in 0..<inputs.len() {
-        sites := [String:MIRSharedLifetime]{}
+        sites := [String:SharedLifetime]{}
         site_diagnostics := [Diagnostic]{}
         facts := sema_effect_shared_facts(modules[inputs[module_index].module_index].call_facts)
         facts = loop fresh_item in facts -> fresh_item
@@ -2781,7 +2781,7 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
             sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, predicate)
         }
         .ConditionNotify(condition, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
-        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .CoreCall(_, args, _, _, _, _) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .HostCall(call) -> sema_effect_walk_host_call_children(walk, &nodes, facts, &diagnostics, caller, call)
         .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
             if argument == .Val(argument_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument_value)

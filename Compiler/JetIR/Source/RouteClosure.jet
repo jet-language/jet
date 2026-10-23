@@ -1,7 +1,6 @@
 // Lower checked TClosureOp expressions through their canonical Prelude routes.
 use jet_foundation.[
     Effect,
-    MIRPreludeABI,
     TClosureOp,
     Type,
 ]
@@ -13,11 +12,10 @@ struct IRClosureRoute {
     arity: Int
     borrow_mask: [Bool]
     effect_kind: Effect?
-    abi: MIRPreludeABI
 }
 
-fn ir_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MIRPreludeABI) -> IRClosureRoute Never! {
-    IRClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
+fn ir_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRClosureRoute Never! {
+    IRClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect}
 }
 
 fn ir_closure_receiver_kind(receiver: Type) -> String? {
@@ -41,85 +39,85 @@ fn ir_collection_closure_route(operation: TClosureOp, receiver: Type) -> IRClosu
     if operation == {
         .Map -> {
             // #4566 slice 5: the eager list map kernels borrow their source.
-            if kind == "list" -> return ir_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "map", "jet_iter_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{true, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "map", "jet_iter_map", 2, [Bool]{false, false}, None)
         }
         .MapMut -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "map_mut", "jet_iter_map_mut", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{true, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "map_mut", "jet_iter_map_mut", 2, [Bool]{false, false}, None)
         }
         .TryMap -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "try_map", "jet_list_try_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "try_map", "jet_iter_try_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "view" -> return ir_closure_route_row("core.view", "try_map", "jet_view_try_map", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "try_map", "jet_list_try_map", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "try_map", "jet_iter_try_map", 2, [Bool]{false, false}, None)
+            if kind == "view" -> return ir_closure_route_row("core.view", "try_map", "jet_view_try_map", 2, [Bool]{true, false}, None)
         }
         .Filter -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "filter", "jet_list_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "filter", "jet_iter_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "filter", "jet_list_filter", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "filter", "jet_iter_filter", 2, [Bool]{false, false}, None)
         }
         .FilterMap -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "filter_map", "jet_list_filter_map_iter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "filter_map", "jet_iter_filter_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "filter_map", "jet_list_filter_map_iter", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "filter_map", "jet_iter_filter_map", 2, [Bool]{false, false}, None)
         }
         .TryFilter -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "try_filter", "jet_list_try_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "try_filter", "jet_iter_try_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "view" -> return ir_closure_route_row("core.view", "try_filter", "jet_view_try_filter", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "try_filter", "jet_list_try_filter", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "try_filter", "jet_iter_try_filter", 2, [Bool]{false, false}, None)
+            if kind == "view" -> return ir_closure_route_row("core.view", "try_filter", "jet_view_try_filter", 2, [Bool]{true, false}, None)
         }
         .Each | .EachMut -> {
             if kind == "list" || kind == "iter" {
-                if operation == TClosureOp.Each -> return ir_closure_route_row("core.list", "each", "jet_list_each", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-                return ir_closure_route_row("core.list", "each_mut", "jet_list_each_mut", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+                if operation == TClosureOp.Each -> return ir_closure_route_row("core.list", "each", "jet_list_each", 2, [Bool]{false, false}, None)
+                return ir_closure_route_row("core.list", "each_mut", "jet_list_each_mut", 2, [Bool]{false, false}, None)
             }
         }
         .Find -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "find", "jet_list_find", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "find", "jet_list_find", 2, [Bool]{false, false}, None)
         }
         .Any -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "any", "jet_list_any", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "any", "jet_list_any", 2, [Bool]{false, false}, None)
         }
         .All -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "all", "jet_list_all", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "all", "jet_list_all", 2, [Bool]{false, false}, None)
         }
         .Reduce -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "reduce", "jet_list_reduce", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "reduce", "jet_list_reduce", 3, [Bool]{false, false, false}, None)
         }
         .TakeWhile -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "take_while", "jet_list_take_while_iter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "take_while", "jet_iter_take_while", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "take_while", "jet_list_take_while_iter", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "take_while", "jet_iter_take_while", 2, [Bool]{false, false}, None)
         }
         .SkipWhile -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "skip_while", "jet_list_skip_while_iter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "skip_while", "jet_iter_skip_while", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "skip_while", "jet_list_skip_while_iter", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "skip_while", "jet_iter_skip_while", 2, [Bool]{false, false}, None)
         }
         .FlatMap -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "flat_map", "jet_list_flat_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "flat_map", "jet_iter_flat_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "flat_map", "jet_list_flat_map", 2, [Bool]{false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "flat_map", "jet_iter_flat_map", 2, [Bool]{false, false}, None)
         }
         .Position -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "position", "jet_list_position", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "position", "jet_list_position", 2, [Bool]{false, false}, None)
         }
         .MinBy -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "min_by", "jet_list_min_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "min_by", "jet_list_min_by", 2, [Bool]{false, false}, None)
         }
         .MaxBy -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "max_by", "jet_list_max_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "max_by", "jet_list_max_by", 2, [Bool]{false, false}, None)
         }
         .GroupBy -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "group_by", "jet_list_group_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "group_by", "jet_list_group_by", 2, [Bool]{false, false}, None)
         }
         .CountBy -> {
-            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "count_by", "jet_list_count_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "count_by", "jet_list_count_by", 2, [Bool]{false, false}, None)
         }
         .Scan -> {
-            if kind == "list" -> return ir_closure_route_row("core.list", "scan", "jet_list_scan_iter", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
-            if kind == "iter" -> return ir_closure_route_row("core.iter", "scan", "jet_iter_scan", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return ir_closure_route_row("core.list", "scan", "jet_list_scan_iter", 3, [Bool]{false, false, false}, None)
+            if kind == "iter" -> return ir_closure_route_row("core.iter", "scan", "jet_iter_scan", 3, [Bool]{false, false, false}, None)
         }
         .OptionMap -> {
-            if kind == "option" -> return ir_closure_route_row("core.option", "map", "jet_option_map_ref", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
+            if kind == "option" -> return ir_closure_route_row("core.option", "map", "jet_option_map_ref", 2, [Bool]{true, false}, None)
         }
         .BagAny -> {
-            if kind == "bag" -> return ir_closure_route_row("core.bag", "any", "jet_bag_any", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
+            if kind == "bag" -> return ir_closure_route_row("core.bag", "any", "jet_bag_any", 2, [Bool]{true, false}, None)
         }
         else -> {}
     }
@@ -128,34 +126,34 @@ fn ir_collection_closure_route(operation: TClosureOp, receiver: Type) -> IRClosu
 
 fn ir_closure_route(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
     if operation == {
-        .EditDisjoint -> return ir_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None, MIRPreludeABI.Value)
-        .EachMap -> return ir_closure_route_row("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .MapAny -> return ir_closure_route_row("core.map", "any", "jet_map_any", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .MapAll -> return ir_closure_route_row("core.map", "all", "jet_map_all", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .MapFilter -> return ir_closure_route_row("core.map", "filter", "jet_map_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .MapMap -> return ir_closure_route_row("core.map", "map", "jet_map_map_values", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .MapFold -> return ir_closure_route_row("core.map", "fold", "jet_map_fold", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
-        .MapFlatMap -> return ir_closure_route_row("core.map", "flat_map", "jet_map_flat_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .ListBinarySearchBy -> return ir_closure_route_row("core.list", "binary_search_by", "jet_list_binary_search_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .ListMinMaxBy -> return ir_closure_route_row("core.list", "min_max_by", "jet_list_min_max_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Aggregate)
-        .CountWhere -> return ir_closure_route_row("core.list", "count_where", "jet_list_count_where", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .SortBy -> return ir_closure_route_row("core.list", "sort_by", "jet_list_sort_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .SortByDesc -> return ir_closure_route_row("core.list", "sort_by_desc", "jet_list_sort_by_desc", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .TrySortBy -> return ir_closure_route_row("core.list", "try_sort_by", "jet_list_try_sort_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .TrySortByDesc -> return ir_closure_route_row("core.list", "try_sort_by_desc", "jet_list_try_sort_by_desc", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .SortByCompare -> return ir_closure_route_row("core.list", "sort_by_compare", "jet_list_sort_by_compare", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .ParaMap -> return ir_closure_route_row("core.list", "para_map", "jet_list_para_map", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
-        .ParaFilter -> return ir_closure_route_row("core.list", "para_filter", "jet_list_para_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .ParaPartition -> return ir_closure_route_row("core.list", "para_partition", "jet_list_para_partition", 2, [Bool]{false, false}, None, MIRPreludeABI.Aggregate)
-        .ParaFold -> return ir_closure_route_row("core.list", "para_fold", "jet_list_para_fold", 4, [Bool]{false, false, false, false}, None, MIRPreludeABI.Value)
-        .DedupBy -> return ir_closure_route_row("core.iter", "dedup_by", "jet_iter_dedup_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .IsSortedBy -> return ir_closure_route_row("core.iter", "is_sorted_by", "jet_iter_is_sorted_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .ChunkWhile -> return ir_closure_route_row("core.iter", "chunk_while", "jet_iter_chunk_while", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .Fold -> return ir_closure_route_row("core.list", "fold", "jet_list_fold", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
-        .ViewFold -> return ir_closure_route_row("core.view", "fold", "jet_view_fold", 3, [Bool]{true, false, false}, None, MIRPreludeABI.Value)
-        .ViewMap -> return ir_closure_route_row("core.view", "map", "jet_view_map", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .UpdateFirst -> return ir_closure_route_row("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem), MIRPreludeABI.Value)
-        .Partition -> return ir_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None, MIRPreludeABI.Aggregate)
+        .EditDisjoint -> return ir_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None)
+        .EachMap -> return ir_closure_route_row("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None)
+        .MapAny -> return ir_closure_route_row("core.map", "any", "jet_map_any", 2, [Bool]{false, false}, None)
+        .MapAll -> return ir_closure_route_row("core.map", "all", "jet_map_all", 2, [Bool]{false, false}, None)
+        .MapFilter -> return ir_closure_route_row("core.map", "filter", "jet_map_filter", 2, [Bool]{false, false}, None)
+        .MapMap -> return ir_closure_route_row("core.map", "map", "jet_map_map_values", 2, [Bool]{false, false}, None)
+        .MapFold -> return ir_closure_route_row("core.map", "fold", "jet_map_fold", 3, [Bool]{false, false, false}, None)
+        .MapFlatMap -> return ir_closure_route_row("core.map", "flat_map", "jet_map_flat_map", 2, [Bool]{false, false}, None)
+        .ListBinarySearchBy -> return ir_closure_route_row("core.list", "binary_search_by", "jet_list_binary_search_by", 2, [Bool]{true, false}, None)
+        .ListMinMaxBy -> return ir_closure_route_row("core.list", "min_max_by", "jet_list_min_max_by", 2, [Bool]{true, false}, None)
+        .CountWhere -> return ir_closure_route_row("core.list", "count_where", "jet_list_count_where", 2, [Bool]{true, false}, None)
+        .SortBy -> return ir_closure_route_row("core.list", "sort_by", "jet_list_sort_by", 2, [Bool]{true, false}, None)
+        .SortByDesc -> return ir_closure_route_row("core.list", "sort_by_desc", "jet_list_sort_by_desc", 2, [Bool]{true, false}, None)
+        .TrySortBy -> return ir_closure_route_row("core.list", "try_sort_by", "jet_list_try_sort_by", 2, [Bool]{true, false}, None)
+        .TrySortByDesc -> return ir_closure_route_row("core.list", "try_sort_by_desc", "jet_list_try_sort_by_desc", 2, [Bool]{true, false}, None)
+        .SortByCompare -> return ir_closure_route_row("core.list", "sort_by_compare", "jet_list_sort_by_compare", 2, [Bool]{true, false}, None)
+        .ParaMap -> return ir_closure_route_row("core.list", "para_map", "jet_list_para_map", 3, [Bool]{false, false, false}, None)
+        .ParaFilter -> return ir_closure_route_row("core.list", "para_filter", "jet_list_para_filter", 2, [Bool]{false, false}, None)
+        .ParaPartition -> return ir_closure_route_row("core.list", "para_partition", "jet_list_para_partition", 2, [Bool]{false, false}, None)
+        .ParaFold -> return ir_closure_route_row("core.list", "para_fold", "jet_list_para_fold", 4, [Bool]{false, false, false, false}, None)
+        .DedupBy -> return ir_closure_route_row("core.iter", "dedup_by", "jet_iter_dedup_by", 2, [Bool]{false, false}, None)
+        .IsSortedBy -> return ir_closure_route_row("core.iter", "is_sorted_by", "jet_iter_is_sorted_by", 2, [Bool]{false, false}, None)
+        .ChunkWhile -> return ir_closure_route_row("core.iter", "chunk_while", "jet_iter_chunk_while", 2, [Bool]{false, false}, None)
+        .Fold -> return ir_closure_route_row("core.list", "fold", "jet_list_fold", 3, [Bool]{false, false, false}, None)
+        .ViewFold -> return ir_closure_route_row("core.view", "fold", "jet_view_fold", 3, [Bool]{true, false, false}, None)
+        .ViewMap -> return ir_closure_route_row("core.view", "map", "jet_view_map", 2, [Bool]{true, false}, None)
+        .UpdateFirst -> return ir_closure_route_row("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .Partition -> return ir_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None)
         .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .FilterMap | .Scan | .OptionMap -> return ir_collection_closure_route(operation, receiver)
         else -> panic("checked TClosureOp has no canonical Prelude route")
     }

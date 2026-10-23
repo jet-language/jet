@@ -1,7 +1,6 @@
 // Canonical lowering for closed TIR builtin-method operations.
 use jet_foundation.[
     Effect,
-    MIRPreludeABI,
     TBuiltinOp,
     TFailureCarrier,
     Type,
@@ -14,15 +13,14 @@ struct IRBuiltinRoute {
     arity: Int
     borrow_mask: [Bool]
     effect_kind: Effect?
-    abi: MIRPreludeABI
 }
 
-fn ir_builtin_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MIRPreludeABI) -> IRBuiltinRoute Never! {
-    IRBuiltinRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
+fn ir_builtin_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
+    IRBuiltinRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect}
 }
 
 fn ir_builtin_plain_route(member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
-    ir_builtin_route_row("core.builtin", member, symbol, arity, borrow_mask, route_effect, MIRPreludeABI.Value)
+    ir_builtin_route_row("core.builtin", member, symbol, arity, borrow_mask, route_effect)
 }
 
 fn ir_builtin_untag(ty: Type) -> Type Never! {
@@ -391,13 +389,13 @@ fn ir_builtin_container_route(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
 fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
     if operation == {
         .AtomicMethod(method) -> {
-            if method == "load" -> return ir_builtin_route_row("core.mem", "load", "jet_atomic_load", 1, [Bool]{true}, None, MIRPreludeABI.Value)
-            if method == "store" -> return ir_builtin_route_row("core.mem", "store", "jet_atomic_store", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-            if method == "add" -> return ir_builtin_route_row("core.mem", "add", "jet_atomic_add", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-            if method == "try_add" -> return ir_builtin_route_row("core.mem", "try_add", "jet_atomic_try_add", 2, [Bool]{true, false}, Val(Effect.Mem), MIRPreludeABI.Value)
-            if method == "compare_exchange" -> return ir_builtin_route_row("core.mem", "compare_exchange", "jet_atomic_compare_exchange", 3, [Bool]{true, false, false}, None, MIRPreludeABI.Value)
-            if method == "publish" -> return ir_builtin_route_row("core.mem", "publish", "jet_atomic_publish", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-            if method == "observe" -> return ir_builtin_route_row("core.mem", "observe", "jet_atomic_observe", 1, [Bool]{true}, None, MIRPreludeABI.Value)
+            if method == "load" -> return ir_builtin_route_row("core.mem", "load", "jet_atomic_load", 1, [Bool]{true}, None)
+            if method == "store" -> return ir_builtin_route_row("core.mem", "store", "jet_atomic_store", 2, [Bool]{true, false}, None)
+            if method == "add" -> return ir_builtin_route_row("core.mem", "add", "jet_atomic_add", 2, [Bool]{true, false}, None)
+            if method == "try_add" -> return ir_builtin_route_row("core.mem", "try_add", "jet_atomic_try_add", 2, [Bool]{true, false}, Val(Effect.Mem))
+            if method == "compare_exchange" -> return ir_builtin_route_row("core.mem", "compare_exchange", "jet_atomic_compare_exchange", 3, [Bool]{true, false, false}, None)
+            if method == "publish" -> return ir_builtin_route_row("core.mem", "publish", "jet_atomic_publish", 2, [Bool]{true, false}, None)
+            if method == "observe" -> return ir_builtin_route_row("core.mem", "observe", "jet_atomic_observe", 1, [Bool]{true}, None)
             panic("checked Atomic method has no canonical route")
         }
         .LenString -> return ir_builtin_plain_route("len_string", "jet_char_len", 1, [Bool]{true}, None)
@@ -512,7 +510,7 @@ fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, ca
         .Keys -> return ir_builtin_plain_route("map_keys", "jet_map_keys", 1, [Bool]{true}, None)
         .Values -> return ir_builtin_plain_route("map_values", "jet_map_values", 1, [Bool]{true}, None)
         .MapTopN -> return ir_builtin_plain_route("map_top_n", "jet_map_top_n", 2, [Bool]{true, false}, None)
-        .MapToList -> return ir_builtin_route_row("core.map", "to_list", "jet_map_to_list", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
+        .MapToList -> return ir_builtin_route_row("core.map", "to_list", "jet_map_to_list", 1, [Bool]{true}, None)
         .MapMin -> return ir_builtin_plain_route("map_min", "jet_map_min_value_kernel", 1, [Bool]{true}, None)
         .MapMax -> return ir_builtin_plain_route("map_max", "jet_map_max_value_kernel", 1, [Bool]{true}, None)
         .MapPopFirst -> return ir_builtin_plain_route("map_pop_first", "jet_map_pop_first", 1, [Bool]{true}, Val(Effect.Mem))
@@ -527,7 +525,7 @@ fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, ca
         .SplitWrite -> return ir_builtin_plain_route("split_write", "jet_split_write", 2, [Bool]{true, false}, Val(Effect.Mem))
         .GetDisjointWrite -> return ir_builtin_plain_route("get_disjoint_write", "jet_get_disjoint_write", 2, [Bool]{true, true}, Val(Effect.Mem))
         .ViewNew(_) -> return ir_builtin_plain_route("view_new", "jet_view_new", 4, [Bool]{true, false, false, false}, Val(Effect.Mem))
-        .ListMinMax -> return ir_builtin_route_row("core.list", "min_max", "jet_list_min_max", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
+        .ListMinMax -> return ir_builtin_route_row("core.list", "min_max", "jet_list_min_max", 1, [Bool]{true}, None)
         .Indexes -> return ir_builtin_plain_route("indexes", "jet_iter_indexes", 1, [Bool]{false}, None)
         .Indexed -> return ir_builtin_plain_route("iter_enumerate", "jet_iter_enumerate", 2, [Bool]{false, false}, None)
         .IterSplit -> return ir_builtin_plain_route("iter_split", "jet_iter_split_at", 3, [Bool]{false, false, false}, None)
@@ -592,7 +590,7 @@ fn ir_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier: TFailur
 }
 
 fn ir_builtin_string_method_route(method: String, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
-    if method == "equal" -> return ir_builtin_route_row("core.compare", "eq", "jet_eq", 2, [Bool]{true, true}, None, MIRPreludeABI.Value)
+    if method == "equal" -> return ir_builtin_route_row("core.compare", "eq", "jet_eq", 2, [Bool]{true, true}, None)
     if method == "expandtabs" -> return ir_builtin_plain_route("expandtabs", "jet_text_expandtabs", 2, [Bool]{true, false}, None)
     if method == "find" -> return ir_builtin_plain_route("find", "jet_text_parse_find", 2, [Bool]{true, true}, None)
     if method == "rfind" -> return ir_builtin_plain_route("rfind", "jet_text_parse_rfind", 2, [Bool]{true, true}, None)

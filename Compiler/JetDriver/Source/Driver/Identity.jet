@@ -15,12 +15,11 @@ use jet_foundation.[
     ImportDecl,
     Item,
     JetTargetLayout,
-    MIRAllocatorPolicy,
-    MIRFunctionID,
-    MIRRuntimeLayer,
-    MIRSourceFile,
+    AllocatorPolicy,
+    RuntimeLayer,
+    SourceFile,
     NameLedger,
-    MIRStructureFact,
+    StructureFact,
     PackageKeyDependency,
     PackageKeySourceFile,
     PackageKeyTargetFact,
@@ -32,7 +31,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_registry_row,
     diagnostic_with_source_path,
-    mir_sha256_hex,
+    sha256_hex,
     package_key_check_key,
     package_key_source_digest,
     package_key_target_facts_digest,
@@ -40,7 +39,7 @@ use jet_foundation.[
     record_decode,
     record_encode,
 ]
-use jet_foundation.[TComptimeValue, TLambda]
+use jet_foundation.[TComptimeValue]
 use jet_sema.[
     SemaCallSiteFact,
     SemaNameReferenceFact,
@@ -53,14 +52,6 @@ use jet_sema.[
     SchemaSnapshot,
 ]
 use jet_eval.[JetEvalConfig]
-
-// Original checked source of a comptime closure. The execution host pins
-// these rows under its checked snapshot identity before admitting code.
-struct JetDriverClosureSource {
-    function: MIRFunctionID
-    source_file: String
-    lambda: TLambda
-}
 
 struct JetDriverAuthorizedSourceFile {
     path: String
@@ -254,8 +245,6 @@ trait JetDriverRecordStore {
 trait JetDriverExecutionHost {
     fn execute(self, request: X64ExecutionRequest) -[Exec, IO, FFI.C, FFI.Asm, Time.Wait]> X64ExecutionResponse
     fn session_resource(self) -[]> X64ExecutionHost Never!
-    fn register_closure_sources(self, snapshot: String, sources: [JetDriverClosureSource]) Never! -[Time.Wait]>
-    fn closure_source(self, snapshot: String, function: MIRFunctionID) -[Time.Wait]> JetDriverClosureSource? Never!
 }
 
 // The raw build-input transport a host supplies for checked `fn build` input
@@ -393,8 +382,8 @@ struct JetDriverPackageInfo {
     name: String
     version: String?
     edition: String
-    runtime_ceiling: MIRRuntimeLayer?
-    allocator_policy: MIRAllocatorPolicy
+    runtime_ceiling: RuntimeLayer?
+    allocator_policy: AllocatorPolicy
     authority_allow: [String]?
     authority_deny: [String]?
     authority_needs: [String]
@@ -438,7 +427,7 @@ struct JetDriverSourceIndexResult {
 }
 
 struct JetDriverSourceFileCollection {
-    files: [MIRSourceFile]
+    files: [SourceFile]
     diagnostics: [Diagnostic]
     complete: Bool
 }
@@ -494,8 +483,8 @@ struct JetDriverLoadResult {
     entry_module_identity: String
     modules: [JetDriverLoadedModule]
     imports: [SemaRegistrationImportEdge]
-    source_files: [MIRSourceFile]
-    generated_source_files: [MIRSourceFile]
+    source_files: [SourceFile]
+    generated_source_files: [SourceFile]
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
@@ -522,7 +511,7 @@ struct JetDriverAuthorityPolicy {
 
 struct JetDriverCompileResult {
     diagnostics: [Diagnostic]
-    generated_source_files: [MIRSourceFile]
+    generated_source_files: [SourceFile]
     package_identity: String
     entry_module_identity: String
     // The effects the checked entry function requires: its own declared
@@ -546,7 +535,7 @@ struct JetDriverCompileResult {
     // `sema_name_structure_facts`), so `jet inspect structure` prints them
     // ahead of the failure diagnostics. A complete Doc compile carries the
     // same rows in its modules' NameLedger instead; other modes leave this empty.
-    structure_facts: [MIRStructureFact]{[MIRStructureFact]{}}
+    structure_facts: [StructureFact]{[StructureFact]{}}
     // `JetDriverCompileMode.Comptime`: every build-time value the comptime
     // stage produced, constants included. Empty in the other modes.
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
@@ -778,14 +767,14 @@ fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, op
         closure = "{closure}{root_field}"
         loop file in root.files {
             path_field :: jet_driver_receipt_field("module", file.relative_path)
-            digest_field :: jet_driver_receipt_field("sha256", mir_sha256_hex(file.source))
+            digest_field :: jet_driver_receipt_field("sha256", sha256_hex(file.source))
             closure = "{closure}{path_field}{digest_field}"
         }
     }
     loop dependency in request.authorized_sources.script_dependencies {
         closure = "{closure}{jet_driver_script_dependency_identity(dependency)}"
     }
-    mir_sha256_hex(closure)
+    sha256_hex(closure)
 }
 
 // A recorded Receipt answers the request only when its closure is the

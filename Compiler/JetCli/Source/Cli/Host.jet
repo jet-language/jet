@@ -52,7 +52,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_render_all,
     gate_ledger_push,
-    mir_sha256_hex,
+    sha256_hex,
     compiler_transfer_rows,
     compiler_threads_failure_text,
     CompilerThreads,
@@ -1001,7 +1001,7 @@ fn jet_cli_new_lock(root: String) -> String {
     parts :: version.split(".").to_list()
     channel :: if parts.len() >= 2 -> "{parts[0]}.{parts[1]}" else -> version
     platform :: "{cli_sys.arch()}-{cli_sys.name()}"
-    id :: "jet-{version}-{mir_sha256_hex("{version}:{platform}").slice(0..<8)}"
+    id :: "jet-{version}-{sha256_hex("{version}:{platform}").slice(0..<8)}"
     stamp := "\n[build.stamp]\n"
     if jet_cli_git_output(root, [String]{"rev-parse", "HEAD"}) == .Val(revision) {
         status :: jet_cli_git_output(root, [String]{"status", "--porcelain", "--untracked-files=all"}) ?? ""

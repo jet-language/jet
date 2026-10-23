@@ -14,7 +14,7 @@ use jet_foundation.[
     InternalTag,
     Item,
     LValue,
-    MIRRuntimeLayer,
+    RuntimeLayer,
     Param,
     Span,
     Stmt,
@@ -33,7 +33,7 @@ use jet_foundation.[
     expr_span,
     jet_ring_prelude_closure_keys,
     jet_ring_prelude_closure_layer,
-    mir_boundary_head_owner_module,
+    boundary_head_owner_module,
     symbol_id,
 ]
 
@@ -55,7 +55,7 @@ struct SemaCoreModuleUsageResult {
     usage_spans: [SemaCoreUsageSpan]
     ffi_callback_keys: [String]
     closure: [String]
-    inferred_layer: MIRRuntimeLayer
+    inferred_layer: RuntimeLayer
 }
 
 struct SemaCoreUsageResult {
@@ -63,7 +63,7 @@ struct SemaCoreUsageResult {
     usage_spans: [SemaCoreUsageSpan]
     ffi_callback_keys: [String]
     closure: [String]
-    inferred_layer: MIRRuntimeLayer
+    inferred_layer: RuntimeLayer
     modules: [SemaCoreModuleUsageResult]
 }
 
@@ -591,7 +591,7 @@ fn sema_core_note_typed_head(used: &[String], spans: &[SemaCoreUsageSpan], name:
         sema_core_note_usage(&used, &spans, "core.regex::compile", span)
         return
     }
-    owner_module :: mir_boundary_head_owner_module(name) ?? return
+    owner_module :: boundary_head_owner_module(name) ?? return
     sema_core_note_usage(&used, &spans, "{owner_module}::typed_head", span)
 }
 fn sema_core_is_internal_task_key(name: String, suffix: String) -> Bool Never! {

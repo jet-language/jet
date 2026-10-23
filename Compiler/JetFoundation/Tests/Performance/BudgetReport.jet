@@ -4,7 +4,7 @@ use jet_foundation.[
     CanonicalJSON, CanonicalJSONField, PerfBudgetError, PerfComparison, PerfCompileAggregate,
     PerfDirection, PerfEnforcement, PerfEvaluation, PerfEvaluationInputs, PerfEvidence,
     PerfLimitDirection, PerfMeasurementPolicy, PerfPercentile, PerfRational, PerfRelativeGoal,
-    canonical_json_bytes, mir_sha256_bytes, mir_sha256_hex_bytes, perf_budget_context_key,
+    canonical_json_bytes, sha256_bytes, sha256_hex_bytes, perf_budget_context_key,
     perf_budget_report, perf_evaluate, perf_finish, perf_rational_integer, perf_rational_to_json,
     perf_report_array, perf_report_boolean, perf_report_evidence_enum, perf_report_frame,
     perf_report_hex64, perf_report_history_ids, perf_report_index, perf_report_integer,
@@ -145,7 +145,7 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     value :: br_o([CanonicalJSONField]{br_f("z", br_s("é\n")), br_f("a", br_i(123))})
     bytes :: "{{\"a\":123,\"z\":\"é\\n\"}}\n".bytes()
     assert_eq(canonical_json_bytes(value), bytes)
-    assert_eq(perf_stable_id(value), mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()])))
+    assert_eq(perf_stable_id(value), sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()])))
     perf_verify_stable_id(value, perf_stable_id(value)) ?? panic(err.message)
     actual :: perf_stable_id(value)
     br_error(perf_verify_stable_id(value, "bad"), "content hash mismatch: claimed bad, recomputed {actual}")

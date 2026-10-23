@@ -270,7 +270,7 @@ fn perf_sha_stream_word(stream: &PerfSHAStream) -> Int Never! {
         input := stream.prefix.copy()
         perf_push_u64(&input, stream.block)
         stream.block = (stream.block + 1) % 18446744073709551616
-        digest :: mir_sha256_bytes(input[0..<input.len()])
+        digest :: sha256_bytes(input[0..<input.len()])
         loop chunk in 0..<4 {
             word := 0
             loop offset in 0..<8 -> word = word * 256 + Int.from_u8(digest[(3 - chunk) * 8 + offset])

@@ -13,8 +13,8 @@ use jet_foundation.[
     Expr,
     Field,
     Item,
-    MIRTargetHardwareUse,
-    MIRSharedLifetime,
+    TargetHardwareUse,
+    SharedLifetime,
     PolicyDeclaration,
     PolicyKey,
     PolicyScope,
@@ -115,7 +115,7 @@ struct SemaCallSiteFact {
     foreign_effect_root: String?{None}
     // A resolved Core lifecycle marker, retained with the checked call site.
     lifecycle: CoreMarkerApplication?{None}
-    shared_lifetime: MIRSharedLifetime?{None}
+    shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
 }
@@ -324,7 +324,7 @@ struct SemaCheckedTextEvaluation {
     source_file: String
     source_expression: Expr
     expression: TExpr
-    hardware_use: MIRTargetHardwareUse
+    hardware_use: TargetHardwareUse
     reachable_function_keys: [String]
     dependencies: [String]
     span: Span
@@ -513,7 +513,7 @@ struct SemaCheckContext {
     lambda_statement_tails: [SemaStatementTailFrame]
     call_facts: [SemaCallSiteFact]
     http_routes: [String]{[String]{}}
-    hardware_use: MIRTargetHardwareUse
+    hardware_use: TargetHardwareUse
     call_return_views: [SemaCallReturnView]
     local_view_provenance: [SemaLocalViewProvenance]
     return_view_receiver_key: String

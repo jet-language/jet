@@ -1,11 +1,11 @@
 // Lifecycle is a projection of resolved name/call sites.
 // Adapted from Rust Edition.rs and mod.rs deprecation_from_markers. Payloads
 // belong to written markers or the checked Core registry, never a name table.
-use jet_foundation.[CoreMarkerApplication, Diagnostic, Marker, MIRStructureFact, MIRStructureFactKind, Span, TextEdit, diagnostic_with_edit]
+use jet_foundation.[CoreMarkerApplication, Diagnostic, Marker, StructureFact, StructureFactKind, Span, TextEdit, diagnostic_with_edit]
 
 struct SemaLifecycleResult {
     diagnostics: [Diagnostic]
-    facts: [MIRStructureFact]
+    facts: [StructureFact]
 }
 
 fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) -> String? {
@@ -104,7 +104,7 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, source: String, span: S
     }
     detail := "since {payload.since}; use `{payload.replacement}`"
     if payload.removed_in == .Val(removed) -> detail = "{detail}; removed in {removed}"
-    &result.facts.push(MIRStructureFact{kind: MIRStructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
+    &result.facts.push(StructureFact{kind: StructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
     if status == "active" -> return
     item :: payload.member
     since :: sema_lifecycle_version_phrase(payload.since)
@@ -119,7 +119,7 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, source: String, span: S
 }
 
 fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
-    result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     payloads := [String:CoreMarkerApplication]{}
     editions := [String:String]{}
     loop policy in policies -> editions[policy.package_identity] = policy.edition

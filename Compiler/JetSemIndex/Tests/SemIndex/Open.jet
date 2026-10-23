@@ -2,7 +2,7 @@
 // assertions already owned by CallableFacts/Facts/Build/Codec are reused below,
 // not replaced with hand-built checked records. These tests are source-only;
 // no registration into the package list or proof is implied by this file.
-use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, mir_sha256_hex]
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, sha256_hex]
 use jet_pkg_model.[WorkspaceDeclarationCache]
 use core.files as semindex_open_files
 use core.process as semindex_open_process
@@ -100,7 +100,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     semindex_open_test_lock_dir(root)
     source :: "module workspace {{ members: [] }}\n"
     semindex_open_test_write(root, "authority.jet", source)
-    digest :: mir_sha256_hex(source)
+    digest :: sha256_hex(source)
     semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n")
     semindex_open_test_write(child, "run.jet", "fn run() {{}}\n")
     policy :: (semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) ?? panic("ancestor workspace lock should load")) ?? panic("persisted policy should be attached")
@@ -116,7 +116,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     semindex_open_test_lock_dir(root)
     source :: "module workspace {{ members: [] }}\n"
     semindex_open_test_write(root, "authority.jet", source)
-    digest :: mir_sha256_hex(source)
+    digest :: sha256_hex(source)
     semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\n")
     semindex_open_test_write(child, "a.jet", source)
     semindex_open_test_write(child, "b.jet", source)
@@ -144,7 +144,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("missing lock is a boundary")) == None)
     semindex_open_test_write(child, ".jet/lock", "version = 1\n")
     assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("nonworkspace lock is a boundary")) == None)
-    digest :: mir_sha256_hex(source)
+    digest :: sha256_hex(source)
     semindex_open_test_write(child, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\n")
     assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("empty policy is a boundary")) == None)
     // A recognized workspace lock that cannot decode is an error, not absence.
@@ -190,7 +190,7 @@ fn semindex_open_test_workspace_fixture(root: String) -[FS]> {
     semindex_open_test_lock_dir(root)
     source :: "module workspace {{ members: [] }}\n"
     semindex_open_test_write(root, "workspace.jet", source)
-    semindex_open_test_write(root, ".jet/lock", semindex_package_codec_test_workspace_fixture(mir_sha256_hex(source)))
+    semindex_open_test_write(root, ".jet/lock", semindex_package_codec_test_workspace_fixture(sha256_hex(source)))
     semindex_open_test_write(root, "run.jet", "fn run() {{}}\n")
 }
 fn semindex_open_test_persisted_workspace_index(index: SemIndex) {

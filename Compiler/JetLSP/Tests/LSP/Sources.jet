@@ -1,7 +1,7 @@
 // Packet 0741 has no original inline tests. Behavioral controls below use
 // canonical Lexer/Driver/W36 fixtures, not private compiler/IO providers.
 // Native identity/snapshot tests require real Core canonicalize (#4494).
-use jet_foundation.[MIROSTarget]
+use jet_foundation.[TTargetOS]
 use jet_parser.[parse_source]
 #Test("source lines preserve Rust LF CRLF lone CR and final-line laws") {
     cr :: String.from_bytes([U8]{13}) ?? panic("CR")
@@ -81,7 +81,7 @@ use jet_parser.[parse_source]
     source :: "trait Z {{ fn z(self) }}\ntrait A {{ fn a(self) }}\nstruct B {{ impl Z {{ fn z(self) {{}} }} impl A {{ fn a(self) {{}} }} }}\nstruct C {{ impl A {{ fn a(self) {{}} }} }}\nfn run() {{}}\n"
     parsed := parse_source(source)
     assert_eq(parsed.diagnostics.len(), 0)
-    bundle := ProgramBundle.new(lsp_diag_test_path("/fixture"), MIROSTarget.Linux, BuildFactSnapshot.for_host(MIROSTarget.Linux, "x86_64-unknown-linux-gnu"), "2028")
+    bundle := ProgramBundle.new(lsp_diag_test_path("/fixture"), TTargetOS.Linux, BuildFactSnapshot.for_host(TTargetOS.Linux, "x86_64-unknown-linux-gnu"), "2028")
     &bundle.modules.push(LoadedModule.from_program(lsp_diag_test_path("/fixture/main.jet"), "/fixture/main.jet", source.copy(), "main", ^parsed.program))
     duplicate := parse_source(source)
     &bundle.modules.push(LoadedModule.from_program(lsp_diag_test_path("/fixture/other.jet"), "/fixture/other.jet", source.copy(), "other", ^duplicate.program))

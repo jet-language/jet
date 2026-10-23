@@ -2,7 +2,7 @@
 // lives at `UNIFIED_LOCK_FILE` inside the project's `.jet/` managed folder
 // (U2) and is the single lockfile. Canonical text lives in Write.jet, the
 // strict reader in Parse.jet, and the on-disk recorders in Record.jet.
-use jet_foundation.[Diagnostic, MIRRuntimeLayer]
+use jet_foundation.[Diagnostic, RuntimeLayer]
 
 PKG_LOCK_VERSION :: prep { 1 }
 // `provenance.build` prefix that marks a package record as projected from a
@@ -82,9 +82,9 @@ struct LockedPackage {
     // Direct dependency names.
     dependencies: [String]{[String]{}}
     // Optional `runtime:` ceiling from the package payload.
-    layer: MIRRuntimeLayer?{None}
+    layer: RuntimeLayer?{None}
     // M2: minimum runtime profile inferred at last build.
-    inferred_layer: MIRRuntimeLayer?{None}
+    inferred_layer: RuntimeLayer?{None}
     // The effect names this dependency's code used at the last
     // build, and the effects granted to it through `grants: { … }`.
     effects: [String]{[String]{}}

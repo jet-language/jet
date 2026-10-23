@@ -177,7 +177,7 @@ fn sema_services_core_call(record: CoreCallRecord, arguments: [TExpr], fallback_
     if !sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value :: sema_call_core_tir(record, call_arguments, span, [Type]{}, [Bool]{}, None, result_type, failure, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, call_arguments, span, [Type]{}, [Bool]{}, result_type, failure, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
 
@@ -580,7 +580,7 @@ struct SemaServiceWorkerHandler {
 
 fn sema_services_find_handlers_expr(expression: TExpr, handlers: &[SemaServiceWorkerHandler]) Never! {
     if expression.kind == {
-        .CoreCall(record, arguments, _, _, _, _, _) -> {
+        .CoreCall(record, arguments, _, _, _, _) -> {
             if record.module_name == "core.service" && record.member == "worker" && arguments.len() >= 5 {
                 if arguments[2].kind == {
                     .ConstRef(symbol) -> {
@@ -761,7 +761,7 @@ fn sema_call_try_job_queue_method(receiver: Expr, receiver_value: TExpr, method:
     failure :: sema_services_result_carrier(result_type)
     if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return failed
     sema_services_record_direct_effect(environment, program, &scopes, &context, "Time", "JobQueue.{method}", span, &diagnostics)
-    value :: sema_call_core_tir(record, normalized, span, [Type]{payload_type}, [Bool]{}, None, result_type, failure, expected, environment, program, &diagnostics)
+    value :: sema_call_core_tir(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: value}
     } else {
         return failed

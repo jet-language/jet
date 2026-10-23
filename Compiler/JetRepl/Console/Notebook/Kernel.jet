@@ -14,9 +14,9 @@ use jet_foundation.[
     Type,
     DIAGNOSTIC_ERROR,
     type_name,
-    mir_sha256_hex,
-    mir_sha256_bytes,
-    mir_sha256_hex_bytes,
+    sha256_hex,
+    sha256_bytes,
+    sha256_hex_bytes,
     CtValue,
     Func,
 ]
@@ -143,7 +143,7 @@ struct Kernel {
             interrupt_requested: false, debug_is_attached: false, perf_is_attached: false,
             cell_effects: [String:Bool]{}, cell_lazy: [String:Bool]{}, pending_effects: [String:Bool]{},
             cell_errors: [String:String]{}, executed_cells: [String:Bool]{}, reactive_root: None,
-            session_id: session_id, control_values: [String:String]{}, control_errors: [String:String]{}, authority_id: mir_sha256_hex("headless"),
+            session_id: session_id, control_values: [String:String]{}, control_errors: [String:String]{}, authority_id: sha256_hex("headless"),
         }
     }
     fn clear_document_runtime(&self) Never! {
@@ -263,7 +263,7 @@ struct Kernel {
             _ :: &self.pending_effects.remove(cell_id)
         }
     }
-    fn set_authority(&self, authority: String) Never! { self.authority_id = mir_sha256_hex(authority) }
+    fn set_authority(&self, authority: String) Never! { self.authority_id = sha256_hex(authority) }
     fn identity(self) -> KernelIdentity Never! {
         KernelIdentity{source: self.notebook.source_hash(), build: notebook_kernel_build_identity(self.notebook.environment_hash), session: self.session_id.copy(), authority: self.authority_id.copy()}
     }
@@ -331,7 +331,7 @@ struct Kernel {
         notebook_kernel_append_nul(&material, return_projection)
         loop effect_ref in effects -> notebook_kernel_append_nul(&material, effect_ref)
         notebook_kernel_append(&material, if function.is_unsafe -> "authority-required" else -> "authority-free")
-        digest :: mir_sha256_hex_bytes(mir_sha256_bytes(material))
+        digest :: sha256_hex_bytes(sha256_bytes(material))
         Ok(NotebookAppSchema{function: function.name.copy(), inputs: ^inputs, return_projection: return_projection, effects: ^effects, authority: self.authority_id.copy(), source_identity: self.notebook.source_hash(), compatibility_digest: digest})
     }
     fn controls_json(self) -> String Never! {
@@ -389,7 +389,7 @@ struct Kernel {
         }
         controls
     }
-    fn environment_hash(project_root: OSPath) -> String Never! { mir_sha256_hex("{notebook_kernel_paths.display(project_root)}|notebook-env-1") }
+    fn environment_hash(project_root: OSPath) -> String Never! { sha256_hex("{notebook_kernel_paths.display(project_root)}|notebook-env-1") }
     fn view(self, client: ClientKind) -> KernelView Never! {
         KernelView{client: client, turns: self.session.turns.copy(), stale_ids: self.stale_ids(), environment_hash: self.notebook.environment_hash.copy()}
     }
@@ -472,7 +472,7 @@ struct Kernel {
         turn_id :: if self.session.turns.is_empty() -> (Int?{None}) else -> Val(self.session.turns[self.session.turns.len() - 1].id)
         &self.notebook.store_output(cell_id, bundle.copy(), Int.from_u32(self.execution_count), turn_id) ?? return Err(err.message)
         self.executed_cells[cell_id] = true
-        render :: notebook_decide_render(self.trust, mir_sha256_hex(source), self.notebook.environment_hash, client.renderer(), bundle)
+        render :: notebook_decide_render(self.trust, sha256_hex(source), self.notebook.environment_hash, client.renderer(), bundle)
         display :: notebook_kernel_display_bundle(render, bundle)
         ended :: notebook_kernel_clock.monotonic_ns() ?? panic("native monotonic clock: {err}")
         // Instant::elapsed saturates negative differences; millis keeps u128.
@@ -542,7 +542,7 @@ struct Kernel {
         output :: window[0].output ?? panic("visible output must carry its cache")
         // Ratified trust-2 owner, not the retired Rust Debug hash material.
         request :: NotebookActiveRequest{
-            notebook_source_hash: mir_sha256_hex(self.notebook.cells[index].source), payload_hash: notebook_trust_payload_hash(output.bundle), renderer_hash: renderer,
+            notebook_source_hash: sha256_hex(self.notebook.cells[index].source), payload_hash: notebook_trust_payload_hash(output.bundle), renderer_hash: renderer,
             environment_hash: self.notebook.environment_hash.copy(), policy_version: NOTEBOOK_TRUST_POLICY_VERSION, widget_id: output.bundle.widget_id ?? "",
             origins: output.bundle.requested_origins.copy(), messages: output.bundle.requested_messages.copy(),
         }
@@ -570,7 +570,7 @@ struct Kernel {
         Val(notebook_kernel_display_bundle(self.render_for(cell, output, client), output.bundle))
     }
     fn render_for(self, cell: NotebookCell, output: NotebookCellOutput, client: ClientKind) -> NotebookRenderDecision Never! {
-        source_hash :: mir_sha256_hex(cell.source)
+        source_hash :: sha256_hex(cell.source)
         first_party :: notebook_decide_render(self.trust, source_hash, self.notebook.environment_hash, ClientKind.FirstParty.renderer(), output.bundle)
         if client == ClientKind.FirstParty -> return ^first_party
         if first_party == .FallbackPlain(_, _) -> return ^first_party
@@ -701,7 +701,7 @@ fn notebook_kernel_app_effect_supported(effect_ref: String) -> Bool Never! {
 fn notebook_kernel_build_identity(environment_hash: String) -> String Never! {
     // Canonical0807 package-version publication; this is jet-repl's Rust
     // CARGO_PKG_VERSION, NOT jet-cli or Foundation's independently owned version.
-    mir_sha256_hex("jet-notebook-build-v1|{JET_REPL_VERSION}|{environment_hash}")
+    sha256_hex("jet-notebook-build-v1|{JET_REPL_VERSION}|{environment_hash}")
 }
 fn notebook_kernel_control_key(function: String, name: String) -> String Never! { "{function}{TEXT_NUL}{name}" }
 fn notebook_kernel_control_value_matches(value: String, type_name: String) -> Bool Never! {

@@ -123,7 +123,7 @@ fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     result_type :: sema_call_compute_alias_type(member, updated_args) ?? Type.Result{ok: Type.Named{name: "Tensor"}, err: Type.Named{name: "ComputeError"}}
     fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
-    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, None, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
     return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
 }
@@ -414,7 +414,7 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     accesses := (loop _ in ownership_types -> AccessConvention.Read)
     ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), &values_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, None, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
     return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
 }

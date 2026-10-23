@@ -34,7 +34,7 @@ use jet_foundation.[
     expr_optional_method_call_as_call,
     expr_span,
     is_compute_tensor_family,
-    mir_boundary_head_carrier_module,
+    boundary_head_carrier_module,
     symbol_id,
     tir_symbol_local,
     type_name,
@@ -252,7 +252,7 @@ fn sema_expression_tuple_field(base: TExpr, member: String, span: Span, diagnost
 // `core.net.url`) names that record wherever it is read, so its documented
 // fields resolve through the declaration (Rust `struct_owner_module`).
 fn sema_expression_carrier_type_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
-    carrier :: mir_boundary_head_carrier_module(name) ?? return None
+    carrier :: boundary_head_carrier_module(name) ?? return None
     if program.registration_graph == .Val(graph) {
     loop module_row_index in 0..<graph.modules.len() {
         if graph.modules[module_row_index].module_name != carrier -> next

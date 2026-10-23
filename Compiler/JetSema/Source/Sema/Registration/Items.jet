@@ -30,9 +30,9 @@ use jet_foundation.[
     ImportedItem,
     InternalTag,
     Item,
-    MIRSerdeCodec,
-    MIRTraitRef,
-    MIRTargetMachine,
+    SerdeCodec,
+    TraitRef,
+    TargetMachine,
     Marker,
     Measure,
     NamedSpan,
@@ -77,7 +77,7 @@ use jet_foundation.[
     core_record_literal_fields,
     core_source_owns_type,
     expr_span,
-    mir_builtin_codec_trait_ref,
+    builtin_codec_trait_ref,
     name_find_bytes,
     sema_reserved_type_name,
     symbol_id,
@@ -124,7 +124,7 @@ struct SemaRegistrationForeignHandleFacts {
 enum SemaRegistrationNominalSource {
     SourceAST(value: Item)
     ForeignHandle(value: SemaRegistrationForeignHandleFacts)
-    CompilerBuiltinTrait(value: MIRTraitRef)
+    CompilerBuiltinTrait(value: TraitRef)
 }
 
 struct SemaRegistrationUnitFact {
@@ -613,7 +613,7 @@ struct SemaRegistrationGraph {
     package_identity: String
     entry_module_identity: String
     canonical_effect_module_identity: String
-    target_machine: MIRTargetMachine
+    target_machine: TargetMachine
     build_facts: SemaBuildFacts
     modules: [SemaRegistrationModule]
     // Module identity -> position in `modules`; fixed at graph construction.
@@ -1603,7 +1603,7 @@ fn sema_registration_error_supplier_diagnostic(detail: String) -> Diagnostic {
     sema_error_optional("E0003", None, detail, "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance")
 }
 
-fn sema_registration_compiler_owned_codec_trait(module_identity: String, reference: MIRTraitRef) -> SemaRegistrationNominal {
+fn sema_registration_compiler_owned_codec_trait(module_identity: String, reference: TraitRef) -> SemaRegistrationNominal {
     span :: Span{start: 0, end: 0}
     ty :: Type.Named{name: reference.name}
     symbol :: sema_registration_named_symbol(module_identity, reference.name, span, SymbolKind.Trait, None, true, false)
@@ -3428,8 +3428,8 @@ fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
         sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
         graph.compiler_builtin_rows[name] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
     }
-    loop codec in ([MIRSerdeCodec#2]{.Encode, .Decode}) {
-        reference :: mir_builtin_codec_trait_ref(codec)
+    loop codec in ([SerdeCodec#2]{.Encode, .Decode}) {
+        reference :: builtin_codec_trait_ref(codec)
         module_index :: sema_registration_compiler_builtin_module(graph, reference.name) ?? next
         module_identity :: graph.modules[module_index].module_identity
         first_nominal :: graph.modules[module_index].nominals.len()
@@ -3449,7 +3449,7 @@ fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name: St
 // are consumed: each program moves into its module row. The unit scans and
 // the module rows are prepared on up to `threads` compiler threads, with the
 // same rows and diagnostics for any thread count.
-fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
+fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Rust CheckInner `retain_error_prelude_module` runs first: the original

@@ -12,7 +12,7 @@
 // session is Idle -> Loaded -> (staged response) -> Closed: staging never
 // mutates compiler facts, rollback drops staged output only (the accept latch
 // stays final), and close hands the guest handle to the host's closer.
-use jet_foundation.[MIRHostImportFact, authority_parse_right]
+use jet_foundation.[HostImportFact, authority_parse_right]
 use core.encoding.json as json
 use core.encoding.hex as hex
 use core.math as math
@@ -324,16 +324,16 @@ struct TypedSnapshot {
     types: [TypeFact]
     symbols: [SymbolFact]
     spans: [SpanFact]
-    host_imports: [MIRHostImportFact]
+    host_imports: [HostImportFact]
 
     // A v1 snapshot with no host imports.
     fn new(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact]) -> TypedSnapshot ExtensionProtocolError! {
-        TypedSnapshot.new_with_imports(abilities, types, symbols, spans, [MIRHostImportFact]{})
+        TypedSnapshot.new_with_imports(abilities, types, symbols, spans, [HostImportFact]{})
     }
 
     // A snapshot with host-import facts; every fact list is sorted by
     // identity for byte-stable replay.
-    fn new_with_imports(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MIRHostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
+    fn new_with_imports(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [HostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
         granted :: pkg_extension_negotiate_abilities(EXTENSION_PROTOCOL_VERSION, abilities)
         sorted_types := types
         &sorted_types.sort_by(fact -> fact.id)
@@ -404,7 +404,7 @@ struct TypedSnapshot {
         spans :: pkg_extension_parse_spans(object["spans"])
         host_imports :: if object.get("host_imports") == {
             .Val(value) -> pkg_extension_parse_host_imports(value)
-            .None -> [MIRHostImportFact]{}
+            .None -> [HostImportFact]{}
         }
         pkg_extension_validate_interface_facts(types, symbols, spans, host_imports)
         Ok(TypedSnapshot{protocol: protocol, stage: stage, abilities: abilities, limits: limits, trust: trust, types: types, symbols: symbols, spans: spans, host_imports: host_imports})
@@ -845,7 +845,7 @@ fn pkg_extension_parse_types(value: Dyn) -> [TypeFact] ExtensionProtocolError! {
     Ok(out)
 }
 
-fn pkg_extension_host_import_json(import: MIRHostImportFact) -> Dyn Never! {
+fn pkg_extension_host_import_json(import: HostImportFact) -> Dyn Never! {
     result_type :: if import.result_type_id == {
         .Val(type_id) -> Dyn.Text(type_id)
         .None -> Dyn.Null
@@ -859,9 +859,9 @@ fn pkg_extension_host_import_json(import: MIRHostImportFact) -> Dyn Never! {
     ])
 }
 
-fn pkg_extension_parse_host_imports(value: Dyn) -> [MIRHostImportFact] ExtensionProtocolError! {
+fn pkg_extension_parse_host_imports(value: Dyn) -> [HostImportFact] ExtensionProtocolError! {
     items :: pkg_extension_array(value, "host_imports")
-    out := [MIRHostImportFact]{}
+    out := [HostImportFact]{}
     loop item in items {
         object :: pkg_extension_object(item, "host import")
         pkg_extension_require_keys(object, [String]{"id", "operation", "parameter_type_ids", "required_right", "result_type_id"}, [String]{})
@@ -870,7 +870,7 @@ fn pkg_extension_parse_host_imports(value: Dyn) -> [MIRHostImportFact] Extension
             .Null -> None
             else -> Val(pkg_extension_text(raw_result))
         }
-        &out.push(MIRHostImportFact{
+        &out.push(HostImportFact{
             id: pkg_extension_text(object["id"]),
             operation: pkg_extension_text(object["operation"]),
             required_right: pkg_extension_text(object["required_right"]),
@@ -883,7 +883,7 @@ fn pkg_extension_parse_host_imports(value: Dyn) -> [MIRHostImportFact] Extension
 
 // The type, span, symbol, and host-import identities are unique and every
 // reference between them resolves; import rights are known Jet rights.
-fn pkg_extension_validate_interface_facts(types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MIRHostImportFact]) ExtensionProtocolError! {
+fn pkg_extension_validate_interface_facts(types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [HostImportFact]) ExtensionProtocolError! {
     type_ids := [String]{}
     loop fact in types {
         if fact.id == "" || type_ids.contains(fact.id) -> return Err(ExtensionProtocolError.new("duplicate or empty type identity `{fact.id}`"))

@@ -100,8 +100,8 @@
 use jet_sema.[sema_output_resolve]
 use jet_foundation.[
     Diagnostic,
-    MIRSourceFile,
-    mir_source_file_id,
+    SourceFile,
+    source_file_id,
 ]
 use jet_sema.[
     SemaCompilerModuleSource,
@@ -259,7 +259,7 @@ fn jet_driver_compiler_check_source_bytes(load: JetDriverLoadResult, path: Strin
 
 // Path -> position of its first loaded source text, built once per compile so
 // each module reads its text without rescanning the file list.
-fn jet_driver_source_file_positions(files: [MIRSourceFile]) -> [String:Int] Never! {
+fn jet_driver_source_file_positions(files: [SourceFile]) -> [String:Int] Never! {
     positions := [String:Int]{}
     loop (index, file) in files {
         if positions.get(file.path) == None -> positions[file.path] = index
@@ -269,7 +269,7 @@ fn jet_driver_source_file_positions(files: [MIRSourceFile]) -> [String:Int] Neve
 
 // The loaded text of `path`; a module with no loaded text (a compiler-synthetic
 // unit) has none.
-fn jet_driver_source_text_at(files: [MIRSourceFile], positions: [String:Int], path: String) -> String Never! {
+fn jet_driver_source_text_at(files: [SourceFile], positions: [String:Int], path: String) -> String Never! {
     if positions.get(path) == .Val(index) -> return files[index].source
     ""
 }
@@ -345,7 +345,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
             return jet_driver_compiler_check_failure(load, JetDriverStage.Load, Val("an authorized source unit collides with the pinned compiler-owned Prelude effect source"))
         }
     }
-    &load.generated_source_files.push(MIRSourceFile{id: mir_source_file_id(canonical.source_file), path: canonical.source_file, source: input.request.canonical_effect_source})
+    &load.generated_source_files.push(SourceFile{id: source_file_id(canonical.source_file), path: canonical.source_file, source: input.request.canonical_effect_source})
     providers := jet_driver_assemble_foreign_providers(input.request.authorized_sources, &load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     if !jet_driver_foreign_provider_owners_valid(load.modules, providers, &load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)

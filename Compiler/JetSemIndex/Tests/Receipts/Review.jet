@@ -1,4 +1,4 @@
-use jet_foundation.[derivation_record, derivation_identity, MIRDerivationMethod]
+use jet_foundation.[derivation_record, derivation_identity, DerivationMethod]
 
 // Independent record-algorithm tests below are NOT checked-source fixtures.
 // Full original fixtures at the bottom are explicitly UNREGISTERED: C4/S4/S5–
@@ -128,7 +128,7 @@ fn review_test_effect(function: String, direct: [String], inferred: [String], ca
     new :: review_test_fact("report", "same", "signature", "new", "run")
     before := review_test_index(^[DefinitionFact]{old.copy()}, ^[EffectFact]{})
     after := review_test_index(^[DefinitionFact]{new}, ^[EffectFact]{})
-    record := derivation_record("report", "checked:report", "compiler", MIRDerivationMethod.FormalProof, "rule", [String]{}, derivation_identity("source", "build", "run", "target"))
+    record := derivation_record("report", "checked:report", "compiler", DerivationMethod.FormalProof, "rule", [String]{}, derivation_identity("source", "build", "run", "target"))
     record.id = "same"
     &before.set_derivations(^[DerivationRecord]{record.copy()})
     record.claim = ""

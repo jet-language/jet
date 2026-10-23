@@ -1,6 +1,6 @@
 // Read-only fn-build staging: ordinary Driver checking and MIR execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
-use jet_foundation.[Diagnostic, EffectRowEntry, Span, TComptimeValue, mir_sha256_hex]
+use jet_foundation.[Diagnostic, EffectRowEntry, Span, TComptimeValue, sha256_hex]
 use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
 use jet_eval.[jet_eval_build_failed_diagnostic]
 use core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -30,7 +30,7 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         subject := ""
         digest := ""
         if unit.source_origin == SemaSourceOrigin.Snapshot {
-            digest = mir_sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
+            digest = sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
             if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
             source_files :: request.authorized_sources.roots[unit.root_index].files
             if unit.file_index < 0 || unit.file_index >= source_files.len() -> return None
@@ -44,7 +44,7 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
             } ?? -1
             if generated_index < 0 -> next
             generated :: request.generated_modules[generated_index]
-            digest = mir_sha256_hex(generated.source)
+            digest = sha256_hex(generated.source)
             owner :: loop package in load.packages {
                 if package.identity == generated.package_identity -> break package.root_index
             } ?? return None

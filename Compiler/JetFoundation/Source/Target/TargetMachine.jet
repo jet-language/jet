@@ -2,25 +2,25 @@
 // TargetMachine.rs and Driver::target_machine_for_facts.
 
 // Canonical TargetMachine.rs validation carriers restored from 45acf6f8f.
-enum MIRTargetCapability {
+enum TargetCapability {
     Allocator Atomic64 MMIO Hardware TimeWall TimeMonotonic TimeZoneData
     TimeSleep Entropy Scheduler IORead IOWrite PanicReport Startup
 }
-struct MIRTargetUnsafeGate { reason: String }
-struct MIRMMIOAccess {
+struct TargetUnsafeGate { reason: String }
+struct MMIOAccess {
     address: Int
-    size: MIRByteSize
-    unsafe_gate: MIRTargetUnsafeGate?
+    size: ByteSize
+    unsafe_gate: TargetUnsafeGate?
 }
-struct MIRTargetMachineUse {
+struct TargetMachineUse {
     stack_bytes: Int
     static_ram_bytes: Int
     heap_required: Bool
     core_apis: [String]
-    mmio: [MIRMMIOAccess]
-    required_capabilities: [MIRTargetCapability]
+    mmio: [MMIOAccess]
+    required_capabilities: [TargetCapability]
 }
-struct MIRSizeBudgetReport {
+struct SizeBudgetReport {
     artifact_bytes: Int
     flash_bytes: Int
     flash_ok: Bool
@@ -29,9 +29,9 @@ struct MIRSizeBudgetReport {
     ram_ok: Bool
 }
 #Error
-enum MIRTargetMachineError {
+enum TargetMachineError {
     MissingTargetTriple
-    MissingMemoryKind(kind: MIRMemoryKind)
+    MissingMemoryKind(kind: MemoryKind)
     DuplicateMemoryRegion(name: String)
     EmptyMemoryRegion(name: String)
     MemoryAddressOverflow(name: String)
@@ -50,7 +50,7 @@ enum MIRTargetMachineError {
     InvalidProviderContract(capability: String, provider: String, sha256: String)
     RamOverflow(used_bytes: Int, ram_bytes: Int)
     HeapRequiresAllocator
-    CoreAPIUnavailable(api: String, required: MIRRuntimeLayer, available: MIRRuntimeLayer)
+    CoreAPIUnavailable(api: String, required: RuntimeLayer, available: RuntimeLayer)
     MMIOOutsideRegion(address: Int, size_bytes: Int)
     MMIOMissingUnsafeGate(address: Int)
     MMIOEmptyUnsafeReason(address: Int)
@@ -60,7 +60,7 @@ enum MIRTargetMachineError {
     ExecutionTierUnsupported(tier: String, machine: String)
     FirmwareToolchainMissing(tool: String)
     FirmwareBuildFailed(detail: String)
-    SizeBudgetExceeded(report: MIRSizeBudgetReport)
+    SizeBudgetExceeded(report: SizeBudgetReport)
     HardwareFactsMissingSVD
     InvalidHardwareSVD(source: String, sha256: String)
     HardwareFactEmptyName(kind: String)
@@ -73,7 +73,7 @@ enum MIRTargetMachineError {
     RegisterOutsideBlock(block: String, register: String)
     UnknownRegisterBlock(block: String)
     UnknownRegister(block: String, register: String)
-    RegisterWidthMismatch(block: String, register: String, expected: MIRRegisterWidth, actual: MIRRegisterWidth)
+    RegisterWidthMismatch(block: String, register: String, expected: RegisterWidth, actual: RegisterWidth)
     RegisterReadDenied(block: String, register: String)
     RegisterWriteDenied(block: String, register: String)
     DuplicateInterrupt(name: String)
@@ -86,34 +86,34 @@ enum MIRTargetMachineError {
     DuplicateDMAChannelNumber(channel: Int)
     DMATransferSizeZero(channel: String)
     UnknownDMAChannel(channel: String)
-    DMAOwnershipMismatch(channel: String, buffer: String, expected: MIRTargetDMAOwner, actual: MIRTargetDMAOwner)
+    DMAOwnershipMismatch(channel: String, buffer: String, expected: TargetDMAOwner, actual: TargetDMAOwner)
     DMAStartWhileInFlight(channel: String, buffer: String)
     DMAWaitWithoutTransfer(channel: String, buffer: String)
     DMABufferUnavailable(channel: String, buffer: String)
     DMAWaitChannelMismatch(channel: String, buffer: String)
 }
 
-fn jet_target_abi_c() -> MIRProviderABI Never! {
-    MIRProviderABI{calling_convention: "C", version: "1"}
+fn jet_target_abi_c() -> ProviderABI Never! {
+    ProviderABI{calling_convention: "C", version: "1"}
 }
 
-fn jet_target_hardware_empty() -> MIRTargetHardwareFacts Never! {
-    MIRTargetHardwareFacts{
+fn jet_target_hardware_empty() -> TargetHardwareFacts Never! {
+    TargetHardwareFacts{
         svd: None,
-        register_blocks: [MIRTargetRegisterBlockFact]{},
-        interrupts: [MIRTargetInterruptFact]{},
-        dma_channels: [MIRTargetDMAChannelFact]{},
+        register_blocks: [TargetRegisterBlockFact]{},
+        interrupts: [TargetInterruptFact]{},
+        dma_channels: [TargetDMAChannelFact]{},
     }
 }
 
-fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MIRLinkerInput, allocator: MIRAllocatorPolicy, panic: MIRPanicPolicy, mmio: MIRMMIOPolicy, wall_clock: MIRClockPolicy, monotonic_clock: MIRClockPolicy, zone_data: MIRClockPolicy, sleep: MIRClockPolicy, entropy: MIREntropyPolicy, scheduler: MIRSchedulerPolicy, byte_sink: MIRByteSinkPolicy, startup: MIRStartupPolicy, startup_entry: String, startup_vectors: String, startup_placement: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: LinkerInput, allocator: AllocatorPolicy, panic: PanicPolicy, mmio: MMIOPolicy, wall_clock: ClockPolicy, monotonic_clock: ClockPolicy, zone_data: ClockPolicy, sleep: ClockPolicy, entropy: EntropyPolicy, scheduler: SchedulerPolicy, byte_sink: ByteSinkPolicy, startup: StartupPolicy, startup_entry: String, startup_vectors: String, startup_placement: String, package_version: String) -> TargetMachine Never! {
     layout :: jet_target_layout_from_triple(triple, package_version)
-    MIRTargetMachine{
+    TargetMachine{
         name: name,
         triple: triple,
         layout: layout.facts,
         no_os: no_os,
-        memory: [MIRMemoryRegion]{},
+        memory: [MemoryRegion]{},
         linker: linker,
         allocator: allocator,
         panic: panic,
@@ -131,28 +131,28 @@ fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MI
         startup_abi: jet_target_abi_c(),
         startup_placement: startup_placement,
         hardware: jet_target_hardware_empty(),
-        programmers: [MIRTargetProgrammerFacts]{},
-        audit: MIRAuditPolicy{build_artifact: true, dossier_lens: true},
+        programmers: [TargetProgrammerFacts]{},
+        audit: AuditPolicy{build_artifact: true, dossier_lens: true},
     }
 }
 
-fn jet_target_machine_hosted(triple: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_hosted(triple: String, package_version: String) -> TargetMachine Never! {
     jet_target_machine_base(
         "hosted",
         triple,
         false,
-        MIRLinkerInput.HostedDefault,
-        MIRAllocatorPolicy.HostedDefault,
-        MIRPanicPolicy.HostedDefault,
-        MIRMMIOPolicy.HostedDefault,
-        MIRClockPolicy.HostedDefault,
-        MIRClockPolicy.HostedDefault,
-        MIRClockPolicy.HostedDefault,
-        MIRClockPolicy.HostedDefault,
-        MIREntropyPolicy.HostedDefault,
-        MIRSchedulerPolicy.HostedDefault,
-        MIRByteSinkPolicy.HostedDefault,
-        MIRStartupPolicy.HostedDefault,
+        LinkerInput.HostedDefault,
+        AllocatorPolicy.HostedDefault,
+        PanicPolicy.HostedDefault,
+        MMIOPolicy.HostedDefault,
+        ClockPolicy.HostedDefault,
+        ClockPolicy.HostedDefault,
+        ClockPolicy.HostedDefault,
+        ClockPolicy.HostedDefault,
+        EntropyPolicy.HostedDefault,
+        SchedulerPolicy.HostedDefault,
+        ByteSinkPolicy.HostedDefault,
+        StartupPolicy.HostedDefault,
         "",
         "",
         "",
@@ -160,23 +160,23 @@ fn jet_target_machine_hosted(triple: String, package_version: String) -> MIRTarg
     )
 }
 
-fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> TargetMachine Never! {
     jet_target_machine_base(
         name,
         triple,
         true,
-        MIRLinkerInput.Generated,
-        MIRAllocatorPolicy.Unspecified,
-        MIRPanicPolicy.Unspecified,
-        MIRMMIOPolicy.Unspecified,
-        MIRClockPolicy.Unspecified,
-        MIRClockPolicy.Unspecified,
-        MIRClockPolicy.Unspecified,
-        MIRClockPolicy.Unspecified,
-        MIREntropyPolicy.Unspecified,
-        MIRSchedulerPolicy.Unspecified,
-        MIRByteSinkPolicy.Unspecified,
-        MIRStartupPolicy.Unspecified,
+        LinkerInput.Generated,
+        AllocatorPolicy.Unspecified,
+        PanicPolicy.Unspecified,
+        MMIOPolicy.Unspecified,
+        ClockPolicy.Unspecified,
+        ClockPolicy.Unspecified,
+        ClockPolicy.Unspecified,
+        ClockPolicy.Unspecified,
+        EntropyPolicy.Unspecified,
+        SchedulerPolicy.Unspecified,
+        ByteSinkPolicy.Unspecified,
+        StartupPolicy.Unspecified,
         "Reset_Handler",
         "vectors",
         ".vectors",
@@ -253,24 +253,24 @@ fn jet_target_optional_string_json(value: String?) -> String Never! {
     jet_target_json_quote(actual)
 }
 
-fn jet_target_optional_contract_json(value: MIRProviderContract?) -> String Never! {
+fn jet_target_optional_contract_json(value: ProviderContract?) -> String Never! {
     contract :: value ?? return "null"
     jet_target_provider_contract_json(contract)
 }
 
-fn jet_target_provider_contract_json(value: MIRProviderContract) -> String Never! {
+fn jet_target_provider_contract_json(value: ProviderContract) -> String Never! {
     "{{\"provider\":{jet_target_json_quote(value.provider)},\"sha256\":{jet_target_json_quote(value.sha256)},\"provenance\":{jet_target_json_quote(value.provenance)},\"abi\":{jet_target_abi_json(value.abi)},\"limits\":{jet_target_provider_limits_json(value.limits)}}}"
 }
 
-fn jet_target_abi_json(value: MIRProviderABI) -> String Never! {
+fn jet_target_abi_json(value: ProviderABI) -> String Never! {
     "{{\"calling_convention\":{jet_target_json_quote(value.calling_convention)},\"version\":{jet_target_json_quote(value.version)}}}"
 }
 
-fn jet_target_provider_limits_json(value: MIRProviderLimits) -> String Never! {
+fn jet_target_provider_limits_json(value: ProviderLimits) -> String Never! {
     "{{\"max_request_bytes\":{jet_target_optional_int_json(value.max_request_bytes)},\"max_response_bytes\":{jet_target_optional_int_json(value.max_response_bytes)},\"max_calls\":{jet_target_optional_int_json(value.max_calls)}}}"
 }
 
-fn jet_target_linker_json(value: MIRLinkerInput) -> String Never! {
+fn jet_target_linker_json(value: LinkerInput) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -279,7 +279,7 @@ fn jet_target_linker_json(value: MIRLinkerInput) -> String Never! {
     }
 }
 
-fn jet_target_allocator_json(value: MIRAllocatorPolicy) -> String Never! {
+fn jet_target_allocator_json(value: AllocatorPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -290,12 +290,12 @@ fn jet_target_allocator_json(value: MIRAllocatorPolicy) -> String Never! {
     }
 }
 
-fn jet_target_optional_byte_size_json(value: MIRByteSize?) -> String Never! {
+fn jet_target_optional_byte_size_json(value: ByteSize?) -> String Never! {
     size :: value ?? return "null"
     "{size.bytes}"
 }
 
-fn jet_target_panic_json(value: MIRPanicPolicy) -> String Never! {
+fn jet_target_panic_json(value: PanicPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -304,7 +304,7 @@ fn jet_target_panic_json(value: MIRPanicPolicy) -> String Never! {
     }
 }
 
-fn jet_target_clock_json(value: MIRClockPolicy) -> String Never! {
+fn jet_target_clock_json(value: ClockPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -313,7 +313,7 @@ fn jet_target_clock_json(value: MIRClockPolicy) -> String Never! {
     }
 }
 
-fn jet_target_entropy_json(value: MIREntropyPolicy) -> String Never! {
+fn jet_target_entropy_json(value: EntropyPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -322,7 +322,7 @@ fn jet_target_entropy_json(value: MIREntropyPolicy) -> String Never! {
     }
 }
 
-fn jet_target_scheduler_json(value: MIRSchedulerPolicy) -> String Never! {
+fn jet_target_scheduler_json(value: SchedulerPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -333,7 +333,7 @@ fn jet_target_scheduler_json(value: MIRSchedulerPolicy) -> String Never! {
     }
 }
 
-fn jet_target_mmio_json(value: MIRMMIOPolicy) -> String Never! {
+fn jet_target_mmio_json(value: MMIOPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -342,7 +342,7 @@ fn jet_target_mmio_json(value: MIRMMIOPolicy) -> String Never! {
     }
 }
 
-fn jet_target_byte_sink_json(value: MIRByteSinkPolicy) -> String Never! {
+fn jet_target_byte_sink_json(value: ByteSinkPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -351,7 +351,7 @@ fn jet_target_byte_sink_json(value: MIRByteSinkPolicy) -> String Never! {
     }
 }
 
-fn jet_target_byte_sink_component_json(value: MIRByteSinkPolicy, component: String) -> String Never! {
+fn jet_target_byte_sink_component_json(value: ByteSinkPolicy, component: String) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -367,7 +367,7 @@ fn jet_target_byte_sink_component_json(value: MIRByteSinkPolicy, component: Stri
     }
 }
 
-fn jet_target_startup_json(value: MIRStartupPolicy) -> String Never! {
+fn jet_target_startup_json(value: StartupPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -375,7 +375,7 @@ fn jet_target_startup_json(value: MIRStartupPolicy) -> String Never! {
     }
 }
 
-fn jet_target_register_width_name(value: MIRRegisterWidth) -> String Never! {
+fn jet_target_register_width_name(value: RegisterWidth) -> String Never! {
     if value == {
         .U8 -> "u8"
         .U16 -> "u16"
@@ -384,7 +384,7 @@ fn jet_target_register_width_name(value: MIRRegisterWidth) -> String Never! {
     }
 }
 
-fn jet_target_register_access_name(value: MIRTargetRegisterAccessMode) -> String Never! {
+fn jet_target_register_access_name(value: TargetRegisterAccessMode) -> String Never! {
     if value == {
         .ReadOnly -> "read-only"
         .WriteOnly -> "write-only"
@@ -392,7 +392,7 @@ fn jet_target_register_access_name(value: MIRTargetRegisterAccessMode) -> String
     }
 }
 
-fn jet_target_memory_kind_name(value: MIRMemoryKind) -> String Never! {
+fn jet_target_memory_kind_name(value: MemoryKind) -> String Never! {
     if value == {
         .Flash -> "flash"
         .Ram -> "ram"
@@ -401,7 +401,7 @@ fn jet_target_memory_kind_name(value: MIRMemoryKind) -> String Never! {
     }
 }
 
-fn jet_target_memory_access_name(value: MIRMemoryAccess) -> String Never! {
+fn jet_target_memory_access_name(value: MemoryAccess) -> String Never! {
     if value == {
         .R -> "r"
         .Rw -> "rw"
@@ -410,7 +410,7 @@ fn jet_target_memory_access_name(value: MIRMemoryAccess) -> String Never! {
     }
 }
 
-fn jet_target_memory_json(regions: [MIRMemoryRegion]) -> String Never! {
+fn jet_target_memory_json(regions: [MemoryRegion]) -> String Never! {
     rows := [String]{}
     loop region in regions {
         &rows.push("{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}")
@@ -418,7 +418,7 @@ fn jet_target_memory_json(regions: [MIRMemoryRegion]) -> String Never! {
     "[{rows.join(",")}]"
 }
 
-fn jet_target_hardware_json(facts: MIRTargetHardwareFacts) -> String Never! {
+fn jet_target_hardware_json(facts: TargetHardwareFacts) -> String Never! {
     svd :: if facts.svd == {
         .Val(provenance) -> "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
         .None -> "null"
@@ -439,13 +439,13 @@ fn jet_target_hardware_json(facts: MIRTargetHardwareFacts) -> String Never! {
     }
     channels := [String]{}
     loop channel in facts.dma_channels {
-        ownership :: if channel.ownership == MIRTargetDMAOwnership.Borrowed -> "borrowed" else -> "transfer"
+        ownership :: if channel.ownership == TargetDMAOwnership.Borrowed -> "borrowed" else -> "transfer"
         &channels.push("{{\"name\":{jet_target_json_quote(channel.name)},\"channel\":{channel.channel},\"transfer_width\":{jet_target_json_quote(jet_target_register_width_name(channel.transfer_width))},\"ownership\":{jet_target_json_quote(ownership)},\"max_transfer_bytes\":{jet_target_optional_int_json(channel.max_transfer_bytes)}}}")
     }
     "{{\"svd\":{svd},\"register_blocks\":[{blocks.join(",")}],\"interrupts\":[{interrupts.join(",")}],\"dma_channels\":[{channels.join(",")}]}}"
 }
 
-fn jet_target_programmer_adapter_name(value: MIRTargetProgrammerAdapter) -> String Never! {
+fn jet_target_programmer_adapter_name(value: TargetProgrammerAdapter) -> String Never! {
     if value == {
         .Emulator -> "emulator"
         .ProbeRs -> "probe-rs"
@@ -453,7 +453,7 @@ fn jet_target_programmer_adapter_name(value: MIRTargetProgrammerAdapter) -> Stri
     }
 }
 
-fn jet_target_programmers_json(programmers: [MIRTargetProgrammerFacts]) -> String Never! {
+fn jet_target_programmers_json(programmers: [TargetProgrammerFacts]) -> String Never! {
     rows := [String]{}
     loop programmer in programmers {
         config := [String]{}
@@ -464,7 +464,7 @@ fn jet_target_programmers_json(programmers: [MIRTargetProgrammerFacts]) -> Strin
 }
 
 // Rust TargetProgrammerFacts::missing_fact (TargetMachine.rs:441-483).
-fn jet_target_programmer_missing_fact(facts: MIRTargetProgrammerFacts) -> String? Never! {
+fn jet_target_programmer_missing_fact(facts: TargetProgrammerFacts) -> String? Never! {
     if facts.executable.trim().is_empty() -> return Val("executable")
     loop value in facts.config {
         if value.trim().is_empty() -> return Val("config")
@@ -492,7 +492,7 @@ fn jet_target_atomic_word_supported(triple: String) -> Bool Never! {
     triple.starts_with("x86_64-") || triple.starts_with("aarch64-") || triple.starts_with("wasm32-")
 }
 
-fn jet_target_provider_facts_json(machine: MIRTargetMachine) -> String Never! {
+fn jet_target_provider_facts_json(machine: TargetMachine) -> String Never! {
     atomic_supported :: jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))
     atomic_triple :: jet_target_json_quote(machine.triple)
     io_read :: jet_target_byte_sink_component_json(machine.byte_sink, "read")
@@ -520,7 +520,7 @@ fn jet_target_provider_facts_json(machine: MIRTargetMachine) -> String Never! {
     "[{facts.join(",")}]"
 }
 
-fn jet_target_environment_identity(machine: MIRTargetMachine) -> String Never! {
+fn jet_target_environment_identity(machine: TargetMachine) -> String Never! {
     if {
         machine.no_os -> "no-os"
         machine.triple.contains("wasip") -> "wasi"
@@ -529,7 +529,7 @@ fn jet_target_environment_identity(machine: MIRTargetMachine) -> String Never! {
     }
 }
 
-fn jet_target_provider_identity(machine: MIRTargetMachine) -> String Never! {
+fn jet_target_provider_identity(machine: TargetMachine) -> String Never! {
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "environment", jet_target_environment_identity(machine))
     jet_target_append_frame(&bytes, "linker", jet_target_linker_json(machine.linker))
@@ -549,25 +549,25 @@ fn jet_target_provider_identity(machine: MIRTargetMachine) -> String Never! {
     jet_target_append_frame(&bytes, "hardware", jet_target_hardware_json(machine.hardware))
     jet_target_append_frame(&bytes, "programmers", jet_target_programmers_json(machine.programmers))
     jet_target_append_frame(&bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
-    "target-providers-v1:{mir_sha256_hex_bytes(bytes)}"
+    "target-providers-v1:{sha256_hex_bytes(bytes)}"
 }
 
-fn jet_target_allocator_provides_heap(policy: MIRAllocatorPolicy) -> Bool Never! {
+fn jet_target_allocator_provides_heap(policy: AllocatorPolicy) -> Bool Never! {
     if policy == {
         .HostedDefault | .Provider(_) | .Fixed(_, _) | .Counting(_) -> true
         else -> false
     }
 }
 
-fn jet_target_max_runtime_layer(machine: MIRTargetMachine) -> MIRRuntimeLayer Never! {
+fn jet_target_max_runtime_layer(machine: TargetMachine) -> RuntimeLayer Never! {
     if {
-        !machine.no_os -> MIRRuntimeLayer.Std
-        jet_target_allocator_provides_heap(machine.allocator) -> MIRRuntimeLayer.Alloc
-        else -> MIRRuntimeLayer.Core
+        !machine.no_os -> RuntimeLayer.Std
+        jet_target_allocator_provides_heap(machine.allocator) -> RuntimeLayer.Alloc
+        else -> RuntimeLayer.Core
     }
 }
 
-fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> TargetMachine Never! {
     if {
         web_target -> jet_target_machine_wasm_browser(package_version)
         target_triple == "wasm32-wasip2" -> jet_target_machine_wasm_wasi(package_version)
@@ -576,59 +576,59 @@ fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: St
     }
 }
 
-fn jet_target_wasm_provider(name: String, implementation: String) -> MIRProviderContract Never! {
+fn jet_target_wasm_provider(name: String, implementation: String) -> ProviderContract Never! {
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "provider", name)
     jet_target_append_frame(&bytes, "implementation", implementation)
-    digest :: mir_sha256_hex_bytes(bytes)
-    MIRProviderContract{
+    digest :: sha256_hex_bytes(bytes)
+    ProviderContract{
         provider: name,
         sha256: "sha256:{digest}",
         provenance: "provider:{name}",
         abi: jet_target_abi_c(),
-        limits: MIRProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None},
+        limits: ProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None},
     }
 }
 
-fn jet_target_machine_wasm_browser(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_wasm_browser(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_hosted("wasm32-unknown-unknown", package_version)
     machine.name = "wasm.browser"
-    machine.allocator = MIRAllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.allocator", "wasm-browser-allocator")}
-    machine.panic = MIRPanicPolicy.Report{provider: jet_target_wasm_provider("wasm.browser.report", "wasm-browser-report")}
-    machine.mmio = MIRMMIOPolicy.NoMMIO
-    machine.wall_clock = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.wall_clock", "wasm-browser-wall")}
-    machine.monotonic_clock = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.monotonic_clock", "wasm-browser-mono")}
-    machine.zone_data = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.zone_data", "wasm-browser-zone")}
-    machine.sleep = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.sleep", "wasm-browser-sleep")}
-    machine.entropy = MIREntropyPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.entropy", "wasm-browser-entropy")}
-    machine.scheduler = MIRSchedulerPolicy.Cooperative{provider: jet_target_wasm_provider("wasm.browser.scheduler", "wasm-browser-scheduler")}
-    machine.byte_sink = MIRByteSinkPolicy.Provider{
+    machine.allocator = AllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.allocator", "wasm-browser-allocator")}
+    machine.panic = PanicPolicy.Report{provider: jet_target_wasm_provider("wasm.browser.report", "wasm-browser-report")}
+    machine.mmio = MMIOPolicy.NoMMIO
+    machine.wall_clock = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.wall_clock", "wasm-browser-wall")}
+    machine.monotonic_clock = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.monotonic_clock", "wasm-browser-mono")}
+    machine.zone_data = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.zone_data", "wasm-browser-zone")}
+    machine.sleep = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.sleep", "wasm-browser-sleep")}
+    machine.entropy = EntropyPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.entropy", "wasm-browser-entropy")}
+    machine.scheduler = SchedulerPolicy.Cooperative{provider: jet_target_wasm_provider("wasm.browser.scheduler", "wasm-browser-scheduler")}
+    machine.byte_sink = ByteSinkPolicy.Provider{
         read: Val(jet_target_wasm_provider("wasm.browser.io_read", "wasm-browser-read")),
         write: Val(jet_target_wasm_provider("wasm.browser.io_write", "wasm-browser-write")),
         report: Val(jet_target_wasm_provider("wasm.browser.report", "wasm-browser-report")),
     }
-    machine.startup = MIRStartupPolicy.Generated{provider: jet_target_wasm_provider("wasm.browser.startup", "wasm-browser-startup")}
+    machine.startup = StartupPolicy.Generated{provider: jet_target_wasm_provider("wasm.browser.startup", "wasm-browser-startup")}
     machine
 }
 
-fn jet_target_machine_wasm_wasi(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_wasm_wasi(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_hosted("wasm32-wasip2", package_version)
     machine.name = "wasm.wasi"
-    machine.allocator = MIRAllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator")}
-    machine.panic = MIRPanicPolicy.Report{provider: jet_target_wasm_provider("wasm.wasi.report", "wasm-wasi-report")}
-    machine.mmio = MIRMMIOPolicy.NoMMIO
-    machine.wall_clock = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.wall_clock", "wasm-wasi-wall")}
-    machine.monotonic_clock = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.monotonic_clock", "wasm-wasi-mono")}
-    machine.zone_data = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.zone_data", "wasm-wasi-zone")}
-    machine.sleep = MIRClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.sleep", "wasm-wasi-sleep")}
-    machine.entropy = MIREntropyPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.entropy", "wasm-wasi-entropy")}
-    machine.scheduler = MIRSchedulerPolicy.BoardRuntime{provider: jet_target_wasm_provider("wasm.wasi.scheduler", "wasm-wasi-scheduler")}
-    machine.byte_sink = MIRByteSinkPolicy.Provider{
+    machine.allocator = AllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator")}
+    machine.panic = PanicPolicy.Report{provider: jet_target_wasm_provider("wasm.wasi.report", "wasm-wasi-report")}
+    machine.mmio = MMIOPolicy.NoMMIO
+    machine.wall_clock = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.wall_clock", "wasm-wasi-wall")}
+    machine.monotonic_clock = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.monotonic_clock", "wasm-wasi-mono")}
+    machine.zone_data = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.zone_data", "wasm-wasi-zone")}
+    machine.sleep = ClockPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.sleep", "wasm-wasi-sleep")}
+    machine.entropy = EntropyPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.entropy", "wasm-wasi-entropy")}
+    machine.scheduler = SchedulerPolicy.BoardRuntime{provider: jet_target_wasm_provider("wasm.wasi.scheduler", "wasm-wasi-scheduler")}
+    machine.byte_sink = ByteSinkPolicy.Provider{
         read: Val(jet_target_wasm_provider("wasm.wasi.io_read", "wasm-wasi-read")),
         write: Val(jet_target_wasm_provider("wasm.wasi.io_write", "wasm-wasi-write")),
         report: Val(jet_target_wasm_provider("wasm.wasi.report", "wasm-wasi-report")),
     }
-    machine.startup = MIRStartupPolicy.Generated{provider: jet_target_wasm_provider("wasm.wasi.startup", "wasm-wasi-startup")}
+    machine.startup = StartupPolicy.Generated{provider: jet_target_wasm_provider("wasm.wasi.startup", "wasm-wasi-startup")}
     machine
 }
 
@@ -652,13 +652,13 @@ fn jet_target_active_os_name(target_triple: String, host_os: String) -> String N
 }
 
 // Rust TargetMachineUse::default (TargetMachine.rs).
-fn jet_target_machine_use_default() -> MIRTargetMachineUse Never! {
-    MIRTargetMachineUse{stack_bytes: 0, static_ram_bytes: 0, heap_required: false,
-        core_apis: [String]{}, mmio: [MIRMMIOAccess]{}, required_capabilities: [MIRTargetCapability]{}}
+fn jet_target_machine_use_default() -> TargetMachineUse Never! {
+    TargetMachineUse{stack_bytes: 0, static_ram_bytes: 0, heap_required: false,
+        core_apis: [String]{}, mmio: [MMIOAccess]{}, required_capabilities: [TargetCapability]{}}
 }
 
 // Rust TargetCapability::as_str (TargetMachine.rs).
-fn jet_target_capability_name(capability: MIRTargetCapability) -> String Never! {
+fn jet_target_capability_name(capability: TargetCapability) -> String Never! {
     if capability == {
         .Allocator -> "Target.Allocator"
         .Atomic64 -> "Target.Atomic64"
@@ -678,7 +678,7 @@ fn jet_target_capability_name(capability: MIRTargetCapability) -> String Never! 
 }
 
 // Rust capabilities_for_core_usage (TargetMachine.rs).
-fn jet_target_capabilities_for_core_usage(api: String) -> [MIRTargetCapability] Never! {
+fn jet_target_capabilities_for_core_usage(api: String) -> [TargetCapability] Never! {
     bytes :: api.bytes()
     separator := 0
     loop separator + 1 < bytes.len() {
@@ -691,7 +691,7 @@ fn jet_target_capabilities_for_core_usage(api: String) -> [MIRTargetCapability] 
         module_name = String.from_bytes(bytes[0..<separator]) ?? ""
         helper = String.from_bytes(bytes[separator + 2..<bytes.len()]) ?? ""
     }
-    result := [MIRTargetCapability]{}
+    result := [TargetCapability]{}
     if module_name == {
         "core.mem" -> if helper == "Atomic" || helper == "atomic" -> &result.push(.Atomic64)
         "core.term" -> {
@@ -718,7 +718,7 @@ fn jet_target_capabilities_for_core_usage(api: String) -> [MIRTargetCapability] 
 }
 
 // Rust TargetMachineUse::from_core_apis (TargetMachine.rs).
-fn jet_target_machine_use_from_core_apis(apis: [String]) -> MIRTargetMachineUse Never! {
+fn jet_target_machine_use_from_core_apis(apis: [String]) -> TargetMachineUse Never! {
     usage := jet_target_machine_use_default()
     sorted := apis.copy()
     &sorted.sort()
@@ -759,11 +759,11 @@ fn jet_target_no_whitespace(value: String) -> Bool Never! {
     }
     true
 }
-fn jet_target_abi_valid(abi: MIRProviderABI) -> Bool Never! {
+fn jet_target_abi_valid(abi: ProviderABI) -> Bool Never! {
     !abi.calling_convention.trim().is_empty() && !abi.version.trim().is_empty()
         && jet_target_no_whitespace(abi.calling_convention) && jet_target_no_whitespace(abi.version)
 }
-fn jet_target_provider_valid(provider: MIRProviderContract) -> Bool Never! {
+fn jet_target_provider_valid(provider: ProviderContract) -> Bool Never! {
     if provider.provider.trim().is_empty() || provider.provenance.trim().is_empty() || !jet_target_abi_valid(provider.abi) -> return false
     if !provider.sha256.starts_with("sha256:") -> return false
     digest :: String.from_bytes(provider.sha256.bytes()[7..<provider.sha256.bytes().len()]) ?? ""
@@ -776,30 +776,30 @@ fn jet_target_provider_valid(provider: MIRProviderContract) -> Bool Never! {
 }
 
 // Rust MemoryRegion::end / contains (TargetMachine.rs).
-fn jet_target_memory_end(region: MIRMemoryRegion) -> Int? Never! {
+fn jet_target_memory_end(region: MemoryRegion) -> Int? Never! {
     end :: region.origin + region.size.bytes
     if end > 18446744073709551615 -> None else -> Val(end)
 }
-fn jet_target_memory_contains(region: MIRMemoryRegion, origin: Int, size: MIRByteSize) -> Bool Never! {
+fn jet_target_memory_contains(region: MemoryRegion, origin: Int, size: ByteSize) -> Bool Never! {
     end :: jet_target_memory_end(region) ?? return false
     access_end :: origin + size.bytes
     access_end <= 18446744073709551615 && region.origin <= origin && access_end <= end
 }
 
 // Rust policy provider/provides methods (TargetMachine.rs).
-fn jet_target_clock_provider(policy: MIRClockPolicy) -> MIRProviderContract? Never! {
+fn jet_target_clock_provider(policy: ClockPolicy) -> ProviderContract? Never! {
     if policy == {
         .Provider(provider) -> Val(provider)
         else -> None
     }
 }
-fn jet_target_scheduler_provider(policy: MIRSchedulerPolicy) -> MIRProviderContract? Never! {
+fn jet_target_scheduler_provider(policy: SchedulerPolicy) -> ProviderContract? Never! {
     if policy == {
         .Cooperative(provider) | .InterruptDriven(provider) | .BoardRuntime(provider) -> Val(provider)
         else -> None
     }
 }
-fn jet_target_sink_provider(policy: MIRByteSinkPolicy, capability: MIRTargetCapability) -> MIRProviderContract? Never! {
+fn jet_target_sink_provider(policy: ByteSinkPolicy, capability: TargetCapability) -> ProviderContract? Never! {
     if policy == {
         .Provider(read, write, report) -> if capability == {
             .IORead -> read
@@ -810,7 +810,7 @@ fn jet_target_sink_provider(policy: MIRByteSinkPolicy, capability: MIRTargetCapa
     }
 }
 // Rust TargetMachine::provides_capability (TargetMachine.rs).
-fn jet_target_machine_provides_capability(machine: MIRTargetMachine, capability: MIRTargetCapability) -> Bool Never! {
+fn jet_target_machine_provides_capability(machine: TargetMachine, capability: TargetCapability) -> Bool Never! {
     hosted :: jet_target_environment_identity(machine) == "hosted"
     if capability == {
         .Allocator -> if machine.allocator == {
@@ -845,13 +845,13 @@ fn jet_target_machine_provides_capability(machine: MIRTargetMachine, capability:
 }
 
 // Rust push_unique / validate_provider_contract / validate_simple_capability (TargetMachine.rs).
-fn jet_target_push_unique(errors: &[MIRTargetMachineError], error: MIRTargetMachineError) Never! {
+fn jet_target_push_unique(errors: &[TargetMachineError], error: TargetMachineError) Never! {
     if !errors.contains(error) -> &errors.push(error)
 }
-fn jet_target_validate_provider_contract(capability: MIRTargetCapability, provider: MIRProviderContract, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_provider_contract(capability: TargetCapability, provider: ProviderContract, errors: &[TargetMachineError]) Never! {
     if !jet_target_provider_valid(provider) -> jet_target_push_unique(&errors, .InvalidProviderContract{capability: jet_target_capability_name(capability), provider: provider.provider, sha256: provider.sha256})
 }
-fn jet_target_validate_simple_capability(machine: MIRTargetMachine, capability: MIRTargetCapability, declared: Bool, hosted_default: Bool, provider: MIRProviderContract?, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_simple_capability(machine: TargetMachine, capability: TargetCapability, declared: Bool, hosted_default: Bool, provider: ProviderContract?, errors: &[TargetMachineError]) Never! {
     if machine.no_os {
         if {
             hosted_default -> jet_target_push_unique(&errors, .HostedCapabilityRequiresOS{capability: jet_target_capability_name(capability)})
@@ -863,7 +863,7 @@ fn jet_target_validate_simple_capability(machine: MIRTargetMachine, capability: 
 }
 
 // Rust validate_memory_regions (TargetMachine.rs); sort indices, not copied region payloads.
-fn jet_target_validate_memory_regions(regions: [MIRMemoryRegion], errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_memory_regions(regions: [MemoryRegion], errors: &[TargetMachineError]) Never! {
     names := [String:Bool]{}
     indices := [Int]{}
     loop index in 0..<regions.len() {
@@ -886,7 +886,7 @@ fn jet_target_validate_memory_regions(regions: [MIRMemoryRegion], errors: &[MIRT
 }
 
 // Rust validate_linker (TargetMachine.rs).
-fn jet_target_validate_linker(linker: MIRLinkerInput, no_os: Bool, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_linker(linker: LinkerInput, no_os: Bool, errors: &[TargetMachineError]) Never! {
     if linker == {
         .Unspecified -> if no_os -> &errors.push(.MissingLinkerInput)
         .File(path, sha256) -> {
@@ -897,7 +897,7 @@ fn jet_target_validate_linker(linker: MIRLinkerInput, no_os: Bool, errors: &[MIR
     }
 }
 // Rust validate_allocator (TargetMachine.rs).
-fn jet_target_validate_allocator(machine: MIRTargetMachine, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_allocator(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if machine.allocator == {
         .Unspecified -> if machine.no_os -> &errors.push(.MissingAllocatorPolicy)
         .HostedDefault | .Counting(_) -> if machine.no_os -> &errors.push(.HostedAllocatorRequiresOS)
@@ -918,14 +918,14 @@ fn jet_target_validate_allocator(machine: MIRTargetMachine, errors: &[MIRTargetM
     }
 }
 // Rust validate_panic (TargetMachine.rs).
-fn jet_target_validate_panic(machine: MIRTargetMachine, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_panic(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if machine.no_os && (machine.panic == .Unspecified || machine.panic == .HostedDefault) -> &errors.push(.MissingPanicPolicy)
     if machine.panic == .Report(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, &errors)
 }
 // Rust validate_ram_budget (TargetMachine.rs).
-fn jet_target_validate_ram_budget(machine: MIRTargetMachine, usage: MIRTargetMachineUse, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_ram_budget(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     if !machine.no_os -> return
-    kinds :: [MIRMemoryKind]{.Flash, .Ram}
+    kinds :: [MemoryKind]{.Flash, .Ram}
     loop kind in kinds {
         present := false
         loop region in machine.memory { if region.kind == kind -> present = true }
@@ -942,7 +942,7 @@ fn jet_target_validate_ram_budget(machine: MIRTargetMachine, usage: MIRTargetMac
     if ram > 0 && used > ram -> &errors.push(.RamOverflow{used_bytes: used, ram_bytes: ram})
 }
 // Rust validate_core_usage (TargetMachine.rs).
-fn jet_target_validate_core_usage(machine: MIRTargetMachine, usage: MIRTargetMachineUse, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_core_usage(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     if usage.heap_required && !jet_target_machine_provides_capability(machine, .Allocator) -> &errors.push(.HeapRequiresAllocator)
     available :: jet_target_max_runtime_layer(machine)
     loop row in jet_ring_classify_prelude_closure(usage.core_apis) {
@@ -951,7 +951,7 @@ fn jet_target_validate_core_usage(machine: MIRTargetMachine, usage: MIRTargetMac
 }
 
 // Rust validate_target_capabilities (TargetMachine.rs).
-fn jet_target_validate_target_capabilities(machine: MIRTargetMachine, usage: MIRTargetMachineUse, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_target_capabilities(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     mmio_provider :: if machine.mmio == { .Provider(provider) -> Val(provider) else -> None }
     jet_target_validate_simple_capability(machine, .MMIO, machine.mmio != .Unspecified, machine.mmio == .HostedDefault, mmio_provider, &errors)
     jet_target_validate_simple_capability(machine, .TimeWall, machine.wall_clock != .Unspecified, machine.wall_clock == .HostedDefault, jet_target_clock_provider(machine.wall_clock), &errors)
@@ -963,7 +963,7 @@ fn jet_target_validate_target_capabilities(machine: MIRTargetMachine, usage: MIR
     jet_target_validate_simple_capability(machine, .Scheduler, machine.scheduler != .Unspecified, machine.scheduler == .HostedDefault, jet_target_scheduler_provider(machine.scheduler), &errors)
     startup_provider :: if machine.startup == { .Generated(provider) -> Val(provider) else -> None }
     jet_target_validate_simple_capability(machine, .Startup, machine.startup != .Unspecified, machine.startup == .HostedDefault, startup_provider, &errors)
-    sinks :: [MIRTargetCapability]{.IORead, .IOWrite, .PanicReport}
+    sinks :: [TargetCapability]{.IORead, .IOWrite, .PanicReport}
     if machine.byte_sink == {
         .HostedDefault -> if machine.no_os {
             loop capability in sinks -> jet_target_push_unique(&errors, .HostedCapabilityRequiresOS{capability: jet_target_capability_name(capability)})
@@ -985,7 +985,7 @@ fn jet_target_validate_target_capabilities(machine: MIRTargetMachine, usage: MIR
     }
 }
 // Rust validate_startup_facts (TargetMachine.rs).
-fn jet_target_validate_startup_facts(machine: MIRTargetMachine, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_startup_facts(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if !machine.no_os -> return
     if machine.startup == {
         .Generated(provider) -> {
@@ -996,7 +996,7 @@ fn jet_target_validate_startup_facts(machine: MIRTargetMachine, errors: &[MIRTar
     }
 }
 // Rust validate_mmio (TargetMachine.rs).
-fn jet_target_validate_mmio(machine: MIRTargetMachine, usage: MIRTargetMachineUse, errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_validate_mmio(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     loop access in usage.mmio {
         inside := false
         loop region in machine.memory {
@@ -1011,7 +1011,7 @@ fn jet_target_validate_mmio(machine: MIRTargetMachine, usage: MIRTargetMachineUs
 }
 
 // Rust TargetHardwareFacts::validate_into (TargetMachine.rs:549-670).
-fn jet_target_hardware_validate_into(hardware: MIRTargetHardwareFacts, memory: [MIRMemoryRegion], errors: &[MIRTargetMachineError]) Never! {
+fn jet_target_hardware_validate_into(hardware: TargetHardwareFacts, memory: [MemoryRegion], errors: &[TargetMachineError]) Never! {
     if hardware.svd == Val(svd) {
         digest :: if svd.sha256.starts_with("sha256:") -> String.from_bytes(svd.sha256.bytes()[7..<svd.sha256.bytes().len()]) ?? "" else -> ""
         if svd.source.trim().is_empty() || digest.trim().is_empty() -> &errors.push(.InvalidHardwareSVD{source: svd.source, sha256: svd.sha256})
@@ -1074,14 +1074,14 @@ fn jet_target_hardware_validate_into(hardware: MIRTargetHardwareFacts, memory: [
     }
 }
 // Rust TargetHardwareFacts::validate (TargetMachine.rs).
-fn jet_target_hardware_validate(hardware: MIRTargetHardwareFacts, memory: [MIRMemoryRegion]) -> [MIRTargetMachineError] Never! {
-    errors := [MIRTargetMachineError]{}
+fn jet_target_hardware_validate(hardware: TargetHardwareFacts, memory: [MemoryRegion]) -> [TargetMachineError] Never! {
+    errors := [TargetMachineError]{}
     jet_target_hardware_validate_into(hardware, memory, &errors)
     errors
 }
 // Rust TargetMachine::validate (TargetMachine.rs:1193-1212); preserve push order.
-fn jet_target_machine_validate(machine: MIRTargetMachine, usage: MIRTargetMachineUse) -> [MIRTargetMachineError] Never! {
-    errors := [MIRTargetMachineError]{}
+fn jet_target_machine_validate(machine: TargetMachine, usage: TargetMachineUse) -> [TargetMachineError] Never! {
+    errors := [TargetMachineError]{}
     if machine.triple.trim().is_empty() -> &errors.push(.MissingTargetTriple)
     jet_target_validate_memory_regions(machine.memory, &errors)
     jet_target_validate_linker(machine.linker, machine.no_os, &errors)
@@ -1098,7 +1098,7 @@ fn jet_target_machine_validate(machine: MIRTargetMachine, usage: MIRTargetMachin
 
 // Rust derive(Debug) for TargetMachineError (TargetMachine.rs:3388-3586).
 // String :Debug delegates to Rust str Debug (Prelude/Core/Values.rs:281-284).
-fn jet_target_machine_error_debug(error: MIRTargetMachineError) -> String Never! {
+fn jet_target_machine_error_debug(error: TargetMachineError) -> String Never! {
     if error == {
         .MissingTargetTriple -> "MissingTargetTriple"
         .MissingMemoryKind(kind) -> {
@@ -1198,17 +1198,17 @@ fn jet_target_machine_error_debug(error: MIRTargetMachineError) -> String Never!
     }
 }
 // Rust Vec<TargetMachineError> derive(Debug).
-fn jet_target_machine_errors_debug(errors: [MIRTargetMachineError]) -> String Never! {
+fn jet_target_machine_errors_debug(errors: [TargetMachineError]) -> String Never! {
     rows :: loop error in errors -> jet_target_machine_error_debug(error)
     "[{rows.join(", ")}]"
 }
 
 // Rust MemoryRegion::new (TargetMachine.rs).
-fn jet_target_memory_region_new(name: String, origin: Int, size: MIRByteSize, kind: MIRMemoryKind, access: MIRMemoryAccess) -> MIRMemoryRegion Never! {
-    MIRMemoryRegion{name: name, origin: origin, size: size, kind: kind, access: access}
+fn jet_target_memory_region_new(name: String, origin: Int, size: ByteSize, kind: MemoryKind, access: MemoryAccess) -> MemoryRegion Never! {
+    MemoryRegion{name: name, origin: origin, size: size, kind: kind, access: access}
 }
 // Rust TargetMachine::with_startup_facts (TargetMachine.rs).
-fn jet_target_machine_with_startup_facts(machine: MIRTargetMachine, entry: String, vectors: String, abi: MIRProviderABI, placement: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_with_startup_facts(machine: TargetMachine, entry: String, vectors: String, abi: ProviderABI, placement: String) -> TargetMachine Never! {
     result := machine
     result.startup_entry = entry
     result.startup_vectors = vectors
@@ -1219,18 +1219,18 @@ fn jet_target_machine_with_startup_facts(machine: MIRTargetMachine, entry: Strin
 // Rust builtin_provider (TargetMachine.rs). These digests are the immutable
 // board implementation facts, calculated from Rust's exact adapter/startup
 // format! bytes by CLI-37/oracle.py (Rust SHA256.rs), not a profile-label hash.
-fn jet_target_builtin_provider_digest(name: String, digest: String) -> MIRProviderContract Never! {
-    MIRProviderContract{provider: name, sha256: "sha256:{digest}",
+fn jet_target_builtin_provider_digest(name: String, digest: String) -> ProviderContract Never! {
+    ProviderContract{provider: name, sha256: "sha256:{digest}",
         provenance: "builtin:{name};sha256:{digest}", abi: jet_target_abi_c(),
-        limits: MIRProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
+        limits: ProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
 }
 // Rust TargetMachine::board_sensor_v1 (TargetMachine.rs:1819-1927).
-fn jet_target_machine_board_sensor_v1(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_board_sensor_v1(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", package_version)
-    machine.memory = [MIRMemoryRegion]{
-        jet_target_memory_region_new("flash", 0, MIRByteSize{bytes: 4194304}, .Flash, .Rx),
-        jet_target_memory_region_new("ram", 0x20000000, MIRByteSize{bytes: 4194304}, .Ram, .Rw),
-        jet_target_memory_region_new("peripherals", 0x40000000, MIRByteSize{bytes: 65536}, .MMIO, .Rw),
+    machine.memory = [MemoryRegion]{
+        jet_target_memory_region_new("flash", 0, ByteSize{bytes: 4194304}, .Flash, .Rx),
+        jet_target_memory_region_new("ram", 0x20000000, ByteSize{bytes: 4194304}, .Ram, .Rw),
+        jet_target_memory_region_new("peripherals", 0x40000000, ByteSize{bytes: 65536}, .MMIO, .Rw),
     }
     digest :: "91b8448a7d4b24c5c83a79bb4504c6de2cd756795529029f46f86e0fb6279d57"
     machine.allocator = .NoAllocator
@@ -1247,9 +1247,9 @@ fn jet_target_machine_board_sensor_v1(package_version: String) -> MIRTargetMachi
         write: Val(jet_target_builtin_provider_digest("board.sensor_v1.uart_tx", digest)),
         report: Val(jet_target_builtin_provider_digest("board.sensor_v1.report_uart", digest))}
     machine.startup = .Generated{provider: jet_target_builtin_provider_digest("board.sensor_v1.startup", "6a126b444bd1ad9269159ea88aebbe3c5e0034b68a2399761619c7d98ab91320")}
-    machine.hardware.register_blocks = [MIRTargetRegisterBlockFact]{
-        {name: "UART0", base: 0x40004000, size: MIRByteSize{bytes: 0x14},
-            registers: [MIRTargetRegisterFact]{
+    machine.hardware.register_blocks = [TargetRegisterBlockFact]{
+        {name: "UART0", base: 0x40004000, size: ByteSize{bytes: 0x14},
+            registers: [TargetRegisterFact]{
                 {name: "data", offset: 0, width: .U32, access: .ReadWrite, volatile: true},
                 {name: "state", offset: 4, width: .U32, access: .ReadWrite, volatile: true},
                 {name: "ctrl", offset: 8, width: .U32, access: .ReadWrite, volatile: true},
@@ -1259,12 +1259,12 @@ fn jet_target_machine_board_sensor_v1(package_version: String) -> MIRTargetMachi
     machine
 }
 // Rust TargetMachine::board_virt_aarch64 (TargetMachine.rs:1930-2000).
-fn jet_target_machine_board_virt_aarch64(package_version: String) -> MIRTargetMachine Never! {
-    machine := jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", MIRProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
-    machine.memory = [MIRMemoryRegion]{
-        jet_target_memory_region_new("flash", 0x40000000, MIRByteSize{bytes: 1048576}, .Flash, .Rx),
-        jet_target_memory_region_new("ram", 0x40100000, MIRByteSize{bytes: 1048576}, .Ram, .Rw),
-        jet_target_memory_region_new("uart0", 0x09000000, MIRByteSize{bytes: 4096}, .MMIO, .Rw),
+fn jet_target_machine_board_virt_aarch64(package_version: String) -> TargetMachine Never! {
+    machine := jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", ProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
+    machine.memory = [MemoryRegion]{
+        jet_target_memory_region_new("flash", 0x40000000, ByteSize{bytes: 1048576}, .Flash, .Rx),
+        jet_target_memory_region_new("ram", 0x40100000, ByteSize{bytes: 1048576}, .Ram, .Rw),
+        jet_target_memory_region_new("uart0", 0x09000000, ByteSize{bytes: 4096}, .MMIO, .Rw),
     }
     digest :: "9c805c6bee9baecf958f958aeaa6a517b0b0333c0df66d6e6a68d8337da668dd"
     machine.allocator = .NoAllocator
@@ -1279,7 +1279,7 @@ fn jet_target_machine_board_virt_aarch64(package_version: String) -> MIRTargetMa
     sink :: jet_target_builtin_provider_digest("board.virt_aarch64.uart0", digest)
     machine.byte_sink = .Provider{read: None, write: Val(sink), report: Val(sink)}
     machine.startup = .Generated{provider: jet_target_builtin_provider_digest("board.virt_aarch64.startup", "f1f5931350c9036875f628dbddb4a42eeb4df50f43fe2c7241a909498f53e96c")}
-    machine.programmers = [MIRTargetProgrammerFacts]{
+    machine.programmers = [TargetProgrammerFacts]{
         {adapter: .Emulator, executable: "qemu-system-aarch64", chip: None,
             interface: None, config: [String]{}, speed_khz: None, reset: false,
             machine: Val("virt"), cpu: Val("cortex-a57")},
@@ -1287,11 +1287,11 @@ fn jet_target_machine_board_virt_aarch64(package_version: String) -> MIRTargetMa
     machine
 }
 // Rust TargetMachine::wasm_no_os (TargetMachine.rs:2083-2115).
-fn jet_target_machine_wasm_no_os(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_wasm_no_os(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("wasm.no-os", "wasm32-unknown-unknown", package_version)
-    machine.memory = [MIRMemoryRegion]{
-        jet_target_memory_region_new("flash", 0, MIRByteSize{bytes: 16777216}, .Flash, .Rx),
-        jet_target_memory_region_new("ram", 0x01000000, MIRByteSize{bytes: 16777216}, .Ram, .Rw),
+    machine.memory = [MemoryRegion]{
+        jet_target_memory_region_new("flash", 0, ByteSize{bytes: 16777216}, .Flash, .Rx),
+        jet_target_memory_region_new("ram", 0x01000000, ByteSize{bytes: 16777216}, .Ram, .Rw),
     }
     machine.allocator = .NoAllocator
     machine.panic = .Abort

@@ -1,0 +1,129 @@
+// Checked facts that sema attaches to checked bodies and that IR lowering reads: codec traits,
+// shared lifetimes, authority decisions, component descriptors, typed literal heads, copy facts.
+
+struct TraitID { value: U64 }
+
+fn trait_ref_id(identity: String) -> TraitID Never! { TraitID{value: stable_id("mir-trait", identity)} }
+
+enum SerdeCodec { Encode Decode }
+
+struct TraitRef { id: TraitID, name: String }
+
+fn trait_ref_named(name: String) -> TraitRef Never! {
+    TraitRef{id: trait_ref_id(name), name: name}
+}
+
+// The registered native Codec definitions, shared by checking and lowering.
+fn builtin_codec_trait_name(codec: SerdeCodec) -> String Never! {
+    if codec == {
+        .Encode -> "Encode"
+        .Decode -> "Decode"
+    }
+}
+
+fn builtin_codec_trait_ref(codec: SerdeCodec) -> TraitRef Never! {
+    trait_ref_named(builtin_codec_trait_name(codec))
+}
+
+struct HostImportFact {
+    id: String
+    operation: String
+    required_right: String
+    parameter_type_ids: [String]
+    result_type_id: String?
+}
+
+struct AuthorityDecision {
+    import: HostImportFact
+    authority_argument: Int?
+    inherited: Bool
+}
+
+// Core publication sites use the same Global path as module storage. The
+// initializer declaration, not a callsite, supplies their identity.
+enum SharedLifetime { Process World Thread Attempt }
+
+fn shared_lifetime_core_member(name: String) -> SharedLifetime? Never! {
+    if name == {
+        "__process_shared" -> Val(SharedLifetime.Process)
+        "__world_shared" -> Val(SharedLifetime.World)
+        "__thread_shared" -> Val(SharedLifetime.Thread)
+        "__attempt_shared" -> Val(SharedLifetime.Attempt)
+        else -> None
+    }
+}
+
+// Both decimals are canonical BigInt keys, so sign, digit count, then lexical
+// order compare their exact numeric values without parsing or allocating limbs.
+fn big_integer_key_compare(left: String, right: String) -> Int Never! {
+    left_negative :: left.starts_with("-")
+    right_negative :: right.starts_with("-")
+    if left_negative != right_negative -> return if left_negative -> -1 else -> 1
+    order :: if left.len() < right.len() -> -1 else -> if left.len() > right.len() -> 1 else -> if left < right -> -1 else -> if left > right -> 1 else -> 0
+    if left_negative -> -order else -> order
+}
+
+enum ComponentTypeDescriptor {
+    Int
+    Float
+    Bool
+    String
+    List(inner: ComponentTypeDescriptor)
+    Option(inner: ComponentTypeDescriptor)
+    Result(ok: ComponentTypeDescriptor, err: ComponentTypeDescriptor)
+    Record(name: String, fields: [ComponentTypeField])
+}
+
+struct ComponentTypeField {
+    index: Int
+    name: String
+    ty: ComponentTypeDescriptor
+}
+
+struct ComponentSignatureDescriptor {
+    params: [ComponentTypeDescriptor]
+    result: ComponentTypeDescriptor
+}
+
+enum HTTPRouteMethod { Get Post Put Delete Patch Head Options }
+
+enum TypedHeadKind { SQL HTML Sh URL Path DateTime }
+
+// The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
+fn typed_head_kind_of(head: Type) -> TypedHeadKind? {
+    if head == {
+        .Named(name) -> {
+            if name == "SQL" -> return Val(TypedHeadKind.SQL)
+            if name == "HTML" -> return Val(TypedHeadKind.HTML)
+            if name == "Sh" -> return Val(TypedHeadKind.Sh)
+            if name == "URL" -> return Val(TypedHeadKind.URL)
+            if name == "Path" -> return Val(TypedHeadKind.Path)
+            if name == "DateTime" -> return Val(TypedHeadKind.DateTime)
+        }
+        else -> {}
+    }
+    None
+}
+
+// The Core module whose runtime serves a boundary typed head (its usage and
+// linkage key), not necessarily a record of the same type.
+fn boundary_head_owner_module(name: String) -> String? {
+    if name == "URL" -> return Val("core.net.url")
+    if name == "Path" -> return Val("core.files")
+    if name == "DateTime" -> return Val("core.time")
+    None
+}
+
+// The Core module whose same-named record is the built-in value. URL and
+// DateTime use their checked source carriers; Path stays the native boundary
+// carrier, distinct from core.files.path's record.
+fn boundary_head_carrier_module(name: String) -> String? {
+    if name == "URL" -> return Val("core.net.url")
+    if name == "DateTime" -> return Val("core.time")
+    None
+}
+
+// #4318: why a checked clone duplicates its operand. Every copy carries the
+// sema decision that made it; lowering and backends never print a clone
+// without one.
+enum CopyFact { Explicit Materialize Share Scalar ViewMaterialize }

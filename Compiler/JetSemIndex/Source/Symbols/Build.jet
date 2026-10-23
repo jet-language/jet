@@ -5,19 +5,19 @@ use jet_foundation.[
     CodeModule,
     ImportDecl,
     Item,
-    MIRNameFacts,
+    NameFacts,
     Span,
 ]
 use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
 
 // Rust's display_type closure, shared with S15's signature projection.
-fn semantic_display_type(names: MIRNameFacts, module_index: Int, name: String) -> String Never! {
+fn semantic_display_type(names: NameFacts, module_index: Int, name: String) -> String Never! {
     name_facts_display_path(names, module_index, name, Val(module_index)) ?? name
 }
 
 // Source rows retain Rust's original bundle order; name projections retain the
 // checked registration index obtained by identity. They are different spaces.
-fn semindex_build_semantic_symbol_index(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> SemanticSymbolIndex Never! {
+fn semindex_build_semantic_symbol_index(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> SemanticSymbolIndex Never! {
     symbols := semantic_language_symbols()
     loop source_index in loaded_module_rows {
         source :: module_sources[source_index]
@@ -128,7 +128,7 @@ fn semindex_build_semantic_symbol_index(db: SymbolDB, registration: SemaRegistra
 
 // Rust render_trait_contracts: preserve authored contract/type/method order,
 // display only type names through the canonical checked name projections.
-fn semantic_render_trait_contracts(contracts: [TraitContractFact], declaration: Bool, names: MIRNameFacts, module_index: Int) -> String Never! {
+fn semantic_render_trait_contracts(contracts: [TraitContractFact], declaration: Bool, names: NameFacts, module_index: Int) -> String Never! {
     blocks := [String]{}
     loop contract in contracts {
         prefix :: if declaration -> "contract" else -> "implements"
@@ -169,7 +169,7 @@ fn semantic_source_import_span(imports: [ImportDecl], file_imports: [ImportDecl]
     None
 }
 
-fn semantic_collect_import_symbols(symbols: &[SemanticSymbol], registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], source_rows: [Int:Int], module_index: Int, module_path: String, imports: [ImportDecl], lexical_scope: SemanticLexicalScope?) Never! {
+fn semantic_collect_import_symbols(symbols: &[SemanticSymbol], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], source_rows: [Int:Int], module_index: Int, module_path: String, imports: [ImportDecl], lexical_scope: SemanticLexicalScope?) Never! {
     module_ref :: registration.modules[module_index]
     loop import in imports {
         if import.kind == {
@@ -247,7 +247,7 @@ fn semantic_import_identity(module_path: String, lexical_scope: SemanticLexicalS
     "import:{module_path}::{suffix}"
 }
 
-fn semantic_collect_inline_import_symbols(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], source_rows: [Int:Int], module_index: Int, module_path: String, items: [Item], parent_scope: SemanticLexicalScope?, symbols: &[SemanticSymbol]) Never! {
+fn semantic_collect_inline_import_symbols(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], source_rows: [Int:Int], module_index: Int, module_path: String, items: [Item], parent_scope: SemanticLexicalScope?, symbols: &[SemanticSymbol]) Never! {
     loop item in items {
         if item == .CodeModule(module_ref) {
             scope :: semantic_inline_module_scope(db, module_path, module_ref, parent_scope)

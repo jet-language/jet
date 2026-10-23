@@ -79,7 +79,7 @@ fn store_records_test_refused(published: Bool) {
 }
 
 fn store_records_test_origin(display: String, path: String, source: String) -> DiagnosticOrigin {
-    DiagnosticOrigin{display: display, path: path, source: source, revision: mir_sha256_hex(source)}
+    DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
 }
 
 // Rust receipt.rs:267 `rich_diagnostic`.
@@ -153,7 +153,7 @@ fn store_records_test_diagnostic(origin: DiagnosticOrigin, core: DiagnosticOrigi
     files.write(file, "one") ?? panic("write input")
     table := StampTable.load(root)
     first :: &table.file_digest(file) ?? panic("digest input")
-    assert(first == mir_sha256_hex("one"))
+    assert(first == sha256_hex("one"))
     table.save(root) ?? panic("save stamps")
     assert(store_project_file_stamp(file) != None)
 
@@ -163,7 +163,7 @@ fn store_records_test_diagnostic(origin: DiagnosticOrigin, core: DiagnosticOrigi
     assert(cached == expected_first)
     // A rewrite changes size and change time, so the digest is recomputed.
     files.write(file, "changed") ?? panic("rewrite input")
-    expected_changed :: Val(mir_sha256_hex("changed"))
+    expected_changed :: Val(sha256_hex("changed"))
     rehashed :: &reloaded.file_digest(file)
     assert(rehashed == expected_changed)
     absent :: &reloaded.file_digest(files.join(root, "absent"))

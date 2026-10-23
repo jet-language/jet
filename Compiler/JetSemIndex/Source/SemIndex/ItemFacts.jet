@@ -9,7 +9,7 @@
 use jet_foundation.[
     Item,
     Program,
-    MIRNameFacts,
+    NameFacts,
     Func,
     ExternFn,
     DeriveBodyItem,
@@ -21,7 +21,7 @@ use jet_foundation.[
     failure_contract_source,
 ]
 
-fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, item: Item, mp: String) {
+fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
     if item == {
         // These six belong to the root's nominal dispatch. Explicit invariant
         // arms keep new AST variants from silently disappearing in a catch-all.
@@ -139,7 +139,7 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts
 
 // Rust2759–2779/2788–2794 deliberately stop at a nested Loop's source. This is
 // not a recursive derive expander: checked expansion belongs to Sema.
-fn semindex_collect_template_body_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
+fn semindex_collect_template_body_item(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
     if body_item == {
         .Item(child) -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
         .Stmt(statement) -> semindex_collect_stmt(&db, &ctx, names, program, source, statement, mp)

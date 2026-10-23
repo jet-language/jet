@@ -11,7 +11,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
-    MIRCopyFact,
+    CopyFact,
     Span,
     Symbol,
     SymbolID,
@@ -718,7 +718,7 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: MIRCopyFact.Materialize}, value.span)
+                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
                 value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)

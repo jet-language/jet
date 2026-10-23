@@ -1,9 +1,7 @@
-// Closed Prelude routing and ordinary MIR lowering for checked THandleOp nodes.
+// Closed Prelude routing and ordinary IR lowering for checked THandleOp nodes.
 // Special expression families stay owned by their structural codegen paths.
 use jet_foundation.[
     Effect,
-    MIRPreludeABI,
-    MIRPreludeFamily,
     TFailureCarrier,
     THandleOp,
     Type,
@@ -11,22 +9,21 @@ use jet_foundation.[
 ]
 
 struct IRHandleRoute {
-    family: MIRPreludeFamily
+    closure_method: Bool
     module_name: String
     member: String
     symbol: String
     borrow_mask: [Bool]
     effect_kind: Effect?
-    abi: MIRPreludeABI
 }
-fn ir_handle_route(family: MIRPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, abi: MIRPreludeABI) -> IRHandleRoute Never! {
-    IRHandleRoute{family: family, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
+fn ir_handle_route(closure_method: Bool, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> IRHandleRoute Never! {
+    IRHandleRoute{closure_method: closure_method, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect}
 }
 fn ir_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> IRHandleRoute Never! {
-    ir_handle_route(MIRPreludeFamily.HandleMethod, "core.handle", member, symbol, borrow_mask, route_effect, MIRPreludeABI.Value)
+    ir_handle_route(false, "core.handle", member, symbol, borrow_mask, route_effect)
 }
 fn ir_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> IRHandleRoute Never! {
-    ir_handle_route(MIRPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MIRPreludeABI.Value)
+    ir_handle_route(false, module_name, member, symbol, borrow_mask, route_effect)
 }
 
 fn ir_handle_type_without_tags(ty: Type) -> Type Never! {
@@ -218,7 +215,7 @@ fn ir_handle_event_route(receiver: Type, method: String, carrier: TFailureCarrie
         }
         else -> return None
     }
-    Val(ir_handle_route(MIRPreludeFamily.ClosureMethod, "core.event", method, symbol, mask, None, MIRPreludeABI.Value))
+    Val(ir_handle_route(true, "core.event", method, symbol, mask, None))
 }
 
 fn ir_handle_reactive_name(ty: Type) -> String? {
@@ -231,9 +228,9 @@ fn ir_handle_reactive_name(ty: Type) -> String? {
 
 fn ir_handle_reactive_route(receiver: Type, method: String) -> IRHandleRoute? {
     name := ir_handle_reactive_name(receiver) ?? return None
-    if name == "Signal" && method == "get" -> return Val(ir_handle_route(MIRPreludeFamily.HandleMethod, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None, MIRPreludeABI.Value))
-    if (name == "Derived" || name == "Computed") && method == "get" -> return Val(ir_handle_route(MIRPreludeFamily.HandleMethod, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None, MIRPreludeABI.Value))
-    if name == "Signal" && method == "set" -> return Val(ir_handle_route(MIRPreludeFamily.HandleMethod, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None, MIRPreludeABI.Value))
+    if name == "Signal" && method == "get" -> return Val(ir_handle_route(false, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None))
+    if (name == "Derived" || name == "Computed") && method == "get" -> return Val(ir_handle_route(false, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None))
+    if name == "Signal" && method == "set" -> return Val(ir_handle_route(false, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None))
     None
 }
 
@@ -247,7 +244,7 @@ fn ir_handle_precise_route(type_name: String, method: String) -> IRHandleRoute? 
     }
     type_key := ir_precise_type_key(type_name)
     mask := if arity == 2 -> [Bool]{true, true} else -> [Bool]{true}
-    Val(ir_handle_route(MIRPreludeFamily.PreciseBuiltin, type_name, method, "jet_{type_key}_{method}", mask, None, MIRPreludeABI.Value))
+    Val(ir_handle_route(false, type_name, method, "jet_{type_key}_{method}", mask, None))
 }
 
 fn ir_handle_is_simd_lane_type(name: String) -> Bool Never! {
@@ -346,7 +343,7 @@ fn ir_handle_math_route(type_name: String, method: String, reduce_op: String?) -
         arity == 2 -> [Bool]{true, false}
         else -> [Bool]{true, false, false}
     }
-    if ir_handle_is_geometry_type(type_name) -> return Val(ir_handle_route(MIRPreludeFamily.MathBuiltin, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None, MIRPreludeABI.Value))
+    if ir_handle_is_geometry_type(type_name) -> return Val(ir_handle_route(false, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
     Val(ir_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
@@ -755,7 +752,7 @@ fn ir_handle_civil_time_route(kind: String, method: String) -> IRHandleRoute? {
     if kind == "DateTime" && (method == "truncate" || method == "floor" || method == "ceil") -> mask = [Bool]{true, true, false}
     if kind == "Period" && method == "total_in" -> mask = [Bool]{true, true, true}
     if kind == "ZonedDateTime" && method == "with_time" -> mask = [Bool]{true, true, true}
-    Val(ir_handle_route(MIRPreludeFamily.HandleMethod, "core.time", member, "{prefix}::{symbol_method}", mask, None, MIRPreludeABI.Value))
+    Val(ir_handle_route(false, "core.time", member, "{prefix}::{symbol_method}", mask, None))
 }
 
 fn ir_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {

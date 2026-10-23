@@ -162,7 +162,7 @@ Lowering and linking failures refuse the pack rather than publishing an artifact
 
 The Rust-debug MIR conversion feed preserves the bootstrap codec's field-name
 mapping for all NameLedger rows, including display paths: the checked Rust
-`MIRNameDisplayPath.module` becomes Jet `module_index`. Internal and display
+`NameDisplayPath.module` becomes Jet `module_index`. Internal and display
 paths remain distinct checked strings; conversion must not infer or discard
 either path.
 
@@ -419,10 +419,10 @@ and `ir.object` on the same corpus and machine.
 
 ### Typed IR (TIR) — the codegen seam
 
-The [codegen lowering](../../Compiler/JetCodegen/Source/Codegen/) accepts the
-checked bundle, carries sema-approved types, access conventions and effects
-into TIR, and gives those facts canonical type, function, place and artifact
-identities in [MIR](../../Compiler/JetFoundation/Source/MIR/MIR.jet). The resulting MIR is
+The [IR builder](../../Compiler/JetIR/Source/) accepts the checked bundle,
+carries sema-approved types, access conventions and effects through TIR into
+the [IR](../../Compiler/JetIR/Source/IR.jet), and gives those facts canonical
+type, function, slot and artifact identities there. The resulting IR is
 validated and optimized before execution or emission. Neither lowering infers
 new language permissions or falls back to an unchecked AST emitter.
 
@@ -657,9 +657,7 @@ explicit inventory,
 [`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list):
 the compiler leaves runtime-only units out, while a source that is both a
 compiler package member and listed there (for example `OS/Linux.jet` or
-`ErrLayout.jet`) is deliberately shared. The
-[`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
-keeps observation aligned with public-by-default declarations and private fields.
+`ErrLayout.jet`) is deliberately shared.
 The compiler's private `Core/Build` kernel uses the same declared enum payload
 labels and write-access calls as ordinary Jet. Stable plan keys use integer
 quotients and sorted, collected map keys. Legacy declaration validation copies

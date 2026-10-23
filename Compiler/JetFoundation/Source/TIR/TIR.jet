@@ -443,7 +443,7 @@ enum TExprKind {
     Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
-    GlobalShared(initializer: SymbolID, lifetime: MIRSharedLifetime)
+    GlobalShared(initializer: SymbolID, lifetime: SharedLifetime)
     Call(callee: SymbolID, type_args: [Type], args: [TCallArg])
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
@@ -485,7 +485,7 @@ enum TExprKind {
     SharedGuardSplit(guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool)
     SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
     ConditionNotify(condition: TExpr, all: Bool)
-    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, fallibility: TFailureCarrier)
+    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier)
     HostCall(call: THostCall)
     AllocNew(ctor: TAllocCtor, args: [TCallArg])
     EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
@@ -498,7 +498,7 @@ enum TExprKind {
     MathLaneIndex(lane_type: String, base: TExpr, index: TExpr, line: Int)
     MathSwizzleRead(type_name: String, receiver: TExpr, lanes: [Int])
     // #4318: `fact` is the sema decision behind the copy; MIR keeps it on Copy.
-    Clone(value: TExpr, fact: MIRCopyFact)
+    Clone(value: TExpr, fact: CopyFact)
     ExplicitCopy(value: TExpr)
     MaterializeView(value: TExpr)
     StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
@@ -626,7 +626,7 @@ enum THostCall {
     TupleIndex(base: TExpr, index: Int)
     SwitchSubjectValue
     YieldSend(value: TExpr)
-    TypedTextInterp(kind: MIRTypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool])
+    TypedTextInterp(kind: TypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool])
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
     // checked literal path or glob, relative to the source file being
@@ -709,8 +709,8 @@ enum TClosureOp {
 }
 
 enum THardwareCall {
-    RegisterRead(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
-    RegisterWrite(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
+    RegisterRead(profile_id: String, block: String, register: String, width: RegisterWidth)
+    RegisterWrite(profile_id: String, block: String, register: String, width: RegisterWidth)
     DMAStart(profile_id: String, channel: String, buffer_ty: Type)
     DMAWait(profile_id: String, channel: String, buffer_ty: Type)
 }
@@ -933,7 +933,7 @@ enum THandleOp {
     ChannelDelayMs
     ChannelClose
     SenderSend
-    HTTPRouterRegister(verb: MIRHTTPMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
+    HTTPRouterRegister(verb: HTTPRouteMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
     MathMethod(type_name: String, method: String, reduce_op: String?)
     ReactiveGet
     ReactiveSet
@@ -1014,7 +1014,7 @@ enum THandleOp {
     DBValueBool
     DBValueBlob
     DBValueIsNull
-    PluginInvoke(export_name: String, signature: MIRComponentSignatureDescriptor)
+    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
     ReaderReadI8
@@ -1922,7 +1922,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             tir_each_lambda_child(predicate, visit)
         }
         .ConditionNotify(condition, _) -> visit(condition)
-        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> visit(value)
+        .CoreCall(_, args, _, _, _, _) -> loop value in args -> visit(value)
         .HostCall(call) -> tir_each_host_call_child(call, visit)
         .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
             if argument == Val(argument_value) -> visit(argument_value)

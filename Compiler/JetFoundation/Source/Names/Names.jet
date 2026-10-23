@@ -2,7 +2,7 @@
 // The indexed ledger owns the existing checked MIR rows, not a second resolver.
 
 struct NameLedger {
-    facts: MIRNameFacts
+    facts: NameFacts
     declarations: [(module_index: Int, name: String):Int]
     aliases: [(module_index: Int, name: String):Int]
     declaration_names: [String:[Int]]
@@ -15,7 +15,7 @@ fn name_facts_leaf(name: String) -> String Never! {
     loop start > 0 && bytes[start - 1] != 46 -> start -= 1
     name.slice(start, name.len())
 }
-fn name_ledger_from_facts(facts: ^MIRNameFacts) -> NameLedger Never! {
+fn name_ledger_from_facts(facts: ^NameFacts) -> NameLedger Never! {
     ledger := NameLedger{facts: ^facts, declarations: [(module_index: Int, name: String):Int]{}, aliases: [(module_index: Int, name: String):Int]{}, declaration_names: [String:[Int]]{}, alias_names: [String:[Int]]{}, display_paths: [(module_index: Int, path: String):String]{}}
     loop (index, row) in ledger.facts.declarations {
         ledger.declarations[(module_index: row.module_index, name: row.name)] = index
@@ -34,11 +34,11 @@ fn name_ledger_from_facts(facts: ^MIRNameFacts) -> NameLedger Never! {
     loop row in ledger.facts.display_paths -> ledger.display_paths[(module_index: row.module_index, path: row.internal_path)] = row.display_path
     ledger
 }
-fn name_ledger_declaration(ledger: NameLedger, module_index: Int, name: String) -> MIRNameDeclaration? Never! {
+fn name_ledger_declaration(ledger: NameLedger, module_index: Int, name: String) -> NameDeclaration? Never! {
     index :: ledger.declarations.get((module_index: module_index, name: name)) ?? return None
     Val(ledger.facts.declarations[index])
 }
-fn name_ledger_alias(ledger: NameLedger, module_index: Int, name: String) -> MIRNameAlias? Never! {
+fn name_ledger_alias(ledger: NameLedger, module_index: Int, name: String) -> NameAlias? Never! {
     index :: ledger.aliases.get((module_index: module_index, name: name)) ?? return None
     Val(ledger.facts.aliases[index])
 }
@@ -61,11 +61,11 @@ fn name_ledger_visible(ledger: NameLedger, from: Int, module_index: Int, name: S
     source :: ledger.facts.modules[from]
     target :: ledger.facts.modules[module_index]
     if source.namespace != None && source.namespace == target.namespace -> return true
-    visibility := MIRNameVisibility?{None}
+    visibility := NameVisibility?{None}
     if name_ledger_declaration(ledger, module_index, name) == .Val(row) -> visibility = Val(row.visibility)
     if visibility == None && name_ledger_alias(ledger, module_index, name) == .Val(row) -> visibility = Val(row.visibility)
-    if visibility == (Val(MIRNameVisibility.Public)) -> return true
-    visibility == (Val(MIRNameVisibility.Package)) && source.package == target.package
+    if visibility == (Val(NameVisibility.Public)) -> return true
+    visibility == (Val(NameVisibility.Package)) && source.package == target.package
 }
 fn name_ledger_display_declaration_path(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
     row :: name_ledger_declaration(ledger, module_index, name) ?? return None

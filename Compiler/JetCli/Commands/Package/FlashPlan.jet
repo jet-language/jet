@@ -4,10 +4,10 @@
 use core.files.path as flash_paths
 use core.files.path.[Path]
 use jet_foundation.[
-    CanonicalJSON, CanonicalJSONField, MIRMemoryKind, MIRTargetMachine, MIRTargetProgrammerFacts,
+    CanonicalJSON, CanonicalJSONField, MemoryKind, TargetMachine, TargetProgrammerFacts,
     canonical_json_bytes, canonical_json_object, canonical_json_sha256, jet_target_hardware_json,
     jet_target_machine_errors_debug, jet_target_machine_use_default, jet_target_machine_validate,
-    jet_target_programmer_missing_fact, jet_target_provider_identity, mir_sha256_hex,
+    jet_target_programmer_missing_fact, jet_target_provider_identity, sha256_hex,
 ]
 use jet_driver.[jet_driver_target_machine_by_name]
 JET_CLI_FLASH_RECEIPT_SCHEMA :: "jet.flash.receipt"
@@ -62,9 +62,9 @@ fn jet_cli_flash_adapter_parse(value: String) -> JetCLIFlashAdapter? Never! {
 }
 // Rust FlashArgument/FlashToolDeclaration (CmdFlash.rs:60-76).
 enum JetCLIFlashArgument { Literal(String) ImageName Dynamic(String) OpenOcdProgram(Bool) }
-struct JetCLIFlashToolDeclaration { adapter: JetCLIFlashAdapter, executable: String, arguments: [JetCLIFlashArgument], programmer: MIRTargetProgrammerFacts }
+struct JetCLIFlashToolDeclaration { adapter: JetCLIFlashAdapter, executable: String, arguments: [JetCLIFlashArgument], programmer: TargetProgrammerFacts }
 // Rust FlashToolDeclaration::from_facts (CmdFlash.rs:79-144).
-fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlashToolDeclaration Never! {
+fn jet_cli_flash_tool_from_facts(facts: TargetProgrammerFacts) -> JetCLIFlashToolDeclaration Never! {
     adapter :: if facts.adapter == {
         .Emulator -> JetCLIFlashAdapter.Emulator
         .ProbeRs -> JetCLIFlashAdapter.ProbeRs
@@ -159,14 +159,14 @@ fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: String)
 // Rust FlashProfile (CmdFlash.rs:176-182).
 struct JetCLIFlashProfile { target: String, target_triple: String, target_identity: String, hardware_identity: String, tools: [JetCLIFlashToolDeclaration] }
 // Rust FlashProfile::from_machine (CmdFlash.rs:187-206).
-fn jet_cli_flash_profile_from_machine(machine: MIRTargetMachine) -> JetCLIFlashProfile JetCLIFlashError! {
+fn jet_cli_flash_profile_from_machine(machine: TargetMachine) -> JetCLIFlashProfile JetCLIFlashError! {
     tools := [JetCLIFlashToolDeclaration]{}
     loop facts in machine.programmers -> &tools.push(jet_cli_flash_tool_from_facts(facts))
     if tools.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator"))
     // copy: `machine.name` stays with the caller (`machine` is a read parameter: no move out of it,
     // E0201) and the field `target` owns its own. `machine.triple` stays with the caller (`machine`
     // is a read parameter: no move out of it, E0201) and the field `target_triple` owns its own.
-    Ok(JetCLIFlashProfile{target: machine.name.copy(), target_triple: machine.triple.copy(), target_identity: jet_target_provider_identity(machine), hardware_identity: mir_sha256_hex(jet_target_hardware_json(machine.hardware)), tools: tools})
+    Ok(JetCLIFlashProfile{target: machine.name.copy(), target_triple: machine.triple.copy(), target_identity: jet_target_provider_identity(machine), hardware_identity: sha256_hex(jet_target_hardware_json(machine.hardware)), tools: tools})
 }
 // Rust FlashProfile::select (CmdFlash.rs:208-246). Return an index, not a copied tool.
 fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetCLIFlashAdapter?) -> Int JetCLIFlashError! {
@@ -189,7 +189,7 @@ fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetCLIFl
 // Rust FlashPlan record (CmdFlash.rs:251-271).
 struct JetCLIFlashPlan {
     schema: String, target: String, target_triple: String, target_identity: String, hardware_identity: String
-    adapter: JetCLIFlashAdapter, programmer: MIRTargetProgrammerFacts
+    adapter: JetCLIFlashAdapter, programmer: TargetProgrammerFacts
     tool: String, tool_identity: String, executable: Path, image: Path, audit: Path
     audit_sha256: String, image_bytes: Int, image_sha256: String, argv: [String], authority: String
 }
@@ -199,13 +199,13 @@ fn jet_cli_flash_plan_from_target_and_image<H: JetCLIFlashHost>(host: &H, target
     jet_cli_flash_plan_from_machine<H>(&host, machine, image, audit, adapter)
 }
 // Rust FlashPlan::from_machine (CmdFlash.rs:289-376), same validation order.
-fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MIRTargetMachine, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
+fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: TargetMachine, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
     if !machine.no_os -> return Err(jet_cli_flash_error("target `{machine.name}` is hosted; flashing requires a no-OS board or emulator profile"))
     validation :: jet_target_machine_validate(machine, jet_target_machine_use_default())
     if !validation.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}"))
     capacity := -1
     loop region in machine.memory {
-        if region.kind == MIRMemoryKind.Flash && region.size.bytes > capacity -> capacity = region.size.bytes
+        if region.kind == MemoryKind.Flash && region.size.bytes > capacity -> capacity = region.size.bytes
     }
     if capacity < 0 -> return Err(jet_cli_flash_error("target `{machine.name}` declares no flash memory region"))
     canonical_image :: jet_cli_flash_regular_file<H>(&host, image, "flash image")
@@ -220,7 +220,7 @@ fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MIRTar
     }
     canonical_audit :: jet_cli_flash_resolve_audit<H>(&host, canonical_image, machine.name, audit)
     text :: jet_cli_flash_read_audit<H>(&host, canonical_audit)
-    audit_digest :: mir_sha256_hex(text)
+    audit_digest :: sha256_hex(text)
     fields :: jet_cli_flash_parse_top_level_string_fields(text) ?? return Err(jet_cli_flash_error("target audit `{flash_paths.show(canonical_audit)}` is malformed: {err.message}"))
     jet_cli_flash_verify_audit(fields, machine, image_digest)
     profile :: jet_cli_flash_profile_from_machine(machine)

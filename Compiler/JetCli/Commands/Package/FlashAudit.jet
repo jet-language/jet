@@ -3,7 +3,7 @@
 // Only the flash plan builder uses the private scan/identity verification.
 use core.files as flash_files
 use jet_foundation.[
-    CanonicalJSON, CanonicalJSONField, MIRTargetMachine, MIRTargetProgrammerFacts,
+    CanonicalJSON, CanonicalJSONField, TargetMachine, TargetProgrammerFacts,
     canonical_json_bytes, jet_target_environment_identity, jet_target_programmer_adapter_name,
     jet_target_provider_identity,
 ]
@@ -154,7 +154,7 @@ fn jet_cli_flash_read_audit<H: JetCLIFlashHost>(host: &H, path: Path) -> String 
     Ok(text)
 }
 // Rust verify_audit_identity (CmdFlash.rs:1025-1059); tokens are never decoded.
-fn jet_cli_flash_verify_audit(fields: [String:String], machine: MIRTargetMachine, digest: String) JetCLIFlashError! {
+fn jet_cli_flash_verify_audit(fields: [String:String], machine: TargetMachine, digest: String) JetCLIFlashError! {
     keys :: [String]{"name", "triple", "environment", "provider_identity"}
     // copy: `machine.name` stays with the caller (`machine` is a read parameter: no move out of it,
     // E0201) and the new value owns its own. `machine.triple` stays with the caller (`machine` is a
@@ -355,7 +355,7 @@ fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
     }
 }
 // Rust programmer_json (CmdFlash.rs:1338-1377).
-fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJSON Never! {
+fn jet_cli_flash_programmer_json(facts: TargetProgrammerFacts) -> CanonicalJSON Never! {
     config := [CanonicalJSON]{}
     // copy: `value` stays in the iterated collection (`value` is a view of its element; no move out
     // of an element, E0225) and the new `CanonicalJSON.String` value owns its own.
@@ -378,6 +378,6 @@ fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJS
 // it, E0201); the JSON string owns its own.
 fn jet_cli_flash_optional_json(value: String?) -> CanonicalJSON Never! { if value == .Val(text) -> CanonicalJSON.String(text.copy()) else -> CanonicalJSON.Null }
 // Rust programmer_value (CmdFlash.rs:1303-1336).
-fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> Dyn Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
+fn jet_cli_flash_programmer_value(facts: TargetProgrammerFacts) -> Dyn Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
 // Rust plan_value (CmdFlash.rs:1274-1301).
 fn jet_cli_flash_plan_value(plan: JetCLIFlashPlan) -> Dyn Never! { jet_cli_flash_status_value(jet_cli_flash_plan_json(plan)) }

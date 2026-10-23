@@ -8,7 +8,7 @@
 // The tree bounds MAX_TREE_FILE_BYTES, MAX_TREE_TOTAL_BYTES,
 // MAX_TREE_FILES, and MAX_TREE_DEPTH live in Syntax.jet.
 use jet_foundation.[
-    MIR_SHA256_H0, MIR_SHA256_K, MIR_SHA256_LENGTH_MASK, mir_sha256_compress, mir_sha256_hex_bytes,
+    SHA256_H0, SHA256_K, SHA256_LENGTH_MASK, sha256_compress, sha256_hex_bytes,
 ]
 use core.files as files
 use core.time as time
@@ -35,9 +35,9 @@ struct StreamingSHA256 {
     priv total: Int
 
     fn new() -> StreamingSHA256 Never! {
-        state :: loop word in MIR_SHA256_H0 -> U32{word}
+        state :: loop word in SHA256_H0 -> U32{word}
         words :: loop _ in 0..<64 -> U32{0}
-        k :: loop word in MIR_SHA256_K -> U32{word}
+        k :: loop word in SHA256_K -> U32{word}
         StreamingSHA256{state: state, words: words, k: k, block: [U8]{}, total: 0}
     }
 
@@ -45,7 +45,7 @@ struct StreamingSHA256 {
         loop byte in data {
             &self.block.push(byte)
             if self.block.len() == 64 {
-                mir_sha256_compress(&self.state, &self.words, self.k, self.block[0..<64], 0)
+                sha256_compress(&self.state, &self.words, self.k, self.block[0..<64], 0)
                 &self.block.clear()
             }
         }
@@ -61,13 +61,13 @@ struct StreamingSHA256 {
         &block.push(U8{128})
         if block.len() > 56 {
             loop block.len() < 64 -> &block.push(U8{0})
-            mir_sha256_compress(&state, &words, self.k, block[0..<64], 0)
+            sha256_compress(&state, &words, self.k, block[0..<64], 0)
             &block.clear()
         }
         loop block.len() < 56 -> &block.push(U8{0})
-        bit_length :: ((self.total * 8)).bit_and(MIR_SHA256_LENGTH_MASK)
+        bit_length :: ((self.total * 8)).bit_and(SHA256_LENGTH_MASK)
         loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{((bit_length >> shift)).bit_and(255)})
-        mir_sha256_compress(&state, &words, self.k, block[0..<64], 0)
+        sha256_compress(&state, &words, self.k, block[0..<64], 0)
         digest := [U8]{}
         loop lane in state {
             word :: Int.from_u32(lane)
@@ -80,7 +80,7 @@ struct StreamingSHA256 {
     }
 
     fn finalize_hex(self) -> String Never! {
-        mir_sha256_hex_bytes(self.finalize())
+        sha256_hex_bytes(self.finalize())
     }
 }
 

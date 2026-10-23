@@ -70,7 +70,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[Type, mir_sha256_bytes, mir_sha256_hex, mir_sha256_hex_bytes]
+use jet_foundation.[Type, sha256_bytes, sha256_hex, sha256_hex_bytes]
 
 enum IROp {
     Nop
@@ -303,7 +303,7 @@ fn ir_row_key(m: IRModule, row: Int) -> String Never! {
 // SHA-256), so a helper's or instance's symbol does not depend on the order
 // the build reached it in.
 fn ir_key_hash(key: String) -> String Never! {
-    mir_sha256_hex(key).slice(0, 16)
+    sha256_hex(key).slice(0, 16)
 }
 
 fn ir_intern_name(m: &IRModule, text: String) -> Int Never! {
@@ -328,7 +328,7 @@ fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
 // A read-only data row holding `bytes` (shared by equal byte strings: keyed
 // by length and digest, linear in the bytes however large the table).
 fn ir_intern_bytes(m: &IRModule, bytes: [U8]) -> Int Never! {
-    key :: "bytes:{bytes.len()}:{mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))}"
+    key :: "bytes:{bytes.len()}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
     found :: m.data_rows.get(key) ?? -1
     if found >= 0 -> return found
     id :: m.data.len()
@@ -516,5 +516,5 @@ fn ir_function_text(m: IRModule, f: IRFunction) -> String Never! {
 // The function's content key: SHA-256 of its text form, which spells every
 // interned id by content.
 fn ir_function_hash(m: IRModule, f: IRFunction) -> String Never! {
-    mir_sha256_hex(ir_function_text(m, f))
+    sha256_hex(ir_function_text(m, f))
 }

@@ -172,8 +172,8 @@ fn source_identity_to_json(value: SourceIdentity) -> CanonicalJSON JetTraceError
 }
 fn trace_source_map_from_map_bytes(^kind: String, ^path: String, ^map: String) -> TraceSourceMap Never! {
     raw :: map.bytes()
-    hash :: mir_sha256_bytes(raw[0..<raw.len()])
-    digest :: mir_sha256_hex_bytes(hash[0..<hash.len()])
+    hash :: sha256_bytes(raw[0..<raw.len()])
+    digest :: sha256_hex_bytes(hash[0..<hash.len()])
     TraceSourceMap{kind: ^kind, path: ^path, sha256: digest, map: ^map}
 }
 fn trace_source_map_jet_with_source(^path: String, source: String) -> TraceSourceMap JetTraceError! {

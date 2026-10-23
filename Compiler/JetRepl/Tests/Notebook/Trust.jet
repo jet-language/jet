@@ -1,6 +1,6 @@
 use core.files as notebook_trust_test_files
 use core.testing as notebook_trust_test_testing
-use jet_foundation.[canonical_json_bytes, mir_sha256_hex]
+use jet_foundation.[canonical_json_bytes, sha256_hex]
 
 fn notebook_trust_test_bundle() -> NotebookMIMEBundle Never! {
     NotebookMIMEBundle{text_plain: "chart", mime: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/javascript", payload: "1"}}, quarantined: false, widget_id: Val("sales.chart"), requested_origins: [String]{"https://data.example"}, requested_messages: [String]{"SelectionChanged"}}
@@ -70,7 +70,7 @@ fn notebook_trust_test_active(decision: NotebookRenderDecision) -> Bool Never! {
     assert_eq(notebook_trust_payload_hash(bundle), unchanged_hash)
 }
 #Test("notebook_grant_key_binds_the_same_five_nul_delimited_components") {
-    expected :: mir_sha256_hex("src{TEXT_NUL}payload{TEXT_NUL}rend{TEXT_NUL}env{TEXT_NUL}notebook-trust-2")
+    expected :: sha256_hex("src{TEXT_NUL}payload{TEXT_NUL}rend{TEXT_NUL}env{TEXT_NUL}notebook-trust-2")
     baseline :: notebook_trust_grant_key("src", "payload", "rend", "env", NOTEBOOK_TRUST_POLICY_VERSION)
     assert_eq(baseline, expected)
     assert(notebook_trust_grant_key("source2", "payload", "rend", "env", NOTEBOOK_TRUST_POLICY_VERSION) != baseline)

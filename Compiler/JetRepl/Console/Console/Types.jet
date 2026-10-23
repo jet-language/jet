@@ -9,7 +9,7 @@
 // Router/data adapters (639+) belong to Adapters.jet.
 use core.files as console_types_files
 use jet_foundation.[
-    foundation_json_quote, mir_sha256_hex, CanonicalAuthority, authority_holds,
+    foundation_json_quote, sha256_hex, CanonicalAuthority, authority_holds,
     authority_parse_right,
 ]
 
@@ -96,8 +96,8 @@ struct ConsoleIdentity {
         validate_token("source revision", source_revision) ?? return Err(err)
         validate_token("session nonce", session_nonce) ?? return Err(err)
         nul :: String.from_bytes([U8]{0}) ?? panic("NUL is UTF-8")
-        project_digest :: mir_sha256_hex("{CONSOLE_PROTOCOL}{nul}project{nul}{project_root}")
-        session_digest :: mir_sha256_hex("{CONSOLE_PROTOCOL}{nul}session{nul}{project_digest}{nul}{source_revision}{nul}{session_nonce}")
+        project_digest :: sha256_hex("{CONSOLE_PROTOCOL}{nul}project{nul}{project_root}")
+        session_digest :: sha256_hex("{CONSOLE_PROTOCOL}{nul}session{nul}{project_digest}{nul}{source_revision}{nul}{session_nonce}")
         // #4303: slice views flow into String interpolation.
         project_prefix := project_digest.slice(0, 24)
         session_prefix := session_digest.slice(0, 24)

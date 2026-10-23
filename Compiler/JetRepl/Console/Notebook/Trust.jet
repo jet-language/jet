@@ -3,7 +3,7 @@ use core.files.host.retained_descriptor as notebook_trust_files
 use core.sys.host.os_path_ingress as notebook_trust_env
 use core.files.runtime.kernel_path_components as notebook_trust_paths
 use core.files.runtime.kernel_path_components.[OSPath]
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_sha256, diagnostic_text_lines, mir_sha256_hex]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_sha256, diagnostic_text_lines, sha256_hex]
 
 // Rust POLICY_VERSION. Ruling B migrates persisted payload identity once:
 // Foundation A-canonical JSON, including its final LF, not Rust Debug or JCS.
@@ -121,7 +121,7 @@ fn notebook_trust_store_path() -[Env]> OSPath Never! {
 
 // Rust grant_key: unchanged five components, separated by exactly four NULs.
 fn notebook_trust_grant_key(source: String, payload: String, renderer: String, environment: String, policy: String) -> String Never! {
-    mir_sha256_hex("{source}{TEXT_NUL}{payload}{TEXT_NUL}{renderer}{TEXT_NUL}{environment}{TEXT_NUL}{policy}")
+    sha256_hex("{source}{TEXT_NUL}{payload}{TEXT_NUL}{renderer}{TEXT_NUL}{environment}{TEXT_NUL}{policy}")
 }
 // Rust is_granted/grant_active/revoke_matching.
 fn notebook_trust_is_granted(store: NotebookTrustStore, key: String) -> Bool Never! { store.grants.has_key(key) }

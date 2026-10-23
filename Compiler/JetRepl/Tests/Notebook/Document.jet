@@ -1,6 +1,6 @@
 // Actual combined N1/N2 proof is blocked #4367/#4388/#4392; retain all
 // assertions for Main's post-stage2 rebuild, not a passing subset or skip.
-use jet_foundation.[canonical_json_bytes, mir_sha256_hex]
+use jet_foundation.[canonical_json_bytes, sha256_hex]
 
 fn notebook_document_test_cell(id: String, source: String, dependencies: [String]) -> NotebookCell Never! {
     NotebookCell{id: id, kind: NotebookCellKind.Jet, source: source, output: None, depends_on: dependencies}
@@ -110,7 +110,7 @@ fn notebook_document_test_add(nb: &JetNotebook, kind: NotebookCellKind, source: 
     nb := notebook_document_test_graph()
     original :: nb.closure_cache_key("c") ?? panic("key")
     expected_text :: "{{\"cache_policy\":\"closure-v2\",\"cells\":[{{\"depends_on\":[],\"id\":\"a\",\"source\":\"x :: 1\"}},{{\"depends_on\":[\"a\"],\"id\":\"b\",\"source\":\"y :: x + 1\"}},{{\"depends_on\":[\"b\"],\"id\":\"c\",\"source\":\"z :: y + 1\"}}],\"environment_hash\":\"env-doc\",\"trust_policy\":\"notebook-trust-2\"}}\n"
-    expected :: mir_sha256_hex(expected_text)
+    expected :: sha256_hex(expected_text)
     assert_eq(original, expected)
     nb.cells[2].source = "x :: 2"
     assert(nb.closure_cache_key("c") != (Val(original)))

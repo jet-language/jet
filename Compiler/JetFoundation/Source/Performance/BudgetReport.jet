@@ -417,7 +417,7 @@ fn perf_budget_context_key(subject: [CanonicalJSONField], tool: [CanonicalJSONFi
             loop key in tool_keys -> perf_report_frame(&input, perf_report_wire_text(tool[perf_report_index(tool, key)].value))
             provider_keys :: [String]{"kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "logical_cpus", "memory_bytes", "os", "kernel", "power_governor", "hardware_fingerprint"}
             loop key in provider_keys -> perf_report_frame(&input, perf_report_wire_text(p[perf_report_index(p, key)].value))
-            return Ok(mir_sha256_hex_bytes(mir_sha256_bytes(input[0..<input.len()])))
+            return Ok(sha256_hex_bytes(sha256_bytes(input[0..<input.len()])))
         }
         return Err(perf_error("provider is not object"))
     }
