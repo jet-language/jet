@@ -4882,7 +4882,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         )
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
-    comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.trace_sink)
+    comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
     // Every copy of a graph shares one counter set (SemaLookupCounters).
     check_lookups := register_lookups

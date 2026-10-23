@@ -3050,6 +3050,32 @@ fn sema_check_registration_module_start(environment: SemaScopeEnvironment, progr
     panic("an owning registered-module pass lost its registration graph")
 }
 
+// Module `module_index`'s result after its declaration and program checks:
+// `started` when its pass made them ahead (sema_check_declaration_modules),
+// else made here into `scopes`. Neither reads the entered module of
+// `environment`.
+fn sema_check_registration_module_started(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], started: ^SemaDeclarationCheck?, scopes: &SemaScopeTable, count_work: Bool, items_scanned: &Int) -> SemaGraphModuleResult {
+    check := ^started ?? {
+        module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
+        sema_check_registration_module_program(environment, program, module_index, scopes, &module_result, count_work, &items_scanned)
+        return module_result
+    }
+    if count_work -> items_scanned += check.items_scanned
+    ^check.module_result
+}
+
+// The module scope sema_check_registration_module_start applies, for a module
+// whose declaration check, made ahead, already holds that application's
+// diagnostics.
+fn sema_check_registration_module_scopes(program: SemaProgramTables, module_index: Int, scopes: &SemaScopeTable) {
+    if program.registration_graph == .Val(graph) {
+        diagnostics := [Diagnostic]{}
+        _ :: sema_registration_apply_graph_module(graph, graph.modules[module_index].module_identity, &scopes, &diagnostics)
+        return
+    }
+    panic("an owning registered-module pass lost its registration graph")
+}
+
 // Retarget the actual module environment after declaration checking and
 // before this ordinary program/header phase, exactly as in the old checker.
 fn sema_check_registration_module_program(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, scopes: SemaScopeTable, module_result: &SemaGraphModuleResult, count_work: Bool, items_scanned: &Int) {
@@ -3666,6 +3692,9 @@ struct SemaPreparedBodies {
     // `methods_prepared` when the wave selected those jobs.
     methods: [SemaPreparedBody]{[SemaPreparedBody]{}}
     methods_prepared: Bool{false}
+    // The module's declaration and program checks when its pass made them
+    // ahead (sema_check_declaration_modules), else None.
+    started: SemaDeclarationCheck?{None}
 }
 
 fn sema_check_prepared_none() -> SemaPreparedBodies Never! {
@@ -4366,16 +4395,19 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
     keep_going :: sema_check_registered_keep_going(environment, program)
     item_count :: sema_check_registered_module_item_count(environment, program, module_index)
     scopes := sema_scope_init(module_identity)
-    module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
+    count_work :: if trace_sink == .Val(_) -> true else -> false
+    items_scanned := 0
+    started := ^ready.started
+    ready.started = None
+    precomputed :: started != None
+    module_result := sema_check_registration_module_started(environment, program, module_index, values, ^started, &scopes, count_work, &items_scanned)
     // The original declaration/header boundary: do not substitute the probe
     // reset, which deliberately clears real else-arm/debug-site source facts.
     // copy: a handle copy (Shared facts plus length and frontier ints): the module's context reads
     // a frozen prefix while environment.comptime_body_publication keeps advancing.
     body_values := environment.comptime_body_publication.copy()
     sema_scope_environment_enter_module(&environment, program, module_index, ^body_values)
-    items_scanned := 0
     functions_checked := 0
-    count_work :: if trace_sink == .Val(_) -> true else -> false
     if count_work {
         loop prepared_body in ready.bodies {
             if prepared_body == {
@@ -4386,11 +4418,11 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
     }
     method_jobs := 0
     impl_rows_scanned := 0
-    sema_check_registration_module_program(environment, program, module_index, scopes, &module_result, count_work, &items_scanned)
     if check_bodies {
         if ready.scopes.len() > 0 {
             scopes = &ready.scopes.pop() ?? sema_scope_init(module_identity)
         } else {
+            if precomputed -> sema_check_registration_module_scopes(program, module_index, &scopes)
             sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
         }
         if memo == None -> memo = sema_incremental_module(session, environment, program, &scopes)
@@ -4468,14 +4500,14 @@ fn sema_name_visibility(value: Int) -> MIRNameVisibility Never! {
 }
 
 // Name facts keep the first row per identity. Rows are appended as found and
-// `sema_name_build_facts` drops later duplicates once, in one indexed pass;
+// `sema_name_build_facts_threads` drops later duplicates once, in one indexed pass;
 // a reference that repeats an added one is dropped before it is formatted
 // (SemaNameReferenceFilter).
 fn sema_name_add_declaration(facts: &MIRNameFacts, module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MIRNameVisibility) Never! {
     &facts.declarations.push(MIRNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility})
 }
 
-// The references sema_name_build_facts has added so far. A reference row is
+// The references sema_name_build_facts_threads has added so far. A reference row is
 // made from its symbol's graph module, owner key, name and definition span
 // and its kind alone, so `seen` keys each added reference by those (the
 // strings interned in `parts`): a reference whose key is seen repeats an
@@ -4913,15 +4945,6 @@ fn sema_name_loaded_facts(modules: [MIRNameModule], programs: [Program], aliases
     facts
 }
 
-// Every module's name facts, then the graph's output references, each row
-// kept once (sema_name_build_facts_threads on one thread).
-fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
-    owner_names :: sema_name_owner_index(graph)
-    parts := [MIRNameFacts]{}
-    &parts.push(sema_name_part_facts(graph, modules, owner_names, sema_name_symbol_index(graph), 0, graph.modules.len()))
-    sema_name_join_facts(graph, owner_names, &parts, structure_facts)
-}
-
 // The name facts of graph modules `from..<to`, in module order: each
 // module's declarations, display paths, aliases and references, before the
 // first-row passes. The part's reference filter is its own, so it drops only
@@ -5004,7 +5027,8 @@ SEMA_NAME_MIN_ROWS_PER_THREAD :: 16384
 // Parts per admitted thread, claimed dynamically.
 SEMA_NAME_PARTS_PER_THREAD :: 4
 
-// sema_name_build_facts on up to `threads` compiler threads, into `names`.
+// Every module's name facts, then the graph's output references, each row
+// kept once, on up to `threads` compiler threads, into `names`.
 // The modules are cut into consecutive parts of about equal rows; each
 // thread collects the parts it claims (sema_name_part_facts reads only the
 // graph, the module results and the two indexes), and the parts are joined
@@ -6331,16 +6355,16 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
     items
 }
 
-// The declaration pass makes no body check of its own (D2: the sources'
+// The declaration pass makes no body check of its own (the sources'
 // constant dependencies come from the run's item checks), so it takes no
-// host callbacks or threads. `graph` moves into the pass's program tables,
-// which no check changes, and leaves unchanged with the stage as the
-// comptime run's graph: the pass never copies it.
-fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
+// host callbacks. `graph` moves into the pass's program tables, which no
+// check changes, and leaves unchanged with the stage as the comptime run's
+// graph: the pass never copies it. The modules' declaration checks and the
+// name facts run on up to `threads` compiler threads.
+fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
     diagnostics := [Diagnostic]{}
     loop diagnostic in graph.diagnostics -> &diagnostics.push(diagnostic)
     complete := graph.complete
-    initial_memory_plan := sema_function_memory_plan_from_graph(graph)
     module_count :: graph.modules.len()
     modules := [SemaGraphModuleResult]{}
     body_values := sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
@@ -6362,27 +6386,31 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     initial_environment.boxed_edges = [String:[String]]{}
     initial_environment.copy_facts = sema_copy_facts_table_empty()
     module_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
-    sema_check_shared_fill(module_state, ^initial_environment, ^initial_program, ^initial_memory_plan)
-    module_index := 0
-    loop module_index < module_count {
-        environment := sema_check_shared_take_environment(module_state)
-        program := sema_check_shared_take_program(module_state)
-        if trace_sink == .Val(sink) -> sema_comptime_trace_module_begin(sink, program, module_index, module_count)
-        memory_plan := sema_check_shared_take_memory_plan(module_state)
-        owned_check := sema_check_registration_module(^environment, ^program, None, ^memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, "sema.check", trace_sink)
-        restored_environment := ^owned_check.environment
-        restored_program := ^owned_check.program
-        restored_memory_plan := ^owned_check.memory_plan
-        sema_check_shared_fill(module_state, ^restored_environment, ^restored_program, ^restored_memory_plan)
-        checked := ^owned_check.module_result
-        if trace_sink == .Val(sink) -> sink.end("sema.module", checked.declarations.type_defs.len() + checked.declarations.traits.len() + checked.declarations.impls.len() + checked.declarations.constants.len())
-        loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
-        if !checked.complete -> complete = false
-        &modules.push(checked)
-        module_index += 1
-    }
+    // A declaration check reads no memory plan.
+    sema_check_shared_fill(module_state, ^initial_environment, ^initial_program, sema_function_memory_plan_new())
+    every_module := [Int]{}
+    loop module_index in 0..<module_count -> &every_module.push(module_index)
+    checks := sema_check_declaration_modules(module_state, every_module, [SemaComptimeItemValue]{}, true, threads)
     pass_environment := sema_check_shared_take_environment(module_state)
     pass_program := sema_check_shared_take_program(module_state)
+    &checks.reverse()
+    module_index := 0
+    loop checks.len() > 0 {
+        check := &checks.pop() ?? break
+        checked := ^check.module_result
+        if trace_sink == .Val(sink) {
+            sema_comptime_trace_module_begin(sink, pass_program, module_index, module_count)
+            sink.progress("counters.sema.check.items_scanned", check.items_scanned, -1)
+            sink.progress("counters.sema.check.functions_checked", 0, -1)
+            sink.progress("counters.sema.check.method_jobs", 0, -1)
+            sink.progress("counters.sema.check.impl_rows_scanned", 0, -1)
+            sink.end("sema.module", checked.declarations.type_defs.len() + checked.declarations.traits.len() + checked.declarations.impls.len() + checked.declarations.constants.len())
+        }
+        loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
+        if !checked.complete -> complete = false
+        &modules.push(^checked)
+        module_index += 1
+    }
     sources := [SemaComptimeItemSource]{}
     source_keys := [String:Bool]{}
     loop source_module_index in 0..<module_count {
@@ -6413,17 +6441,20 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     // Recover the original graph from its tables.
     sema_comptime_body_work_flush(pass_environment.comptime_body_publication, trace_sink, "sema.check")
     imports := sema_comptime_stage_imports(pass_program)
-    names :: sema_comptime_stage_names(pass_program, modules)
-    pass_graph := ^pass_program.registration_graph
+    taken := ^pass_program.registration_graph
+    pass_graph := ^taken ?? panic("the declaration pass lost its registration graph")
+    structure_facts :: sema_name_structure_facts(pass_graph)
+    names := sema_name_facts_empty()
+    returned := sema_name_build_facts_threads(^pass_graph, &modules, structure_facts, threads, &names)
     SemaComptimeDeclarationStage{
         modules: ^modules,
         imports: ^imports,
         package_policies: package_policies,
-        names: names,
+        names: ^names,
         sources: sources,
         diagnostics: diagnostics,
         complete: complete,
-        graph: ^pass_graph,
+        graph: Val(^returned),
     }
 }
 
@@ -6437,11 +6468,6 @@ fn sema_comptime_trace_module_begin(sink: CompilerTraceSink, program: SemaProgra
 
 fn sema_comptime_stage_imports(program: SemaProgramTables) -> [SemaRegistrationImport] {
     if program.registration_graph == .Val(registered) -> return registered.imports.copy()
-    panic("the declaration pass lost its registration graph")
-}
-
-fn sema_comptime_stage_names(program: SemaProgramTables, modules: [SemaGraphModuleResult]) -> MIRNameFacts {
-    if program.registration_graph == .Val(registered) -> return sema_name_build_facts(registered, modules, sema_name_structure_facts(registered))
     panic("the declaration pass lost its registration graph")
 }
 
@@ -6482,6 +6508,163 @@ fn sema_check_declarations_in_shared(shared_state: Shared<SemaCheckShared>, modu
     restored_memory_plan := ^checked.memory_plan
     sema_check_shared_fill(shared_state, ^restored_environment, ^restored_program, ^restored_memory_plan)
     ^checked.module_result
+}
+
+// A compiler thread is admitted for at least this many bytes of module item
+// source to check declarations in.
+SEMA_DECLARATION_MIN_BYTES_PER_THREAD :: 65536
+
+// The declaration check of the module at `position` of a checked module list
+// (sema_check_declaration_module) and the program items it scanned.
+struct SemaDeclarationCheck {
+    position: Int
+    module_result: SemaGraphModuleResult
+    items_scanned: Int
+}
+
+// A module's declaration check under `values`: its declarations and program
+// items, then its foreign rows when `foreign`, the checks
+// sema_check_registration_module makes of a module besides its bodies. Each
+// reads only the graph and the program tables, never the entered module of
+// `environment`, so the modules' checks are independent of each other and of
+// their order.
+fn sema_check_declaration_module(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, position: Int, values: [SemaComptimeItemValue], foreign: Bool) -> SemaDeclarationCheck {
+    scopes := sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
+    module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
+    items_scanned := 0
+    sema_check_registration_module_program(environment, program, module_index, scopes, &module_result, true, &items_scanned)
+    if foreign -> sema_check_registration_module_foreign(environment, program, module_index, &module_result)
+    SemaDeclarationCheck{position: position, module_result: ^module_result, items_scanned: items_scanned}
+}
+
+// The declaration check (sema_check_declaration_module) of every module of
+// `modules`, in that order, on up to `threads` compiler threads. The threads
+// claim modules heaviest source first and read the pass environment and
+// program tables of `shared_state` in place; the graph stops counting its
+// lookups meanwhile, as in a body wave: every lookup would take the shared
+// counters' permit and serialize the threads. Work that admits one thread
+// checks on the calling thread.
+fn sema_check_declaration_modules(shared_state: Shared<SemaCheckShared>, modules: [Int], values: [SemaComptimeItemValue], foreign: Bool, threads: CompilerThreads) -> [SemaDeclarationCheck] {
+    weights := [Int]{}
+    scope_rows := 0
+    work :: sema_check_declaration_weights_in_shared(shared_state, modules, &weights, &scope_rows)
+    workers :: compiler_threads_admit(threads, modules.len(), work, SEMA_DECLARATION_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
+    checks := [SemaDeclarationCheck]{}
+    if workers <= 1 {
+        loop position in 0..<modules.len() -> &checks.push(sema_check_declaration_module_in_shared(shared_state, modules[position], position, values, foreign))
+        return checks
+    }
+    counting :: sema_check_shared_counting(shared_state, false)
+    // copy: the threads' read-only inputs; the module list and the pass's
+    // comptime values are read parameters here.
+    inputs :: shared SemaDeclarationInputs{modules: modules.copy(), values: values.copy(), foreign: foreign}
+    plan :: shared SemaDeclarationPlan{order: compiler_threads_heaviest_first(weights), next: 0}
+    placed := [SemaDeclarationCheck?]{}
+    loop _ in 0..<modules.len() -> &placed.push(None)
+    sema_check_declaration_claimers(shared_state, inputs, plan, 0, workers, &placed)
+    _ :: sema_check_shared_counting(shared_state, counting)
+    &placed.reverse()
+    loop placed.len() > 0 {
+        slot := &placed.pop() ?? break
+        check := ^slot ?? panic("a module's declaration check left its thread")
+        &checks.push(^check)
+    }
+    checks
+}
+
+// Each module of `modules`' item source bytes into `weights`, the largest
+// module scope (sema_check_module_scope_rows) into `scope_rows`; the total.
+fn sema_check_declaration_weights_in_shared(shared_state: Shared<SemaCheckShared>, modules: [Int], weights: &[Int], scope_rows: &Int) -> Int {
+    inputs :: shared_state.guard_read()
+    sema_check_declaration_weights(inputs.value.programs[0], modules, &weights, &scope_rows)
+}
+
+fn sema_check_declaration_weights(program: SemaProgramTables, modules: [Int], weights: &[Int], scope_rows: &Int) -> Int {
+    if program.registration_graph == .Val(graph) {
+        work := 0
+        loop module_index in modules {
+            weight := 0
+            loop item_index in 0..<graph.modules[module_index].program.items.len() {
+                span :: sema_compiler_index_item_span(graph.modules[module_index].program.items[item_index])
+                weight += span.end - span.start
+            }
+            &weights.push(weight)
+            work += weight
+            rows :: sema_check_module_scope_rows(graph, module_index)
+            if rows > scope_rows -> scope_rows = rows
+        }
+        return work
+    }
+    panic("the declaration pass lost its registration graph")
+}
+
+fn sema_check_declaration_module_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int, position: Int, values: [SemaComptimeItemValue], foreign: Bool) -> SemaDeclarationCheck {
+    inputs :: shared_state.guard_read()
+    sema_check_declaration_module(inputs.value.environments[0], inputs.value.programs[0], module_index, position, values, foreign)
+}
+
+// Sets whether the graph in `shared_state`'s program tables counts its
+// lookups; the old flag.
+fn sema_check_shared_counting(shared_state: Shared<SemaCheckShared>, counting: Bool) -> Bool {
+    permit :: shared_state.guard_edit()
+    program := &permit.value.programs.pop() ?? panic("the declaration program tables left the threads' shared state")
+    old :: sema_comptime_precheck_graph_counting(program)
+    program.registration_graph = sema_comptime_precheck_counting(^program.registration_graph, counting)
+    &permit.value.programs.push(^program)
+    old
+}
+
+// What every declaration-check thread reads: the checked modules by
+// position, the comptime values and whether foreign rows are checked.
+struct SemaDeclarationInputs {
+    modules: [Int]
+    values: [SemaComptimeItemValue]
+    foreign: Bool
+}
+
+// The module positions in claim order: `order[rank]` is the position claimed
+// at `rank`, `next` the next unclaimed rank.
+struct SemaDeclarationPlan {
+    order: [Int]
+    next: Int
+}
+
+// Runs claiming threads `from..<workers`, one task each, and moves every
+// check a thread returned into its position's slot of `placed`.
+fn sema_check_declaration_claimers(shared_state: Shared<SemaCheckShared>, inputs: Shared<SemaDeclarationInputs>, plan: Shared<SemaDeclarationPlan>, from: Int, workers: Int, placed: &[SemaDeclarationCheck?]) {
+    if from >= workers -> return
+    task.group sema_declaration_threads {
+        head :: task sema_check_declaration_claimed(shared_state, inputs, plan)
+        sema_check_declaration_claimers(shared_state, inputs, plan, from + 1, workers, &placed)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            check := &claimed.pop() ?? break
+            position :: check.position
+            placed[position] = Val(^check)
+        }
+    }
+}
+
+// One thread: checks the modules it claims until none is left.
+fn sema_check_declaration_claimed(shared_state: Shared<SemaCheckShared>, inputs: Shared<SemaDeclarationInputs>, plan: Shared<SemaDeclarationPlan>) -> [SemaDeclarationCheck] {
+    tables :: shared_state.guard_read()
+    rows :: inputs.guard_read()
+    claimed := [SemaDeclarationCheck]{}
+    loop {
+        position :: sema_check_declaration_claim(plan)
+        if position < 0 -> break
+        // Passed straight through: a local binding of a guarded row would copy it.
+        &claimed.push(sema_check_declaration_module(tables.value.environments[0], tables.value.programs[0], rows.value.modules[position], position, rows.value.values, rows.value.foreign))
+    }
+    claimed
+}
+
+fn sema_check_declaration_claim(plan: Shared<SemaDeclarationPlan>) -> Int {
+    permit :: plan.guard_edit()
+    rank :: permit.value.next
+    if rank >= permit.value.order.len() -> return -1
+    permit.value.next = rank + 1
+    permit.value.order[rank]
 }
 
 // The rows sema_comptime_modules_with_values adds for the values at `from`
@@ -6913,6 +7096,12 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     // module; otherwise consecutive modules share a body wave.
     single_passes := trace_functions
     if session == .Val(_) -> single_passes = true
+    // Body waves take every selected module's declaration and program checks
+    // made up front on the threads (sema_check_declaration_modules), last
+    // first; a module's foreign rows stay after its bodies.
+    starts := [SemaDeclarationCheck]{}
+    if !codec_wave && !single_passes -> starts = sema_check_declaration_modules(shared_state, selected, values, false, threads)
+    &starts.reverse()
     start := 0
     loop start < selected.len() {
         module_index :: selected[start]
@@ -6923,7 +7112,7 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
         }
         if !single_passes {
             end :: sema_check_body_wave_end(shared_state, selected, start)
-            checked_functions += sema_check_body_wave(shared_state, host_hooks, selected, start, end, values, comptime_functions, comptime_rows, pending_obligations, threads, phase, trace_sink, &modules)
+            checked_functions += sema_check_body_wave(shared_state, host_hooks, selected, start, end, values, comptime_functions, comptime_rows, pending_obligations, threads, phase, trace_sink, &starts, &modules)
             start = end
             next
         }
@@ -7016,8 +7205,9 @@ fn sema_check_body_wave_end(shared_state: Shared<SemaCheckShared>, selected: [In
 // (sema_check_registration_module) enters its module before it reads the
 // environment, so each module's prepared bodies and its result from the
 // module checks, run in module order, are those of a pass per module.
+// `starts` holds the modules' declaration checks, made ahead, last first.
 // Returns how many functions the modules checked.
-fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], start: Int, end: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> Int {
+fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], start: Int, end: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
     jobs := [SemaBodyJob]{}
     job_modules := [Int]{}
     order := [Int]{}
@@ -7056,6 +7246,9 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
     loop wave_module in 0..<(end - start) {
         module_index :: selected[start + wave_module]
         bodies := &prepared.pop() ?? panic("a body-wave module lost its prepared bodies")
+        started := &starts.pop() ?? panic("a body-wave module lost its declaration check")
+        if started.position != start + wave_module -> panic("a body-wave module took another module's declaration check")
+        bodies.started = Val(^started)
         sema_check_module_trace_begin_in_shared(shared_state, module_index, phase, trace_sink)
         checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^bodies, threads, None, phase, trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
