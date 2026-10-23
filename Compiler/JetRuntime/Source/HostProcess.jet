@@ -61,6 +61,10 @@ fn host_i32(value: I64) -> I64 {
     _ := host_call(I64{162}, I64{0}, I64{0}, I64{0})
 }
 
+// Under the process root (jet_rt_main) the exit is a root stop: every frame
+// cleans up on its stop edge, then the root runs the exit handlers and
+// exits with `code`. Elsewhere (a task's body, an exit handler) the exit
+// handlers run and the process exits here.
 #Export(c) fn jet_std_process_exit(code: I64) {
     native :: host_i32(code)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
@@ -68,8 +72,7 @@ fn host_i32(value: I64) -> I64 {
         _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, native)
         return
     }
-    jet_rt_stdout_flush()
-    _ := host_call(I64{231}, native, I64{0}, I64{0})
+    jet_rt_process_exit(native)
 }
 
 // Raw tuples marshal into the generator's separate out slots, never a boxed

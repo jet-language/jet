@@ -95,9 +95,34 @@ fn main_exit_cleanup() -> I64 {
     // EnvInit.rs:27: exactly once, after TLS/registry initialization and before
     // the checked no-argument entry. Object main must not start Observe itself.
     jet_rt_observe_runtime_start_from_env()
+    // The entry runs under the process root control: a stop (a panic, a
+    // numeric stop, process.exit, os.stop) is published there and every
+    // generated frame leaves by its stop edge, running its closes, drops
+    // and guards (JetIR Build.jet ir_stop_check). The root then takes it:
+    // exit handlers run, then the captured report is written, then the
+    // process exits with the stop's code (D-FAIL-EXIT1).
+    save :: jet_rt_alloc(I64{40}, I64{8})
+    root :: jet_rt_root_begin(save)
     #Unsafe("entry is the loader/object's checked executable System V void(void) address, not a closure header") {
         os_call0_unit(entry)
     }
+    record :: jet_rt_root_take_stop(root, save + I64{32})
+    jet_rt_root_leave(root, save)
+    if (record != I64{0}) {
+        code :: trap_word(save + I64{32})
+        report :: scheduler_stop_take_message(record)
+        scheduler_stop_drop(record)
+        jet_rt_free(save, I64{40}, I64{8})
+        main_exit_claim(code)
+        _ := main_exit_cleanup()
+        main_flush(main_exit_root + I64{16})
+        if (report != I64{0}) {
+            trap_write_handle(report)
+            jet_rt_string_drop(report)
+        }
+        jet_rt_process_exit_finish()
+    }
+    jet_rt_free(save, I64{40}, I64{8})
     main_exit_claim(I64{0})
     parked_code :: main_exit_cleanup()
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins

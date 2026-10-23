@@ -85,6 +85,7 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
         cursor += 1
     }
     out := ir_module_new()
+    if parts.len() > 0 -> out.stop_points = parts[0].stop_points
     loop (id, part) in g.function_part {
         local :: g.function_local[id]
         ir_merge_rewrite(g.sides[part], &parts[part].functions[local])

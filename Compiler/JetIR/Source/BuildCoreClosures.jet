@@ -84,7 +84,10 @@ fn ir_task_release_body(m: &IRModule, a: &IRBuilder) Never! {
 // and the transaction hooks are not built here.
 fn ir_core_closure_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyCoreClosureKind, span: Span) -> Int Never! {
     if kind == {
-        .Spawn(group, site, label, executable) -> return ir_task_spawn(&m, p, &b, ty, group, site, label ?? "", executable, span)
+        .Spawn(group, site, label, executable) -> {
+            named :: label ?? ir_spawn_label(p, b, executable)
+            return ir_task_spawn(&m, p, &b, ty, group, site, named, executable, span)
+        }
         .Guard(executable) -> return ir_scope_guard(&m, p, &b, ty, executable, span)
         .OnCommit(handle_name, executable) -> return ir_transaction_hook(&m, p, &b, handle_name, executable, true, span)
         .OnRollback(handle_name, executable) -> return ir_transaction_hook(&m, p, &b, handle_name, executable, false, span)
@@ -117,7 +120,8 @@ fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: Int
         if ir_failed(b) || group_slot < 0 -> return -1
     }
     int_row :: ir_type_row(&m, Type.Int) ?? 0
-    site_slot :: ir_int_constant(&m, &b, int_row, site)
+    ordinal :: p.spawn_sites.get("{b.f.source_file}:{executable.source_span.start}") ?? site
+    site_slot :: ir_int_constant(&m, &b, int_row, ordinal)
     string_row :: ir_string_row(&m)
     label_slot :: ir_temp(&m, &b, string_row)
     label_text :: ir_intern_text(&m, label)
@@ -157,6 +161,29 @@ fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: Int
     b.fresh[env] = false
     if group_slot >= 0 -> ir_release(&m, &b, group_slot)
     spawned
+}
+
+// The label of a task the checker named none: the called function's name
+// when the body is one direct call (`task boom()`, which the checker may wrap
+// in a `?` passing the call's failure on), else none (the runtime shows
+// `task@<site>`).
+fn ir_spawn_label(p: IRProgram, b: IRBuilder, executable: BodyLambda) -> String Never! {
+    if executable.executable == .Expr(value) {
+        id := value
+        loop {
+            if ir_body_node(p, b, id).kind == {
+                .Call(callee, _, _) -> {
+                    row :: p.rows.get(callee.key) ?? -1
+                    if row >= 0 -> return p.functions[row].name.copy()
+                    return ""
+                }
+                .Try(inner, _, _) -> { id = inner }
+                .TryWithContext(inner, _, _, _, _, _) -> { id = inner }
+                else -> return ""
+            }
+        }
+    }
+    ""
 }
 
 // `core.mem.scope.guard(callback)`: the callback's closure box, reowned as

@@ -2113,6 +2113,7 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
             ir_release(&m, &b, slot)
         }
     }
+    ir_stop_check(&m, &b)
     dst
 }
 
@@ -3941,6 +3942,7 @@ fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args
     loop (index, slot) in slots {
         if index > 0 -> ir_release(&m, &b, slot)
     }
+    ir_stop_check(&m, &b)
     dst
 }
 
@@ -4030,6 +4032,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         dst :: if callee_row >= 0 -> ir_fresh_temp(&m, &a, callee_row) else -> -1
         operands :: ir_args(&a.f, arguments)
         ir_emit(&a.f, IROp.Call, dst, target, operands, arguments.len(), a.line)
+        ir_stop_check(&m, &a)
         result := -1
         if result_row >= 0 && dst >= 0 -> result = ir_adapt(&m, p, &a, dst, result_row, span)
         if a.error != "" {

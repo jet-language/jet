@@ -228,7 +228,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // which every later use reports again; `trait_keys` a boxed trait value's
 // payload key by concrete type identity (BuildTraits.jet ir_trait_key);
 // `subst_names`/`subst_types` the type parameters of the instance being
-// built and their arguments.
+// built and their arguments. `stop_points`: calls that can deliver a
+// runtime stop are followed by a stop check (Build.jet ir_stop_check); the
+// runtime library manages its own stops and has none.
 struct IRModule {
     types: [IRType]
     type_keys: [String]
@@ -259,6 +261,7 @@ struct IRModule {
     trait_keys: [String:Int]
     subst_names: [String]
     subst_types: [Type]
+    stop_points: Bool{false}
 }
 
 fn ir_module_new() -> IRModule Never! {

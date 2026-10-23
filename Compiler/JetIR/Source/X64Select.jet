@@ -463,8 +463,11 @@ fn ir_x64_stop_texts() -> [String] Never! {
     [String]{IR_X64_DIVIDED_BY_ZERO, ir_x64_overflow_message("add"), ir_x64_overflow_message("sub"), ir_x64_overflow_message("mul"), ir_x64_overflow_message("div")}
 }
 
-// Lays out every slow path after the epilogue.
-fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables) Never! {
+// Lays out every slow path after the epilogue. In a module with stop points
+// (IRModule.stop_points) a slow path whose runtime call published a stop
+// leaves the function by the `epilogue` with no result written; its
+// caller's stop check takes the stop on (Build.jet ir_stop_check).
+fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, epilogue: Int) Never! {
     loop cold in e.colds {
         here :: e.code.len()
         loop site in cold.sites -> x64_patch_rel32(&e.code, site, here)
@@ -486,6 +489,21 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 x64_mov_ri(&e.code, X64_R8, cold.line)
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: cold.symbol}})
+                if m.stop_points {
+                    // A division by zero or a negative shift count publishes
+                    // its stop and returns. Two pushes keep the stack aligned
+                    // and the result across the status call; pops keep the
+                    // flags of its test.
+                    x64_push(&e.code, X64_RAX)
+                    x64_push(&e.code, X64_RAX)
+                    status_at :: x64_call_rel32(&e.code)
+                    &e.relocs.push(X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}})
+                    x64_test_rr(&e.code, X64_RAX, X64_RAX)
+                    x64_pop(&e.code, X64_RAX)
+                    x64_pop(&e.code, X64_RAX)
+                    stopped :: x64_jcc_rel32(&e.code, X64Cond.NE)
+                    x64_patch_rel32(&e.code, stopped, epilogue)
+                }
                 ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
                 ir_x64_jump_to(&e, cold.resume)
             }
@@ -512,7 +530,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 x64_mov_ri(&e.code, X64_R8, tables.lengths[cold.text])
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}})
-                x64_ud2(&e.code)
+                ir_x64_stop_resume(&e, m, epilogue)
             }
             .ShiftStop -> {
                 path :: tables.texts.get(cold.symbol) ?? -1
@@ -528,9 +546,20 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 x64_push(&e.code, X64_R11)
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: "jet_rt_fixed_shift_stop"}})
-                x64_ud2(&e.code)
+                ir_x64_stop_resume(&e, m, epilogue)
             }
         }
+    }
+}
+
+// After a numeric stop's runtime call, which returns only when it published
+// the stop on a task or root control: leave by the `epilogue` in a module
+// with stop points, else trap.
+fn ir_x64_stop_resume(e: &IRX64Emitter, m: IRModule, epilogue: Int) Never! {
+    if m.stop_points {
+        ir_x64_jump_to(&e, epilogue)
+    } else {
+        x64_ud2(&e.code)
     }
 }
 
@@ -1666,7 +1695,7 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
     dwarf_cfa_advance(&cfi, ret_at, ret_at + 1)
     dwarf_cfa_restore_state(&cfi)
-    ir_x64_emit_colds(&e, m, f, al, tables)
+    ir_x64_emit_colds(&e, m, f, al, tables, epilogue)
 
     variables := [LIRDebugVariable]{}
     ranges := [X64VariableRange]{}

@@ -101,6 +101,8 @@ struct IRBuilder {
     next_node: Int{IR_FIRST_NODE_ID}
     // The closures this body created so far, by key base (ir_lambda).
     lambdas: [String:Int]
+    // Building a stop edge (ir_stop_return): its cleanup checks for no stop.
+    stopping: Bool{false}
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
@@ -149,6 +151,14 @@ struct IRProgram {
     // A runtime library's intrinsics by function key (BuildLibrary.jet):
     // a call of one is its machine operation, never a call.
     intrinsics: [String:IRRuntimeIntrinsic]
+    // Whether the modules built from it check for a runtime stop after each
+    // call that can deliver one (IRModule.stop_points); false only for the
+    // runtime library (ir_build_library).
+    stop_points: Bool{true}
+    // The ordinal of each `task` spawn site among its file's spawn sites in
+    // source order, by "{source file}:{span start}" (ir_spawn_sites): the
+    // "spawn site N" of task reports.
+    spawn_sites: [String:Int]{[String:Int]{}}
 }
 
 // A Display, Printable, Close or user Comparable implementation: the
@@ -356,10 +366,42 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
         }
     }
     p.trait_methods = ir_trait_methods(owned, p.type_rows, p.types, p.impl_slots, p.impl_traits)
+    p.spawn_sites = ir_spawn_sites(owned)
     p.functions = ^owned
     p.rows = rows
     p.render_impls = render_impls
     p.close_methods = close_methods
+}
+
+// IRProgram.spawn_sites of `functions`: the reports number a file's spawn
+// sites 0, 1, ... in source order, keyed by the spawned body's span start
+// (the checker's site is the `task` word, which a `task.all` shares).
+fn ir_spawn_sites(functions: [FnBody]) -> [String:Int] Never! {
+    files := [String:[Int]]{}
+    loop function in functions {
+        loop node in function.tree.nodes {
+            if node.kind == .CoreClosureCall(kind) {
+                if kind == .Spawn(_, _, _, executable) {
+                    starts := files.get(function.source_file) ?? [Int]{}
+                    &starts.push(executable.source_span.start)
+                    files[function.source_file] = ^starts
+                }
+            }
+        }
+    }
+    sites := [String:Int]{}
+    loop (file, starts) in files {
+        ordered := starts.copy()
+        &ordered.sort()
+        ordinal := 0
+        loop start in ordered {
+            key :: "{file}:{start}"
+            if sites.get(key) != None -> next
+            sites[key] = ordinal
+            ordinal += 1
+        }
+    }
+    sites
 }
 
 // `definition` takes over `p`'s constant rows of its key and its qualified
@@ -383,6 +425,7 @@ fn ir_program_put_constant(p: &IRProgram, definition: ^TConstantDef, taken: &[St
 fn ir_module_for(p: IRProgram) -> IRModule Never! {
     m := ir_module_new()
     loop _ in 0..<p.functions.len() -> &m.ids.push(-1)
+    m.stop_points = p.stop_points
     m
 }
 
@@ -722,6 +765,7 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
     result :: ir_fresh_temp(&m, &b, row)
     operands :: ir_args(&b.f, [Int]{})
     ir_emit(&b.f, IROp.Call, result, entry, operands, 0, b.line)
+    ir_stop_check(&m, &b)
     if ir_untag(ty) == {
         .Result(_, err_ty) -> {
             // A kept `T Never!` carrier never holds an Err.
@@ -1321,11 +1365,119 @@ fn ir_type_fail(b: &IRBuilder, span: Span, ty: Type) -> Int Never! {
 }
 
 // A runtime route call with a fresh result of type row `ty` (-1: none).
+// A route that can deliver a runtime stop is followed by its stop check.
 fn ir_runtime(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int) -> Int Never! {
     dst :: if ty >= 0 -> ir_fresh_temp(&m, &b, ty) else -> -1
     start :: ir_args(&b.f, args)
     ir_emit(&b.f, IROp.CallRuntime, dst, ir_intern_name(&m, symbol), start, args.len(), b.line)
+    if ir_route_can_stop(symbol) -> ir_stop_check(&m, &b)
     dst
+}
+
+// Stop points (Docs/research/jet-backend-design-2026-10-01.md "Stop
+// points"). A runtime stop (a panic, a trap, process.exit, a delivered
+// cancellation) is published on the thread's task control, and the call
+// that published it returns; nothing unwinds through generated frames.
+// Each call that can deliver one is followed by a check: stopped, the
+// function leaves by its stop edge, which runs the cleanup a return would
+// (closes, drops, guards, open transactions) with the stop masked, then
+// returns with no result written. Every frame up to the boundary that
+// takes the stop (jet_rt_main's root, a task's runner) cleans up in turn.
+
+// Whether runtime route `symbol` can deliver a stop: all but the ones that
+// only allocate, free, copy, count or read (an allocation failure is
+// fatal), and the stop rail's own calls.
+fn ir_route_can_stop(symbol: String) -> Bool Never! {
+    if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") -> return false
+    if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") -> return false
+    if symbol == {
+        "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
+        "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_journey_reset" -> false
+        "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
+        else -> true
+    }
+}
+
+// After a call that can deliver a stop: when the thread's task control
+// holds a stop (the word ir_stop_leaf reads), the delivered status
+// (jet_rt_session_propagate: zero while a cleanup or shield masks it)
+// decides; nonzero takes the stop edge. The edge's own cleanup has none.
+fn ir_stop_check(m: &IRModule, b: &IRBuilder) Never! {
+    if !m.stop_points || b.stopping -> return
+    word_row :: ir_word_row(&m)
+    raw :: ir_temp(&m, &b, word_row)
+    leaf :: ir_stop_leaf(&m)
+    start :: ir_args(&b.f, [Int]{})
+    ir_emit(&b.f, IROp.Call, raw, leaf, start, 0, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    pending :: ir_bool_op(&m, &b, IROp.Ne, raw, zero)
+    ir_open_if(&b.f, pending, b.line)
+    status :: ir_runtime(&m, &b, "jet_rt_session_propagate", [Int]{}, word_row)
+    stopped :: ir_bool_op(&m, &b, IROp.Ne, status, zero)
+    ir_open_if(&b.f, stopped, b.line)
+    ir_stop_return(&m, &b)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+}
+
+// The leaf that reads the stop status of the thread's task control, 0 when
+// it has none: GS:0 holds the attached thread's TCB address (OS/Linux.jet
+// os_tls_base_i64), whose word 16 is the current control, whose word 32 is
+// its status (JetRuntime Scheduler.jet scheduler_control_current); an
+// unattached thread's GS names a zero word (Thread.jet thread_base). Built
+// once per module, by key.
+fn ir_stop_leaf(m: &IRModule) -> Int Never! {
+    key :: "jet_ir_stop_status#asm"
+    found :: m.function_rows.get(key) ?? -1
+    if found >= 0 -> return found
+    // mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
+    // test rax, rax; jz done; mov rax, [rax + 32]; done:
+    code :: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x85, 0xc0, 0x74, 0x0d, 0x48, 0x8b, 0x40, 0x10, 0x48, 0x85, 0xc0, 0x74, 0x04, 0x48, 0x8b, 0x40, 0x20}
+    f := ir_function_new("jet_ir_stop_status", key, "jet_ir_stop_status", "", 0)
+    f.result = ir_word_row(&m)
+    f.asm = Val(IRAsmLeaf{code: code, regs: [Int]{}, result: 0})
+    id :: m.functions.len()
+    &m.functions.push(^f)
+    m.function_rows[key] = id
+    id
+}
+
+// The stop edge: the cleanup of a return from here (the open transactions'
+// Stm and handle drops, whose rollback hooks run, then every owned
+// variable's close and drop), inside one runtime cleanup scope, then a
+// return with no result written (no caller reads it: its own stop check
+// comes first). Snapshots are not restored: the frame is being left.
+fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
+    if ir_stop_cleans(b) {
+        b.stopping = true
+        word_row :: ir_word_row(&m)
+        saved :: ir_runtime(&m, &b, "jet_rt_cleanup_enter", [Int]{}, word_row)
+        index := b.transactions.len() - 1
+        loop index >= 0 {
+            frame :: b.transactions[index]
+            index -= 1
+            if frame.stm >= 0 -> ir_emit(&b.f, IROp.Drop, -1, frame.stm, -1, -1, b.line)
+            if frame.handle >= 0 -> ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
+            if frame.shield {
+                _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+            }
+        }
+        states :: ir_own_states(b, b.bindings.len())
+        ir_drop_bindings(&m, &b, 0)
+        ir_set_own_states(&b, states)
+        _ :: ir_runtime(&m, &b, "jet_rt_cleanup_leave", [Int]{saved}, -1)
+        b.stopping = false
+    }
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+}
+
+// Whether a stop edge from here has cleanup to run.
+fn ir_stop_cleans(b: IRBuilder) -> Bool Never! {
+    if b.transactions.len() > 0 || b.closes.len() > 0 -> return true
+    loop binding in b.bindings {
+        if binding.owned -> return true
+    }
+    false
 }
 
 // The static text pair (data address, byte length) of `text`.

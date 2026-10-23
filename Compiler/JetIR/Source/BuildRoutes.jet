@@ -923,6 +923,7 @@ fn ir_call_closure(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_
     dst :: if result_row >= 0 && m.types[result_row].kind != .Unit -> ir_fresh_temp(&m, &b, result_row) else -> -1
     start :: ir_args(&b.f, operands)
     ir_emit(&b.f, IROp.CallIndirect, dst, code, start, operands.len(), b.line)
+    ir_stop_check(&m, &b)
     dst
 }
 

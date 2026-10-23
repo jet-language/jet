@@ -1169,6 +1169,7 @@ fn ir_render_impl_call(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row
     start :: ir_args(&b.f, [Int]{slot})
     at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 1, b.line)
     &b.deferred.push(IRDeferredCall{at: at, key: function.key, args: owner_args})
+    ir_stop_check(&m, &b)
     string_row :: ir_string_row(&m)
     text :: ir_adapt(&m, p, &b, dst, string_row, Span{start: 0, end: 0})
     if text != dst -> b.fresh[text] = true
@@ -1266,6 +1267,7 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
         if helper < 0 -> return
         start :: ir_args(&b.f, [Int]{slot, builder})
         ir_emit(&b.f, IROp.Call, -1, helper, start, 2, b.line)
+        ir_stop_check(&m, &b)
         return
     }
     text :: ir_render(&m, p, &b, ty, slot, mode, span)
@@ -1759,6 +1761,7 @@ fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
     order :: ir_temp(&m, &b, word_row)
     start :: ir_args(&b.f, [Int]{left, right})
     ir_emit(&b.f, IROp.Call, order, helper, start, 2, b.line)
+    ir_stop_check(&m, &b)
     zero :: ir_word_const(&m, &b, 0)
     ir_order_step(&m, &b, order, zero, sign, decided)
 }
@@ -1776,6 +1779,7 @@ fn ir_compare_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: In
     start :: ir_args(&b.f, [Int]{left, right})
     at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 2, b.line)
     &b.deferred.push(IRDeferredCall{at: at, key: function.key})
+    ir_stop_check(&m, &b)
     dst
 }
 
@@ -2054,6 +2058,7 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         equal :: ir_temp(&m, &b, bool_row)
         start :: ir_args(&b.f, [Int]{left, right})
         ir_emit(&b.f, IROp.Call, equal, helper, start, 2, b.line)
+        ir_stop_check(&m, &b)
         return ir_exit_unless(&m, &b, equal, differ)
     }
     if p.types[definition_row].kind == .Struct(_, _) {
@@ -2301,6 +2306,7 @@ fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conve
             returned :: ir_fresh_temp(&m, &b, returned_row)
             start :: ir_args(&b.f, [Int]{payload})
             ir_emit(&b.f, IROp.Call, returned, callee, start, 1, b.line)
+            ir_stop_check(&m, &b)
             b.fresh[payload] = false
             converted = returned
             if ir_untag(routine_return) == .Result(_, _) {

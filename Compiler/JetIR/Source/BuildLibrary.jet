@@ -97,6 +97,7 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
 fn ir_build_library(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
+    p.stop_points = false
     m := ir_module_for(p)
     exports := [IRLibraryExportRow]{}
     export_rows := [Int]{}

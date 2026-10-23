@@ -59,6 +59,7 @@ fn ir_heap_call(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, elem_row: I
     dst :: if result >= 0 -> ir_fresh_temp(&m, &b, result) else -> -1
     operands :: ir_args(&b.f, args)
     ir_emit(&b.f, IROp.Call, dst, callee, operands, args.len(), b.line)
+    ir_stop_check(&m, &b)
     dst
 }
 
