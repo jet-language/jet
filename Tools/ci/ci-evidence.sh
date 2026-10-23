@@ -93,7 +93,7 @@ fi
   fail_identity "cannot initialize evidence stdout: $stdout_file"
 }
 
-source_manifest="$ROOT/Cargo.lock"
+source_manifest="$ROOT/flake.lock"
 workflow="$ROOT/.github/workflows/ci.yml"
 if ! {
   echo '=== nix ==='

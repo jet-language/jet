@@ -32,6 +32,12 @@ import { Converter, encode, jetDecoder, loadMirSchema, parseRustDebug } from './
 import { decodeStream, jetWriter } from './front-feed-codec.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+// The compiler identity version is the Jet CLI's declared release version.
+const compilerVersion = () => {
+  const version = readFileSync(join(repo, 'Compiler/JetCli/Source/Cli/Registry.jet'), 'utf8').match(/^JET_CLI_VERSION :: "([^"]+)"$/m)?.[1];
+  if (!version) throw new Error('Compiler/JetCli/Source/Cli/Registry.jet declares no exact JET_CLI_VERSION');
+  return version;
+};
 const argv = process.argv.slice(2);
 const output = argv.shift();
 if (!output) throw new Error('expected OUT --baseline results.tsv [--rust-mir DIR|--rust-jet BINARY] --assemble|--probe BINARY|--bootstrap JETC0');
@@ -213,8 +219,7 @@ if (options.bootstrap) {
     writeFileSync(join(probeDir, 'front-cleanup-stop.txt'), file + '\n');
     writeFileSync(join(out, 'cleanup-fixture.json'), JSON.stringify({ source: fixture, sha256: createHash('sha256').update(text).digest('hex') }, null, 2) + '\n');
     if (options.probe) {
-      const version = readFileSync(join(repo, 'Cargo.toml'), 'utf8').match(/^version = "([^"]+)"$/m)?.[1];
-      if (!version) throw new Error('compiler package has no exact version');
+      const version = compilerVersion();
       const identity = createHash('sha256').update(readFileSync(resolve(options.probe))).digest('hex');
       const probe = spawnSync(resolve(options.probe), [], { cwd: probeDir, env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_COMPILER_IDENTITY: `jet@${version}#${identity}` }, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
       writeFileSync(join(out, 'cleanup-stop.log'), `${probe.stdout ?? ''}${probe.stderr ?? ''}`);
@@ -252,8 +257,7 @@ if (options.bootstrap) {
         writeFileSync(join(out, 'explicit-cleanup-order-result.json'), JSON.stringify(receipt, null, 2) + '\n');
         throw new Error('Rust explicit cleanup producer did not exercise the current checked fixture and stop order; see explicit-cleanup-rust.log');
       }
-      const version = readFileSync(join(repo, 'Cargo.toml'), 'utf8').match(/^version = "([^"]+)"$/m)?.[1];
-      if (!version) throw new Error('compiler package has no exact version');
+      const version = compilerVersion();
       const identity = createHash('sha256').update(readFileSync(resolve(options.probe))).digest('hex');
       receipt.probe_sha256 = identity;
       const probe = spawnSync(resolve(options.probe), [], { cwd: probeDir, env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_COMPILER_IDENTITY: `jet@${version}#${identity}` }, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
@@ -274,8 +278,7 @@ if (options.bootstrap) {
     writeFileSync(join(probeDir, 'runtime-pack.txt'), resolve(pack) + '\n');
     const hash = createHash('sha256');
     for await (const chunk of createReadStream(resolve(options.probe))) hash.update(chunk);
-    const version = readFileSync(join(repo, 'Cargo.toml'), 'utf8').match(/^version = "([^"]+)"$/m)?.[1];
-    if (!version) throw new Error('compiler package has no exact version');
+    const version = compilerVersion();
     const compilerIdentity = `jet@${version}#${hash.digest('hex')}`;
     writeFileSync(join(probeDir, 'compiler-identity.txt'), compilerIdentity + '\n');
     // Run one case per process: a crashing compiler/backend must not hide the

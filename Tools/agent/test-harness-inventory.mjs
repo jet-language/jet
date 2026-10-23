@@ -83,7 +83,8 @@ function rustFiles(directory) {
 
 export function inventory(root = ROOT) {
   const common = functions(readFileSync(join(root, 'tests/common/mod.rs'), 'utf8'));
-  const crates = new Set(['jet', ...[...readFileSync(join(root, 'Cargo.toml'), 'utf8').matchAll(/^([a-z][a-z0-9-]*)\s*=\s*\{/gmu)].map((m) => m[1]), 'rustls-pemfile', 'wat']);
+  // The crate names the retired Rust workspace declared; a test importing one is a Rust-path test.
+  const crates = new Set(['jet', 'jet-driver', 'jet-codegen', 'jetpack', 'jet-env-model', 'jet-pkg-model', 'jet-foundation', 'jet-evalhost', 'jet-rt', 'jet-net', 'jet-queries', 'jet-semindex', 'jet-impact', 'jet-repl', 'jet-debug', 'jet-cli', 'jet-canvas', 'jet-devserver', 'jet-store', 'jet-unicode', 'rustls', 'rustls-pemfile', 'wat']);
   const rows = [];
   const owners = new Map();
   const addOwner = (file, target) => {
