@@ -53,7 +53,12 @@ fn storage_u_max(left: I64, right: I64) -> I64 Never! {
 }
 fn storage_capacity(word: I64) -> I64 {
     value :: jet_int_owned_to_i64(word)
-    if (value < I64{0}) -> trap_native_index_range_stop()
+    if (value < I64{0}) {
+        // The stop is published: an empty store is built and the caller's
+        // stop point takes the stop.
+        trap_native_index_range_stop()
+        return I64{0}
+    }
     value
 }
 

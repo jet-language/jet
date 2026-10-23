@@ -1631,7 +1631,8 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
         // rest call located routes.
         if op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Shl || op == .Shr {
             dst :: ir_fresh_like(&m, &b, left)
-            ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, IR_OVERFLOW_TRAP, site)
+            at :: ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, IR_OVERFLOW_TRAP, site)
+            ir_stop_trap(&m, &b, at)
             return dst
         }
         member :: ir_route_member(op)
@@ -1649,7 +1650,8 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
         // The old trap routes (jet_<w>_trap_<op>) are native checked operators.
         policy :: if (overflow || trapping) && !bitwise -> IR_OVERFLOW_TRAP else -> IR_OVERFLOW_WRAP
         dst :: ir_temp_like(&m, &b, left)
-        ir_emit(&b.f, ir_op, dst, left, right, policy, site)
+        at :: ir_emit(&b.f, ir_op, dst, left, right, policy, site)
+        ir_stop_trap(&m, &b, at)
         return dst
     }
     if kind == .Float || kind == .Float32 {

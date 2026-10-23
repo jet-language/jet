@@ -1420,44 +1420,66 @@ fn ir_route_can_stop(symbol: String) -> Bool Never! {
     }
 }
 
-// After a call that can deliver a stop: when the thread's task control
-// holds a stop (the word ir_stop_leaf reads), the delivered status
-// (jet_rt_session_propagate: zero while a cleanup or shield masks it)
-// decides; nonzero takes the stop edge. The edge's own cleanup has none.
+// After a call that can deliver a stop: the poll (IR_STOP_POLL_KEY) returns
+// whether a stop was delivered (jet_rt_session_propagate when the thread's
+// task control holds one, which is zero while a cleanup or shield masks it),
+// and true takes the stop edge. The edge's own cleanup has none. The
+// selector keeps the call and a branch hot and lays the edge out cold
+// (X64Select ir_x64_stop_point).
 fn ir_stop_check(m: &IRModule, b: &IRBuilder) Never! {
     if !m.stop_points || b.stopping -> return
-    word_row :: ir_word_row(&m)
-    raw :: ir_temp(&m, &b, word_row)
-    leaf :: ir_stop_leaf(&m)
+    ir_stop_point(&m, &b, IR_STOP_POLL_KEY)
+}
+
+// After instruction `at`, a user operation whose slow path can publish a
+// numeric stop: its stop edge, through the trap poll (IR_STOP_TRAP_KEY),
+// which the selector enters only from that slow path, so the hot path has
+// no poll.
+fn ir_stop_trap(m: &IRModule, b: &IRBuilder, at: Int) Never! {
+    if !m.stop_points || b.stopping || !ir_op_can_stop(m, b.f, at) -> return
+    ir_stop_point(&m, &b, IR_STOP_TRAP_KEY)
+}
+
+// Whether user operation `at` has a slow path that can publish a numeric
+// stop (X64Select): an integer division (by zero), a fixed-width operation
+// that traps on overflow or on a shift count out of range, an exact Int
+// shift (a negative count).
+fn ir_op_can_stop(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    op :: f.op[at]
+    kind :: m.types[f.slot_type[f.a[at]]].kind
+    trap :: kind == .Word && f.c[at] != IR_OVERFLOW_WRAP
+    if op == {
+        .Div | .Rem | .FloorDiv | .Mod -> kind == .Int || kind == .Word
+        .Shl | .Shr -> kind == .Int || trap
+        .Add | .Sub | .Mul | .Neg -> trap
+        else -> false
+    }
+}
+
+// `stopped := poll(); if stopped { stop edge }`, with poll `key`.
+fn ir_stop_point(m: &IRModule, b: &IRBuilder, key: String) Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    stopped :: ir_temp(&m, &b, bool_row)
+    poll :: ir_stop_poll(&m, key)
     start :: ir_args(&b.f, [Int]{})
-    ir_emit(&b.f, IROp.Call, raw, leaf, start, 0, b.line)
-    zero :: ir_word_const(&m, &b, 0)
-    pending :: ir_bool_op(&m, &b, IROp.Ne, raw, zero)
-    ir_open_if(&b.f, pending, b.line)
-    status :: ir_runtime(&m, &b, "jet_rt_session_propagate", [Int]{}, word_row)
-    stopped :: ir_bool_op(&m, &b, IROp.Ne, status, zero)
+    ir_emit(&b.f, IROp.Call, stopped, poll, start, 0, b.line)
     ir_open_if(&b.f, stopped, b.line)
     ir_stop_return(&m, &b)
     ir_end(&b.f, b.line)
-    ir_end(&b.f, b.line)
 }
 
-// The leaf that reads the stop status of the thread's task control, 0 when
-// it has none: GS:0 holds the attached thread's TCB address (OS/Linux.jet
-// os_tls_base_i64), whose word 16 is the current control, whose word 32 is
-// its status (JetRuntime Scheduler.jet scheduler_control_current); an
-// unattached thread's GS names a zero word (Thread.jet thread_base). Built
+// A stop poll: true when the thread's task control holds a stop and
+// jet_rt_session_propagate delivers it. Its code is the selector's
+// (X64Select ir_x64_stop_poll); IR_STOP_TRAP_KEY's is the same. Built
 // once per module, by key.
-fn ir_stop_leaf(m: &IRModule) -> Int Never! {
-    key :: "jet_ir_stop_status#asm"
+fn ir_stop_poll(m: &IRModule, key: String) -> Int Never! {
     found :: m.function_rows.get(key) ?? -1
     if found >= 0 -> return found
-    // mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
-    // test rax, rax; jz done; mov rax, [rax + 32]; done:
-    code :: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x85, 0xc0, 0x74, 0x0d, 0x48, 0x8b, 0x40, 0x10, 0x48, 0x85, 0xc0, 0x74, 0x04, 0x48, 0x8b, 0x40, 0x20}
-    f := ir_function_new("jet_ir_stop_status", key, "jet_ir_stop_status", "", 0)
-    f.result = ir_word_row(&m)
-    f.asm = Val(IRAsmLeaf{code: code, regs: [Int]{}, result: 0})
+    name :: if key == IR_STOP_TRAP_KEY -> "jet_ir_stop_trap" else -> "jet_ir_stop_poll"
+    f := ir_function_new(name, key, name, "", 0)
+    f.result = ir_type_row(&m, Type.Bool) ?? 0
+    // An asm leaf with no template: never inlined.
+    f.asm = Val(IRAsmLeaf{code: [U8]{}, regs: [Int]{}, result: 0})
     id :: m.functions.len()
     &m.functions.push(^f)
     m.function_rows[key] = id

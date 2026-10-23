@@ -1094,7 +1094,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 // operand with the subtraction's overflow message.
                 zero :: ir_const_like(&m, &b, value, 0)
                 slot :: ir_temp_like(&m, &b, value)
-                ir_emit(&b.f, IROp.Sub, slot, zero, value, IR_OVERFLOW_TRAP, b.line)
+                sub :: ir_emit(&b.f, IROp.Sub, slot, zero, value, IR_OVERFLOW_TRAP, b.line)
+                ir_stop_trap(&m, &b, sub)
                 return slot
             }
             operand_type :: ir_ty(p, b, operand)
@@ -1627,7 +1628,8 @@ fn ir_overflow_opt(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, prefix: 
         // Division by zero stops under either policy; a policy's overflow
         // stops with the trapping operator's message.
         dst :: ir_temp_like(&m, &b, left)
-        ir_emit(&b.f, op, dst, left, right, if prefix == "wrapping" -> IR_OVERFLOW_WRAP else -> IR_OVERFLOW_TRAP, b.line)
+        at :: ir_emit(&b.f, op, dst, left, right, if prefix == "wrapping" -> IR_OVERFLOW_WRAP else -> IR_OVERFLOW_TRAP, b.line)
+        ir_stop_trap(&m, &b, at)
         return dst
     }
     checked :: prefix == "checked"

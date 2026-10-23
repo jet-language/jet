@@ -38,8 +38,9 @@ fn numeric_widen_stop(file: I64, line: I64) {
     }
     precision :: if target_f32 -> I64{24} else -> I64{53}
     if (significant > precision && trailing < significant - precision) {
+        // The stop is published: the caller's stop point takes it.
         numeric_widen_stop(file, line)
-        loop { jet_rt_unreachable(I64{0}, I64{0}) }
+        return 0.0
     }
     if (signed || raw >= I64{0}) -> return Float{raw}
     // Split unsigned conversion at bit63 without a U64->I64 checked cast.

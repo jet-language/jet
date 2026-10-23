@@ -142,6 +142,20 @@ struct IRX64Cold {
     unsigned: Int
     width: Int
     line: Int
+    // Stop, ShiftStop, LocatedRoute: the If of the stop point the slow path
+    // leaves by once it published a stop (ir_x64_stop_point), -1 for none.
+    pad: Int
+}
+
+// A stop point's edge: If `at` (its End at `end`), entered from the hot
+// branch at rel32 field `site` (-1 when only slow paths enter), laid out
+// after the epilogue with the open constructs of its If (`open`, `heads`).
+struct IRX64Pad {
+    at: Int
+    end: Int
+    site: Int
+    open: [Int]
+    heads: [Int]
 }
 
 struct IRX64Emitter {
@@ -156,7 +170,8 @@ struct IRX64Emitter {
     // rel32 fields that jump to the End of opener `end_targets[k]`.
     end_sites: [Int]
     end_targets: [Int]
-    // rel32 fields of Returns that jump to the epilogue.
+    // rel32 fields of Returns that jump to the epilogue (a stop edge's: to
+    // the stop exit).
     returns: [Int]
     colds: [IRX64Cold]
     errors: [String]
@@ -165,6 +180,11 @@ struct IRX64Emitter {
     // when it is true (ir_x64_fusable).
     fused: Int
     fused_cond: X64Cond
+    // Per instruction: the offset of an opener's End once laid out (-1
+    // before), and an If's stop edge label (-1 for none).
+    end_of: [Int]
+    pad_label: [Int]
+    pads: [IRX64Pad]
 }
 
 // One compiled function and the debug variables its ranges refer to.
@@ -443,7 +463,7 @@ fn ir_x64_helper(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
 // Slow paths.
 
 fn ir_x64_cold(kind: IRX64ColdKind, sites: [Int]) -> IRX64Cold Never! {
-    IRX64Cold{kind: kind, sites: sites, resume: -1, symbol: "", left: -1, left_imm: 0, right: -1, right_imm: 0, dst: -1, cond: X64Cond.E, text: -1, direction: 0, unsigned: 0, width: 0, line: 0}
+    IRX64Cold{kind: kind, sites: sites, resume: -1, symbol: "", left: -1, left_imm: 0, right: -1, right_imm: 0, dst: -1, cond: X64Cond.E, text: -1, direction: 0, unsigned: 0, width: 0, line: 0, pad: -1}
 }
 
 // `jo` when `reg` is not an inline Int (bits 63 and 62 differ), through rdx.
@@ -486,11 +506,12 @@ fn ir_x64_stop_texts() -> [String] Never! {
     [String]{IR_X64_DIVIDED_BY_ZERO, ir_x64_overflow_message("add"), ir_x64_overflow_message("sub"), ir_x64_overflow_message("mul"), ir_x64_overflow_message("div")}
 }
 
-// Lays out every slow path after the epilogue. In a module with stop points
-// (IRModule.stop_points) a slow path whose runtime call published a stop
-// leaves the function by the `epilogue` with no result written; its
-// caller's stop check takes the stop on (Build.jet ir_stop_check).
-fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, epilogue: Int) Never! {
+// Lays out every slow path after the epilogue and the stop edges. In a
+// module with stop points (IRModule.stop_points) a slow path whose runtime
+// call published a stop leaves by its stop point's edge (IRX64Cold.pad),
+// else by the stop `exit` with no result written, where its caller's stop
+// check takes the stop on (Build.jet ir_stop_check).
+fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, exit: Int) Never! {
     loop cold in e.colds {
         here :: e.code.len()
         loop site in cold.sites -> x64_patch_rel32(&e.code, site, here)
@@ -525,7 +546,8 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                     x64_pop(&e.code, X64_RAX)
                     x64_pop(&e.code, X64_RAX)
                     stopped :: x64_jcc_rel32(&e.code, X64Cond.NE)
-                    x64_patch_rel32(&e.code, stopped, epilogue)
+                    target :: ir_x64_stop_target(e, cold, exit)
+                    x64_patch_rel32(&e.code, stopped, target)
                 }
                 ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
                 ir_x64_jump_to(&e, cold.resume)
@@ -553,7 +575,8 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 x64_mov_ri(&e.code, X64_R8, tables.lengths[cold.text])
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}})
-                ir_x64_stop_resume(&e, m, epilogue)
+                target :: ir_x64_stop_target(e, cold, exit)
+                ir_x64_stop_resume(&e, m, target)
             }
             .ShiftStop -> {
                 path :: tables.texts.get(cold.symbol) ?? -1
@@ -569,18 +592,29 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 x64_push(&e.code, X64_R11)
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: "jet_rt_fixed_shift_stop"}})
-                ir_x64_stop_resume(&e, m, epilogue)
+                // The edge runs code of the body's frame: the argument
+                // bytes go first.
+                target :: ir_x64_stop_target(e, cold, exit)
+                if target != exit -> x64_alu_ri(&e.code, X64Alu.Add, X64_RSP, 16)
+                ir_x64_stop_resume(&e, m, target)
             }
         }
     }
 }
 
+// Where slow path `cold` leaves once it published a stop: its stop point's
+// edge, else the stop `exit`.
+fn ir_x64_stop_target(e: IRX64Emitter, cold: IRX64Cold, exit: Int) -> Int Never! {
+    if cold.pad >= 0 && e.pad_label[cold.pad] >= 0 -> return e.pad_label[cold.pad]
+    exit
+}
+
 // After a numeric stop's runtime call, which returns only when it published
-// the stop on a task or root control: leave by the `epilogue` in a module
-// with stop points, else trap.
-fn ir_x64_stop_resume(e: &IRX64Emitter, m: IRModule, epilogue: Int) Never! {
+// the stop on a task or root control: leave by `target` (the stop edge or
+// the stop exit) in a module with stop points, else trap.
+fn ir_x64_stop_resume(e: &IRX64Emitter, m: IRModule, target: Int) Never! {
     if m.stop_points {
-        ir_x64_jump_to(&e, epilogue)
+        ir_x64_jump_to(&e, target)
     } else {
         x64_ud2(&e.code)
     }
@@ -1373,12 +1407,14 @@ fn ir_x64_target(e: IRX64Emitter, depth: Int) -> Int Never! {
 }
 
 // A jump (or a jcc on `cond` when `conditional`) to the construct `depth` out:
-// back to a Loop's head, forward to a Block's or If's End.
+// back to a Loop's head, forward to a Block's or If's End (already laid out
+// for a branch from a stop edge).
 fn ir_x64_branch(e: &IRX64Emitter, f: IRFunction, at: Int, depth: Int, conditional: Bool, cond: X64Cond) Never! {
     row :: ir_x64_target(e, depth)
     if row < 0 -> return ir_x64_fail(&e, f, at, "branch depth {depth} leaves the function")
     site :: if conditional -> x64_jcc_rel32(&e.code, cond) else -> x64_jmp_rel32(&e.code)
     if e.heads[row] >= 0 -> return x64_patch_rel32(&e.code, site, e.heads[row])
+    if e.end_of[e.open[row]] >= 0 -> return x64_patch_rel32(&e.code, site, e.end_of[e.open[row]])
     &e.end_sites.push(site)
     &e.end_targets.push(e.open[row])
 }
@@ -1406,6 +1442,7 @@ fn ir_x64_end(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     here :: e.code.len()
     row :: e.open.len() - 1
     opener :: e.open[row]
+    e.end_of[opener] = here
     if e.falses[row] >= 0 -> x64_patch_rel32(&e.code, e.falses[row], here)
     kept := 0
     loop index in 0..<e.end_sites.len() {
@@ -1553,6 +1590,178 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
 }
 
 // ---------------------------------------------------------------------------
+// Stop points.
+
+// A stop point (Build.jet ir_stop_point): `stopped := poll()` at `at`, then
+// `if stopped { edge }` with no Else, its Bool read by nothing else. Right
+// after a direct call of a selected body (ir_x64_reports_stop) the hot path
+// is `test edx, edx; jnz edge`: every body returns edx 0 from its epilogue
+// and 1 from its stop exit. Elsewhere it keeps `call poll; test rax, rax;
+// jnz edge`. The edge goes after the epilogue (ir_x64_pads). A trap poll
+// right after slow paths that publish a numeric stop (colds from `traps`
+// on) keeps no hot code: those slow paths take the edge (IRX64Cold.pad).
+// Returns the If's End when `at` is such a stop point, else -1.
+fn ir_x64_stop_point(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, poll: Int, trap: Int, traps: Int) -> Int Never! {
+    if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap) -> return -1
+    branch :: at + 1
+    stopped :: f.dst[at]
+    if stopped < 0 || branch >= f.op.len() || f.op[branch] != .If || f.a[branch] != stopped || f.b[branch] >= 0 || al.ends[stopped] != branch -> return -1
+    wired := false
+    if f.a[at] == trap {
+        loop index in traps..<e.colds.len() {
+            kind :: e.colds[index].kind
+            if kind == .Stop || kind == .ShiftStop || kind == .LocatedRoute {
+                e.colds[index].pad = branch
+                wired = true
+            }
+        }
+    }
+    site := -1
+    if !wired {
+        if at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
+            // test edx, edx
+            &e.code.push(0x85)
+            &e.code.push(0xd2)
+        } else {
+            ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
+            x64_test_rr(&e.code, X64_RAX, X64_RAX)
+        }
+        site = x64_jcc_rel32(&e.code, X64Cond.NE)
+    }
+    // A branch from the edge to its own If's End resumes here.
+    e.end_of[branch] = e.code.len()
+    &e.pads.push(IRX64Pad{at: branch, end: f.c[branch], site: site, open: e.open, heads: e.heads})
+    f.c[branch]
+}
+
+// Whether function `id` is a selected body (ir_x64_compile_body), whose
+// return leaves edx 1 when it took a stop edge and 0 otherwise. An asm leaf
+// or a poll leaves edx as it is.
+fn ir_x64_reports_stop(m: IRModule, id: Int) -> Bool Never! {
+    if id < 0 || id >= m.functions.len() || m.functions[id].asm != None -> return false
+    key :: m.functions[id].key
+    key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY
+}
+
+// Lays out the stop edges after the epilogue, each distinct one once
+// (ir_x64_pad_key); an edge that is a bare Return (nothing to clean up) is
+// the stop `exit` itself, and every Return in an edge leaves by it. An edge
+// runs in the body's frame with the open constructs of its If (every one
+// already laid out); one that falls off its end resumes after the If.
+fn ir_x64_pads(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, exit: Int, lines: &[X64LineRow]) Never! {
+    seen := [String:Int]{}
+    loop pad in e.pads {
+        label := exit
+        bare :: pad.end == pad.at + 2 && f.op[pad.at + 1] == .Return && f.a[pad.at + 1] < 0
+        if !bare {
+            key :: ir_x64_pad_key(f, al, pad)
+            label = seen.get(key) ?? -1
+            if label < 0 {
+                label = e.code.len()
+                seen[key] = label
+                e.open = pad.open
+                e.heads = pad.heads
+                &e.open.push(pad.at)
+                &e.heads.push(-1)
+                e.falses = [Int]{}
+                loop _ in 0..<e.open.len() -> &e.falses.push(-1)
+                e.fused = -1
+                loop at in (pad.at + 1)..<pad.end {
+                    ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
+                    ir_x64_select(&e, m, f, al, tables, at)
+                }
+                last :: f.op[pad.end - 1]
+                resume :: e.end_of[pad.at]
+                if pad.end == pad.at + 1 || (last != .Return && last != .Br && last != .Unreachable) -> ir_x64_jump_to(&e, resume)
+            }
+        }
+        e.pad_label[pad.at] = label
+        if pad.site >= 0 -> x64_patch_rel32(&e.code, pad.site, label)
+    }
+    e.open = [Int]{}
+    e.heads = [Int]{}
+    e.falses = [Int]{}
+}
+
+// What laying out stop edge `pad` depends on, lines aside: each
+// instruction's op and operands, where a slot that lives only inside the
+// edge is numbered in order of first use (with its type). Edges with one
+// key share one layout: each slot keeps one place over its range
+// (X64Alloc), and every way out is a Return (or a trap), after which no
+// slot is read. An edge that can leave otherwise (a branch out of it, as
+// an inlined callee's edge does, or its end) runs on in the body, where
+// another edge's temporaries may share a live register: its key is its own.
+fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> String Never! {
+    names := [Int:Int]{}
+    order := [Int]{}
+    reads := [Int]{}
+    out := [String]{}
+    depth := 0
+    last :: f.op[pad.end - 1]
+    escapes := pad.end == pad.at + 1 || (last != .Return && last != .Unreachable)
+    loop at in (pad.at + 1)..<pad.end {
+        op :: f.op[at]
+        a :: f.a[at]
+        b :: f.b[at]
+        c :: f.c[at]
+        text := ir_op_name(op)
+        if op == {
+            .Block | .Loop -> {
+                text = "{text} {a - at}"
+                depth += 1
+            }
+            .If -> {
+                cond :: ir_x64_key_slot(f, al, pad, &names, &order, a)
+                text = "{text} {cond} {if b >= 0 -> b - at else -> -1} {c - at}"
+                depth += 1
+            }
+            .Else -> text = "{text} {a - at}"
+            .End -> {
+                text = "{text} {a - at}"
+                depth -= 1
+            }
+            .Br | .BrIf -> {
+                level :: if op == .Br -> a else -> b
+                if level >= depth -> escapes = true
+                cond :: if op == .BrIf -> ir_x64_key_slot(f, al, pad, &names, &order, a) else -> ""
+                text = "{text} {level} {cond}"
+            }
+            else -> {
+                text = "{text} {ir_x64_key_slot(f, al, pad, &names, &order, ir_x64_write(f, at))}"
+                ir_x64_reads_into(f, at, &reads)
+                loop slot in reads -> text = "{text} {ir_x64_key_slot(f, al, pad, &names, &order, slot)}"
+                // The fields that are no slots.
+                if op == {
+                    .Call | .CallRuntime -> text = "{text} | {a} {c}"
+                    .CallIndirect -> text = "{text} | {c}"
+                    .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> text = "{text} | {c}"
+                    .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset -> text = "{text} | {b} {c}"
+                    .Store -> text = "{text} | {b}"
+                    .Return -> {}
+                    else -> text = "{text} | {a} {b} {c}"
+                }
+            }
+        }
+        &out.push(text)
+    }
+    if escapes -> &out.push("@{pad.at}")
+    out.join("\n")
+}
+
+// A slot in ir_x64_pad_key: one live only inside the edge by its number in
+// `order` (its first use adds it, with its type), any other by itself.
+fn ir_x64_key_slot(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, names: &[Int:Int], order: &[Int], slot: Int) -> String Never! {
+    if slot < 0 -> return "_"
+    if f.slot_kind[slot] != .Temp || al.starts[slot] <= pad.at || al.ends[slot] >= pad.end -> return "s{slot}"
+    known :: names.get(slot) ?? -1
+    if known >= 0 -> return "t{known}"
+    id :: order.len()
+    &order.push(slot)
+    names[slot] = id
+    "t{id}:{f.slot_type[slot]}"
+}
+
+// ---------------------------------------------------------------------------
 // One function.
 
 // Debug variables and their locations: a register slot over its live range,
@@ -1590,8 +1799,47 @@ fn ir_x64_import(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
 }
 
 fn ir_x64_compile_function(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
+    key :: m.functions[row].key
+    if key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY -> return ir_x64_stop_poll(m.functions[row], row)
     if m.functions[row].asm == .Val(leaf) -> return ir_x64_asm_function(m.functions[row], leaf, row)
     ir_x64_compile_body(m, m.functions[row], tables, row)
+}
+
+// A stop poll (Build.jet ir_stop_poll), frameless: GS:0 holds the attached
+// thread's TCB address (OS/Linux.jet os_tls_base_i64), whose word 16 is the
+// current task control, whose word 32 is its status (JetRuntime
+// Scheduler.jet scheduler_control_current); an unattached thread's GS names
+// a zero word (Thread.jet thread_base). With no stop it returns 0 from the
+// first zero word; with one, jet_rt_session_propagate's delivered status as
+// a Bool (zero while a cleanup or shield masks it):
+//   mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
+//   test rax, rax; jz done; mov rax, [rax + 32]; test rax, rax; jz done;
+//   sub rsp, 8; call jet_rt_session_propagate; add rsp, 8; test rax, rax;
+//   setne al; movzx eax, al; done: ret
+fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
+    code := [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x85, 0xc0, 0x74, 0x28, 0x48, 0x8b, 0x40, 0x10, 0x48, 0x85, 0xc0, 0x74, 0x1f, 0x48, 0x8b, 0x40, 0x20, 0x48, 0x85, 0xc0, 0x74, 0x16, 0x48, 0x83, 0xec, 0x08}
+    call_at :: code.len()
+    status_at :: x64_call_rel32(&code)
+    restore :: [U8]{0x48, 0x83, 0xc4, 0x08}
+    loop byte in restore -> &code.push(byte)
+    restored :: code.len()
+    result :: [U8]{0x48, 0x85, 0xc0, 0x0f, 0x95, 0xc0, 0x0f, 0xb6, 0xc0}
+    loop byte in result -> &code.push(byte)
+    x64_ret(&code)
+    // The CFA is rsp + 8, rsp + 16 from the `sub` to the `add`.
+    cfi := [U8]{}
+    dwarf_cfa_advance(&cfi, 0, call_at)
+    dwarf_cfa_def_cfa_offset(&cfi, 16)
+    dwarf_cfa_advance(&cfi, call_at, restored)
+    dwarf_cfa_def_cfa_offset(&cfi, 8)
+    relocs := [X64Reloc]{X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}}}
+    name :: if f.symbol != "" -> f.symbol else -> f.key
+    IRX64FunctionResult{
+        function: X64CompiledFunction{id: LIRFunctionID{value: row}, name: name, code: ^code, relocs: ^relocs},
+        debug: X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: ^cfi, ranges: [X64VariableRange]{}},
+        variables: [LIRDebugVariable]{},
+        errors: [String]{},
+    }
 }
 
 // An `#FFI(asm)` leaf (IRFunction.asm): the template's bytes in the
@@ -1664,7 +1912,11 @@ fn ir_x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
 // Function row `row` (`f`, borrowed from `m`).
 fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al :: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE}
+    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}}
+    loop _ in 0..<f.op.len() {
+        &e.end_of.push(-1)
+        &e.pad_label.push(-1)
+    }
 
     // The frame and its call frame instructions, as the old selector's:
     // after `push rbp` the CFA is rsp + 16 with rbp below the return
@@ -1728,17 +1980,35 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         &lines.push(X64LineRow{at: body, line: f.line})
     }
     positions := [Int]{}
-    loop at in 0..<f.op.len() {
+    poll :: m.function_rows.get(IR_STOP_POLL_KEY) ?? -1
+    trap :: m.function_rows.get(IR_STOP_TRAP_KEY) ?? -1
+    // The slow paths of the instruction before `at` start at colds[traps].
+    traps := 0
+    at := 0
+    loop at < f.op.len() {
         &positions.push(e.code.len())
         ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
+        end :: ir_x64_stop_point(&e, m, f, al, at, poll, trap, traps)
+        traps = e.colds.len()
+        if end > at {
+            loop _ in (at + 1)..<(end + 1) -> &positions.push(e.code.len())
+            at = end + 1
+            next
+        }
         ir_x64_select(&e, m, f, al, tables, at)
+        at += 1
     }
     &positions.push(e.code.len())
     if e.open.len() > 0 -> &e.errors.push("{f.name}: {e.open.len()} structured constructs are never closed")
 
-    // The one epilogue.
+    // The one epilogue. A return leaves edx 0 (no stop) for its caller's
+    // stop point (ir_x64_stop_point); `xor`, `lea`, `pop` and `ret` keep
+    // the result registers.
     epilogue :: e.code.len()
-    loop site in e.returns -> x64_patch_rel32(&e.code, site, epilogue)
+    // xor edx, edx
+    &e.code.push(0x31)
+    &e.code.push(0xd2)
+    restore :: e.code.len()
     x64_lea(&e.code, X64_RSP, X64_RBP, 0 - 8 * al.saved.len())
     index := al.saved.len() - 1
     loop index >= 0 {
@@ -1755,7 +2025,26 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
     dwarf_cfa_advance(&cfi, ret_at, ret_at + 1)
     dwarf_cfa_restore_state(&cfi)
-    ir_x64_emit_colds(&e, m, f, al, tables, epilogue)
+    // The stop exit: the epilogue with edx 1 (a stop edge was taken), for
+    // the stop edges and the slow paths that published a stop.
+    exit := epilogue
+    stops := m.stop_points && e.pads.len() > 0
+    loop cold in e.colds {
+        if m.stop_points && (cold.kind == .Stop || cold.kind == .ShiftStop || cold.kind == .LocatedRoute) -> stops = true
+    }
+    if stops {
+        exit = e.code.len()
+        // mov edx, 1
+        set :: [U8]{0xba, 1, 0, 0, 0}
+        loop byte in set -> &e.code.push(byte)
+        ir_x64_jump_to(&e, restore)
+    }
+    body_returns :: e.returns.len()
+    ir_x64_pads(&e, m, f, al, tables, exit, &lines)
+    loop (nth, site) in e.returns {
+        x64_patch_rel32(&e.code, site, if nth < body_returns -> epilogue else -> exit)
+    }
+    ir_x64_emit_colds(&e, m, f, al, tables, exit)
 
     variables := [LIRDebugVariable]{}
     ranges := [X64VariableRange]{}
