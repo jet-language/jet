@@ -158,12 +158,50 @@ fn alloc_test_full_slabs() {
     }
     alloc_cache_flush()
     head :: alloc_head(arena, I64{4096})
-    #Unsafe("after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped") {
+    #Unsafe("after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked onto the free-slab stack") {
         retained :: os_load_i64(wrapping(head + I64{64}))
         alloc_test_require(retained != I64{0} && os_load_i64(head) == retained)
         alloc_test_require(os_load_i64(retained) == I64{0})
         alloc_test_require(os_load_i64(wrapping(retained + I64{8})) == I64{0})
         alloc_test_require(os_load_i64(wrapping(retained + I64{24})) == I64{0})
+    }
+}
+
+// Ten slabs of class 4096 emptied at once: the class keeps at most
+// ALLOC_RETAINED_EMPTY_SLABS of them, the rest go on the free-slab stack
+// still mapped, and the next slab mapped for any class is the stack's top.
+fn alloc_test_slab_stack() {
+    alloc_cache_flush()
+    chain := I64{0}
+    count := I64{0}
+    loop count < (I64{150}) {
+        pointer :: jet_rt_alloc(I64{2048}, I64{16})
+        #Unsafe("the test owns the full payload and keeps its chain word there") {
+            os_store_i64(pointer, chain)
+        }
+        chain = pointer
+        count = wrapping(count + I64{1})
+    }
+    loop chain != (I64{0}) {
+        pointer :: chain
+        #Unsafe("the chain word remains readable until its payload is freed") {
+            chain = os_load_i64(pointer)
+        }
+        jet_rt_free(pointer, I64{2048}, I64{16})
+    }
+    alloc_cache_flush()
+    stacked := I64{0}
+    #Unsafe("this thread is the heap's only user; the stack word is read once and the stacked slab's link word stays mapped") {
+        stacked = os_load_i64(wrapping(alloc_root + I64{760}))
+        alloc_test_require(stacked != I64{0})
+        os_store_i64(wrapping(stacked + I64{8}), I64{1})
+    }
+    taken :: alloc_slab_map()
+    alloc_test_require(taken == stacked)
+    alloc_slab_retire(taken)
+    #Unsafe("the retired slab is the stack's top again; its pages were never unmapped") {
+        alloc_test_require(os_load_i64(wrapping(alloc_root + I64{760})) == stacked)
+        alloc_test_require(os_load_i64(wrapping(stacked + I64{8})) == I64{1})
     }
 }
 
@@ -283,6 +321,7 @@ fn alloc_tests() {
     alloc_test_large_reuse()
     alloc_test_reuse()
     alloc_test_full_slabs()
+    alloc_test_slab_stack()
     alloc_test_counts()
     alloc_test_cache()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {

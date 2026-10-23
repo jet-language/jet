@@ -9,7 +9,8 @@
 // [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
 // 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
 // the large-block cache owns lock 216, cached bytes 224 and 59 class heads
-// from 256.
+// from 256; the slab regions own lock 736, cursor 744, end 752 and the
+// free-slab stack 760 (alloc_slab_map).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
@@ -45,9 +46,10 @@
 // (alloc_lock: a short spin, then a kernel sleep), so threads on different
 // stacks rarely contend and a waiter never burns a core. Payloads belong exclusively to
 // their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per class and
-// arena stay linked to avoid mmap/munmap on every temporary; additional empty
-// slabs are unmapped
-// immediately. Large mappings are rounded to a size class (at most 25% over
+// arena stay linked to avoid relinking on every temporary; additional empty
+// slabs go on the process's free-slab stack, still mapped, for the next new
+// slab of any class (alloc_slab_map: slabs are carved from slab regions and
+// their pages never fault twice). Large mappings are rounded to a size class (at most 25% over
 // the page-rounded need) and a freed one is kept on its class list while the
 // cache holds at most 64 MiB in all (resident pages a compiler keeps, so the
 // bound stays small), for the next allocation of that class instead of
@@ -284,22 +286,100 @@ fn alloc_link(slab: I64, head: I64) {
     }
 }
 
+// Slabs come from slab regions, not one mapping each: a region is
+// ALLOC_REGION of 4 KiB pages, mapped once and carved 64 KiB at a time, so a
+// program touches only the pages its blocks use and a growing heap makes one
+// mmap per 512 slabs. A slab that is no longer needed (more empty slabs than
+// ALLOC_RETAINED_EMPTY_SLABS) goes on the process's free-slab stack and serves
+// the next new slab of any class and arena. Its pages are never returned, so
+// they never fault again.
+// State page words: lock 736, region cursor 744, region end 752, free-slab
+// stack 760 (a stacked slab's first word links the next).
+ALLOC_SLAB_BYTES :: I64{65536}
+ALLOC_REGION :: I64{33554432}
+
+// A slab's 64 KiB: a stacked slab, else the next of the current region,
+// mapping a new region when it is used up. Zero when no region can be
+// mapped. A stacked slab's bytes are stale: alloc_new_slab rewrites its header.
+fn alloc_slab_map() -> I64 {
+    lock :: wrapping(alloc_root + I64{736})
+    slab := I64{0}
+    alloc_lock(lock)
+    #Unsafe("the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word") {
+        stack :: wrapping(alloc_root + I64{760})
+        slab = os_load_i64(stack)
+        if (slab != I64{0}) {
+            os_store_i64(stack, os_load_i64(slab))
+        } else {
+            cursor :: wrapping(alloc_root + I64{744})
+            end :: wrapping(alloc_root + I64{752})
+            if (os_load_i64(cursor) == os_load_i64(end)) {
+                region :: alloc_region_map()
+                if (region != I64{0}) {
+                    os_store_i64(cursor, region)
+                    os_store_i64(end, wrapping(region + ALLOC_REGION))
+                }
+            }
+            at :: os_load_i64(cursor)
+            if (at != os_load_i64(end)) {
+                slab = at
+                os_store_i64(cursor, wrapping(at + ALLOC_SLAB_BYTES))
+            }
+        }
+    }
+    alloc_unlock(lock)
+    slab
+}
+
+// Puts a slab no class holds on the free-slab stack, mapped.
+fn alloc_slab_retire(slab: I64) {
+    lock :: wrapping(alloc_root + I64{736})
+    alloc_lock(lock)
+    #Unsafe("the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block") {
+        stack :: wrapping(alloc_root + I64{760})
+        os_store_i64(slab, os_load_i64(stack))
+        os_store_i64(stack, slab)
+    }
+    alloc_unlock(lock)
+}
+
+// A new slab region, or zero. It keeps 4 KiB pages (MADV_NOHUGEPAGE): where
+// the system makes huge pages unasked, a first touch would zero 2 MiB, and an
+// advised huge region compacts memory synchronously on fault, which stalls
+// every thread allocating under a loaded host. A refused advice only costs
+// page size.
+fn alloc_region_map() -> I64 {
+    region :: alloc_map_try(ALLOC_REGION)
+    if (region == I64{0}) { return I64{0} }
+    #Unsafe("madvise only changes the page size of the fresh private region") {
+        _ := os_syscall_i64(I64{28}, region, ALLOC_REGION, I64{15}, I64{0}, I64{0}, I64{0})
+    }
+    region
+}
+
+// A slab for class `slot` of arena `root`, linked on the class list `head`.
+// Its header: [next 0][prev 8][free 16][live 24][head 32][arena 40][carve 48].
 fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
-    slab :: alloc_map_try(I64{65536})
+    slab :: alloc_slab_map()
     if (slab == I64{0}) { return I64{0} }
     first :: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
-    #Unsafe("the fresh zeroed 64KiB mapping's header words; the heap lock excludes all list readers") {
+    #Unsafe("the slab is this arena's alone: fresh from its region or off the free-slab stack; the held arena lock excludes all list readers") {
+        os_store_i64(slab, I64{0})
+        os_store_i64(wrapping(slab + I64{8}), I64{0})
+        os_store_i64(wrapping(slab + I64{16}), I64{0})
+        os_store_i64(wrapping(slab + I64{24}), I64{0})
         os_store_i64(wrapping(slab + I64{32}), head)
         os_store_i64(wrapping(slab + I64{40}), root)
-        if (wrapping(first + slot) <= wrapping(slab + I64{65536})) { os_store_i64(wrapping(slab + I64{48}), first) }
+        os_store_i64(wrapping(slab + I64{48}), if (wrapping(first + slot) <= wrapping(slab + ALLOC_SLAB_BYTES)) -> first else -> I64{0})
     }
     alloc_link(slab, head)
     slab
 }
 
 // Empty slabs a class keeps linked per arena, so a burst of temporaries
-// (a thread's cache drains 32 blocks at a time) does not unmap a slab it
-// maps again moments later: at most 8 x 64 KiB per class and arena.
+// (a thread's cache drains 32 blocks at a time) does not give up a slab it
+// takes again moments later: at most 8 x 64 KiB per class and arena. Any
+// further empty slab goes on the free-slab stack (alloc_slab_retire).
 ALLOC_RETAINED_EMPTY_SLABS :: I64{8}
 
 // Take up to `limit` free blocks of the class's head slab under the held
@@ -358,7 +438,7 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
 // is linked again when it had no block left to give (an empty free list and
 // nothing left to carve); a slab whose last block
 // returns stays linked as one of the class's retained empty slabs
-// (ALLOC_RETAINED_EMPTY_SLABS) or is unmapped.
+// (ALLOC_RETAINED_EMPTY_SLABS) or goes on the free-slab stack.
 fn alloc_slab_return(slab: I64, block: I64) {
     #Unsafe("the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
         free :: os_load_i64(wrapping(slab + I64{16}))
@@ -375,7 +455,7 @@ fn alloc_slab_return(slab: I64, block: I64) {
             count :: os_load_i64(retained)
             if (count < ALLOC_RETAINED_EMPTY_SLABS) { os_store_i64(retained, wrapping(count + I64{1})) } else {
                 alloc_unlink(slab)
-                alloc_unmap(slab, I64{65536})
+                alloc_slab_retire(slab)
             }
         }
     }
