@@ -854,6 +854,8 @@ fn jet_cli_launch_plan(file: String, program_args: [String], release: Bool, invo
     X64Launch{argv: argv, env: env, executable: executable, name: jet_cli_stem(file), relaunch: relaunch}
 }
 
+#Import(c) fn jet_cli_scheduler_shutdown() -> I64 = "jet_rt_scheduler_shutdown"
+
 // Run the linked program `image` of `file` with `program_args` on this
 // process's stdin, stdout and stderr, as its built file would run, and end as
 // it ends: in memory (Image/Loader.jet) in place of jet when jet is
@@ -867,6 +869,9 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
     loaded :: x64_image_load(image)
     reason := loaded.failure
     if reason == "" {
+        // The compile's scheduler threads are idle now; joining them leaves
+        // jet single-threaded, so the program can take its place.
+        _ := jet_cli_scheduler_shutdown()
         if x64_process_threads() == 1 {
             reason = x64_image_exec(loaded, launch)
             x64_image_unload(loaded)
