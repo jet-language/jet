@@ -1,0 +1,12 @@
+// A stop delivered in a callee (a backwards interval, as in Card #2302)
+// leaves through every caller's stop edge. Under SSA stress the stop points'
+// Bools shared a slot with other values, so selection did not take their Ifs
+// as stop edges: RNG.int returned without reporting its stop (edx 0), its
+// caller went on, and the program ended in an internal error instead of the
+// stop.
+use core.math.random as random
+
+fn run() {
+    rng := random.rng(1)
+    &rng.int(9, 3).drop("only the backwards-interval stop matters")
+}

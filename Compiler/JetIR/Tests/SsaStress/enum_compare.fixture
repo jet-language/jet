@@ -1,0 +1,106 @@
+// Derived ==, compare and ordered operators on payload-free enums (a tag
+// compare, BuildExpr ir_tag_method), on a payload enum and on a struct.
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+enum Level {
+    Low
+    Mid
+    High
+    Max
+}
+
+enum Shape {
+    Dot
+    Circle(Int)
+    Square(Int)
+}
+
+struct Pair {
+    c: Color
+    n: Int
+}
+
+fn color_index(c: Color) -> Int {
+    if c == {
+        .Red -> 0
+        .Green -> 1
+        .Blue -> 2
+    }
+}
+
+fn level_index(l: Level) -> Int {
+    if l == {
+        .Low -> 0
+        .Mid -> 1
+        .High -> 2
+        .Max -> 3
+    }
+}
+
+fn pick(i: Int) -> Color {
+    if i %% 3 == {
+        0 -> .Red
+        1 -> .Green
+        else -> .Blue
+    }
+}
+
+fn level(i: Int) -> Level {
+    if i %% 4 == {
+        0 -> .Low
+        1 -> .Mid
+        2 -> .High
+        else -> .Max
+    }
+}
+
+fn order(a: Int, b: Int) -> Ordering {
+    if a < b -> return Ordering.Less
+    if a > b -> return Ordering.Greater
+    Ordering.Equal
+}
+
+fn generic_eq<T: Equatable>(a: T, b: T) -> Bool {
+    a == b
+}
+
+fn run() {
+    bad := 0
+    total := 0
+    loop i in 0..<9 {
+        loop j in 0..<9 {
+            a :: pick(i)
+            b :: pick(j)
+            ai :: color_index(a)
+            bi :: color_index(b)
+            if (a == b) != (ai == bi) -> bad += 1
+            if (a != b) != (ai != bi) -> bad += 1
+            if (a < b) != (ai < bi) -> bad += 1
+            if (a <= b) != (ai <= bi) -> bad += 1
+            if (a > b) != (ai > bi) -> bad += 1
+            if (a >= b) != (ai >= bi) -> bad += 1
+            if a.compare(b) != order(ai, bi) -> bad += 1
+            if generic_eq(a, b) != (ai == bi) -> bad += 1
+            la :: level(i)
+            lb :: level(j)
+            if (la == lb) != (level_index(la) == level_index(lb)) -> bad += 1
+            if (la != lb) != (level_index(la) != level_index(lb)) -> bad += 1
+            if a.compare(b) == .Less -> total += 1
+            pa :: Pair{c: a, n: j}
+            pb :: Pair{c: b, n: i}
+            if (pa < pb) != (ai < bi || (ai == bi && j < i)) -> bad += 1
+            if (pa == pb) != (ai == bi && i == j) -> bad += 1
+        }
+    }
+    s :: Shape.Circle(3)
+    t :: Shape.Square(1)
+    print("{bad} {total} {s < t} {s == t} {Shape.Dot < s} {Color.Blue > Color.Red} {Color.Green.compare(Color.Green):Debug} {Level.Max == Level.Max}")
+    colors := [Color]{.Blue, .Red, .Green, .Red, .Blue}
+    &colors.sort()
+    print("{colors:Debug}")
+}

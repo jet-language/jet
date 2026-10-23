@@ -1,0 +1,89 @@
+// [Bool] lists through every List route, with calls between the prints: at
+// O2 under SSA stress the moves SsaOut adds separate a stop poll from its If
+// (X64Select ir_x64_stop_point), and the poll must still be called.
+
+STATIC_FLAGS :: [true, false, false, true, true]
+
+struct Board {
+    cells: [Bool]
+    name: String
+}
+
+fn flip(xs: [Bool]) -> [Bool] {
+    out := [Bool]{}
+    loop x in xs -> &out.push(!x)
+    out
+}
+
+fn count(xs: [Bool]) -> Int {
+    n := 0
+    loop x in xs {
+        if x -> n += 1
+    }
+    n
+}
+
+fn sieve(n: Int) -> Int {
+    marks := [Bool]{}
+    loop _ in 0..<n -> &marks.push(true)
+    marks[0] = false
+    marks[1] = false
+    i := 2
+    loop i * i < n {
+        if marks[i] {
+            j := i * i
+            loop j < n {
+                marks[j] = false
+                j += i
+            }
+        }
+        i += 1
+    }
+    count(marks)
+}
+
+fn run() {
+    xs := [true, false, true, true, false, false, true]
+    print("{xs} {xs.len()} {count(xs)}")
+    &xs.push(false)
+    &xs.push(true)
+    print("{xs} {xs.len()}")
+    popped :: &xs.pop()
+    print("{popped} {xs}")
+    xs[1] = true
+    xs[2] = false
+    print("{xs} first={xs.first()} last={xs.last()}")
+    print("contains true {xs.contains(true)} index_of false {xs.index_of(false)}")
+    ys := flip(xs)
+    print("{ys} eq {xs == ys} eq2 {xs == flip(ys)}")
+    &ys.sort()
+    print("sorted {ys}")
+    &ys.reverse()
+    print("reversed {ys}")
+    print("slice {xs[1..<4]}")
+    print("static {STATIC_FLAGS} {count(STATIC_FLAGS)}")
+    b := Board{cells: [false, true, true], name: "b"}
+    &b.cells.push(false)
+    print("{b.name} {b.cells} {count(b.cells)}")
+    grid := [[Bool]]{}
+    loop r in 0..<3 {
+        row := [Bool]{}
+        loop c in 0..<5 -> &row.push((r + c) %% 2 == 0)
+        &grid.push(row)
+    }
+    print("grid {grid}")
+    total := 0
+    loop row in grid -> total += count(row)
+    print("grid count {total}")
+    many := [Bool]{}
+    loop k in 0..<1000 -> &many.push(k %% 3 == 0)
+    print("many {count(many)} {many[999]} {many[998]} {many[0]}")
+    print("sieve {sieve(100000)}")
+    print("min {xs.min()} max {xs.max()}")
+    words := [Int]{}
+    loop k in 0..<9 -> &words.push(k)
+    odd :: words.filter((w: Int) -> w %% 2 == 1)
+    print("odd {odd}")
+    flags :: words.map((w: Int) -> w > 4)
+    print("flags {flags} {count(flags)}")
+}

@@ -1531,7 +1531,10 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Concat -> ir_x64_helper(&e, m, f, al, "jet_rt_string_concat", [IRX64Arg]{IRX64Arg.Slot{slot: f.a[at]}, IRX64Arg.Slot{slot: f.b[at]}}, dst)
         .Call -> {
             if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return ir_x64_fail(&e, f, at, "function {f.a[at]} is not in the module")
-            if m.functions[f.a[at]].asm == .Val(leaf) {
+            // A stop poll's leaf has no template (Build.jet ir_stop_poll): one
+            // apart from its If (ir_x64_stop_point) is a call of its body.
+            key :: m.functions[f.a[at]].key
+            if m.functions[f.a[at]].asm == .Val(leaf) && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY {
                 if ir_x64_asm_inline(&e, m, f, al, leaf, f.args, f.b[at], f.c[at], dst) -> return
             }
             ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])

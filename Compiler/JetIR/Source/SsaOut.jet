@@ -19,9 +19,10 @@
 // phi's argument is read at its edge's moves, at the If for an If's false
 // edge (those moves run only on the path that skipped the then-part), and
 // the phi's home is written at each of its edges' moves, a point each.
-// Two values whose ranges share a position never share a home. With no
-// pass between building and leaving SSA, every value keeps its own slot and
-// the function comes back unchanged.
+// Two values whose ranges share a position never share a home. The ranges
+// are whole-block approximations, so even with no pass between building
+// and leaving SSA, values of one slot can interfere and get fresh homes;
+// the optimizer (Opt.jet ir_opt_ssa) leaves SSA only for verify and stress.
 
 struct IRSsaOutStats {
     changed: Bool
@@ -129,6 +130,16 @@ fn ir_ssa_put_moves(f: &IRFunction, code: &IRSsaCode, temps: &[Int:Int], dsts: [
         }
     }
     moves
+}
+
+// Whether `value` is a stop point's Bool (Build.jet ir_stop_point): a
+// call with no arguments whose result the next instruction, an If with no
+// Else, tests. A user call of that shape keeps its slot as well.
+fn ir_ssa_out_poll(f: IRFunction, s: IRSsa, value: Int) -> Bool Never! {
+    if s.val_kind[value] != .Def -> return false
+    at :: s.val_at[value]
+    if f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 || at + 1 >= f.op.len() -> return false
+    f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
 fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutStats Never! {
@@ -282,8 +293,19 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
         slot :: s.val_slot[value]
         own :: ir_ssa_sorted(ranges[value])
         home := -1
-        if s.val_kind[value] == .Param || (!stress && !ir_ssa_overlap(taken[slot], own)) {
+        // A stop point's Bool keeps a slot of its own (its slot, else a
+        // fresh one no other value shares): selection takes the If after the
+        // poll as the stop edge only when nothing else reads that slot
+        // (X64Select ir_x64_stop_point), and only that edge leaves with the
+        // stop reported to the caller.
+        poll :: ir_ssa_out_poll(f, s, value)
+        if s.val_kind[value] == .Param || ((poll || !stress) && !ir_ssa_overlap(taken[slot], own)) {
             home = slot
+        } else if poll {
+            home = count + fresh_rows.len()
+            &fresh_rows.push(f.slot_type[slot])
+            &taken.push([Int]{})
+            changed = true
         } else {
             row :: f.slot_type[slot]
             known :: fresh_by_row.get(row) ?? [Int]{}
