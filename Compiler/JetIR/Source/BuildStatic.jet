@@ -15,15 +15,22 @@
 // fix-up; a position-independent image applies them as relative
 // relocations at load.
 //
-// A value the build cannot freeze (an exact Int outside the inline range,
-// runtime-owned; a Map whose key order the build does not reproduce) keeps
-// the constant on ir_comptime, built at each read.
+// A value the build cannot freeze (a Map whose key order the build does not
+// reproduce) keeps the constant on ir_comptime, built at each read.
 
 use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type]
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
 IR_STATIC_BOX_HEADER :: 24
+
+// The count word of a static exact-Int node (ir_static_big_int): retains and
+// releases (JetRuntime Int.jet jet_rt_int_clone, jet_rt_int_drop) move it but
+// never bring it to zero, so the runtime never frees the node.
+IR_STATIC_INT_COUNT :: 4611686018427387904
+
+// The bit an exact-Int word sets to name a node (JetRuntime Int.jet int_tag).
+IR_STATIC_INT_TAG :: 4611686018427387904
 
 // A word of a static object while its constant is laid out: a plain word,
 // or an address (`target` a local object, else a module data row, or the
@@ -53,6 +60,31 @@ fn ir_static_box(s: &IRStaticBuild, size: Int) -> Int Never! {
 
 fn ir_static_box_word(object: Int) -> IRStaticWord Never! {
     IRStaticWord{word: 0, target: object, addend: IR_STATIC_BOX_HEADER, local: true}
+}
+
+// The node of exact Int `value` outside the inline range (JetRuntime Int.jet
+// int_node_init, int_pack): [count, 0, sign, limb buffer, length, capacity]
+// over its base-10^9 32-bit limbs, least significant first, the most
+// significant nonzero. Its word is the node's address tagged (int_tag).
+fn ir_static_big_int(s: &IRStaticBuild, value: Int) -> IRStaticWord? Never! {
+    magnitude :: if value < 0 -> -value else -> value
+    digits :: "{magnitude}"
+    limbs := [Int]{}
+    end := digits.len()
+    loop end > 0 {
+        start :: if end > 9 -> end - 9 else -> 0
+        &limbs.push(Int.parse(digits.slice(start, end)) ?? return None)
+        end = start
+    }
+    buffer :: ir_static_new(&s, limbs.len() * 4)
+    loop (index, limb) in limbs -> ir_static_put(&s, buffer, index * 4, IRStaticWord{word: limb}, 4)
+    node :: ir_static_new(&s, 48)
+    ir_static_put(&s, node, 0, IRStaticWord{word: IR_STATIC_INT_COUNT}, 8)
+    if value < 0 -> ir_static_put(&s, node, 16, IRStaticWord{word: 1}, 8)
+    ir_static_put(&s, node, 24, IRStaticWord{word: 0, target: buffer, local: true}, 8)
+    ir_static_put(&s, node, 32, IRStaticWord{word: limbs.len()}, 8)
+    ir_static_put(&s, node, 40, IRStaticWord{word: limbs.len()}, 8)
+    Val(IRStaticWord{word: 0, target: node, addend: IR_STATIC_INT_TAG, local: true})
 }
 
 // Writes the low `size` bytes of `value` at `offset` of local object
@@ -185,7 +217,7 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
     kind :: m.types[row].kind
     if value == {
         .Int(number) -> {
-            if kind == .Int && !ir_int_inline(number) -> return None
+            if kind == .Int && !ir_int_inline(number) -> return ir_static_big_int(&s, number)
             return Val(IRStaticWord{word: number})
         }
         .Bool(flag) -> return Val(IRStaticWord{word: if flag -> 1 else -> 0})
@@ -197,7 +229,10 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
         }
         .BigInt(decimal) -> {
             if kind == .Word -> return Val(IRStaticWord{word: ir_constant_u64_bits(decimal)})
-            return None
+            if kind != .Int -> return None
+            number :: Int.parse(decimal) ?? return None
+            if ir_int_inline(number) -> return Val(IRStaticWord{word: number})
+            return ir_static_big_int(&s, number)
         }
         .Present(inner) -> {
             if ir_untag(ty) == .Option(inner_ty) {

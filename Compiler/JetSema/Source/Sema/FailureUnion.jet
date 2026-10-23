@@ -560,19 +560,15 @@ fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphMo
 
 // #3708 (card item T1): every function the failure solve proved infallible is
 // projected onto the `T Never!` carrier with no written span, which every
-// tier lowers as a plain return. A function a compile-time evaluation already
-// checked keeps its carrier, so its cached callers stay consistent. Returns
+// tier lowers as a plain return. A function a compile-time evaluation checked
+// is projected too: its reused body, like every body checked before the
+// solve, is reconciled (sema_failure_reconcile_infallible), its callers keep
+// the carrier they were checked against, and every finalization undoes the
+// projection on `trail` before a later comptime run reads the graph. Returns
 // the projected keys. Every replaced row is recorded on `trail`.
-fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult], trail: &SemaGraphTrail) -> [String] {
-    // The keys compile-time evaluation reached, collected once.
-    comptime_reached := [String:Bool]{}
-    loop result in comptime_functions {
-        comptime_reached[result.function_key] = true
-        loop key in result.reachable_function_keys -> comptime_reached[key] = true
-    }
+fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], trail: &SemaGraphTrail) -> [String] {
     projections := [SemaFailureProjection]{}
     loop key in solved {
-        if comptime_reached.get(key) != None -> next
         row :: graph.callable_rows.get(key) ?? next
         if row == .Function(module_index, index) {
             contract :: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[index].declaration), err: Type.Named{name: "Never"}}

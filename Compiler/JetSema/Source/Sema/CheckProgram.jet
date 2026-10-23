@@ -2584,14 +2584,18 @@ fn sema_keep_going_trap_return_span(func: Func) -> Span? Never! {
     if func.return_type_span == None -> Val(func.span) else -> func.return_type_span
 }
 
-// Appends a keep-going trap; a trap that could not be built is one more
-// reason the module is incomplete.
-fn sema_keep_going_push_stub(stub: SemaFunctionResult?, label: String, functions: &[TFunc], reasons: &[String]) -> Bool Never! {
+// Appends a keep-going trap. Every trap is a census row (#5566): the module
+// is incomplete and names the trapped function, so a compiler that lowers a
+// trap never looks clean to the keep-going report, even when the failure was
+// a post-solve recheck whose reports are settled away. A trap that could not
+// be built or recorded is one more reason.
+fn sema_keep_going_push_stub(stub: SemaFunctionResult?, label: String, functions: &[TFunc], reasons: &[String]) Never! {
     checked :: stub ?? {
         &reasons.push("{label}: its keep-going trap did not check (the declared signature fails)")
-        return false
+        return
     }
-    sema_append_function(&functions, checked)
+    &reasons.push("{label}: lowered as a keep-going trap")
+    if !sema_append_function(&functions, checked) -> &reasons.push("{label}: its keep-going trap could not be recorded")
 }
 
 // Preparation is identical on the calling thread and a body-job thread.
@@ -3326,7 +3330,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             if !sema_comptime_append_checked_function(checked_function, &result.checked, &result.call_facts, &result.comptime_requests, &result.name_references) {
                 result.complete = false
                 &result.incomplete_reasons.push("function `{function_name}`: comptime-checked body is incomplete")
-                if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
+                if keep_going -> sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
             }
             loop source in checked_function.comptime_body_sources -> &result.comptime_body_sources.push(source)
             &result.compute_facts.push(checked_function.compute_facts)
@@ -3379,9 +3383,10 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             if !checked.complete {
                 result.complete = false
                 sema_check_push_function_reasons("function `{function_name}`", checked, &result.incomplete_reasons)
-                if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
+                if keep_going -> sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
-                if !sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons) -> result.complete = false
+                sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
+                result.complete = false
             } else {
                 position :: result.checked.len()
                 if sema_append_function(&result.checked, checked) {
@@ -3412,7 +3417,7 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
             &reasons.push("{label}: comptime-checked body is incomplete")
             if keep_going {
                 original_kind :: sema_check_registered_original_method_kind(job, module_index, environment, program)
-                _ := sema_keep_going_push_stub(sema_check_registered_method_stub(job, module_index, memory_plan, owner_id, original_kind, raw_protocol_return, &environment, program, &scopes, host_hooks), label, &functions, &reasons)
+                sema_keep_going_push_stub(sema_check_registered_method_stub(job, module_index, memory_plan, owner_id, original_kind, raw_protocol_return, &environment, program, &scopes, host_hooks), label, &functions, &reasons)
             }
             return false
         }
@@ -3517,15 +3522,18 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     if !memory_complete && owned_input.memory_found -> &reasons.push("{label}: memory plan is incomplete")
     if !owner_generic_complete -> &reasons.push("{label}: generic owner `{type_name(owned_input.normalized_owner_type)}` could not be resolved to a registered nominal")
     if !memory_complete || !owner_generic_complete {
-        if keep_going -> _ := sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
+        if keep_going -> sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
         return false
     }
     if !checked.complete {
         sema_check_push_function_reasons(label, checked, &reasons)
-        if keep_going -> _ := sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
+        if keep_going -> sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
         return false
     }
-    if keep_going_stub != None -> return sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
+    if keep_going_stub != None {
+        sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
+        return false
+    }
     if checked.value != None && sema_check_registered_protocol_unit_return(job, module_index, program) {
         taken := ^checked.value
         checked.value = None
@@ -7869,7 +7877,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     union_start :: diagnostics.len()
     unions :: sema_failure_union_infer(&after_body_graph, modules, &diagnostics, &trail)
     if diagnostics.len() > union_start -> complete = false
-    infallible :: sema_failure_project_infallible(&after_body_graph, inferred_infallible, comptime_functions, &trail)
+    infallible :: sema_failure_project_infallible(&after_body_graph, inferred_infallible, &trail)
     if trace_sink == .Val(sink) -> sink.end("sema.failure", inferred_infallible.len())
     // One body pass: only the modules a union contract changes are checked
     // again; the `T Never!` projections are reconciled onto the checked bodies.
