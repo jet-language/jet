@@ -2507,7 +2507,11 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
         // field or index capability check, so only an assignment goes on.
         if action != "be assigned" -> return false
     }
-    if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
+    // A `#Persist` module cell is mutable state lent like a local (its module
+    // binding is registered without `mutable`); every other static root was
+    // refused above.
+    persist :: state.persist_roots.contains(places[0].root_key)
+    if !has_view && !persist && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
         if action == "be assigned" && sema_ownership_report_assignment_capability(expr, places[0].root, info, &diagnostics) -> return false
         if info.access == {
             .Read -> {
@@ -3294,8 +3298,7 @@ fn sema_ownership_check_call_receiver(state: &SemaOwnershipState, receiver: Expr
 // a built-in method, the method name for a declared one (Rust passes
 // `receiver.span()` or the call span to `check_mutating_method_receiver`).
 fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    sema_receiver_mark_note(&state, receiver, convention)
-    state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: convention, reserved: false}
+    sema_ownership_note_call_receiver(&state, receiver, convention)
     places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     if places.len() == 0 {
         if convention == AccessConvention.Write {
@@ -3313,6 +3316,13 @@ fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: E
         .Move -> sema_ownership_mark_move(&state, receiver, scopes, "a consuming method call", &diagnostics)
         else -> sema_ownership_check_use(&state, receiver, scopes, &diagnostics)
     }
+}
+
+// Records the receiver's resolved convention for the mark check and the call's
+// receiver access, with no ownership check.
+fn sema_ownership_note_call_receiver(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention) {
+    sema_receiver_mark_note(&state, receiver, convention)
+    state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: convention, reserved: false}
 }
 
 fn sema_ownership_check_receiver_write(state: &SemaOwnershipState, receiver: Expr, method: String, scopes: SemaScopeTable, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {

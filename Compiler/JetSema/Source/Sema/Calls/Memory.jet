@@ -243,7 +243,13 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method == "reset" {
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        // Rust `allocator_view_preserving_receiver`: an allocator's storage is
+        // the runtime's audited interior-mutable storage, so `&arena.reset()`
+        // runs no write-capability gate (a `::` arena resets) and invalidates
+        // the arena's views below instead of refusing them. Only `Fixed`
+        // refuses while a view of its owner is live (Rust `check_owner_change`).
+        sema_ownership_note_call_receiver(&state, receiver, AccessConvention.Write)
+        if name == "Fixed" && !sema_ownership_check_write_change(&state, receiver, "be reset", scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         result_type := Type.Named{name: "Unit"}
         if !sema_call_memory_record_allocator_effect(name, method, result_type, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         receiver_is_ident := if receiver == {

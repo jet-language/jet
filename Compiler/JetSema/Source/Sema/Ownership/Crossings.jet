@@ -212,9 +212,10 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
 fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     if sema_type_name_is_generic(context.generic_params, name) -> return None
     if program.registration_graph == .Val(graph) {
-        nominal_row := sema_type_resolve_nominal_row(graph, ty, environment.module_identity)
+        caller :: sema_type_module_row(graph, environment.module_identity)
+        nominal_row := sema_type_resolve_nominal_row_at(graph, ty, caller)
         if nominal_row == .Val(row) -> return sema_ownership_crossing_named(ty, graph.modules[row.module_index].nominals[row.row], crossing, strict_callable, cell_only, environment, program, context, &walk)
-        resolved := sema_type_graph_resolve_named(graph, name, environment.module_identity)
+        resolved := sema_type_graph_resolve_named(graph, name, caller)
         if resolved == {
             .TraitObject(bounds) -> {
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: bounds.join(" + ")}))

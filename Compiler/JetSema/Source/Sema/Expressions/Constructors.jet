@@ -235,7 +235,10 @@ fn sema_expression_enum_declares_variant(enum_name: String, variant: String, env
 // (`Box`, `types.Box`, `module::Box`) name the same head.
 fn sema_expression_same_nominal_head(left: String, right: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if left == right -> return true
-    if program.registration_graph == .Val(graph) -> return sema_type_graph_resolve_apply_name(graph, left, environment.module_identity) == sema_type_graph_resolve_apply_name(graph, right, environment.module_identity)
+    if program.registration_graph == .Val(graph) {
+        caller :: sema_type_module_row(graph, environment.module_identity)
+        return sema_type_graph_resolve_apply_name(graph, left, caller) == sema_type_graph_resolve_apply_name(graph, right, caller)
+    }
     false
 }
 

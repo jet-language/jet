@@ -2524,8 +2524,9 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program:
         }
     }
     receiver_name :: sema_expr_operator_row_name(base_name)
-    source_declaration := sema_type_source_owns_nominal(graph, base_name, environment.module_identity)
-    if sema_type_resolve_nominal_row(graph, sema_expr_unwrap_tag(receiver_type), environment.module_identity) == .Val(owner) {
+    caller :: sema_type_module_row(graph, environment.module_identity)
+    source_declaration := sema_type_source_owns_nominal(graph, base_name, caller)
+    if sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) == .Val(owner) {
         module_row :: graph.modules[owner.module_index]
         if module_row.module_identity.starts_with("<corelib>/") {
             loop row in CORE_SOURCE_OWNED_ROWS {
@@ -2793,7 +2794,10 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
 
 fn sema_expr_check_take_pattern_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "take_pattern" || (receiver_value.ty != Type.Named{name: "Cursor"} && receiver_value.ty != Type.Named{name: "Reader"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    // Rust method_calls.rs resolves `take_pattern` beside `Arena.alloc` with no
+    // receiver gate: the cursor's position is runtime-owned handle state, so
+    // the unmarked receiver of a `::` Cursor or Reader binding is read here.
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 {
         &diagnostics.push(sema_error("E0104", span, "`take_pattern` expects one literal pattern, got {args.len()} arguments", "a pattern is a compile-time literal and is the whole argument list", "write exactly one string or `[U8]` pattern literal"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -3903,7 +3907,8 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         if (sema_expr_precise_name(lhs.ty) == None) == (sema_expr_precise_name(rhs.ty) == None) {
             left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
             right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
-            source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
+            caller :: sema_type_module_row(graph, environment.module_identity)
+            source_operator = sema_type_source_owns_nominal(graph, left_name, caller) || sema_type_source_owns_nominal(graph, right_name, caller)
         }
     }
     if source_operator && sema_expr_operator_trait(op) != None {

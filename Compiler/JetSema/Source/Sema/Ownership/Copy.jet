@@ -140,7 +140,7 @@ fn sema_copy_facts_table(graph: SemaRegistrationGraph?) -> SemaCopyFactsTable Ne
             entry := SemaCopyTypeFacts?{None}
             if registered.modules[module_index].nominals[row].generic_params.len() == 0 && registered.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.Trait {
                 walk.tainted = false
-                facts :: sema_copy_nominal_facts(registered.modules[module_index].nominals[row], Type.Named{name: registered.modules[module_index].nominals[row].symbol.name}, graph, none, "", [TGenericParam]{}, &walk)
+                facts :: sema_copy_nominal_facts(registered.modules[module_index].nominals[row], Type.Named{name: registered.modules[module_index].nominals[row].symbol.name}, graph, none, -1, [TGenericParam]{}, &walk)
                 if !walk.tainted -> entry = Val(facts)
             }
             &module_rows.push(entry)
@@ -190,11 +190,11 @@ fn sema_copy_apply_is_canonical_task(
     ty: Type,
     name: String,
     graph: SemaRegistrationGraph?,
-    caller_module_identity: String,
+    caller: Int,
 ) -> Bool Never! {
     if name != "Task" || graph == None -> return false
     registered :: graph ?? return false
-    if sema_type_resolve_nominal_row(registered, ty, caller_module_identity) != None -> return false
+    if sema_type_resolve_nominal_row_at(registered, ty, caller) != None -> return false
     owner :: sema_registration_core_builtin_owner(registered, name) ?? return false
     owner.ownership == TDeclarationOwnership.Owned
 }
@@ -366,7 +366,7 @@ fn sema_copy_type_facts(
     ty: Type,
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
-    caller_module_identity: String,
+    caller: Int,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
@@ -375,25 +375,25 @@ fn sema_copy_type_facts(
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .Measure(_) -> sema_copy_type_facts_known(true, true, false, false, false, false, true)
         .String -> sema_copy_type_facts_known(false, true, true, false, false, false, true)
         .List(inner) -> {
-            nested :: sema_copy_type_facts(inner, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
         .Map(key, _, value) -> {
-            key_facts :: sema_copy_type_facts(key, graph, table, caller_module_identity, generic_params, &walk)
-            value_facts :: sema_copy_type_facts(value, graph, table, caller_module_identity, generic_params, &walk)
+            key_facts :: sema_copy_type_facts(key, graph, table, caller, generic_params, &walk)
+            value_facts :: sema_copy_type_facts(value, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(false, key_facts.cloneable && value_facts.cloneable, true, key_facts.observable_clock || value_facts.observable_clock, false, key_facts.dynamic_loan || value_facts.dynamic_loan, key_facts.complete && value_facts.complete)
         }
         .Shared(inner) -> {
-            nested :: sema_copy_type_facts(inner, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(false, true, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
         .Option(inner) -> {
-            nested :: sema_copy_type_facts(inner, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(false, nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
         .Result(ok, err) -> {
-            ok_facts :: sema_copy_type_facts(ok, graph, table, caller_module_identity, generic_params, &walk)
-            err_facts :: sema_copy_type_facts(err, graph, table, caller_module_identity, generic_params, &walk)
+            ok_facts :: sema_copy_type_facts(ok, graph, table, caller, generic_params, &walk)
+            err_facts :: sema_copy_type_facts(err, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(false, ok_facts.cloneable && err_facts.cloneable, ok_facts.heap || err_facts.heap, ok_facts.observable_clock || err_facts.observable_clock, false, ok_facts.dynamic_loan || err_facts.dynamic_loan, ok_facts.complete && err_facts.complete)
         }
         .Fn(_, _, _, _, _, _) -> sema_copy_type_facts_known(false, false, false, false, false, false, true)
@@ -406,7 +406,7 @@ fn sema_copy_type_facts(
             dynamic_loan := false
             complete := true
             loop field in fields {
-                nested :: sema_copy_type_facts(field.ty, graph, table, caller_module_identity, generic_params, &walk)
+                nested :: sema_copy_type_facts(field.ty, graph, table, caller, generic_params, &walk)
                 copyable = copyable && nested.copyable
                 cloneable = cloneable && nested.cloneable
                 heap = heap || nested.heap
@@ -417,15 +417,15 @@ fn sema_copy_type_facts(
             sema_copy_type_facts_known(copyable, cloneable, heap, clock, false, dynamic_loan, complete)
         }
         .FixedList(inner, _) -> {
-            nested :: sema_copy_type_facts(inner, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
         .InlineRange(base, _, _) -> {
-            nested :: sema_copy_type_facts(base, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(base, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
         .Tagged(marker, inner) -> {
-            nested :: sema_copy_type_facts(inner, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
             deterministic :: marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_copy_is_clock_type(inner)
             sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, if deterministic -> false else -> nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
@@ -436,7 +436,7 @@ fn sema_copy_type_facts(
             dynamic_loan := false
             complete := true
             loop member in members {
-                nested :: sema_copy_type_facts(member, graph, table, caller_module_identity, generic_params, &walk)
+                nested :: sema_copy_type_facts(member, graph, table, caller, generic_params, &walk)
                 cloneable = cloneable && nested.cloneable
                 heap = heap || nested.heap
                 clock = clock || nested.observable_clock
@@ -446,11 +446,11 @@ fn sema_copy_type_facts(
             sema_copy_type_facts_known(false, cloneable, heap, clock, false, dynamic_loan, complete)
         }
         .Quantity(base, _) -> {
-            nested :: sema_copy_type_facts(base, graph, table, caller_module_identity, generic_params, &walk)
+            nested :: sema_copy_type_facts(base, graph, table, caller, generic_params, &walk)
             sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
         }
-        .Named(name) -> sema_copy_named_facts(ty, name, graph, table, caller_module_identity, generic_params, &walk)
-        .Apply(name, args) -> sema_copy_apply_facts(ty, name, args, graph, table, caller_module_identity, generic_params, &walk)
+        .Named(name) -> sema_copy_named_facts(ty, name, graph, table, caller, generic_params, &walk)
+        .Apply(name, args) -> sema_copy_apply_facts(ty, name, args, graph, table, caller, generic_params, &walk)
     }
 }
 
@@ -459,7 +459,7 @@ fn sema_copy_named_facts(
     name: String,
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
-    caller_module_identity: String,
+    caller: Int,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
@@ -469,14 +469,14 @@ fn sema_copy_named_facts(
         // resolves to a Trait symbol, which the nominal-row lookup (Type
         // symbols only) never returns, so it is tested first. One lookup
         // serves both.
-        resolved :: sema_type_graph_lookup_symbol(registered, caller_module_identity, name)
+        resolved :: sema_type_graph_lookup_symbol_at(registered, caller, name)
         // Only a canonical `module::Name` that resolves names one symbol from
         // every caller; any other name is the caller's scope's reading.
         if resolved == None || !name.contains("::") -> walk.tainted = true
         if resolved == .Val(found) {
             if found.symbol.kind == SymbolKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
         }
-        if sema_type_lookup_nominal_row(registered, resolved, name, caller_module_identity) == .Val(row) {
+        if sema_type_lookup_nominal_row(registered, resolved, name, caller) == .Val(row) {
             if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
             if sema_copy_table_facts(table, row) == .Val(known) {
                 // Facts computed with the nominal's own name: only `copyable`
@@ -484,7 +484,7 @@ fn sema_copy_named_facts(
                 if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.ForeignHandle -> return known
                 return SemaCopyTypeFacts{copyable: sema_copy_copyable_scalar(ty), cloneable: known.cloneable, heap: known.heap, observable_clock: known.observable_clock, resource: known.resource, dynamic_loan: known.dynamic_loan, complete: known.complete}
             }
-            return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, table, caller_module_identity, generic_params, &walk)
+            return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, table, caller, generic_params, &walk)
         }
     }
     // Core-only naming does not remove the runtime enum's Copy capability.
@@ -502,7 +502,7 @@ fn sema_copy_nominal_facts(
     actual: Type,
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
-    caller_module_identity: String,
+    caller: Int,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
@@ -538,7 +538,7 @@ fn sema_copy_nominal_facts(
     dynamic_loan := false
     declared_types :: sema_copy_nominal_declared_types(nominal, bindings, graph)
     loop declared in declared_types {
-        nested :: sema_copy_type_facts(declared, graph, table, caller_module_identity, generic_params, &walk)
+        nested :: sema_copy_type_facts(declared, graph, table, caller, generic_params, &walk)
         cloneable = cloneable && nested.cloneable
         heap = heap || nested.heap
         clock = clock || nested.observable_clock
@@ -566,7 +566,7 @@ fn sema_copy_apply_nested_facts(
     args: [Type],
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
-    caller_module_identity: String,
+    caller: Int,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
@@ -576,7 +576,7 @@ fn sema_copy_apply_nested_facts(
     nested_dynamic_loan := false
     nested_complete := true
     loop arg in args {
-        facts :: sema_copy_type_facts(arg, graph, table, caller_module_identity, generic_params, &walk)
+        facts :: sema_copy_type_facts(arg, graph, table, caller, generic_params, &walk)
         nested_cloneable = nested_cloneable && facts.cloneable
         nested_heap = nested_heap || facts.heap
         nested_clock = nested_clock || facts.observable_clock
@@ -592,19 +592,19 @@ fn sema_copy_apply_facts(
     args: [Type],
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
-    caller_module_identity: String,
+    caller: Int,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     dynamic_loan :: sema_copy_apply_is_dynamic_loan(name)
-    nested :: sema_copy_apply_nested_facts(args, graph, table, caller_module_identity, generic_params, &walk)
+    nested :: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, &walk)
     if core_source_owns_type(name) && core_identity_is(name, "core.crypto.vault", "ExpiringSecret") {
         return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
     }
     if graph == .Val(registered) {
         if !name.contains("::") -> walk.tainted = true
-        if sema_type_resolve_nominal_row(registered, ty, caller_module_identity) == .Val(row) {
-            nominal_facts :: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, table, caller_module_identity, generic_params, &walk)
+        if sema_type_resolve_nominal_row_at(registered, ty, caller) == .Val(row) {
+            nominal_facts :: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, table, caller, generic_params, &walk)
             return SemaCopyTypeFacts{
                 copyable: sema_copy_copyable_scalar(ty),
                 cloneable: nominal_facts.cloneable && nested.cloneable,
@@ -617,7 +617,7 @@ fn sema_copy_apply_facts(
         }
         walk.tainted = true
     }
-    if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller_module_identity) {
+    if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller) {
         return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
     }
     if name == "View" && args.len() == 1 {
@@ -644,14 +644,15 @@ fn sema_copy_classify(
 ) -> SemaCopyFacts Never! {
     owned :: sema_copy_owned_view_type(source, string_view)
     materializes_view :: owned.materialized
+    caller :: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
     source_walk := sema_copy_walk()
-    source_facts :: sema_copy_type_facts(source, program.registration_graph, program.copy_facts, env.module_identity, generic_params, &source_walk)
+    source_facts :: sema_copy_type_facts(source, program.registration_graph, program.copy_facts, caller, generic_params, &source_walk)
     // Only a materialized view copies into a different type; otherwise the
     // target is the source and its facts are the ones just walked.
     target_facts := source_facts
     if materializes_view {
         target_walk := sema_copy_walk()
-        target_facts = sema_copy_type_facts(owned.ty, program.registration_graph, program.copy_facts, env.module_identity, generic_params, &target_walk)
+        target_facts = sema_copy_type_facts(owned.ty, program.registration_graph, program.copy_facts, caller, generic_params, &target_walk)
     }
     lowering :: if {
         materializes_view -> SemaCopyLowering.MaterializeView

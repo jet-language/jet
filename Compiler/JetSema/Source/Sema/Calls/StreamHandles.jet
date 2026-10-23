@@ -265,10 +265,12 @@ fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bo
 // Rust `file_handle_method_return` (method_calls.rs E2-M7) types the methods
 // of these handles without recording a receiver convention, so an unmarked
 // `reader.read(n)` or `writer.write_all(bytes)` needs no `&`, and a written
-// mark has no convention to be checked against. `Stdout`/`Stderr` dispatch
-// to their `&self` source methods instead.
+// mark has no convention to be checked against. `text_cursor_method_return`
+// and `binary_reader_method_return` record none either, so `&c.skip_ws()` and
+// `&r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `&self`
+// source methods instead.
 fn sema_stream_handle_reports_no_receiver_convention(owner: String) -> Bool Never! {
-    owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle"
+    owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
 }
 
 fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
