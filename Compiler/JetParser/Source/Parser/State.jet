@@ -892,11 +892,14 @@ fn parser_skip_to_rparen(state: &JetParserState) Never! {
     }
 }
 
-// After a failed top-level item: skip to the next plausible item start.
+// After a failed top-level item: skip to the next plausible item start. A
+// `comptime` starts an item only at the start of a line; after `NAME ::` it
+// is that binding's value, which goes with the skipped line.
 fn parser_sync_top(state: &JetParserState) Never! {
     loop {
         kind :: parser_current_kind(&state)
-        if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST || kind == TOKEN_KW_COMPTIME -> break
+        if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST -> break
+        if kind == TOKEN_KW_COMPTIME && (state.position == 0 || state.tokens[state.position - 1].kind == TOKEN_SEMI) -> break
         parser_bump(&state)
     }
 }
