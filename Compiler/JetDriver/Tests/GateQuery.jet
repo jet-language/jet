@@ -5,7 +5,7 @@ use jet_foundation.[
 ]
 use jet_driver.[
     JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileRequest, JetDriverCompileTarget, JetDriverGatePolicy, JetDriverHostFacts,
+    JetDriverCompileRequest, JetDriverGatePolicy, JetDriverHostFacts,
     jet_driver_gate_query, jet_driver_source_query,
 ]
 use jet_eval.[jet_eval_default_config]
@@ -22,7 +22,7 @@ fn gate_query_request(source: String, policy: String?) -> JetDriverCompileReques
     &files.push(JetDriverAuthorizedSourceFile{path: "/gates/helper.jet", relative_path: "helper.jet", identity: "gates-helper", source: "fn helper() {{ undefined_helper() }}"})
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/gates", identity: "gates-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "gates-root", entry_path: "/gates/run.jet"},
-        canonical_effect_source: "", core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native, record_store: None, trace_sink: None, mir_lint_every_pass: false, compiler_threads: compiler_threads_single(),
+        canonical_effect_source: "", core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, mir_lint_every_pass: false, compiler_threads: compiler_threads_single(),
     }
 }
 #Test("gate_query") {

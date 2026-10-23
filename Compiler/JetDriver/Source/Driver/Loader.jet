@@ -3677,50 +3677,9 @@ fn jet_driver_loaded_module(source_unit_index: Int, unit: JetDriverSourceUnit, m
 }
 
 fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
-    jet_driver_load_graph(request, JetDriverLoadMode.Program)
-}
-
-// Unlike a program's lazy Core import closure, this graph roots every row of
-// the installed catalog, including private parts, under the compiler-owned
-// library identity. It never borrows a user's authority root or invents run.
-fn jet_driver_load_core_library(request: JetDriverCompileRequest) -> JetDriverLoadResult {
-    jet_driver_load_graph(request, JetDriverLoadMode.CoreLibrary)
-}
-
-fn jet_driver_core_library_catalog(core_sources: [JetDriverCoreSource]) -> JetDriverSourceCatalogResult {
-    units := [JetDriverSourceUnit]{}
-    keys := [String:String]{}
-    loop (index, row) in core_sources {
-        unit :: jet_driver_core_source_unit(row.module_name, row.path, index, row.source)
-        keys[unit.path] = jet_driver_unit_module_identity(unit)
-        &units.push(unit)
-    }
-    // Same canonical module-owner/path ordering as core_shared_source_seal.
-    // file_index still points at the unmodified installed source recipe.
-    &units.sort_by((a: JetDriverSourceUnit, b: JetDriverSourceUnit) -> ((keys.get(a.path) ?? "") <=> (keys.get(b.path) ?? "")).then(a.relative_path <=> b.relative_path))
-    package :: JetDriverPackageInfo{
-        root_index: -1, root_path: JET_DRIVER_CORE_SOURCE_ROOT,
-        identity: JET_DRIVER_CORE_SOURCE_ROOT, name: "core", version: "",
-        edition: JET_DRIVER_EDITION, runtime_ceiling: None,
-        allocator_policy: MIRAllocatorPolicy.HostedDefault,
-        authority_allow: None, authority_deny: None, authority_needs: [String]{},
-        entry: None, manifest_path: None, inline_package: false,
-        configs: [String]{},
-        dependencies: [JetDriverPackageDependency]{},
-        outputs: JetDriverPackageOutputs{library: true, executable: false, entry_modules: [String]{}},
-    }
-    JetDriverSourceCatalogResult{
-        packages: [JetDriverPackageInfo]{package}, source_units: ^units,
-        entry_package_identity: JET_DRIVER_CORE_SOURCE_ROOT,
-        diagnostics: [Diagnostic]{}, complete: true,
-    }
-}
-
-fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMode) -> JetDriverLoadResult {
-    core_library :: mode == JetDriverLoadMode.CoreLibrary
     diagnostics := [Diagnostic]{}
     failed_stage := JetDriverStage?{None}
-    catalog := if core_library -> jet_driver_core_library_catalog(request.core_sources) else -> jet_driver_build_source_catalog(request)
+    catalog := jet_driver_build_source_catalog(request)
     loop diagnostic in catalog.diagnostics -> &diagnostics.push(diagnostic)
     if !catalog.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     // Fix the selected callable before module loading, semantic registration,
@@ -3735,20 +3694,10 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     source_index_result :: jet_driver_build_source_index(catalog.source_units)
     loop diagnostic in source_index_result.diagnostics -> &diagnostics.push(diagnostic)
     if !source_index_result.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-    entry_index := Int?{None}
-    if core_library {
-        // Registration needs one real module anchor, not an executable entry.
-        if catalog.source_units.len() > 0 -> entry_index = Val(0)
-        else {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the installed Core source catalog is empty", "the canonical Core library graph must contain its installed source recipe", "supply the complete installed Core source catalog"))
-            failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-        }
-    } else {
-        entry_index = source_index_result.index.by_path.get(jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path))
-        if entry_index == None {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
-            failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-        }
+    entry_index :: source_index_result.index.by_path.get(jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path))
+    if entry_index == None {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
+        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     }
     if jet_driver_has_errors(diagnostics) {
         return JetDriverLoadResult{
@@ -3764,7 +3713,6 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
             diagnostics: diagnostics,
             failed_stage: failed_stage,
             complete: false,
-            mode: mode,
         }
     }
 
@@ -3783,14 +3731,12 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         }
     }
     entry_source_identity :: jet_driver_source_identity(selected_entry.package_identity, selected_entry.path)
-    entry_module_identity :: if core_library -> jet_driver_unit_module_identity(selected_entry) else -> jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
+    entry_module_identity :: jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
     // Only the installed runtime unit's exact source/path earns Core privileges.
     entry_module := ""
-    if !core_library {
-        if jet_driver_source_unit_text(request, selected_entry) == .Val(entry_text) {
-            if jet_driver_runtime_entry_row(request.core_sources, selected_entry, entry_text) == .Val(entry_row) {
-                entry_module = request.core_sources[entry_row].module_name
-            }
+    if jet_driver_source_unit_text(request, selected_entry) == .Val(entry_text) {
+        if jet_driver_runtime_entry_row(request.core_sources, selected_entry, entry_text) == .Val(entry_row) {
+            entry_module = request.core_sources[entry_row].module_name
         }
     }
     pending := [Int]{entry_index ?? 0}
@@ -3800,7 +3746,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     // The build plan selected these exact modules. Check every selected output,
     // including loose-file outputs not named by an import.
     loop (unit_index, unit) in source_units {
-        if (core_library || unit.source_origin == SemaSourceOrigin.CompilerGenerated) && !queued[unit_index] {
+        if unit.source_origin == SemaSourceOrigin.CompilerGenerated && !queued[unit_index] {
             queued[unit_index] = true
             &pending.push(unit_index)
         }

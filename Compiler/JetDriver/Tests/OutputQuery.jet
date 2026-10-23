@@ -1,4 +1,4 @@
-// Production parser/load/sema/layout/MIR path; no preconstructed output facts.
+// Production parser/load/sema/layout path; no preconstructed output facts.
 use jet_driver.[
     JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode, JetDriverCompileRequest, jet_driver_output_query,
@@ -28,7 +28,6 @@ fn output_query_request(source: String, triple: String) -> JetDriverCompileReque
         unit :: Type.Named{name: "Unit"}
         inferred :: if output.failure_contract == { .InferredNever(contract) -> contract == unit else -> false }
         output_query_require(inferred, "post-body failure inference retained")
-        output_query_require(result.compile.entry_function != None && result.compile.emitted_source == None, "selected MIR root; no emission or execution")
         output_query_require(result.layouts.len() > 0 && result.target_triple == triple, "canonical layout rows for selected target")
         layout :: result.target_layout ?? panic("OutputQuery: missing target layout")
         output_query_require(layout.pointer_size == (if triple.starts_with("i686") -> 4 else -> 8), "layout never assumes host pointer width")

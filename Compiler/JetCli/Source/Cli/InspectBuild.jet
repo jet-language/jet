@@ -1,9 +1,9 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
 use jet_driver.[
     JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
-    JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan,
+    JetDriverVerbOutput, jet_driver_query_build_plan,
     jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
-    jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK,
+    jet_driver_report_problems, JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
 ]
 use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIRSourceFile]
@@ -13,39 +13,7 @@ use core.math as build_math
 use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
 use jet_build_session.[BuildPlanSelection, build_plan_selection]
 
-fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
-    rows := [JetCLIStatusValue]{}
-    text := ""
-    // Build inspection uses MIR declaration order (CmdCompile.rs), whereas
-    // acceleration inspection intentionally sorts its function projection.
-    program :: query.compile.mir ?? panic("completed build vector query lost its MIR")
-    loop function in program.functions {
-        loop fact in function.optimization.vector_facts {
-            rule :: jet_cli_optimization_vector_rule(fact.rule)
-            layout :: jet_cli_optimization_vector_layout(fact.layout)
-            lane :: if fact.lane_width == .Val(width) -> "{width}" else -> "none"
-            decision :: if fact.decision == {
-                .Eligible -> "accepted"
-                .Rejected(reason) -> jet_cli_optimization_rejection(reason).code
-            }
-            if !json {
-                text += "vector\t{function.key}\t{fact.span.start}..{fact.span.end}\t{rule}\t{layout}\t{lane}\t{decision}\n"
-            } else {
-                &rows.push(jet_cli_status_object([
-                    jet_cli_status_field("function", jet_cli_status_text(function.key)),
-                    jet_cli_status_field("span", jet_cli_optimization_span(fact.span)),
-                    jet_cli_status_field("rule", jet_cli_status_text(rule)),
-                    jet_cli_status_field("layout", jet_cli_status_text(layout)),
-                    jet_cli_status_field("lane", jet_cli_status_text(lane)),
-                    jet_cli_status_field("decision", jet_cli_status_text(decision)),
-                ]))
-            }
-        }
-    }
-    if json -> jet_cli_status_json(jet_cli_status_array(rows)) else -> text
-}
-
-fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subject: String?, json: Bool) -> String Never! {
+fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
     plan :: query.plan ?? {
         if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n"
         return "default pipeline: no root fn build\n"
@@ -58,7 +26,7 @@ fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subjec
         return text
     }
     if json {
-        payload :: jet_driver_build_plan_json(plan, vector)
+        payload :: jet_driver_build_plan_json(plan)
         build :: jet_cli_status_from_tree(report_status_value_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
         return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", build)])}\n"
     }
@@ -66,7 +34,7 @@ fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subjec
     text := ""
     loop target in graph.targets -> text += "target\t{target.name}\t{target.kind}\n"
     loop action in graph.actions -> text += "action\t{action.name}\t{action.outputs.join(",")}\n"
-    "{text}{vector}"
+    text
 }
 
 fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
@@ -122,14 +90,7 @@ fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriver
     request := ^response.request
     query := ^response.query
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
-    vector := if json -> "[]" else -> ""
-    if query.plan == .Val(_) && subject == None {
-        optimization :: jet_driver_optimization_query(^request)
-        // The reference omits vector rows on failed semantic lowering. An
-        // actual completed producer, never an absent provider, supplies [].
-        if optimization.compile.complete && optimization.compile.internal_problem == None -> vector = jet_cli_build_vector(optimization, json)
-    }
-    {stdout: jet_cli_build_report(query, vector, subject, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: jet_cli_build_report(query, subject, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Exact IEEE-754 fixed-three formatting, including half-to-even and -0.

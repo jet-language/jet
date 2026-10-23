@@ -1,7 +1,7 @@
 // Runtime loader restoration: installed-unit identity, parse controls, import
 // rewriting and Core-private admission are independent of the linker live set.
 use jet_driver.[
-    JetDriverCoreSource, JetDriverParseJob, JetDriverSourceUnit, jet_driver_core_library_catalog,
+    JetDriverCoreSource, JetDriverParseJob, JetDriverSourceUnit,
     jet_driver_core_runtime_member_imports, jet_driver_core_runtime_row,
     jet_driver_core_source_unit, jet_driver_core_unit, jet_driver_has_errors, jet_driver_parse_one,
     jet_driver_runtime_entry_row,
@@ -100,6 +100,4 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
     allowed :: jet_driver_core_unit(&units, &queued, &pending, &generated, rows, row.module_name, true, "", -1, Span{start: 0, end: 1}, &allowed_diagnostics)
     assert_eq(allowed, Val(0))
     assert_eq(allowed_diagnostics.len(), 0)
-    catalog :: jet_driver_core_library_catalog(rows)
-    assert(catalog.complete && catalog.source_units.len() == rows.len())
 }

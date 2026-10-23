@@ -1691,8 +1691,8 @@ for reads, writes, takes, and returned values.
 
 ## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / D-DEP-WASM1)
 
-An application `target: sandbox` is a WASM Component Model guest in the
-existing `jet-pkg-model::Prelude::Plugin` host. The native library boundary is
+An application sandbox is a prebuilt WASM Component Model guest loaded by the
+`core.plugin` host; the compiler has no sandbox build target. The native library boundary is
 different: a native library is trusted code and has no Wasmtime sandbox or
 implicit capability reduction. Both surfaces keep the same checked export
 shape, but only the Component path makes an isolation guarantee.

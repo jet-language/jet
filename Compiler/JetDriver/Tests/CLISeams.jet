@@ -3,10 +3,10 @@
 use jet_driver.[
     JET_DRIVER_CORE_SOURCE_ROOT, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
     JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
-    JetDriverCoreSource, jet_driver_checked_projection, jet_driver_compile_mir,
-    jet_driver_has_errors, jet_driver_load, jet_driver_module_display,
-    jet_driver_registration_module_inputs, jet_driver_schema_pending_breaks,
-    jet_driver_source_query,
+    JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_checked_projection,
+    jet_driver_compile, jet_driver_has_errors, jet_driver_load, jet_driver_lowering_inputs,
+    jet_driver_module_display, jet_driver_registration_module_inputs,
+    jet_driver_schema_pending_breaks, jet_driver_source_query,
 ]
 use jet_cli.[jet_cli_checked_semindex, jet_cli_driver_request]
 use jet_sema.[SchemaSnapshot, SemaForeignProviderInput, SnapshotField]
@@ -39,6 +39,19 @@ fn seams_package_request(version: String?) -> JetDriverCompileRequest {
     if version == .Val(value) -> manifest = "{manifest}version: \"{value}\"\n"
     &request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: "/seams-fixture/package.jet", relative_path: "package.jet", identity: "seams-manifest", source: manifest})
     request
+}
+
+// The name of the checked function the compile stopped before lowering names
+// as its executable entry; None for a library or a compile that failed.
+fn seams_entry_name(front: JetDriverLoweringInputsResult) -> String? Never! {
+    if front.inputs == .Val(checked) {
+        if checked.entry_key == .Val(key) {
+            loop function in checked.functions {
+                if function.key == key -> return Val(function.name.copy())
+            }
+        }
+    }
+    None
 }
 
 fn seams_registration_inputs(request: JetDriverCompileRequest, expected_source_rows: Int) {
@@ -112,7 +125,7 @@ fn seams_checked_projection() {
     seams_require(empty.compile.complete && empty.source_modules.len() == 1, "an empty authorized file is still a real source owner")
     failed :: jet_driver_checked_projection(seams_request("fn serve() {{ undefined_call() }}", JetDriverCompileMode.Check))
     seams_require(!failed.compile.complete && failed.source_modules.len() == 0 && failed.entry_module == None, "failed checking does not publish a complete projection")
-    legacy :: jet_driver_compile_mir(seams_request(source, JetDriverCompileMode.Doc))
+    legacy :: jet_driver_compile(seams_request(source, JetDriverCompileMode.Doc))
     seams_require(legacy.complete && legacy.doc_modules.len() == 1, "legacy Doc keeps its existing user-only path")
 }
 #Test("cli_seams") {
@@ -137,11 +150,20 @@ fn seams_checked_projection() {
     malformed :: jet_driver_source_query(seams_request("fn serve( {{", JetDriverCompileMode.Doc))
     seams_require(!malformed.complete && malformed.diagnostics.len() > 0, "loader failures preserved")
     // Named jobs remain callable under their declared name, even with a stock
-    // run, and the same declared body is the MIR entry on every execution mode.
-    loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Program, JetDriverCompileMode.Doc, JetDriverCompileMode.Eval, JetDriverCompileMode.Interpreter}) {
-        request := seams_request("#Job fn serve() -> Int {{ 7 }}\nfn caller() -> Int {{ serve() }}\nfn run() -> Int {{ 9 }}", mode)
+    // run: the same declared body is the checked entry of every mode, and the
+    // executing modes evaluate it.
+    job_source :: "#Job fn serve() -> Int {{ 7 }}\nfn caller() -> Int {{ serve() }}\nfn run() -> Int {{ 9 }}"
+    loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Program, JetDriverCompileMode.Doc}) {
+        request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
-        result := jet_driver_compile_mir(^request)
+        front :: jet_driver_lowering_inputs(^request, None)
+        seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job check")
+        seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
+    }
+    loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Eval, JetDriverCompileMode.Interpreter}) {
+        request := seams_request(job_source, mode)
+        request.selected_entry = Val("serve")
+        result := jet_driver_compile(^request)
         seams_require(result.complete && result.internal_problem == None && !jet_driver_has_errors(result.diagnostics), "named job compile")
         entry :: result.entry_function ?? panic("selected entry missing")
         program := ^result.mir ?? panic("selected MIR missing")
@@ -160,26 +182,23 @@ fn seams_checked_projection() {
     // A named generator does not need a synthetic or pre-existing run body.
     generate := seams_request("#Job fn generate_files() -> Int {{ 3 }}", JetDriverCompileMode.Program)
     generate.selected_entry = Val("generate_files")
-    generated :: jet_driver_compile_mir(^generate)
-    seams_require(generated.complete && generated.entry_function != None && generated.internal_problem == None, "generate selects declared Job without fn run")
+    generated :: jet_driver_lowering_inputs(^generate, None)
+    seams_require(generated.compile.complete && generated.compile.internal_problem == None && seams_entry_name(generated) == Val("generate_files"), "generate selects declared Job without fn run")
     // Rust artifact_plan.rs `lower_entry`: with no selected Output and no
     // manifest entry, the executable entry is the entry module's `fn run`;
     // without one the package lowers as a library, with no entry.
-    plain :: jet_driver_compile_mir(seams_request("fn helper() -> Int {{ 1 }}\nfn run() {{ print(helper()) }}", JetDriverCompileMode.Program))
-    plain_entry :: plain.entry_function ?? panic("a package with `fn run` and no outputs lost its executable entry")
-    plain_program :: plain.mir ?? panic("default run entry MIR missing")
-    plain_run := false
-    loop function in plain_program.functions {
-        if function.id == plain_entry && function.name == "run" -> plain_run = true
-    }
-    seams_require(plain.complete && plain_run, "no-output package selects its `fn run` as the executable entry")
-    library :: jet_driver_compile_mir(seams_request("fn helper() -> Int {{ 1 }}", JetDriverCompileMode.Program))
-    seams_require(library.complete && library.entry_function == None, "no `fn run` and no outputs: library, no entry")
+    plain :: jet_driver_lowering_inputs(seams_request("fn helper() -> Int {{ 1 }}\nfn run() {{ print(helper()) }}", JetDriverCompileMode.Program), None)
+    seams_require(plain.compile.complete && seams_entry_name(plain) == Val("run"), "no-output package selects its `fn run` as the executable entry")
+    library :: jet_driver_lowering_inputs(seams_request("fn helper() -> Int {{ 1 }}", JetDriverCompileMode.Program), None)
+    // Stays true unless the compile returns its checked inputs with no entry.
+    library_entry := true
+    if library.inputs == .Val(checked) -> library_entry = checked.entry_key != None
+    seams_require(library.compile.complete && !library_entry, "no `fn run` and no outputs: library, no entry")
     // Eval's existing canonical purity pass must attribute a transitive effect
     // through checked TIR calls, including calls nested in a conditional.
     pure := seams_request("fn leaf() {{ print(\"effect\") }}\nfn helper() {{ if true {{ leaf() }} }}\nfn evaluate() {{ helper() }}\nfn run() {{ }}", JetDriverCompileMode.Eval)
     pure.selected_entry = Val("evaluate")
-    impure :: jet_driver_compile_mir(^pure)
+    impure :: jet_driver_compile(^pure)
     chain := false
     loop diagnostic in impure.diagnostics {
         if diagnostic.code == "E3401" {
@@ -192,7 +211,7 @@ fn seams_checked_projection() {
     schema := seams_request("#PublishedSchema struct Account {{\n    name: String\n    verified: Bool\n}}\nfn run() {{ }}", JetDriverCompileMode.Doc)
     baseline :: SchemaSnapshot{schema_version: U32{1}, type_name: "Account", published_version: "1.0.0", squashed_before: None, fields: [SnapshotField]{SnapshotField{name: "name", ty: "String"}}}
     schema.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
-    breaking :: jet_driver_compile_mir(^schema)
+    breaking :: jet_driver_compile(^schema)
     schema_error := false
     loop diagnostic in breaking.diagnostics { if diagnostic.code == "E0910" -> schema_error = true }
     seams_require(schema_error && !breaking.complete && breaking.mir == None, "schema fails before codegen")

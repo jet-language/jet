@@ -68,7 +68,7 @@ fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetD
     // its label.
     {label: subject.copy(), provenance: ^facts}
 }
-fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> String Never! {
+fn jet_driver_build_plan_json(plan: BuildSessionPlan) -> String Never! {
     permit :: plan.storage.guard_read()
     graph :: build_session_project(permit.value)
     targets := [String]{}
@@ -104,5 +104,5 @@ fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> St
     default :: if plan.default >= 0 -> { "{plan.default}" } else -> { "null" }
     // Rust BuildGraph.affected_files() is the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
-    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"vector\":{vector_json}}}"
+    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}]}}"
 }

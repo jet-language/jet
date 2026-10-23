@@ -13,7 +13,7 @@ fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], 
 
 fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
@@ -65,7 +65,7 @@ fn jet_cli_lint_max_error(text: String, color: Bool) -> JetDriverVerbOutput Neve
 
 fn jet_cli_lint_architecture(file: String, color: Bool) -> JetCLIArchitectureInspection {
     watch :: cli_time.start()
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> return JetCLIArchitectureInspection{rows: [], check: None, reason: Val("the checked semantic projection was unavailable; no architecture claim was emitted ({refusal.stderr.trim()})")}
         .Compiled(result, snapshot) -> {
@@ -89,7 +89,7 @@ fn jet_cli_lint_complexity(file: String, source: String, raw: [String], color: B
         .Refused(output) -> return ^output
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {

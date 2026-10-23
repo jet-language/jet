@@ -32,7 +32,7 @@ fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: G
 }
 
 fn ff_case(file: String, name: String, pack: GLPack) -> String {
-    compiled :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> {
             ff_files.write("{name}.front-issues", refusal.stderr) ?? panic("cannot write front-end refusal")
@@ -279,7 +279,7 @@ fn ff_cleanup_program(program: MIRProgram) {
 }
 
 fn ff_cleanup_case(file: String) {
-    compiled :: jet_cli_compile_file(file, false, false, Val(1), JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, false, Val(1), JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> panic("cleanup witness refused: {refusal.stderr}")
         .Compiled(result, snapshot) -> {
@@ -394,7 +394,7 @@ fn ff_explicit_cleanup_function(program: MIRProgram, function: MIRFunction) -> S
 }
 
 fn ff_explicit_cleanup_case(file: String) {
-    compiled :: jet_cli_compile_file(file, false, false, Val(1), JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, false, Val(1), JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> panic("explicit cleanup witness refused: {refusal.stderr}")
         .Compiled(result, snapshot) -> {

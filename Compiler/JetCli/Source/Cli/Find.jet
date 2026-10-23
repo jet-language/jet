@@ -527,7 +527,7 @@ fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
 fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json: Bool) -> JetDriverVerbOutput {
     path :: file ?? return JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(jet_cli_symbol_index(jet_cli_language_symbols()), [JetCLISemEffect]{}, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(path, false, false, None, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_find_result(path, query, mode, json, result, snapshot))

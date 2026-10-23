@@ -19,7 +19,6 @@ const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.fixture/GateLedger.jet"],
     ["gate-projection", "Compiler/JetCli/Tests/GateProjection.fixture/GateProjection.jet"],
-    ["export-boundary", "Compiler/JetSema/Tests/ExportBoundary.fixture/ExportBoundary.jet"],
     ["view-field-provenance", "Compiler/JetSema/Tests/ViewFieldProvenance.fixture/ViewFieldProvenance.jet"],
     ["named-tuple-identity", "Compiler/JetSema/Tests/NamedTupleIdentityFixtures.jet"],
     ["recovered-frozen", "Compiler/JetSema/Tests/FrozenFixtures.fixture/FrozenFixtures.jet"],

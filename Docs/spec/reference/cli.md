@@ -403,7 +403,7 @@ The generated help groups subcommands as follows:
 - **Registry:** `publish`, `yank`, `keygen`, `key backup`, and `vendor`.
 - **Db:** bounded SQL plus `migrate new`, `preview`, `status`, `target`,
   `apply`, `step`, `rollback`, and `resume`.
-- **Inspect:** `types`, `rights`, `claims`, `shapes`, `accel`, `decisions`,
+- **Inspect:** `types`, `rights`, `claims`, `shapes`, `decisions`,
   `structure`, `build`, `gates`, `graph`, `query build`, `explain-build`,
   `compiler`, `impact`, `provenance`, `digest`, `env`, `semindex`, `output`,
   `expand`, `schema`, `codemod`, `audit`, `sbom`, `bind`, `logs`, `info`,
@@ -889,14 +889,12 @@ the graph key: target, profile, and runtime-pack identity are not encoded in tha
 static key, so it cannot serve as a native artifact cache identity. A compile
 observation never stamps an unexecuted check or link action.
 
-Acceleration inspection projects the optimizer's actual loop, vector, and
-acceleration proof rows for the selected profile and machine layout. It does
-not convert a source proof into a runtime measurement. Decision inspection
-materializes the canonical ledger from those MIR producers and semantic
-diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
-the complete source/configuration/profile/target/implementation/artifact/run
-identity and checked derivation references for live snapshots and replay;
-readers reject altered identities, row IDs, derivations, and noncanonical bytes.
+Decision inspection builds the checked program into the slot IR from its
+`fn run` and runs the IR optimizer at the level `jet build` uses: O1, or O2
+under `--release` or the `release`/`hardened` profiles. It reports what the
+passes changed (instructions before and after, inlined and direct calls, folds,
+fused compares, coalesced copies, removed dead and unreachable code, scalar
+replaced aggregates) and names each function the IR builder could not build.
 
 Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
 Its no-follow read retains one file descriptor, checks its regular-file type,
@@ -906,28 +904,15 @@ snapshot schema bounds values, tasks and channels to 4096 rows; event observatio
 retain exactly fifteen payload-free fields, at most 256 records, strictly
 increasing sequences, and the runtime's closed enums and unavailable-count sentinel.
 Text and JSON share this validated snapshot, including published rendered values
-and sorted shape identities. Optional decision ledgers use the optimizer's existing
-authenticated codec with a 512 KiB transport bound; absence is explicitly
-`unavailable`, not evidence of a compiler decision. No process memory is read.
+and sorted shape identities. The snapshot's `decisions` slot carries no compiler
+decision and is not read. No process memory is read.
 Duplicate keys anywhere in a snapshot are rejected as corrupt or forged runtime
 transport by the strict Core JSON parser. This intentionally does not preserve
 the retired host's first-scalar/last-container duplicate-key behavior.
 
-The CLI's `inspect.accel` status projects typed authenticated runtime receipt
-rows separately from static vector and gate facts. Missing measurements stay
-null; a source proof alone never marks an acceleration selected. The shared
-D-ACCEL1 evaluator retains the release, parity, proof, measurement, and gain
-checks in their canonical order. `inspect.decisions` projects numeric row IDs,
-flat derivation references, per-kind counts, and the actual compiler journal's
-canonical routes; transport-ledger JSON is not a CLI status envelope.
-
-Runtime rows are read from authenticated current receipts through the held
-RecordIndex. Selection rederives the canonical target input identity, filters
-the current tool version, then chooses recorded sequence and receipt ID in
-descending order. A valid newest receipt with no acceleration rows does not
-reuse older measurements. Typed sections retain full-width integer values and
-reject unknown fields, invalid variants, duplicate numeric row sequences,
-reversed ranges, and values exceeding the compiled target's pointer width.
+The CLI's `inspect.decisions` status carries the optimizer report's counts as
+fields, the unbuilt functions as text rows, and the actual compiler journal's
+canonical routes.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,

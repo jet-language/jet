@@ -1,6 +1,6 @@
 // The `jet inspect` group (Source/CmdInspect.rs, the Source/main.rs arms its
 // dispatch words reach, CmdCompile.rs `run_build_query`/`run_compiler_api`,
-// and crates/jet-cli CLI.rs `parse_inspect_args`): the nine planes (`jet
+// and crates/jet-cli CLI.rs `parse_inspect_args`): the eight planes (`jet
 // inspect <plane> [TARGET] [--live PID | --replay ARTIFACT]`) and the
 // `graph`, `query`, `explain-build`, `compiler`, `impact`, and `provenance`
 // actions. The other inspect actions belong to InspectB.jet. A plane, scope,
@@ -21,7 +21,6 @@ use jet_driver.[
     jet_driver_inline_package,
     jet_driver_mask_inline_package,
     jet_driver_present_diagnostics,
-    jet_driver_optimization_query,
     jet_driver_report_problems,
 ]
 use jet_foundation.[
@@ -33,7 +32,6 @@ use jet_foundation.[
     ImplDef,
     Item,
     Program,
-    MIRArtifactBuildMode,
     Span,
     Type,
     TypeParam,
@@ -52,7 +50,7 @@ use jet_parser.[
 use jetpack_artifact_store.[ArtifactStore]
 
 // CLI.rs `InspectPlane::ALL`, in order.
-JET_CLI_INSPECT_PLANES :: [String]{"types", "rights", "claims", "shapes", "accel", "decisions", "structure", "build", "gates"}
+JET_CLI_INSPECT_PLANES :: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates"}
 
 // CLI.rs `InspectScope`: `Target` is a source file or a package directory.
 enum JetCLIInspectScope {
@@ -99,9 +97,9 @@ fn jet_cli_inspect_flag_takes_value(argument: String) -> Bool Never! {
 
 // CLI.rs `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
 fn jet_cli_inspect_parse(argv: [String]) -> JetCLIInspectParse Never! {
-    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates"}
+    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, or gates"}
     plane :: argv[1]
-    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates"}
+    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, or gates"}
     target := String?{None}
     live := Int?{None}
     replay := String?{None}
@@ -174,7 +172,7 @@ fn jet_cli_inspect_parse(argv: [String]) -> JetCLIInspectParse Never! {
 // projection (CmdInspect.rs `run_inspect`).
 fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     if jet_cli_inspect_parse(argv) == {
-        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|accel|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
+        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
         .Parsed(request) -> return jet_cli_inspect_run(request, color, json, threads)
     }
 }
@@ -185,7 +183,6 @@ fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?)
 // `inspect_entry_path` resolves.
 fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     plane :: request.plane
-    if plane == "accel" -> return jet_cli_inspect_optimization(request, color, json, threads)
     if request.scope == .Live(pid) -> return jet_cli_inspect_live(plane, pid, color, json)
     if request.scope == .Replay(artifact) {
         if jet_cli_inspect_entry(request.scope, plane, color) == {
@@ -193,7 +190,7 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
             .File(path, notice) -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "replay", file: path, subject: Val(artifact), json: json, color: color, threads: threads, notice: notice, project: true}}
         }
     }
-    if plane == "decisions" -> return jet_cli_inspect_optimization(request, color, json, threads)
+    if plane == "decisions" -> return jet_cli_inspect_decisions(request, color, json, threads)
     if plane == "build" {
         loop option in request.options {
             if option == "--coverage" || option.starts_with("--coverage=") -> return jet_cli_inspect_coverage(json, color)
@@ -238,13 +235,10 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
     jet_cli_with_notices([String]{notice}, jet_cli_not_ported("inspect {plane}", color))
 }
 
-// CmdInspect.rs `run_accel`/`run_decisions` up to the projection: the profile
-// name (`--release` wins over `--profile`, default `debug`), the scope name,
-// and the resolved entry. Accel resolves the name to its build mode
-// (CmdCompile.rs `resolve_named_profile`, the blessed names;
-// a package-declared profile is not ported yet); decisions keeps the name as
-// its label and lowers the dev artifact.
-fn jet_cli_inspect_optimization(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+// `jet inspect decisions` up to the projection: the profile name (`--release`
+// wins over `--profile`, default `debug`), which selects the optimization
+// level, the scope name, and the resolved entry.
+fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     plane :: request.plane
     profile := "debug"
     release := false
@@ -261,12 +255,10 @@ fn jet_cli_inspect_optimization(request: JetCLIInspectRequest, color: Bool, json
     }
     if release -> profile = "release"
     release_build := false
-    if plane == "accel" {
-        if profile == {
-            "release" | "hardened" -> release_build = true
-            "debug" | "ci" -> {}
-            else -> return jet_cli_not_ported("inspect {plane} --profile {profile}", color)
-        }
+    if profile == {
+        "release" | "hardened" -> release_build = true
+        "debug" | "ci" -> {}
+        else -> return jet_cli_not_ported("inspect {plane} --profile {profile}", color)
     }
     scope := "package"
     target := String?{None}
@@ -299,7 +291,6 @@ fn jet_cli_inspect_live(plane: String, pid: Int, color: Bool, json: Bool) -[FS, 
     fix :: "start the program with --observe, then run `jet inspect {plane} --live {pid}`"
     snapshot :: jet_cli_live_read(pid) ?? return jet_cli_inspect_b_report("E2105", err.message, jet_cli_why("E2105"), fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
     output :: if {
-        plane == "decisions" -> jet_cli_live_decisions_report(snapshot, json)
         json -> jet_cli_live_json_report(snapshot, plane)
         else -> jet_cli_live_text(snapshot)
     }
@@ -379,8 +370,8 @@ struct JetCLIInspectJob {
     depth: Int{3}
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
     root: String{""}
-    // `accel`/`decisions`: the profile name, whether accel lowers the release
-    // artifact, and the scope name (`subject` is the named target).
+    // `decisions`: the profile name, whether it optimizes at the release
+    // level, and the scope name (`subject` is the named target).
     profile: String{"debug"}
     release_build: Bool{false}
     scope: String{""}
@@ -1474,7 +1465,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     }
     if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
@@ -1544,13 +1535,13 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         return jet_cli_inspect_check_failed(job, "", [Diagnostic]{missing})
     }
     source :: cli_files.read(job.file) ?? ""
-    if job.action == "accel" || job.action == "decisions" -> return jet_cli_inspect_optimization_host(job, source)
+    if job.action == "decisions" -> return jet_cli_inspect_decisions_host(job, source)
     if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch :: cli_time.start()
-    compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, mode)
+    compiled :: jet_cli_compile_file(job.file, job.color, job.threads, mode)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
@@ -1599,44 +1590,6 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
             return jet_cli_build_host(^request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
         }
     }
-}
-
-// CmdInspect.rs `run_accel`/`run_decisions` over the shared optimization
-// host: the checked Doc compile of the authorized sources under the job's
-// profile, the check failure every inspect plane reports, then accel's
-// authenticated receipt rows and the invocation's canonical-pass journal.
-// Canonical-route evidence is opt-in through the adapter evidence
-// environment (CanonicalPass.rs `enabled`: `JET_ADAPTER_MODE` and
-// comma-separated `JET_ADAPTER_OPERATION_IDS`). A receipt query the port
-// cannot answer (the #4736 comptime read set) refuses the command rather than
-// reporting no runtime rows.
-fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared :: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Doc)
-    if prepared == {
-        .Refused(refusal) -> output = ^refusal
-        .Prepared(value, _) -> {
-            request := ^value
-            request.profile = job.profile
-            if job.release_build -> request.build_mode = MIRArtifactBuildMode.Release
-            request.adapter_mode = cli_sys.get("JET_ADAPTER_MODE") ?? ""
-            ids :: cli_sys.get("JET_ADAPTER_OPERATION_IDS") ?? ""
-            if ids != "" -> request.adapter_operation_ids = ids.split(",").to_list()
-            sources := request.authorized_sources
-            query :: jet_driver_optimization_query(^request)
-            errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, sources, query.compile.generated_source_files))
-            if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
-            if query.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
-            runtime := [JetCLIAccelerationRuntime]{}
-            if job.action == "accel" {
-                runtime = jet_cli_acceleration_runtime_rows(query.profile, job.file, job.scope, job.subject) ?? jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color))
-            }
-            process :: cli_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
-            routes :: jet_cli_canonical_routes(query.canonical_routes, process)
-            jet_cli_inspect_finish(job, jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json))
-        }
-    }
-    output
 }
 
 // jet-impact `ImpactEdge` / `ImpactRef`.

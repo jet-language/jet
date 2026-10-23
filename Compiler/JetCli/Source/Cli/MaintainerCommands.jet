@@ -56,7 +56,7 @@ fn jet_cli_reduced_path(file: String) -> String Never! {
 // The reducer's oracle: the reduced source still reports diagnostic `code`.
 fn jet_cli_reduce_oracle(scratch: String, source: String, code: String) -> Bool {
     cli_files.write(scratch, source) ?? return false
-    if jet_cli_compile_file(scratch, false, true, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(scratch, false, None, JetDriverCompileMode.Program) == {
         .Refused(_) -> return false
         .Compiled(result, _) -> {
             loop diagnostic in result.diagnostics {
@@ -142,7 +142,7 @@ fn jet_cli_devtools_ice_report(args: [String], color: Bool, json: Bool) -> JetDr
     file :: args[0]
     source :: cli_files.read(file) ?? return jet_cli_maintainer_error("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
     root := ""
-    if jet_cli_compile_file(file, false, true, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> return output
         .Compiled(result, snapshot) -> {
             errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))

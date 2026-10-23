@@ -225,16 +225,3 @@ fn jet_cli_receipt_list(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] 
     }
     Ok(receipts)
 }
-
-fn jet_cli_receipt_list_current(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] JetCLIReadError! {
-    receipts :: jet_cli_receipt_list(project_root)
-    current := [JetCLIReceipt]{}
-    loop receipt in receipts {
-        if jet_cli_receipt_lookup(project_root, receipt.claim) == {
-            .Val(fresh) -> &current.push(fresh)
-            .None -> {}
-            .Err(error) -> { return Err(error) }
-        }
-    }
-    Ok(current)
-}

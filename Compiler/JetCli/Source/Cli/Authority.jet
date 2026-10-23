@@ -11,13 +11,9 @@
 use jet_driver.[
     JetDriverAuthorityPolicy,
     JetDriverCompileResult,
-    JetDriverLoweringInputs,
 ]
 use jet_foundation.[
     Diagnostic,
-    MIRFunctionID,
-    MIRProgram,
-    TFunc,
     authority_is_deny_only,
     diagnostic_from_registry,
 ]
@@ -147,76 +143,12 @@ fn jet_cli_policy_effects(names: [String]) -> [String] Never! {
     jet_cli_sorted_set(rights)
 }
 
-// EffectBudget.rs `entry_effects`: the application requires the direct
-// effects of every function its entry reaches along checked call edges.
-// The maximal row an open-world call (an unannotated function value, an
-// extern) seeds into `solved` is a ceiling fact (E0743), not a required
-// right, so it never widens the authority the application must hold.
-fn jet_cli_entry_required_effects(program: MIRProgram, entry: MIRFunctionID) -> [String] Never! {
-    by_key := [String:Int]{}
-    pending := [Int]{}
-    loop (index, function) in program.functions {
-        if by_key.get(function.key) == None -> by_key[function.key] = index
-        if function.id == entry -> &pending.push(index)
-    }
-    seen := [Int:Bool]{}
-    required := [String]{}
-    loop pending.len() > 0 {
-        index :: &pending.pop() ?? break
-        if seen.get(index) != None -> next
-        seen[index] = true
-        loop effect_name in program.functions[index].effects.direct -> &required.push(effect_name)
-        loop edge in program.functions[index].effects.call_edges {
-            if by_key.get(edge) == .Val(callee) -> &pending.push(callee)
-        }
-    }
-    required
-}
-
 // EffectBudget.rs `project_application_effects` plus CmdCompile.rs
-// `merge_invocation_authority`.
+// `merge_invocation_authority`. The compile's `entry_effects` are the direct
+// effects of every function its checked entry reaches (EffectBudget.rs
+// `entry_effects`, jet_driver_required_effects).
 fn jet_cli_application_authority(result: JetDriverCompileResult, invocation: JetCLIInvocationAuthority?) -> JetCLIAuthority Never! {
-    required := [String]{}
-    if result.mir == .Val(program) {
-        if result.entry_function == .Val(entry) -> required = jet_cli_entry_required_effects(program, entry)
-    }
-    authority := jet_cli_policy_authority(required, result.authority_policy)
-    jet_cli_with_invocation(&authority, invocation)
-    authority
-}
-
-// jet_cli_entry_required_effects over the checked functions the native
-// route builds from: the direct effects of every function the entry `entry_key`
-// reaches along checked call edges (the TIR effect facts MIR copies).
-fn jet_cli_checked_required_effects(functions: [TFunc], entry_key: String) -> [String] Never! {
-    by_key := [String:Int]{}
-    loop (index, function) in functions {
-        if by_key.get(function.key) == None -> by_key[function.key] = index
-    }
-    pending := [Int]{}
-    if by_key.get(entry_key) == .Val(entry) -> &pending.push(entry)
-    seen := [Int:Bool]{}
-    required := [String]{}
-    loop pending.len() > 0 {
-        index :: &pending.pop() ?? break
-        if seen.get(index) != None -> next
-        seen[index] = true
-        loop effect_name in functions[index].effects.direct -> &required.push(effect_name)
-        loop edge in functions[index].effects.call_edges {
-            if by_key.get(edge) == .Val(callee) -> &pending.push(callee)
-        }
-    }
-    required
-}
-
-// jet_cli_application_authority of an executable compile (`jet build`,
-// `jet run`): the effects its checked entry reaches under its package policy.
-fn jet_cli_executable_authority(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, invocation: JetCLIInvocationAuthority?) -> JetCLIAuthority Never! {
-    required := [String]{}
-    if inputs == .Val(checked) {
-        if checked.entry_key == .Val(entry_key) -> required = jet_cli_checked_required_effects(checked.functions, entry_key)
-    }
-    authority := jet_cli_policy_authority(required, result.authority_policy)
+    authority := jet_cli_policy_authority(result.entry_effects, result.authority_policy)
     jet_cli_with_invocation(&authority, invocation)
     authority
 }

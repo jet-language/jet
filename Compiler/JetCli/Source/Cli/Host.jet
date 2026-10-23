@@ -127,7 +127,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
     }
     requires_run :: project && !jet_cli_package_is_library_only(file) && jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
+    compiled :: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
@@ -203,7 +203,7 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
-    compiled :: jet_cli_compile_file(file, color, false, None, mode)
+    compiled :: jet_cli_compile_file(file, color, None, mode)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> jet_cli_eval_result(file, source, color, json, ^result, snapshot)
@@ -266,25 +266,6 @@ fn jet_cli_eval_shown(value: CtValue) -> String? Never! {
     if value == .Present(inner) -> return jet_cli_eval_shown(inner)
     if value == .Unit -> return None
     Val(ast_comptime_value_show(value))
-}
-
-// Syntax/predicates.rs `sanitize_crate_name`: ASCII letters, digits, and `_`
-// stay; any other character becomes one `_` (a UTF-8 continuation byte
-// belongs to the character before it).
-fn jet_cli_crate_name(stem: String) -> String Never! {
-    name := ""
-    loop byte in stem.bytes() {
-        code :: Int.from_u8(byte)
-        if code >= 128 && code < 192 -> next
-        keep :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
-        piece := "_"
-        if keep -> piece = String.from_bytes([U8]{byte}) ?? "_"
-        name = "{name}{piece}"
-    }
-    if name.len() == 0 -> return "out"
-    first :: Int.from_u8(name.bytes()[0])
-    if first >= 48 && first <= 57 -> return "_{name}"
-    name
 }
 
 // The entry's file name without `.jet`.
@@ -353,8 +334,7 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 
 // The one native executable route of `jet build`, `jet run` (every profile),
 // `jet test` (`harness`: the selected tests and Check Outputs, built by
-// ir_build_tests instead of the program's entry) and the bootstrap native
-// feed (Compiler/Bootstrap/Host/Entry.jet): build
+// ir_build_tests instead of the program's entry): build
 // the slot IR of every checked function the entry reaches (Compiler/JetIR),
 // select x86-64 for it into an in-memory object, realize the program's C closure
 // (c@path archives, #FFI(c) inline bodies, a Rust foreign helper's archive,
@@ -673,9 +653,9 @@ fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool
 // leaves undecided a right the program requires (Authority.jet). A script
 // answers with the `-A` rows (`jet_cli_source_invocation`).
 // Traced as `cli.authority`.
-fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?) -> JetDriverVerbOutput? Never! {
+fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -> JetDriverVerbOutput? Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
-    authority :: jet_cli_executable_authority(result, inputs, jet_cli_source_invocation(source, invocation))
+    authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, invocation))
     if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
     jet_cli_authority_report(file, source, color, command, authority)
 }
@@ -710,7 +690,7 @@ fn jet_cli_build_result(file: String, name: String, source: String, color: Bool,
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if jet_cli_authority_check(file, source, color, "build", invocation, result, inputs) == .Val(refusal) -> return refusal
+    if jet_cli_authority_check(file, source, color, "build", invocation, result) == .Val(refusal) -> return refusal
     if jet_cli_build_binary(file, name, "build", color, release, result, ^inputs, snapshot) == {
         .Failed(failure) -> return failure
         .Binary(_) -> {}
@@ -801,7 +781,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if jet_cli_authority_check(file, source, color, "run", invocation, result, inputs) == .Val(refusal) -> return refusal
+    if jet_cli_authority_check(file, source, color, "run", invocation, result) == .Val(refusal) -> return refusal
     if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     built :: jet_cli_build_binary(file, jet_cli_stem(file), "run", color, release, result, ^inputs, snapshot)
@@ -854,9 +834,8 @@ fn jet_cli_compile_script(file: String, source: String, color: Bool, release: Bo
 // Build a compiled script as `jet run` does, keep the program under `keep`
 // (ScriptCache.jet), then run it.
 fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetDriverVerbOutput {
-    // The kept program's authority is the compile's own, before the build
-    // takes the checked functions.
-    authority :: jet_cli_executable_authority(result, inputs, None)
+    // The kept program's authority is the compile's own.
+    authority :: jet_cli_application_authority(result, None)
     built :: jet_cli_run_result(file, source, color, release, false, program_args, invocation, result, ^inputs, snapshot, true)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, built.stdout, authority)
@@ -1109,7 +1088,7 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
 // status, or write `docs/index.html` and `docs/index.md` beside the entry.
 fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, check: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_doc_result(file, source, color, json, check, result, snapshot))
@@ -1151,7 +1130,7 @@ fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, che
 // stderr with exit 1.
 fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_semindex_result(file, color, json, result, snapshot))
@@ -1306,7 +1285,7 @@ JET_CLI_FMT_EXPLICIT_COPIES_POLICY :: "#Policy(copies: .Explicit)\n"
 // copies the default policy makes implicitly. Sema spans point into the
 // source as read, so marks go in before any package-target migration.
 fn jet_cli_fmt_explicit_copies(source: String, origin: String, color: Bool) -> JetCLIFmtSource {
-    if jet_cli_compile_file(origin, color, false, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(origin, color, None, JetDriverCompileMode.Program) == {
         .Refused(refusal) -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(refusal.stderr)}
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
@@ -1315,7 +1294,7 @@ fn jet_cli_fmt_explicit_copies(source: String, origin: String, color: Bool) -> J
     }
     shift :: JET_CLI_FMT_EXPLICIT_COPIES_POLICY.len()
     sites := [Int]{}
-    if jet_cli_compile_entry(origin, color, false, None, JetDriverCompileMode.Program, Val("{JET_CLI_FMT_EXPLICIT_COPIES_POLICY}{source}"), None) == .Compiled(result, snapshot) {
+    if jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val("{JET_CLI_FMT_EXPLICIT_COPIES_POLICY}{source}"), None) == .Compiled(result, snapshot) {
         loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
             owner :: diagnostic.origin ?? next
             edit :: diagnostic.edit ?? next
@@ -1869,10 +1848,6 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .BuildPackage(file, color, release, threads, invocation, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_build_package(file, color, release, threads, invocation, trace_sink)
-        }
-        .BuildSandbox(file, source, color, quiet, threads, notice) -> {
-            jet_cli_write_notice(notice)
-            output = jet_cli_compile_sandbox(file, source, color, quiet, threads)
         }
         .Run(file, source, color, release, verbose, threads, program_args, invocation, notice, watch) -> {
             jet_cli_write_notice(notice)

@@ -4274,10 +4274,12 @@ manifest's `deps` block without discarding their declarations
 
 ## Sandboxed WASM packages
 
-A package with `target: sandbox` compiles to an isolated `wasm32` Component
-Model module. A native host loads and calls it across the Component boundary;
-the sandbox does not require a `#Unsafe` gate. This application-sandbox world
-is distinct from PATH helpers and from the compiler-extension world.
+A sandbox is an isolated `wasm32` Component Model module. A native host loads
+and calls it across the Component boundary; the sandbox does not require a
+`#Unsafe` gate. This application-sandbox world is distinct from PATH helpers
+and from the compiler-extension world. The compiler does not build sandbox
+Components: `jet build` has no sandbox target, and a host loads a Component
+that was built ahead of time.
 
 ```jet
 // package.jet
@@ -4292,9 +4294,8 @@ fn scale(a: Float, b: Float) -> Float {
 }
 ```
 
-The sandbox build derives a WIT world from the entry file's top-level functions
-surface, emits guest code, and uses the Component Model toolchain to produce a
-`.wasm` component. A host uses a typed plugin handle:
+A sandbox's WIT world lists the entry file's top-level functions. A host uses a
+typed plugin handle:
 
 ```jet
 use core.plugin as plugin
@@ -4337,11 +4338,11 @@ export `load` and no frames.
 
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
-`.jet/cache/api/`; unchanged interfaces freeze silently, while removing or
-changing an export is E1257. E1258 reports authority denial, E1259 a component
-build/toolchain failure, and E1260 an unsupported export shape on either the
-sandbox Component boundary or the native `#Export(c)` C boundary
-(D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-DEP-WASM1, D-EMBED2).
+`.jet/cache/api/`. Sema resolves a host's calls against that frozen interface,
+and a call to an export it does not list is E1257. E1260 reports an unsupported
+export shape on
+either the sandbox Component boundary or the native `#Export(c)` C boundary
+(D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-EMBED2).
 
 ### Embedding artifacts
 
@@ -4358,11 +4359,10 @@ header. It needs no Component runtime, but the native artifact is trusted code:
 the C host owns its ABI and capabilities. Text results are released with the
 generated `jet_text_free` function.
 
-`jet build --target=sandbox` emits the Component from the same list. A sandbox
-host supplies a Component runtime; the guest has no ambient Jet authority, and
-future host capabilities must be explicit WIT imports. The native and Component
-artifacts therefore share source semantics while offering different trust and
-runtime guarantees.
+A sandbox host supplies a Component runtime; the guest has no ambient Jet
+authority, and future host capabilities must be explicit WIT imports. The
+native and Component artifacts therefore offer different trust and runtime
+guarantees.
 
 ## Programmable builds
 

@@ -60,7 +60,7 @@ fn jet_cli_compiler_service_answer(op: String, text: String) -> JetDriverVerbOut
 // compile still failed internally is one E2105 row.
 fn jet_cli_compiler_service_check(file: String, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Program, Val(source), None)
+    compiled :: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Program, Val(source), None)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {

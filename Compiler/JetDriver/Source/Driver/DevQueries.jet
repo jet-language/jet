@@ -97,7 +97,7 @@ fn jet_driver_query_dev_config(owned_request: ^JetDriverCompileRequest) -> JetDr
         }
     }
     path :: selected ?? return JetDriverDevQueryResult{config: jet_driver_dev_config_stock(), diagnostics: ^sources.diagnostics, complete: true, internal_problem: None}
-    compiled := jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("dev"), true, false)
+    compiled := jet_driver_compile_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("dev"), true, false)
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_dev_query_failed(^compiled.diagnostics, ^compiled.internal_problem)
     entry :: compiled.entry_function ?? return jet_driver_dev_query_failed(^compiled.diagnostics, Val("checked dev invocation lost its MIR entry"))
     mir :: ^compiled.mir ?? return jet_driver_dev_query_failed(^compiled.diagnostics, Val("checked dev invocation lost its MIR program"))

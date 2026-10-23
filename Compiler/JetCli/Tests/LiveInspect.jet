@@ -1,10 +1,8 @@
 // Full-unit pure witnesses for the authoritative LiveInspect/EventObservation
 // consumer contract. Transport witnesses are separate real-filesystem fixtures.
-use jet_optimizer.[mir_decision_ledger_json]
 use jet_cli.[
-    JetCLILiveRuntime, jet_cli_live_decisions_report, jet_cli_live_decode,
-    jet_cli_live_event_render, jet_cli_live_json, jet_cli_live_json_report,
-    jet_cli_live_start_from_stat, jet_cli_live_text, jet_cli_live_unavailable_ledger,
+    JetCLILiveRuntime, jet_cli_live_decode, jet_cli_live_event_render,
+    jet_cli_live_json_report, jet_cli_live_start_from_stat, jet_cli_live_text,
 ]
 
 fn live_inspect_fixture(events: String, runtime: String, decisions: String) -> String Never! {
@@ -39,15 +37,8 @@ fn live_inspect_event(sequence: Int) -> String Never! {
         assert(json.contains("\"rendered_value\":\"7\""))
         assert(json.contains("\"shapes\":[{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\"]}}]"))
     }
-    unavailable :: jet_cli_live_decisions_report(snapshot, false)
-    assert(unavailable.starts_with("decisions: scope=live pid=42 source=app.jet build=build-1 revision=rev-1 world=world-1 record_status=unavailable retention=bounded redaction=transport-safe\n"))
-    assert(unavailable.contains("decision kind=tier disposition=unavailable derivation_disposition=unavailable"))
-    ledger :: jet_cli_live_unavailable_ledger(snapshot)
-    payload :: mir_decision_ledger_json(ledger)
-    published :: jet_cli_live_decode(live_inspect_fixture(events, "", ",\"decisions\":{payload}")) ?? panic("canonical live ledger")
-    assert(published.decisions != None)
-    assert(jet_cli_live_decisions_report(published, true).contains("\"record_status\":\"current\""))
-    live_inspect_rejected(live_inspect_fixture(events, "", ",\"decisions\":{payload.replace("\"run\":\"rev-1\"", "\"run\":\"forged\"")}"), "untrusted derivation")
+    with_ledger_slot :: jet_cli_live_decode(live_inspect_fixture(events, "", ",\"decisions\":null")) ?? panic("runtime's null decisions slot")
+    assert(jet_cli_live_text(with_ledger_slot) == expected)
     runtime :: ",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}}"
     window :: jet_cli_live_decode(live_inspect_fixture(events, runtime, "")) ?? panic("runtime window")
     assert(window.runtime == Val(JetCLILiveRuntime{elapsed_ns: 7, cpu_ns: Val(5), exit: true}))
@@ -81,8 +72,6 @@ fn live_inspect_event(sequence: Int) -> String Never! {
     assert(missing_value.values[0].rendered_value == None)
     null_deadline :: jet_cli_live_decode(text.replace("\"deadline_ms\":480", "\"deadline_ms\":null")) ?? panic("null deadline")
     assert(null_deadline.tasks[0].deadline_ms == None)
-    ordered :: Dyn.Object([(key: String, value: Dyn)]{(key: "z", value: Dyn.Int(2)), (key: "a", value: Dyn.Text("first"))})
-    assert((jet_cli_live_json(ordered) ?? panic(err.message)) == "{{\"a\":\"first\",\"z\":2}}")
     wide :: jet_cli_live_decode(text.replace("\"arena_bytes\":64", "\"arena_bytes\":9223372036854775807")) ?? panic("i64 maximum retained exactly")
     assert(wide.resources.get("arena_bytes") == Val(9223372036854775807))
     live_inspect_rejected(text.replace("\"arena_bytes\":64", "\"arena_bytes\":9223372036854775808"), "not valid JSON")
@@ -93,7 +82,6 @@ fn live_inspect_event(sequence: Int) -> String Never! {
     live_inspect_rejected(text.replace("\"values\":", "\"values\":[],\"values\":"), "not valid JSON")
     live_inspect_rejected(text.replace("\"depth\":4", "\"depth\":4,\"depth\":5"), "not valid JSON")
     live_inspect_rejected(text.replace("\"sequence\":1", "\"sequence\":1,\"sequence\":2"), "not valid JSON")
-    live_inspect_rejected(live_inspect_fixture(events, "", ",\"decisions\":{payload.replace("\"run\":\"rev-1\"", "\"run\":\"rev-1\",\"run\":\"forged\"")}"), "not valid JSON")
     absent :: jet_cli_live_decode(live_inspect_fixture("", "", "")) ?? panic("pure renderer permits absent event sequence")
     assert(absent.events == None && !jet_cli_live_text(absent).contains("\nevents\n"))
     proc_fields := [String]{"S"}
@@ -110,8 +98,6 @@ fn live_inspect_event(sequence: Int) -> String Never! {
     assert(at_limit.bytes().len() == 1048576)
     assert(jet_cli_live_decode(at_limit) == .Ok(_))
     live_inspect_rejected("{at_limit} ", "not valid JSON")
-    oversized_ledger :: payload.replace("the live runtime produced no compiler decision ledger for this run", "x".repeat(524289))
-    live_inspect_rejected(live_inspect_fixture(events, "", ",\"decisions\":{oversized_ledger}"), "transport limit")
     value :: "{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\",\"rendered_value\":\"7\"}}"
     many_values := [String]{}
     loop _ in 0..<4096 -> &many_values.push(value)

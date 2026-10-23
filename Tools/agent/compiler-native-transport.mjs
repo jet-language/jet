@@ -18,7 +18,7 @@ const checkedMirDriverEntry = `
 fn run() {
     args :: cli_process.args()
     if args.len() != 2 { panic("expected source and checked MIR output") }
-    compiled :: jet_cli_compile_file(args[0], false, false, None, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(args[0], false, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> panic("registry MIR request refused: {refusal.stderr}")
         .Compiled(result, _) -> {

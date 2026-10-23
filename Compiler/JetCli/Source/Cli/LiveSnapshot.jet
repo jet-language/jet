@@ -1,9 +1,7 @@
-// LiveInspect.rs: the closed runtime snapshot codec. Core owns JSON parsing;
-// the optimizer owns decision-ledger authentication. Duplicate keys are corrupt
-// runtime transport and are rejected by Core's strict parser (Main ruling).
-// No runtime fact is inferred.
-use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
-use jet_optimizer.[MIRDecisionLedger, mir_decision_ledger_read]
+// LiveInspect.rs: the closed runtime snapshot codec. Core owns JSON parsing.
+// Duplicate keys are corrupt runtime transport and are rejected by Core's
+// strict parser (Main ruling). No runtime fact is inferred.
+use jet_foundation.[foundation_parse_protocol_json]
 use core.text as live_text
 use core.math as status_math
 use core.encoding.[Dyn]
@@ -17,7 +15,7 @@ struct JetCLILiveSnapshot {
     revision: String, world_id: String, pid: Int, start_id: String, captured_ms: Int,
     values: [JetCLILiveValue], tasks: [JetCLILiveTask], channels: [JetCLILiveChannel],
     effects: [String:Int], resources: [String:Int], runtime: JetCLILiveRuntime?,
-    decisions: MIRDecisionLedger?, raw_events: Dyn?, events: String?
+    raw_events: Dyn?, events: String?
 }
 
 fn jet_cli_live_field(value: Dyn, key: String) -> Dyn? Never! {
@@ -82,44 +80,6 @@ fn jet_cli_live_array(value: Dyn, key: String) -> [Dyn] JetCLIReadError! {
     }
     Err(jet_cli_read_error("live runtime snapshot {key} are not an array"))
 }
-// LiveInspect canonical_json_value sorts object keys before handing the exact
-// transport to the existing canonical decision-ledger reader.
-fn jet_cli_live_json(value: Dyn) -> String JetCLIReadError! {
-    if value == {
-        .Null -> { return Ok("null") }
-        .Bool(flag) -> { return Ok("{flag}") }
-        .Int(number) -> { return Ok("{number}") }
-        .Float(number) -> {
-            if !status_math.is_finite(number) -> return Err(jet_cli_read_error("decision ledger contains a non-finite number"))
-            return Ok("{number}")
-        }
-        .Text(text) -> { return Ok(foundation_json_quote(text)) }
-        .Array(items) -> {
-            encoded := [String]{}
-            loop item in items -> &encoded.push(jet_cli_live_json(item))
-            return Ok("[{encoded.join(",")}]")
-        }
-        .Object(fields) -> {
-            names := [String]{}
-            loop field in fields -> &names.push(field.key)
-            &names.sort()
-            encoded := [String]{}
-            loop name in names {
-                child :: jet_cli_live_field(value, name) ?? return Err(jet_cli_read_error("decision ledger field disappeared"))
-                &encoded.push("{foundation_json_quote(name)}:{jet_cli_live_json(child)}")
-            }
-            return Ok("{{{encoded.join(",")}}}")
-        }
-    }
-}
-fn jet_cli_live_decisions(root: Dyn) -> MIRDecisionLedger? JetCLIReadError! {
-    value :: jet_cli_live_field(root, "decisions") ?? return Ok(None)
-    if value == .Null -> return Ok(None)
-    payload :: jet_cli_live_json(value)
-    if payload.bytes().len() > 524288 -> return Err(jet_cli_read_error("live decision ledger exceeds its transport limit"))
-    ledger :: mir_decision_ledger_read(payload) ?? return Err(jet_cli_read_error(err.message))
-    Ok(Val(ledger))
-}
 fn jet_cli_live_counts(root: Dyn, key: String, keys: [String], label: String) -> [String:Int] JetCLIReadError! {
     value :: jet_cli_live_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
     jet_cli_live_object(value, keys, [String]{}, label)
@@ -130,7 +90,6 @@ fn jet_cli_live_counts(root: Dyn, key: String, keys: [String], label: String) ->
 fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
     root :: foundation_parse_protocol_json(text) ?? return Err(jet_cli_read_error("live runtime snapshot is not valid JSON"))
     jet_cli_live_object(root, [String]{"protocol", "session_id", "source_id", "build_id", "revision", "world_id", "values", "schema_version", "pid", "start_id", "captured_ms", "tasks", "channels", "effects", "resources"}, [String]{"event_observations", "decisions", "runtime"}, "live runtime snapshot")
-    decisions :: jet_cli_live_decisions(root)
     version :: jet_cli_live_int(root, "schema_version", "live runtime snapshot", true)
     protocol :: jet_cli_live_string(root, "protocol", "live runtime snapshot")
     if protocol != "jet.live.v1" -> return Err(jet_cli_read_error("live runtime snapshot protocol must be jet.live.v1"))
@@ -183,5 +142,5 @@ fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
         runtime = Val(JetCLILiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: cpu_ns, exit: jet_cli_live_bool(window, "exit", "live runtime window")})
     }
     raw_events :: jet_cli_live_field(root, "event_observations")
-    Ok(JetCLILiveSnapshot{protocol: protocol, session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: start_id, captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: runtime, decisions: decisions, raw_events: raw_events, events: None})
+    Ok(JetCLILiveSnapshot{protocol: protocol, session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: start_id, captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: runtime, raw_events: raw_events, events: None})
 }

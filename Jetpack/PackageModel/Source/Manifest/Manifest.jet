@@ -401,23 +401,6 @@ fn pkg_e1213(file: String, name: String, paths: [String]) -> Diagnostic Never! {
         "rename one of the conflicting `module {name}` declarations so each package has a unique name")
 }
 
-// E1258 a sandbox uses an effect its `authority.needs`
-// does not cover.
-fn pkg_e1258(effects: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1258", None,
-        "a sandbox effect is not declared",
-        "this package builds as `target: sandbox` and uses: {effects}. Every non-memory effect must be covered by the package's canonical `authority.needs` declaration before a host import can be registered.",
-        "declare each required canonical right in `authority.needs`, or remove the effectful call from the sandbox guest")
-}
-
-// E1259 the sandbox's wasm32 Component build failed.
-fn pkg_e1259(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1259", None,
-        "couldn't build the sandbox's WASM Component",
-        detail,
-        "make sure `rustc` supports `--target wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell)")
-}
-
 // `--profile=<name>` names no blessed or declared profile.
 fn pkg_e1219(name: String) -> Diagnostic Never! {
     pkg_manifest_diagnostic_from_row("E1219", [ManifestEntry]{ManifestEntry{key: "name", value: name}}, None)

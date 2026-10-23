@@ -169,7 +169,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
                 }
                 // copy: `sources` keeps its module rows: on a duplicate build entry it returns
                 // `sources.diagnostics`. The selected path moves into
-                // jet_driver_compile_mir_selection, which takes ownership of the entry path.
+                // jet_driver_compile_selection, which takes ownership of the entry path.
                 selected = Val(loaded_module.physical_path.copy())
                 span = function.span
                 network_declared = jet_driver_build_declared_network(function.declared_effects)
@@ -179,7 +179,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     path :: selected ?? {
         // No build entry still has an ordinary checked source projection.
         // Loader-only success must not hide type errors in the package.
-        checked :: jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
+        checked :: jet_driver_compile_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
         complete :: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
         result := jet_driver_build_query_empty(^request, ^checked.diagnostics, complete, ^checked.internal_problem)
         if complete {
@@ -193,7 +193,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     }
     // Input services resolve paths against the build file's own directory.
     base_dir :: jet_driver_parent_path(path)
-    compiled := jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true, false)
+    compiled := jet_driver_compile_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true, false)
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
     program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
     entry :: compiled.entry_function ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
@@ -247,7 +247,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
         // (package is shared by every row).
         &request.generated_modules.push(JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()})
     }
-    checked :: jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
+    checked :: jet_driver_compile_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
     loop request.generated_modules.len() > original_generated_count -> _ :: &request.generated_modules.pop()
     if selected_outputs -> request.build_output_names = [String]{}
     loop error in checked.diagnostics -> &errors.push(error)

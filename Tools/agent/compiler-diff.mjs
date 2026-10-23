@@ -333,7 +333,6 @@ function uiCommands(source, file) {
   if (has("cli_e2101")) return [{ phase: "check", args: ["bench"] }];
   if (has("cli_e1219")) return [{ phase: "build", args: ["build", file, "--profile=turbo"] }];
   if (has("cli_build")) return [{ phase: "build", args: ["build", file] }];
-  if (has("sandbox_effect") || has("plugin_target")) return [{ phase: "build", args: ["build", file, "--target=sandbox"] }];
   if (complexity) return [{ phase: "check", args: ["lint", "--complexity", file, `--max=${complexity.split(/\s+/u)[1]}`] }];
   if (has("cost_cli")) return [{ phase: "check", args: ["explain", "--cost", file] }];
   if (has("run_cli") || has("web_run") || has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {

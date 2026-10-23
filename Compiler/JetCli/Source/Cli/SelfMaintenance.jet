@@ -25,7 +25,7 @@ fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriver
     source :: jet_cli_new_ui_source()
     cli_files.write(file, source) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
     actual := "(no errors)\n"
-    if jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> return output
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)

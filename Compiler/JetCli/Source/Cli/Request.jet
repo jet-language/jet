@@ -31,14 +31,12 @@ use jet_driver.[
     JetDriverKeepGoing,
     JetDriverLoweringInputs,
     JetDriverLoweringInputsResult,
-    JetDriverCompileTarget,
     JetDriverCoreSource,
     JetDriverComptimeInputLog,
     JetDriverHostFacts,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_USER_ERROR,
     jet_driver_compile,
-    jet_driver_compile_mir,
     jet_driver_compile_keep_going,
     jet_driver_lowering_inputs,
     jet_driver_c_symbol,
@@ -55,18 +53,16 @@ use jet_backend.[x64_link_runtime_pack]
 use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[DepSpec, PackageFacts, pkg_manifest_parse, pkg_to_manifest]
 
-// The production CLI and bootstrap observer share the driver's all-phases
-// implementation. A diagnostic trap is a failed compile, never an artifact.
+// The production CLI's compile, under the driver's all-phases collector when
+// JET_KEEP_GOING=1. A diagnostic trap is a failed compile, never an artifact.
 // `trace_sink` traces the keep-going report write (`keepgoing.report`).
-fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
-    if !jet_cli_keep_going_enabled() {
-        return if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
-    }
+fn jet_cli_compile_request(request: ^JetDriverCompileRequest, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
+    if !jet_cli_keep_going_enabled() -> return jet_driver_compile(^request)
     skip := [String]{}
     loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
         if row.trim().len() > 0 -> &skip.push(row.trim())
     }
-    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, emit_rust)
+    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip})
     if result.keep_going_rows.len() > 0 -> result.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem :: jet_cli_keep_going_report(result.keep_going_rows)
@@ -93,8 +89,7 @@ fn jet_cli_lowering_inputs(request: ^JetDriverCompileRequest, trace_sink: JetCLI
     front
 }
 
-// JET_KEEP_GOING=1 selects the all-phases collector (here and in the
-// bootstrap native feed, Compiler/Bootstrap/Host/Entry.jet).
+// JET_KEEP_GOING=1 selects the all-phases collector.
 fn jet_cli_keep_going_enabled() -> Bool Never! {
     (cli_sys.get("JET_KEEP_GOING") ?? "") == "1"
 }
@@ -122,9 +117,7 @@ fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
 // Packaging uses the ordinary hosted source loader: the checked
 // NativeLibrary program (the compile stopped before lowering, without an
 // entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1
-// and written as `{prefix}.o`, its export list and ABI receipt. The private
-// environment seam is shared with the bootstrap observer; neither Tests.rs
-// factories nor emitted Rust enter object/pack production.
+// and written as `{prefix}.o`, its export list and ABI receipt.
 fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
     owned := ^front
     result := ^owned.compile
@@ -693,13 +686,11 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         core_sources: core_sources,
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity()},
         eval_config: jet_cli_eval_config(),
-        target: JetDriverCompileTarget.Native,
         record_store: None,
         trace_sink: None,
-        // Dev verification knob (the bootstrap host's
-        // JET_BOOTSTRAP_MIR_LINT_EVERY_PASS): JET_MIR_LINT_EVERY_PASS=1 checks
-        // legality and MIR Lint after every optimizer pass, and a failure names
-        // the pass and carries the rejected function's MIR.
+        // Dev verification knob: JET_MIR_LINT_EVERY_PASS=1 checks legality and
+        // MIR Lint after every optimizer pass, and a failure names the pass and
+        // carries the rejected function's MIR.
         mir_lint_every_pass: (cli_sys.get("JET_MIR_LINT_EVERY_PASS") ?? "") == "1",
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
         mode: mode,
@@ -920,16 +911,15 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRead
 
 // Build the request for `file` (the entry as the user named it) and run the
 // Jet compiler on it in `mode` with at most `threads` compiler threads
-// (`--threads N`; `None` admits threads automatically). `emit_rust` asks for
-// explicit Rust emission queries; native builds/runs/tests stop at checked MIR
-// with the same diagnostics, then use the native backend's existing optimizer.
+// (`--threads N`; `None` admits threads automatically). Only the Eval,
+// Interpreter and REPL modes lower past the checked functions
+// (Pipeline `jet_driver_lowers_mir`).
 // Untraced: only the compiling verbs trace (`jet_cli_compile_entry`).
 // `jet_driver_compile` declares no effect row or failure (its Eval host
 // adapter makes dynamic calls with no effect bound), so this function and the
-// host verbs above it stay unannotated, like the bootstrap entry
-// (Compiler/Bootstrap/Host/Entry.jet).
-fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
-    jet_cli_compile_entry(file, color, emit_rust, threads, mode, None, None)
+// host verbs above it stay unannotated.
+fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+    jet_cli_compile_entry(file, color, threads, mode, None, None)
 }
 
 // One file's bytes as a compile sees them in place of the disk copy, or as a
@@ -944,10 +934,10 @@ struct JetCLIOverlay {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, emit_rust, threads, mode, trace_sink)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -1037,22 +1027,14 @@ fn jet_cli_prepare_refusal(what: String, fix: String, color: Bool) -> JetDriverV
 // The checked sources under `anchor`'s source root with `overlays` laid over
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
-// source loader and its authorization stay the one in this file.
-fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
-    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native, false, trace_sink)
-}
-
-// Sandbox and native targets use the same authorized source snapshot. The
-// source walk is the `sources` span; the request carries `trace_sink` into
-// the driver's phases, and its result back to the native backend.
-// `release` is Rust CmdCompile `select_native_profile` for `--release` (or
-// `--profile release`): the compile runs under the `release` profile, whose
-// MIR artifact mode is Release (Driver `mir_artifact_build_mode_for`).
-fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, release: Bool, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// source loader and its authorization stay the one in this file. The source
+// walk is the `sources` span; the request carries `trace_sink` into the
+// driver's phases.
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared :: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(^prepared, emit_rust, target, release, None, trace_sink)
+    jet_cli_compile_prepared(^prepared, None, trace_sink)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -1063,26 +1045,21 @@ fn jet_cli_prepared_file_count(prepared: JetCLIPrepared) -> Int Never! {
     }
 }
 
-// Compile `prepared` for `target` (`jet_cli_compile_for_target`).
-// `input_log`, when given, records every comptime input file the compile
-// reads (`embed_file`, `embed_bytes`, `find`).
-fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, emit_rust: Bool, target: JetDriverCompileTarget, release: Bool, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
+// records every comptime input file the compile reads (`embed_file`,
+// `embed_bytes`, `find`).
+fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     if ^prepared == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
             selected := request
-            selected.target = target
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
-            if release {
-                selected.profile = "release"
-                selected.build_mode = MIRArtifactBuildMode.Release
-            }
-            library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
+            library_prefix :: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
-            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(^selected, trace_sink), prefix, compiler_threads) else -> jet_cli_compile_request(^selected, emit_rust, trace_sink)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(^selected, trace_sink), prefix, compiler_threads) else -> jet_cli_compile_request(^selected, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.
@@ -1118,7 +1095,6 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, release: Bool, input_lo
         .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
             selected := request
-            selected.target = JetDriverCompileTarget.Native
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()

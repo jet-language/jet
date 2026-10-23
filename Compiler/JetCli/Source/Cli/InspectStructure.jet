@@ -35,9 +35,6 @@ fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact]
         // through a guard view) and the caller gets its own list.
         return permit.value.facts.structure_facts.copy()
     }
-    // copy: the structure facts stay in the compile result's program (owner: `result`, a read
-    // parameter: no move out of it, E0201) and the caller gets its own list.
-    if result.mir == .Val(program) -> return program.names.structure_facts.copy()
     result.structure_facts
 }
 
@@ -111,7 +108,7 @@ fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 // A checked result ends the process behind `notice` (jet_cli_finish).
 fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_structure_result(file, color, json, result, snapshot)))

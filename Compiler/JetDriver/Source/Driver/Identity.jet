@@ -16,11 +16,9 @@ use jet_foundation.[
     PolicyDeclaration,
     ImportDecl,
     Item,
-    JetReleaseDevtoolsPolicy,
     JetTargetLayout,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
-    MIRArtifactID,
     MIRFunctionID,
     MIRProgram,
     MIRRuntimeLayer,
@@ -58,14 +56,7 @@ use jet_sema.[
     SemaSourceSegment,
     SchemaSnapshot,
 ]
-use jet_codegen.[
-JetCodegenClosureSource,
-JetPluginArtifacts,
-JetRustEmitManifest,
-JetWebArtifacts,
-JetWebAssets,
-JetWebTimezoneAsset,
-]
+use jet_codegen.[JetCodegenClosureSource]
 use jet_eval.[JetEvalConfig]
 use jet_repl.[ReplSession]
 
@@ -107,27 +98,6 @@ struct JetDriverHostFacts {
     target_triple: String?
     active_os: String?
     compiler_identity: String?
-}
-
-enum JetDriverCompileTarget {
-    Native
-    Web(
-    assets: JetWebAssets,
-    release_devtools_policy: JetReleaseDevtoolsPolicy,
-    profile: MIRArtifactBuildMode,
-    )
-    // `--target=sandbox` the entry module's `pub fn` rows
-    // become a WASM Component guest. `export_name` is the manifest `export:`
-    // name (the package name when absent); `frozen_interfaces` are the texts
-    // of the `.jet/cache/api/plugin__*.api` snapshots the host read (the
-    // compile diffs against the one whose `package` is `plugin__<name>`, since
-    // only the compile resolves the name); the guest embeds `timezone_data`
-    // because a sandbox has no host filesystem.
-    Sandbox(
-    export_name: String?,
-    frozen_interfaces: [String],
-    timezone_data: [JetWebTimezoneAsset],
-    )
 }
 
 // Rust `CompileMode`: `Program` compiles a package for check, build, or run
@@ -216,7 +186,6 @@ struct JetDriverCompileRequest {
     core_sources: [JetDriverCoreSource]
     host_facts: JetDriverHostFacts
     eval_config: JetEvalConfig
-    target: JetDriverCompileTarget
     record_store: JetDriverRecordStore?
     // Captured snapshots override the canonical project schema cache; absence
     // reads that cache once through the same ordinary populated checker.
@@ -533,11 +502,6 @@ struct JetDriverCompileTrace {
     exit_code: Int?
 }
 
-enum JetDriverLoadMode {
-    Program
-    CoreLibrary
-}
-
 struct JetDriverLoadResult {
     package_identity: String
     packages: [JetDriverPackageInfo]
@@ -551,7 +515,6 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
-    mode: JetDriverLoadMode{JetDriverLoadMode.Program}
     // Canonical parser/load facts, available without checking callable bodies.
     names: NameLedger?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
@@ -579,12 +542,10 @@ struct JetDriverCompileResult {
     package_identity: String
     entry_module_identity: String
     entry_function: MIRFunctionID?
-    runtime_artifact: MIRArtifactID?
-    web_artifact: MIRArtifactID?
-    web_artifacts: JetWebArtifacts?
     mir: MIRProgram?
-    emitted_source: String?
-    emit_manifest: JetRustEmitManifest?
+    // The effects the checked entry function requires: its own declared
+    // effects and those of every function it reaches through call edges.
+    entry_effects: [String]{[String]{}}
     comptime_stdout: String
     comptime_stderr: String
     soft_stop: Bool
@@ -609,9 +570,6 @@ struct JetDriverCompileResult {
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
     // A Repl compile retains its checked scope and canonical MIR machine.
     repl_session: ReplSession?{None}
-    // A complete `Sandbox` compile: the guest artifacts plus the interface
-    // snapshot the host stores as the new frozen baseline.
-    sandbox: JetDriverSandboxOutput?{None}
     canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
     build_program: TComptimeValue?{None}
     build_nodes: [BuildGraphNode]?{None}
@@ -624,24 +582,17 @@ struct JetDriverCompileResult {
     // libraries, inline C bodies), read by the host's C link closure.
     foreign_link: JetDriverForeignLinkFacts{jet_driver_foreign_link_empty()}
     // The request's trace sink, handed back by the host's compile
-    // (JetCli Request.jet `jet_cli_compile_for_target`) so the host's own
+    // (JetCli Request.jet `jet_cli_compile_prepared`) so the host's own
     // phases after it (the native backend route) trace through the same sink.
     trace_sink: CompilerTraceSink?{None}
     // The request's compiler threads, handed back by the host's compile
-    // (JetCli Request.jet `jet_cli_compile_for_target`) so the native backend
+    // (JetCli Request.jet `jet_cli_compile_prepared`) so the native backend
     // route after it compiles on the same threads.
     compiler_threads: CompilerThreads{compiler_threads_single()}
 }
 
-struct JetDriverSandboxOutput {
-    artifacts: JetPluginArtifacts
-    // `plugin__<export name>`: the `.jet/cache/api/<package>.api` file stem.
-    snapshot_package: String
-    snapshot_text: String
-}
-
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
-// by the bootstrap entry). Its output is never shipped: a failed item is
+// by the CLI). Its output is never shipped: a failed item is
 // recorded and replaced by a typed trap so every later phase still runs.
 struct JetDriverKeepGoing {
     // Traps an earlier run asked for after it crashed inside one function,
@@ -745,10 +696,6 @@ fn jet_driver_diagnostic_without_span(code: String, what: String, why: String, f
 fn jet_driver_row_diagnostic(code: String, span: Span?) -> Diagnostic {
     row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic_from_registry(code, span, row.what, row.why, row.fix)
-}
-
-fn jet_driver_diagnostic_with_optional_span(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic {
-    diagnostic_from_registry(code, span, what, why, fix)
 }
 
 fn jet_driver_diagnostic_at_source(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
@@ -875,18 +822,13 @@ fn jet_driver_script_dependency_identity(dependency: JetDriverScriptDependency) 
 // #2517 package keys for the self-hosted driver, framed by
 // `package_key_*` in JetFoundation.
 // The facts self-hosted sema reads from the request for one package: the
-// active OS, the target triple, the package edition, and whether the build
-// targets the web. The build clock and root policy never enter.
+// active OS, the target triple and the package edition. The build clock and
+// root policy never enter.
 fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
-    web :: if request.target == {
-        .Web(_, _, _) -> "true"
-        .Native | .Sandbox(_, _, _) -> "false"
-    }
     facts := [PackageKeyTargetFact]{
         {name: "active_os", value: request.host_facts.active_os ?? ""},
         {name: "edition", value: package.edition},
         {name: "target_triple", value: request.host_facts.target_triple ?? ""},
-        {name: "web", value: web},
     }
     loop dependency in request.authorized_sources.script_dependencies {
         root :: request.authorized_sources.roots[package.root_index]
