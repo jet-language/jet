@@ -41,7 +41,6 @@ use core.process as process
 fn subject(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
-        if mode == "interpret" -> &argv.push("--interpret")
         &argv.push(path)
         return process.cmd(argv).run() ?? panic("run subject")
     }
@@ -86,7 +85,7 @@ fn reset_errno() -> Int {
     panic("raw-net-io-kind: host ECONNRESET constant is not mapped")
 }
 fn run() {
-    modes :: [String]{"default", "interpret", "aot"}
+    modes :: [String]{"default", "aot"}
     paths :: [String]{"/default", "/explicit", "/over", "/consumed", "/binary"}
     expected :: [String]{"default=hello", "explicit=hello", "over=BodyTooLarge:4", "consumed=BodyConsumed", "binary=UnsupportedEncoding"}
     loop mode in modes {

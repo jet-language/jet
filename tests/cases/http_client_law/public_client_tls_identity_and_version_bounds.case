@@ -14,7 +14,7 @@ step: openssl req -new -newkey rsa:2048 -nodes -subj /CN=jet-client -keyout tls/
 exit: 0
 step: openssl x509 -req -days 1 -CAcreateserial -CAserial tls/jet-client.srl -CA tls/ca.cert.pem -CAkey tls/ca.key.pem -extfile tls/jet-client.ext -in tls/jet-client.csr.pem -out tls/jet-client.cert.pem
 exit: 0
-step: jet run --interpreter port/main.jet
+step: jet run port/main.jet
 exit: 0
 capture: version_port = text stdout.trim
 session versiontls raw: openssl s_server -quiet -www -tls1_2 -accept {cap:version_port} -CAfile tls/ca.cert.pem -cert tls/localhost.cert.pem -key tls/localhost.key.pem
@@ -28,7 +28,7 @@ stdout: = public_client_tls_identity_and_version_bounds.version.expected
 signal versiontls: KILL
 close versiontls
 exit: any # original ignores BOTH kill() and wait() Results; expected case-requested termination per DESIGN360
-step: jet run --interpreter port/main.jet
+step: jet run port/main.jet
 exit: 0
 capture: mtls_port = text stdout.trim
 session mtls raw: openssl s_server -quiet -www -Verify 1 -verify_return_error -accept {cap:mtls_port} -CAfile tls/ca.cert.pem -cert tls/localhost.cert.pem -key tls/localhost.key.pem

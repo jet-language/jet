@@ -9,9 +9,6 @@ stdout: = "[2, 1, 3]\n[1, 2, 3]\n[1, 3, 2]\n"
 step: jet run valid.jet
 exit: == valid
 stdout: == valid
-step: jet run --interpret valid.jet
-exit: == valid
-stdout: == valid
 step: jet build --release negative.jet
 exit: 0
 step negative: built
@@ -22,10 +19,6 @@ step: jet run negative.jet
 exit: == negative
 stdout: empty
 stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): == negative
-step: jet run --interpret negative.jet
-exit: == negative
-stdout: empty
-stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): == negative
 step: jet build --release too_large.jet
 exit: 0
 step too_large: built
@@ -33,10 +26,6 @@ exit: nonzero
 stdout: empty
 stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): = "Stop [E3010]: `the list has 2 items, so position 3 doesn't exist`"
 step: jet run too_large.jet
-exit: == too_large
-stdout: empty
-stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): == too_large
-step: jet run --interpret too_large.jet
 exit: == too_large
 stdout: empty
 stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): == too_large
