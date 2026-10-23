@@ -41,6 +41,11 @@ struct TLocal {
     // partially moved (sema_ownership_move_pattern_payload): lowering may
     // take the payload out of the subject's storage instead of copying it.
     payload_take: Bool{false}
+    // A read-only binding of a place (`x :: rows[i]`) that reads the place
+    // itself instead of a copy: sema proved neither the binding nor the
+    // variable the place reads is written, moved or captured while it lives
+    // (JetSema Ownership/PlaceBorrows.jet).
+    place_borrow: Bool{false}
 }
 
 fn tir_user_local(name: String, span: Span) -> TLocal Never! {

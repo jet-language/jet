@@ -221,6 +221,16 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
             if ir_unit_type(init.ty) || value < 0 {
                 return
             }
+            // A place sema proved stays unchanged while the binding lives
+            // (TLocal.place_borrow) is read in place: the binding aliases its
+            // value like a read pin and never owns it, so every use that hands
+            // the value on copies it (ir_own). Only for a value that copies as
+            // a share or a clone and never closes.
+            if local.place_borrow && !b.fresh[value] && ir_place_borrow_type(&m, p, &b, value, span) {
+                symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
+                &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
+                return
+            }
             ir_bind_local(&m, p, &b, local, value)
             bound :: b.bindings[b.bindings.len() - 1].slot
             ir_close_arm(&m, p, &b, bound, false, span)
@@ -485,6 +495,17 @@ fn ir_bind_local(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, value
     if b.cells.contains(local.name) && ir_kind_of(m, b, slot) != .Aggregate {
         _ :: ir_cell_binding(&m, &b, local.name)
     }
+}
+
+// Whether a read of the place in `slot` can stand for a copy of it: a value
+// with no drop, an aggregate whose drop is its own glue (ir_own shares it),
+// or a value with a runtime clone; never one that closes.
+fn ir_place_borrow_type(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Bool Never! {
+    row :: b.f.slot_type[slot]
+    if ir_close_glue(&m, p, &b, row, false, span) >= 0 || ir_failed(b) -> return false
+    if m.types[row].drop == "" -> return true
+    if m.types[row].kind == .Aggregate -> return m.types[row].drop == ir_drop_key(m, row)
+    m.types[row].clone != ""
 }
 
 // The aggregate variable at `slot` takes the owned value `value` (an

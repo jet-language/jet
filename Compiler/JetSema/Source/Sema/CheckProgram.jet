@@ -1965,6 +1965,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     }
 
     params := [TParameter]{}
+    // The symbol key of an explicit read `self` (sema_place_borrow_function).
+    place_borrow_receiver := ""
     param_index := 0
     loop param_index < func.params.len() {
         // The parameter is read in place (`func.params[param_index]`): a
@@ -2035,6 +2037,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         if !sema_function_explicit_receiver(function_kind, param_index, func.params[param_index]) {
             public_label :: func.params[param_index].public_label.map((label) -> label.name) ?? func.params[param_index].name
             &params.push(TParameter{local: local, name: func.params[param_index].name, span: func.params[param_index].name_span, ty: parameter_ty, convention: func.params[param_index].convention, public_label: public_label, zone: func.params[param_index].zone, default: default_expr, variadic: func.params[param_index].variadic})
+        } else if func.params[param_index].convention == AccessConvention.Read {
+            place_borrow_receiver = param_symbol.id.key
         }
         param_index += 1
     }
@@ -2109,6 +2113,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         line :: sema_source_line_at(updated.source_segments, unsafe_span) ?? source_line_value
         unsafe_gate = Val(TUnsafeGate{file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, unsafe_span), line: line, reason: reason, enabled: true, fenced: false})
     }
+    sema_place_borrow_function(&body, params, place_borrow_receiver)
     target :: sema_function_target_applicability(func)
     tir :: TFunc{
         name: func.name,
