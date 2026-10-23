@@ -87,7 +87,9 @@ struct JetCLISemWalk {
     structural_slot: String
     structural_slot_kind: String
     block_spans: [Span]
-    claimed_block_spans: [String: Bool]
+    // Union-find successor over `block_spans` (claims are by start and end): `block_next[i] == i`
+    // while span i is unclaimed; a claimed span points past itself. One sentinel slot at the end.
+    block_next: [Int]
     references: [SemaNameReferenceFact]
     module_paths: [String: String]
 }
@@ -491,18 +493,26 @@ fn jet_cli_sem_slot_enter(db: &JetCLISemDB, ctx: &JetCLISemWalk, name: String, k
             middle :: first + (high - first) /% 2
             if ctx.block_spans[middle].start < parent_start -> first = middle + 1 else -> high = middle
         }
-        chosen := Span?{None}
-        loop index in first..<ctx.block_spans.len() {
-            // copy: `ctx.block_spans[index]` stays in its list (no move out of an element, E0225);
-            // the binding `span` owns its own.
-            span :: ctx.block_spans[index].copy()
-            if exact_parent_end && !(span.end <= parent_end || parent_end <= span.start) -> next
-            if ctx.claimed_block_spans.has_key("{span.start}:{span.end}") -> next
-            chosen = Val(span)
+        // Claimed spans are skipped through `block_next`, not rescanned on every entry.
+        chosen := Int?{None}
+        index := jet_cli_sem_next_unclaimed(&ctx, first)
+        loop index < ctx.block_spans.len() {
+            if exact_parent_end && !(ctx.block_spans[index].end <= parent_end || parent_end <= ctx.block_spans[index].start) {
+                index = jet_cli_sem_next_unclaimed(&ctx, index + 1)
+                next
+            }
+            chosen = Val(index)
             break
         }
-        if chosen == .Val(span) {
-            ctx.claimed_block_spans["{span.start}:{span.end}"] = true
+        if chosen == .Val(claimed) {
+            // copy: `ctx.block_spans[claimed]` stays in its list (no move out of an element, E0225);
+            // the binding `span` owns its own.
+            span :: ctx.block_spans[claimed].copy()
+            // Equal spans sort together (same start) after the first unclaimed one; the claim covers them.
+            loop at in claimed..<ctx.block_spans.len() {
+                if ctx.block_spans[at].start != span.start -> break
+                if ctx.block_spans[at].end == span.end -> ctx.block_next[at] = at + 1
+            }
             &db.slot_boundaries.push(JetCLISemSlotBoundary{parent: parent, slot: name, module_path: db.nodes[parent].module_path, span: span})
         }
     }
@@ -510,6 +520,20 @@ fn jet_cli_sem_slot_enter(db: &JetCLISemDB, ctx: &JetCLISemWalk, name: String, k
     ctx.structural_slot = name
     ctx.structural_slot_kind = kind
     saved
+}
+
+// The first unclaimed index of `ctx.block_spans` at or after `index` (`block_spans.len()` when
+// none), compressing the path it walked.
+fn jet_cli_sem_next_unclaimed(ctx: &JetCLISemWalk, index: Int) -> Int {
+    root := index
+    loop ctx.block_next[root] != root -> root = ctx.block_next[root]
+    cursor := index
+    loop cursor != root {
+        following :: ctx.block_next[cursor]
+        ctx.block_next[cursor] = root
+        cursor = following
+    }
+    root
 }
 
 fn jet_cli_sem_slot_leave(ctx: &JetCLISemWalk, saved: JetCLISemSlotSave) Never! {
@@ -1863,42 +1887,63 @@ fn jet_cli_sem_normalize_definition(source: String) -> String {
     String.from_bytes(output) ?? source
 }
 
+// One non-local definition, keyed for jet_cli_sem_definition_facts: module, start, listing order.
+struct JetCLISemDefinitionAt {
+    module_path: String
+    start: Int
+    end: Int
+    index: Int
+}
+
 // Build.rs `build_definition_facts`: one fact per top-level item, for the
-// first non-local definition it declares.
+// first non-local definition it declares. Each module's source bytes are read
+// once, and the item's definition is found by binary search over the non-local
+// definitions sorted by (module, start, listing order): the first one inside the
+// item is the earliest-starting, first-listed one.
 fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetCLISemNode], modules: [JetDriverDocModule]) -> [JetCLISemDefinitionFact] {
     output := [JetCLISemDefinitionFact]{}
+    source_slot := [String: Int]{}
+    sources := [[U8]]{}
+    loop doc_module in modules {
+        if source_slot.has_key(doc_module.path) -> next
+        source_slot[doc_module.path] = sources.len()
+        &sources.push(doc_module.source.bytes())
+    }
+    candidates := [JetCLISemDefinitionAt]{}
+    loop (index, definition) in definitions {
+        if definition.def.kind == {
+            .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
+            else -> {}
+        }
+        &candidates.push(JetCLISemDefinitionAt{module_path: definition.def.module_path, start: definition.def.def_span.start, end: definition.def.def_span.end, index: index})
+    }
+    &candidates.sort_by((left: JetCLISemDefinitionAt, right: JetCLISemDefinitionAt) -> (left.module_path <=> right.module_path).then(left.start <=> right.start).then(left.index <=> right.index))
     loop node in nodes {
         if node.parent != None || node.class != "item" -> next
-        source := String?{None}
-        loop doc_module in modules {
-            if doc_module.path == node.module_path {
-                source = Val(doc_module.source)
-                break
-            }
+        slot :: source_slot.get(node.module_path) ?? next
+        first := 0
+        high := candidates.len()
+        loop first < high {
+            middle :: first + (high - first) /% 2
+            if (candidates[middle].module_path <=> node.module_path).then(candidates[middle].start <=> node.span.start) == Ordering.Less -> first = middle + 1 else -> high = middle
         }
-        module_source :: source ?? next
-        chosen := JetCLISemDefinition?{None}
-        loop definition in definitions {
-            def :: definition.def
-            if def.module_path != node.module_path || def.def_span.start < node.span.start || def.def_span.start > node.span.end || def.def_span.end > node.span.end -> next
-            if def.kind == {
-                .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
-                else -> {}
-            }
-            if chosen == .Val(current) {
-                if def.def_span.start < current.def.def_span.start -> chosen = Val(definition)
-            } else {
-                chosen = Val(definition)
-            }
+        chosen := Int?{None}
+        loop at in first..<candidates.len() {
+            if candidates[at].module_path != node.module_path || candidates[at].start > node.span.end -> break
+            if candidates[at].end > node.span.end -> next
+            chosen = Val(candidates[at].index)
+            break
         }
-        definition :: chosen ?? next
+        position :: chosen ?? next
+        definition :: definitions[position]
         kind :: jet_cli_sem_definition_kind(definition.def.kind)
         structural :: "{kind}|{definition.def.identity}"
         signature :: "{kind}|{jet_cli_sem_definition_signature(definition)}"
+        text :: if node.span.end > sources[slot].len() -> "" else -> jet_cli_doc_text(sources[slot], node.span.start, node.span.end)
         &output.push(JetCLISemDefinitionFact{
             stable_id: "def:{mir_sha256_hex(structural).slice(0, 16)}",
             signature_id: "sig:{mir_sha256_hex(signature).slice(0, 16)}",
-            content_id: "sha256:{mir_sha256_hex(jet_cli_sem_normalize_definition(jet_cli_sem_source_text(module_source, node.span)))}",
+            content_id: "sha256:{mir_sha256_hex(jet_cli_sem_normalize_definition(text))}",
             human_identity: definition.def.identity,
             name: definition.def.qualified_name,
             kind: kind,
@@ -1906,15 +1951,8 @@ fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetC
             span: node.span,
         })
     }
-    loop index in 1..<output.len() {
-        value :: output[index]
-        position := index
-        loop position > 0 && (output[position - 1].stable_id > value.stable_id || (output[position - 1].stable_id == value.stable_id && output[position - 1].human_identity > value.human_identity)) {
-            output[position] = output[position - 1]
-            position -= 1
-        }
-        output[position] = value
-    }
+    // Stable: equal (stable_id, human_identity) rows keep their item order.
+    &output.sort_by((left: JetCLISemDefinitionFact, right: JetCLISemDefinitionFact) -> (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity))
     output
 }
 
@@ -2176,7 +2214,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
             structural_slot: "root",
             structural_slot_kind: "list",
             block_spans: block_spans,
-            claimed_block_spans: [String: Bool]{},
+            block_next: loop index in 0..<block_spans.len() + 1 -> index,
             references: doc_module.name_references,
             module_paths: module_paths,
         }

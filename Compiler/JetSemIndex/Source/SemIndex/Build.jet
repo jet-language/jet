@@ -160,10 +160,13 @@ struct WalkCtx {
     structural_slot: String
     structural_slot_kind: StructuralSlotKind
     block_spans: [Span]
-    claimed_block_spans: [SourceSpan:Bool]
+    // Union-find successor over `block_spans` (claims are by start and end): `block_next[i] == i`
+    // while span i is unclaimed; a claimed span points past itself. One sentinel slot at the end.
+    block_next: [Int]
 
     // Rust build_symbol_db WalkCtx literal (1343–1355).
     fn new(module_idx: Int, scope_identity: ^String, block_spans: ^[Span]) -> WalkCtx Never! {
+        block_next :: loop index in 0..<block_spans.len() + 1 -> index
         WalkCtx{
             module_idx: module_idx,
             caller: None,
@@ -172,7 +175,7 @@ struct WalkCtx {
             structural_slot: "root",
             structural_slot_kind: StructuralSlotKind.List,
             block_spans: ^block_spans,
-            claimed_block_spans: [SourceSpan:Bool]{},
+            block_next: block_next,
         }
     }
 }

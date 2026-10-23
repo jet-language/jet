@@ -35,17 +35,27 @@ use jet_parser.[parse_source]
 fn semindex_structure_test_parent(class: String, start: Int, end: Int) -> StructuralNode Never! {
     StructuralNode{id: 4, parent: None, slot: "root", slot_kind: StructuralSlotKind.List, ordinal: 0, class: class, shape: "Discriminant(6)", module_path: "main.jet", span: SourceSpan{start: start, end: end}}
 }
-#Test("semindex_block_candidates_keep_arm_head_bounds_and_claim_exclusion") {
+#Test("semindex_block_candidates_keep_arm_head_bounds") {
     arm :: semindex_structure_test_parent("arm", 10, 20)
-    assert(!semindex_block_span_candidate(arm, Span{start: 9, end: 15}, false))
-    assert(semindex_block_span_candidate(arm, Span{start: 10, end: 20}, false))
-    assert(!semindex_block_span_candidate(arm, Span{start: 15, end: 25}, false))
-    assert(semindex_block_span_candidate(arm, Span{start: 20, end: 25}, false))
-    assert(semindex_block_span_candidate(arm, Span{start: 25, end: 35}, false))
-    assert(!semindex_block_span_candidate(arm, Span{start: 10, end: 20}, true))
+    assert(!semindex_block_span_candidate(arm, Span{start: 9, end: 15}))
+    assert(semindex_block_span_candidate(arm, Span{start: 10, end: 20}))
+    assert(!semindex_block_span_candidate(arm, Span{start: 15, end: 25}))
+    assert(semindex_block_span_candidate(arm, Span{start: 20, end: 25}))
+    assert(semindex_block_span_candidate(arm, Span{start: 25, end: 35}))
     item :: semindex_structure_test_parent("item", 10, 20)
-    assert(semindex_block_span_candidate(item, Span{start: 15, end: 25}, false))
-    assert(!semindex_block_span_candidate(item, Span{start: 15, end: 25}, true))
+    assert(semindex_block_span_candidate(item, Span{start: 15, end: 25}))
+}
+#Test("semindex_claimed_block_spans_are_skipped_through_block_next") {
+    ctx := WalkCtx.new(0, "module:main.jet", [Span]{Span{start: 10, end: 20}, Span{start: 10, end: 20}, Span{start: 10, end: 30}, Span{start: 40, end: 50}})
+    assert_eq(semindex_next_unclaimed(&ctx, 0), 0)
+    ctx.block_next[0] = 1
+    ctx.block_next[1] = 2
+    assert_eq(semindex_next_unclaimed(&ctx, 0), 2)
+    ctx.block_next[2] = 3
+    ctx.block_next[3] = 4
+    assert_eq(semindex_next_unclaimed(&ctx, 1), 4)
+    assert_eq(ctx.block_next[1], 4)
+    assert_eq(semindex_next_unclaimed(&ctx, 4), 4)
 }
 #Test("semindex_call_rows_use_current_caller_only_and_preserve_exact_callee") {
     calls := [CallEdge]{}

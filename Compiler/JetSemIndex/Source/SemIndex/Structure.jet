@@ -79,8 +79,23 @@ fn semindex_is_lexical_structural_slot(slot: String) -> Bool Never! {
 
 // Real arms enforce the upper bound, except the classic-if private arm whose
 // head-only span ends before its body starts. All parents enforce the lower bound.
-fn semindex_block_span_candidate(parent: StructuralNode, span: Span, claimed: Bool) -> Bool Never! {
-    parent.span.start <= span.start && (parent.class != "arm" || span.end <= parent.span.end || parent.span.end <= span.start) && !claimed
+// Claimed spans never reach this test: semindex_next_unclaimed skips them.
+fn semindex_block_span_candidate(parent: StructuralNode, span: Span) -> Bool Never! {
+    parent.span.start <= span.start && (parent.class != "arm" || span.end <= parent.span.end || parent.span.end <= span.start)
+}
+
+// The first unclaimed index of `ctx.block_spans` at or after `index` (`block_spans.len()` when
+// none), compressing the path it walked.
+fn semindex_next_unclaimed(ctx: &WalkCtx, index: Int) -> Int Never! {
+    root := index
+    loop ctx.block_next[root] != root -> root = ctx.block_next[root]
+    cursor := index
+    loop cursor != root {
+        following :: ctx.block_next[cursor]
+        ctx.block_next[cursor] = root
+        cursor = following
+    }
+    root
 }
 
 fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Never! {
@@ -93,18 +108,27 @@ fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Neve
         middle :: first + (high - first) /% 2
         if ctx.block_spans[middle].start < parent.span.start -> first = middle + 1 else -> high = middle
     }
-    chosen := Span?{None}
-    loop index in first..<ctx.block_spans.len() {
-        span :: ctx.block_spans[index]
-        claimed :: ctx.claimed_block_spans.get(semindex_source_span(span)) != None
-        if !semindex_block_span_candidate(parent, span, claimed) -> next
-        if chosen == {
-            .Val(old) -> { if span.start < old.start -> chosen = Val(span) }
-            .None -> chosen = Val(span)
+    // Rust's min_by_key over the sorted tail is its first candidate; claimed spans are skipped
+    // through `block_next`, not rescanned on every entry.
+    chosen := Int?{None}
+    index := semindex_next_unclaimed(&ctx, first)
+    loop index < ctx.block_spans.len() {
+        if !semindex_block_span_candidate(parent, ctx.block_spans[index]) {
+            index = semindex_next_unclaimed(&ctx, index + 1)
+            next
         }
+        chosen = Val(index)
+        break
     }
-    if chosen == .Val(span) {
-        ctx.claimed_block_spans[semindex_source_span(span)] = true
+    if chosen == .Val(claimed) {
+        // copy: `ctx.block_spans[claimed]` stays in its list (no move out of an element, E0225);
+        // the binding `span` owns its own.
+        span :: ctx.block_spans[claimed].copy()
+        // Equal spans sort together (same start) after the first unclaimed one; the claim covers them.
+        loop at in claimed..<ctx.block_spans.len() {
+            if ctx.block_spans[at].start != span.start -> break
+            if ctx.block_spans[at].end == span.end -> ctx.block_next[at] = at + 1
+        }
         &db.slot_boundaries.push(StructuralSlotBoundary{parent: parent.id, slot: name, module_path: parent.module_path, span: semindex_source_span(span)})
     }
 }

@@ -1104,6 +1104,9 @@ fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, che
         return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    // The runtime-library seam (Request.jet jet_cli_compile_prepared) built the checked program as the
+    // runtime object and pack; packaging reads those, not pages, so no index or pages are built.
+    if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") != None -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     graph :: jet_cli_build_doc_graph(result.doc_modules, jet_cli_checked_semindex(result))
     if check {
         if jet_cli_doc_undocumented_public(graph).len() > 0 {
