@@ -58,12 +58,15 @@ struct IRWaveWorker {
 // The next claimable position.
 struct IRWaveQueue { next: Int }
 
-// The wave build state: every job in job order and its row by key, and the
+// The wave build state: every job in job order; the index of a plain
+// function's job (no type arguments, not a lambda: its key is its checked
+// row's, ir_function_id) by that row, and of any other job by key; and the
 // failures by order key (2 * job index; the entry's sits before the jobs
 // its report queued).
 struct IRWaves {
     jobs: [IRWaveJob]
-    job_rows: [String:Int]
+    row_jobs: [Int]
+    keyed_jobs: [String:Int]
     failures: [Int:[IRBuildFailure]]
     parts: Int
 }
@@ -85,11 +88,9 @@ fn ir_build_waves_kept(program: ^IRProgram, roots: ^[IRWaveJob], entry: Bool, th
         slot :: shared IRWaveWorker{modules: [IRModule]{ir_module_for(p)}, built: [IRWaveBuilt]{}}
         &slots.push(slot)
     }
-    w := IRWaves{jobs: ^roots, job_rows: [String:Int]{}, failures: [Int:[IRBuildFailure]]{}, parts: count}
-    loop index in 0..<w.jobs.len() {
-        key :: w.jobs[index].key.copy()
-        if w.job_rows.get(key) == None -> w.job_rows[key] = index
-    }
+    w := IRWaves{jobs: ^roots, row_jobs: [Int]{}, keyed_jobs: [String:Int]{}, failures: [Int:[IRBuildFailure]]{}, parts: count}
+    loop _ in 0..<p.functions.len() -> &w.row_jobs.push(-1)
+    loop index in 0..<w.jobs.len() -> ir_waves_note(&w, index)
     inputs :: shared IRWaveInputs{programs: [IRProgram]{^p}, jobs: [IRWaveJob]{}, first: 0, pinned: [[Int]]{}, free: [Int]{}}
     from :: ir_waves_drain(inputs, slots, &w, 0)
     entry_root := IRMergeRoot{part: -1, local: -1}
@@ -197,9 +198,32 @@ fn ir_waves_hand(inputs: Shared<IRWaveInputs>, jobs: [IRWaveJob], first: Int, la
 // Queues the jobs `found` (in order) not queued yet.
 fn ir_waves_queue(w: &IRWaves, found: &[IRWaveJob]) Never! {
     loop job in compiler_take_rows<IRWaveJob>(&found) {
-        if w.job_rows.get(job.key) != None -> next
-        w.job_rows[job.key.copy()] = w.jobs.len()
+        if ir_waves_known(w, job) -> next
+        index :: w.jobs.len()
         &w.jobs.push(job)
+        ir_waves_note(&w, index)
+    }
+}
+
+// Whether `job` builds a plain function, found by its checked row.
+fn ir_waves_plain(job: IRWaveJob) -> Bool {
+    job.lambda < 0 && job.args.len() == 0
+}
+
+// Whether a job of `job`'s function is queued.
+fn ir_waves_known(w: IRWaves, job: IRWaveJob) -> Bool Never! {
+    if ir_waves_plain(job) -> return w.row_jobs[job.row] >= 0
+    w.keyed_jobs.get(job.key) != None
+}
+
+// Records job `index` as its function's job unless one is recorded.
+fn ir_waves_note(w: &IRWaves, index: Int) Never! {
+    if ir_waves_known(w, w.jobs[index]) -> return
+    if ir_waves_plain(w.jobs[index]) {
+        row :: w.jobs[index].row
+        w.row_jobs[row] = index
+    } else {
+        w.keyed_jobs[w.jobs[index].key.copy()] = index
     }
 }
 
