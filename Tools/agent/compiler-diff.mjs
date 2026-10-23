@@ -686,6 +686,14 @@ function stabilizeStderr(text) {
     .replace(/\b[0-9a-f]{16,}\b/gu, "<HEX>");
 }
 
+// Wall-clock timestamps a program prints (structured log `"ts"` fields in
+// epoch milliseconds, ISO-8601 instants) differ between any two runs.
+function stabilizeClock(text) {
+  return text
+    .replace(/"ts":\d{12,14}\b/gu, '"ts":<TS>')
+    .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/gu, "<TS>");
+}
+
 const DIAGNOSTIC_HEADER = /^(Error|Warning|Note|Help|Info|Hint|Stop|Lint)\b[^[\n]*\[([A-Z][A-Za-z0-9-]*)\](?: \(([^)]*)\))?: ?(.*)$/u;
 const DIAGNOSTIC_SPAN = /^\s*-->\s*(\S+)$/u;
 
@@ -793,8 +801,8 @@ function sideEffects(caseDir, before, after, normalize) {
 }
 
 function observe(run, normalize, effects) {
-  const stdout = normalize(run.stdout);
-  const stderr = stabilizeStderr(normalize(run.stderr));
+  const stdout = stabilizeClock(normalize(run.stdout));
+  const stderr = stabilizeClock(stabilizeStderr(normalize(run.stderr)));
   return {
     status: statusText(run),
     panic: classifyPanic(stderr),
