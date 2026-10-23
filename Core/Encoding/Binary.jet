@@ -139,17 +139,17 @@ fn sign_extend(n: Int, bits: Int) -> Int Never! {
 
 fn pack_f64le(n: Float) -> [U8] BinaryError! {
     bits :: math.to_bits(n) ?? return Err(BinaryError.Range)
-    pack_u64le(bits)
+    pack_u64le(bits.bit_and(18446744073709551615))
 }
 
 fn pack_f64be(n: Float) -> [U8] BinaryError! {
     bits :: math.to_bits(n) ?? return Err(BinaryError.Range)
-    pack_u64be(bits)
+    pack_u64be(bits.bit_and(18446744073709551615))
 }
 
 fn unpack_f64le(data: [U8], offset: Int) -> Float? Never! {
     bits :: unpack_u64le(data, offset) ?? return None
-    value :: math.from_bits(bits) ?? return None
+    value :: math.from_bits(sign_extend(bits, 64)) ?? return None
     Val(value)
 }
 
