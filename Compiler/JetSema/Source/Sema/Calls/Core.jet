@@ -4,6 +4,7 @@
 // Call resolution prefers source exports, then uses the signature contract to
 // validate supported arities; call construction consumes the resolved contract.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CORE_CALL_COVERAGE_SEMA,
     CORE_MODULE_EXPORTS,
@@ -734,19 +735,19 @@ fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: 
 
 fn sema_call_core_default_expr(default: CoreCallDefault, span: Span) -> Expr Never! {
     if default == {
-        .Bool(value) -> Expr.Bool{value: value, span: span}
-        .Int(value) -> Expr.Int{value: value, span: span, width: None, raw: Val("{value}")}
-        .Float(value) -> Expr.Float{value: value, span: span, is_f32: false, raw: Val("{value}")}
-        .String(value) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span}
-        .EmptyList -> Expr.ListLit{elements: [Expr]{}, span: span}
-        .Absent -> Expr.Absent{span: span}
+        .Bool(value) -> Expr.Bool{value: value, span: span, id: AST_NODE_GENERATED}
+        .Int(value) -> Expr.Int{value: value, span: span, width: None, raw: Val("{value}"), id: AST_NODE_GENERATED}
+        .Float(value) -> Expr.Float{value: value, span: span, is_f32: false, raw: Val("{value}"), id: AST_NODE_GENERATED}
+        .String(value) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span, id: AST_NODE_GENERATED}
+        .EmptyList -> Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}
+        .Absent -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
         .StaticCall(type_name, method) -> Expr.Call{call: Call{
             name: "{type_name}.{method}",
             name_span: span,
             type_args: [Type]{},
             args: [CallArg]{},
-        }}
-        .StaticEnum(type_name, variant) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span}
+        }, id: AST_NODE_GENERATED}
+        .StaticEnum(type_name, variant) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
     }
 }
 
@@ -1083,7 +1084,7 @@ fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, typ
     }
     if args.len() != 1 || type_args.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
     if args[0].label != None || args[0].spread -> return sema_call_core_shared_reject(member, span, &diagnostics)
-    name :: if args[0].expr == {.Ident(value, _) -> Val(value) else -> None} ?? return sema_call_core_shared_reject(member, span, &diagnostics)
+    name :: if args[0].expr == {.Ident(value, _, _) -> Val(value) else -> None} ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     nearest :: sema_scope_resolve_index(scopes, name) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if scopes.bindings[nearest].symbol.kind != SymbolKind.Function -> return sema_call_core_shared_reject(member, span, &diagnostics)
     target :: sema_call_resolve_direct(name, [Type]{}, environment, program, &scopes, args[0].span, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)

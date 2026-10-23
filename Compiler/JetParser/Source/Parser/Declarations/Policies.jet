@@ -84,14 +84,14 @@ fn parser_policy_retired_memory(state: &JetParserState, name: String, span: Span
 fn parser_policy_retired_marker(state: &JetParserState, marker: Marker) -> Bool {
     loop index in 0..<marker.args.len() {
         expr :: parser_marker_expression(marker, index) ?? next
-        if expr == .Ident(name, span) {
+        if expr == .Ident(name, span, _) {
             if parser_policy_retired_memory(&state, name, span, None) -> return true
-        } else if expr == .Call(call) {
+        } else if expr == .Call(call, _) {
             limit := Int?{None}
             if call.args.len() == 1 {
                 argument :: call.args[0]
                 if argument.label != None || argument.spread -> next
-                if argument.expr == .Int(value, _, _, _) {
+                if argument.expr == .Int(value, _, _, _, _) {
                     limit = Val(value)
                 } else {
                     next
@@ -110,7 +110,7 @@ fn parser_policy_retired_marker(state: &JetParserState, marker: Marker) -> Bool 
 fn parser_callable_policy_marker(marker: Marker) -> Bool Never! {
     loop index in 0..<marker.args.len() {
         expr :: parser_marker_expression(marker, index) ?? return false
-        if expr == .Call(call) {
+        if expr == .Call(call, _) {
             loop argument in call.args {
                 if argument.label != None || argument.spread -> return false
             }
@@ -136,7 +136,7 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
         mode := PolicyValue?{None}
         if label == "copies" || label == "sentries" {
             variant :: if expr == {
-                .EnumLit(type_name, written, _, args, _, _) -> if type_name == "" && args.len() == 0 -> written else -> ""
+                .EnumLit(type_name, written, _, args, _, _, _) -> if type_name == "" && args.len() == 0 -> written else -> ""
                 else -> ""
             }
             mode = if {
@@ -150,17 +150,17 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
             }
         } else {
             if expr == {
-                .Ident(written, span) -> {
+                .Ident(written, span, _) -> {
                     name = written
                     name_span = span
                 }
-                .Call(call) -> {
+                .Call(call, _) -> {
                     if call.args.len() != 1 || call.args[0].label != None {
                         parser_marker_shape_error(&state, marker)
                         return None
                     }
                     if call.args[0].expr == {
-                        .Int(value, _, _, _) -> limit = Val(value)
+                        .Int(value, _, _, _, _) -> limit = Val(value)
                         else -> {
                             parser_marker_shape_error(&state, marker)
                             return None

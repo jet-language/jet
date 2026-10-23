@@ -1,5 +1,6 @@
 // Checked field, place, borrow, dereference, and mutation expressions.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -81,7 +82,7 @@ fn sema_expression_tuple_field_ref(owner: Type, name: String, ty: Type) -> TFiel
 
 fn sema_expression_is_place(expr: Expr) -> Bool Never! {
     if expr == {
-        .Ident(_, _) | .Field(_, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) | .Deref(_, _) | .Place(_, _, _) -> true
+        .Ident(_, _, _) | .Field(_, _, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Deref(_, _, _) | .Place(_, _, _, _) -> true
         else -> false
     }
 }
@@ -95,8 +96,8 @@ fn sema_expression_is_place(expr: Expr) -> Bool Never! {
 // in TIR so field projections leave an empty slot rather than a copied value.
 fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
     if expr == {
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{sema_expression_move_mark_text(base)}.{member}"
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> "{sema_expression_move_mark_text(base)}.{member}"
         else -> "…"
     }
 }
@@ -105,8 +106,8 @@ fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
 // passes through an index names storage inside a collection element.
 fn sema_expression_place_below_element(expr: Expr) -> Bool Never! {
     if expr == {
-        .Field(base, _, _) | .Paren(base, _) -> sema_expression_place_below_element(base)
-        .Index(_, _, _, _) -> true
+        .Field(base, _, _, _) | .Paren(base, _, _) -> sema_expression_place_below_element(base)
+        .Index(_, _, _, _, _) -> true
         else -> false
     }
 }
@@ -121,7 +122,7 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     checked :: sema_check_expression(value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, true) -> return None
-    if value == .Index(_, _, _, _) {
+    if value == .Index(_, _, _, _, _) {
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))
         return None
     }
@@ -154,7 +155,7 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     // `^p` of a match payload takes it out of its subject, never a copy.
     payload :: sema_ownership_move_pattern_payload(&state, value, mark_span, scopes, &diagnostics)
     if payload < 0 -> return None
-    if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
+    if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span, id: AST_NODE_GENERATED}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
     moved :: if payload > 0 -> sema_expression_payload_take(^checked) else -> ^checked
     Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, span))
 }
@@ -391,7 +392,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
 fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Rust infer_field diagnoses the foreign surface before reading `os`,
     // without treating a lexical `os` binding as an exemption.
-    if base == .Ident(root, _) && root == "os" && member == "environ" {
+    if base == .Ident(root, _, _) && root == "os" && member == "environ" {
         // Native Field carries the whole path; Rust Field carries its member.
         member_span :: Span{start: span.end - member.len(), end: span.end}
         &diagnostics.push(sema_error("E0039", member_span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
@@ -424,14 +425,14 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     }
     // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
     // whole-module import reads that module's constant `NAME`.
-    if base == .Ident(alias, _) {
+    if base == .Ident(alias, _, _) {
         module_constant :: sema_expression_module_constant(alias, member, span, expected, environment, program, &scopes, &context, &diagnostics)
         if module_constant.handled -> return module_constant.value
     }
     // Rust `infer_field` (static-owner arm): `Type.member` on a declared
     // struct reads no value. A typestate label is a compile-time fact, and
     // any other member is not a static member of the struct.
-    if base == .Ident(type_name, _) {
+    if base == .Ident(type_name, _, _) {
         owner :: sema_expression_type_symbol(&scopes, environment, program, type_name)
         if owner == .Val(symbol) {
             if sema_scope_declaration_struct_states(environment, program, symbol.id) == .Val(states) {
@@ -443,7 +444,7 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     // copy: the owner read is reported at the member name, so it checks the
     // place under that span; `field` itself spans the whole path. With no
     // live view the check cannot fail and reads nothing else, so it is skipped.
-    if state.views.len() > 0 && !sema_ownership_check_owner_read(&state, Expr.Field{base: base.copy(), member: member, span: member_span}, scopes, &diagnostics) -> return None
+    if state.views.len() > 0 && !sema_ownership_check_owner_read(&state, Expr.Field{base: base.copy(), member: member, span: member_span, id: AST_NODE_GENERATED}, scopes, &diagnostics) -> return None
     // A projected base suppresses descendant moves, but still answers for
     // moves of itself or its ancestors. The complete place checks all moves.
     moved_ok :: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(&state, field, scopes, &diagnostics) else -> sema_ownership_check_moved_place_use(&state, field, scopes, &diagnostics)
@@ -603,7 +604,7 @@ fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member
 // `Numeric.MEMBER`, or None when `base` is not a numeric type name or
 // `member` is not one of its constants.
 fn sema_expression_numeric_bound_type(base: Expr, member: String) -> Type? {
-    if base == .Ident(owner_name, _) {
+    if base == .Ident(owner_name, _, _) {
         kind :: builtin_numeric_kind(owner_name) ?? return None
         if member == "MIN" || member == "MAX" -> return Val(kind.ty)
         if !kind.integer && (member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON") -> return Val(kind.ty)
@@ -688,7 +689,7 @@ fn sema_expression_optional_method_call(receiver: Expr, method: String, method_s
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
-    call_expr :: expr_optional_method_call_as_call(Expr.Ident{name: name, span: receiver_span}, method, method_span, type_args, args)
+    call_expr :: expr_optional_method_call_as_call(Expr.Ident{name: name, span: receiver_span, id: AST_NODE_GENERATED}, method, method_span, type_args, args)
     checked_call := sema_check_expression(call_expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_scope_leave(&scopes, &state)
     call :: checked_call ?? return None

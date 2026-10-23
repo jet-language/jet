@@ -401,9 +401,9 @@ fn sema_network_handle_text_params(params: [SemaCallParam]) -> [SemaCallParam] N
 
 fn sema_network_tls_static_target(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if receiver == {
-        .Field(base, leaf, _) -> {
+        .Field(base, leaf, _, _) -> {
             is_tls_module := if base == {
-                .Ident(alias, _) -> sema_expr_core_import_module(environment, program, alias) == (Val("core.net.tls"))
+                .Ident(alias, _, _) -> sema_expr_core_import_module(environment, program, alias) == (Val("core.net.tls"))
                 else -> false
             }
             if is_tls_module {

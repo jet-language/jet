@@ -86,8 +86,8 @@ fn sema_http_route_find_struct(environment: SemaScopeEnvironment, program: SemaP
 
 fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaHTTPRouteShape? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_shape(inner, environment, program, scopes, host_hooks)
-        .Lambda(lambda) -> {
+        .Paren(inner, _, _) -> return sema_http_route_shape(inner, environment, program, scopes, host_hooks)
+        .Lambda(lambda, _) -> {
             if lambda.meta.http_route_source == .Val(source) {
                 if program.registration_graph == .Val(graph) {
                 loop module_row_index in 0..<graph.modules.len() {
@@ -116,7 +116,7 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, pr
             body :: lambda.body
             return Val(SemaHTTPRouteShape{params: params, body: body, module_identity: environment.module_identity})
         }
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             function :: sema_http_route_find_function(environment, program, scopes, name) ?? return None
             if program.registration_graph == .Val(graph) {
             params := [SemaHTTPRouteParameter]{}
@@ -164,8 +164,8 @@ fn sema_http_route_method_owner_module(graph: SemaRegistrationGraph, symbol_key:
 
 fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_constant_string(inner, environment, program, scopes)
-        .Str(parts, _) -> {
+        .Paren(inner, _, _) -> return sema_http_route_constant_string(inner, environment, program, scopes)
+        .Str(parts, _, _) -> {
             value := ""
             loop part in parts {
                 if part == {
@@ -175,14 +175,14 @@ fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvir
             }
             return Val(value)
         }
-        .ComptimeName(_, _, value) -> {
+        .ComptimeName(_, _, value, _) -> {
             present :: value ?? return None
             if present == {
                 .Str(text) -> { return Val(text) }
                 else -> { return None }
             }
         }
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             binding := scopes.bindings[index]
             if binding.prepared == .Val(known) {
@@ -338,7 +338,7 @@ fn sema_http_route_pattern_error(pattern: String) -> String? {
 // An interpolated route literal (Rust `check_http_route_constant`) is refused
 // before constant evaluation; its holes render as `{name}` or `{…}`.
 fn sema_http_route_interpolated_source(expression: Expr) -> String? {
-    if expression == .Str(parts, _) {
+    if expression == .Str(parts, _, _) {
         interpolated := false
         source := ""
         loop part in parts {
@@ -347,7 +347,7 @@ fn sema_http_route_interpolated_source(expression: Expr) -> String? {
                 .Byte(value) -> { source = "{source}{sema_expr_byte_text(value)}" }
                 .Interp(inner, _) -> {
                     interpolated = true
-                    hole :: if inner == .Ident(name, _) -> name else -> "…"
+                    hole :: if inner == .Ident(name, _, _) -> name else -> "…"
                     source = "{source}{{{hole}}}"
                 }
             }
@@ -488,25 +488,25 @@ fn sema_http_route_schema_type(ty: Type, environment: SemaScopeEnvironment, prog
 
 fn sema_http_route_schema_expr(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, locals: [SemaHTTPRouteParameter]) -> String? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_schema_expr(inner, environment, program, locals)
-        .Str(_, _) | .Char(_, _) -> return Val("{{\"type\":\"string\"}}")
-        .Int(_, _, _, _) -> return Val("{{\"type\":\"integer\",\"format\":\"int64\"}}")
-        .Float(_, _, _, _) -> return Val("{{\"type\":\"number\",\"format\":\"double\"}}")
-        .Bool(_, _) -> return Val("{{\"type\":\"boolean\"}}")
-        .Unit(_) -> return Val("{{\"type\":\"null\"}}")
-        .Ident(name, _) -> {
+        .Paren(inner, _, _) -> return sema_http_route_schema_expr(inner, environment, program, locals)
+        .Str(_, _, _) | .Char(_, _, _) -> return Val("{{\"type\":\"string\"}}")
+        .Int(_, _, _, _, _) -> return Val("{{\"type\":\"integer\",\"format\":\"int64\"}}")
+        .Float(_, _, _, _, _) -> return Val("{{\"type\":\"number\",\"format\":\"double\"}}")
+        .Bool(_, _, _) -> return Val("{{\"type\":\"boolean\"}}")
+        .Unit(_, _) -> return Val("{{\"type\":\"null\"}}")
+        .Ident(name, _, _) -> {
             loop parameter in locals { if parameter.name == name -> return sema_http_route_schema_type(parameter.ty, environment, program, [String]{}) }
             return None
         }
-        .StructLit(type_name, _, _, _, _, _, _) -> return sema_http_route_schema_type(Type.Named{name: type_name}, environment, program, [String]{})
-        .TupleLit(_, _, tuple_ty) -> {
+        .StructLit(type_name, _, _, _, _, _, _, _) -> return sema_http_route_schema_type(Type.Named{name: type_name}, environment, program, [String]{})
+        .TupleLit(_, _, tuple_ty, _) -> {
             if tuple_ty == {
                 .Val(ty) -> { return sema_http_route_schema_type(ty, environment, program, [String]{}) }
                 else -> { return None }
             }
         }
-        .Ok(inner, _) | .Try(inner, _, _, _) -> return sema_http_route_schema_expr(inner, environment, program, locals)
-        .ListLit(items, _) -> {
+        .Ok(inner, _, _) | .Try(inner, _, _, _, _) -> return sema_http_route_schema_expr(inner, environment, program, locals)
+        .ListLit(items, _, _) -> {
             if items.len() == 0 -> return None
             item :: sema_http_route_schema_expr(items[0], environment, program, locals) ?? return None
             return Val("{{\"type\":\"array\",\"items\":{item}}}")
@@ -517,16 +517,16 @@ fn sema_http_route_schema_expr(expression: Expr, environment: SemaScopeEnvironme
 
 fn sema_http_route_response_status(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, module_identity: String) -> Int? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_response_status(inner, environment, program, scopes, module_identity)
-        .Int(value, _, _, _) -> return Val(value)
-        .ComptimeName(_, _, value) -> {
+        .Paren(inner, _, _) -> return sema_http_route_response_status(inner, environment, program, scopes, module_identity)
+        .Int(value, _, _, _, _) -> return Val(value)
+        .ComptimeName(_, _, value, _) -> {
             present :: value ?? return None
             if present == {
                 .Int(number) -> { return Val(number) }
                 else -> { return None }
             }
         }
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
                 loop constant_index in 0..<graph.modules[module_index].constants.len() {
@@ -593,27 +593,27 @@ fn sema_http_route_response_alias(aliases: [SemaHTTPRouteResponseAlias], name: S
 
 fn sema_http_route_response_local_type(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, locals: [SemaHTTPRouteParameter], module_identity: String) -> Type? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_response_local_type(inner, environment, program, locals, module_identity)
-        .Str(_, _) | .Char(_, _) -> return Val(Type.String)
-        .Int(_, _, _, _) -> return Val(Type.Int)
-        .Float(_, _, _, _) -> return Val(Type.Float)
-        .Bool(_, _) -> return Val(Type.Bool)
-        .Unit(_) -> return Val(Type.Named{name: "Unit"})
-        .Ident(name, _) -> {
+        .Paren(inner, _, _) -> return sema_http_route_response_local_type(inner, environment, program, locals, module_identity)
+        .Str(_, _, _) | .Char(_, _, _) -> return Val(Type.String)
+        .Int(_, _, _, _, _) -> return Val(Type.Int)
+        .Float(_, _, _, _, _) -> return Val(Type.Float)
+        .Bool(_, _, _) -> return Val(Type.Bool)
+        .Unit(_, _) -> return Val(Type.Named{name: "Unit"})
+        .Ident(name, _, _) -> {
             loop local in locals { if local.name == name -> return Val(local.ty) }
             return None
         }
-        .StructLit(type_name, _, _, _, _, _, _) -> {
+        .StructLit(type_name, _, _, _, _, _, _, _) -> {
             if program.registration_graph == .Val(graph) {
                 return Val(sema_type_resolve_declared(graph, Type.Named{name: type_name}, module_identity))
             } else {
                 return None
             }
         }
-        .TupleLit(_, _, tuple_ty) -> {
+        .TupleLit(_, _, tuple_ty, _) -> {
             return tuple_ty
         }
-        .ListLit(items, _) -> {
+        .ListLit(items, _, _) -> {
             if items.len() == 0 -> return None
             item :: sema_http_route_response_local_type(items[0], environment, program, locals, module_identity) ?? return None
             return Val(Type.List{element: item})
@@ -666,8 +666,8 @@ fn sema_http_route_response_adapter_returns_response(method: String, args: [Call
 
 fn sema_http_route_response_expr(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], aliases: [SemaHTTPRouteResponseAlias], module_identity: String) -> [SemaHTTPRouteResponse] {
     if expression == {
-        .Paren(inner, _) | .Ok(inner, _) | .Try(inner, _, _, _) -> return sema_http_route_response_expr(inner, environment, program, scopes, locals, aliases, module_identity)
-        .If(_, then_body, then_value, else_body, else_value, _) -> {
+        .Paren(inner, _, _) | .Ok(inner, _, _) | .Try(inner, _, _, _, _) -> return sema_http_route_response_expr(inner, environment, program, scopes, locals, aliases, module_identity)
+        .If(_, then_body, then_value, else_body, else_value, _, _) -> {
             left := sema_http_route_response_statements(then_body, environment, program, scopes, locals, aliases, module_identity)
             loop response in sema_http_route_response_expr(then_value, environment, program, scopes, locals, aliases, module_identity) {
                 &left.push(response)
@@ -680,13 +680,13 @@ fn sema_http_route_response_expr(expression: Expr, environment: SemaScopeEnviron
             }
             return left
         }
-        .Ident(name, _) -> return sema_http_route_response_alias(aliases, name) ?? [SemaHTTPRouteResponse]{}
-        .Call(call) -> {
+        .Ident(name, _, _) -> return sema_http_route_response_alias(aliases, name) ?? [SemaHTTPRouteResponse]{}
+        .Call(call, _) -> {
             leaf_parts := call.name.split(".").to_list()
             leaf := leaf_parts[leaf_parts.len() - 1]
             if sema_http_route_response_constructor(leaf, call.args, environment, program, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
         }
-        .MethodCall(receiver, method, method_span, _, type_args, args) -> {
+        .MethodCall(receiver, method, method_span, _, type_args, args, _) -> {
             if sema_http_route_response_constructor(method, args, environment, program, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
             receiver_responses := sema_http_route_response_expr(receiver, environment, program, scopes, locals, aliases, module_identity)
             if receiver_responses.len() > 0 {
@@ -753,12 +753,12 @@ fn sema_http_route_response_statements(statements: [Stmt], environment: SemaScop
 
 fn sema_http_route_find_json_expr(expression: Expr, request_names: [String]) -> Type? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_find_json_expr(inner, request_names)
-        .MethodCall(receiver, method, _, _, type_args, args) -> {
+        .Paren(inner, _, _) -> return sema_http_route_find_json_expr(inner, request_names)
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> {
             if method == "json" && type_args.len() == 1 {
                 request := false
                 if receiver == {
-                    .Ident(name, _) -> {
+                    .Ident(name, _, _) -> {
                         loop request_name in request_names {
                             if request_name == name -> request = true
                         }
@@ -774,25 +774,25 @@ fn sema_http_route_find_json_expr(expression: Expr, request_names: [String]) -> 
                 if argument_found != None -> return argument_found
             }
         }
-        .Call(call) -> {
+        .Call(call, _) -> {
             loop argument in call.args {
                 found := sema_http_route_find_json_expr(argument.expr, request_names)
                 if found != None -> return found
             }
         }
-        .Field(base, _, _) | .Unary(_, base, _) | .Ok(base, _) | .Try(base, _, _, _) -> return sema_http_route_find_json_expr(base, request_names)
-        .Binary(_, left, right, _) -> {
+        .Field(base, _, _, _) | .Unary(_, base, _, _) | .Ok(base, _, _) | .Try(base, _, _, _, _) -> return sema_http_route_find_json_expr(base, request_names)
+        .Binary(_, left, right, _, _) -> {
             found := sema_http_route_find_json_expr(left, request_names)
             if found != None -> return found
             return sema_http_route_find_json_expr(right, request_names)
         }
-        .ListLit(items, _) -> {
+        .ListLit(items, _, _) -> {
             loop item in items {
                 found := sema_http_route_find_json_expr(item, request_names)
                 if found != None -> return found
             }
         }
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             found := sema_http_route_find_json_expr(cond, request_names)
             if found == None -> found = sema_http_route_find_json_statements(then_body, request_names)
             if found == None -> found = sema_http_route_find_json_expr(then_value, request_names)
@@ -800,7 +800,7 @@ fn sema_http_route_find_json_expr(expression: Expr, request_names: [String]) -> 
             if found == None -> found = sema_http_route_find_json_expr(else_value, request_names)
             return found
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             loop field in fields {
                 found := sema_http_route_find_json_expr(field.value, request_names)
                 if found != None -> return found

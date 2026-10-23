@@ -126,8 +126,8 @@ fn sema_checked_marker_text(marker: Marker) -> String? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == {
         .Expr(expression) -> if expression == {
-            .Ident(name, _) -> Val(name)
-            .Str(parts, _) -> {
+            .Ident(name, _, _) -> Val(name)
+            .Str(parts, _, _) -> {
                 if parts.len() == 1 {
                     if parts[0] == .Lit(text) -> return Val(text)
                 }
@@ -146,13 +146,13 @@ fn sema_checked_marker_text_label(marker: Marker, label: String) -> String? {
                 if marker.args[index] == {
                     .Expr(expression) -> {
                         if expression == {
-                            .Str(parts, _) -> {
+                            .Str(parts, _, _) -> {
                                 if parts.len() == 1 {
                                     if parts[0] == .Lit(text) -> return Val(text)
                                 }
                                 return None
                             }
-                            .Ident(name, _) -> return Val(name)
+                            .Ident(name, _, _) -> return Val(name)
                             else -> return None
                         }
                     }
@@ -1884,7 +1884,7 @@ fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: Str
     result := [TCLIBinding]{}
     loop binding in definition.cli_bindings {
         target_name :: if binding.target == {
-            .Ident(name, _) -> name
+            .Ident(name, _, _) -> name
             else -> binding.name
         }
         markers :: loop marker in binding.markers if !marker.negated -> marker.name
@@ -3356,12 +3356,12 @@ fn sema_checked_comptime(source: CtValue) -> TComptimeValue? {
 fn sema_checked_constant_type(definition: ConstDef) -> Type? {
     if definition.ty != None -> return definition.ty
     if definition.value == {
-        .Int(_, _, _, _) -> Val(Type.Int)
-        .Float(_, _, _, _) -> Val(Type.Float)
-        .Bool(_, _) -> Val(Type.Bool)
-        .Char(_, _) -> Val(Type.Char)
-        .Str(parts, _) -> if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
-        .TypedLit(_, _, _) -> sema_checked_typed_scalar_literal_type(definition.value)
+        .Int(_, _, _, _, _) -> Val(Type.Int)
+        .Float(_, _, _, _, _) -> Val(Type.Float)
+        .Bool(_, _, _) -> Val(Type.Bool)
+        .Char(_, _, _) -> Val(Type.Char)
+        .Str(parts, _, _) -> if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
+        .TypedLit(_, _, _, _) -> sema_checked_typed_scalar_literal_type(definition.value)
         else -> None
     }
 }
@@ -3369,7 +3369,7 @@ fn sema_checked_constant_type(definition: ConstDef) -> Type? {
 // Preserve the type on a scalar literal when no staged type
 // has been installed yet. Calls/operators remain outside module storage.
 fn sema_checked_typed_scalar_literal_type(value: Expr) -> Type? {
-    if value == .TypedLit(head, body, _) {
+    if value == .TypedLit(head, body, _, _) {
         ty :: head ?? return None
         if ty == {
             .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> {}
@@ -3390,9 +3390,9 @@ fn sema_checked_typed_scalar_literal_type(value: Expr) -> Type? {
 
 fn sema_checked_module_scalar_literal(value: Expr) -> Bool Never! {
     if value == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) -> true
-        .Unary(op, inner, _) -> op == UnOp.Neg && (inner == .Int(_, _, _, _) || inner == .Float(_, _, _, _))
-        .Paren(inner, _) -> sema_checked_module_scalar_literal(inner)
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) -> true
+        .Unary(op, inner, _, _) -> op == UnOp.Neg && (inner == .Int(_, _, _, _, _) || inner == .Float(_, _, _, _, _))
+        .Paren(inner, _, _) -> sema_checked_module_scalar_literal(inner)
         else -> false
     }
 }
@@ -3488,28 +3488,28 @@ fn sema_checked_module_value_error(definition: ConstDef) -> Diagnostic {
 // `Type.Case` path, optionally `Type.Case(args)`, names an enum case.
 fn sema_checked_module_literal(value: Expr) -> Bool Never! {
     if value == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .Unit(_) | .Absent(_) -> true
-        .Str(parts, _) -> {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .Absent(_, _) -> true
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Lit(_) -> next
                 return false
             }
             true
         }
-        .Unary(op, operand, _) -> op == UnOp.Neg && (operand == .Int(_, _, _, _) || operand == .Float(_, _, _, _))
-        .Paren(inner, _) -> sema_checked_module_literal(inner)
-        .Present(inner, _) -> sema_checked_module_literal(inner)
-        .ListLit(elements, _) -> sema_checked_module_literal_list(elements)
-        .MapLit(entries, _) -> sema_checked_module_literal_pairs(entries)
-        .StructLit(_, _, _, _, fields, _, _) -> sema_checked_module_literal_fields(fields)
-        .TypedLit(_, body, _) -> if body == {
+        .Unary(op, operand, _, _) -> op == UnOp.Neg && (operand == .Int(_, _, _, _, _) || operand == .Float(_, _, _, _, _))
+        .Paren(inner, _, _) -> sema_checked_module_literal(inner)
+        .Present(inner, _, _) -> sema_checked_module_literal(inner)
+        .ListLit(elements, _, _) -> sema_checked_module_literal_list(elements)
+        .MapLit(entries, _, _) -> sema_checked_module_literal_pairs(entries)
+        .StructLit(_, _, _, _, fields, _, _, _) -> sema_checked_module_literal_fields(fields)
+        .TypedLit(_, body, _, _) -> if body == {
             .Fields(fields) -> sema_checked_module_literal_fields(fields)
             .Elements(elements) -> sema_checked_module_literal_list(elements)
             .Entries(entries) -> sema_checked_module_literal_pairs(entries)
             .Value(inner) -> sema_checked_module_literal(inner)
             .ByteText(_) | .Empty -> true
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 item :: if argument == {
                     .Positional(inner) -> inner
@@ -3519,8 +3519,8 @@ fn sema_checked_module_literal(value: Expr) -> Bool Never! {
             }
             true
         }
-        .Field(_, _, _) -> sema_checked_module_type_path(value)
-        .MethodCall(receiver, method, _, _, type_args, args) -> {
+        .Field(_, _, _, _) -> sema_checked_module_type_path(value)
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> {
             if type_args.len() != 0 || !sema_checked_module_uppercase(method) || !sema_checked_module_type_path(receiver) -> return false
             loop argument in args {
                 if !sema_checked_module_literal(argument.expr) -> return false
@@ -3554,8 +3554,8 @@ fn sema_checked_module_literal_fields(fields: [ExprField]) -> Bool Never! {
 
 fn sema_checked_module_type_path(value: Expr) -> Bool Never! {
     if value == {
-        .Ident(name, _) -> sema_checked_module_uppercase(name)
-        .Field(base, member, _) -> sema_checked_module_uppercase(member) && sema_checked_module_type_path(base)
+        .Ident(name, _, _) -> sema_checked_module_uppercase(name)
+        .Field(base, member, _, _) -> sema_checked_module_uppercase(member) && sema_checked_module_type_path(base)
         else -> false
     }
 }

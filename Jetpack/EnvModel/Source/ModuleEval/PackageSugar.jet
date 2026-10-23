@@ -30,7 +30,7 @@ struct SugarField {
 // source text and reusing the tested sugar parser.
 fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages EnvModelEvalError! {
     span :: if value == {
-        .ListLit(_, span) -> span
+        .ListLit(_, span, _) -> span
         else -> { return Err(envmodel_packages_not_a_list(expr_span(value))) }
     }
     text :: pkg_bytes_text(src.bytes(), span.start, span.end)

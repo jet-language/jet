@@ -133,13 +133,13 @@ fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &
 
 fn sema_hardware_expr_is_dma_start(expression: Expr) -> Bool Never! {
     if expression == {
-        .Paren(inner, _) -> { return sema_hardware_expr_is_dma_start(inner) }
-        .MethodCall(receiver, method, _, _, _, _) -> {
+        .Paren(inner, _, _) -> { return sema_hardware_expr_is_dma_start(inner) }
+        .MethodCall(receiver, method, _, _, _, _, _) -> {
             if method != "start" {
                 return false
             }
             is_dma_receiver := if receiver == {
-                .Ident(name, _) -> name == "dma"
+                .Ident(name, _, _) -> name == "dma"
                 else -> false
             }
             if is_dma_receiver {
@@ -210,21 +210,21 @@ fn sema_hardware_ascii_upper(value: String) -> String Never! {
 
 fn sema_hardware_expr_path(expression: Expr) -> [String]? {
     if expression == {
-        .Ident(name, _) -> { return Val([String]{name}) }
-        .Field(base, member, _) -> {
+        .Ident(name, _, _) -> { return Val([String]{name}) }
+        .Field(base, member, _, _) -> {
             path := sema_hardware_expr_path(base) ?? return None
             &path.push(member)
             return Val(path)
         }
-        .Paren(inner, _) -> { return sema_hardware_expr_path(inner) }
+        .Paren(inner, _, _) -> { return sema_hardware_expr_path(inner) }
         else -> None
     }
 }
 
 fn sema_hardware_expr_name(expression: Expr) -> String? {
     if expression == {
-        .Ident(name, _) -> { return Val(name) }
-        .Paren(inner, _) -> { return sema_hardware_expr_name(inner) }
+        .Ident(name, _, _) -> { return Val(name) }
+        .Paren(inner, _, _) -> { return sema_hardware_expr_name(inner) }
         else -> None
     }
 }
@@ -364,7 +364,7 @@ fn sema_hardware_register_method(receiver: Expr, receiver_value: TExpr, method: 
 
 fn sema_hardware_dma_start(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
-        .Ident(name, _) -> name == "dma"
+        .Ident(name, _, _) -> name == "dma"
         else -> false
     }
     if !is_dma_receiver {
@@ -448,7 +448,7 @@ fn sema_hardware_method_receiver_name(ty: Type) -> String Never! {
 // `__JetDmaTransfer` type alone cannot prove profile/channel/buffer ownership.
 fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
-        .Ident(name, _) -> name == "dma"
+        .Ident(name, _, _) -> name == "dma"
         else -> false
     }
     if is_dma_receiver && method == "start" {
@@ -460,7 +460,7 @@ fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, method: 
 
 fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
-        .Ident(name, _) -> name == "dma"
+        .Ident(name, _, _) -> name == "dma"
         else -> false
     }
     is_dma_start := method == "start" && is_dma_receiver

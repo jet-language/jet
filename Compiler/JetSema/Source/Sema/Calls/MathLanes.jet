@@ -96,11 +96,11 @@ fn sema_call_math_lane_reduce(receiver: Expr, receiver_value: TExpr, name: Strin
     argument :: args[0].expr
     operation := ""
     if argument == {
-        .ReduceMarker(marker, marker_span) -> {
+        .ReduceMarker(marker, marker_span, _) -> {
             &diagnostics.push(sema_call_math_reduce_error(marker_span, "`#{marker}` is retired as a reduce selector", "reduce operations are ordinary Core `ReduceOp` enum values", "write `v.reduce(.Add)`"))
             return failed
         }
-        .EnumLit(enum_type, variant, _, payload, _, value_span) -> {
+        .EnumLit(enum_type, variant, _, payload, _, value_span, _) -> {
             valid :: (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant)
             if !valid {
                 &diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
@@ -183,7 +183,7 @@ fn sema_call_math_lane_index(name: String, base: TExpr, index: Expr, checked_ind
         return None
     }
     lanes :: sema_call_math_arity(name)
-    if index == .Int(number, _, _, _) {
+    if index == .Int(number, _, _, _, _) {
         if number < 0 || number >= lanes {
             &diagnostics.push(sema_error("E0965", expr_span(index), "lane {number} is out of range for `{name}` ({lanes} lanes)", "the valid lanes for `{name}` are 0 through {lanes - 1}", "use a lane index between 0 and {lanes - 1}"))
             return None

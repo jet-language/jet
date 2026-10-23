@@ -5,6 +5,7 @@
 // own target policy. Core's dependency graph and runtime-layer classification
 // remain Foundation-owned (RingLayer.jet).
 use jet_foundation.[
+    AST_NODE_GENERATED,
     Expr,
     ExternFn,
     Field,
@@ -122,8 +123,8 @@ fn sema_core_type_uses_default_int(ty: Type) -> Bool Never! {
 
 fn sema_core_generated_receiver_key(receiver: Expr) -> String Never! {
     if receiver == {
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> {
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> {
             prefix :: sema_core_generated_receiver_key(base)
             if prefix == "" -> member else -> "{prefix}.{member}"
         }
@@ -607,7 +608,7 @@ fn sema_core_is_internal_task_key(name: String, suffix: String) -> Bool Never! {
 fn sema_core_collect_params(params: [Param], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop parameter in params {
         sema_core_collect_type(parameter.ty, registered, &used, &spans, Val(parameter.ty_span))
-        if parameter.default != None -> sema_core_collect_expr(parameter.default ?? Expr.Unit{span: parameter.name_span}, imports, registered, &used, &spans, &callbacks)
+        if parameter.default != None -> sema_core_collect_expr(parameter.default ?? Expr.Unit{span: parameter.name_span, id: AST_NODE_GENERATED}, imports, registered, &used, &spans, &callbacks)
     }
 }
 
@@ -671,8 +672,8 @@ fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModu
 
 fn sema_core_collect_field(field: Field, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     sema_core_collect_type(field.ty, registered, &used, &spans, Val(field.ty_span))
-    if field.computed != None -> sema_core_collect_expr(field.computed ?? Expr.Unit{span: field.name_span}, imports, registered, &used, &spans, &callbacks)
-    if field.default != None -> sema_core_collect_expr(field.default ?? Expr.Unit{span: field.name_span}, imports, registered, &used, &spans, &callbacks)
+    if field.computed != None -> sema_core_collect_expr(field.computed ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}, imports, registered, &used, &spans, &callbacks)
+    if field.default != None -> sema_core_collect_expr(field.default ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}, imports, registered, &used, &spans, &callbacks)
 }
 
 fn sema_core_collect_trait_method(method: TraitMethodSig, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
@@ -746,7 +747,7 @@ fn sema_core_collect_item(item: Item, owner: String, unshared: [String], imports
                     .Named(fields) -> loop field in fields -> sema_core_collect_type(field.ty, registered, &used, &spans, Val(field.ty_span))
                     .Unit -> {}
                 }
-                if variant.discriminant_expr != None -> sema_core_collect_expr(variant.discriminant_expr ?? Expr.Unit{span: variant.name_span}, imports, registered, &used, &spans, &callbacks)
+                if variant.discriminant_expr != None -> sema_core_collect_expr(variant.discriminant_expr ?? Expr.Unit{span: variant.name_span, id: AST_NODE_GENERATED}, imports, registered, &used, &spans, &callbacks)
             }
             loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
             loop block in definition.trait_impls -> sema_core_collect_trait_impl(block, imports, registered, &used, &spans, &callbacks)
@@ -842,7 +843,7 @@ fn sema_core_collect_typed_literal_body(body: TypedLitBody, imports: [SemaCoreIm
 
 fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             if call.name == "input" -> sema_core_note_usage(&used, &spans, "core.term::input", Val(call.name_span))
             if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(&used, &spans, "core.math::__precise__", Val(call.name_span))
             sema_core_note_builtin_math_type(call.name, registered, &used, &spans, Val(call.name_span))
@@ -851,7 +852,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 lone_string := if {
                     call.args.len() == 1 -> {
                         if call.args[0].expr == {
-                            .Str(_, _) -> true
+                            .Str(_, _, _) -> true
                             else -> false
                         }
                     }
@@ -883,24 +884,24 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
             }
         }
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> {
             constructor_name := sema_core_generated_receiver_key(receiver)
             if method == "new" && !sema_core_generated_shadowed(registered, constructor_name) && sema_core_generated_constructor_marked(registered, constructor_name) -> sema_core_note_usage(&used, &spans, "core.mem::pool_shared", None)
             if receiver == {
-                .Ident(name, _) -> {
+                .Ident(name, _, _) -> {
                     if name == "Path" -> sema_core_note_usage(&used, &spans, "core.files::__pathapi__", Val(method_span))
                 }
                 else -> {}
             }
             if receiver == {
-                .Ident(name, _) -> {
+                .Ident(name, _, _) -> {
                     sema_core_note_builtin_math_type(name, registered, &used, &spans, Val(method_span))
                 }
                 else -> {}
             }
             loop ty in owner_type_args -> sema_core_collect_type(ty, registered, &used, &spans, Val(method_span))
             loop ty in type_args -> sema_core_collect_type(ty, registered, &used, &spans, Val(method_span))
-            recv_name := if receiver == {.Ident(name, _) -> name else -> ""}
+            recv_name := if receiver == {.Ident(name, _, _) -> name else -> ""}
             if sema_core_is_internal_task_key(recv_name, "") -> sema_core_note_usage(&used, &spans, "core.concurrency::task", Val(method_span))
             if method == {
                 "trim_start" | "trim_end" | "pad_start" | "pad_end" |
@@ -930,9 +931,9 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
             }
             if receiver == {
-                .Field(base, leaf, _) -> {
+                .Field(base, leaf, _, _) -> {
                     if base == {
-                        .Ident(alias, _) -> {
+                        .Ident(alias, _, _) -> {
                             row :: sema_core_import_find(imports, alias)
                             if row != None {
                                 imported := row
@@ -952,13 +953,13 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
             }
         }
-        .PtrFromAddr(_, _, elem, addr, span) -> {
+        .PtrFromAddr(_, _, elem, addr, span, _) -> {
             sema_core_collect_type(elem, registered, &used, &spans, Val(span))
             sema_core_collect_expr(addr, imports, registered, &used, &spans, &callbacks)
         }
-        .Field(base, member, span) -> {
+        .Field(base, member, span, _) -> {
             if base == {
-                .Ident(alias, _) -> {
+                .Ident(alias, _, _) -> {
                     row :: sema_core_import_find(imports, alias)
                     if row != None {
                         imported := row
@@ -970,24 +971,24 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             }
             sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
         }
-        .OptField(base, _, _, _, _) -> sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> sema_core_collect_expr(expr_optional_method_call_as_call(receiver, method, method_span, type_args, args), imports, registered, &used, &spans, &callbacks)
-        .Unary(_, value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
-        .Place(value, _, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
-        .Try(value, _, _, context) -> {
+        .OptField(base, _, _, _, _, _) -> sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
+        .OptMethodCall(receiver, method, method_span, type_args, args, _, _) -> sema_core_collect_expr(expr_optional_method_call_as_call(receiver, method, method_span, type_args, args), imports, registered, &used, &spans, &callbacks)
+        .Unary(_, value, _, _) | .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Tainted(value, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+        .Place(value, _, _, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+        .Try(value, _, _, context, _) -> {
             sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
             if context != None -> sema_core_collect_expr(context, imports, registered, &used, &spans, &callbacks)
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             sema_core_collect_expr(left, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_expr(right, imports, registered, &used, &spans, &callbacks)
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_expr(index, imports, registered, &used, &spans, &callbacks)
         }
-        .CompareChain(operands, _, _, _) -> loop value in operands -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
-        .Slice(base, start, end, range, _) -> {
+        .CompareChain(operands, _, _, _, _) -> loop value in operands -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+        .Slice(base, start, end, range, _, _) -> {
             sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
             if {
                 range != None -> {
@@ -999,11 +1000,11 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
             }
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             sema_core_collect_expr(start, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_expr(end, imports, registered, &used, &spans, &callbacks)
         }
-        .Str(parts, _) -> loop part in parts {
+        .Str(parts, _, _) -> loop part in parts {
             if part == {
                 .Interp(value, format) -> {
                     sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(expr_span(value)))
@@ -1016,22 +1017,22 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 else -> {}
             }
         }
-        .ListLit(values, _) -> loop value in values -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
-        .MemberSpread(base, _, _) | .Spread(base, _) -> sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
-        .MapLit(entries, _) -> loop entry in entries {
+        .ListLit(values, _, _) -> loop value in values -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+        .MemberSpread(base, _, _, _) | .Spread(base, _, _) -> sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
+        .MapLit(entries, _, _) -> loop entry in entries {
             sema_core_collect_expr(entry.key, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_expr(entry.value, imports, registered, &used, &spans, &callbacks)
         }
-        .TupleLit(fields, span, ty) -> {
+        .TupleLit(fields, span, ty, _) -> {
             if ty != None -> sema_core_collect_type(ty, registered, &used, &spans, Val(span))
             loop field in fields -> sema_core_collect_expr(field.value, imports, registered, &used, &spans, &callbacks)
         }
-        .StructLit(type_name, type_args, _, _, fields, _, span) -> {
+        .StructLit(type_name, type_args, _, _, fields, _, span, _) -> {
             sema_core_note_builtin_math_type(type_name, registered, &used, &spans, Val(span))
             loop ty in type_args -> sema_core_collect_type(ty, registered, &used, &spans, Val(span))
             loop field in fields -> sema_core_collect_expr(field.value, imports, registered, &used, &spans, &callbacks)
         }
-        .TypedLit(head, body, span) -> {
+        .TypedLit(head, body, span, _) -> {
             if head != None {
                 ty := head
                 sema_core_collect_type(ty, registered, &used, &spans, Val(span))
@@ -1044,7 +1045,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             }
             sema_core_collect_typed_literal_body(body, imports, registered, &used, &spans, &callbacks)
         }
-        .EnumLit(_, _, _, args, _, _) -> loop arg in args {
+        .EnumLit(_, _, _, args, _, _, _) -> loop arg in args {
             if arg == {
                 .Positional(value) -> {
                     sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
@@ -1054,8 +1055,8 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
             }
         }
-        .PatternTest(subject, _, _) -> sema_core_collect_expr(subject, imports, registered, &used, &spans, &callbacks)
-        .OrFallback(value, fallback, _, _) -> {
+        .PatternTest(subject, _, _, _) -> sema_core_collect_expr(subject, imports, registered, &used, &spans, &callbacks)
+        .OrFallback(value, fallback, _, _, _) -> {
             sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
             if fallback == {
                 .Value(other) -> {
@@ -1074,7 +1075,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 else -> {}
             }
         }
-        .Lambda(lambda) -> {
+        .Lambda(lambda, _) -> {
             loop parameter in lambda.params {
                 if parameter.ty != None -> sema_core_collect_type(parameter.ty ?? Type.Named{name: "Unit"}, registered, &used, &spans, parameter.ty_span)
             }
@@ -1083,14 +1084,14 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 .Block(body) -> sema_core_collect_stmts(body, imports, registered, &used, &spans, &callbacks)
             }
         }
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             sema_core_collect_expr(cond, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_stmts(then_body, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_expr(then_value, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_stmts(else_body, imports, registered, &used, &spans, &callbacks)
             sema_core_collect_expr(else_value, imports, registered, &used, &spans, &callbacks)
         }
-        .ComptimeName(_, span, value) -> {
+        .ComptimeName(_, span, value, _) -> {
             if value != None {
                 ct := value
                 if ct == {
@@ -1101,7 +1102,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
             }
         }
-        .Paren(value, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+        .Paren(value, _, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
         else -> {}
     }
 }
@@ -1208,7 +1209,7 @@ fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool Never! {
     // the same structural predicate used by the checked switch pass.
     loop arm in arms {
         if arm.cond == {
-            .TupleLit(fields, _, _) -> {
+            .TupleLit(fields, _, _, _) -> {
                 if fields.len() == 1 -> return true
             }
             else -> {}

@@ -386,8 +386,8 @@ fn envmodel_evaluate_host_override(source: String, original_span: Span, scope: M
 // spelling; resolved identifiers and real expressions use the pure evaluator.
 fn envmodel_evaluate_host_option(expr: Expr, span: Span, source: String, prefix_len: Int, scope: ModuleEvalScope, resolved: [String: CtValue]) -> String EnvModelEvalError! {
     symbolic :: if expr == {
-        .Ident(name, _) -> !resolved.has_key(name)
-        .Field(_, _, _) | .Str(_, _) -> true
+        .Ident(name, _, _) -> !resolved.has_key(name)
+        .Field(_, _, _, _) | .Str(_, _, _) -> true
         else -> false
     }
     value :: if symbolic -> CtValue.Str{value: envmodel_host_field_source(source, span, prefix_len)} else -> envmodel_evaluate_expression(expr, resolved, scope)

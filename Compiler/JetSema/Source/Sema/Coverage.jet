@@ -517,8 +517,8 @@ fn sema_coverage_chain_condition(cond: TIfCond, conditions: &[TExpr]) -> Bool Ne
 fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool Never! {
     if else_body.len() != 0 -> return false
     if else_value == {
-        .NoElse(_) -> true
-        .If(_, _, _, next_body, next_value, next_span) -> next_span == span && sema_coverage_is_noelse_chain(next_body, next_value, span)
+        .NoElse(_, _) -> true
+        .If(_, _, _, next_body, next_value, next_span, _) -> next_span == span && sema_coverage_is_noelse_chain(next_body, next_value, span)
         else -> false
     }
 }
@@ -531,7 +531,7 @@ fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [T
     current_lowered := lowered
     loop {
         if current_source == {
-            .If(_, _, _, else_body, else_value, span) -> {
+            .If(_, _, _, else_body, else_value, span, _) -> {
                 if !sema_coverage_is_noelse_chain(else_body, else_value, span) -> return None
                 if current_lowered == {
                     .If(cond, _, else_stmts, _, _) -> {
@@ -541,7 +541,7 @@ fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [T
                             else -> return None
                         }
                         if else_value == {
-                            .NoElse(_) -> return Val(conditions)
+                            .NoElse(_, _) -> return Val(conditions)
                             else -> {}
                         }
                         nested :: else_stmts ?? return None
@@ -611,7 +611,7 @@ fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> [TEx
     table_span :: expr_span(source)
     loop {
         if current_source == {
-            .If(_, _, _, _, else_value, span) -> {
+            .If(_, _, _, _, else_value, span, _) -> {
                 if span != table_span -> return conditions
                 if current_lowered == {
                     .If(cond, _, else_stmts, _, _) -> {

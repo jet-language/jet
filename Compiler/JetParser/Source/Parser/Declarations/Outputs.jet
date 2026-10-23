@@ -19,7 +19,7 @@ fn parser_parse_output(state: &JetParserState, modifiers: ParsedItemModifiers) -
     args :: parser_parse_variant_args(&state, 0, true)
     end :: parser_previous_end(state)
     span :: Span{start: owner.span.start, end: end}
-    value :: Expr.EnumLit{type_name: "Output", variant: parser_value(state, variant), variant_span: Val(variant.span), args: args, leading_dot: false, span: span}
+    value :: Expr.EnumLit{type_name: "Output", variant: parser_value(state, variant), variant_span: Val(variant.span), args: args, leading_dot: false, span: span, id: parser_node_id(&state)}
     result := ast_const(parser_value(state, name), name.span, Span{start: name.span.start, end: end}, value)
     result.ty = Val(Type.Named{name: "Output"})
     result.is_pub = modifiers.is_pub

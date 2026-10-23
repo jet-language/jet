@@ -1,4 +1,5 @@
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     CoreCallRecord,
@@ -84,22 +85,22 @@ fn sema_dyn_wrappable(ty: Type) -> Bool Never! {
 
 fn sema_dyn_site(expr: Expr) -> String Never! {
     return if expr == {
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{sema_dyn_site(base)}.{member}"
-        .Index(base, index, _, _) -> "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
-        .Paren(inner, _) | .Place(inner, _, _) -> sema_dyn_site(inner)
-        .Int(value, _, _, _) -> "{value}"
-        .Float(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> if value -> "true" else -> "false"
-        .Unary(op, inner, _) -> {
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> "{sema_dyn_site(base)}.{member}"
+        .Index(base, index, _, _, _) -> "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
+        .Paren(inner, _, _) | .Place(inner, _, _, _) -> sema_dyn_site(inner)
+        .Int(value, _, _, _, _) -> "{value}"
+        .Float(value, _, _, raw, _) -> raw ?? "{value}"
+        .Bool(value, _, _) -> if value -> "true" else -> "false"
+        .Unary(op, inner, _, _) -> {
             literal :: if inner == {
-                .Int(_, _, _, _) | .Float(_, _, _, _) -> true
+                .Int(_, _, _, _, _) | .Float(_, _, _, _, _) -> true
                 else -> false
             }
             if op == UnOp.Neg && literal -> return "-{sema_dyn_site(inner)}"
             "…"
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             text := ""
             loop part in parts {
                 if part == .Lit(piece) -> text = "{text}{piece}" else -> return "…"
@@ -782,8 +783,8 @@ fn sema_data_object_pairs_type() -> Type Never! {
 
 fn sema_data_object_pairs_argument(argument: Expr, scopes: SemaScopeTable) -> Bool {
     if argument == {
-        .ListLit(_, _) -> return true
-        .Ident(name, _) -> {
+        .ListLit(_, _, _) -> return true
+        .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
             ty :: scopes.bindings[index].symbol.ty ?? return false
             return sema_data_is_object_pairs_type(ty)
@@ -812,11 +813,11 @@ fn sema_data_literal_variant_valid(ty: Type, variant: String) -> Bool Never! {
 
 fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if argument == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
             return sema_ownership_binding_is_borrowed_param(scopes.bindings[index])
         }
-        .Field(base, _, _) | .Index(base, _, _, _) | .Paren(base, _) -> return sema_data_argument_is_borrowed(base, scopes)
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Paren(base, _, _) -> return sema_data_argument_is_borrowed(base, scopes)
         else -> false
     }
 }
@@ -824,7 +825,7 @@ fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Boo
 fn sema_data_dbvalue_payload_live_after(ty: Type, argument: Expr, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if ty != (Type.Named{name: "DBValue"}) -> return false
     if argument == {
-        .Ident(name, _) -> { return sema_ownership_name_live_after(name, &tail_store, &context) }
+        .Ident(name, _, _) -> { return sema_ownership_name_live_after(name, &tail_store, &context) }
         else -> { return false }
     }
 }
@@ -896,7 +897,7 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         }
         if argument.convention != AccessConvention.Move && !borrowed && !sema_ownership_type_is_copy(want) && sema_data_dbvalue_payload_live_after(ty, argument.expr, &tail_store, &context) && sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
         if argument.convention == AccessConvention.Move -> clone_arg = false
-        taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span} else -> argument.expr
+        taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED} else -> argument.expr
         if !clone_arg && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     result_ty := if ty == (Type.Named{name: "DBValue"}) -> sema_data_value_type() else -> sema_dyn_type()
@@ -993,7 +994,7 @@ fn sema_call_try_data_stream_core_call(module_name: String, member: String, args
 }
 
 fn sema_data_core_default_call(type_name: String, method: String, span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: span}, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}}
+    Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED}, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
 }
 
 fn sema_data_core_param(label: String, ty: Type, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
@@ -1132,9 +1133,9 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     // registered defaults before the shared arity and argument checks.
     if module_name == "core.sys" {
         params := [SemaCallParam]{
-            sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span})),
-            sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span})),
-            sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span})),
+            sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED})),
+            sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span, id: AST_NODE_GENERATED})),
+            sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED})),
         }
         binding :: sema_call_bind_args("{module_name}.{member}", params, &updated_args, span, &diagnostics)
         if binding == None {
@@ -1205,9 +1206,9 @@ fn sema_data_core_reader_writer_params(module_name: String, member: String, reco
             &labels.push("header")
             &labels.push("skip_blank")
             &defaults.push(Val(sema_data_core_default_call("EncodingLimits", "safe", span)))
-            &defaults.push(Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ","}}, span: span}))
-            &defaults.push(Val(Expr.Bool{value: false, span: span}))
-            &defaults.push(Val(Expr.Bool{value: false, span: span}))
+            &defaults.push(Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ","}}, span: span, id: AST_NODE_GENERATED}))
+            &defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
+            &defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
         }
         else -> {
             &argument_types.push(Type.Named{name: "EncodingLimits"})
@@ -1223,7 +1224,7 @@ fn sema_data_core_reader_writer_params(module_name: String, member: String, reco
                 module_name == "core.encoding.json" && !reader -> {
                     &argument_types.push(Type.Bool)
                     &labels.push("canonical")
-                    &defaults.push(Val(Expr.Bool{value: false, span: span}))
+                    &defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
                 }
             }
         }
@@ -1322,12 +1323,12 @@ fn sema_data_sql_column_token(raw: String) -> String Never! {
 
 fn sema_data_analytics_sql_literal(expression: Expr) -> String? {
     if expression == {
-        .TypedLit(head, body, _) -> {
+        .TypedLit(head, body, _, _) -> {
             if head != .Val(Type.Named{name: "SQL"}) -> return None
             if body == {
                 .Value(value) -> {
                     if value == {
-                        .Str(parts, _) -> {
+                        .Str(parts, _, _) -> {
                             result := ""
                             loop part in parts {
                                 if part == {

@@ -242,7 +242,7 @@ fn sema_plugin_resolved_unit_dimension(dimensions: [SemaPluginResolvedUnitDimens
 
 fn sema_plugin_resolve_unit_dimension_expression(expression: Expr, dimensions: [SemaPluginResolvedUnitDimension]) -> Dimension? {
     if expression == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             loop row in dimensions {
                 if row.family == name {
                     return Val(row.dimension)
@@ -250,7 +250,7 @@ fn sema_plugin_resolve_unit_dimension_expression(expression: Expr, dimensions: [
             }
             return None
         }
-        .Binary(op, left, right, _) -> {
+        .Binary(op, left, right, _, _) -> {
             if op != BinOp.Mul && op != BinOp.Div -> return None
             left_dimension :: sema_plugin_resolve_unit_dimension_expression(left, dimensions) ?? return None
             right_dimension :: sema_plugin_resolve_unit_dimension_expression(right, dimensions) ?? return None

@@ -498,11 +498,11 @@ fn jet_target_layout_enum_c_tag(definition: EnumDef) -> CEnumTag? {
         if candidate.name == "Layout" -> break candidate
     } ?? return None
     layout_expr :: jet_target_layout_marker_expression(marker, 0) ?? return None
-    layout_name :: if layout_expr == { .Ident(name, _) -> name else -> "" }
+    layout_name :: if layout_expr == { .Ident(name, _, _) -> name else -> "" }
     if jet_target_layout_ascii_lower(layout_name) != "c" -> return None
     enum_tag :: jet_target_layout_marker_expression(marker, 1) ?? return Val(CEnumTag.CInt)
     if enum_tag == {
-        .Ident(name, _) -> if name == {
+        .Ident(name, _, _) -> if name == {
             "U8" -> Val(CEnumTag.U8)
             "I8" -> Val(CEnumTag.I8)
             "U16" -> Val(CEnumTag.U16)

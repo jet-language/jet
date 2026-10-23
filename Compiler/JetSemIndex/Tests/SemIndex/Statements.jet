@@ -1,7 +1,7 @@
 // TOOLS-S11: real leaf byte-span claims plus unregistered full-walker oracles.
 // C4/CP-NAMES/S12/CP-AST/#4397 gate actual checked products. No prefilled index,
 // empty registration graph or fake parser/name provider substitutes for them.
-use jet_foundation.[Stmt, Expr, Binding, CallArg, CallLabel, Span, NamedSpan, Program, MIRNameFacts, AccessConvention, ast_empty_call_arg_flags, type_name]
+use jet_foundation.[AST_NODE_GENERATED, Stmt, Expr, Binding, CallArg, CallLabel, Span, NamedSpan, Program, MIRNameFacts, AccessConvention, ast_empty_call_arg_flags, type_name]
 
 #Test("semindex_loop_label_reference_span_uses_utf8_bytes") {
     assert_eq(semindex_loop_label_span("outer", Span{start: 7, end: 99}), Span{start: 7, end: 12})
@@ -87,7 +87,7 @@ fn semindex_s11_arg(start: Int, label: String?, binder_label: String?, slot: Int
     authored := CallLabel?{None}
     if label == .Val(label) -> authored = Val(CallLabel{name: label, span: (Span{start: start - 2, end: start - 1})})
     // Argument span includes its access sigil; hint anchors the expression.
-    CallArg{convention: AccessConvention.Write, expr: Expr.Unit{span: Span{start: start, end: start + 2}}, span: Span{start: start - 1, end: start + 2}, flags: flags, label: authored, spread: false}
+    CallArg{convention: AccessConvention.Write, expr: Expr.Unit{span: Span{start: start, end: start + 2}, id: AST_NODE_GENERATED}, span: Span{start: start - 1, end: start + 2}, flags: flags, label: authored, spread: false}
 }
 fn semindex_s11_call_inlays_filter_labels_and_dedup_variadic_slots() {
     db := SymbolDB.new()

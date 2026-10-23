@@ -21,7 +21,7 @@ fn pc_binding_values(parsed: ParseResult) -> [Int] {
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
-                if statement == .Val(binding) && binding.init == .Int(value, _, _, _) -> &values.push(value)
+                if statement == .Val(binding) && binding.init == .Int(value, _, _, _, _) -> &values.push(value)
             }
         }
     }
@@ -114,7 +114,7 @@ fn pc_marker_metadata() {
             expected :: PC_MARKER_STATUS.get(declaration.name) ?? panic("unregistered marker {declaration.name}")
             replacement := ""
             loop parameter in declaration.params {
-                if parameter.name == "$retired" && parameter.value == .Val(value) && value == .Str(parts, _) {
+                if parameter.name == "$retired" && parameter.value == .Val(value) && value == .Str(parts, _, _) {
                     if parts.len() == 1 && parts[0] == .Lit(text) -> replacement = text
                 }
             }
@@ -171,12 +171,12 @@ fn pc_output_provider() {
             pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist, "{kind} stays a default-private immutable runtime declaration")
             pc_require(value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.persist_span == None && value.resolved_output == None, "{kind} preserves ordinary Const tags")
             pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "Output" else -> false, "{kind} carries the canonical Output type")
-            if value.value == .EnumLit(type_name, variant_name, variant_site, args, leading_dot, span) {
+            if value.value == .EnumLit(type_name, variant_name, variant_site, args, leading_dot, span, _) {
                 pc_require(type_name == "Output" && variant_name == kind && !leading_dot, "{kind} keeps its qualified closed-sum constructor")
                 pc_require(span == Span{start: 7, end: source.len() - 1} && variant_site == (Val(Span{start: 14, end: 14 + kind.len()})), "{kind} keeps constructor and variant byte spans")
                 pc_require(args.len() == 2, "{kind} retains both named fields")
                 pc_require(if args[0] == .Named(label, _) -> label == "name" else -> false, "{kind} retains first field label")
-                pc_require(if args[1] == .Named(label, argument) && argument == .Ident(name, _) -> label == "entry" && name == "run" else -> false, "{kind} retains the bare callable address")
+                pc_require(if args[1] == .Named(label, argument) && argument == .Ident(name, _, _) -> label == "entry" && name == "run" else -> false, "{kind} retains the bare callable address")
             } else { panic("Output provider lost the {kind} constructor") }
         } else { panic("Output provider lost the {kind} Const item") }
     }
@@ -187,7 +187,7 @@ fn pc_output_provider() {
         pc_require(value.name == "defaults" && value.name_span == Span{start: 0, end: 8} && value.span == Span{start: 0, end: source.len() - 1}, "defaults preserves existing Source declaration spans")
         pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "__OutputDefaults" else -> false, "defaults retains the existing internal tag")
         pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist && value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.resolved_output == None, "defaults keeps its default Const facts")
-        if value.value == .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) {
+        if value.value == .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span, _) {
             pc_require(type_name == "" && type_args.len() == 0 && import_ns == None && as_trait == None && inferred && span == Span{start: 10, end: source.len() - 1}, "defaults retains the anonymous named-field record")
             pc_require(fields.len() == 3, "defaults preserves all three addresses")
             labels :: [String]{"run", "check", "enter"}
@@ -195,7 +195,7 @@ fn pc_output_provider() {
             loop index in 0..<fields.len() {
                 field :: fields[index]
                 pc_require(field.name == labels[index], "defaults preserves field order")
-                pc_require(if field.value == .Ident(name, _) -> name == addresses[index] else -> false, "defaults preserves bare Output addresses")
+                pc_require(if field.value == .Ident(name, _, _) -> name == addresses[index] else -> false, "defaults preserves bare Output addresses")
             }
         } else { panic("Output defaults provider lost its record") }
     } else { panic("Output defaults provider lost its Const item") }
@@ -268,9 +268,9 @@ fn pc_optional_comparison_rhs(rhs: String, binds: Bool) {
     function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function")
     binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding")
     if binds {
-        pc_require(if binding.init == .PatternTest(_, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
+        pc_require(if binding.init == .PatternTest(_, _, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
     } else {
-        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
+        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
     }
 }
 
@@ -308,7 +308,7 @@ fn pc_qualified_generic_literal() {
         if item == .Func(func) {
             loop statement in func.body {
                 if statement == .Val(binding) {
-                    if binding.init == .StructLit(name, args, namespace, _, _, _, _) {
+                    if binding.init == .StructLit(name, args, namespace, _, _, _, _, _) {
                         pc_require(name == "TypedHistoryCase", "qualified literal name")
                         pc_require((namespace ?? "") == "testing", "qualified literal namespace")
                         pc_require(args.len() == 1, "qualified literal generic arguments retained")
@@ -351,14 +351,14 @@ fn pc_named_struct_pattern_rhs() {
     constant :: parse_source("fn run() {{\n if kind == CONST {{ print(kind) }}\n if kind == Limit {{ print(kind) }}\n}}\n".bytes())
     pc_require(constant.diagnostics.len() == 0, "a name compared before an `if` body stays a value")
     init :: pc_named_struct_pattern_rhs_init("fn run() {{ result :: point == Point{{x, y: 0}} }}", "Point{{x, y: 0}}")
-    shaped :: if init == .PatternTest(_, pattern, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 2 && (if head == .Val(_) -> true else -> false) else -> false) else -> false
+    shaped :: if init == .PatternTest(_, pattern, _, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 2 && (if head == .Val(_) -> true else -> false) else -> false) else -> false
     pc_require(shaped, "a named struct pattern still binds and compares fields")
     // #4785 (Rust `try_pattern_rhs`): record-shaped braces after `==` are an
     // anonymous struct pattern in an `if` condition and in a value alike.
     single_arm :: parse_source("fn run() {{\n if row == {{kind: x}} -> print(x)\n}}\n".bytes())
     pc_require(single_arm.diagnostics.len() == 0, "single-arm `if row == {{kind: x}} -> …` parses as a pattern test")
     record :: pc_named_struct_pattern_rhs_init("fn run() {{ result :: row == {{kind: x}} }}", "{{kind: x}}")
-    anonymous :: if record == .PatternTest(_, pattern, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 1 && head == None else -> false) else -> false
+    anonymous :: if record == .PatternTest(_, pattern, _, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 1 && head == None else -> false) else -> false
     pc_require(anonymous, "record-shaped braces after `==` are an anonymous struct pattern")
 }
 fn pc_allow_and_fact_roots() {

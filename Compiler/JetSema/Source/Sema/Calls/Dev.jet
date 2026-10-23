@@ -37,7 +37,7 @@ fn sema_call_try_dev_context_method(receiver: Expr, receiver_value: TExpr, metho
     if method == "reload" {
         // `.Restart` or `.Hot`: the reload mode, carried as its variant name.
         mode := ""
-        if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _) {
+        if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
             if leading_dot && enum_args.len() == 0 && (variant == "Restart" || variant == "Hot") -> mode = variant.copy()
         }
         if mode.len() == 0 {

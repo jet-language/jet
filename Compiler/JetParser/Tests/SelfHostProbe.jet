@@ -30,26 +30,26 @@ fn selfhost_parser_label(facts: &[Int], label: CallLabel?) {
 
 fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
     if expression == {
-        .Ident(name, span) -> {
+        .Ident(name, span, _) -> {
             &facts.push(1)
             selfhost_parser_text(&facts, name)
             &facts.push(span.start)
             &facts.push(span.end)
         }
-        .Spread(value, span) -> {
+        .Spread(value, span, _) -> {
             &facts.push(2)
             &facts.push(span.start)
             &facts.push(span.end)
             selfhost_parser_expr(&facts, value)
         }
-        .Field(base, member, span) -> {
+        .Field(base, member, span, _) -> {
             &facts.push(3)
             selfhost_parser_text(&facts, member)
             &facts.push(span.start)
             &facts.push(span.end)
             selfhost_parser_expr(&facts, base)
         }
-        .OptField(base, member, member_span, _, span) -> {
+        .OptField(base, member, member_span, _, span, _) -> {
             &facts.push(5)
             selfhost_parser_text(&facts, member)
             &facts.push(member_span.start)
@@ -58,7 +58,7 @@ fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
             &facts.push(span.end)
             selfhost_parser_expr(&facts, base)
         }
-        .OptMethodCall(receiver, method, method_span, _, args, span) -> {
+        .OptMethodCall(receiver, method, method_span, _, args, span, _) -> {
             &facts.push(6)
             selfhost_parser_text(&facts, method)
             &facts.push(method_span.start)
@@ -69,7 +69,7 @@ fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
             loop argument in args -> selfhost_parser_call_arg(&facts, argument)
             selfhost_parser_expr(&facts, receiver)
         }
-        .MethodCall(receiver, method, _, _, _, args) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
             &facts.push(7)
             selfhost_parser_text(&facts, method)
             &facts.push(args.len())
@@ -189,7 +189,7 @@ fn selfhost_parser_result_facts(parsed: ParseResult) -> [Int] {
         if statement == {
             .Expr(expression) -> {
                 if expression == {
-                    .Call(call) -> {
+                    .Call(call, _) -> {
                         &facts.push(1)
                         &facts.push(call.args.len())
                         index = 0

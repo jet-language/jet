@@ -56,8 +56,8 @@ fn run() {}
     hole :: parser_test_function(parsed, "hole").body
     assert_eq(ok.len(), 1)
     assert_eq(hole.len(), 1)
-    assert(if ok[0] == { .Expr(.EnumLit(_, _, _, _, leading_dot, _)) -> leading_dot else -> false })
-    assert(if hole[0] == { .Expr(.Todo(_, _)) -> true else -> false })
+    assert(if ok[0] == { .Expr(.EnumLit(_, _, _, _, leading_dot, _, _)) -> leading_dot else -> false })
+    assert(if hole[0] == { .Expr(.Todo(_, _, _)) -> true else -> false })
 }
 
 // Rust: crates/jet-parser/src/Parser/Expressions/patterns.rs:13
@@ -144,5 +144,5 @@ else -> return cp
 }
 `)
     body :: parser_test_function(parsed, "mapping").body
-    assert(if body[body.len() - 1] == { .Expr(.If(_, _, _, _, _, _)) -> true else -> false })
+    assert(if body[body.len() - 1] == { .Expr(.If(_, _, _, _, _, _, _)) -> true else -> false })
 }

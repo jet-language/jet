@@ -729,16 +729,16 @@ fn sema_pattern_constant_name(name: String) -> Bool Never! {
 
 fn sema_pattern_map_key_written(key: Expr) -> Bool Never! {
     if key == {
-        .Int(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .EnumLit(_, _, _, _, _, _) -> true
-        .Str(parts, _) -> {
+        .Int(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .EnumLit(_, _, _, _, _, _, _) -> true
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(_, _) -> return false
             }
             true
         }
-        .Ident(name, _) -> sema_pattern_constant_name(name)
-        .Field(base, _, _) -> if base == .Ident(name, _) -> name.len() > 0 else -> false
-        .Unary(_, inner, _) -> sema_pattern_map_key_written(inner)
+        .Ident(name, _, _) -> sema_pattern_constant_name(name)
+        .Field(base, _, _, _) -> if base == .Ident(name, _, _) -> name.len() > 0 else -> false
+        .Unary(_, inner, _, _) -> sema_pattern_map_key_written(inner)
         else -> false
     }
 }

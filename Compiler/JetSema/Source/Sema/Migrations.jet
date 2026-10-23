@@ -1,4 +1,5 @@
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     Expr,
@@ -127,13 +128,13 @@ fn sema_migration_default_function(name: String, ty: Type, default: Expr, span: 
 fn sema_migration_callable_converter_function(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func Never! {
     argument := CallArg{
         convention: AccessConvention.Move,
-        expr: Expr.Ident{name: "__old", span: span},
+        expr: Expr.Ident{name: "__old", span: span, id: AST_NODE_GENERATED},
         span: span,
         flags: ast_empty_call_arg_flags(),
         label: None,
         spread: false,
     }
-    call := Expr.CallValue{callee: converter, args: [CallArg]{argument}, span: span}
+    call := Expr.CallValue{callee: converter, args: [CallArg]{argument}, span: span, id: AST_NODE_GENERATED}
     function := ast_func(name, span, span)
     function.params = [Param]{Param{
         convention: AccessConvention.Move,
@@ -158,7 +159,7 @@ fn sema_migration_callable_converter_function(name: String, old_ty: Type, new_ty
 
 fn sema_migration_converter_function(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func Never! {
     if converter == {
-        .Lambda(lambda) -> if lambda.params.len() == 1 {
+        .Lambda(lambda, _) -> if lambda.params.len() == 1 {
             parameter := lambda.params[0]
             body := if lambda.body == {
                 .Expr(value) -> [Stmt]{Stmt.Return{value: Val(value), span: span}}

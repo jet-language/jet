@@ -93,7 +93,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
         &diagnostics.push(sema_error("E0104", span, "`{method}` takes one lambda, got {args.len()}", if method == "on_commit" -> "a post-commit hook registers a single cleanup lambda" else -> "a rollback hook registers a single undo lambda", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if args[0].expr == .Lambda(lambda) {
+    if args[0].expr == .Lambda(lambda, _) {
         if lambda.params.len() != 0 {
             &diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> "" else -> "s"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(() -> {{ … }})` with no parameters"))
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -103,7 +103,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
     saved_transaction_wall_depth :: scopes.transaction_wall_depth
     scopes.transaction_depth = 0
     scopes.transaction_wall_depth = 0
-    checked :: sema_check_expression_with_lambda_escapes(args[0].expr, if args[0].expr == {.Lambda(_) -> Val(Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None}, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+    checked :: sema_check_expression_with_lambda_escapes(args[0].expr, if args[0].expr == {.Lambda(_, _) -> Val(Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None}, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     scopes.transaction_depth = saved_transaction_depth
     scopes.transaction_wall_depth = saved_transaction_wall_depth
     callback :: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -111,7 +111,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
         &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {type_name(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    handle_name :: if receiver == {.Ident(name, _) -> name else -> ""}
+    handle_name :: if receiver == {.Ident(name, _, _) -> name else -> ""}
     if handle_name == "" -> return SemaMethodSpecialCheck{handled: true, value: None}
     kind :: if method == "on_commit" -> TCoreClosureKind.OnCommit{handle_name: handle_name, executable: executable} else -> TCoreClosureKind.OnRollback{handle_name: handle_name, executable: executable}
     value :: sema_tir_node(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
@@ -148,7 +148,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
     callback_expected :: Val(Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
     host_stored :: sema_shared_access_is_shared_type(receiver_value.ty) && method == "edit" && scopes.transaction_depth > 0
     callback :: if args[0].expr == {
-        .Lambda(_) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Lambda(_, _) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {
             checked :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             &diagnostics.push(sema_call_builtin_host_lambda_diagnostic(method, checked.ty, args[0].span))
@@ -638,7 +638,7 @@ fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallPar
         decision :: sema_call_argument_convention(parameter, args[index])
         if decision != SemaCallConventionDecision.Accepted -> return None
         checked_argument :: if args[index].expr == {
-            .Lambda(_) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            .Lambda(_, _) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             else -> if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         value :: checked_argument ?? return None
@@ -934,7 +934,7 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
         }
         if handler && method != "mount" {
             if argument.expr == {
-                .Ident(_, _) -> {}
+                .Ident(_, _, _) -> {}
                 else -> {
                     &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
                     return SemaMethodSpecialCheck{handled: true, value: None}

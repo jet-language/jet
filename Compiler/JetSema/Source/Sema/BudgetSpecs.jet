@@ -287,9 +287,9 @@ fn sema_budget_scene_attachments(stmts: [Stmt], scenes: &[String]) Never! {
 
 fn sema_budget_scene_expr(expr: Expr, scenes: &[String]) Never! {
     if expr == {
-        .MethodCall(receiver, method, _, _, _, args) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
             scene_receiver :: if receiver == {
-                .Field(_, member, _) -> member == "Scene"
+                .Field(_, member, _, _) -> member == "Scene"
                 else -> false
             }
             if method == "new" && scene_receiver && args.len() == 1 {
@@ -298,12 +298,12 @@ fn sema_budget_scene_expr(expr: Expr, scenes: &[String]) Never! {
             sema_budget_scene_expr(receiver, &scenes)
             loop arg in args -> sema_budget_scene_expr(arg.expr, &scenes)
         }
-        .Call(call) -> {
+        .Call(call, _) -> {
             loop arg in call.args -> sema_budget_scene_expr(arg.expr, &scenes)
         }
-        .Field(base, _, _) -> sema_budget_scene_expr(base, &scenes)
-        .Unary(_, operand, _) -> sema_budget_scene_expr(operand, &scenes)
-        .Binary(_, left, right, _) -> {
+        .Field(base, _, _, _) -> sema_budget_scene_expr(base, &scenes)
+        .Unary(_, operand, _, _) -> sema_budget_scene_expr(operand, &scenes)
+        .Binary(_, left, right, _, _) -> {
             sema_budget_scene_expr(left, &scenes)
             sema_budget_scene_expr(right, &scenes)
         }
@@ -573,7 +573,7 @@ fn sema_budget_arg_value(arg: EnumLitArg) -> Expr Never! {
 
 fn sema_budget_closed_metric(name: String, expr: Expr) -> BudgetMetricPair BudgetSpecError! {
     if expr == {
-        .EnumLit(_, variant, _, args, _, _) -> {
+        .EnumLit(_, variant, _, args, _, _, _) -> {
             if !BUDGET_METRICS.contains(variant) -> return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` is not a performance metric", "use one metric from the registered performance-budget vocabulary", expr_span(expr))))
             percentile_metric :: variant == "FrameTime" || variant == "Latency" || variant == "BenchTime" || variant == "DrawCalls" || variant == "CompileTime"
             if percentile_metric {
@@ -593,7 +593,7 @@ fn sema_budget_closed_metric(name: String, expr: Expr) -> BudgetMetricPair Budge
 }
 
 fn sema_budget_closed_comparison(name: String, expr: Expr) -> BudgetComparisonFact BudgetSpecError! {
-    if expr == .EnumLit(_, variant, _, args, _, _) {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
         if variant == "Absolute" && args.len() == 0 -> return Ok(BudgetComparisonFact{kind: variant, baseline: None})
         if (variant == "AbsoluteFrom" || variant == "RelativeTo") && args.len() == 1 && args[0] == .Positional(value) {
             baseline :: sema_budget_string_value(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` requires one constant baseline name", "write a lowercase slash-separated name such as `\"ci/linux-x64\"`", expr_span(value))))
@@ -607,7 +607,7 @@ fn sema_budget_closed_comparison(name: String, expr: Expr) -> BudgetComparisonFa
 
 fn sema_budget_enum_args(expr: Expr) -> [EnumLitArg] Never! {
     if expr == {
-        .EnumLit(_, _, _, args, _, _) -> args
+        .EnumLit(_, _, _, args, _, _, _) -> args
         else -> [EnumLitArg]{}
     }
 }
@@ -702,8 +702,8 @@ struct BudgetStructLit { type_name: String, fields: [ExprField] }
 // and written fields.
 fn sema_budget_struct_lit(expr: Expr) -> BudgetStructLit? Never! {
     if expr == {
-        .StructLit(written_name, _, _, _, fields, _, _) -> { return Val(BudgetStructLit{type_name: written_name, fields: fields}) }
-        .TypedLit(head, body, _) -> {
+        .StructLit(written_name, _, _, _, fields, _, _, _) -> { return Val(BudgetStructLit{type_name: written_name, fields: fields}) }
+        .TypedLit(head, body, _, _) -> {
             ty :: head ?? return None
             if body == {
                 .Fields(fields) -> { return Val(BudgetStructLit{type_name: type_name(ty), fields: fields}) }
@@ -732,13 +732,13 @@ fn sema_budget_parse_applicability(name: String, expr: Expr) -> BudgetApplicabil
 
 fn sema_budget_parse_axis(name: String, axis: String, expr: Expr) -> BudgetAxis BudgetSpecError! {
     shape_error :: sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`", "use one closed applicability variant", expr_span(expr)))
-    if expr == .EnumLit(_, variant, _, args, _, _) {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
         if variant == "Current" && args.len() == 0 -> return Ok(BudgetAxis.Current)
         if variant == "All" && args.len() == 0 -> return Ok(BudgetAxis.All)
         if variant == "Only" && args.len() == 1 {
             value :: sema_budget_arg_value(args[0])
             values :: if value == {
-                .ListLit(elements, _) -> elements
+                .ListLit(elements, _, _) -> elements
                 else -> { return Err(sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` Only requires a list", "write `.Only([selector, ...])`", expr_span(value)))) }
             }
             if values.len() == 0 -> return Err(sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` Only list cannot be empty", "add at least one selector", expr_span(value))))
@@ -755,7 +755,7 @@ fn sema_budget_parse_axis(name: String, axis: String, expr: Expr) -> BudgetAxis 
 }
 
 fn sema_budget_target_selector(name: String, expr: Expr) -> String BudgetSpecError! {
-    if expr == .EnumLit(_, variant, _, args, _, _) {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
         if variant == "Class" && args.len() == 1 {
             value :: sema_budget_arg_value(args[0])
             class :: sema_budget_enum_variant(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", expr_span(value))))
@@ -778,7 +778,7 @@ BUDGET_BUILT_IN_PROFILES :: [String]{"dev", "release", "small", "test", "bench"}
 
 fn sema_budget_profile_selector(name: String, expr: Expr) -> String BudgetSpecError! {
     selector_error :: sema_budget_fail(sema_budget_invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr_span(expr)))
-    if expr == .EnumLit(_, variant, _, args, _, _) {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
         if (variant == "Dev" || variant == "Release" || variant == "Small" || variant == "Test" || variant == "Bench") && args.len() == 0 -> return Ok(variant)
         if variant == "Named" && args.len() == 1 {
             value :: sema_budget_arg_value(args[0])
@@ -825,7 +825,7 @@ fn sema_budget_required(map: [String: BudgetFieldEntry], field: String, span: Sp
 
 fn sema_budget_enum_variant(expr: Expr) -> String? Never! {
     if expr == {
-        .EnumLit(_, variant, _, _, _, _) -> Val(variant)
+        .EnumLit(_, variant, _, _, _, _, _) -> Val(variant)
         else -> None
     }
 }
@@ -833,14 +833,14 @@ fn sema_budget_enum_variant(expr: Expr) -> String? Never! {
 // The canonical key of a closed enum value: `Variant` or
 // `Variant(arg,...)` with quoted text unquoted and nested enums keyed.
 fn sema_budget_enum_key(expr: Expr) -> String? Never! {
-    if expr == .EnumLit(_, variant, _, args, _, _) {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
         if args.len() == 0 -> return Val(variant)
         rendered := [String]{}
         loop arg in args {
             value :: sema_budget_arg_value(arg)
             if value == {
-                .Str(_, _) -> &rendered.push(sema_budget_string_value(value) ?? return None)
-                .EnumLit(_, _, _, _, _, _) -> &rendered.push(sema_budget_enum_key(value) ?? return None)
+                .Str(_, _, _) -> &rendered.push(sema_budget_string_value(value) ?? return None)
+                .EnumLit(_, _, _, _, _, _, _) -> &rendered.push(sema_budget_enum_key(value) ?? return None)
                 else -> { return None }
             }
         }
@@ -892,14 +892,14 @@ fn sema_budget_normalize_limit(name: String, metric: String, limit: String, expr
     }
     if allowed.len() == 0 {
         count_error :: sema_budget_fail(sema_budget_invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", expr_span(value)))
-        if value == .Int(count, _, _, _) {
+        if value == .Int(count, _, _, _, _) {
             if count < 0 || count > sema_budget_u128_max() -> return Err(count_error)
             return Ok(BudgetLimitFact{kind: limit, quantity: BudgetQuantity.Count{value: count}, raw: BudgetRawQuantity.Scalar{digits: "{count}", suffix: None}})
         }
         return Err(count_error)
     }
     unit_error :: sema_budget_fail(sema_budget_invalid(name, "`{metric}` requires one of these units: {allowed.join(", ")}", "write the limit with a {allowed[0]} suffix", expr_span(value)))
-    if value == .UnitLit(raw, _, _, suffix, _, _) {
+    if value == .UnitLit(raw, _, _, suffix, _, _, _) {
         if !allowed.contains(suffix) -> return Err(unit_error)
         multiplier :: sema_budget_unit_scale(suffix) ?? panic("allowed normalized unit")
         range_error :: sema_budget_fail(sema_budget_invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", expr_span(value)))
@@ -922,7 +922,7 @@ fn sema_budget_digits(text: String) -> Bool Never! {
 }
 
 fn sema_budget_normalize_percent(value: Expr) -> BudgetPercent? Never! {
-    if value == .UnitLit(raw, _, _, suffix, _, _) {
+    if value == .UnitLit(raw, _, _, suffix, _, _, _) {
         if suffix != "pct" -> return None
         parts :: raw.split(".").to_list()
         if parts.len() > 2 -> return None
@@ -960,14 +960,14 @@ fn sema_budget_normalize_rate(name: String, value: Expr) -> BudgetRate BudgetSpe
     count_error :: sema_budget_fail(sema_budget_invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", expr_span(count_expr)))
     count_value := 0
     count_raw := ""
-    if count_expr == .Int(written, _, _, raw) && raw == .Val(text) {
+    if count_expr == .Int(written, _, _, raw, _) && raw == .Val(text) {
         if written < 0 || written > sema_budget_u128_max() -> return Err(count_error)
         count_value = written
         count_raw = text
     } else {
         return Err(count_error)
     }
-    if per_expr == .UnitLit(per_raw, _, _, suffix, _, _) {
+    if per_expr == .UnitLit(per_raw, _, _, suffix, _, _, _) {
         duration_unit :: suffix == "ns" || suffix == "us" || suffix == "ms" || suffix == "s"
         unit_error :: sema_budget_fail(sema_budget_invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", expr_span(per_expr)))
         multiplier :: if duration_unit -> sema_budget_unit_scale(suffix) ?? return Err(unit_error) else -> { return Err(unit_error) }
@@ -992,7 +992,7 @@ fn sema_budget_gcd(left: Int, right: Int) -> Int Never! {
 }
 
 fn sema_budget_string_value(expr: Expr) -> String? Never! {
-    if expr == .Str(parts, _) && parts.len() == 1 && parts[0] == .Lit(value) -> return Val(value)
+    if expr == .Str(parts, _, _) && parts.len() == 1 && parts[0] == .Lit(value) -> return Val(value)
     None
 }
 

@@ -772,7 +772,7 @@ struct SemaDropStatement {
 
 fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
     if expr == {
-        .MethodCall(receiver, method, method_span, _, _, args) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
             reason :: sema_drop_reason_problem(args)
             if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
@@ -797,7 +797,7 @@ fn sema_drop_reason_problem(args: [CallArg]) -> SemaDropReasonProblem? {
     if args.len() == 0 -> return Val(SemaDropReasonProblem{what: "`.drop()` requires a reason argument", why: "the reason documents why this result is intentionally discarded", fix: "write `.drop(\"why this is fine to ignore\")`"})
     parts := [StrPart]{}
     if args[0].expr == {
-        .Str(values, _) -> parts = values
+        .Str(values, _, _) -> parts = values
         else -> return Val(literal_problem)
     }
     if parts.len() == 1 && parts[0] == (StrPart.Lit{text: ""}) -> return Val(SemaDropReasonProblem{what: "`.drop()` reason must not be empty", why: "the reason documents why this result is intentionally discarded", fix: "write `.drop(\"why this is fine to ignore\")` with a real explanation"})
@@ -836,9 +836,9 @@ fn sema_stmt_never_return_rejected(value: Expr?, return_type: Type?, function_na
 
 fn sema_never_return_is_err(value: Expr) -> Bool {
     if value == {
-        .Paren(inner, _) -> sema_never_return_is_err(inner)
-        .Err(_, _) -> true
-        .Call(call) -> call.name == "Err"
+        .Paren(inner, _, _) -> sema_never_return_is_err(inner)
+        .Err(_, _, _) -> true
+        .Call(call, _) -> call.name == "Err"
         else -> false
     }
 }
@@ -848,8 +848,8 @@ fn sema_never_return_is_err(value: Expr) -> Bool {
 // (a direct call, or a member called through a module alias).
 fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
-        .Paren(inner, _) -> return sema_never_expr_diverges(inner, environment, program, scopes)
-        .Call(call) -> {
+        .Paren(inner, _, _) -> return sema_never_expr_diverges(inner, environment, program, scopes)
+        .Call(call, _) -> {
             if call.name == "panic" -> return true
             index :: sema_scope_resolve_index(scopes, call.name) ?? return false
             if sema_scope_binding_type(environment, scopes, index) == .Val(symbol_type) {
@@ -860,7 +860,7 @@ fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, progr
             }
             return false
         }
-        .MethodCall(receiver, method, _, _, _, args) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
+        .MethodCall(receiver, method, _, _, _, args, _) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
         else -> return sema_stmt_refutable_expr_diverges(expr)
     }
 }

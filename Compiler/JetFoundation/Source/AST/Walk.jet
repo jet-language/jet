@@ -3,38 +3,38 @@
 fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visitor(expression)
     if expression == {
-        .Str(parts, _) -> loop part in parts { if part == .Interp(value, _) -> ast_visit_expr(value, visitor) }
-        .ListLit(values, _) | .CompareChain(values, _, _, _) -> loop value in values -> ast_visit_expr(value, visitor)
-        .MemberSpread(value, _, _) | .Spread(value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) | .OptField(value, _, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) | .Paren(value, _) | .Unary(_, value, _) | .Tainted(value, _, _) -> ast_visit_expr(value, visitor)
-        .Try(value, _, _, note) -> {
+        .Str(parts, _, _) -> loop part in parts { if part == .Interp(value, _) -> ast_visit_expr(value, visitor) }
+        .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> loop value in values -> ast_visit_expr(value, visitor)
+        .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) | .Field(value, _, _, _) | .OptField(value, _, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) | .Paren(value, _, _) | .Unary(_, value, _, _) | .Tainted(value, _, _, _) -> ast_visit_expr(value, visitor)
+        .Try(value, _, _, note, _) -> {
             ast_visit_expr(value, visitor)
             if note == .Val(note_value) -> ast_visit_expr(note_value, visitor)
         }
-        .MapLit(entries, _) -> loop entry in entries {
+        .MapLit(entries, _, _) -> loop entry in entries {
             ast_visit_expr(entry.key, visitor)
             ast_visit_expr(entry.value, visitor)
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             ast_visit_expr(base, visitor)
             ast_visit_expr(index, visitor)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             ast_visit_expr(base, visitor)
             ast_visit_expr(start, visitor)
             ast_visit_expr(end, visitor)
             if range == .Val(value) -> ast_visit_expr(value, visitor)
         }
-        .Range(left, right, _, _) | .Binary(_, left, right, _) -> {
+        .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) -> {
             ast_visit_expr(left, visitor)
             ast_visit_expr(right, visitor)
         }
-        .Call(call) -> ast_visit_call_args(call.args, visitor)
-        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+        .Call(call, _) -> ast_visit_call_args(call.args, visitor)
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
             ast_visit_expr(receiver, visitor)
             ast_visit_call_args(args, visitor)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> ast_visit_expr(field.value, visitor)
-        .TypedLit(_, body, _) -> if body == {
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> ast_visit_expr(field.value, visitor)
+        .TypedLit(_, body, _, _) -> if body == {
             .Fields(fields) -> loop field in fields -> ast_visit_expr(field.value, visitor)
             .Elements(values) -> loop value in values -> ast_visit_expr(value, visitor)
             .Entries(entries) -> loop entry in entries {
@@ -44,30 +44,30 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
             .Value(value) -> ast_visit_expr(value, visitor)
             .ByteText(_) | .Empty -> {}
         }
-        .EnumLit(_, _, _, args, _, _) -> loop argument in args {
+        .EnumLit(_, _, _, args, _, _, _) -> loop argument in args {
             if argument == { .Positional(value) | .Named(_, value) -> ast_visit_expr(value, visitor) }
         }
-        .PatternTest(subject, pattern, _) -> {
+        .PatternTest(subject, pattern, _, _) -> {
             ast_visit_expr(subject, visitor)
             ast_visit_pattern(pattern, visitor)
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             ast_visit_expr(value, visitor)
             ast_visit_fallback(fallback, visitor)
         }
-        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+        .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
             ast_visit_expr(condition, visitor)
             ast_visit_body(then_body, visitor, true)
             ast_visit_expr(then_value, visitor)
             ast_visit_body(else_body, visitor, true)
             ast_visit_expr(else_value, visitor)
         }
-        .TupleLit(fields, _, _) -> loop field in fields -> ast_visit_expr(field.value, visitor)
-        .Lambda(lambda) -> if lambda.body == {
+        .TupleLit(fields, _, _, _) -> loop field in fields -> ast_visit_expr(field.value, visitor)
+        .Lambda(lambda, _) -> if lambda.body == {
             .Expr(value) -> ast_visit_expr(value, visitor)
             .Block(body) -> ast_visit_body(body, visitor, true)
         }
-        .PtrFromAddr(_, _, _, address, _) -> ast_visit_expr(address, visitor)
+        .PtrFromAddr(_, _, _, address, _, _) -> ast_visit_expr(address, visitor)
         else -> {}
     }
 }

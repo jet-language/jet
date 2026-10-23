@@ -486,7 +486,7 @@ fn sema_call_try_stream_handle_static(owner: String, method: String, args: [Call
             if args[0].convention == AccessConvention.Move -> owned_reader = true
             if args[0].convention == AccessConvention.Read {
                 if args[0].expr == {
-                    .Ident(name, _) -> { owned_reader = !sema_ownership_name_live_after(name, &tail_store, &context) }
+                    .Ident(name, _, _) -> { owned_reader = !sema_ownership_name_live_after(name, &tail_store, &context) }
                     else -> {}
                 }
             }

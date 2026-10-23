@@ -9,8 +9,8 @@ fn run() {
     sema_ownership_declare_binding(&state, symbol, false)
     site := SemaOwnershipFreezeSite{span: Span{start: 10, end: 16}, line: 3, column: 5}
     state.declarations[0].frozen_site = Val(site)
-    source := Expr.Ident{name: "snapshot", span: Span{start: 20, end: 28}}
-    projected := Expr.Field{base: source, member: "value", span: Span{start: 20, end: 34}}
+    source := Expr.Ident{name: "snapshot", span: Span{start: 20, end: 28}, id: AST_NODE_GENERATED}
+    projected := Expr.Field{base: source, member: "value", span: Span{start: 20, end: 34}, id: AST_NODE_GENERATED}
     if sema_ownership_frozen_expr_site(state, projected, scopes) != Val(site) -> panic("a projected place lost its freeze provenance")
     diagnostics := [Diagnostic]{}
     if !sema_ownership_reject_frozen_write(state, projected, "be edited", expr_span(projected), scopes, &diagnostics) -> panic("a frozen place accepted a write")

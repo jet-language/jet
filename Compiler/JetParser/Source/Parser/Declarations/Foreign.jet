@@ -162,7 +162,7 @@ fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> Extern
 
 fn parser_foreign_marker_name(marker: Marker, index: Int) -> NamedSpan? {
     value :: parser_marker_expression(marker, index) ?? return None
-    if value == { .Ident(name, span) -> Val(NamedSpan{name: name, span: span}) else -> None }
+    if value == { .Ident(name, span, _) -> Val(NamedSpan{name: name, span: span}) else -> None }
 }
 
 fn parser_parse_extern_fn(state: &JetParserState, allow_missing_semicolon: Bool) -> ExternFn {

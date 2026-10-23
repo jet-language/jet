@@ -146,14 +146,14 @@ fn sema_frame_checked_call_operation(name: String, args: [CallArg], signature_ac
 
 fn sema_frame_resource_identity(expression: Expr) -> ResourceIdentity? {
     if expression == {
-        .Paren(inner, _) | .Place(inner, _, _) | .Copy(inner, _) -> return sema_frame_resource_identity(inner)
-        .Ident(name, _) -> return Val(ResourceIdentity.Named{name: name})
-        .Field(base, _, _) -> return sema_frame_resource_identity(base)
-        .Index(base, _, _, _) | .Slice(base, _, _, _, _) -> {
+        .Paren(inner, _, _) | .Place(inner, _, _, _) | .Copy(inner, _, _) -> return sema_frame_resource_identity(inner)
+        .Ident(name, _, _) -> return Val(ResourceIdentity.Named{name: name})
+        .Field(base, _, _, _) -> return sema_frame_resource_identity(base)
+        .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> {
             identity :: sema_frame_resource_identity(base) ?? return Val(ResourceIdentity.Unknown)
             return Val(identity)
         }
-        .Call(_) | .MethodCall(_, _, _, _, _, _) | .CallValue(_, _, _) -> return Val(ResourceIdentity.Unknown)
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> return Val(ResourceIdentity.Unknown)
         else -> None
     }
 }
@@ -216,7 +216,7 @@ fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_name:
 
 fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
-        .Ident(name, _) -> name == "dma"
+        .Ident(name, _, _) -> name == "dma"
         else -> false
     }
     if !is_dma_receiver || args.len() != 2 -> return SemaFrameHardwareCall{operation: None, dma_start: None}

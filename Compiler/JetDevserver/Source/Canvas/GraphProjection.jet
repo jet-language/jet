@@ -287,15 +287,15 @@ fn collect_game_statements(statements: &[Stmt], source_id: String, src: String, 
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:825
 fn game_assets_receiver(expr: Expr) -> Bool {
     if expr == {
-        .Field(_, name, _) -> name == "assets"
-        .Paren(inner, _) -> game_assets_receiver(inner)
+        .Field(_, name, _, _) -> name == "assets"
+        .Paren(inner, _, _) -> game_assets_receiver(inner)
         else -> false
     }
 }
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:832
 fn game_receiver_start(expr: Expr) -> USize {
     if expr == {
-        .Field(base, ..) | .Paren(base, ..) -> game_receiver_start(base)
+        .Field(base, ..) | .Paren(base, .., _) -> game_receiver_start(base)
         else -> expr.span().start
     }
 }

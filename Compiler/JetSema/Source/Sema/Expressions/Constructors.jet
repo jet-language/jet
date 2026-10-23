@@ -3,6 +3,7 @@ use core.net.url as boundary_url
 use core.text as boundary_unicode
 use core.time as boundary_time
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     ByteTextPart,
     Call,
@@ -135,8 +136,8 @@ struct SemaExpressionEnumPath {
 
 fn sema_expression_path_segments(expression: Expr) -> [String]? {
     if expression == {
-        .Ident(name, _) -> Val([String]{name})
-        .Field(inner, member, _) -> {
+        .Ident(name, _, _) -> Val([String]{name})
+        .Field(inner, member, _, _) -> {
             segments := sema_expression_path_segments(inner) ?? return None
             &segments.push(member)
             Val(segments)
@@ -214,8 +215,8 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
     // Payload slots retain written access even though they have no CallArg.
     enum_args :: loop argument in args -> EnumLitArg.Positional{value: if argument.convention == {
         .Read -> argument.expr
-        .Write -> Expr.Place{value: argument.expr, access: PlaceAccess.Write, span: argument.span}
-        .Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span}
+        .Write -> Expr.Place{value: argument.expr, access: PlaceAccess.Write, span: argument.span, id: AST_NODE_GENERATED}
+        .Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED}
     }}
     end := method_span.end
     if args.len() > 0 && args[args.len() - 1].span.end > end -> end = args[args.len() - 1].span.end
@@ -744,7 +745,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             failed := false
             loop arg in args {
                 label := ""
-                payload_expr := Expr.Unit{span: span}
+                payload_expr := Expr.Unit{span: span, id: AST_NODE_GENERATED}
                 if arg == {
                     .Named(name, value) -> {
                         label = name
@@ -868,7 +869,7 @@ fn sema_expression_core_enum_named_literal(enum_name: String, display_name: Stri
     failed := false
     loop arg in args {
         label := ""
-        payload_expr := Expr.Unit{span: span}
+        payload_expr := Expr.Unit{span: span, id: AST_NODE_GENERATED}
         if arg == {
             .Named(name, value) -> {
                 label = name
@@ -1068,7 +1069,7 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
 }
 
 fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    type_name :: if receiver == {.Ident(name, _) -> name else -> { return SemaMethodSpecialCheck{handled: false, value: None} }}
+    type_name :: if receiver == {.Ident(name, _, _) -> name else -> { return SemaMethodSpecialCheck{handled: false, value: None} }}
     target :: sema_expression_checked_text_target(Type.Named{name: type_name}, environment, program, &scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if method_name == "raw" -> return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     function :: if method_name == "check" || method_name == "from" -> target.check else -> if method_name == "encode_hole" -> target.encode_hole else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
@@ -1203,7 +1204,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         }
     }
     parts :: if body_value == {
-        .Str(rows, _) -> rows
+        .Str(rows, _, _) -> rows
         else -> {
             &diagnostics.push(sema_error("E0112", expr_span(body_value), "`{type_name}{{ … }}` needs a string recipe body", "a checked text type is constructed from a quoted template, not another expression shape", "write `{type_name}{{\"…\"}}` with interpolation holes as needed"))
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
@@ -1217,26 +1218,28 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
             .Interp(value, _) -> {
                 argument := CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
                 encoder := Expr.MethodCall{
-                    receiver: Expr.Ident{name: type_name, span: expr_span(value)},
+                    receiver: Expr.Ident{name: type_name, span: expr_span(value), id: AST_NODE_GENERATED},
                     method: "encode_hole",
                     method_span: expr_span(value),
                     owner_type_args: [Type]{},
                     type_args: [Type]{},
                     args: [CallArg]{argument},
+                    id: AST_NODE_GENERATED,
                 }
                 &encoded_parts.push(StrPart.Interp{expr: encoder, format: StrFormat.Display})
             }
         }
     }
-    encoded_body := Expr.Str{parts: encoded_parts, span: expr_span(body_value)}
+    encoded_body := Expr.Str{parts: encoded_parts, span: expr_span(body_value), id: AST_NODE_GENERATED}
     check_argument := CallArg{convention: AccessConvention.Read, expr: encoded_body, span: expr_span(body_value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     check_call := Expr.MethodCall{
-        receiver: Expr.Ident{name: type_name, span: span},
+        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
         method: "check",
         method_span: span,
         owner_type_args: [Type]{},
         type_args: [Type]{},
         args: [CallArg]{check_argument},
+        id: AST_NODE_GENERATED,
     }
     fact_start := context.call_facts.len()
     reference_start := context.name_references.len()
@@ -1288,7 +1291,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         key: key,
         type_name: type_name,
         source_file: source_file,
-        source_expression: Expr.TypedLit{head: source_head, body: body, span: span},
+        source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
         expression: checked,
         hardware_use: MIRTargetHardwareUse{
             register_accesses: loop index in register_access_start..<context.hardware_use.register_accesses.len() -> context.hardware_use.register_accesses[index],
@@ -1513,7 +1516,7 @@ fn sema_expression_url_skeleton_reason(skeleton: String) -> String? {
 
 fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     parts := if value == {
-        .Str(rows, _) -> rows
+        .Str(rows, _, _) -> rows
         else -> {
             &diagnostics.push(sema_error("E0112", span, "`{type_name(head)}.{{ … }}` needs a string recipe body", "checked typed heads are built from a quoted template, not from another expression shape", "write `{type_name(head)}.{{\"...\"}}` with `{{value}}` holes as needed"))
             return None
@@ -1523,12 +1526,13 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
     if kind == MIRTypedHeadKind.DateTime {
         argument :: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         constructor :: Expr.MethodCall{
-            receiver: Expr.Ident{name: "DateTime", span: span},
+            receiver: Expr.Ident{name: "DateTime", span: span, id: AST_NODE_GENERATED},
             method: "__literal",
             method_span: span,
             owner_type_args: [Type]{},
             type_args: [Type]{},
             args: [CallArg]{argument},
+            id: AST_NODE_GENERATED,
         }
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
@@ -1536,13 +1540,13 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
     if kind == MIRTypedHeadKind.URL {
         literal_exprs := [Expr]{}
         hole_exprs := [Expr]{}
-        loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})
+        loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED})
         loop part in parts {
-            if part == .Interp(hole, _) -> &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole)})
+            if part == .Interp(hole, _) -> &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole), id: AST_NODE_GENERATED})
         }
         args := [CallArg]{}
         loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {
-            &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+            &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
         }
         // `core.net.url.literal` is declared `-> URL Never!`; the head yields its
         // success value exactly as the automatic `Never!` propagation of a call.
@@ -1561,7 +1565,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
 
 fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     parts := if value == {
-        .Str(rows, _) -> rows
+        .Str(rows, _, _) -> rows
         else -> {
             &diagnostics.push(sema_error("E0152", span, "`Regex.{{ … }}` needs one quoted pattern", "a regex typed literal contains pattern text, not another expression shape", "write `Regex.{{\"...\"}}`"))
             return None
@@ -1585,7 +1589,7 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
     route :: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 1, false, span, &diagnostics) ?? return None
     if route == {
         .Source(target) -> {
-            argument :: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            argument :: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value), id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
             compiled :: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             result_type :: if compiled.ty == {.Result(ok, _) -> ok else -> panic("source Regex compile producer is not fallible")}
             message :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
@@ -1613,7 +1617,7 @@ fn sema_expression_typed_literal_mismatch(head: Type, span: Span, diagnostics: &
 // `.{…}`) always use element notation.
 fn sema_expression_typed_literal_whole_value(head: Type, value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if value == {
-        .Spread(_, _) -> return false
+        .Spread(_, _, _) -> return false
         else -> {}
     }
     if sema_expression_list_element_needs_expected_type(value) -> return false
@@ -1663,7 +1667,7 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, p
 // A record field written as the bare shorthand `{name}`: the parser gives its
 // value the field name's own identifier and span.
 fn sema_expression_field_is_shorthand(field: ExprField) -> Bool Never! {
-    if field.value == .Ident(name, value_span) -> return name == field.name && value_span.start == field.name_span.start && value_span.end == field.name_span.end
+    if field.value == .Ident(name, value_span, _) -> return name == field.name && value_span.start == field.name_span.start && value_span.end == field.name_span.end
     false
 }
 
@@ -1721,34 +1725,34 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
                     return sema_expr_expected_owned(^constant, expected, environment, program, &diagnostics)
                 }
                 // `[U8; N]{"…"}` and other element heads check each byte as an element.
-                elements :: loop byte in bytes -> Expr.Int{value: Int.from_u8(byte), span: span, width: None, raw: Val("{Int.from_u8(byte)}")}
-                checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                elements :: loop byte in bytes -> Expr.Int{value: Int.from_u8(byte), span: span, width: None, raw: Val("{Int.from_u8(byte)}"), id: AST_NODE_GENERATED}
+                checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Empty -> {
-                checked :: sema_expression_list(Expr.ListLit{elements: [Expr]{}, span: span}, [Expr]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked :: sema_expression_list(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, [Expr]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Elements(elements) -> {
                 if elements.len() == 1 && sema_expression_typed_literal_whole_value(result_head, elements[0], environment, program, &scopes, &state, &tail_store, &context) -> return sema_expression_typed_literal_whole(result_head, elements[0], expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Value(value) -> {
                 if sema_expression_typed_literal_whole_value(result_head, value, environment, program, &scopes, &state, &tail_store, &context) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 elements := [Expr]{value}
-                checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
         }
         .Map(_, _, _) -> if body == {
             .Empty -> {
-                checked :: sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span}, [ExprPair]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked :: sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span, id: AST_NODE_GENERATED}, [ExprPair]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Entries(entries) -> {
-                checked :: sema_expression_map(Expr.MapLit{entries: entries, span: span}, entries, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked :: sema_expression_map(Expr.MapLit{entries: entries, span: span, id: AST_NODE_GENERATED}, entries, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             // #3739: a map body without `:` can only be the whole value.
@@ -1878,9 +1882,9 @@ fn sema_expression_typed_literal_value_needs_head(value: Expr, head: Type) -> Bo
 
 fn sema_expression_typed_literal_integer_literal(value: Expr) -> Bool Never! {
     if value == {
-        .Int(_, _, _, _) -> true
-        .Paren(inner, _) -> sema_expression_typed_literal_integer_literal(inner)
-        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expression_typed_literal_integer_literal(inner)
+        .Int(_, _, _, _, _) -> true
+        .Paren(inner, _, _) -> sema_expression_typed_literal_integer_literal(inner)
+        .Unary(op, inner, _, _) -> op == UnOp.Neg && sema_expression_typed_literal_integer_literal(inner)
         else -> false
     }
 }

@@ -32,7 +32,7 @@ struct SemaCopySite {
 // applies to `x`, not to the carrier.
 fn sema_copy_site_payload(value: Expr) -> Expr Never! {
     if value == {
-        .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) -> inner
+        .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> inner
         else -> value
     }
 }
@@ -51,7 +51,7 @@ fn sema_copy_site_is_type_parameter(ty: Type, context: SemaCheckContext) -> Bool
 fn sema_copy_site_find(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCopySite? {
     if !scopes.copies_explicit -> return None
     if sema_copy_site_payload(value) == {
-        .Ident(name, span) -> {
+        .Ident(name, span, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             binding :: scopes.bindings[index]
             // A string view reports its own E2307 under the same policy.
@@ -125,7 +125,7 @@ fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironm
 // Copy): the value an owning binding or return would take from storage this
 // function does not own.
 fn sema_copy_site_borrowed_param(value: Expr, scopes: SemaScopeTable) -> SemaCopySite? {
-    if value == .Ident(name, span) {
+    if value == .Ident(name, span, _) {
         index :: sema_scope_resolve_index(scopes, name) ?? return None
         binding :: scopes.bindings[index]
         if !sema_ownership_binding_is_borrowed_param(binding) -> return None
@@ -169,7 +169,7 @@ fn sema_copy_site_check_field(value: Expr, environment: SemaScopeEnvironment, pr
 fn sema_copy_site_record_move(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     payload :: sema_copy_site_payload(value)
     if payload == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return true
             binding :: scopes.bindings[index]
             if binding.string_view -> return true
@@ -189,7 +189,7 @@ fn sema_copy_site_record_move(value: Expr, scopes: SemaScopeTable, state: &SemaO
 fn sema_copy_site_check_assignment(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if !scopes.copies_explicit -> return false
     if value == {
-        .Ident(name, span) -> {
+        .Ident(name, span, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
             binding :: scopes.bindings[index]
             if binding.symbol.kind != SymbolKind.Parameter -> return false
@@ -217,8 +217,8 @@ fn sema_copy_site_check_conditional(init: Expr, declared: Type?, environment: Se
 
 fn sema_copy_site_check_arms(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if value == {
-        .Paren(inner, _) -> sema_copy_site_check_arms(inner, environment, program, scopes, context, &diagnostics)
-        .If(_, _, then_value, _, else_value, _) -> {
+        .Paren(inner, _, _) -> sema_copy_site_check_arms(inner, environment, program, scopes, context, &diagnostics)
+        .If(_, _, then_value, _, else_value, _, _) -> {
             sema_copy_site_check_arm(then_value, environment, program, scopes, context, &diagnostics)
             sema_copy_site_check_arm(else_value, environment, program, scopes, context, &diagnostics)
         }
@@ -228,8 +228,8 @@ fn sema_copy_site_check_arms(value: Expr, environment: SemaScopeEnvironment, pro
 
 fn sema_copy_site_check_arm(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if value == {
-        .If(_, _, _, _, _, _) -> sema_copy_site_check_arms(value, environment, program, scopes, context, &diagnostics)
-        .Ident(name, span) -> {
+        .If(_, _, _, _, _, _, _) -> sema_copy_site_check_arms(value, environment, program, scopes, context, &diagnostics)
+        .Ident(name, span, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return
             ty :: sema_scope_binding_type(environment, scopes, index) ?? return
             if sema_ownership_type_is_copy(ty) -> return

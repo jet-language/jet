@@ -264,7 +264,7 @@ fn sema_gate_expression(source: String, expression: Expr, ledger: &GateLedger, c
 
 fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {
     if expression == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             if call.name == "approx" {
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, "approx", None, "exact value widened to an approximation", "recorded"))
             } else if call.name == "wrapping" || call.name == "saturating" || call.name == "checked" {
@@ -276,7 +276,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, call.name, None, detail, "recorded"))
             }
         }
-        .MethodCall(receiver, method, span, _, _, args) -> {
+        .MethodCall(receiver, method, span, _, _, args, _) -> {
             if {
                 sema_gate_rounded_conversion(method, args) -> {
                     gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, method, None, "unit conversion rounded with an explicit mode", "recorded"))
@@ -297,7 +297,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                 else -> {}
             }
         }
-        .RawOf(_, span) -> {
+        .RawOf(_, span, _) -> {
             gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, ".raw", None, "typed fact extracted as a raw value", "recorded"))
         }
         else -> {}
@@ -307,9 +307,9 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
 fn sema_gate_checked_receiver(receiver: Expr, names: [String:Bool]) -> Bool Never! {
     candidate := String?{None}
     if receiver == {
-        .Ident(name, _) -> { candidate = Val(name) }
-        .Field(base, name, _) -> {
-            if base == .Ident(_, _) -> candidate = Val(name)
+        .Ident(name, _, _) -> { candidate = Val(name) }
+        .Field(base, name, _, _) -> {
+            if base == .Ident(_, _, _) -> candidate = Val(name)
         }
         else -> {}
     }
@@ -363,7 +363,7 @@ fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
 
 fn sema_gate_literal_text(expression: Expr?) -> String? Never! {
     value :: expression ?? return None
-    parts :: (if value == .Str(str_parts, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
+    parts :: (if value == .Str(str_parts, _, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
     text := ""
     loop part in parts {
         if part == {

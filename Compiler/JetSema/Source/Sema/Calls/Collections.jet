@@ -55,7 +55,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     open_slot := false
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
         is_lambda := if argument.expr == {
-            .Lambda(_) -> true
+            .Lambda(_, _) -> true
             else -> sema_expr_is_bare_member_chain(argument.expr)
         }
         open_slot = required_ret == None && !is_lambda
@@ -165,7 +165,7 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
 fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) -> TListRemoveMode? {
     if method != "remove" || args.len() != 2 -> return None
     return if args[1].expr == {
-        .EnumLit(_, variant, _, _, _, _) -> if {
+        .EnumLit(_, variant, _, _, _, _, _) -> if {
             variant == "Slot" -> Val(TListRemoveMode.Slot)
             variant == "Val" -> Val(TListRemoveMode.Value)
             else -> None
@@ -210,7 +210,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     comparator := false
     if contract.accepts_comparator && updated_args.len() == 1 {
         comparator = if updated_args[0].expr == {
-            .Lambda(lambda) -> lambda.params.len() == 2
+            .Lambda(lambda, _) -> lambda.params.len() == 2
             else -> false
         }
     }
@@ -420,7 +420,7 @@ fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, a
         &slots.push([String]{"left"})
         &slots.push([String]{"right"})
     } else {
-        if args[0].expr == .ListLit(items, _) {
+        if args[0].expr == .ListLit(items, _, _) {
             loop item in items {
                 &proof_spans.push(expr_span(item))
                 &slots.push([String]{"[]"})

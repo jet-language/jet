@@ -14,7 +14,7 @@ use jet_foundation.[
 
 fn sema_pin_write_window(argument: CallArg) -> Bool Never! {
     if argument.convention == AccessConvention.Write -> return true
-    if argument.expr == .Place(_, access, _) {
+    if argument.expr == .Place(_, access, _, _) {
         return access == PlaceAccess.Write
     }
     false
@@ -53,8 +53,8 @@ fn sema_pin_view_fact(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> Bo
 // requires the `Pin<T>` result type.
 fn sema_pin_call_argument(expr: Expr) -> CallArg? {
     if expr == {
-        .MethodCall(receiver, method, _, _, _, args) -> if method == "pin" && args.len() == 1 && receiver == .Ident(_, _) -> Val(args[0]) else -> None
-        .Paren(value, _) -> sema_pin_call_argument(value)
+        .MethodCall(receiver, method, _, _, _, args, _) -> if method == "pin" && args.len() == 1 && receiver == .Ident(_, _, _) -> Val(args[0]) else -> None
+        .Paren(value, _, _) -> sema_pin_call_argument(value)
         else -> None
     }
 }
@@ -67,7 +67,7 @@ fn sema_pin_record_binding(state: &SemaOwnershipState, binding: Binding, init_ty
     argument :: sema_pin_call_argument(binding.init) ?? return false
     if !sema_pin_write_window(argument) -> return false
     target :: if argument.expr == {
-        .Place(value, _, _) -> value
+        .Place(value, _, _, _) -> value
         else -> argument.expr
     }
     places :: sema_ownership_places_from_expr_in_state(target, scopes, &state)

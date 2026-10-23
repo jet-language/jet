@@ -602,8 +602,8 @@ fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) ->
 // whole non-Copy local named by itself (a Copy value simply copies).
 fn sema_call_marked_move_place(expr: Expr, value: TExpr) -> Bool Never! {
     if expr == {
-        .Field(_, _, _) -> true
-        .Ident(_, _) -> value.kind == .Local(_) && !sema_ownership_type_is_copy(value.ty)
+        .Field(_, _, _, _) -> true
+        .Ident(_, _, _) -> value.kind == .Local(_) && !sema_ownership_type_is_copy(value.ty)
         else -> false
     }
 }
@@ -613,7 +613,7 @@ fn sema_call_marked_move_place(expr: Expr, value: TExpr) -> Bool Never! {
 // Expressions/Places.jet), never a silent copy. True when rejected.
 fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool Never! {
     element :: if expr == {
-        .Index(_, _, _, _) -> true
+        .Index(_, _, _, _, _) -> true
         else -> false
     }
     if !element && !sema_expression_place_below_element(expr) -> return false
@@ -706,7 +706,7 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             // A rest slot owns its elements, so collecting an ExpiringSecret
             // loan moves it, which its callback refuses; nothing moves and
             // the call still checks.
-            if args[index].expr == .Ident(name, name_span) -> &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(name, "be moved", name_span))
+            if args[index].expr == .Ident(name, name_span, _) -> &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(name, "be moved", name_span))
         } else if !sema_ownership_type_is_copy(value.ty) {
             places :: sema_ownership_places_from_expr_in_state(args[index].expr, scopes, &state)
             borrowed := false

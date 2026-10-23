@@ -1,6 +1,7 @@
 // Whole-program multi-head normalization. Variant names are collected across
 // every input Program; function heads are grouped only within their Program.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     Diagnostic,
     Expr,
@@ -131,9 +132,9 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             payload_index += 1
         }
 
-        subject := Expr.Ident{name: "__jet_multi_head_subject", span: folded.name_span}
+        subject := Expr.Ident{name: "__jet_multi_head_subject", span: folded.name_span, id: AST_NODE_GENERATED}
         &arms.push(SwitchArm{
-            cond: Expr.PatternTest{subject: subject, pattern: pattern, span: pattern_span},
+            cond: Expr.PatternTest{subject: subject, pattern: pattern, span: pattern_span, id: AST_NODE_GENERATED},
             body: head.body,
             span: pattern_span,
         })
@@ -148,7 +149,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
     last_head := heads[heads.len() - 1]
     full_span := Span{start: folded.span.start, end: last_head.span.end}
     subject_name := "__jet_multi_head_subject"
-    subject := Expr.Ident{name: subject_name, span: folded.name_span}
+    subject := Expr.Ident{name: subject_name, span: folded.name_span, id: AST_NODE_GENERATED}
     folded.params = [Param]{Param{
         convention: AccessConvention.Read,
         root: false,

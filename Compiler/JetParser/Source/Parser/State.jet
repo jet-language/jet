@@ -127,6 +127,11 @@ struct JetParserState {
     // (an interpolation, a pattern hole) borrows the row while it parses and
     // hands it back (`parser_lend_tables` / `parser_return_tables`).
     tables: [TokenTables]{[TokenTables]{}}
+    // AST NodeIds (`parser_node_id`): the current top-level unit's first
+    // byte, shifted past the unit-local count, plus the next unit-local
+    // number. A nested state numbers on from its parent's count.
+    node_base: Int{0}
+    next_node: Int{0}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
@@ -200,16 +205,39 @@ fn parser_part_text(state: JetParserState, part: StringPart) -> String Never! {
     name_text(state.tables[0].names, part.text)
 }
 
-// A nested state parses with its parent's tables; it must hand them back
-// with `parser_return_tables` before the parent reads a token again.
+// A nested state parses with its parent's tables and numbers its nodes on
+// from the parent's count; it must hand both back with
+// `parser_return_tables` before the parent reads a token again.
 fn parser_lend_tables(state: &JetParserState, nested: &JetParserState) Never! {
+    nested.node_base = state.node_base
+    nested.next_node = state.next_node
     tables :: &state.tables.pop() ?? return
     &nested.tables.push(tables)
 }
 
 fn parser_return_tables(state: &JetParserState, nested: &JetParserState) Never! {
+    state.next_node = nested.next_node
     tables :: &nested.tables.pop() ?? return
     &state.tables.push(tables)
+}
+
+// The next AST NodeId of the current top-level unit.
+fn parser_node_id(state: &JetParserState) -> Int Never! {
+    id :: state.node_base + state.next_node
+    state.next_node += 1
+    id
+}
+
+// A top-level unit (item or script statement) starting at byte `start`
+// numbers its nodes from `start << PARSER_NODE_UNIT_BITS`: the ids depend on
+// the unit's place in the file, not on which chunk parsed it. Units start at
+// least one byte apart, so ids stay unique while a unit has fewer than
+// 2^PARSER_NODE_UNIT_BITS nodes per source byte.
+PARSER_NODE_UNIT_BITS :: 24
+
+fn parser_begin_node_unit(state: &JetParserState, start: Int) Never! {
+    state.node_base = start << PARSER_NODE_UNIT_BITS
+    state.next_node = 0
 }
 
 // An interpolation hole parses with its parent's tables and source text: the

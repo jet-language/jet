@@ -252,7 +252,7 @@ fn sema_expression_zip_free_call(call: Call, expected: Type?, environment: SemaS
 
 fn sema_expression_zip_consume_receiver(receiver: Expr, receiver_type: Type, method: String, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
     if receiver == {
-        .Ident(name, receiver_span) -> {
+        .Ident(name, receiver_span, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return true
             binding := scopes.bindings[index]
             if binding.symbol.kind == SymbolKind.Parameter && !sema_ownership_type_is_copy(receiver_type) && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write) {

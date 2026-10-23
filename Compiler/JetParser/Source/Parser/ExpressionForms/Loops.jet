@@ -73,10 +73,10 @@ fn parser_expression_form_loop_binding(state: &JetParserState) -> ParserExpressi
         second :: parser_expect_name(&state, "as the second loop variable")
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
         parser_expect(&state, TOKEN_RPAREN, "after the two loop variables")
-        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
+        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(&state)}, step: None}}
     }
     first :: parser_expect_name(&state, "as the loop variable")
-    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
+    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(&state)}, step: None}}
 }
 
 fn parser_expression_form_loop_separator(state: &JetParserState) {
@@ -112,7 +112,7 @@ fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> Stmt?
 
 fn parser_expression_form_loop_range_kind(state: &JetParserState, first: ParsedExpr, depth: Int) -> ForKind {
     if first.expr == {
-        .Range(start, end, exclusive, _) -> {
+        .Range(start, end, exclusive, _, _) -> {
             step :: parser_expression_form_loop_step(&state, depth + 1)
             step_expr := Expr?{None}
             if step == .Val(statement) {
@@ -220,7 +220,7 @@ fn parser_expression_form_loop_rewrite_exits(statements: &[Stmt], target: String
     }
 }
 
-fn parser_expression_form_make_loop_lambda(body: [Stmt], start: Span, end: Span, result_loop: Bool, collecting_loop: Bool, requires_exhaustion_route: Bool, exhaustion_span: Span?) -> ParsedExpr Never! {
+fn parser_expression_form_make_loop_lambda(state: &JetParserState, body: [Stmt], start: Span, end: Span, result_loop: Bool, collecting_loop: Bool, requires_exhaustion_route: Bool, exhaustion_span: Span?) -> ParsedExpr Never! {
     lambda_meta := ast_empty_lambda_meta()
     lambda_meta.result_loop = result_loop
     lambda_meta.collecting_loop = collecting_loop
@@ -235,7 +235,8 @@ fn parser_expression_form_make_loop_lambda(body: [Stmt], start: Span, end: Span,
         meta: lambda_meta,
     }
     span :: Span{start: start.start, end: end.end}
-    ParsedExpr{expr: Expr.CallValue{callee: Expr.Lambda{lambda: lambda}, args: [CallArg]{}, span: span}, span: span}
+    callee :: Expr.Lambda{lambda: lambda, id: parser_node_id(&state)}
+    ParsedExpr{expr: Expr.CallValue{callee: callee, args: [CallArg]{}, span: span, id: parser_node_id(&state)}, span: span}
 }
 
 fn parser_expression_form_parse_counted_loop(state: &JetParserState, start: Span, depth: Int) -> ParserExpressionFormCountedLoop {
@@ -270,7 +271,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
         block :: parser_parse_block(&state)
         end :: block.span
         loop_stmt :: Stmt.Loop{body: block.statements, span: parser_cover(start.span, end), arrow_body: false, label: None}
-        return parser_expression_form_make_loop_lambda(body: [Stmt]{loop_stmt}, start: start.span, end: end, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
+        return parser_expression_form_make_loop_lambda(state: &state, body: [Stmt]{loop_stmt}, start: start.span, end: end, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
     }
     // Rust yielding_loop_expr accepts only the header shapes with an
     // exhaustion edge before attempting the collecting expression.
@@ -280,7 +281,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
     finite_header :: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW))
     if !finite_header {
         parser_add_fatal_code(&state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
-        return ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
+        return ParsedExpr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}, span: start.span}
     }
     bindingless :: (parser_current_kind(&state) == TOKEN_IDENT || parser_current_kind(&state) == TOKEN_KW_IT) && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_KW_IF)
     counted := ParserExpressionFormCountedLoop?{None}
@@ -312,7 +313,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
     if parser_current_kind(&state) != TOKEN_UNIFIED_ARROW && parser_current_kind(&state) != TOKEN_LBRACE {
         token :: parser_current(&state)
         parser_expression_form_error(&state, "E0003", token.span, "this loop expression needs a body", "a finite loop value needs a braced body or `->` item body", "add `-> value` or `{{ ... }}")
-        return parser_expression_form_make_loop_lambda(body: [Stmt]{}, start: start.span, end: token.span, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
+        return parser_expression_form_make_loop_lambda(state: &state, body: [Stmt]{}, start: start.span, end: token.span, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
     }
     if {
         parser_current_kind(&state) == TOKEN_LBRACE -> {
@@ -320,7 +321,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
             body := block.statements
             exhaustion_span :: block.span
             if guard == .Val(guard_expr) {
-                body = [Stmt]{Stmt.Switch{subject: Expr.Bool{value: true, span: start.span}, arms: [SwitchArm]{SwitchArm{cond: guard_expr, body: body, span: expr_span(guard_expr)}}, else_body: None, span: start.span}}
+                body = [Stmt]{Stmt.Switch{subject: Expr.Bool{value: true, span: start.span, id: parser_node_id(&state)}, arms: [SwitchArm]{SwitchArm{cond: guard_expr, body: body, span: expr_span(guard_expr)}}, else_body: None, span: start.span}}
             }
             result_label :: "__jet_value_loop_{start.span.start}"
             parser_expression_form_loop_rewrite_exits(&body, result_label, 0)
@@ -341,7 +342,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
                     loop_stmt = Stmt.Loop{body: nested, span: parser_cover(start.span, exhaustion_span), arrow_body: false, label: Val(NamedSpan{name: result_label, span: start.span})}
                 }
             }
-            return parser_expression_form_make_loop_lambda(body: [loop_stmt], start: start.span, end: exhaustion_span, result_loop: true, collecting_loop: false, requires_exhaustion_route: true, exhaustion_span: Val(exhaustion_span))
+            return parser_expression_form_make_loop_lambda(state: &state, body: [loop_stmt], start: start.span, end: exhaustion_span, result_loop: true, collecting_loop: false, requires_exhaustion_route: true, exhaustion_span: Val(exhaustion_span))
         }
     }
     parser_bump(&state)
@@ -363,17 +364,17 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
         token :: parser_current(&state)
         parser_expression_form_error(&state, "E0073", token.span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` explicitly omits it", "return a value on this path or remove `->`")
     }
-    last :: &body.pop() ?? Stmt.Expr{expr: Expr.Unit{span: start.span}}
+    last :: &body.pop() ?? Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
     value :: if last == {
         .Expr(expr) -> expr
         else -> {
             parser_expression_form_error(&state, "E0073", start.span, "this collecting loop path produces no item", "a multiline collecting body uses its final expression as the item", "return a value on this path or use `next`")
-            Expr.Unit{span: start.span}
+            Expr.Unit{span: start.span, id: parser_node_id(&state)}
         }
     }
     &body.push(Stmt.Yield{value: value, span: Span{start: start.span.start, end: start.span.start}})
     if guard == .Val(guard_expr) {
-        body = [Stmt]{Stmt.Switch{subject: Expr.Bool{value: true, span: start.span}, arms: [SwitchArm]{SwitchArm{cond: guard_expr, body: body, span: expr_span(guard_expr)}}, else_body: None, span: start.span}}
+        body = [Stmt]{Stmt.Switch{subject: Expr.Bool{value: true, span: start.span, id: parser_node_id(&state)}, arms: [SwitchArm]{SwitchArm{cond: guard_expr, body: body, span: expr_span(guard_expr)}}, else_body: None, span: start.span}}
     }
     collect_label :: "__jet_collect_loop_{start.span.start}"
     parser_expression_form_loop_rewrite_exits(&body, collect_label, 0)
@@ -396,5 +397,5 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
         }
     }
     final_stmt :: loop_stmt ?? Stmt.Loop{body: body, span: start.span, arrow_body: false, label: Val(NamedSpan{name: collect_label, span: start.span})}
-    parser_expression_form_make_loop_lambda(body: [Stmt]{final_stmt}, start: start.span, end: end, result_loop: false, collecting_loop: true, requires_exhaustion_route: false, exhaustion_span: None)
+    parser_expression_form_make_loop_lambda(state: &state, body: [Stmt]{final_stmt}, start: start.span, end: end, result_loop: false, collecting_loop: true, requires_exhaustion_route: false, exhaustion_span: None)
 }

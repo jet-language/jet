@@ -42,7 +42,7 @@ fn sema_function_reactive_note_upgrade(context: &SemaCheckContext, name: String,
 
 fn sema_function_reactive_note_channel(context: &SemaCheckContext, value: Expr, ty: Type) Never! {
     if !sema_function_reactive_handle_type(ty) -> return
-    name := if value == {.Ident(name, _) -> name else -> "this value"}
+    name := if value == {.Ident(name, _, _) -> name else -> "this value"}
     sema_function_reactive_note_upgrade(&context, name, ty, "channel")
 }
 

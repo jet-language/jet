@@ -1,6 +1,7 @@
 // Source producers for retained UI callbacks, UI backend methods, sketches, and
 // Browser handle methods. Operation choices mirror the native TIR producers.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     CallLabel,
@@ -60,7 +61,7 @@ fn sema_ui_handle_call_fact(environment: SemaScopeEnvironment, program: SemaProg
 
 fn sema_ui_handle_literal_string(expr: Expr) -> String? {
     return if expr == {
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             value := ""
             loop part in parts {
                 if part == {
@@ -82,9 +83,9 @@ fn sema_ui_handle_imported_ui_alias(alias: String, environment: SemaScopeEnviron
 
 fn sema_ui_handle_interactive_role(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if expr == {
-        .MethodCall(receiver, method, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _) -> {
             if receiver == {
-                .Ident(alias, _) -> {
+                .Ident(alias, _, _) -> {
                     if !sema_ui_handle_imported_ui_alias(alias, environment, program, scopes) -> return None
                     if method == "aria_role_button" -> return Val("button")
                     if method == "aria_role_text_input" -> return Val("text input")
@@ -107,13 +108,13 @@ fn sema_call_core_ui_node_role_lint(args: [CallArg], span: Span, environment: Se
 fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if args.len() == 0 -> return
     if args[0].expr == {
-        .ListLit(items, _) -> {
+        .ListLit(items, _, _) -> {
             labels := [String]{}
             loop item in items {
                 if item == {
-                    .MethodCall(receiver, method, _, _, _, call_args) -> {
+                    .MethodCall(receiver, method, _, _, _, call_args, _) -> {
                         if method != "node_role" || call_args.len() != 4 -> next
-                        alias :: if receiver == {.Ident(name, _) -> Val(name) else -> None} ?? next
+                        alias :: if receiver == {.Ident(name, _, _) -> Val(name) else -> None} ?? next
                         if !sema_ui_handle_imported_ui_alias(alias, environment, program, scopes) -> next
                         if sema_ui_handle_interactive_role(call_args[3].expr, environment, program, scopes) == None -> next
                         label :: sema_ui_handle_literal_string(call_args[0].expr) ?? next
@@ -141,8 +142,8 @@ fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: 
 
 fn sema_ui_handle_callback_source_arity(expr: Expr) -> Int? {
     if expr == {
-        .Lambda(lambda) -> Val(lambda.params.len())
-        .Paren(value, _) -> sema_ui_handle_callback_source_arity(value)
+        .Lambda(lambda, _) -> Val(lambda.params.len())
+        .Paren(value, _, _) -> sema_ui_handle_callback_source_arity(value)
         else -> None
     }
 }
@@ -211,9 +212,9 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
     }
     params := [SemaCallParam]{
         sema_ui_handle_callback_param("display", "display", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
-        sema_ui_handle_callback_param("shortcut", "shortcut", Type.Option{inner: Type.Named{name: "UIShortcut"}}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
-        sema_ui_handle_callback_param("label", "label", Type.Option{inner: Type.String}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
-        sema_ui_handle_callback_param("on_click", "on_click", sema_ui_handle_callback_type([Type]{}), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
+        sema_ui_handle_callback_param("shortcut", "shortcut", Type.Option{inner: Type.Named{name: "UIShortcut"}}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
+        sema_ui_handle_callback_param("label", "label", Type.Option{inner: Type.String}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
+        sema_ui_handle_callback_param("on_click", "on_click", sema_ui_handle_callback_type([Type]{}), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
     }
     bound :: sema_ui_handle_bind_callback_args("button", args, span, "on_click", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 4 {
@@ -245,7 +246,7 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
     params := [SemaCallParam]{
         sema_ui_handle_callback_param("state", "state", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
         sema_ui_handle_callback_param("ime", "ime", Type.Named{name: "UIIMEMode"}, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
-        sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.Named{name: "UIDropItem"}})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
+        sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.Named{name: "UIDropItem"}})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
     }
     bound :: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 3 {

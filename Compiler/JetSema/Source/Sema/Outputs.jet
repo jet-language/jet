@@ -94,7 +94,7 @@ fn sema_output_field(args: [EnumLitArg], index: Int) -> Expr? Never! {
 }
 
 fn sema_output_string(value: Expr) -> String? Never! {
-    if value == .Str(parts, _) {
+    if value == .Str(parts, _, _) {
         if parts.len() == 1 {
             part :: parts[0]
             if part == .Lit(text) -> return Val(text.copy())
@@ -105,8 +105,8 @@ fn sema_output_string(value: Expr) -> String? Never! {
 
 fn sema_output_path(value: Expr) -> (root: String, root_span: Span, members: [ExprMember])? Never! {
     if value == {
-        .Ident(name, span) -> Val((members: [ExprMember]{}, root: name.copy(), root_span: span))
-        .Field(base, member, span) -> {
+        .Ident(name, span, _) -> Val((members: [ExprMember]{}, root: name.copy(), root_span: span))
+        .Field(base, member, span, _) -> {
             path := sema_output_path(base) ?? return None
             &path.members.push(ExprMember{name: member.copy(), span: span})
             Val(^path)
@@ -126,7 +126,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
     references := [SemaNameReferenceFact]{}
     source_name := String?{None}
     resolved := SemaRegistrationResolvedSymbol?{None}
-    if entry == .Ident(name, span) {
+    if entry == .Ident(name, span, _) {
         if owner.inline_bindings.imports.get(name) == .Val(binding) {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, binding.semantic_name)
             source_name = Val(name.copy())
@@ -149,7 +149,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             &diagnostics.push(sema_output_error(span, "Output entry `{name}` does not resolve to a function", "an Output entry is an ordinary checked function reference, not a text lookup", "define `fn {name}(...)`, import it, or update `entry:`"))
             return None
         }
-    } else if entry == .Field(_, _, _) {
+    } else if entry == .Field(_, _, _, _) {
         path :: sema_output_path(entry) ?? {
             &diagnostics.push(sema_output_error(expr_span(entry), "Output entry has no resolvable module owner", "qualified function references use one imported or inline module alias", "write `entry: module_name.function`"))
             return None
@@ -338,10 +338,10 @@ fn sema_output_default(graph: SemaRegistrationGraph, entry_index: Int, diagnosti
     loop item_index in 0..<graph.modules[entry_index].program.items.len() {
         if graph.modules[entry_index].program.items[item_index] == .Const(definition) {
             if definition.ty != (Val(Type.Named{name: "__OutputDefaults"})) -> next
-            if definition.value == .StructLit(_, _, _, _, fields, _, _) {
+            if definition.value == .StructLit(_, _, _, _, fields, _, _, _) {
                 loop field in fields {
                     if field.name != "run" -> next
-                    if field.value == .Ident(address, _) -> return Val(address.copy())
+                    if field.value == .Ident(address, _, _) -> return Val(address.copy())
                     &diagnostics.push(sema_output_error(expr_span(field.value), "default `run` is not an Output address", "defaults use checked Output references, not text or calls", "write `run: output_name`"))
                 }
                 return None
@@ -374,7 +374,7 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
         loop (item_index, item) in module_row.program.items {
             if item == .Const(definition) {
                 if definition.ty != (Val(Type.Named{name: "Output"})) -> next
-                if definition.value == .EnumLit(_, variant, _, args, _, span) {
+                if definition.value == .EnumLit(_, variant, _, args, _, span, _) {
                     kind :: sema_output_kind(variant) ?? {
                         &diagnostics.push(sema_output_error(span, "`{variant}` is not an Output kind", "Output has exactly nine ratified kinds", "use one of: Library, Executable, Service, Check, Environment, Image, Bundle, System, Fleet"))
                         next

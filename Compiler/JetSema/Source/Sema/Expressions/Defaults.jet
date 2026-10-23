@@ -58,19 +58,19 @@ fn sema_default_owner_scope(environment: SemaScopeEnvironment, program: SemaProg
 // name, so it checks the same in any module.
 fn sema_default_names_nothing(value: Expr) -> Bool Never! {
     if value == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) | .UnitLit(_, _, _, _, _, _) | .Absent(_) -> true
-        .Str(parts, _) -> {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) -> true
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(_, _) -> return false
             }
             true
         }
-        .ListLit(elements, _) -> elements.len() == 0
-        .MapLit(entries, _) -> entries.len() == 0
-        .Ident(name, _) -> name == "None"
-        .EnumLit(type_name, _, _, args, _, _) -> type_name == "" && args.len() == 0
-        .Unary(_, operand, _) -> sema_default_names_nothing(operand)
-        .Paren(inner, _) -> sema_default_names_nothing(inner)
+        .ListLit(elements, _, _) -> elements.len() == 0
+        .MapLit(entries, _, _) -> entries.len() == 0
+        .Ident(name, _, _) -> name == "None"
+        .EnumLit(type_name, _, _, args, _, _, _) -> type_name == "" && args.len() == 0
+        .Unary(_, operand, _, _) -> sema_default_names_nothing(operand)
+        .Paren(inner, _, _) -> sema_default_names_nothing(inner)
         else -> false
     }
 }

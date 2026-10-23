@@ -8,6 +8,7 @@
 // generated decode of a struct with a block returns `T.validate(decoded)`
 // (sema_serde_items_struct_decode_body).
 use jet_foundation.[
+    AST_NODE_GENERATED,
     Diagnostic,
     Expr,
     Func,
@@ -71,13 +72,13 @@ fn sema_validate_impl(definition: StructDef, diagnostics: &[Diagnostic]) -> Impl
 // and gives None.
 fn sema_validate_rule(statement: Stmt, fields: [String:Bool], diagnostics: &[Diagnostic]) -> SemaValidateRule? {
     if statement == .Expr(expression) {
-        if expression == .Call(call) {
+        if expression == .Call(call, _) {
             if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return sema_validate_refuse(sema_validate_e0353(call.name_span), &diagnostics)
             if call.args[0].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[0].span), &diagnostics)
             at_label :: call.args[1].label ?? return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
             if at_label.name != "at" -> return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
             if call.args[2].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[2].span), &diagnostics)
-            if call.args[1].expr == .Ident(name, name_span) {
+            if call.args[1].expr == .Ident(name, name_span, _) {
                 if fields.get(name) == None -> return sema_validate_refuse(sema_validate_e0354(name, name_span), &diagnostics)
                 return Val(SemaValidateRule{cond: call.args[0].expr.copy(), field: name.copy(), message: call.args[2].expr.copy()})
             }
@@ -116,11 +117,11 @@ fn sema_validate_build(definition: StructDef, rules: [SemaValidateRule], span: S
         push :: Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "push", [Expr]{failure}, span)}
         &checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond.copy(), span), [Stmt]{push}, span))
     }
-    body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span}, true, span)}
-    &body.push(sema_serde_items_if(Expr.Bool{value: true, span: span}, checks, span))
+    body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
+    &body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, checks, span))
     has_errors :: sema_serde_items_not(sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "is_empty", [Expr]{}, span), span)
-    &body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span}, span)}, span))
-    &body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span}, span))
+    &body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span, id: AST_NODE_GENERATED}, span)}, span))
+    &body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}, span))
     target :: Type.Named{name: definition.name}
     function := ast_func("validate", span, span)
     function.is_pub = definition.is_pub
@@ -147,7 +148,7 @@ fn sema_validate_referenced_fields(rules: [SemaValidateRule], fields: [String:Bo
 }
 
 fn sema_validate_note_name(fields: [String:Bool], found: &[String], expression: Expr) Never! -[Mem.Alloc]> {
-    if expression == .Ident(name, _) {
+    if expression == .Ident(name, _, _) {
         if fields.get(name) == None || found.contains(name) -> return
         &found.push(name.copy())
     }

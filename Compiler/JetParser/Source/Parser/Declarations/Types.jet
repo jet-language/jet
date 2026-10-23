@@ -153,7 +153,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     if family_expr == {
         .Val(value) -> {
             if value == {
-                .Ident(name, span) -> {
+                .Ident(name, span, _) -> {
                     family = name
                     family_span = span
                 }
@@ -173,13 +173,13 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
         if {
             label == "base" -> {
                 if value == .Val(expr) {
-                    if expr == .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span})
+                    if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
             index == 1 -> {
                 if value == .Val(expr) {
                     if expr == {
-                        .Ident(name, span) -> {
+                        .Ident(name, span, _) -> {
                             if name == "dimension" -> dimension = Val(UnitDimensionDecl.Base{span: span}) else -> dimension = Val(UnitDimensionDecl.Derived{expr: expr})
                         }
                         else -> dimension = Val(UnitDimensionDecl.Derived{expr: expr})
@@ -188,7 +188,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
             }
             index == 2 && base == None -> {
                 if value == .Val(expr) {
-                    if expr == .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span})
+                    if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
             else -> {}

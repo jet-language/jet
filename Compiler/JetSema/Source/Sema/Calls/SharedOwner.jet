@@ -86,7 +86,7 @@ fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: 
         return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, environment, program, &scopes, &context, &diagnostics)
     }
     callback_is_lambda :: if args[0].expr == {
-        .Lambda(_) -> true
+        .Lambda(_, _) -> true
         else -> false
     }
     if !callback_is_lambda {
@@ -224,7 +224,7 @@ fn sema_call_cell_get_or_set(receiver: Expr, receiver_value: TExpr, inner: Type,
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     is_lambda :: if args[0].expr == {
-        .Lambda(_) -> true
+        .Lambda(_, _) -> true
         else -> false
     }
     if !is_lambda {
@@ -245,23 +245,23 @@ fn sema_call_cell_get_or_set(receiver: Expr, receiver_value: TExpr, inner: Type,
 // field reads from it.
 fn sema_call_cell_guard_projection_path(expression: Expr, parameter: String) -> [String]? {
     if expression == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             if name == parameter -> return Val([String]{})
             return None
         }
-        .Field(base, member, _) -> {
+        .Field(base, member, _, _) -> {
             path := sema_call_cell_guard_projection_path(base, parameter) ?? return None
             &path.push(member)
             return Val(path)
         }
-        .Paren(inner, _) -> return sema_call_cell_guard_projection_path(inner, parameter)
+        .Paren(inner, _, _) -> return sema_call_cell_guard_projection_path(inner, parameter)
         else -> return None
     }
 }
 
 fn sema_call_cell_guard_projection(expression: Expr) -> [String]? {
     if expression == {
-        .Lambda(lambda) -> {
+        .Lambda(lambda, _) -> {
             if lambda.params.len() != 1 -> return None
             if lambda.body == {
                 .Expr(body) -> return sema_call_cell_guard_projection_path(body, lambda.params[0].name)
@@ -284,7 +284,7 @@ fn sema_call_cell_guard_paths_overlap(first: [String], second: [String]) -> Bool
 // guard lends the value mutably.
 fn sema_call_cell_closure(method: String, inner: Type, argument: CallArg, editable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     is_lambda :: if argument.expr == {
-        .Lambda(_) -> true
+        .Lambda(_, _) -> true
         else -> false
     }
     if !is_lambda {

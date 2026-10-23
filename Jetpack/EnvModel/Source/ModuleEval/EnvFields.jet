@@ -86,7 +86,7 @@ enum EnvFieldKind {
 // E0966.
 fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
     if value == {
-        .StructLit(type_name, _, _, _, fields, _, _) -> {
+        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name != "" && type_name != TYPE_ENV -> return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
             named := [NamedExpr]{}
             loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
@@ -163,19 +163,19 @@ fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: ModuleE
 // explicit expert record's scalar fields.
 fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
     if expr == {
-        .Ident(name, _) -> Ok(CtValue.Str{value: name})
-        .Field(_, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
-        .ListLit(values, _) -> {
+        .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
+        .Field(_, _, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
+        .ListLit(values, _, _) -> {
             items := [CtValue]{}
             loop value in values -> &items.push(envmodel_evaluate_lifecycle_value(value, scope, globals))
             Ok(CtValue.List{values: items})
         }
-        .StructLit(type_name, _, _, _, fields, _, _) -> {
+        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
             loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)})
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
-        .EnumLit(type_name, variant, _, args, _, _) -> {
+        .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
@@ -185,7 +185,7 @@ fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals
             }
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
         }
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             lowered := [CtMapEntry]{}
             loop entry in entries {
                 key_value :: envmodel_evaluate_lifecycle_value(entry.key, scope, globals)
@@ -228,8 +228,8 @@ fn envmodel_scalar_ct_key(value: CtValue) -> CtKey? Never! {
 // named by its start offset.
 fn envmodel_expression_name(expr: Expr) -> String Never! {
     if expr == {
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{envmodel_expression_name(base)}.{member}"
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> "{envmodel_expression_name(base)}.{member}"
         else -> "{expr_span(expr).start}"
     }
 }
@@ -259,7 +259,7 @@ enum PromptField {
 // one environment-layer setting.
 fn envmodel_capture_prompt_setting(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String: CtValue], source: String) EnvModelEvalError! {
     if value == {
-        .StructLit(type_name, _, _, _, fields, _, _) -> {
+        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name == TYPE_PROMPT {
                 loop field in fields {
                     span :: field.name_span

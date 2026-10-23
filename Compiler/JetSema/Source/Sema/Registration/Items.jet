@@ -5,6 +5,7 @@
 // defaults remain AST references keyed by FunctionDefaultRef.
 use core.text as unicode
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CORE_SOURCE_OWNED_ROWS,
     CallContractRow,
@@ -1001,7 +1002,7 @@ fn sema_registration_function(func: Func, raw_protocol_return: Bool, module_iden
     if metadata == .Val(row) {
         loop (index, parameter) in func.params {
             if parameter.default != None && (index >= row.defaults.len() || row.defaults[index] == None) {
-                &diagnostics.push(sema_error("E0003", expr_span(parameter.default ?? Expr.Unit{span: parameter.name_span}), "a callable default has no stable source identity", "default expressions are resolved by their owning declaration, parameter index, and span", "preserve the declaration's FunctionDefaultRef metadata"))
+                &diagnostics.push(sema_error("E0003", expr_span(parameter.default ?? Expr.Unit{span: parameter.name_span, id: AST_NODE_GENERATED}), "a callable default has no stable source identity", "default expressions are resolved by their owning declaration, parameter index, and span", "preserve the declaration's FunctionDefaultRef metadata"))
             }
         }
     }
@@ -2697,7 +2698,7 @@ fn sema_registration_cli_callable_params(function: Func, command: String, shared
 fn sema_registration_cli_literal_default(expr: Expr) -> Bool Never! {
     current :: sema_registration_cli_without_parens(expr)
     if current == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Str(_, _) -> true
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) -> true
         else -> false
     }
 }
@@ -2714,7 +2715,7 @@ fn sema_registration_cli_named_leaf(ty: Type) -> String? {
 // Rust `binding_target`: the module function a bound CLI member names.
 fn sema_registration_cli_binding_target(items: [Item], target: Expr) -> Func? {
     current :: sema_registration_cli_without_parens(target)
-    if current == .Ident(name, _) {
+    if current == .Ident(name, _, _) {
         loop item in items {
             if item == .Func(function) && function.name == name -> return Val(function)
         }
@@ -2726,7 +2727,7 @@ fn sema_registration_cli_binding_target(items: [Item], target: Expr) -> Func? {
 fn sema_registration_cli_without_parens(expr: Expr) -> Expr Never! {
     current := expr
     loop {
-        if current == .Paren(inner, _) {
+        if current == .Paren(inner, _, _) {
             current = inner
         } else {
             break
@@ -2773,7 +2774,7 @@ fn sema_registration_cli_standard(markers: [Marker]) -> Bool Never! {
     loop marker in markers {
         if marker.name != "CLI" -> next
         loop argument in marker.args {
-            if argument == .Expr(value) && value == .Ident(name, _) && name == "Standard" -> return true
+            if argument == .Expr(value) && value == .Ident(name, _, _) && name == "Standard" -> return true
         }
     }
     false
@@ -2797,7 +2798,7 @@ fn sema_registration_cli_scalar(ty: Type) -> Bool Never! {
 // Rust `marker_string`: the marker's first argument when it is one literal string.
 fn sema_registration_cli_marker_string(marker: Marker) -> String? {
     if marker.args.len() == 0 -> return None
-    if marker.args[0] == .Expr(value) && value == .Str(parts, _) && parts.len() == 1 {
+    if marker.args[0] == .Expr(value) && value == .Str(parts, _, _) && parts.len() == 1 {
         if parts[0] == .Lit(text) -> return Val(text)
     }
     None

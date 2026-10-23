@@ -28,8 +28,8 @@ struct SemaGameCoreStaticTarget {
 
 fn sema_game_static_target(receiver: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaGameCoreStaticTarget? {
     if receiver == {
-        .Field(base, type_name, _) -> {
-            alias :: if base == {.Ident(name, _) -> name else -> { return None }}
+        .Field(base, type_name, _, _) -> {
+            alias :: if base == {.Ident(name, _, _) -> name else -> { return None }}
             if sema_call_core_import_module(environment, program, alias) != (Val("core.game")) {
                 return None
             }
@@ -54,7 +54,7 @@ fn sema_game_check_first_string_discard_rest(args: [CallArg], environment: SemaS
 
 fn sema_game_literal_string(expression: Expr) -> String? {
     if expression == {
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             if parts.len() != 1 -> return None
             if parts[0] == {
                 .Lit(text) -> { return Val(text) }

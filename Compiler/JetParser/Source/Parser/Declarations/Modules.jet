@@ -802,8 +802,8 @@ fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> Com
     if parser_value(state, head) != "CompilerWorkload" || parser_value(state, variant) != "Edit" {
         parser_module_error(&state, "E2903", parser_cover(head.span, variant.span), "unknown compiler workload variant", "performance probes currently use CompilerWorkload.Edit", "write `CompilerWorkload.Edit{{ target: ..., patch: ... }}`")
     }
-    target_value :: target ?? Expr.Unit{span: name.span}
-    patch_value :: patch ?? Expr.Unit{span: name.span}
+    target_value :: target ?? Expr.Unit{span: name.span, id: parser_node_id(&state)}
+    patch_value :: patch ?? Expr.Unit{span: name.span, id: parser_node_id(&state)}
     if target == None -> parser_module_error(&state, "E2903", name.span, "a compile workload is missing `target`", "each edit workload names the measured target", "add `target: \"cli\"`")
     if patch == None -> parser_module_error(&state, "E2903", name.span, "a compile workload is missing `patch`", "each edit workload names a deterministic source patch", "add `patch: \"path/to.patch\"`")
     CompileWorkloadDecl{name: parser_value(state, name), name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}

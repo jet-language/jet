@@ -65,7 +65,7 @@ fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnv
 }
 
 fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    expected :: if argument.expr == {.Lambda(_) -> Val(required) else -> None}
+    expected :: if argument.expr == {.Lambda(_, _) -> Val(required) else -> None}
     checked :: sema_check_expression(argument.expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if type_identity_equal(checked.ty, required) -> return Val(checked)
     compatible :: sema_call_type_assignable(required, checked.ty, environment, program) ?? return None
@@ -114,7 +114,7 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
         }
         else -> {}
     }
-    named_function := if source == {.Ident(name, _) -> sema_scope_resolve_index(scopes, name) == None else -> false}
+    named_function := if source == {.Ident(name, _, _) -> sema_scope_resolve_index(scopes, name) == None else -> false}
     if !named_function {
         problem := SemaSendabilityProblem{root: None, path: [String]{}, kind: SemaSendProblemKind.ClosureCaptures}
         &diagnostics.push(sema_ownership_crossing_diagnostic("parallel callback", Type.Named{name: "callback"}, problem, SemaSendCrossing.ParallelWorker, value.span))
@@ -157,7 +157,7 @@ fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, arg
     payload :: sema_call_concurrency_check_value(updated_args[0], payload_ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     crossing_problem := sema_ownership_crossing_problem_for_expr(updated_args[0].expr, payload_ty, SemaSendCrossing.ChannelSend, updated_args[0].convention == AccessConvention.Move, environment, program, scopes, state, context)
     if crossing_problem == .Val(problem) {
-        value_name := if updated_args[0].expr == {.Ident(name, _) -> name else -> "this value"}
+        value_name := if updated_args[0].expr == {.Ident(name, _, _) -> name else -> "this value"}
         &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, updated_args[0].span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

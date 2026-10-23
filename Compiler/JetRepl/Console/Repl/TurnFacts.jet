@@ -367,7 +367,7 @@ fn repl_note_move(name: String, bindings: Set<String>, scope: [String:CtValue], 
 fn collect_moved_in_stmt(stmt: Stmt, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
     if stmt == {
         .Val(binding) -> {
-            if binding.init == .Ident(name, _) -> repl_note_move(name, bindings, scope, &moved) else -> collect_moved_in_expr(binding.init, bindings, scope, &moved)
+            if binding.init == .Ident(name, _, _) -> repl_note_move(name, bindings, scope, &moved) else -> collect_moved_in_expr(binding.init, bindings, scope, &moved)
         }
         .Assign(_, _, _, value) -> collect_moved_in_expr(value, bindings, scope, &moved)
         .Expr(expr) -> collect_moved_in_expr(expr, bindings, scope, &moved)
@@ -378,8 +378,8 @@ fn collect_moved_in_stmt(stmt: Stmt, bindings: Set<String>, scope: [String:CtVal
 }
 fn collect_moved_in_expr(expr: Expr, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
     if expr == {
-        .Call(call) -> { loop arg in call.args -> collect_moved_in_callarg(arg, bindings, scope, &moved) }
-        .MethodCall(receiver, _, _, _, _, args) -> {
+        .Call(call, _) -> { loop arg in call.args -> collect_moved_in_callarg(arg, bindings, scope, &moved) }
+        .MethodCall(receiver, _, _, _, _, args, _) -> {
             collect_moved_in_expr(receiver, bindings, scope, &moved)
             loop arg in args -> collect_moved_in_callarg(arg, bindings, scope, &moved)
         }
@@ -387,7 +387,7 @@ fn collect_moved_in_expr(expr: Expr, bindings: Set<String>, scope: [String:CtVal
     }
 }
 fn collect_moved_in_callarg(arg: CallArg, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
-    if arg.convention == AccessConvention.Move && arg.expr == .Ident(name, _) -> repl_note_move(name, bindings, scope, &moved)
+    if arg.convention == AccessConvention.Move && arg.expr == .Ident(name, _, _) -> repl_note_move(name, bindings, scope, &moved)
 }
 
 enum InputKind {

@@ -59,12 +59,12 @@ fn sema_scope_members_append_name(values: &[String], name: String) Never! {
 
 fn sema_scope_members_site_name(value: Expr) -> String? {
     if value == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             if name.starts_with(".") -> return Val(name.slice(1, name.len()))
             return Val(name)
         }
-        .Field(_, name, _) -> return Val(name)
-        .EnumLit(_, name, _, _, _, _) -> return Val(name)
+        .Field(_, name, _, _) -> return Val(name)
+        .EnumLit(_, name, _, _, _, _, _) -> return Val(name)
         else -> return None
     }
 }
@@ -80,7 +80,7 @@ fn sema_scope_members_declared_sites(declaration: MarkerDecl) -> [String]? {
         found = true
         value :: declaration.params[parameter_index].value ?? return None
         if value == {
-            .ListLit(values, _) -> {
+            .ListLit(values, _, _) -> {
                 sites := [String]{}
                 loop item in values {
                     site :: sema_scope_members_site_name(item) ?? return None
@@ -101,7 +101,7 @@ fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> Bool? {
         if declaration.params[parameter_index].name != "$repeatable" -> next
         value :: declaration.params[parameter_index].value ?? return None
         if value == {
-            .Bool(repeatable, _) -> return Val(repeatable)
+            .Bool(repeatable, _, _) -> return Val(repeatable)
             else -> return None
         }
     }
@@ -284,7 +284,7 @@ fn sema_scope_members_dsl_args_valid(name: String, args: [Expr]) -> Bool Never! 
     if args.len() == 0 -> return true
     if args.len() != 1 -> return false
     return if args[0] == {
-        .Ident(_, _) -> true
+        .Ident(_, _, _) -> true
         else -> false
     }
 }
@@ -322,7 +322,7 @@ fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry,
     }
     if sema_scope_members_is_applied_rule_at(program, name, name_span) && args.len() == 1 {
         if args[0] == {
-            .Ident(type_name, type_span) -> {
+            .Ident(type_name, type_span, _) -> {
                 has_type_parameter := false
                 if sema_scope_members_applied_rule_index(registry, name) == {
                     .Val(index) -> {

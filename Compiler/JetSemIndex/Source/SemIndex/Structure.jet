@@ -14,8 +14,8 @@ use jet_pkg_model.[EffectBudgetProgram, PackageEffectSummary]
 
 fn semindex_state_marker_path(expr: Expr) -> NamedSpan? Never! {
     if expr == {
-        .Ident(name, span) -> Val(NamedSpan{name: name, span: span})
-        .Field(base, member, span) -> {
+        .Ident(name, span, _) -> Val(NamedSpan{name: name, span: span})
+        .Field(base, member, span, _) -> {
             if semindex_state_marker_path(base) == .Val(path) -> return Val(NamedSpan{name: "{path.name}.{member}", span: span})
             None
         }
@@ -125,57 +125,57 @@ fn semindex_structural_slot<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind:
 
 fn semindex_expr_shape(expr: Expr) -> String Never! {
     ordinal :: if expr == {
-        .Str(_, _) -> 0
-        .StrMatchLit(_, _) -> 1
-        .BinMatchLit(_, _) -> 2
-        .Int(_, _, _, _) -> 3
-        .Float(_, _, _, _) -> 4
-        .Bool(_, _) -> 5
-        .Unit(_) -> 6
-        .Char(_, _) -> 7
-        .ListLit(_, _) -> 8
-        .MemberSpread(_, _, _) -> 9
-        .Spread(_, _) -> 10
-        .MapLit(_, _) -> 11
-        .Index(_, _, _, _) -> 12
-        .Slice(_, _, _, _, _) -> 13
-        .Range(_, _, _, _) -> 14
-        .Ident(_, _) -> 15
-        .Call(_) -> 16
-        .Unary(_, _, _) -> 17
-        .Binary(_, _, _, _) -> 18
-        .CompareChain(_, _, _, _) -> 19
-        .UnitLit(_, _, _, _, _, _) -> 20
-        .Deref(_, _) -> 21
-        .RawOf(_, _) -> 22
-        .Copy(_, _) -> 23
-        .Place(_, _, _) -> 24
-        .Field(_, _, _) -> 25
-        .OptField(_, _, _, _, _) -> 26
-        .MethodCall(_, _, _, _, _, _) -> 27
+        .Str(_, _, _) -> 0
+        .StrMatchLit(_, _, _) -> 1
+        .BinMatchLit(_, _, _) -> 2
+        .Int(_, _, _, _, _) -> 3
+        .Float(_, _, _, _, _) -> 4
+        .Bool(_, _, _) -> 5
+        .Unit(_, _) -> 6
+        .Char(_, _, _) -> 7
+        .ListLit(_, _, _) -> 8
+        .MemberSpread(_, _, _, _) -> 9
+        .Spread(_, _, _) -> 10
+        .MapLit(_, _, _) -> 11
+        .Index(_, _, _, _, _) -> 12
+        .Slice(_, _, _, _, _, _) -> 13
+        .Range(_, _, _, _, _) -> 14
+        .Ident(_, _, _) -> 15
+        .Call(_, _) -> 16
+        .Unary(_, _, _, _) -> 17
+        .Binary(_, _, _, _, _) -> 18
+        .CompareChain(_, _, _, _, _) -> 19
+        .UnitLit(_, _, _, _, _, _, _) -> 20
+        .Deref(_, _, _) -> 21
+        .RawOf(_, _, _) -> 22
+        .Copy(_, _, _) -> 23
+        .Place(_, _, _, _) -> 24
+        .Field(_, _, _, _) -> 25
+        .OptField(_, _, _, _, _, _) -> 26
+        .MethodCall(_, _, _, _, _, _, _) -> 27
         // The canonical borrowed visitor projects this as CallValue(OptField).
         .OptMethodCall(_, _, _, _, _, _, _, _) -> 45
-        .StructLit(_, _, _, _, _, _, _) -> 28
-        .TypedLit(_, _, _) -> 29
-        .EnumLit(_, _, _, _, _, _) -> 30
-        .Tainted(_, _, _) -> 31
-        .Present(_, _) -> 32
-        .Absent(_) -> 33
-        .Todo(_, _) -> 34
-        .NoElse(_) -> 35
-        .ReduceMarker(_, _) -> 36
-        .PatternTest(_, _, _) -> 37
-        .Ok(_, _) -> 38
-        .Err(_, _) -> 39
-        .Try(_, _, _, _) -> 40
-        .OrFallback(_, _, _, _) -> 41
-        .If(_, _, _, _, _, _) -> 42
-        .TupleLit(_, _, _) -> 43
-        .Lambda(_) -> 44
-        .CallValue(_, _, _) -> 45
-        .PtrFromAddr(_, _, _, _, _) -> 46
-        .ComptimeName(_, _, _) -> 47
-        .Paren(_, _) -> 48
+        .StructLit(_, _, _, _, _, _, _, _) -> 28
+        .TypedLit(_, _, _, _) -> 29
+        .EnumLit(_, _, _, _, _, _, _) -> 30
+        .Tainted(_, _, _, _) -> 31
+        .Present(_, _, _) -> 32
+        .Absent(_, _) -> 33
+        .Todo(_, _, _) -> 34
+        .NoElse(_, _) -> 35
+        .ReduceMarker(_, _, _) -> 36
+        .PatternTest(_, _, _, _) -> 37
+        .Ok(_, _, _) -> 38
+        .Err(_, _, _) -> 39
+        .Try(_, _, _, _, _) -> 40
+        .OrFallback(_, _, _, _, _) -> 41
+        .If(_, _, _, _, _, _, _) -> 42
+        .TupleLit(_, _, _, _) -> 43
+        .Lambda(_, _) -> 44
+        .CallValue(_, _, _, _) -> 45
+        .PtrFromAddr(_, _, _, _, _, _) -> 46
+        .ComptimeName(_, _, _, _) -> 47
+        .Paren(_, _, _) -> 48
     }
     "Discriminant({ordinal})"
 }
@@ -184,12 +184,12 @@ fn semindex_expr_shape(expr: Expr) -> String Never! {
 // retain the original name/receiver starts without saturation or clamping.
 fn semindex_structural_expr_span(expr: Expr) -> Span Never! {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             end := call.name_span.end + 2
             if call.args.len() > 0 -> end = semindex_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
             Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args) -> {
+        .MethodCall(receiver, _, method_span, _, _, args, _) -> {
             end := method_span.end + 2
             if args.len() > 0 -> end = semindex_structural_expr_span(args[args.len() - 1].expr).end + 1
             Span{start: semindex_structural_expr_span(receiver).start, end: end}
@@ -317,7 +317,7 @@ fn semindex_collect_allow_markers(db: &SymbolDB, markers: [Marker], site: String
         if marker.name != "allow" -> next
         loop arg in marker.args {
             if arg == .Expr(expr) {
-                if expr == .Ident(lint_name, _) -> &db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: lint_name, module_path: mp, span: semindex_source_span(marker.span)})
+                if expr == .Ident(lint_name, _, _) -> &db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: lint_name, module_path: mp, span: semindex_source_span(marker.span)})
             }
         }
     }

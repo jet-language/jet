@@ -81,7 +81,7 @@ fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: 
             references := [Expr]{}
             sema_function_header_default_idents(default, &references)
             loop reference in references {
-                if reference == .Ident(name, span) {
+                if reference == .Ident(name, span, _) {
                     later := false
                     loop (position, candidate) in names {
                         if candidate == name {
@@ -104,31 +104,31 @@ fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: 
 // The identifier nodes a default expression reads, in source order.
 fn sema_function_header_default_idents(value: Expr, found: &[Expr]) {
     if value == {
-        .Ident(_, _) -> &found.push(value)
-        .Binary(_, left, right, _) -> {
+        .Ident(_, _, _) -> &found.push(value)
+        .Binary(_, left, right, _, _) -> {
             sema_function_header_default_idents(left, &found)
             sema_function_header_default_idents(right, &found)
         }
-        .Unary(_, inner, _) | .Paren(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .Spread(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Present(inner, _) | .Tainted(inner, _, _) -> sema_function_header_default_idents(inner, &found)
-        .Index(base, index, _, _) -> {
+        .Unary(_, inner, _, _) | .Paren(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Spread(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Present(inner, _, _) | .Tainted(inner, _, _, _) -> sema_function_header_default_idents(inner, &found)
+        .Index(base, index, _, _, _) -> {
             sema_function_header_default_idents(base, &found)
             sema_function_header_default_idents(index, &found)
         }
-        .Call(call) -> loop argument in call.args -> sema_function_header_default_idents(argument.expr, &found)
-        .CallValue(callee, args, _) -> {
+        .Call(call, _) -> loop argument in call.args -> sema_function_header_default_idents(argument.expr, &found)
+        .CallValue(callee, args, _, _) -> {
             sema_function_header_default_idents(callee, &found)
             loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
         }
-        .MethodCall(receiver, _, _, _, _, args) -> {
+        .MethodCall(receiver, _, _, _, _, args, _) -> {
             sema_function_header_default_idents(receiver, &found)
             loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
         }
-        .ListLit(items, _) -> loop item in items -> sema_function_header_default_idents(item, &found)
-        .TupleLit(fields, _, _) -> loop field in fields -> sema_function_header_default_idents(field.value, &found)
-        .Str(parts, _) -> loop part in parts {
+        .ListLit(items, _, _) -> loop item in items -> sema_function_header_default_idents(item, &found)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_default_idents(field.value, &found)
+        .Str(parts, _, _) -> loop part in parts {
             if part == .Interp(inner, _) -> sema_function_header_default_idents(inner, &found)
         }
-        .If(cond, _, then_value, _, else_value, _) -> {
+        .If(cond, _, then_value, _, else_value, _, _) -> {
             sema_function_header_default_idents(cond, &found)
             sema_function_header_default_idents(then_value, &found)
             sema_function_header_default_idents(else_value, &found)
@@ -196,9 +196,9 @@ fn sema_function_arithmetic_policy(markers: [Marker]) -> ArithmeticPolicyFact? N
 // Rust `ArithmeticMode::from_expr`.
 fn sema_function_arithmetic_mode(value: Expr) -> ArithmeticMode? Never! {
     word :: if value == {
-        .Ident(name, _) -> name
-        .Field(_, member, _) -> member
-        .EnumLit(_, variant, _, _, _, _) -> variant
+        .Ident(name, _, _) -> name
+        .Field(_, member, _, _) -> member
+        .EnumLit(_, variant, _, _, _, _, _) -> variant
         else -> ""
     }
     if word == {
@@ -342,7 +342,7 @@ fn sema_function_header_variadic_statement(statement: Stmt, name: String, top_le
         }
         .For(_, _, second, kind, body, span, _, label, _) -> {
             direct := false
-            if top_level && second == None && label == None && kind == .In(direct_collection, direct_step) && direct_step == None && direct_collection == .Ident(direct_name, _) && direct_name == name -> direct = true
+            if top_level && second == None && label == None && kind == .In(direct_collection, direct_step) && direct_step == None && direct_collection == .Ident(direct_name, _, _) && direct_name == name -> direct = true
             if direct {
                 loops += 1
             } else {
@@ -353,7 +353,7 @@ fn sema_function_header_variadic_statement(statement: Stmt, name: String, top_le
                         if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, &uses)
                     }
                     .In(collection, step) -> {
-                        if collection == .Ident(collection_name, _) && collection_name == name {
+                        if collection == .Ident(collection_name, _, _) && collection_name == name {
                             &uses.push(span)
                         } else {
                             sema_function_header_variadic_expr(collection, name, &uses)
@@ -391,28 +391,28 @@ fn sema_function_header_variadic_args(args: [CallArg], name: String, uses: &[Spa
 
 fn sema_function_header_variadic_expr(expr: Expr, name: String, uses: &[Span]) Never! {
     if expr == {
-        .Ident(found, span) -> {
+        .Ident(found, span, _) -> {
             if found == name -> &uses.push(span)
         }
-        .Call(call) -> sema_function_header_variadic_args(call.args, name, &uses)
-        .MethodCall(receiver, _, _, _, _, args) | .CallValue(receiver, args, _) -> {
+        .Call(call, _) -> sema_function_header_variadic_args(call.args, name, &uses)
+        .MethodCall(receiver, _, _, _, _, args, _) | .CallValue(receiver, args, _, _) -> {
             sema_function_header_variadic_expr(receiver, name, &uses)
             sema_function_header_variadic_args(args, name, &uses)
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             sema_function_header_variadic_expr(left, name, &uses)
             sema_function_header_variadic_expr(right, name, &uses)
         }
-        .Unary(_, inner, _) | .Field(inner, _, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .OptField(inner, _, _, _, _) -> sema_function_header_variadic_expr(inner, name, &uses)
-        .Try(inner, _, _, note) -> {
+        .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .OptField(inner, _, _, _, _, _) -> sema_function_header_variadic_expr(inner, name, &uses)
+        .Try(inner, _, _, note, _) -> {
             sema_function_header_variadic_expr(inner, name, &uses)
             if note == .Val(note_value) -> sema_function_header_variadic_expr(note_value, name, &uses)
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             sema_function_header_variadic_expr(base, name, &uses)
             sema_function_header_variadic_expr(index, name, &uses)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_function_header_variadic_expr(base, name, &uses)
             if range == .Val(range_value) {
                 sema_function_header_variadic_expr(range_value, name, &uses)
@@ -421,13 +421,13 @@ fn sema_function_header_variadic_expr(expr: Expr, name: String, uses: &[Span]) N
                 sema_function_header_variadic_expr(end, name, &uses)
             }
         }
-        .ListLit(elements, _) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
-        .MapLit(entries, _) -> loop entry in entries {
+        .ListLit(elements, _, _) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
+        .MapLit(entries, _, _) -> loop entry in entries {
             sema_function_header_variadic_expr(entry.key, name, &uses)
             sema_function_header_variadic_expr(entry.value, name, &uses)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
-        .TypedLit(_, body, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
                 .Elements(elements) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
@@ -439,14 +439,14 @@ fn sema_function_header_variadic_expr(expr: Expr, name: String, uses: &[Span]) N
                 else -> {}
             }
         }
-        .TupleLit(fields, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
-        .EnumLit(_, _, _, args, _, _) -> loop arg in args {
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+        .EnumLit(_, _, _, args, _, _, _) -> loop arg in args {
             if arg == {
                 .Positional(value) -> sema_function_header_variadic_expr(value, name, &uses)
                 .Named(_, value) -> sema_function_header_variadic_expr(value, name, &uses)
             }
         }
-        .Str(parts, _) -> loop part in parts {
+        .Str(parts, _, _) -> loop part in parts {
             if part == .Interp(value, _) -> sema_function_header_variadic_expr(value, name, &uses)
         }
         else -> {}

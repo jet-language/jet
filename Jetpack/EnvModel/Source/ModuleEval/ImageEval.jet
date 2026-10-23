@@ -247,7 +247,7 @@ fn envmodel_eval_user(expr: Expr, scope: ModuleEvalScope, globals: [String: CtVa
 // word that just isn't `Oci`.
 fn envmodel_bare_enum_word(expr: Expr, span: Span) -> String EnvModelEvalError! {
     if expr == {
-        .EnumLit(_, variant, _, args, _, _) -> {
+        .EnumLit(_, variant, _, args, _, _, _) -> {
             if args.len() == 0 -> return Ok(variant)
         }
         else -> {}
@@ -328,7 +328,7 @@ fn envmodel_eval_base(expr: Expr, scope: ModuleEvalScope, globals: [String: CtVa
     shape :: envmodel_image_field_shape(IMAGE_FIELD_BASE, "`oci(\"<ref>\")`, e.g. `base: oci(\"debian:12\")`", span)
     call :: if expr == {
         // copy: `call` is a payload of read parameter `expr`, which keeps the original; the assigned `call` owns this one
-        .Call(call) -> call.copy()
+        .Call(call, _) -> call.copy()
         else -> { return Err(shape) }
     }
     if call.name != IMAGE_BASE_FN || call.args.len() != 1 -> return Err(shape)

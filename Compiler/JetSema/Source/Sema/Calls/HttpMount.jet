@@ -1,6 +1,7 @@
 // Mounting reflects one explicit struct value and
 // expands to ordinary checked registrations. No backend discovers routes.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -96,17 +97,17 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                         loop index in 1..<method.params.len() {
                             parameter_ty :: sema_type_resolve_declared(graph, method.params[index].ty, method_environment.module_identity)
                             &params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None})
-                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span}, method.params[index].name_span)
+                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
                             argument.convention = method.params[index].convention
                             &call_args.push(argument)
                         }
-                        invocation :: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args}
+                        invocation :: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
                         meta := ast_empty_lambda_meta()
                         nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
                         loop registered in nominal.methods {
                             if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
                         }
-                        handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}}
+                        handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
                         registration :: sema_call_try_http_router(receiver, sema_tir_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         if registration.value == .Val(value) -> &body.push(TStmt.ExprStmt{value: value, span: marker.span})
                     }

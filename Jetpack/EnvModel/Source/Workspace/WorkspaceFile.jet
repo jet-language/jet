@@ -411,7 +411,7 @@ fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: Strin
     // manifest helper is separate from comptime `find(glob) -> [String]`,
     // which records matched file hashes for ordinary Jet comptime bindings.
     if expr == {
-        .Call(call) && call.name == BUILTIN_FIND -> {
+        .Call(call, _) && call.name == BUILTIN_FIND -> {
             span :: call.name_span
             if call.args.len() == 0 {
                 return Err(envmodel_error(
@@ -469,7 +469,7 @@ fn envmodel_workspace_member_path_string(value: CtValue) -> String? Never! {
 // A plain string literal with no interpolation.
 fn envmodel_workspace_literal_string(expr: Expr) -> String? Never! {
     parts :: if expr == {
-        .Str(literal_parts, _) -> literal_parts
+        .Str(literal_parts, _, _) -> literal_parts
         else -> { return None }
     }
     text := [String]{}

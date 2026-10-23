@@ -2,6 +2,7 @@
 // core.http calls stay in Calls/Core.jet; this file owns only checked HTTP
 // receiver/static routes that lower to dedicated TIR operations.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     CallContractRow,
@@ -55,10 +56,10 @@ fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
 
 fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaHTTPStaticTarget? {
     if receiver == {
-        .Paren(inner, _) -> { return sema_call_http_static_target(inner, environment, program) }
-        .Field(base, leaf, _) -> {
+        .Paren(inner, _, _) -> { return sema_call_http_static_target(inner, environment, program) }
+        .Field(base, leaf, _, _) -> {
             if base == {
-                .Ident(alias, _) -> {
+                .Ident(alias, _, _) -> {
                     namespace :: sema_call_core_import_module(environment, program, alias) ?? return None
                     if namespace != "core.http" && namespace != "core.http.client" && namespace != "core.http.server" {
                         return None
@@ -760,11 +761,11 @@ fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: Strin
 }
 
 fn sema_call_http_form_text(value: String, span: Span) -> Expr Never! {
-    Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span}
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span, id: AST_NODE_GENERATED}
 }
 
 fn sema_call_http_form_enum(type_name: String, variant: String, span: Span) -> Expr Never! {
-    Expr.EnumLit{type_name: type_name, variant: variant, variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: false, span: span}
+    Expr.EnumLit{type_name: type_name, variant: variant, variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
 }
 
 fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, control_variant: String) -> Expr Never! {
@@ -777,15 +778,16 @@ fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, cont
         fields: [ExprField]{
             {name: "name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
             {name: "value_type", name_span: field_span, value: sema_call_http_form_enum("WebFormValueType", value_variant, field_span)},
-            {name: "required", name_span: field_span, value: Expr.Bool{value: true, span: field_span}},
-            {name: "default", name_span: field_span, value: Expr.Absent{span: field_span}},
+            {name: "required", name_span: field_span, value: Expr.Bool{value: true, span: field_span, id: AST_NODE_GENERATED}},
+            {name: "default", name_span: field_span, value: Expr.Absent{span: field_span, id: AST_NODE_GENERATED}},
             {name: "label", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
             {name: "control", name_span: field_span, value: sema_call_http_form_enum("WebFormControl", control_variant, field_span)},
-            {name: "group", name_span: field_span, value: Expr.Absent{span: field_span}},
+            {name: "group", name_span: field_span, value: Expr.Absent{span: field_span, id: AST_NODE_GENERATED}},
             {name: "wire_name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
         },
         inferred: false,
         span: field_span,
+        id: AST_NODE_GENERATED,
     }
 }
 
@@ -800,7 +802,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     if args[0].label == .Val(label) && label.name == "action" -> action_index = 0
     if args[1].label == .Val(label) && label.name == "action" -> action_index = 1
     model_index := if action_index == 0 -> 1 else -> 0
-    model_name :: if args[model_index].expr == {.Ident(name, _) -> name else -> {
+    model_name :: if args[model_index].expr == {.Ident(name, _, _) -> name else -> {
         &diagnostics.push(sema_error("E2474", args[model_index].span, "web.form needs a named model type", "the form field set is derived from one declared struct, so a runtime value cannot provide its schema", "pass the struct name as the first argument: `web.form(Checkout, action: submit)`"))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -813,7 +815,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     model_row :: sema_type_resolve_nominal_row(graph, Type.Named{name: model_name}, environment.module_identity) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     model_nominal :: graph.modules[model_row.module_index].nominals[model_row.row]
     model_module_identity := model_nominal.symbol.module_name
-    action_name :: if args[action_index].expr == {.Ident(name, _) -> name else -> {
+    action_name :: if args[action_index].expr == {.Ident(name, _, _) -> name else -> {
         &diagnostics.push(sema_error("E2474", args[action_index].span, "web.form action must be a named function", "the action is registered through the existing typed server-function boundary", "pass a named action function: `web.form({model_name}, action: submit)`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }}
@@ -889,8 +891,8 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     }
     input_signature_type := sema_call_http_core_signature_type(input_signature)
     input_args := [CallArg]{
-        sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: model_name}}, span: span}, span),
-        sema_call_http_core_synthetic_arg(Expr.ListLit{elements: descriptor_exprs, span: span}, span),
+        sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: model_name}}, span: span, id: AST_NODE_GENERATED}, span),
+        sema_call_http_core_synthetic_arg(Expr.ListLit{elements: descriptor_exprs, span: span, id: AST_NODE_GENERATED}, span),
     }
     _ := sema_call_core_bind_arguments(input_record, input_signature_type, input_args, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     input_result :: input_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
@@ -907,8 +909,8 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     }
     typed_signature_type := sema_call_http_core_signature_type(typed_signature)
     typed_args := [CallArg]{
-        sema_call_http_core_synthetic_arg(Expr.Ident{name: "input", span: span}, span),
-        sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: action_name}}, span: span}, span),
+        sema_call_http_core_synthetic_arg(Expr.Ident{name: "input", span: span, id: AST_NODE_GENERATED}, span),
+        sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: action_name}}, span: span, id: AST_NODE_GENERATED}, span),
     }
     _ := sema_call_core_bind_arguments(typed_record, typed_signature_type, typed_args, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     typed_result :: typed_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}

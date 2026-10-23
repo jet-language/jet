@@ -1,6 +1,6 @@
 // TOOLS-S7: independent real algorithms; original checked fixtures below stay
 // unregistered until C4/CP-NAMES/S8–S12/S20 produce the actual checked graph.
-use jet_foundation.[Call, CallArg, EffectDecl, Diagnostic, AccessConvention, Type, CallLabel, MarkerCallArg, ast_empty_call_arg_flags]
+use jet_foundation.[AST_NODE_GENERATED, Call, CallArg, EffectDecl, Diagnostic, AccessConvention, Type, CallLabel, MarkerCallArg, ast_empty_call_arg_flags]
 use jet_parser.[parse_source]
 
 #Test("semindex_normalize_definition_drops_line_comments_and_unicode_space") {
@@ -191,32 +191,32 @@ fn semindex_structure_optional_call_source() -> String Never! { "fn run() {{ rec
 // canonical Foundation values, never a second AST schema.
 fn semindex_structure_test_rust_discriminants() Never! {
     span :: Span{start: 2, end: 5}
-    assert_eq(semindex_expr_shape(Expr.Int{value: 1, span: span, width: None, raw: None}), "Discriminant(3)")
-    assert_eq(semindex_expr_shape(Expr.Ident{name: "x", span: span}), "Discriminant(15)")
-    assert_eq(semindex_expr_shape(Expr.Absent{span: span}), "Discriminant(33)")
-    assert_eq(semindex_expr_shape(Expr.Paren{value: Expr.Unit{span: span}, span: span}), "Discriminant(48)")
+    assert_eq(semindex_expr_shape(Expr.Int{value: 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}), "Discriminant(3)")
+    assert_eq(semindex_expr_shape(Expr.Ident{name: "x", span: span, id: AST_NODE_GENERATED}), "Discriminant(15)")
+    assert_eq(semindex_expr_shape(Expr.Absent{span: span, id: AST_NODE_GENERATED}), "Discriminant(33)")
+    assert_eq(semindex_expr_shape(Expr.Paren{value: Expr.Unit{span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}), "Discriminant(48)")
     assert_eq(semindex_stmt_shape(Stmt.Break{span: span}), "Discriminant(7)")
-    assert_eq(semindex_stmt_shape(Stmt.DeferClose{close: Expr.Unit{span: span}, span: span}), "Discriminant(34)")
+    assert_eq(semindex_stmt_shape(Stmt.DeferClose{close: Expr.Unit{span: span, id: AST_NODE_GENERATED}, span: span}), "Discriminant(34)")
     item :: Item.EffectDecl{value: EffectDecl{name: "FS.Read", name_span: span, irreversible: false, span: span}}
     assert_eq(semindex_item_shape(item), "Discriminant(8)")
     assert_eq(semindex_item_span(item), span)
 }
 fn semindex_structure_test_exact_call_spans() Never! {
-    empty :: Expr.Call{call: Call{name: "f", name_span: Span{start: 4, end: 5}, type_args: [Type]{}, args: [CallArg]{}}}
+    empty :: Expr.Call{call: Call{name: "f", name_span: Span{start: 4, end: 5}, type_args: [Type]{}, args: [CallArg]{}}, id: AST_NODE_GENERATED}
     assert_eq(semindex_structural_expr_span(empty), Span{start: 4, end: 7})
     // A nested no-argument call contributes its closing extent, not name_span.
     last :: CallArg{convention: AccessConvention.Read, expr: empty, span: Span{start: 4, end: 7}, flags: ast_empty_call_arg_flags(), label: None, spread: false}
-    outer :: Expr.Call{call: Call{name: "g", name_span: Span{start: 1, end: 2}, type_args: [Type]{}, args: [CallArg]{last}}}
+    outer :: Expr.Call{call: Call{name: "g", name_span: Span{start: 1, end: 2}, type_args: [Type]{}, args: [CallArg]{last}}, id: AST_NODE_GENERATED}
     assert_eq(semindex_structural_expr_span(outer), Span{start: 1, end: 8})
 }
 fn semindex_structure_test_state_marker_paths() Never! {
-    root :: Expr.Ident{name: "Door", span: Span{start: 1, end: 5}}
-    state :: Expr.Field{base: root, member: "State", span: Span{start: 1, end: 11}}
-    closed :: Expr.Field{base: state, member: "Closed", span: Span{start: 1, end: 18}}
+    root :: Expr.Ident{name: "Door", span: Span{start: 1, end: 5}, id: AST_NODE_GENERATED}
+    state :: Expr.Field{base: root, member: "State", span: Span{start: 1, end: 11}, id: AST_NODE_GENERATED}
+    closed :: Expr.Field{base: state, member: "Closed", span: Span{start: 1, end: 18}, id: AST_NODE_GENERATED}
     path :: semindex_state_marker_path(closed) ?? panic("qualified marker path")
     assert_eq(path.name, "Door.State.Closed")
     assert_eq(path.span, Span{start: 1, end: 18})
-    assert(semindex_state_marker_path(Expr.Unit{span: Span{start: 1, end: 3}}) == None)
+    assert(semindex_state_marker_path(Expr.Unit{span: Span{start: 1, end: 3}, id: AST_NODE_GENERATED}) == None)
 }
 // The harness passes the actual parsed function (including authored type spans).
 fn semindex_structure_test_function_types(function: Func, mp: String) {
@@ -246,12 +246,12 @@ fn semindex_structure_test_allow_marker_projection() Never! {
     span :: Span{start: 4, end: 30}
     markers :: [Marker]{
         {name: "allow", negated: false, name_span: span, args: [MarkerCallArg]{
-            MarkerCallArg.Expr{value: Expr.Ident{name: "decimal", span: span}},
-            MarkerCallArg.Expr{value: Expr.Unit{span: span}},
+            MarkerCallArg.Expr{value: Expr.Ident{name: "decimal", span: span, id: AST_NODE_GENERATED}},
+            MarkerCallArg.Expr{value: Expr.Unit{span: span, id: AST_NODE_GENERATED}},
             MarkerCallArg.EffectRow{effects: [EffectRowEntry]{}, span: span},
-            MarkerCallArg.Expr{value: Expr.Ident{name: "copies", span: span}},
+            MarkerCallArg.Expr{value: Expr.Ident{name: "copies", span: span, id: AST_NODE_GENERATED}},
         }, arg_labels: [CallLabel?]{}, span: span, ct: None},
-        {name: "Allow", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "ignored", span: span}}}, arg_labels: [CallLabel?]{}, span: span, ct: None},
+        {name: "Allow", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "ignored", span: span, id: AST_NODE_GENERATED}}}, arg_labels: [CallLabel?]{}, span: span, ct: None},
     }
     semindex_collect_allow_markers(&db, markers, "field", "main.jet")
     assert_eq(db.bypasses.len(), 2)

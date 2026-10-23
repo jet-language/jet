@@ -12,7 +12,7 @@ fn view_field_symbol(name: String, kind: SymbolKind, ty: Type, span: Span) -> Sy
 }
 
 fn view_field_window(value: Expr, span: Span) -> Expr Never! {
-    Expr.StructLit{type_name: "Window", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{ExprField{name: "values", name_span: span, value: value}}, inferred: false, span: span}
+    Expr.StructLit{type_name: "Window", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{ExprField{name: "values", name_span: span, value: value}}, inferred: false, span: span, id: AST_NODE_GENERATED}
 }
 
 fn view_field_case(parameter: Bool, access: AccessConvention, expected: String) {
@@ -30,10 +30,10 @@ fn view_field_case(parameter: Bool, access: AccessConvention, expected: String) 
     sema_ownership_declare_binding(&state, owner, parameter)
     if parameter -> &context.return_view_parameter_keys.push(owner.id.key)
     view_field_require(sema_scope_declare_local(&scopes, selected, false, AccessConvention.Read, None, false), "range binding is declared")
-    slice :: Expr.Slice{base: Expr.Ident{name: "values", span: use_span}, start: Expr.Int{value: 0, span: use_span, width: None, raw: None}, end: Expr.Int{value: 1, span: use_span, width: None, raw: None}, range: None, span: use_span}
+    slice :: Expr.Slice{base: Expr.Ident{name: "values", span: use_span, id: AST_NODE_GENERATED}, start: Expr.Int{value: 0, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, end: Expr.Int{value: 1, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, range: None, span: use_span, id: AST_NODE_GENERATED}
     sema_ownership_declare_binding(&state, selected, false)
     view_field_require(sema_ownership_record_binding_view(&state, view_field_binding("selected", slice, view_type, use_span), scopes), "production range binding records its owner")
-    window :: view_field_window(Expr.Ident{name: "selected", span: use_span}, use_span)
+    window :: view_field_window(Expr.Ident{name: "selected", span: use_span, id: AST_NODE_GENERATED}, use_span)
     valid :: sema_stmt_record_return_views(window, Type.Named{name: "Window"}, scopes, &state, &context, &diagnostics)
     if expected != "" {
         view_field_require(!valid && diagnostics.len() == 1, "unsafe aggregate return is rejected once")
@@ -125,10 +125,10 @@ fn view_pattern_reinitialization() {
     scopes := sema_scope_init("fixture")
     state := sema_ownership_state_init()
     view_field_require(sema_scope_declare_local(&scopes, owner, true, AccessConvention.Read, None, false), "reinit owner declared")
-    base :: Expr.Field{base: Expr.Ident{name: "pair", span: span}, member: "inner", span: span}
+    base :: Expr.Field{base: Expr.Ident{name: "pair", span: span, id: AST_NODE_GENERATED}, member: "inner", span: span, id: AST_NODE_GENERATED}
     place :: sema_ownership_place_from_expr_inner(base, scopes) ?? panic("missing ancestor place")
     &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "consume_inner", share_ty: None}})
-    child :: sema_ownership_place_from_expr_inner(Expr.Field{base: base, member: "left", span: span}, scopes) ?? panic("missing child place")
+    child :: sema_ownership_place_from_expr_inner(Expr.Field{base: base, member: "left", span: span, id: AST_NODE_GENERATED}, scopes) ?? panic("missing child place")
     sema_ownership_clear_moved(&state, child)
     view_field_require(state.moved.len() == 1 && sema_ownership_place_exact(state.moved[0].place, place), "descendant assignment never clears its moved ancestor")
 }

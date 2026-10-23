@@ -2,6 +2,7 @@
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     BinOp,
     Call,
@@ -54,7 +55,7 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
     }
     argument :: call.args[0]
     operation := BinOp?{None}
-    if argument.expr == .Binary(op, _, _, _) {
+    if argument.expr == .Binary(op, _, _, _, _) {
         if sema_call_is_overflow_operation(op) -> operation = Val(op)
     }
     operation_value :: operation ?? {
@@ -858,9 +859,9 @@ fn sema_call_default_err_optional(value: Expr?, value_span: Span?, span: Span) -
     if value == {
         .Val(expression) -> {
             present_span :: value_span ?? expr_span(expression)
-            Expr.Present{value: expression, span: present_span}
+            Expr.Present{value: expression, span: present_span, id: AST_NODE_GENERATED}
         }
-        else -> Expr.Absent{span: span}
+        else -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
     }
 }
 
@@ -934,13 +935,13 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
             }
         }
     }
-    message_expr :: message ?? Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span}
+    message_expr :: message ?? Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED}
     fields :: [ExprField]{
         {name: "message", name_span: expr_span(message_expr), value: message_expr},
         {name: "code", name_span: span, value: sema_call_default_err_optional(code, code_span, span)},
         {name: "cause", name_span: span, value: sema_call_default_err_optional(cause, cause_span, span)},
     }
-    struct_expr :: Expr.StructLit{type_name: "Err", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span}
+    struct_expr :: Expr.StructLit{type_name: "Err", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
     payload :: sema_check_expression(struct_expr, Val(Type.Named{name: "Err"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !wrap_result -> return Val(payload)
     result_value :: sema_call_default_err_result(expected) ?? Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
@@ -1010,9 +1011,9 @@ struct SemaCallInferenceFacts {
 
 fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
     if expr == {
-        .Lambda(_) -> true
-        .ListLit(elements, _) -> elements.len() == 0
-        .MapLit(entries, _) -> entries.len() == 0
+        .Lambda(_, _) -> true
+        .ListLit(elements, _, _) -> elements.len() == 0
+        .MapLit(entries, _, _) -> entries.len() == 0
         else -> false
     }
 }

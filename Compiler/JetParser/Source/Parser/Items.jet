@@ -1141,7 +1141,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
 fn parser_marker_is_c_guest_import(marker: Marker) -> Bool Never! {
     if marker.negated || marker.name != "Import" -> return false
     first :: parser_marker_first_expr(marker) ?? return false
-    if first == .Ident(name, _) -> return name == "c"
+    if first == .Ident(name, _, _) -> return name == "c"
     false
 }
 
@@ -1153,7 +1153,7 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
     symbol := ""
     error_span := func.span
     if func.body.len() == 1 {
-        if func.body[0] == .Expr(value) && value == .Str(parts, span) {
+        if func.body[0] == .Expr(value) && value == .Str(parts, span, _) {
             error_span = span
             if parts.len() == 1 {
                 if parts[0] == .Lit(text) -> symbol = text
@@ -1421,7 +1421,7 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -
     lang := ""
     lang_span := ffi.span
     if parser_marker_first_expr(ffi) == .Val(argument) {
-        if argument == .Ident(name, span) {
+        if argument == .Ident(name, span, _) {
             lang = name
             lang_span = span
         }
@@ -1614,7 +1614,7 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             // `#Scrub(Tag)` names the one fact tag removed.
             "Scrub" -> {
                 if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) {
-                    if values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
+                    if values[0] == .Val(written) && written == .Ident(name, _, _) -> func.scrub_tag = Val(name)
                 }
             }
             // Bare `#Inline` is a hint; `#Inline(Always)`
@@ -1705,7 +1705,7 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             }
             "Undo" -> {
                 values :: parser_marker_bindings(marker, [String]{"inverse"}) ?? [Expr?]{None}
-                if values[0] == .Val(written) && written == .Ident(inverse, span) {
+                if values[0] == .Val(written) && written == .Ident(inverse, span, _) {
                     func.undo = Val(NamedSpan{name: inverse, span: span})
                 } else {
                     parser_marker_shape_fatal(&state, marker)
@@ -2009,7 +2009,7 @@ fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &En
         parser_bump(&state)
         expression :: parser_parse_expression(&state, 1, 0)
         discriminant_expr = Val(expression.expr)
-        if expression.expr == .Int(number, _, _, _) -> discriminant = Val(number)
+        if expression.expr == .Int(number, _, _, _, _) -> discriminant = Val(number)
     }
     if parser_current_kind(&state) != TOKEN_LBRACE {
         &value.variants.push(Variant{name: path, name_span: name.span, payload: payload, discriminant: discriminant, discriminant_expr: discriminant_expr, serde_markers: markers})
@@ -2114,12 +2114,12 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
     binding_name :: parser_value(state, name_token)
     prepared := false
-    parsed_value := ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
+    parsed_value := ParsedExpr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}, span: start.span}
     if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
         head :: parser_bump(&state)
         block :: parser_parse_value_block(&state, 0, true)
         span :: parser_cover(head.span, block.span)
-        parsed_value = ParsedExpr{expr: Expr.Unit{span: span}, span: span}
+        parsed_value = ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(&state)}, span: span}
         if block.statements.len() == 0 && block.tail == .Val(tail) {
             prepared = true
             parsed_value = ParsedExpr{expr: tail, span: span}

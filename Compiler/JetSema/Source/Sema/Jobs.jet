@@ -136,14 +136,14 @@ fn sema_job_schedule_error(reason: EveryScheduleError, span: Span) -> Diagnostic
 
 fn sema_job_default_text(expression: Expr) -> String? {
     if expression == {
-        .Paren(value, _) -> return sema_job_default_text(value)
-        .Int(value, _, _, _) -> return Val("{value}")
-        .Float(value, _, _, raw) -> {
+        .Paren(value, _, _) -> return sema_job_default_text(value)
+        .Int(value, _, _, _, _) -> return Val("{value}")
+        .Float(value, _, _, raw, _) -> {
             text :: raw ?? "{value}"
             return Val(text.replace("_", ""))
         }
-        .Bool(value, _) -> return Val("{value}")
-        .Str(parts, _) -> {
+        .Bool(value, _, _) -> return Val("{value}")
+        .Str(parts, _, _) -> {
             if parts.len() != 1 -> return None
             if parts[0] == {
                 .Lit(text) -> {
@@ -181,7 +181,7 @@ fn sema_job_doc(function: Func) -> String? {
         if marker.args.len() == 0 -> return None
         if marker.args[0] == {
             .Expr(expression) -> if expression == {
-                .Str(parts, _) -> {
+                .Str(parts, _, _) -> {
                     if parts.len() != 1 -> return None
                     if parts[0] == {
                         .Lit(text) -> {

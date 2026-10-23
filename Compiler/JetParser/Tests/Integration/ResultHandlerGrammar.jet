@@ -33,27 +33,27 @@ fn result_handler_binding(function: Func, name: String) -> Expr? {
     })
     run :: result_handler_function(parsed.program, "run") ?? panic("run")
     propagated :: result_handler_binding(run, "propagated") ?? panic("propagated")
-    assert(if propagated == { .Ident(name, _) -> name == "value" else -> false })
+    assert(if propagated == { .Ident(name, _, _) -> name == "value" else -> false })
     noted :: result_handler_binding(run, "noted") ?? panic("noted")
-    assert(if noted == { .Try(_, _, _, .Val(_)) -> true else -> false })
+    assert(if noted == { .Try(_, _, _, .Val(_), _) -> true else -> false })
     chained :: result_handler_binding(run, "chained") ?? panic("chained")
-    assert(if chained == { .OptField(_, _, _, _, _) -> true else -> false })
+    assert(if chained == { .OptField(_, _, _, _, _, _) -> true else -> false })
     negated :: result_handler_binding(run, "negated") ?? panic("negated")
-    assert(if negated == { .Unary(.Not, inner, _) -> if inner == { .Bool(value, _) -> value else -> false } else -> false })
+    assert(if negated == { .Unary(.Not, inner, _, _) -> if inner == { .Bool(value, _, _) -> value else -> false } else -> false })
     handled :: result_handler_binding(run, "handled") ?? panic("handled")
-    if handled == .If(cond, _, then_value, _, else_value, _) {
-        assert(if cond == { .PatternTest(_, .Ok(binding, _, _, _), _) -> binding == "ok" else -> false })
+    if handled == .If(cond, _, then_value, _, else_value, _, _) {
+        assert(if cond == { .PatternTest(_, .Ok(binding, _, _, _), _, _) -> binding == "ok" else -> false })
         assert(if then_value == {
-            .If(inner_cond, _, _, _, _, _) -> if inner_cond == {
-                .Unary(.Not, inner, _) -> if inner == { .Bool(value, _) -> value else -> false }
+            .If(inner_cond, _, _, _, _, _, _) -> if inner_cond == {
+                .Unary(.Not, inner, _, _) -> if inner == { .Bool(value, _, _) -> value else -> false }
                 else -> false
             }
             else -> false
         })
         assert(if else_value == {
-            .If(err_cond, _, failure, _, _, _) -> {
-                is_error :: if err_cond == { .PatternTest(_, .Err(binding, _, _, _), _) -> binding == "error" else -> false }
-                is_failure :: if failure == { .Ident(name, _) -> name == "error" else -> false }
+            .If(err_cond, _, failure, _, _, _, _) -> {
+                is_error :: if err_cond == { .PatternTest(_, .Err(binding, _, _, _), _, _) -> binding == "error" else -> false }
+                is_failure :: if failure == { .Ident(name, _, _) -> name == "error" else -> false }
                 is_error && is_failure
             }
             else -> false

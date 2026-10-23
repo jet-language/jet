@@ -82,23 +82,23 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(result.diagnostics.is_empty(), "Result handler should parse: {result.diagnostics:Debug}")
     result.program.items[0] == .Func(function) ?? panic("function")
     function.body[0] == .Expr(handler) ?? panic("Result handler should lower as a value if")
-    handler == .If(ok_cond, _, ok_value, _, else_value, _) ?? panic("Result handler should lower as a value if")
-    ok_cond == .PatternTest(ok_subject, ok_pattern, _) ?? panic("Result handler needs one success pattern")
+    handler == .If(ok_cond, _, ok_value, _, else_value, _, _) ?? panic("Result handler should lower as a value if")
+    ok_cond == .PatternTest(ok_subject, ok_pattern, _, _) ?? panic("Result handler needs one success pattern")
     ok_pattern == .Ok(ok_binding, ok_binding_span, _, _) ?? panic("Result handler needs one success pattern")
-    assert(if ok_subject == { .Ident(name, _) -> name == "value"
+    assert(if ok_subject == { .Ident(name, _, _) -> name == "value"
  else -> false })
     assert_eq(ok_binding, "ok")
-    assert(if ok_value == { .Ident(name, _) -> name == "ok"
+    assert(if ok_value == { .Ident(name, _, _) -> name == "ok"
  else -> false })
-    else_value == .If(err_cond, _, err_value, _, terminal, _) ?? panic("Result handler must retain its failure branch")
-    err_cond == .PatternTest(err_subject, err_pattern, _) ?? panic("Result handler needs one failure pattern")
+    else_value == .If(err_cond, _, err_value, _, terminal, _, _) ?? panic("Result handler must retain its failure branch")
+    err_cond == .PatternTest(err_subject, err_pattern, _, _) ?? panic("Result handler needs one failure pattern")
     err_pattern == .Err(err_binding, err_binding_span, _, _) ?? panic("Result handler needs one failure pattern")
-    assert(if err_subject == { .Ident(name, _) -> name == "value"
+    assert(if err_subject == { .Ident(name, _, _) -> name == "value"
  else -> false })
     assert_eq(err_binding, "error")
-    assert(if err_value == { .Ident(name, _) -> name == "error"
+    assert(if err_value == { .Ident(name, _, _) -> name == "error"
  else -> false })
-    assert(if terminal == { .NoElse(_) -> true
+    assert(if terminal == { .NoElse(_, _) -> true
  else -> false })
     assert(ok_binding_span.end < err_binding_span.start)
     assert(expr_span(ok_cond).end < expr_span(err_cond).start)
@@ -110,18 +110,18 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(result.diagnostics.is_empty(), "multiline Result handler should parse: {result.diagnostics:Debug}")
     result.program.items[0] == .Func(function) ?? panic("function")
     function.body[0] == .Expr(handler) ?? panic("Result handler")
-    handler == .If(cond, _, _, _, else_value, _) ?? panic("Result handler")
-    cond == .PatternTest(subject, pattern, _) ?? panic("success pattern")
-    assert(if subject == { .Ident(name, _) -> name == "value"
+    handler == .If(cond, _, _, _, else_value, _, _) ?? panic("Result handler")
+    cond == .PatternTest(subject, pattern, _, _) ?? panic("success pattern")
+    assert(if subject == { .Ident(name, _, _) -> name == "value"
  else -> false })
     assert(if pattern == { .Ok(binding, _, _, _) -> binding == "ok"
  else -> false })
-    else_value == .If(err_cond, then_body, then_value, _, _, _) ?? panic("failure branch")
-    err_cond == .PatternTest(_, err_pattern, _) ?? panic("failure pattern")
+    else_value == .If(err_cond, then_body, then_value, _, _, _, _) ?? panic("failure branch")
+    err_cond == .PatternTest(_, err_pattern, _, _) ?? panic("failure pattern")
     assert(if err_pattern == { .Err(binding, _, _, _) -> binding == "error"
  else -> false })
     assert(then_body.is_empty())
-    assert(if then_value == { .Call(call) -> call.name == "print"
+    assert(if then_value == { .Call(call, _) -> call.name == "print"
  else -> false })
 }
 
@@ -146,7 +146,7 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     result.program.items[0] == .Func(function) ?? panic("function")
     function.body[0] == .Switch(_, ok_arms, _, _) ?? panic("success switch")
     assert(!ok_arms.is_empty())
-    ok_arms[0].cond == .PatternTest(_, ok_pattern, _) ?? panic("success pattern")
+    ok_arms[0].cond == .PatternTest(_, ok_pattern, _, _) ?? panic("success pattern")
     ok_name := false
     loop name in pattern_binding_names(ok_pattern) { if name.name == "ok" -> ok_name = true }
     assert(ok_name)
@@ -155,7 +155,7 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  else -> false })
     function.body[1] == .Switch(_, err_arms, _, _) ?? panic("failure switch")
     assert(!err_arms.is_empty())
-    err_arms[0].cond == .PatternTest(_, err_pattern, _) ?? panic("failure pattern")
+    err_arms[0].cond == .PatternTest(_, err_pattern, _, _) ?? panic("failure pattern")
     err_name := false
     loop name in pattern_binding_names(err_pattern) { if name.name == "error" -> err_name = true }
     assert(err_name)
@@ -163,11 +163,11 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  .Variant(variant, _, _, _) -> variant == "Err"
  else -> false })
     function.body[2] == .Val(binding) ?? panic("fallback binding")
-    binding.init == .OrFallback(value, fallback, _, _) ?? panic("value fallback")
-    assert(if value == { .Ident(name, _) -> name == "maybe"
+    binding.init == .OrFallback(value, fallback, _, _, _) ?? panic("value fallback")
+    assert(if value == { .Ident(name, _, _) -> name == "maybe"
  else -> false })
     fallback == .Value(fallback_value) ?? panic("value fallback")
-    assert(if fallback_value == { .Int(_, _, _, _) -> true
+    assert(if fallback_value == { .Int(_, _, _, _, _) -> true
  else -> false })
     function.body[3] == .Val(refutable) ?? panic("refutable binding")
     refutable.pattern == .Val(bind_pattern) ?? panic("refutable pattern")
@@ -219,8 +219,8 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     found := false
     loop marker in function.markers {
         if marker.name == "Policy" {
-            assert(if marker.args[0] == { .Expr(.Call(call)) -> call.name == "retry" else -> false })
-            assert(if marker.args[1] == { .Expr(.Call(call)) -> call.name == "trace" else -> false })
+            assert(if marker.args[0] == { .Expr(.Call(call, _)) -> call.name == "retry" else -> false })
+            assert(if marker.args[1] == { .Expr(.Call(call, _)) -> call.name == "trace" else -> false })
             found = true
             break
         }
@@ -269,13 +269,13 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
             result.program.items[0] == .Const(def) ?? panic("expected comptime declaration: {source:Debug}")
             assert(def.span.end == expr_span(def.value).end, "{source:Debug}")
             if typed_array {
-                def.value == .TypedLit(head, body, _) ?? panic("typed array")
+                def.value == .TypedLit(head, body, _, _) ?? panic("typed array")
                 assert(if head == { .Val(.List(_)) -> true
  else -> false })
                 assert(if body == { .Elements(elements) -> elements.len() == 1
  else -> false })
             } else {
-                assert(if def.value == { .StructLit(type_name, _, _, _, fields, _, _) -> type_name == "CoreModuleExportNames" && fields.len() == 1
+                assert(if def.value == { .StructLit(type_name, _, _, _, fields, _, _, _) -> type_name == "CoreModuleExportNames" && fields.len() == 1
  else -> false })
             }
         }
@@ -335,13 +335,13 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
             binding_found := false
             loop stmt in function.body {
                 if stmt == .Val(binding) {
-                    binding.init == .CallValue(callee, _, _) ?? panic("expected collecting loop call, got {binding.init:Debug}")
+                    binding.init == .CallValue(callee, _, _, _) ?? panic("expected collecting loop call, got {binding.init:Debug}")
                     callee == .Lambda(lambda) ?? panic("expected collecting loop lambda, got {callee:Debug}")
                     lambda.body == .Block(body) ?? panic("expected collecting loop block")
                     assert(!body.is_empty(), "expected one source loop, got {body:Debug}")
                     body[0] == .For(_, _, _, kind, _, _, _, _, _) ?? panic("expected one source loop, got {body:Debug}")
                     kind == .Range(_, _, step, _) ?? panic("expected range source, got {kind:Debug}")
-                    step == .Val(.Int(value, _, _, _)) ?? panic("expected numeric stride, got {step:Debug}")
+                    step == .Val(.Int(value, _, _, _, _)) ?? panic("expected numeric stride, got {step:Debug}")
                     assert_eq(value, 2)
                     binding_found = true
                     break

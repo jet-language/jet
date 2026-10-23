@@ -1,5 +1,6 @@
 // Checked collection, scalar, indexing, slicing, and range expressions.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     Diagnostic,
     Expr,
@@ -197,10 +198,10 @@ struct SemaExpressionListCheckedParts {
 
 fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool Never! {
     if element == {
-        .StructLit(_, _, _, _, _, inferred, _) -> inferred
-        .TypedLit(head, _, _) -> head == None
-        .Paren(inner, _) -> sema_expression_list_element_needs_expected_type(inner)
-        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expression_list_element_needs_expected_type(inner)
+        .StructLit(_, _, _, _, _, inferred, _, _) -> inferred
+        .TypedLit(head, _, _, _) -> head == None
+        .Paren(inner, _, _) -> sema_expression_list_element_needs_expected_type(inner)
+        .Unary(op, inner, _, _) -> op == UnOp.Neg && sema_expression_list_element_needs_expected_type(inner)
         else -> false
     }
 }
@@ -208,15 +209,15 @@ fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool Never
 // `[["41"], [], ["x"]]`: an empty item takes its type from a sibling.
 fn sema_expression_list_element_is_empty_list(element: Expr) -> Bool Never! {
     if element == {
-        .ListLit(elements, _) -> elements.len() == 0
-        .Paren(inner, _) -> sema_expression_list_element_is_empty_list(inner)
+        .ListLit(elements, _, _) -> elements.len() == 0
+        .Paren(inner, _, _) -> sema_expression_list_element_is_empty_list(inner)
         else -> false
     }
 }
 
 fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if value == {
-        .Ident(name, span) -> {
+        .Ident(name, span, _) -> {
             binding_index :: sema_scope_resolve_index_at(scopes, name, span) ?? return true
             binding := scopes.bindings[binding_index]
             if binding.symbol.kind != SymbolKind.Local -> return true
@@ -251,7 +252,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
             }
             true
         }
-        .Paren(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> sema_expression_list_mark_owned_value(inner, &state, &scopes, &diagnostics)
+        .Paren(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) -> sema_expression_list_mark_owned_value(inner, &state, &scopes, &diagnostics)
         else -> true
     }
 }
@@ -288,7 +289,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
             next
         }
         if element == {
-            .Spread(value, spread_span) -> {
+            .Spread(value, spread_span, _) -> {
                 checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
                 if !sema_expression_list_mark_owned_value(value, &state, &scopes, &diagnostics) -> return None
@@ -409,7 +410,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
 fn sema_expression_member_spread_fields(base: Expr, members: [ExprMember], span: Span) -> [Expr] Never! {
     fields := [Expr]{}
     loop member in members {
-        &fields.push(Expr.Field{base: base, member: member.name, span: Span{start: span.start, end: member.span.end}})
+        &fields.push(Expr.Field{base: base, member: member.name, span: Span{start: span.start, end: member.span.end}, id: AST_NODE_GENERATED})
     }
     fields
 }
@@ -418,7 +419,7 @@ fn sema_expression_list_member_spreads(elements: [Expr]) -> [Expr] Never! {
     expanded := [Expr]{}
     loop element in elements {
         if element == {
-            .MemberSpread(base, members, span) -> {
+            .MemberSpread(base, members, span, _) -> {
                 loop field in sema_expression_member_spread_fields(base, members, span) -> &expanded.push(field)
             }
             else -> &expanded.push(element)
@@ -432,7 +433,7 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
     has_spread := false
     loop element in elements {
         if element == {
-            .Spread(_, _) -> has_spread = true
+            .Spread(_, _, _) -> has_spread = true
             else -> {}
         }
     }
@@ -716,7 +717,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
     // named index keeps its own type when it is a stored `Range` (a window
     // selection, classified below); any other named index meets `Int` as before.
-    named_position :: index == .Ident(_, _) && index_expected == (Val(Type.Int))
+    named_position :: index == .Ident(_, _, _) && index_expected == (Val(Type.Int))
     hint :: if named_position -> Type?{None} else -> index_expected
     inferred_index :: sema_check_expression(index, hint, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     checked_index :: if named_position && inferred_index.ty != (Type.Named{name: "Range"}) -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? return None else -> inferred_index

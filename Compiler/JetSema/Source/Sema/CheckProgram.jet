@@ -2,6 +2,7 @@
 // The result explicitly reports when a source form lies beyond this checker
 // slice so consumers cannot treat its TIR as a complete semantic program.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     WebPartitionMarker,
     AccessConvention,
     ResolvedOutput,
@@ -1991,7 +1992,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             default_context.host_hooks = context.host_hooks
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork :: sema_ownership_fork(&state)
-            checked_default :: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
+            checked_default :: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
             sema_ownership_fork_rollback(&state, default_fork)
             sema_ownership_fork_close(&state, default_fork)
             if {
@@ -2528,7 +2529,7 @@ fn sema_keep_going_stub(func: Func, owner_id: SymbolID, function_kind: TFuncKind
     stub := func
     stub.pre = [ContractClause]{}
     stub.post = [ContractClause]{}
-    stub.body = [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None}}}
+    stub.body = [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None, id: AST_NODE_GENERATED}}}
     stub.return_type_span = sema_keep_going_trap_return_span(func)
     discarded_diagnostics := [Diagnostic]{}
     discarded_call_facts := [SemaCallSiteFact]{}
@@ -2954,7 +2955,7 @@ fn sema_keep_going_stub_source(func: Func) -> Func {
         undo: func.undo,
         markers: func.markers,
         compiler_generated: func.compiler_generated,
-        body: [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None}}},
+        body: [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None, id: AST_NODE_GENERATED}}},
     }
 }
 
@@ -6157,7 +6158,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                     // default opportunistically; construction lowers the default
                     // expression itself, so only a baked default must evaluate.
                     if field.default != None && field.default_ct == None {
-                        expression :: field.default ?? Expr.Unit{span: field.name_span}
+                        expression :: field.default ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}
                         destination_key := symbol.id.key
                         key := "{destination_key}::default"
                         added :: sources.items.len()
@@ -6187,7 +6188,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                     }
                     if registered_symbol != None {
                         symbol :: registered_symbol ?? return
-                        expression :: variant.discriminant_expr ?? Expr.Unit{span: variant.name_span}
+                        expression :: variant.discriminant_expr ?? Expr.Unit{span: variant.name_span, id: AST_NODE_GENERATED}
                         destination_key := symbol.id.key
                         key := "{destination_key}::discriminant"
                         sema_comptime_add_source(&sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{variant.name}", SemaComptimeItemKind.TypeLevel, expression, Val(Type.Int))
@@ -6241,7 +6242,7 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
         // Rust `module_scalar_const_type`: a bare decimal literal binding is a
         // Float constant, not the expression default Decimal.
         expected := constant.declaration.ty
-        if expected == None && constant.declaration.value == .Float(_, _, _, _) -> expected = Val(Type.Float)
+        if expected == None && constant.declaration.value == .Float(_, _, _, _, _) -> expected = Val(Type.Float)
         if expected == None -> expected = constant.ty
         sema_comptime_add_source(&sources, graph, source_module.module_identity, constant.symbol.id.key, constant.symbol.id.key, constant.declaration.name, SemaComptimeItemKind.Constant, expression, expected)
     }

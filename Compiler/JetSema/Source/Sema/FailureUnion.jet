@@ -116,7 +116,7 @@ fn sema_failure_union_add_member(context: &SemaCheckContext, ty: Type) Never! {
 
 fn sema_failure_union_unparen(value: Expr) -> Expr Never! {
     if value == {
-        .Paren(inner, _) -> sema_failure_union_unparen(inner)
+        .Paren(inner, _, _) -> sema_failure_union_unparen(inner)
         else -> value
     }
 }
@@ -140,7 +140,7 @@ fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, 
         return
     }
     value :: sema_failure_union_unparen(call.args[0].expr)
-    if value == .EnumLit(owner, variant, _, args, _, span) {
+    if value == .EnumLit(owner, variant, _, args, _, span, _) {
         if owner == "" {
             payload := [SemaFailureCaseField]{}
             loop argument in args {
@@ -153,7 +153,7 @@ fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, 
             return
         }
     }
-    if value == .Str(_, _) {
+    if value == .Str(_, _, _) {
         context.failure_union_general = true
         return
     }

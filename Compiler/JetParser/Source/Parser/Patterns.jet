@@ -353,26 +353,26 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
     if typed == .Val(body) {
         if body.binary {
             parts := parser_take_pattern_binary_parts(&state, body.parts, body.span)
-            return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span}, span: body.span}
+            return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span, id: parser_node_id(&state)}, span: body.span}
         }
         loop part in body.parts {
             if part.kind != STRING_PART_INTERPOLATION || parser_pattern_hole_shape_ok(part) -> next
             bad_span :: if part.tokens.len() > 0 -> part.tokens[0].span else -> body.span
             parser_add_error(&state, bad_span, "a `take_pattern` hole must be a bare name, optionally typed", "each hole binds a name or a typed, fallibly-parsed name, the same grammar an `if ==` pattern hole uses", "write `{{name}}` or `{{name:Type}}`")
-            return ParsedExpr{expr: Expr.Unit{span: body.span}, span: body.span}
+            return ParsedExpr{expr: Expr.Unit{span: body.span, id: parser_node_id(&state)}, span: body.span}
         }
         parts := parser_take_pattern_text_parts(&state, body.parts)
-        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span}, span: body.span}
+        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span, id: parser_node_id(&state)}, span: body.span}
     }
     token :: parser_current(&state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         parser_bump(&state)
         token_parts :: parser_string_parts(state, token)
         parts := parser_take_pattern_text_parts(&state, token_parts)
-        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span}, span: token.span}
+        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span, id: parser_node_id(&state)}, span: token.span}
     }
     parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
-    ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
+    ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(&state)}, span: token.span}
 }
 // S31 only equality against `Val(name)` introduces a binding.
 // Other payload expressions construct a value. This restriction belongs to
@@ -818,7 +818,7 @@ fn parser_parse_map_pattern_key(state: &JetParserState, depth: Int) -> ParsedExp
     loop parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT {
         parser_bump(&state)
         member :: parser_bump(&state)
-        key = ParsedExpr{expr: Expr.Field{base: key.expr, member: parser_value(state, member), span: member.span}, span: parser_cover(key.span, member.span)}
+        key = ParsedExpr{expr: Expr.Field{base: key.expr, member: parser_value(state, member), span: member.span, id: parser_node_id(&state)}, span: parser_cover(key.span, member.span)}
     }
     key
 }

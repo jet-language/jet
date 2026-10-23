@@ -38,12 +38,12 @@ fn sema_units_dimension_lookup(visible: SemaUnitDimensionVisibility, known: [Int
 }
 fn sema_units_dimension_expression(expression: Expr, visible: SemaUnitDimensionVisibility, known: [Int:Dimension], ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
     if expression == {
-        .Ident(name, _) -> sema_units_dimension_lookup(visible, known, None, name, ambiguity_only)
-        .Field(base, name, _) -> if base == {
-            .Ident(alias, _) -> sema_units_dimension_lookup(visible, known, Val(alias), name, ambiguity_only)
+        .Ident(name, _, _) -> sema_units_dimension_lookup(visible, known, None, name, ambiguity_only)
+        .Field(base, name, _, _) -> if base == {
+            .Ident(alias, _, _) -> sema_units_dimension_lookup(visible, known, Val(alias), name, ambiguity_only)
             else -> SemaUnitDimensionLookup.Missing
         }
-        .Binary(op, left, right, _) -> {
+        .Binary(op, left, right, _, _) -> {
             if op != BinOp.Mul && op != BinOp.Div -> return SemaUnitDimensionLookup.Missing
             left_value :: sema_units_dimension_expression(left, visible, known, ambiguity_only)
             right_value :: sema_units_dimension_expression(right, visible, known, ambiguity_only)
@@ -64,8 +64,8 @@ fn sema_units_dimension_expression(expression: Expr, visible: SemaUnitDimensionV
 // binary operator; the resolver itself admits only multiplication/division.
 fn sema_units_dimension_dependencies(expression: Expr, names: &[String]) Never! {
     if expression == {
-        .Ident(name, _) -> &names.push(name)
-        .Binary(_, left, right, _) -> {
+        .Ident(name, _, _) -> &names.push(name)
+        .Binary(_, left, right, _, _) -> {
             sema_units_dimension_dependencies(left, &names)
             sema_units_dimension_dependencies(right, &names)
         }
@@ -78,11 +78,11 @@ fn sema_units_dimension_dependencies(expression: Expr, names: &[String]) Never! 
 // is not a valid dimension expression. Unqualified names never visit a field.
 fn sema_units_dimension_aliases(expression: Expr, aliases: &[String:Bool]) Never! {
     if expression == {
-        .Field(base, _, _) -> {
-            if base == .Ident(alias, _) -> aliases[alias] = true
+        .Field(base, _, _, _) -> {
+            if base == .Ident(alias, _, _) -> aliases[alias] = true
             sema_units_dimension_aliases(base, &aliases)
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             sema_units_dimension_aliases(left, &aliases)
             sema_units_dimension_aliases(right, &aliases)
         }
@@ -92,7 +92,7 @@ fn sema_units_dimension_aliases(expression: Expr, aliases: &[String:Bool]) Never
 
 fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibility, dependencies: &[Int:Bool], aliases: &[String:Bool]) Never! {
     if expression == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             target :: sema_units_dimension_target(visible, None, name)
             if target.target == .Val(index) -> dependencies[index] = true
             if visible.local.get(name) == None {
@@ -106,14 +106,14 @@ fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibi
                 }
             }
         }
-        .Field(base, name, _) -> {
-            if base == .Ident(alias, _) {
+        .Field(base, name, _, _) -> {
+            if base == .Ident(alias, _, _) {
                 aliases[alias] = true
                 if visible.qualified.get("{alias}|{name}") == .Val(index) -> dependencies[index] = true
             }
             // A field base is not an unqualified dimension read.
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             sema_units_dimension_reads(left, visible, &dependencies, &aliases)
             sema_units_dimension_reads(right, visible, &dependencies, &aliases)
         }

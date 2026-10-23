@@ -21,8 +21,18 @@ use jet_sema.[
     sema_scope_environment_enter_probe_module, sema_scope_environment_init, sema_scope_init,
 ]
 use jet_foundation.[
-    Diagnostic, Expr, Span, SymbolKind, TComptimeValue, TConstantDef, TTypeDef, Type,
-    compiler_threads_single, jet_target_machine_hosted, symbol_id,
+    AST_NODE_GENERATED,
+    Diagnostic,
+    Expr,
+    Span,
+    SymbolKind,
+    TComptimeValue,
+    TConstantDef,
+    TTypeDef,
+    Type,
+    compiler_threads_single,
+    jet_target_machine_hosted,
+    symbol_id,
 ]
 use jet_parser.[parse_source]
 use jet_driver.[
@@ -85,7 +95,7 @@ fn body_index_source_identity() {
     other_scopes :: body_index_scopes("function::two")
     source :: Span{start: 10, end: 20}
     site :: Span{start: 3, end: 7}
-    expression :: Expr.Int{value: 1, span: source, width: None, raw: None}
+    expression :: Expr.Int{value: 1, span: source, width: None, raw: None, id: AST_NODE_GENERATED}
     context := sema_check_context_init()
     _ := sema_comptime_body_capture(&context, environment, program, scopes, "base", expression, Type.Int, source, site)
     environment.module_identity = "mod::two"
@@ -109,9 +119,9 @@ fn body_index_identity_and_lifecycle() {
     site :: Span{start: 3, end: 7}
     context := sema_check_context_init()
     body_index_query(context, "mod::one", "function::one", source, site)
-    first :: sema_comptime_body_capture(&context, environment, program, scopes, "original", Expr.Int{value: 7, span: source, width: None, raw: Val("7")}, Type.Int, source, site)
+    first :: sema_comptime_body_capture(&context, environment, program, scopes, "original", Expr.Int{value: 7, span: source, width: None, raw: Val("7"), id: AST_NODE_GENERATED}, Type.Int, source, site)
     environment.source_file = "replacement.jet"
-    duplicate :: sema_comptime_body_capture(&context, environment, program, scopes, "different", Expr.Bool{value: true, span: source}, Type.Bool, source, site)
+    duplicate :: sema_comptime_body_capture(&context, environment, program, scopes, "different", Expr.Bool{value: true, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(duplicate == first && context.comptime_body_sources.len() == 1, "duplicate capture returns the entire first row, including file/name/expression/type")
     variants :: [SemaComptimeBodyValue]{
         body_index_value("mod::one", "function::one", source, site, 1),
@@ -167,30 +177,30 @@ fn body_index_identity_and_lifecycle() {
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((repeated)), "an equal key with a different module is not a second match")
     mark :: sema_check_context_mark(&context)
     sema_comptime_body_source_append(&context, first)
-    _ := sema_comptime_body_capture(&context, environment, program, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None}, Type.Int, source, Span{start: 30, end: 31})
+    _ := sema_comptime_body_capture(&context, environment, program, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, Span{start: 30, end: 31})
     sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, wrong_module, repeated})
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "a probe may append a second matching value")
     sema_check_context_rollback(&context, mark)
     body_index_require(context.comptime_body_sources.len() == 1, "rollback restores the canonical source prefix")
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((repeated)), "rollback rebuilds value uniqueness from the retained rows")
-    retained :: sema_comptime_body_capture(&context, environment, program, scopes, "after rollback", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
+    retained :: sema_comptime_body_capture(&context, environment, program, scopes, "after rollback", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(retained == first && context.comptime_body_sources.len() == 1, "duplicate pop retains the first source index")
     child := sema_check_context_snapshot(context)
     start :: child.comptime_body_sources.len()
-    added :: sema_comptime_body_capture(&child, environment, program, scopes, "lambda", Expr.Int{value: 9, span: source, width: None, raw: None}, Type.Int, source, Span{start: 40, end: 41})
+    added :: sema_comptime_body_capture(&child, environment, program, scopes, "lambda", Expr.Int{value: 9, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, Span{start: 40, end: 41})
     sema_expression_lambda_merge_context_facts(&child, &context, 0, 0, 0, start, 0, 0, 0)
-    merged :: sema_comptime_body_capture(&context, environment, program, scopes, "merged duplicate", Expr.Bool{value: false, span: source}, Type.Bool, source, Span{start: 40, end: 41})
+    merged :: sema_comptime_body_capture(&context, environment, program, scopes, "merged duplicate", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, Span{start: 40, end: 41})
     body_index_require(merged == added && context.comptime_body_sources.len() == 2 && child.comptime_body_sources.len() == 2, "real lambda merge indexes its appended rows without changing snapshot identity")
     replacement_parent := sema_check_context_init()
     sema_comptime_body_source_append(&replacement_parent, added)
     sema_comptime_body_source_append(&replacement_parent, first)
     child = sema_check_context_snapshot(replacement_parent)
     body_index_require(child.comptime_body_sources[0] == added && context.comptime_body_sources[0] == first, "same-length snapshot replacement preserves source order and parent independence")
-    reordered :: sema_comptime_body_capture(&child, environment, program, scopes, "reordered", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
+    reordered :: sema_comptime_body_capture(&child, environment, program, scopes, "reordered", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(reordered == first && child.comptime_body_sources.len() == 2, "snapshot source replacement rebuilds row positions at the same length")
     sema_comptime_body_sources_truncate(&child, 0)
     sema_comptime_body_values_replace(&child, [SemaComptimeBodyValue]{})
-    _ := sema_comptime_body_capture(&child, environment, program, scopes, "fresh", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
+    _ := sema_comptime_body_capture(&child, environment, program, scopes, "fresh", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(child.comptime_body_sources.len() == 1 && child.comptime_body_sources[0].name == "fresh" && context.comptime_body_sources.len() == 2, "reset and recapture do not use a stale row or alter the parent")
     body_index_query(child, "mod::one", "function::one", source, site)
     body_index_query(context, "mod::one", "function::one", source, site)
@@ -208,13 +218,13 @@ fn body_index_size(size: Int) {
     loop index in 0..<size {
         source :: Span{start: index * 4, end: index * 4 + 2}
         site :: Span{start: index * 4 + 2, end: index * 4 + 3}
-        _ := sema_comptime_body_capture(&context, environment, program, scopes, "row_{index}", Expr.Int{value: index, span: source, width: None, raw: None}, Type.Int, source, site)
+        _ := sema_comptime_body_capture(&context, environment, program, scopes, "row_{index}", Expr.Int{value: index, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, site)
         &values.push(body_index_value("scale::module", "scale::function", source, site, index))
     }
     loop index in 0..<size {
         source :: Span{start: index * 4, end: index * 4 + 2}
         site :: Span{start: index * 4 + 2, end: index * 4 + 3}
-        existing :: sema_comptime_body_capture(&context, environment, program, scopes, "duplicate", Expr.Bool{value: true, span: source}, Type.Bool, source, site)
+        existing :: sema_comptime_body_capture(&context, environment, program, scopes, "duplicate", Expr.Bool{value: true, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
         body_index_require(existing.name == "row_{index}" && context.comptime_body_sources[index].name == existing.name, "scaled duplicate capture retains source order and the first payload")
     }
     body_index_require(context.comptime_body_sources.len() == size, "scaled unique source cardinality")

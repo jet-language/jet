@@ -58,7 +58,7 @@ fn envmodel_unparen(expr: Expr) -> Expr Never! {
     current := expr
     loop {
         if current == {
-            .Paren(inner, _) -> current = inner
+            .Paren(inner, _, _) -> current = inner
             else -> { return current }
         }
     }
@@ -80,23 +80,23 @@ fn envmodel_dependencies_for_expression(expr: Expr, field_names: [String]) -> [S
 fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
     envmodel_check_build_io(expr)
     if envmodel_unparen(expr) == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             if globals.get(name) == {
                 .Val(value) -> { return Ok(value) }
                 .None -> {}
             }
         }
-        .ListLit(values, _) -> {
+        .ListLit(values, _, _) -> {
             items := [CtValue]{}
             loop value in values -> &items.push(envmodel_evaluate_expression(value, globals, scope))
             return Ok(CtValue.List{values: items})
         }
-        .StructLit(type_name, _, _, _, fields, _, _) -> {
+        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
             loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_expression(field.value, globals, scope)})
             return Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
-        .EnumLit(type_name, variant, _, args, _, _) -> {
+        .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
@@ -106,7 +106,7 @@ fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scope: M
             }
             return Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
         }
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             lowered := [CtMapEntry]{}
             loop entry in entries {
                 key_value :: envmodel_evaluate_expression(entry.key, globals, scope)

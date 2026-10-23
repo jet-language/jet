@@ -36,13 +36,13 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 #Test("value_block_accepts_control_statement_before_tail") {
     program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n        1\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, else_value, _) -> {
+        .If(_, then_body, then_value, _, else_value, _, _) -> {
             assert(then_body.len() == 1)
             assert(if then_body[0] == { .Loop(_, _, _, _) -> true
  else -> false })
-            assert(if then_value == { .Int(value, _, _, _) -> value == 1
+            assert(if then_value == { .Int(value, _, _, _, _) -> value == 1
  else -> false })
-            assert(if else_value == { .Int(value, _, _, _) -> value == 0
+            assert(if else_value == { .Int(value, _, _, _, _) -> value == 0
  else -> false })
             true
         }
@@ -53,13 +53,13 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 #Test("value_block_accepts_multiple_nested_control_statements_before_tail") {
     program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if fallback {{\n            notify()\n        }}\n        7\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 2)
             assert(if then_body[0] == { .Loop(_, _, _, _) -> true
  else -> false })
             assert(if then_body[1] == { .Switch(_, arms, _, _) -> arms.len() == 1
  else -> false })
-            assert(if then_value == { .Int(value, _, _, _) -> value == 7
+            assert(if then_value == { .Int(value, _, _, _, _) -> value == 7
  else -> false })
             true
         }
@@ -77,9 +77,9 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     assert(e0114, "expected E0114 for a non-value tail")
     loop_value :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(loop_value, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.is_empty())
-            if then_value == { .CallValue(callee, _, _) -> if callee == { .Lambda(lambda) -> lambda.meta.result_loop
+            if then_value == { .CallValue(callee, _, _, _) -> if callee == { .Lambda(lambda) -> lambda.meta.result_loop
  else -> false }
  else -> false }
         }
@@ -87,11 +87,11 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     }, "loop branch must retain its result-loop lambda")
     program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        return\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 1)
             assert(if then_body[0] == { .Return(value, _) -> value == None
  else -> false })
-            if then_value == { .NoElse(_) -> true
+            if then_value == { .NoElse(_, _) -> true
  else -> false }
         }
         else -> false
@@ -114,11 +114,11 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 #Test("result_handler_value_block_accepts_control_statement_before_tail") {
     program :: value_block_parsed("\nfn run() {{\n    result :: fetch() ? ok -> {{\n        loop {{\n            break\n        }}\n        ok\n    }}\n    ! err -> err\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 1)
             assert(if then_body[0] == { .Loop(_, _, _, _) -> true
  else -> false })
-            if then_value == { .Ident(name, _) -> name == "ok"
+            if then_value == { .Ident(name, _, _) -> name == "ok"
  else -> false }
         }
         else -> false
@@ -135,7 +135,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
  else -> false })
             assert(if function.body[0] == {
                 .Val(result) -> if result.init == {
-                    .OrFallback(_, fallback, _, _) -> if fallback == {
+                    .OrFallback(_, fallback, _, _, _) -> if fallback == {
                         .Block(body, value, _) -> {
                             assert(value == None)
                             assert(body.len() == 5)
@@ -148,7 +148,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
  else -> false })
                             assert(if body[2] == { .Val(binding) -> binding.name == "bound"
  else -> false })
-                            assert(if body[3] == { .Expr(expr) -> if expr == { .Call(call) -> call.name == "notify"
+                            assert(if body[3] == { .Expr(expr) -> if expr == { .Call(call, _) -> call.name == "notify"
  else -> false }
  else -> false })
                             assert(if body[4] == { .Return(returned, _) -> returned == None

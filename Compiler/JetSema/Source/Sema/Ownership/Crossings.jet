@@ -1,6 +1,7 @@
 // One recursive ownership proof for values crossing tasks, channels, and
 // worker boundaries. A missing nominal is not evidence of thread safety.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     Diagnostic,
     Expr,
     Span,
@@ -320,7 +321,7 @@ fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: Se
     if index == .Val(binding_index) {
         binding :: scopes.bindings[binding_index]
         if binding.string_view -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
-        expr := Expr.Ident{name: name, span: binding.symbol.span}
+        expr := Expr.Ident{name: name, span: binding.symbol.span, id: AST_NODE_GENERATED}
         loop fact_index in 0..<state.views.len() {
             if state.views[fact_index].active && sema_ownership_view_fact_matches_expr(state.views[fact_index], expr, scopes) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
         }
@@ -333,7 +334,7 @@ fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: Se
  
 fn sema_ownership_crossing_problem_for_expr(expr: Expr, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
     if expr == {
-        .Ident(name, span) -> {
+        .Ident(name, span, _) -> {
             if sema_scope_resolve_index_at(scopes, name, span) != None -> return sema_ownership_crossing_problem_for_name(name, ty, crossing, closure_taken, environment, program, scopes, state, context)
         }
         else -> {}

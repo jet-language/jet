@@ -194,18 +194,18 @@ fn jet_cli_sem_params(params: [Param], source: String, skip_self: Bool) -> [JetC
 // `#Policy` argument.
 fn jet_cli_sem_policy_argument(expr: Expr) -> String {
     if expr == {
-        .Ident(name, _) -> name
-        .Int(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> if value -> "true" else -> "false"
-        .Str(parts, _) -> {
+        .Ident(name, _, _) -> name
+        .Int(value, _, _, raw, _) -> raw ?? "{value}"
+        .Bool(value, _, _) -> if value -> "true" else -> "false"
+        .Str(parts, _, _) -> {
             text := ""
             loop part in parts {
                 if part == .Lit(value) -> text = "{text}{value}"
             }
             "\"{text}\""
         }
-        .Field(base, member, _) -> "{jet_cli_sem_policy_argument(base)}.{member}"
-        .Call(call) -> {
+        .Field(base, member, _, _) -> "{jet_cli_sem_policy_argument(base)}.{member}"
+        .Call(call, _) -> {
             arguments :: loop argument in call.args -> jet_cli_sem_policy_argument(argument.expr)
             "{call.name}({arguments.join(", ")})"
         }
@@ -220,7 +220,7 @@ fn jet_cli_sem_callable_policies(markers: [Marker]) -> [CallablePolicy] {
         if marker.name != "Policy" -> next
         loop argument in marker.args {
             if argument == .Expr(value) {
-                if value == .Call(call) {
+                if value == .Call(call, _) {
                     arguments :: loop call_argument in call.args -> jet_cli_sem_policy_argument(call_argument.expr)
                     &policies.push(CallablePolicy{name: call.name, arguments: arguments})
                 }
@@ -405,8 +405,8 @@ fn jet_cli_sem_declaration_ref(name: String, span: Span, ctx: JetCLISemWalk, mod
 
 fn jet_cli_sem_state_marker_path(expr: Expr) -> NamedSpan? {
     if expr == {
-        .Ident(name, span) -> return Val(NamedSpan{name: name, span: span})
-        .Field(base, member, span) -> {
+        .Ident(name, span, _) -> return Val(NamedSpan{name: name, span: span})
+        .Field(base, member, span, _) -> {
             inner :: jet_cli_sem_state_marker_path(base) ?? return None
             return Val(NamedSpan{name: "{inner.name}.{member}", span: span})
         }
@@ -623,11 +623,11 @@ fn jet_cli_sem_stmt_head(stmt: Stmt) -> NamedSpan {
 // argument (plus the closing parenthesis).
 fn jet_cli_sem_structural_expr_span(expr: Expr) -> Span {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             end :: if call.args.len() == 0 -> call.name_span.end + 2 else -> jet_cli_sem_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
             return Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args) -> {
+        .MethodCall(receiver, _, method_span, _, _, args, _) -> {
             end :: if args.len() == 0 -> method_span.end + 2 else -> jet_cli_sem_structural_expr_span(args[args.len() - 1].expr).end + 1
             return Span{start: jet_cli_sem_structural_expr_span(receiver).start, end: end}
         }
@@ -648,7 +648,7 @@ fn jet_cli_sem_allow_markers(markers: [Marker], site: String, db: &JetCLISemDB, 
         if marker.name != "allow" -> next
         loop argument in marker.args {
             if argument == .Expr(value) {
-                if value == .Ident(lint_name, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: lint_name, module_path: ctx.module_path, span: marker.span})
+                if value == .Ident(lint_name, _, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: lint_name, module_path: ctx.module_path, span: marker.span})
             }
         }
     }
@@ -1132,7 +1132,7 @@ fn jet_cli_sem_method_call(receiver: Expr, method: String, method_span: Span, ar
     if method == "drop" {
         reason := ""
         if args.len() > 0 {
-            if args[0].expr == .Str(parts, _) {
+            if args[0].expr == .Str(parts, _, _) {
                 if parts.len() == 1 {
                     if parts[0] == .Lit(text) -> reason = text
                 }
@@ -1147,9 +1147,9 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
     structural_id :: jet_cli_sem_record_node(&db, &ctx, "expr", "expr", jet_cli_sem_structural_expr_span(expr))
     jet_cli_sem_push_parent(&ctx, structural_id)
     if expr == {
-        .PtrFromAddr(_, _, _, addr, _) -> jet_cli_sem_scalar("address", addr, &db, &ctx, modules)
-        .Ident(name, span) -> &db.refs.push(jet_cli_sem_scoped_ref(name, span, ctx))
-        .Call(call) -> {
+        .PtrFromAddr(_, _, _, addr, _, _) -> jet_cli_sem_scalar("address", addr, &db, &ctx, modules)
+        .Ident(name, span, _) -> &db.refs.push(jet_cli_sem_scoped_ref(name, span, ctx))
+        .Call(call, _) -> {
             loop argument in call.args {
                 fact :: argument.flags.arithmetic_policy ?? next
                 operation :: jet_cli_sem_arithmetic_operation(fact) ?? next
@@ -1159,28 +1159,28 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             &db.refs.push(jet_cli_sem_scoped_ref(call.name, call.name_span, ctx))
             jet_cli_sem_args(call.args, &db, &ctx, modules)
         }
-        .MethodCall(receiver, method, method_span, _, _, args) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
-        .OptMethodCall(receiver, method, method_span, _, args, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
-        .Field(base, member, span) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .OptMethodCall(receiver, method, method_span, _, args, _, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .Field(base, member, span, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             &db.refs.push(jet_cli_sem_scoped_ref(member, span, ctx))
         }
-        .OptField(base, member, member_span, _, _) -> {
+        .OptField(base, member, member_span, _, _, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             &db.refs.push(jet_cli_sem_scoped_ref(member, member_span, ctx))
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             jet_cli_sem_scalar("lhs", left, &db, &ctx, modules)
             jet_cli_sem_scalar("rhs", right, &db, &ctx, modules)
         }
-        .CompareChain(operands, _, _, _) -> jet_cli_sem_list("operands", operands, &db, &ctx, modules)
-        .Unary(_, operand, _) -> jet_cli_sem_scalar("operand", operand, &db, &ctx, modules)
-        .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) -> jet_cli_sem_scalar("operand", value, &db, &ctx, modules)
-        .Index(base, index, _, _) -> {
+        .CompareChain(operands, _, _, _, _) -> jet_cli_sem_list("operands", operands, &db, &ctx, modules)
+        .Unary(_, operand, _, _) -> jet_cli_sem_scalar("operand", operand, &db, &ctx, modules)
+        .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) -> jet_cli_sem_scalar("operand", value, &db, &ctx, modules)
+        .Index(base, index, _, _, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             jet_cli_sem_scalar("index", index, &db, &ctx, modules)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             if range == .Val(value) {
                 jet_cli_sem_scalar("range", value, &db, &ctx, modules)
@@ -1189,35 +1189,35 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 jet_cli_sem_scalar("end", end, &db, &ctx, modules)
             }
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             jet_cli_sem_scalar("start", start, &db, &ctx, modules)
             jet_cli_sem_scalar("end", end, &db, &ctx, modules)
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             interpolations := [Expr]{}
             loop part in parts {
                 if part == .Interp(inner, _) -> &interpolations.push(inner)
             }
             jet_cli_sem_list("interpolations", interpolations, &db, &ctx, modules)
         }
-        .ListLit(elements, _) -> jet_cli_sem_list("items", elements, &db, &ctx, modules)
-        .MemberSpread(base, _, _) -> jet_cli_sem_scalar("base", base, &db, &ctx, modules)
-        .Spread(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
-        .MapLit(entries, _) -> {
+        .ListLit(elements, _, _) -> jet_cli_sem_list("items", elements, &db, &ctx, modules)
+        .MemberSpread(base, _, _, _) -> jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+        .Spread(value, _, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .MapLit(entries, _, _) -> {
             keys :: loop entry in entries -> entry.key
             values :: loop entry in entries -> entry.value
             jet_cli_sem_list("keys", keys, &db, &ctx, modules)
             jet_cli_sem_list("values", values, &db, &ctx, modules)
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             values :: loop field in fields -> field.value
             jet_cli_sem_list("fields", values, &db, &ctx, modules)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             values :: loop field in fields -> field.value
             jet_cli_sem_list("fields", values, &db, &ctx, modules)
         }
-        .TypedLit(_, body, _) -> {
+        .TypedLit(_, body, _, _) -> {
             values :: if body == {
                 .Fields(fields) -> loop field in fields -> field.value
                 .Elements(elements) -> elements
@@ -1234,19 +1234,19 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             }
             jet_cli_sem_list("body", values, &db, &ctx, modules)
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             values :: loop argument in args -> if argument == {
                 .Positional(value) -> value
                 .Named(_, value) -> value
             }
             jet_cli_sem_list("args", values, &db, &ctx, modules)
         }
-        .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
-        .Try(value, _, _, note) -> {
+        .Tainted(value, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .Try(value, _, _, note, _) -> {
             jet_cli_sem_scalar("value", value, &db, &ctx, modules)
             if note == .Val(context) -> jet_cli_sem_scalar("note", context, &db, &ctx, modules)
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             jet_cli_sem_scalar("value", value, &db, &ctx, modules)
             if fallback == {
                 .Value(inner) -> jet_cli_sem_scalar("fallback", inner, &db, &ctx, modules)
@@ -1263,8 +1263,8 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 .BreakLabel(name, span) | .ContinueLabel(name, span) -> jet_cli_sem_label_ref(name, span, &db, ctx)
             }
         }
-        .PatternTest(subject, _, _) -> jet_cli_sem_scalar("subject", subject, &db, &ctx, modules)
-        .Lambda(lambda) -> {
+        .PatternTest(subject, _, _, _) -> jet_cli_sem_scalar("subject", subject, &db, &ctx, modules)
+        .Lambda(lambda, _) -> {
             loop parameter in lambda.params {
                 &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_local_identity(jet_cli_sem_active_scope(ctx), "param", parameter.name), parameter.name, parameter.name, parameter.name_span, JetCLISemKind.Param{ty: parameter.ty ?? Type.Int}))
             }
@@ -1273,22 +1273,22 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 .Block(stmts) -> jet_cli_sem_block_body("body", stmts, &db, &ctx, modules)
             }
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             jet_cli_sem_scalar("callee", callee, &db, &ctx, modules)
             jet_cli_sem_args(args, &db, &ctx, modules)
         }
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             jet_cli_sem_scalar("condition", cond, &db, &ctx, modules)
             jet_cli_sem_block_body("then_body", then_body, &db, &ctx, modules)
             jet_cli_sem_scalar("then_value", then_value, &db, &ctx, modules)
             jet_cli_sem_block_body("else_body", else_body, &db, &ctx, modules)
             jet_cli_sem_scalar("else_value", else_value, &db, &ctx, modules)
         }
-        .ComptimeName(name, span, _) -> {
+        .ComptimeName(name, span, _, _) -> {
             nul :: String.from_bytes([U8]{0}) ?? ""
             if name.starts_with("{nul}jet.fact.") && jet_cli_sem_source_text(ctx.source, span) == "$origin" -> &db.refs.push(jet_cli_sem_scoped_ref("$origin", span, ctx))
         }
-        .Paren(value, _) -> jet_cli_sem_scalar("inner", value, &db, &ctx, modules)
+        .Paren(value, _, _) -> jet_cli_sem_scalar("inner", value, &db, &ctx, modules)
         else -> {}
     }
     jet_cli_sem_pop_parent(&ctx, structural_id)

@@ -46,7 +46,7 @@ fn sema_string_view_copies_marker(marker: Marker) -> Bool Never! {
         if marker.args[index] == {
             .Expr(value) -> {
                 if value == {
-                    .EnumLit(type_name, variant, _, args, _, _) -> {
+                    .EnumLit(type_name, variant, _, args, _, _, _) -> {
                         if type_name == "" && variant == "Explicit" && args.len() == 0 -> return true
                     }
                     else -> {}
@@ -85,11 +85,11 @@ fn sema_string_view_push_copies_policy(table: &SemaScopeTable, declarations: [Po
 fn sema_string_view_call_sources(init: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
-        .MethodCall(receiver, method, _, _, _, args) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
             arity_ok :: (method == "trim" && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1)
             if !arity_ok -> return none
             if receiver == {
-                .Ident(name, _) -> {
+                .Ident(name, _, _) -> {
                     symbol :: sema_scope_resolve(scopes, name) ?? return none
                     if symbol.kind != SymbolKind.Local && symbol.kind != SymbolKind.Parameter -> return none
                     if symbol.ty != (Val(Type.String)) -> return none
@@ -136,7 +136,7 @@ fn sema_string_view_binding(scopes: SemaScopeTable, name: String) -> Bool Never!
 fn sema_string_view_exempt_receiver(receiver: Expr, method: String, scopes: SemaScopeTable) -> Bool Never! {
     if method != "trim" && method != "after" && method != "before" -> return false
     if receiver == {
-        .Ident(name, _) -> sema_string_view_binding(scopes, name)
+        .Ident(name, _, _) -> sema_string_view_binding(scopes, name)
         else -> false
     }
 }
@@ -187,7 +187,7 @@ fn sema_string_view_materialize(name: String, span: Span, expected: Type?, envir
 fn sema_string_view_owning_read(value: Expr, destination: Type, scopes: SemaScopeTable) -> Bool Never! {
     if scopes.copies_explicit || sema_expr_unwrap_tag(destination) != Type.String -> return false
     if value == {
-        .Ident(name, _) -> sema_string_view_binding(scopes, name)
+        .Ident(name, _, _) -> sema_string_view_binding(scopes, name)
         else -> false
     }
 }
@@ -229,7 +229,7 @@ fn sema_string_view_check_field(value: Expr, field_ty: Type, environment: SemaSc
     if checked.ty != Type.String -> return Val(checked)
     span :: expr_span(value)
     view_name := ""
-    if value == .Ident(name, _) {
+    if value == .Ident(name, _, _) {
         if sema_string_view_binding(scopes, name) -> view_name = name
     }
     if view_name != "" {
@@ -254,7 +254,7 @@ fn sema_string_view_return_boundary(span: Span, diagnostics: &[Diagnostic]) {
 // binding, or a `trim`/`after`/`before` call on a `String` name, as the
 // view itself.
 fn sema_string_view_return_source(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
-    if value == .Ident(name, _) {
+    if value == .Ident(name, _, _) {
         if sema_string_view_binding(scopes, name) -> return true
     }
     sema_string_view_call_sources(value, scopes, &state).len() > 0
@@ -280,7 +280,7 @@ fn sema_string_view_return_value(value: Expr, success: Type, environment: SemaSc
 fn sema_string_view_record_return(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     span :: expr_span(value)
     places := [SemaOwnershipPlace]{}
-    if value == .Ident(name, name_span) {
+    if value == .Ident(name, name_span, _) {
         if !sema_string_view_binding(scopes, name) {
             sema_string_view_return_boundary(span, &diagnostics)
             return false

@@ -22,8 +22,8 @@ use jet_foundation.[
 
 fn sema_call_value_root_name(callee: Expr) -> String? {
     if callee == {
-        .Ident(name, _) -> Val(name)
-        .Paren(value, _) -> sema_call_value_root_name(value)
+        .Ident(name, _, _) -> Val(name)
+        .Paren(value, _, _) -> sema_call_value_root_name(value)
         else -> None
     }
 }
@@ -154,7 +154,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
 
 fn sema_call_value_is_parameter(callee: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if callee == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             symbol :: sema_scope_resolve(scopes, name) ?? return false
             symbol.kind == SymbolKind.Parameter
         }
@@ -164,12 +164,12 @@ fn sema_call_value_is_parameter(callee: Expr, scopes: SemaScopeTable) -> Bool Ne
 
 fn sema_call_value_is_declaration(callee: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if callee == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             symbol :: sema_scope_resolve(scopes, name) ?? return false
             symbol.kind == SymbolKind.Function
         }
-        .Paren(value, _) -> sema_call_value_is_declaration(value, scopes)
-        .If(_, then_body, then_value, else_body, else_value, _) -> then_body.len() == 0 && else_body.len() == 0 && sema_call_value_is_declaration(then_value, scopes) && sema_call_value_is_declaration(else_value, scopes)
+        .Paren(value, _, _) -> sema_call_value_is_declaration(value, scopes)
+        .If(_, then_body, then_value, else_body, else_value, _, _) -> then_body.len() == 0 && else_body.len() == 0 && sema_call_value_is_declaration(then_value, scopes) && sema_call_value_is_declaration(else_value, scopes)
         else -> false
     }
 }
@@ -214,14 +214,14 @@ fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, envi
 fn sema_call_value_is_inline_loop(callee: Expr, args: [CallArg]) -> Bool Never! {
     if args.len() != 0 -> return false
     if callee == {
-        .Lambda(lambda) -> lambda.params.len() == 0 && (lambda.meta.collecting_loop || lambda.meta.result_loop)
+        .Lambda(lambda, _) -> lambda.params.len() == 0 && (lambda.meta.collecting_loop || lambda.meta.result_loop)
         else -> false
     }
 }
 
 fn sema_call_check_value_owned(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     if sema_call_value_is_inline_loop(callee, args) {
-        if callee == .Lambda(lambda) -> return sema_call_value_inline_loop(lambda, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if callee == .Lambda(lambda, _) -> return sema_call_value_inline_loop(lambda, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     callee_value :: sema_check_expression(callee, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     signature :: callee_value.ty

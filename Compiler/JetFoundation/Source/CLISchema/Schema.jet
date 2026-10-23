@@ -260,15 +260,15 @@ fn cli_schema_job_argument(param: Param) -> JobArgumentSchema Never! {
 }
 fn cli_schema_job_default(expression: Expr) -> String? Never! {
     if expression == {
-        .Paren(inner, _) -> cli_schema_job_default(inner)
-        .Int(value, _, _, _) -> Val("{value}")
-        .Float(value, _, is_f32, _) -> {
+        .Paren(inner, _, _) -> cli_schema_job_default(inner)
+        .Int(value, _, _, _, _) -> Val("{value}")
+        .Float(value, _, is_f32, _, _) -> {
             // The typed constructor performs the actual width conversion;
             // widening a Float carrier tagged F32 would lose its display law.
             if is_f32 -> Val("{F32{value}}") else -> Val("{value}")
         }
-        .Bool(value, _) -> Val(if value -> "true" else -> "false")
-        .Str(parts, _) -> {
+        .Bool(value, _, _) -> Val(if value -> "true" else -> "false")
+        .Str(parts, _, _) -> {
             if parts.len() == 1 {
                 if parts[0] == .Lit(text) -> return Val(text)
             }
@@ -282,7 +282,7 @@ fn cli_schema_job_doc(function: Func) -> String? Never! {
         if marker.name != "Doc" -> next
         if marker.args.len() == 0 -> return None
         if marker.args[0] == .Expr(value) {
-            if value == .Str(parts, _) {
+            if value == .Str(parts, _, _) {
                 if parts.len() == 1 {
                     if parts[0] == .Lit(text) -> return Val(text)
                 }

@@ -645,7 +645,7 @@ fn sema_function_memory_type_may_own_heap(ty: Type) -> Bool Never! {
 }
 
 fn sema_function_memory_expr_may_own_heap(expression: Expr) -> Bool Never! {
-    if expression == {.Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .UnitLit(_, _, _, _, _, _) | .ReduceMarker(_, _) -> false else -> true}
+    if expression == {.Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .ReduceMarker(_, _, _) -> false else -> true}
 }
 
 fn sema_function_memory_contains_name(names: [String], name: String) -> Bool Never! {
@@ -659,9 +659,9 @@ fn sema_function_memory_append_name_unique(names: &[String], name: String) Never
 
 fn sema_function_memory_returned_name(expression: Expr) -> String? {
     if expression == {
-        .Ident(name, _) -> Val(name)
-        .Paren(inner, _) -> sema_function_memory_returned_name(inner)
-        .Ok(inner, _) -> sema_function_memory_returned_name(inner)
+        .Ident(name, _, _) -> Val(name)
+        .Paren(inner, _, _) -> sema_function_memory_returned_name(inner)
+        .Ok(inner, _, _) -> sema_function_memory_returned_name(inner)
         else -> None
     }
 }
@@ -695,9 +695,9 @@ fn sema_function_memory_returned_names(stmts: [Stmt]) -> [String] Never! {
 
 fn sema_function_memory_called_function_name(expression: Expr) -> String? {
     if expression == {
-        .Paren(inner, _) -> sema_function_memory_called_function_name(inner)
-        .Call(call) -> Val(call.name)
-        .Try(inner, _, _, _) -> sema_function_memory_called_function_name(inner)
+        .Paren(inner, _, _) -> sema_function_memory_called_function_name(inner)
+        .Call(call, _) -> Val(call.name)
+        .Try(inner, _, _, _, _) -> sema_function_memory_called_function_name(inner)
         else -> None
     }
 }
@@ -705,33 +705,33 @@ fn sema_function_memory_called_function_name(expression: Expr) -> String? {
 fn sema_function_memory_lvalue_root(target: LValue) -> String? {
     if target == {
         .Local(name, _) -> Val(name)
-        .Field(base, _, _) | .Index(base, _, _, _) -> if base == {.Ident(name, _) -> Val(name) else -> None}
+        .Field(base, _, _) | .Index(base, _, _, _) -> if base == {.Ident(name, _, _) -> Val(name) else -> None}
     }
 }
 
 fn sema_function_memory_collect_expr_idents(expression: Expr, names: &[String]) {
     if expression == {
-        .Ident(name, _) -> sema_function_memory_append_name_unique(&names, name)
-        .Call(call) -> loop argument in call.args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
-        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+        .Ident(name, _, _) -> sema_function_memory_append_name_unique(&names, name)
+        .Call(call, _) -> loop argument in call.args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
             sema_function_memory_collect_expr_idents(receiver, &names)
             loop argument in args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             sema_function_memory_collect_expr_idents(left, &names)
             sema_function_memory_collect_expr_idents(right, &names)
         }
-        .Unary(_, inner, _) | .Field(inner, _, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) -> sema_function_memory_collect_expr_idents(inner, &names)
-        .Try(inner, _, _, note) -> {
+        .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> sema_function_memory_collect_expr_idents(inner, &names)
+        .Try(inner, _, _, note, _) -> {
             sema_function_memory_collect_expr_idents(inner, &names)
             if note == .Val(value) -> sema_function_memory_collect_expr_idents(value, &names)
         }
-        .OptField(base, _, _, _, _) -> sema_function_memory_collect_expr_idents(base, &names)
-        .Index(base, index, _, _) -> {
+        .OptField(base, _, _, _, _, _) -> sema_function_memory_collect_expr_idents(base, &names)
+        .Index(base, index, _, _, _) -> {
             sema_function_memory_collect_expr_idents(base, &names)
             sema_function_memory_collect_expr_idents(index, &names)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_function_memory_collect_expr_idents(base, &names)
             if range == {
                 .Val(value) -> {
@@ -743,15 +743,15 @@ fn sema_function_memory_collect_expr_idents(expression: Expr, names: &[String]) 
                 }
             }
         }
-        .ListLit(items, _) -> loop item in items -> sema_function_memory_collect_expr_idents(item, &names)
-        .MapLit(entries, _) -> loop entry in entries {
+        .ListLit(items, _, _) -> loop item in items -> sema_function_memory_collect_expr_idents(item, &names)
+        .MapLit(entries, _, _) -> loop entry in entries {
             sema_function_memory_collect_expr_idents(entry.key, &names)
             sema_function_memory_collect_expr_idents(entry.value, &names)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_function_memory_collect_expr_idents(field.value, &names)
-        .TypedLit(_, body, _) -> sema_function_memory_collect_typed_lit_idents(body, &names)
-        .TupleLit(fields, _, _) -> loop field in fields -> sema_function_memory_collect_expr_idents(field.value, &names)
-        .EnumLit(_, _, _, args, _, _) -> loop argument in args {
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_function_memory_collect_expr_idents(field.value, &names)
+        .TypedLit(_, body, _, _) -> sema_function_memory_collect_typed_lit_idents(body, &names)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_memory_collect_expr_idents(field.value, &names)
+        .EnumLit(_, _, _, args, _, _, _) -> loop argument in args {
             if argument == {
                 .Positional(value) -> {
                     sema_function_memory_collect_expr_idents(value, &names)
@@ -761,7 +761,7 @@ fn sema_function_memory_collect_expr_idents(expression: Expr, names: &[String]) 
                 }
             }
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == {
                     .Interp(value, _) -> {
@@ -814,16 +814,16 @@ fn sema_function_memory_add_promotion_edges(expression: Expr, slot: String, grou
 fn sema_function_memory_promotion_edges(expression: Expr) -> [GCPromotionEdge] {
     edges := [GCPromotionEdge]{}
     if expression == {
-        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_function_memory_add_promotion_edges(field.value, "field:{field.name}", 0, &edges)
-        .TypedLit(_, body, _) -> sema_function_memory_typed_lit_edges(body, &edges)
-        .ListLit(items, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_function_memory_add_promotion_edges(field.value, "field:{field.name}", 0, &edges)
+        .TypedLit(_, body, _, _) -> sema_function_memory_typed_lit_edges(body, &edges)
+        .ListLit(items, _, _) -> {
             index := 0
             loop item in items {
                 sema_function_memory_add_promotion_edges(item, "collection", index, &edges)
                 index += 1
             }
         }
-        .TupleLit(fields, _, _) -> loop field in fields -> sema_function_memory_add_promotion_edges(field.value, "field:{field.name}", 0, &edges)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_memory_add_promotion_edges(field.value, "field:{field.name}", 0, &edges)
         else -> sema_function_memory_add_promotion_edges(expression, "value", 0, &edges)
     }
     edges
@@ -874,8 +874,8 @@ fn sema_function_memory_sort_and_deduplicate_edges(edges: &[GCPromotionEdge]) Ne
 
 fn sema_function_memory_collection_len(expression: Expr) -> Int? {
     return if expression == {
-        .ListLit(items, _) -> Val(items.len())
-        .TypedLit(head, body, _) -> {
+        .ListLit(items, _, _) -> Val(items.len())
+        .TypedLit(head, body, _, _) -> {
             if body != TypedLitBody.Empty -> return None
             if head == .Val(ty) {
                 if ty == {

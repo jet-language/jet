@@ -692,68 +692,68 @@ fn sema_compiler_index_item_span(item: Item) -> Span Never! {
 
 fn sema_compiler_index_expr_shape(expression: Expr) -> String {
     index := if expression == {
-        .Str(_, _) -> 0
-        .StrMatchLit(_, _) -> 1
-        .BinMatchLit(_, _) -> 2
-        .Int(_, _, _, _) -> 3
-        .Float(_, _, _, _) -> 4
-        .Bool(_, _) -> 5
-        .Unit(_) -> 6
-        .Char(_, _) -> 7
-        .ListLit(_, _) -> 8
-        .MemberSpread(_, _, _) -> 9
-        .Spread(_, _) -> 10
-        .MapLit(_, _) -> 11
-        .Index(_, _, _, _) -> 12
-        .Slice(_, _, _, _, _) -> 13
-        .Range(_, _, _, _) -> 14
-        .Ident(_, _) -> 15
-        .Call(_) -> 16
-        .Unary(_, _, _) -> 17
-        .Binary(_, _, _, _) -> 18
-        .CompareChain(_, _, _, _) -> 19
-        .UnitLit(_, _, _, _, _, _) -> 20
-        .Deref(_, _) -> 21
-        .RawOf(_, _) -> 22
-        .Copy(_, _) -> 23
-        .Place(_, _, _) -> 24
-        .Field(_, _, _) -> 25
-        .OptField(_, _, _, _, _) -> 26
-        .MethodCall(_, _, _, _, _, _) -> 27
-        .StructLit(_, _, _, _, _, _, _) -> 28
-        .TypedLit(_, _, _) -> 29
-        .EnumLit(_, _, _, _, _, _) -> 30
-        .Tainted(_, _, _) -> 31
-        .Present(_, _) -> 32
-        .Absent(_) -> 33
-        .Todo(_, _) -> 34
-        .NoElse(_) -> 35
-        .ReduceMarker(_, _) -> 36
-        .PatternTest(_, _, _) -> 37
-        .Ok(_, _) -> 38
-        .Err(_, _) -> 39
-        .Try(_, _, _, _) -> 40
-        .OrFallback(_, _, _, _) -> 41
-        .If(_, _, _, _, _, _) -> 42
-        .TupleLit(_, _, _) -> 43
-        .Lambda(_) -> 44
-        .CallValue(_, _, _) -> 45
-        .PtrFromAddr(_, _, _, _, _) -> 46
-        .ComptimeName(_, _, _) -> 47
-        .Paren(_, _) -> 48
-        .OptMethodCall(_, _, _, _, _, _) -> 49
+        .Str(_, _, _) -> 0
+        .StrMatchLit(_, _, _) -> 1
+        .BinMatchLit(_, _, _) -> 2
+        .Int(_, _, _, _, _) -> 3
+        .Float(_, _, _, _, _) -> 4
+        .Bool(_, _, _) -> 5
+        .Unit(_, _) -> 6
+        .Char(_, _, _) -> 7
+        .ListLit(_, _, _) -> 8
+        .MemberSpread(_, _, _, _) -> 9
+        .Spread(_, _, _) -> 10
+        .MapLit(_, _, _) -> 11
+        .Index(_, _, _, _, _) -> 12
+        .Slice(_, _, _, _, _, _) -> 13
+        .Range(_, _, _, _, _) -> 14
+        .Ident(_, _, _) -> 15
+        .Call(_, _) -> 16
+        .Unary(_, _, _, _) -> 17
+        .Binary(_, _, _, _, _) -> 18
+        .CompareChain(_, _, _, _, _) -> 19
+        .UnitLit(_, _, _, _, _, _, _) -> 20
+        .Deref(_, _, _) -> 21
+        .RawOf(_, _, _) -> 22
+        .Copy(_, _, _) -> 23
+        .Place(_, _, _, _) -> 24
+        .Field(_, _, _, _) -> 25
+        .OptField(_, _, _, _, _, _) -> 26
+        .MethodCall(_, _, _, _, _, _, _) -> 27
+        .StructLit(_, _, _, _, _, _, _, _) -> 28
+        .TypedLit(_, _, _, _) -> 29
+        .EnumLit(_, _, _, _, _, _, _) -> 30
+        .Tainted(_, _, _, _) -> 31
+        .Present(_, _, _) -> 32
+        .Absent(_, _) -> 33
+        .Todo(_, _, _) -> 34
+        .NoElse(_, _) -> 35
+        .ReduceMarker(_, _, _) -> 36
+        .PatternTest(_, _, _, _) -> 37
+        .Ok(_, _, _) -> 38
+        .Err(_, _, _) -> 39
+        .Try(_, _, _, _, _) -> 40
+        .OrFallback(_, _, _, _, _) -> 41
+        .If(_, _, _, _, _, _, _) -> 42
+        .TupleLit(_, _, _, _) -> 43
+        .Lambda(_, _) -> 44
+        .CallValue(_, _, _, _) -> 45
+        .PtrFromAddr(_, _, _, _, _, _) -> 46
+        .ComptimeName(_, _, _, _) -> 47
+        .Paren(_, _, _) -> 48
+        .OptMethodCall(_, _, _, _, _, _, _) -> 49
     }
     "Discriminant({index})"
 }
 
 fn sema_compiler_index_expr_structural_span(expression: Expr) -> Span {
     if expression == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             end := call.name_span.end + 2
             if call.args.len() > 0 -> end = expr_span(call.args[call.args.len() - 1].expr).end + 1
             Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args) | .OptMethodCall(receiver, _, method_span, _, args, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args, _) | .OptMethodCall(receiver, _, method_span, _, args, _, _) -> {
             end := method_span.end + 2
             if args.len() > 0 -> end = expr_span(args[args.len() - 1].expr).end + 1
             Span{start: expr_span(receiver).start, end: end}
@@ -968,24 +968,24 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
     id :: sema_compiler_index_walk_node(&state, "expr", sema_compiler_index_expr_shape(expression), module_path, sema_compiler_index_expr_structural_span(expression)) ?? return
     &state.parents.push(id)
     if expression == {
-        .Call(call) -> sema_compiler_index_walk_call_args(&state, call.args, module_path)
-        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .Call(call, _) -> sema_compiler_index_walk_call_args(&state, call.args, module_path)
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "receiver", receiver, module_path)
             sema_compiler_index_walk_call_args(&state, args, module_path)
         }
-        .PtrFromAddr(_, _, _, address, _) -> sema_compiler_index_walk_expr_slot(&state, "address", address, module_path)
-        .Field(base, _, _) | .OptField(base, _, _, _, _) | .MemberSpread(base, _, _) -> sema_compiler_index_walk_expr_slot(&state, "base", base, module_path)
-        .Binary(_, left, right, _) -> {
+        .PtrFromAddr(_, _, _, address, _, _) -> sema_compiler_index_walk_expr_slot(&state, "address", address, module_path)
+        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .MemberSpread(base, _, _, _) -> sema_compiler_index_walk_expr_slot(&state, "base", base, module_path)
+        .Binary(_, left, right, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "lhs", left, module_path)
             sema_compiler_index_walk_expr_slot(&state, "rhs", right, module_path)
         }
-        .CompareChain(operands, _, _, _) -> sema_compiler_index_walk_expr_list(&state, "operands", operands, module_path)
-        .Unary(_, operand, _) | .Deref(operand, _) | .RawOf(operand, _) | .Copy(operand, _) | .Place(operand, _, _) -> sema_compiler_index_walk_expr_slot(&state, "operand", operand, module_path)
-        .Index(base, index, _, _) -> {
+        .CompareChain(operands, _, _, _, _) -> sema_compiler_index_walk_expr_list(&state, "operands", operands, module_path)
+        .Unary(_, operand, _, _) | .Deref(operand, _, _) | .RawOf(operand, _, _) | .Copy(operand, _, _) | .Place(operand, _, _, _) -> sema_compiler_index_walk_expr_slot(&state, "operand", operand, module_path)
+        .Index(base, index, _, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "base", base, module_path)
             sema_compiler_index_walk_expr_slot(&state, "index", index, module_path)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "base", base, module_path)
             if range == .Val(value) -> sema_compiler_index_walk_expr_slot(&state, "range", value, module_path)
             else {
@@ -993,11 +993,11 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
                 sema_compiler_index_walk_expr_slot(&state, "end", end, module_path)
             }
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "start", start, module_path)
             sema_compiler_index_walk_expr_slot(&state, "end", end, module_path)
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             old_slot := state.slot
             old_list := state.slot_is_list
             state.slot = "interpolations"
@@ -1008,15 +1008,15 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
             state.slot = old_slot
             state.slot_is_list = old_list
         }
-        .ListLit(items, _) -> sema_compiler_index_walk_expr_list(&state, "items", items, module_path)
-        .Spread(value, _) | .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) -> sema_compiler_index_walk_expr_slot(&state, "value", value, module_path)
-        .MapLit(entries, _) -> {
+        .ListLit(items, _, _) -> sema_compiler_index_walk_expr_list(&state, "items", items, module_path)
+        .Spread(value, _, _) | .Tainted(value, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) -> sema_compiler_index_walk_expr_slot(&state, "value", value, module_path)
+        .MapLit(entries, _, _) -> {
             sema_compiler_index_walk_expr_pairs(&state, "keys", entries, true, module_path)
             sema_compiler_index_walk_expr_pairs(&state, "values", entries, false, module_path)
         }
-        .TupleLit(fields, _, _) -> sema_compiler_index_walk_tuple_fields(&state, "fields", fields, module_path)
-        .StructLit(_, _, _, _, fields, _, _) -> sema_compiler_index_walk_expr_fields(&state, "fields", fields, module_path)
-        .TypedLit(_, body, _) -> {
+        .TupleLit(fields, _, _, _) -> sema_compiler_index_walk_tuple_fields(&state, "fields", fields, module_path)
+        .StructLit(_, _, _, _, fields, _, _, _) -> sema_compiler_index_walk_expr_fields(&state, "fields", fields, module_path)
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> sema_compiler_index_walk_expr_fields(&state, "body", fields, module_path)
                 .Elements(values) -> sema_compiler_index_walk_expr_list(&state, "body", values, module_path)
@@ -1044,7 +1044,7 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
                 .ByteText(_) | .Empty -> {}
             }
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             old_slot := state.slot
             old_list := state.slot_is_list
             state.slot = "args"
@@ -1058,11 +1058,11 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
             state.slot = old_slot
             state.slot_is_list = old_list
         }
-        .Try(value, _, _, context) -> {
+        .Try(value, _, _, context, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "value", value, module_path)
             if context == .Val(note) -> sema_compiler_index_walk_expr_slot(&state, "note", note, module_path)
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "value", value, module_path)
             if fallback == {
                 .Value(fallback_value) -> sema_compiler_index_walk_expr_slot(&state, "fallback", fallback_value, module_path)
@@ -1075,26 +1075,26 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
                 .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
-        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+        .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "condition", condition, module_path)
             sema_compiler_index_walk_stmt_slot(&state, "then_body", then_body, module_path)
             sema_compiler_index_walk_expr_slot(&state, "then_value", then_value, module_path)
             sema_compiler_index_walk_stmt_slot(&state, "else_body", else_body, module_path)
             sema_compiler_index_walk_expr_slot(&state, "else_value", else_value, module_path)
         }
-        .Lambda(lambda) -> {
+        .Lambda(lambda, _) -> {
             if lambda.body == {
                 .Expr(value) -> sema_compiler_index_walk_expr_slot(&state, "body", value, module_path)
                 .Block(body) -> sema_compiler_index_walk_stmt_slot(&state, "body", body, module_path)
             }
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "callee", callee, module_path)
             sema_compiler_index_walk_call_args(&state, args, module_path)
         }
-        .PatternTest(subject, _, _) -> sema_compiler_index_walk_expr_slot(&state, "subject", subject, module_path)
-        .Paren(value, _) -> sema_compiler_index_walk_expr_slot(&state, "inner", value, module_path)
-        .StrMatchLit(_, _) | .BinMatchLit(_, _) | .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) | .Ident(_, _) | .UnitLit(_, _, _, _, _, _) | .Absent(_) | .Todo(_, _) | .NoElse(_) | .ReduceMarker(_, _) | .ComptimeName(_, _, _) -> {}
+        .PatternTest(subject, _, _, _) -> sema_compiler_index_walk_expr_slot(&state, "subject", subject, module_path)
+        .Paren(value, _, _) -> sema_compiler_index_walk_expr_slot(&state, "inner", value, module_path)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ReduceMarker(_, _, _) | .ComptimeName(_, _, _, _) -> {}
     }
     _ := &state.parents.pop()
 }

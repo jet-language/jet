@@ -456,70 +456,70 @@ fn jet_cli_emit_ast_unary(kind: String, text: String, value: Expr) -> JetCLIEmit
 
 fn jet_cli_emit_ast_expr(expression: Expr) -> JetCLIEmitNode Never! {
     if expression == {
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             children :: loop part in parts -> jet_cli_emit_ast_str_part(part)
             jet_cli_emit_node("Str", "string", children)
         }
-        .StrMatchLit(parts, _) -> jet_cli_emit_leaf("StrMatchLit", "string pattern ({parts.len()} parts)")
-        .BinMatchLit(parts, _) -> jet_cli_emit_leaf("BinMatchLit", "bytes pattern ({parts.len()} parts)")
-        .Int(value, _, _, raw) -> jet_cli_emit_leaf("Int", "int {jet_cli_emit_ast_spelling(raw, "{value}")}")
-        .Float(value, _, _, raw) -> jet_cli_emit_leaf("Float", "float {jet_cli_emit_ast_spelling(raw, "{value}")}")
-        .Bool(value, _) -> jet_cli_emit_leaf("Bool", if value -> "bool true" else -> "bool false")
-        .Unit(_) -> jet_cli_emit_leaf("Unit", "unit")
-        .Char(value, _) -> jet_cli_emit_leaf("Char", "char {jet_cli_debug_quote(value)}")
-        .ListLit(elements, _) -> jet_cli_emit_ast_exprs("ListLit", "list", elements)
-        .MemberSpread(base, members, _) -> {
+        .StrMatchLit(parts, _, _) -> jet_cli_emit_leaf("StrMatchLit", "string pattern ({parts.len()} parts)")
+        .BinMatchLit(parts, _, _) -> jet_cli_emit_leaf("BinMatchLit", "bytes pattern ({parts.len()} parts)")
+        .Int(value, _, _, raw, _) -> jet_cli_emit_leaf("Int", "int {jet_cli_emit_ast_spelling(raw, "{value}")}")
+        .Float(value, _, _, raw, _) -> jet_cli_emit_leaf("Float", "float {jet_cli_emit_ast_spelling(raw, "{value}")}")
+        .Bool(value, _, _) -> jet_cli_emit_leaf("Bool", if value -> "bool true" else -> "bool false")
+        .Unit(_, _) -> jet_cli_emit_leaf("Unit", "unit")
+        .Char(value, _, _) -> jet_cli_emit_leaf("Char", "char {jet_cli_debug_quote(value)}")
+        .ListLit(elements, _, _) -> jet_cli_emit_ast_exprs("ListLit", "list", elements)
+        .MemberSpread(base, members, _, _) -> {
             names :: loop member in members -> member.name
             jet_cli_emit_ast_unary("MemberSpread", "members .[{names.join(", ")}]", base)
         }
-        .Spread(value, _) -> jet_cli_emit_ast_unary("Spread", "spread", value)
-        .MapLit(entries, _) -> {
+        .Spread(value, _, _) -> jet_cli_emit_ast_unary("Spread", "spread", value)
+        .MapLit(entries, _, _) -> {
             children := [JetCLIEmitNode]{}
             jet_cli_emit_ast_pairs(entries, &children)
             jet_cli_emit_node("MapLit", "map", children)
         }
-        .Index(base, index, _, _) -> jet_cli_emit_node("Index", "index", [JetCLIEmitNode]{jet_cli_emit_ast_expr(base), jet_cli_emit_ast_expr(index)})
-        .Slice(base, start, end, range, _) -> {
+        .Index(base, index, _, _, _) -> jet_cli_emit_node("Index", "index", [JetCLIEmitNode]{jet_cli_emit_ast_expr(base), jet_cli_emit_ast_expr(index)})
+        .Slice(base, start, end, range, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(base), jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)}
             if range == .Val(value) -> &children.push(jet_cli_emit_ast_expr(value))
             jet_cli_emit_node("Slice", "slice", children)
         }
-        .Range(start, end, exclusive, _) -> jet_cli_emit_node("Range", if exclusive -> "range ..<" else -> "range ..", [JetCLIEmitNode]{jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)})
-        .Ident(name, _) -> jet_cli_emit_leaf("Ident", "ident {name}")
-        .Call(call) -> {
+        .Range(start, end, exclusive, _, _) -> jet_cli_emit_node("Range", if exclusive -> "range ..<" else -> "range ..", [JetCLIEmitNode]{jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)})
+        .Ident(name, _, _) -> jet_cli_emit_leaf("Ident", "ident {name}")
+        .Call(call, _) -> {
             children := [JetCLIEmitNode]{}
             jet_cli_emit_ast_args(call.args, &children)
             jet_cli_emit_node("Call", "call {call.name}{jet_cli_emit_ast_type_args(call.type_args)}", children)
         }
-        .Unary(op, operand, _) -> jet_cli_emit_ast_unary("Unary", jet_cli_emit_ast_unary_op(op), operand)
-        .Binary(op, left, right, _) -> jet_cli_emit_node("Binary", "binary {jfmt_bin_op_spell(op)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(left), jet_cli_emit_ast_expr(right)})
-        .CompareChain(operands, ops, _, _) -> {
+        .Unary(op, operand, _, _) -> jet_cli_emit_ast_unary("Unary", jet_cli_emit_ast_unary_op(op), operand)
+        .Binary(op, left, right, _, _) -> jet_cli_emit_node("Binary", "binary {jfmt_bin_op_spell(op)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(left), jet_cli_emit_ast_expr(right)})
+        .CompareChain(operands, ops, _, _, _) -> {
             spelled :: loop op in ops -> jfmt_bin_op_spell(op)
             jet_cli_emit_ast_exprs("CompareChain", "compare {spelled.join(" ")}", operands)
         }
-        .UnitLit(raw, _, _, suffix, _, _) -> jet_cli_emit_leaf("UnitLit", "unit literal {raw} {suffix}")
-        .Deref(value, _) -> jet_cli_emit_ast_unary("Deref", "deref", value)
-        .RawOf(value, _) -> jet_cli_emit_ast_unary("RawOf", "raw", value)
-        .Copy(value, _) -> jet_cli_emit_ast_unary("Copy", "copy", value)
-        .Place(value, access, _) -> jet_cli_emit_ast_unary("Place", jet_cli_emit_ast_place_access(access), value)
-        .Field(base, member, _) -> jet_cli_emit_ast_unary("Field", "field .{member}", base)
-        .OptField(base, member, _, _, _) -> jet_cli_emit_ast_unary("OptField", "field ?.{member}", base)
-        .MethodCall(receiver, method, _, _, type_args, args) -> {
+        .UnitLit(raw, _, _, suffix, _, _, _) -> jet_cli_emit_leaf("UnitLit", "unit literal {raw} {suffix}")
+        .Deref(value, _, _) -> jet_cli_emit_ast_unary("Deref", "deref", value)
+        .RawOf(value, _, _) -> jet_cli_emit_ast_unary("RawOf", "raw", value)
+        .Copy(value, _, _) -> jet_cli_emit_ast_unary("Copy", "copy", value)
+        .Place(value, access, _, _) -> jet_cli_emit_ast_unary("Place", jet_cli_emit_ast_place_access(access), value)
+        .Field(base, member, _, _) -> jet_cli_emit_ast_unary("Field", "field .{member}", base)
+        .OptField(base, member, _, _, _, _) -> jet_cli_emit_ast_unary("OptField", "field ?.{member}", base)
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(receiver)}
             jet_cli_emit_ast_args(args, &children)
             jet_cli_emit_node("MethodCall", "method .{method}{jet_cli_emit_ast_type_args(type_args)}", children)
         }
-        .OptMethodCall(receiver, method, _, type_args, args, _) -> {
+        .OptMethodCall(receiver, method, _, type_args, args, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(receiver)}
             jet_cli_emit_ast_args(args, &children)
             jet_cli_emit_node("OptMethodCall", "method ?.{method}{jet_cli_emit_ast_type_args(type_args)}", children)
         }
-        .StructLit(owner, type_args, _, _, fields, _, _) -> {
+        .StructLit(owner, type_args, _, _, fields, _, _, _) -> {
             children := [JetCLIEmitNode]{}
             jet_cli_emit_ast_fields(fields, &children)
             jet_cli_emit_node("StructLit", "struct {owner}{jet_cli_emit_ast_type_args(type_args)}", children)
         }
-        .TypedLit(head, body, _) -> {
+        .TypedLit(head, body, _, _) -> {
             written :: if head == .Val(ty) -> " {type_name(ty)}" else -> ""
             children := [JetCLIEmitNode]{}
             if body == {
@@ -532,7 +532,7 @@ fn jet_cli_emit_ast_expr(expression: Expr) -> JetCLIEmitNode Never! {
             }
             jet_cli_emit_node("TypedLit", "literal{written}", children)
         }
-        .EnumLit(owner, variant, _, args, _, _) -> {
+        .EnumLit(owner, variant, _, args, _, _, _) -> {
             children := [JetCLIEmitNode]{}
             loop arg in args {
                 if arg == {
@@ -542,44 +542,44 @@ fn jet_cli_emit_ast_expr(expression: Expr) -> JetCLIEmitNode Never! {
             }
             jet_cli_emit_node("EnumLit", "variant {owner}.{variant}", children)
         }
-        .Tainted(value, marked, _) -> jet_cli_emit_ast_unary("Tainted", "tainted{jet_cli_emit_ast_suffix(" #", marked)}", value)
-        .Present(value, _) -> jet_cli_emit_ast_unary("Present", "present", value)
-        .Absent(_) -> jet_cli_emit_leaf("Absent", "absent")
-        .Todo(_, _) -> jet_cli_emit_leaf("Todo", "todo")
-        .NoElse(_) -> jet_cli_emit_leaf("NoElse", "no else")
-        .ReduceMarker(name, _) -> jet_cli_emit_leaf("ReduceMarker", "reduce {name}")
-        .PatternTest(subject, pattern, _) -> jet_cli_emit_node("PatternTest", "matches", [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject), jet_cli_emit_ast_pattern(pattern)})
-        .Ok(value, _) -> jet_cli_emit_ast_unary("Ok", "ok", value)
-        .Err(value, _) -> jet_cli_emit_ast_unary("Err", "err", value)
-        .Try(value, _, _, context) -> {
+        .Tainted(value, marked, _, _) -> jet_cli_emit_ast_unary("Tainted", "tainted{jet_cli_emit_ast_suffix(" #", marked)}", value)
+        .Present(value, _, _) -> jet_cli_emit_ast_unary("Present", "present", value)
+        .Absent(_, _) -> jet_cli_emit_leaf("Absent", "absent")
+        .Todo(_, _, _) -> jet_cli_emit_leaf("Todo", "todo")
+        .NoElse(_, _) -> jet_cli_emit_leaf("NoElse", "no else")
+        .ReduceMarker(name, _, _) -> jet_cli_emit_leaf("ReduceMarker", "reduce {name}")
+        .PatternTest(subject, pattern, _, _) -> jet_cli_emit_node("PatternTest", "matches", [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject), jet_cli_emit_ast_pattern(pattern)})
+        .Ok(value, _, _) -> jet_cli_emit_ast_unary("Ok", "ok", value)
+        .Err(value, _, _) -> jet_cli_emit_ast_unary("Err", "err", value)
+        .Try(value, _, _, context, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}
             if context == .Val(note) -> &children.push(jet_cli_emit_node("context", "context", [JetCLIEmitNode]{jet_cli_emit_ast_expr(note)}))
             jet_cli_emit_node("Try", "try", children)
         }
-        .OrFallback(value, fallback, _, _) -> jet_cli_emit_node("OrFallback", "or else", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value), jet_cli_emit_ast_fallback(fallback)})
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> jet_cli_emit_node("OrFallback", "or else", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value), jet_cli_emit_ast_fallback(fallback)})
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             then_node := jet_cli_emit_ast_body("then", "then", then_body)
             &then_node.children.push(jet_cli_emit_ast_expr(then_value))
             else_node := jet_cli_emit_ast_body("else", "else", else_body)
             &else_node.children.push(jet_cli_emit_ast_expr(else_value))
             jet_cli_emit_node("If", "if", [JetCLIEmitNode]{jet_cli_emit_ast_expr(cond), then_node, else_node})
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             children :: loop field in fields -> jet_cli_emit_ast_tuple_field(field)
             jet_cli_emit_node("TupleLit", "tuple", children)
         }
-        .Lambda(lambda) -> {
+        .Lambda(lambda, _) -> {
             params :: loop param in lambda.params -> jet_cli_emit_ast_lambda_param(param)
             jet_cli_emit_node("Lambda", "lambda ({params.join(", ")})", jet_cli_emit_ast_lambda_body(lambda.body))
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(callee)}
             jet_cli_emit_ast_args(args, &children)
             jet_cli_emit_node("CallValue", "call value", children)
         }
-        .PtrFromAddr(alias, _, elem, address, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
-        .ComptimeName(name, _, _) -> jet_cli_emit_leaf("ComptimeName", "prep name {name}")
-        .Paren(value, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
+        .PtrFromAddr(alias, _, elem, address, _, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
+        .ComptimeName(name, _, _, _) -> jet_cli_emit_leaf("ComptimeName", "prep name {name}")
+        .Paren(value, _, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
     }
 }
 

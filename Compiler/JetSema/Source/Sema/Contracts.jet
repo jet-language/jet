@@ -376,8 +376,8 @@ fn sema_contract_result_ident_in_statements(values: [Stmt]) -> Span? {
 
 fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
     if expr == {
-        .Ident(name, span) -> if name == "result" -> Val(span) else -> None
-        .Str(parts, _) -> {
+        .Ident(name, span, _) -> if name == "result" -> Val(span) else -> None
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(value, _) {
                     found :: sema_contract_result_ident_in_expr(value)
@@ -386,15 +386,15 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             }
             None
         }
-        .ListLit(elements, _) -> {
+        .ListLit(elements, _, _) -> {
             loop value in elements {
                 found :: sema_contract_result_ident_in_expr(value)
                 if found != None -> return found
             }
             None
         }
-        .MemberSpread(base, _, _) | .Spread(base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) | .Place(base, _, _) | .Tainted(base, _, _) | .Present(base, _) | .Ok(base, _) | .Err(base, _) | .Paren(base, _) -> sema_contract_result_ident_in_expr(base)
-        .MapLit(entries, _) -> {
+        .MemberSpread(base, _, _, _) | .Spread(base, _, _) | .Deref(base, _, _) | .RawOf(base, _, _) | .Copy(base, _, _) | .Place(base, _, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) | .Ok(base, _, _) | .Err(base, _, _) | .Paren(base, _, _) -> sema_contract_result_ident_in_expr(base)
+        .MapLit(entries, _, _) -> {
             loop entry in entries {
                 found := sema_contract_result_ident_in_expr(entry.key)
                 if found != None -> return found
@@ -403,12 +403,12 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             }
             None
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             found := sema_contract_result_ident_in_expr(base)
             if found != None -> return found
             sema_contract_result_ident_in_expr(index)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             found := sema_contract_result_ident_in_expr(base)
             if found != None -> return found
             found = sema_contract_result_ident_in_expr(start)
@@ -417,44 +417,44 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             if found != None -> return found
             if range == .Val(range_expr) -> sema_contract_result_ident_in_expr(range_expr) else -> None
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             found := sema_contract_result_ident_in_expr(start)
             if found != None -> return found
             sema_contract_result_ident_in_expr(end)
         }
-        .Call(call) -> sema_contract_result_ident_in_call_args(call.args)
-        .CallValue(callee, args, _) -> {
+        .Call(call, _) -> sema_contract_result_ident_in_call_args(call.args)
+        .CallValue(callee, args, _, _) -> {
             found := sema_contract_result_ident_in_expr(callee)
             if found != None -> return found
             sema_contract_result_ident_in_call_args(args)
         }
-        .Unary(_, operand, _) -> sema_contract_result_ident_in_expr(operand)
-        .Binary(_, left, right, _) -> {
+        .Unary(_, operand, _, _) -> sema_contract_result_ident_in_expr(operand)
+        .Binary(_, left, right, _, _) -> {
             found := sema_contract_result_ident_in_expr(left)
             if found != None -> return found
             sema_contract_result_ident_in_expr(right)
         }
-        .CompareChain(operands, _, _, _) -> {
+        .CompareChain(operands, _, _, _, _) -> {
             loop operand in operands {
                 found :: sema_contract_result_ident_in_expr(operand)
                 if found != None -> return found
             }
             None
         }
-        .Field(base, _, _) | .OptField(base, _, _, _, _) -> sema_contract_result_ident_in_expr(base)
-        .MethodCall(receiver, _, _, _, _, args) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) -> sema_contract_result_ident_in_expr(base)
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             found := sema_contract_result_ident_in_expr(receiver)
             if found != None -> return found
             sema_contract_result_ident_in_call_args(args)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             loop field in fields {
                 found :: sema_contract_result_ident_in_expr(field.value)
                 if found != None -> return found
             }
             None
         }
-        .TypedLit(_, body, _) -> {
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> loop field in fields {
                     found :: sema_contract_result_ident_in_expr(field.value)
@@ -475,7 +475,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             }
             None
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 if argument == {
                     .Positional(value) -> {
@@ -490,22 +490,22 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             }
             None
         }
-        .PatternTest(subject, pattern, _) -> {
+        .PatternTest(subject, pattern, _, _) -> {
             found := sema_contract_result_ident_in_expr(subject)
             if found != None -> return found
             sema_contract_result_ident_in_pattern(pattern)
         }
-        .Try(value, _, _, context) -> {
+        .Try(value, _, _, context, _) -> {
             found := sema_contract_result_ident_in_expr(value)
             if found != None -> return found
             if context == .Val(context_expr) -> sema_contract_result_ident_in_expr(context_expr) else -> None
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             found := sema_contract_result_ident_in_expr(value)
             if found != None -> return found
             sema_contract_result_ident_in_fallback(fallback)
         }
-        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+        .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
             found := sema_contract_result_ident_in_expr(condition)
             if found != None -> return found
             found = sema_contract_result_ident_in_statements(then_body)
@@ -516,18 +516,18 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             if found != None -> return found
             sema_contract_result_ident_in_expr(else_value)
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             loop field in fields {
                 found :: sema_contract_result_ident_in_expr(field.value)
                 if found != None -> return found
             }
             None
         }
-        .Lambda(lambda) -> if lambda.body == {
+        .Lambda(lambda, _) -> if lambda.body == {
             .Expr(value) -> sema_contract_result_ident_in_expr(value)
             .Block(body) -> sema_contract_result_ident_in_statements(body)
         }
-        .PtrFromAddr(_, _, _, address, _) -> sema_contract_result_ident_in_expr(address)
+        .PtrFromAddr(_, _, _, address, _, _) -> sema_contract_result_ident_in_expr(address)
         else -> None
     }
 }

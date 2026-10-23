@@ -385,7 +385,7 @@ fn sema_process_spec_method(receiver: Expr, receiver_value: TExpr, method: Strin
     known_mutating :: method != "abilities" && method != "plan" && method != "run" && method != "run_checked" && method != "spawn"
     if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_receiver_mark_forget(&state, receiver)
-    if known_mutating && receiver == .Ident(_, _) {
+    if known_mutating && receiver == .Ident(_, _, _) {
         if !sema_ownership_mark_unmarked_move(&state, receiver, scopes, "`ProcessSpec.{method}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     effect_name :: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""

@@ -308,11 +308,11 @@ fn sema_unsafe_mode(value: PolicyValue) -> String Never! {
 fn sema_unsafe_assertion(statement: Stmt) -> (names: [String], span: Span)? Never! {
     // copy: `value` is a payload of read parameter `statement`, which keeps the original; the Val carrier owns this one
     expression :: (if statement == .Expr(value) -> Val(value.copy()) else -> Expr?{None}) ?? return None
-    call :: (if expression == .Call(value) -> Val(value) else -> Call?{None}) ?? return None
+    call :: (if expression == .Call(value, _) -> Val(value) else -> Call?{None}) ?? return None
     if call.name != "__jet_unsafe_assert" -> return None
     names := [String]{}
     loop argument in call.args {
-        if argument.expr == .Ident(name, _) -> &names.push(name)
+        if argument.expr == .Ident(name, _, _) -> &names.push(name)
     }
     Val((names: names, span: call.name_span))
 }
@@ -417,19 +417,19 @@ fn sema_unsafe_shallow_operations(statement: Stmt, out: &[SemaUnsafeOperation]) 
 
 fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Never! {
     if expression == {
-        .PtrFromAddr(_, _, _, addr, span) -> {
+        .PtrFromAddr(_, _, _, addr, span, _) -> {
             &out.push(SemaUnsafeOperation{kind: "pointer_from_address", span: span, required: ["valid_ptr", "aligned"]})
             sema_unsafe_expr_operations(addr, &out)
         }
-        .Deref(inner, span) -> {
+        .Deref(inner, span, _) -> {
             &out.push(SemaUnsafeOperation{kind: "dereference", span: span, required: ["valid_ptr", "aligned"]})
             sema_unsafe_expr_operations(inner, &out)
         }
-        .RawOf(inner, span) -> {
+        .RawOf(inner, span, _) -> {
             &out.push(SemaUnsafeOperation{kind: "raw_pointer", span: span, required: ["no_alias"]})
             sema_unsafe_expr_operations(inner, &out)
         }
-        .MethodCall(receiver, method, span, _, _, args) -> {
+        .MethodCall(receiver, method, span, _, _, args, _) -> {
             if method == {
                 "volatile_read" -> {
                     &out.push(SemaUnsafeOperation{kind: "volatile_read", span: span, required: ["valid_ptr", "aligned"]})
@@ -445,35 +445,35 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
             sema_unsafe_expr_operations(receiver, &out)
             loop argument in args -> sema_unsafe_expr_operations(argument.expr, &out)
         }
-        .Call(call) -> {
+        .Call(call, _) -> {
             loop argument in call.args -> sema_unsafe_expr_operations(argument.expr, &out)
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(value, _) -> sema_unsafe_expr_operations(value, &out)
             }
         }
-        .Binary(_, left, right, _) | .Index(left, right, _, _) | .Range(left, right, _, _) -> {
+        .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) | .Range(left, right, _, _, _) -> {
             sema_unsafe_expr_operations(left, &out)
             sema_unsafe_expr_operations(right, &out)
         }
-        .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> {
+        .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
             loop operand in operands -> sema_unsafe_expr_operations(operand, &out)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_unsafe_expr_operations(base, &out)
             if range == .Val(value) -> sema_unsafe_expr_operations(value, &out) else {
                 sema_unsafe_expr_operations(start, &out)
                 sema_unsafe_expr_operations(end, &out)
             }
         }
-        .Unary(_, inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .OptField(inner, _, _, _, _) | .Paren(inner, _) | .Spread(inner, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) -> {
+        .Unary(_, inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> {
             sema_unsafe_expr_operations(inner, &out)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
         }
-        .TypedLit(_, body, _) -> {
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> {
                     loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
@@ -491,7 +491,7 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
                 .ByteText(_) | .Empty -> {}
             }
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 if argument == {
                     .Positional(value) | .Named(_, value) -> {
@@ -500,25 +500,25 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
                 }
             }
         }
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             loop entry in entries {
                 sema_unsafe_expr_operations(entry.key, &out)
                 sema_unsafe_expr_operations(entry.value, &out)
             }
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             sema_unsafe_expr_operations(callee, &out)
             loop argument in args -> sema_unsafe_expr_operations(argument.expr, &out)
         }
-        .Try(inner, _, _, note) -> {
+        .Try(inner, _, _, note, _) -> {
             sema_unsafe_expr_operations(inner, &out)
             if note == .Val(value) -> sema_unsafe_expr_operations(value, &out)
         }
-        .PatternTest(subject, _, _) -> { sema_unsafe_expr_operations(subject, &out) }
-        .OrFallback(value, fallback, _, _) -> {
+        .PatternTest(subject, _, _, _) -> { sema_unsafe_expr_operations(subject, &out) }
+        .OrFallback(value, fallback, _, _, _) -> {
             sema_unsafe_expr_operations(value, &out)
             if fallback == {
                 .Value(fallback_value) | .Return(.Val(fallback_value), _) -> {
@@ -534,7 +534,7 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
                 else -> {}
             }
         }
-        .If(cond, _, then_value, _, else_value, _) -> {
+        .If(cond, _, then_value, _, else_value, _, _) -> {
             sema_unsafe_expr_operations(cond, &out)
             sema_unsafe_expr_operations(then_value, &out)
             sema_unsafe_expr_operations(else_value, &out)

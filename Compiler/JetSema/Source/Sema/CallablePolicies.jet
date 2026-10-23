@@ -15,7 +15,7 @@ fn sema_policy_calls(function: Func) -> [Call] Never! {
     loop marker in function.markers {
         if marker.name != "Policy" -> next
         loop argument in marker.args {
-            if argument == .Expr(value) && value == .Call(call) && !sema_policy_builtin(call.name) -> &calls.push(call)
+            if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> &calls.push(call)
         }
     }
     calls
@@ -25,11 +25,11 @@ struct SemaPolicyUses {
     uses: [String:[String]]
 
     fn visit(&self, expression: Expr) Never! {
-        if expression == .Call(call) && call.name == "apply" && call.args.len() > 0 {
-            if call.args[call.args.len() - 1].expr == .Ident(target, _) {
+        if expression == .Call(call, _) && call.name == "apply" && call.args.len() > 0 {
+            if call.args[call.args.len() - 1].expr == .Ident(target, _, _) {
                 names := self.uses.get(target) ?? [String]{}
                 loop index in 0..<(call.args.len() - 1) {
-                    if call.args[index].expr == .Call(policy) && !sema_policy_builtin(policy.name) && !names.contains(policy.name) -> &names.push(policy.name)
+                    if call.args[index].expr == .Call(policy, _) && !sema_policy_builtin(policy.name) && !names.contains(policy.name) -> &names.push(policy.name)
                 }
                 self.uses[target] = names
             }
@@ -188,13 +188,13 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     last :: call.args[call.args.len() - 1]
-    target_name :: if last.expr == .Ident(name, _) -> name else -> ""
+    target_name :: if last.expr == .Ident(name, _, _) -> name else -> ""
     target :: sema_call_resolve_direct(target_name, [Type]{}, environment, program, &scopes, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, last.span)
     index := call.args.len() - 1
     loop index > 0 {
         index -= 1
-        if call.args[index].expr == .Call(policy) {
+        if call.args[index].expr == .Call(policy, _) {
             if sema_policy_builtin(policy.name) -> next
             callee = sema_policy_wrap(callee, target, policy, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         } else {

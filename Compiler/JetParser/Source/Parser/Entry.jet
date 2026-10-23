@@ -788,6 +788,8 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
+        unit_start :: parser_current(&state).span.start
+        parser_begin_node_unit(&state, unit_start)
         if {
             // A top-level `@` is a misspelled applied rule.
             parser_current_kind(&state) == TOKEN_AT -> {
@@ -1066,7 +1068,7 @@ fn parser_report_repeated_file_marker(state: &JetParserState, name: String, span
 // Rust `html_from_marker`: the companion page is `Path{"page.html"}` or a
 // plain literal string; any other value names no page.
 fn parser_html_page_path(page: Expr) -> String? {
-    if page == .TypedLit(head, body, _) && head == .Val(ty) && ty == .Named(type_name) && type_name == "Path" && body == .Value(inner) -> return parser_expr_literal_string(inner)
+    if page == .TypedLit(head, body, _, _) && head == .Val(ty) && ty == .Named(type_name) && type_name == "Path" && body == .Value(inner) -> return parser_expr_literal_string(inner)
     parser_expr_literal_string(page)
 }
 

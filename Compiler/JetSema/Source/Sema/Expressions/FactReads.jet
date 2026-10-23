@@ -599,8 +599,8 @@ fn sema_fact_reflection_field(base: TExpr, member: String, span: Span) -> TExpr?
 
 fn sema_fact_path_text(base: Expr, member: String) -> String? {
     if base == {
-        .Ident(name, _) -> return Val("{name}.{member}")
-        .Field(inner, inner_member, _) -> {
+        .Ident(name, _, _) -> return Val("{name}.{member}")
+        .Field(inner, inner_member, _, _) -> {
             prefix :: sema_fact_path_text(inner, inner_member) ?? return None
             return Val("{prefix}.{member}")
         }
@@ -610,16 +610,16 @@ fn sema_fact_path_text(base: Expr, member: String) -> String? {
 
 fn sema_fact_expr_path(expr: Expr) -> String? {
     if expr == {
-        .Ident(name, _) -> return Val(name)
-        .Field(base, member, _) -> return sema_fact_path_text(base, member)
+        .Ident(name, _, _) -> return Val(name)
+        .Field(base, member, _, _) -> return sema_fact_path_text(base, member)
         else -> None
     }
 }
 
 fn sema_fact_build_rooted(base: Expr) -> Bool Never! {
     if base == {
-        .Ident(name, _) -> return name == "$build" || name == "$package"
-        .Field(inner, _, _) -> return sema_fact_build_rooted(inner)
+        .Ident(name, _, _) -> return name == "$build" || name == "$package"
+        .Field(inner, _, _, _) -> return sema_fact_build_rooted(inner)
         else -> return false
     }
 }
@@ -912,7 +912,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
         &diagnostics.push(sema_error("E0302", span, "fact read `{member}` is compile-time only", "a fact is a value known before code generation; it never selects runtime behavior", fix))
         return sema_fact_read_failed()
     }
-    if base == .Ident(name, _) {
+    if base == .Ident(name, _, _) {
         index :: sema_scope_resolve_index(scopes, name)
         symbol := Symbol?{None}
         if index == .Val(binding_index) -> symbol = Val(sema_scope_binding_symbol(environment, scopes, binding_index))

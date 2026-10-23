@@ -87,14 +87,14 @@ fn sema_callable_policy_call_text(call: Call) -> String Never! {
 
 fn sema_callable_policy_argument_text(expr: Expr) -> String Never! {
     if expr == {
-        .Str(parts, _) -> sema_callable_policy_string_text(parts)
-        .Int(value, _, _, raw) -> raw ?? "{value}"
-        .Float(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> "{value}"
-        .Char(value, _) -> "'{value}'"
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{sema_callable_policy_argument_text(base)}.{member}"
-        .Call(call) -> sema_callable_policy_call_text(call)
+        .Str(parts, _, _) -> sema_callable_policy_string_text(parts)
+        .Int(value, _, _, raw, _) -> raw ?? "{value}"
+        .Float(value, _, _, raw, _) -> raw ?? "{value}"
+        .Bool(value, _, _) -> "{value}"
+        .Char(value, _, _) -> "'{value}'"
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> "{sema_callable_policy_argument_text(base)}.{member}"
+        .Call(call, _) -> sema_callable_policy_call_text(call)
         else -> "<expression>"
     }
 }
@@ -105,7 +105,7 @@ fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
         if marker.name == "Policy" {
             loop argument in marker.args {
                 if argument == .Expr(value) {
-                    if value == .Call(call) {
+                    if value == .Call(call, _) {
                         arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
                         &policies.push(CallablePolicy{name: call.name, arguments: arguments})
                     }

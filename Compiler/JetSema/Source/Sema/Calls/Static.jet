@@ -584,7 +584,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         // A written `^name` is a checked move, as for any consuming argument
         // (Calls/Checking.jet): never a silent copy, E0201 on a read
         // parameter. `shared name`'s operand carries no written `^`.
-        explicit :: args[index].convention == AccessConvention.Move && !args[index].flags.shared_operand && args[index].expr == .Ident(_, _) && !sema_ownership_type_is_copy(value.ty)
+        explicit :: args[index].convention == AccessConvention.Move && !args[index].flags.shared_operand && args[index].expr == .Ident(_, _, _) && !sema_ownership_type_is_copy(value.ty)
         if explicit && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         &explicit_moves.push(explicit)
         &values.push(sema_call_marked_move_value(&state, explicit, args[index].expr, ^value, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
@@ -601,7 +601,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         convention := row.parameter_convention
         if args[index].convention == AccessConvention.Move {
             if args[index].expr == {
-                .Ident(_, _) -> {
+                .Ident(_, _, _) -> {
                     if explicit_moves[index] {
                         convention = AccessConvention.Move
                     } else {
@@ -665,7 +665,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
 // `alias.Owner.method(...)`: a Core module alias names the owner's module.
 fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     alias :: if base == {
-        .Ident(name, _) -> name
+        .Ident(name, _, _) -> name
         else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     }
     if !sema_expr_core_module_alias_visible(alias, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -709,12 +709,12 @@ fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], spa
 // carriers; a qualified owner is not a runtime field access.
 fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Symbol? Never! {
     owner_name :: if receiver == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             if sema_scope_resolve_index(scopes, name) == .Val(index) -> return Val(sema_scope_binding_symbol(environment, scopes, index))
             name
         }
-        .Field(base, leaf, _) -> {
-            alias :: if base == {.Ident(name, _) -> name else -> { return None }}
+        .Field(base, leaf, _, _) -> {
+            alias :: if base == {.Ident(name, _, _) -> name else -> { return None }}
             if !sema_expr_core_module_alias_visible(alias, scopes) -> return None
             "{alias}.{leaf}"
         }
@@ -790,10 +790,10 @@ fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environm
 }
 
 fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if receiver == .Call(descriptor, _) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     owner_symbol :: sema_call_static_source_owner(receiver, method, environment, program, scopes) ?? {
-        if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if receiver == .Ident(name, _) {
+        if receiver == .Field(base, owner_leaf, _, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if receiver == .Ident(name, _, _) {
             if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if name == "Option" && method == "lift2" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_option_lift2(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if sema_scope_resolve_index(scopes, name) == None && sema_call_retired_entropy_constructor(name, method, span) == .Val(retired) {
@@ -1016,10 +1016,10 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
 // an inline range conversion, not a runtime constructor.
 fn sema_call_inline_range_descriptor(descriptor: Call) -> SemaIntegerRange? {
     if descriptor.name != "Int" || descriptor.args.len() != 1 -> return None
-    if descriptor.args[0].expr == .Range(start, end, exclusive, _) {
+    if descriptor.args[0].expr == .Range(start, end, exclusive, _, _) {
         if exclusive -> return None
-        if start == .Int(lo, _, _, _) {
-            if end == .Int(hi, _, _, _) -> return Val(SemaIntegerRange{lo: lo, hi: hi})
+        if start == .Int(lo, _, _, _, _) {
+            if end == .Int(hi, _, _, _, _) -> return Val(SemaIntegerRange{lo: lo, hi: hi})
         }
     }
     None
@@ -1056,7 +1056,7 @@ fn sema_call_try_inline_range_conversion(descriptor: Call, method: String, args:
     argument :: sema_expr_expected(checked, Val(Type.Int), environment, program, &diagnostics) ?? return sema_call_distinct_conversion_failed()
     target :: Type.InlineRange{base: Type.Int, lo: bounds.lo, hi: bounds.hi}
     literal := false
-    if args[0].expr == .Int(value, literal_span, _, _) {
+    if args[0].expr == .Int(value, literal_span, _, _, _) {
         literal = true
         if value < bounds.lo || value > bounds.hi -> &diagnostics.push(sema_inline_range_out_of_bounds(value, bounds.lo, bounds.hi, literal_span))
     }

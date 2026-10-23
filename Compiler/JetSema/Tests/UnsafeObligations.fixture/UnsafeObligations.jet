@@ -42,12 +42,12 @@ fn run() Never! {
     refusal :: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, declarations: [declaration]}], invocation)
     unsafe_test_require(refusal.diagnostics[0].diagnostic.code == "E3415", "invocation cannot widen refusal")
     span :: Span{start: 10, end: 20}
-    pointer :: Expr.Ident{name: "pointer", span: span}
+    pointer :: Expr.Ident{name: "pointer", span: span, id: AST_NODE_GENERATED}
     operations := [SemaUnsafeOperation]{}
-    sema_unsafe_expr_operations(Expr.PtrFromAddr{alias: "mem", alias_span: span, elem: Type.Int, addr: pointer, span: span}, &operations)
+    sema_unsafe_expr_operations(Expr.PtrFromAddr{alias: "mem", alias_span: span, elem: Type.Int, addr: pointer, span: span, id: AST_NODE_GENERATED}, &operations)
     methods :: [String]{"volatile_read", "volatile_write", "cast_ptr"}
     loop method in methods {
-        sema_unsafe_expr_operations(Expr.MethodCall{receiver: pointer, method: method, method_span: span, owner_type_args: [], type_args: [], args: []}, &operations)
+        sema_unsafe_expr_operations(Expr.MethodCall{receiver: pointer, method: method, method_span: span, owner_type_args: [], type_args: [], args: [], id: AST_NODE_GENERATED}, &operations)
     }
     unsafe_test_require(operations.len() == 4, "pointer, volatile reads/writes, cast collection")
     unsafe_test_require(operations[0].kind == "pointer_from_address" && operations[3].kind == "pointer_cast", "pointer operation names")
