@@ -1696,6 +1696,7 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
     trees := [Int]{}
     records := [Int]{}
     record_drops := [String]{}
+    record_lists := [IRRecordHandles]{}
     loop (index, slot) in args {
         carrier :: route.params[index]
         if carrier == .Unit -> next
@@ -1748,8 +1749,22 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
             .List(element) -> {
                 // A nested List (List<List<U8>>) crosses like any List: its
                 // buffer holds the inline 24-byte element headers.
-                if ir_list_element(&m, p, b, slot) == None -> return ir_fail_slot(&b, span, "runtime route {name} List argument of {shown}")
-                if element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                item_row :: ir_list_element(&m, p, b, slot) ?? return ir_fail_slot(&b, span, "runtime route {name} List argument of {shown}")
+                if element == .Handle(handle_name) {
+                    // A List of records the program lays out itself crosses
+                    // as a buffer of runtime record handles, one per element,
+                    // dropped with the buffer after the call (Lower
+                    // lower_record_list_element: list.record_handles).
+                    item :: if ir_untag(shown) == .List(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {name} List of {element}") }
+                    record :: ir_record_runtime(&m, p, item) ?? return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                    if record.runtime != handle_name -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                    handles :: ir_record_handles(&m, p, &b, slot, item, item_row, span)
+                    if handles < 0 -> return -1
+                    &lowered.push(handles)
+                    &lowered.push(ir_load_word(&m, &b, slot, 0))
+                    &record_lists.push(IRRecordHandles{list: slot, item_row: item_row, handles: handles, drop: "jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}"})
+                    next
+                }
                 &lowered.push(ir_load_word(&m, &b, slot, 16))
                 &lowered.push(ir_load_word(&m, &b, slot, 0))
             }
@@ -1807,6 +1822,7 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
     loop (index, record) in records {
         _ :: ir_runtime(&m, &b, record_drops[index], [Int]{record}, -1)
     }
+    loop handles in record_lists -> ir_record_handles_free(&m, &b, handles)
     loop (index, slot) in args {
         if slot < 0 -> next
         if index < borrowed.len() && !borrowed[index] {
@@ -1816,6 +1832,50 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
         }
     }
     dst
+}
+
+// A List of records lent to a route as runtime record handles: the List,
+// its element row, the handle buffer and the drop of each handle.
+struct IRRecordHandles { list: Int, item_row: Int, handles: Int, drop: String }
+
+// The buffer of runtime record handles for the records in `list`, one
+// record.out per element (Lower list.record_handles); -1 after a failure.
+fn ir_record_handles(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, item: Type, item_row: Int, span: Span) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    bytes :: ir_record_handles_bytes(&m, &b, list)
+    align :: ir_word_const(&m, &b, 8)
+    buffer :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, align}, pointer_row)
+    walk :: ir_walk_open(&m, &b, list, item_row)
+    made :: ir_record_out(&m, p, &b, item, walk.item, span)
+    if made < 0 -> return -1
+    at :: ir_element_address(&m, &b, buffer, walk.index, 8)
+    ir_emit(&b.f, IROp.Store, -1, at, 0, made, b.line)
+    ir_walk_close(&m, &b, walk)
+    buffer
+}
+
+// The byte size of the handle buffer for `list`: one word per element and
+// one spare, so an empty List still has an allocation to free.
+fn ir_record_handles_bytes(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never! {
+    length :: ir_load_word(&m, &b, list, 0)
+    one :: ir_word_const(&m, &b, 1)
+    slots :: ir_word_op(&m, &b, IROp.Add, length, one)
+    eight :: ir_word_const(&m, &b, 8)
+    ir_word_op(&m, &b, IROp.Mul, slots, eight)
+}
+
+// Drops every handle in a route's record-handle buffer, then the buffer
+// (Lower list.record_handles_free).
+fn ir_record_handles_free(m: &IRModule, b: &IRBuilder, handles: IRRecordHandles) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    walk :: ir_walk_open(&m, &b, handles.list, handles.item_row)
+    at :: ir_element_address(&m, &b, handles.handles, walk.index, 8)
+    handle :: ir_load_at(&m, &b, at, 0, pointer_row)
+    _ :: ir_runtime(&m, &b, handles.drop, [Int]{handle}, -1)
+    ir_walk_close(&m, &b, walk)
+    bytes :: ir_record_handles_bytes(&m, &b, handles.list)
+    align :: ir_word_const(&m, &b, 8)
+    _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{handles.handles, bytes, align}, -1)
 }
 
 // Lower Strings.jet lower_route_symbol: a view route is its owned twin.

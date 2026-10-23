@@ -3323,7 +3323,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     sema_stmt_track_origin(binding, environment, program, &scopes)
     _ := sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, &scopes)
     view_diagnostics_before :: diagnostics.len()
-    if !sema_stmt_record_binding_views(binding, init.ty, scopes, &state, &context, &diagnostics) {
+    // An owning copy of a read view (`entries := stream.object_entries(tree)`)
+    // is new storage: the binding holds no window into the view's source.
+    owned_copy :: init.kind == .MaterializeView(_)
+    if !owned_copy && !sema_stmt_record_binding_views(binding, init.ty, scopes, &state, &context, &diagnostics) {
         if !sema_has_error_since(diagnostics, view_diagnostics_before) -> sema_check_unsupported(&context, "the view held by `{binding.name}` (offset {binding.name_span.start}) could not be recorded")
         return None
     }

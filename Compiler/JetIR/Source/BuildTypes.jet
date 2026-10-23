@@ -537,7 +537,8 @@ fn ir_record_runtime(m: &IRModule, p: IRProgram, ty: Type) -> LowerRuntimeHandle
 
 // Whether the runtime's record exports carry a member of type row `row`
 // (Lower lower_record_members_cross): a word, Float or String leaf, a
-// record, or an optional String, Int or record.
+// record, an optional String, Int or record, or a byte List (the
+// `List.Byte` sequence a getter lends as its List header).
 fn ir_record_member_crosses(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     ty :: m.types[row].ty
     if ir_record_runtime(&m, p, ty) != None -> return true
@@ -548,11 +549,19 @@ fn ir_record_member_crosses(m: &IRModule, p: IRProgram, row: Int) -> Bool Never!
             else -> false
         }
     }
+    if ir_untag(ty) == .List(_) -> return ir_record_byte_list(&m, p, row)
     if ir_is_handle(m, row) -> return false
     if m.types[row].kind == {
         .Bool | .Int | .Word | .Float | .String -> true
         else -> false
     }
+}
+
+// Whether List type row `row` holds one-byte words: the runtime's
+// `List.Byte` record sequence has the native List header and stride.
+fn ir_record_byte_list(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    element :: ir_list_element_of(&m, p, row) ?? return false
+    m.types[element].kind == .Word && ir_list_stride(m, element) == 1
 }
 
 // Writes the native value of record type `ty` for the runtime record handle
@@ -770,6 +779,17 @@ fn ir_record_load_value(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, 
         nested :: ir_runtime(&m, &a, getter, [Int]{handle}, pointer_row)
         a.fresh[nested] = false
         return ir_record_in(&m, p, &a, ty, nested, base, offset, span)
+    }
+    // A byte List member: the getter lends its List header (Lower
+    // lower_record_sequence_from_runtime), so the record gets a buffer of its own.
+    if ir_untag(ty) == .List(_) {
+        element :: ir_list_element_of(&m, p, row) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+        header :: ir_runtime(&m, &a, getter, [Int]{handle}, pointer_row)
+        a.fresh[header] = false
+        lent :: ir_temp(&m, &a, row)
+        ir_emit(&a.f, IROp.Offset, lent, header, 0, -1, a.line)
+        copied :: ir_list_clone(&m, p, &a, lent, element, row)
+        return ir_store_at(&m, p, &a, base, offset, copied)
     }
     value :: ir_runtime(&m, &a, getter, [Int]{handle}, row)
     ir_store_at(&m, p, &a, base, offset, value)
