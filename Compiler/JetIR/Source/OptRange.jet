@@ -64,11 +64,16 @@ struct IRRanges {
     lo: [Int]
     hi: [Int]
     // Per block: the value of the condition its entry decides (-1: none),
-    // and whether the condition holds there (else it fails).
+    // whether the condition holds there (else it fails), and the nearest
+    // block at or above it in the dominator tree that decides one (-1:
+    // none).
     cond: [Int]
     holds: [Bool]
-    // Per value: the block of its write.
+    up: [Int]
+    // Per value: the block of its write, and whether a deciding condition
+    // compares it (else no branch narrows it).
     home: [Int]
+    tested: [Bool]
 }
 
 fn ir_range_top() -> IRRange Never! {
@@ -100,10 +105,19 @@ fn ir_range_is_compare(op: IROp) -> Bool Never! {
     op == .Lt || op == .Le || op == .Gt || op == .Ge || op == .Eq || op == .Ne
 }
 
+// Whether function `f` has an Int or word slot (a value with a range).
+fn ir_range_wanted(m: IRModule, f: IRFunction) -> Bool Never! {
+    loop row in f.slot_type {
+        kind :: m.types[row].kind
+        if kind == .Int || kind == .Word -> return true
+    }
+    false
+}
+
 fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     count :: s.val_slot.len()
     if count == 0 || count > IR_RANGE_VALUES -> return 0
-    r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, cond: [Int]{}, holds: [Bool]{}, home: [Int]{}}
+    r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}}
     any := false
     loop value in 0..<count {
         ty :: m.types[f.slot_type[s.val_slot[value]]]
@@ -133,11 +147,13 @@ fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         kind :: s.val_kind[value]
         home :: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
         &r.home.push(home)
+        &r.tested.push(false)
     }
     if !any -> return 0
     loop _ in 0..<s.preds.len() {
         &r.cond.push(-1)
         &r.holds.push(false)
+        &r.up.push(-1)
     }
     ir_range_conditions(f, s, &r)
     // Ascending rounds, widening late phi growth.
@@ -184,39 +200,67 @@ fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
 }
 
 // Each block entered through a decided branch: an If's arms, a BrIf's
-// fall-through.
+// fall-through; then each block's nearest deciding dominator (blocks are
+// numbered after their immediate dominators).
 fn ir_range_conditions(f: IRFunction, s: IRSsa, r: &IRRanges) Never! {
     loop at in 0..<f.op.len() {
         if s.block[at] < 0 || at + 1 >= f.op.len() -> next
         op :: f.op[at]
         if op == .If && s.use_a[at] >= 0 {
-            ir_range_decide(s, &r, at + 1, s.use_a[at], true)
-            if f.b[at] >= 0 && f.b[at] + 1 < f.op.len() -> ir_range_decide(s, &r, f.b[at] + 1, s.use_a[at], false)
+            ir_range_decide(f, s, &r, at + 1, s.use_a[at], true)
+            if f.b[at] >= 0 && f.b[at] + 1 < f.op.len() -> ir_range_decide(f, s, &r, f.b[at] + 1, s.use_a[at], false)
         }
-        if op == .BrIf && s.use_a[at] >= 0 -> ir_range_decide(s, &r, at + 1, s.use_a[at], false)
+        if op == .BrIf && s.use_a[at] >= 0 -> ir_range_decide(f, s, &r, at + 1, s.use_a[at], false)
+    }
+    loop block in 1..<s.preds.len() {
+        if r.cond[block] >= 0 {
+            r.up[block] = block
+        } else if s.idom[block] >= 0 && s.idom[block] < block {
+            r.up[block] = r.up[s.idom[block]]
+        }
     }
 }
 
-fn ir_range_decide(s: IRSsa, r: &IRRanges, at: Int, cond: Int, holds: Bool) Never! {
+// Block `at`'s entry decides `cond`; the values the comparison under its
+// Nots compares are tested (ir_range_narrow reads through the same Nots).
+fn ir_range_decide(f: IRFunction, s: IRSsa, r: &IRRanges, at: Int, cond: Int, holds: Bool) Never! {
     block :: s.block[at]
     if block <= 0 || s.preds[block].len() != 1 -> return
     r.cond[block] = ir_ssa_find(s, cond)
     r.holds[block] = holds
+    test := r.cond[block]
+    loop s.val_kind[test] == .Def {
+        def :: s.val_at[test]
+        op :: f.op[def]
+        if op == .Not && s.use_a[def] >= 0 {
+            test = ir_ssa_find(s, s.use_a[def])
+            next
+        }
+        if ir_range_is_compare(op) && s.use_a[def] >= 0 && s.use_b[def] >= 0 {
+            r.tested[ir_ssa_find(s, s.use_a[def])] = true
+            r.tested[ir_ssa_find(s, s.use_b[def])] = true
+        }
+        break
+    }
 }
 
 // The range of value `used` read in `block`, narrowed by the decided
-// branches dominating it.
+// branches dominating it below the value's write: up to IR_RANGE_DEPTH of
+// them, nearest first.
 fn ir_range_at(f: IRFunction, s: IRSsa, r: IRRanges, used: Int, block: Int) -> IRRange Never! {
     if used < 0 -> return ir_range_top()
     value :: ir_ssa_find(s, used)
     if !r.ranged[value] || s.val_kind[value] == .Undef -> return ir_range_top()
     if !r.known[value] -> return ir_range_none()
     out := IRRange{known: true, lo: r.lo[value], hi: r.hi[value]}
-    at := block
+    if !r.tested[value] || block <= 0 -> return out
+    home :: r.home[value]
+    at := r.up[block]
     steps := 0
-    loop out.known && at > 0 && at != r.home[value] && steps < IR_RANGE_DEPTH {
-        if r.cond[at] >= 0 -> out = ir_range_narrow(f, s, r, out.lo, out.hi, value, r.cond[at], r.holds[at])
-        at = s.idom[at]
+    loop out.known && at > 0 && steps < IR_RANGE_DEPTH {
+        if home >= 0 && ir_ssa_dominates(s, at, home) -> break
+        out = ir_range_narrow(f, s, r, out.lo, out.hi, value, r.cond[at], r.holds[at])
+        at = if s.idom[at] >= 0 && s.idom[at] < at -> r.up[s.idom[at]] else -> -1
         steps += 1
     }
     out

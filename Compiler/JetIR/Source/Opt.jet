@@ -224,25 +224,34 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursiv
 }
 
 // The SSA round trip: build, verify when asked, the inline Int facts
-// (OptRange.jet), and back to slots.
+// (OptRange.jet), and back to slots. No pass on the form gives a value a
+// new slot (the facts only drop reads, fold a compare into its own slot or
+// keep a read's slot), so the slot code stays valid as it is, and leaving
+// SSA (SsaOut.jet) runs only for verify and stress, which exercise it.
+// Without either, a function the facts cannot touch (no Int or word slot,
+// or "range" off) builds no form.
 fn ir_opt_ssa(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROptReport) Never! {
     if f.op.len() == 0 -> return
+    ranges :: ir_opt_enabled(options, "range") && ir_range_wanted(m, f)
+    if !ranges && !options.verify && !options.stress -> return
     s := ir_ssa_build(f)
     if options.verify {
         errors :: ir_ssa_verify(f, s)
         if errors.len() > 0 -> panic("the SSA form of {f.key} is invalid: {errors.join("; ")}")
     }
-    facts :: if ir_opt_enabled(options, "range") -> ir_opt_int_facts(m, &f, &s) else -> 0
+    facts :: if ranges -> ir_opt_int_facts(m, &f, &s) else -> 0
     report.int_facts += facts
-    stats :: ir_ssa_out(m, &f, s, options.stress)
+    report.ssa_functions += 1
+    if options.verify || options.stress {
+        stats :: ir_ssa_out(m, &f, s, options.stress)
+        if stats.changed {
+            report.ssa_changed += 1
+            report.ssa_moves += stats.moves
+            report.ssa_fresh += stats.fresh
+        }
+    }
     // The comparisons the ranges decided leave constant branches and Nops.
     if facts > 0 -> ir_opt_simplify(m, &f, &report)
-    report.ssa_functions += 1
-    if stats.changed {
-        report.ssa_changed += 1
-        report.ssa_moves += stats.moves
-        report.ssa_fresh += stats.fresh
-    }
 }
 
 // The waves of the bottom-up order: a function's wave is one past the
