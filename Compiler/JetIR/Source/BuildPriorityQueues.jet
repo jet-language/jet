@@ -28,7 +28,7 @@ fn ir_priority_queue_row(m: &IRModule, p: IRProgram, heap_row: Int) -> Int? Neve
 fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
     key :: "{name}<{type_carrier_identity(m.types[row].ty)}>"
     if m.function_rows.get(key) == .Val(known) -> return known
-    kind :: ir_map_key_kind(m, elem_row)
+    kind :: if m.types[elem_row].kind == .Float -> "float" else -> ir_map_key_kind(m, elem_row)
     id :: m.functions.len()
     symbol :: name.split(".").to_list().join("_")
     &m.functions.push(ir_function_new(name, key, "jet_ir_{symbol}_{ir_key_hash(key)}", "", 0))
@@ -211,7 +211,8 @@ fn ir_priority_queue_pop_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: S
 // swapping roles each pass); a merge takes the right run's element only when
 // it orders strictly before the left run's (strictly after it for
 // sort_desc), so equal elements keep their input order. Elements move as
-// bytes; nothing is cloned or dropped.
+// bytes; nothing is cloned or dropped. A Float list (kind "float") orders by
+// ir_float_total_key, f64::total_cmp's order.
 fn ir_list_sort_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, list: Int, elem_row: Int, descending: Bool) Never! {
     stride :: ir_list_stride(m, elem_row)
     stride_word :: ir_word_const(&m, &a, stride)
@@ -267,9 +268,11 @@ fn ir_list_sort_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, li
     ir_open_if(&a.f, right_open, a.line)
     left_at :: ir_element_address(&m, &a, source, left_index, stride)
     right_at :: ir_element_address(&m, &a, source, right_index, stride)
-    left :: ir_load_at(&m, &a, left_at, 0, elem_row)
-    right :: ir_load_at(&m, &a, right_at, 0, elem_row)
-    order :: if descending -> ir_map_order(&m, p, &a, kind, left, right) else -> ir_map_order(&m, p, &a, kind, right, left)
+    float :: kind == "float"
+    left :: if float -> ir_float_total_key(&m, &a, left_at) else -> ir_load_at(&m, &a, left_at, 0, elem_row)
+    right :: if float -> ir_float_total_key(&m, &a, right_at) else -> ir_load_at(&m, &a, right_at, 0, elem_row)
+    order_kind :: if float -> "word" else -> kind
+    order :: if descending -> ir_map_order(&m, p, &a, order_kind, left, right) else -> ir_map_order(&m, p, &a, order_kind, right, left)
     ir_emit(&a.f, IROp.Copy, take_right, order.less, -1, -1, a.line)
     ir_end(&a.f, a.line)
     ir_else(&a.f, a.line)
@@ -312,6 +315,23 @@ fn ir_list_sort_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, li
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
+// The signed word whose order is f64::total_cmp's for the Float at
+// `address`: its bits, with every bit but the sign flipped when the sign is
+// set (negative values and -NaN reverse their magnitude order).
+fn ir_float_total_key(m: &IRModule, a: &IRBuilder, address: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    key :: ir_temp(&m, &a, word_row)
+    bits :: ir_load_at(&m, &a, address, 0, word_row)
+    ir_emit(&a.f, IROp.Copy, key, bits, -1, -1, a.line)
+    zero :: ir_word_const(&m, &a, 0)
+    negative :: ir_bool_op(&m, &a, IROp.Lt, bits, zero)
+    ir_open_if(&a.f, negative, a.line)
+    magnitude :: ir_word_const(&m, &a, 9223372036854775807)
+    ir_emit(&a.f, IROp.BitXor, key, bits, magnitude, IR_OVERFLOW_WRAP, a.line)
+    ir_end(&a.f, a.line)
+    key
+}
+
 // `xs.sort()` / `xs.sort_desc()` on the List at `list` in place (Lower
 // lower_list_method_more): the element needs a native order.
 fn ir_list_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
@@ -322,7 +342,8 @@ fn ir_list_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row: 
         else -> false
     }
     if !is_list -> return ir_fail_slot(&b, span, "sort of {ir_type_name(list_ty)}")
-    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(&b, span, "List sort of {ir_type_name(m.types[elem_row].ty)} is not lowered at O0 yet")
+    float :: m.types[elem_row].kind == .Float
+    if !float && ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(&b, span, "List sort of {ir_type_name(m.types[elem_row].ty)} is not lowered at O0 yet")
     helper :: if descending -> "list.sort_desc" else -> "list.sort"
     _ :: ir_heap_call(&m, p, &b, list_row, elem_row, helper, [Int]{list}, -1)
     return -1
