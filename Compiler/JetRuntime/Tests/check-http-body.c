@@ -1,5 +1,5 @@
 // L9 ABI witness, linked with the real Jet runtime object and admitted pack.
-// Only the session Propagate rail is scripted, following check-stop-points.c;
+// Only the session Propagate rail is scripted;
 // reader closures use real Linux pipes. This does not implement a TLS adapter.
 #include <assert.h>
 #include <errno.h>

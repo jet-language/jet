@@ -911,8 +911,7 @@ transport by the strict Core JSON parser. This intentionally does not preserve
 the retired host's first-scalar/last-container duplicate-key behavior.
 
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
-fields, the unbuilt functions as text rows, and the actual compiler journal's
-canonical routes.
+fields and the unbuilt functions as text rows.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,
@@ -922,11 +921,10 @@ receipt discovery refuses with `#4736`, rather than presenting an approximate
 input identity as authenticated. Directory-target collection uses the separate
 canonical tree policy.
 
-Explicit canonical-pass selections may report `canonical_route_gaps` alongside
-actual `canonical_routes`: these producer-owned operation IDs say `no Jet pass`
-only for absent Jet boundaries. They are availability rows, not execution
-receipts. Ordinary invocations preserve the reference status schema and omit
-the extension when there are no gaps.
+Explicit canonical-pass selections report `canonical_route_gaps`: no Jet pass
+records a canonical boundary, so every selected operation ID says `no Jet pass`.
+They are availability rows, not execution receipts. Ordinary invocations omit
+the extension.
 
 Output inspection consumes sema's checked callable links and selection facts,
 including the original source/semantic/machine names, typed parameters, inferred

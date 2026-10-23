@@ -1487,11 +1487,6 @@ enum TCostState {
     OptimizerRemoved
 }
 
-struct TCostFact {
-    kind: TCostKind
-    state: TCostState
-}
-
 enum TFactExclusivity {
     Unknown
     Shared
@@ -1503,51 +1498,6 @@ enum TFactPurity {
     Unknown
     Pure
     Impure
-}
-
-struct TFactChannel {
-    ty: Type?
-    integer_bounds: TIntegerBounds?
-    exclusivity: TFactExclusivity
-    purity: TFactPurity
-    no_cross_iteration_deps: Bool
-    comptime_value: TComptimeValue?
-    cost: TCostFact?
-}
-
-fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
-    facts := TFactChannel{ty: Val(expression.ty), integer_bounds: tir_cost_integer_bounds(expression), exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: tir_cost_fact(expression)}
-    facts.exclusivity = if expression.kind == {
-        .Borrow(_, access) -> if {
-            access == AccessConvention.Write -> TFactExclusivity.Exclusive
-            access == AccessConvention.Move -> TFactExclusivity.Move
-            else -> TFactExclusivity.Shared
-        }
-        .Move(_) -> TFactExclusivity.Move
-        else -> TFactExclusivity.Unknown
-    }
-    facts.purity = if expression.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) -> TFactPurity.Pure
-        else -> TFactPurity.Unknown
-    }
-    facts.comptime_value = if expression.kind == {
-        .CtLit(value) -> Val(value)
-        else -> None
-    }
-    facts
-}
-
-fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel Never! {
-    facts := tir_expr_facts(argument.value)
-    facts.exclusivity = if {
-        argument.mut_borrow -> TFactExclusivity.Exclusive
-        argument.borrow -> TFactExclusivity.Shared
-        else -> if argument.value.kind == {
-            .Move(_) -> TFactExclusivity.Move
-            else -> TFactExclusivity.Unknown
-        }
-    }
-    facts
 }
 
 fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
@@ -2085,17 +2035,5 @@ fn tir_each_fn_value_child(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem
             loop argument in args -> visit(argument.value)
         }
         .Send(value) -> visit(value)
-    }
-}
-
-fn tir_func_facts(function: TFunc) -> TFactChannel Never! {
-    TFactChannel{
-        ty: function.ret
-        integer_bounds: None
-        exclusivity: TFactExclusivity.Unknown
-        purity: if function.is_pure -> TFactPurity.Pure else -> TFactPurity.Unknown
-        no_cross_iteration_deps: false
-        comptime_value: None
-        cost: None
     }
 }

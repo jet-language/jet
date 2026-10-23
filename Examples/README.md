@@ -87,10 +87,8 @@ Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the Rust feature
-runner (`tests/golden.rs`), the native backend runner
-(`Compiler/JetBackend/Tests/run-goldens.mjs`), and the runtime trap runner
-(`Compiler/JetRuntime/Tests/run-trap-goldens.mjs`). Native parity additionally
+These rules apply to the Rust feature runner (`tests/golden.rs`) and the
+native feature runner (`Tools/agent/run-feature-examples.mjs`). Native parity additionally
 requires an executed reference with the same exit and both output streams;
 an emit-only reference does not establish runtime parity.
 

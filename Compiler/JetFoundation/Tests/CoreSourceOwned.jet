@@ -3,7 +3,7 @@ use jet_foundation.[
     AccessConvention, CORE_CALL_COVERAGE_KNOWN, CORE_CALL_COVERAGE_SEMA, CoreCallCoverage,
     CoreCallFallibility, CoreCallInterpreterRoute, CoreCallPureRoute, CoreCallRecord,
     CoreCallResourceAccess, CoreCallSignature, CoreCallSymbol, CoreCapabilityContract,
-    CoreCapabilityKind, Type, core_call_has_direct_symbol, core_call_projection_in,
+    CoreCapabilityKind, Type, core_call_projection_in,
     core_call_source_member, core_call_typed_signature,
 ]
 
@@ -19,8 +19,7 @@ fn core_source_owned_require(ok: Bool, message: String) Never! {
     original.interpreter_route = CoreCallInterpreterRoute.TypedIntrinsic
     original.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}
     original.aot_direct = true
-    core_source_owned_require(core_call_has_direct_symbol(original), "host row keeps its direct symbol")
-    core_source_owned_require(!core_call_has_direct_symbol(row) && row.interpreter_route == CoreCallInterpreterRoute.NoRoute, "no executable host route")
+    core_source_owned_require(row.interpreter_route == CoreCallInterpreterRoute.NoRoute, "no executable host route")
     core_source_owned_require(if core_call_source_member(row) == {.Val(name) -> name == "shortcut" else -> false}, "default source export")
     selected := row.copy()
     selected.source_target = Val("__shortcut_entry")

@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and MIR execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use jet_foundation.[Diagnostic, EffectRowEntry, Span, TComptimeValue, mir_sha256_hex]
-use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place, jet_eval_runtime_config]
+use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
 use jet_eval.[jet_eval_build_failed_diagnostic]
 use core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
 use jet_sema.[SemaGraphResult, SemaSourceOrigin]
@@ -193,11 +193,11 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     }
     // Input services resolve paths against the build file's own directory.
     base_dir :: jet_driver_parent_path(path)
-    compiled := jet_driver_compile_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true, false)
+    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true)
+    compiled := ^selection.compile
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
     program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
-    entry :: compiled.entry_function ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
-    mir :: ^compiled.mir ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
+    inputs :: ^selection.inputs ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its checked functions"))
     session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
     config := jet_eval_runtime_config(request.eval_config)
@@ -205,16 +205,17 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     // own. This query keeps `session` to abort or finish it, and `request` is returned in every
     // response.
     config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: base_dir})
-    evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, ^config)
-    returned := jet_eval_comptime_value(&evaluated, span)
-    // The value converter retires a value-owning result. A failed invocation
-    // can have no value, so still drain its actual machine before expiration.
-    retired :: jet_eval_retire_in_place(&evaluated, span) ?? false
+    run := jet_driver_invocation_run(^inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
     errors := ^compiled.diagnostics
+    evaluated :: ^run.result ?? {
+        build_session_abort(&session)
+        return jet_driver_build_query_empty(^request, ^errors, false, ^run.problem)
+    }
     // copy: `errors` owns the reported diagnostic, while `evaluated` keeps its error for the
     // internal_problem/complete checks below. `error` is a payload view, which cannot be moved.
     if evaluated.error == .Val(error) -> &errors.push(error.diagnostic.copy())
-    if evaluated.internal_problem != None || !evaluated.complete || !retired || returned == None {
+    returned :: evaluated.value
+    if evaluated.internal_problem != None || !evaluated.complete || returned == None {
         build_session_abort(&session)
         // copy: the query result owns the problem text, but `internal` is a payload view of
         // `evaluated.internal_problem`, and Jet has no consuming match to move it out.

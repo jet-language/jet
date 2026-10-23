@@ -4,7 +4,6 @@
 // through the typed lazy.callback helper with the emitted payload's slot lent
 // for the call, and released once by the release helper.
 
-use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route]
 use jet_foundation.[Span, TExpr, THandleOp, Type, type_carrier_identity]
 
 // The compiler-known `Event<T>` (Lower Events.jet lower_event_type).
@@ -39,7 +38,7 @@ fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         .EventMethod(_) -> {}
         else -> return None
     }
-    route :: jet_codegen_general_handle_route(operation, ir_subst(m, receiver.ty), args.len(), jet_codegen_failure_carrier_for_type(ty)) ?? return None
+    route :: ir_general_handle_route(operation, ir_subst(m, receiver.ty), args.len(), ir_failure_carrier_for_type(ty)) ?? return None
     if route.module_name != "core.event" -> return None
     symbol :: route.symbol
     if symbol == "jet_std::JetEvent::on" -> return Val(ir_event_listen(&m, p, &b, ty, receiver, args, false, false, span))

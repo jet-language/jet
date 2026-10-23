@@ -65,40 +65,6 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Neve
     None
 }
 
-// A closed host packet has no owner leases to transfer. Refuse closures,
-// Shared, resource handles and cursor requests rather than fabricating data.
-fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? Never! {
-    if value == {
-        // copy: `data` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
-        .Data(data) -> return Val(data.copy())
-        .Present(inner) -> return Val(TComptimeValue.Present{value: jet_eval_build_host_data(inner) ?? return None})
-        .List(values) -> {
-            output := [TComptimeValue]{}
-            loop item in values -> &output.push(jet_eval_build_host_data(item) ?? return None)
-            return Val(TComptimeValue.List{values: output})
-        }
-        .Struct(name, fields) -> {
-            output := [TComptimeField]{}
-            loop field in fields -> &output.push(TComptimeField{name: field.name, value: jet_eval_build_host_data(field.value) ?? return None})
-            return Val(TComptimeValue.Struct{type_name: name, fields: output})
-        }
-        .Enum(name, variant, args) -> {
-            output := [TComptimeEnumArg]{}
-            loop arg in args -> &output.push(TComptimeEnumArg{name: arg.name, value: jet_eval_build_host_data(arg.value) ?? return None})
-            return Val(TComptimeValue.Enum{type_name: name, variant: variant, args: output})
-        }
-        else -> None
-    }
-}
-
-fn jet_eval_build_session_host_input(value: JetEvalHostValue) -> BuildSessionValue? Never! {
-    jet_eval_build_session_input(jet_eval_build_host_data(value) ?? return None)
-}
-
-fn jet_eval_build_context_host_id(value: JetEvalHostValue) -> Int? Never! {
-    jet_eval_build_context_id(jet_eval_build_host_data(value) ?? return None)
-}
-
 fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue Never! {
     if value == {
         .Unit -> TComptimeValue.Unit

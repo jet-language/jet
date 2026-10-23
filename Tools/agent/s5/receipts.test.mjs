@@ -6,19 +6,18 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {finalizeDriver, phaseSchema, readPrerequisite, writePhaseReceipt} from './receipts.mjs';
-import {consumePrepared, preparedFiles} from './prepared.mjs';
 import {readSharedPack} from './shared-publications.mjs';
 
 const head = 'a'.repeat(40), tree = 'b'.repeat(40), key = 'c'.repeat(64);
 const temporary = t => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jet-s5-receipts-')); t.after(() => fs.rmSync(dir, {recursive: true, force: true})); return dir; };
-const successful = () => ({schema: phaseSchema, head, phase: 'goldens', runId: 'unit', complete: true, verdict: 'PASS', steps: [{name: 'union', verdict: 'PASS'}], runners: []});
+const successful = () => ({schema: phaseSchema, head, phase: 'boundary', runId: 'unit', complete: true, verdict: 'PASS', steps: [{name: 'union', verdict: 'PASS'}], runners: []});
 function publication(dir, receipt = successful(), rc = '0\n') {
   writePhaseReceipt(dir, receipt); fs.writeFileSync(path.join(dir, 'driver.rc'), rc);
 }
 
 test('prerequisites require real driver success, completion, pin, phase and decisive rows', t => {
   const dir = temporary(t); publication(dir);
-  assert.equal(readPrerequisite(dir, head, ['union'], 'goldens').problem, null);
+  assert.equal(readPrerequisite(dir, head, ['union'], 'boundary').problem, null);
   assert.match(readPrerequisite(dir, head, ['missing']).problem, /decisive/);
   assert.match(readPrerequisite(dir, head, [], 'runtime').problem, /phase differs/);
   assert.match(readPrerequisite(dir, 'd'.repeat(40)).problem, /same-pin/);
@@ -39,18 +38,17 @@ test('missing, malformed, incomplete and failed receipts are blocked inputs', t 
   assert.match(readPrerequisite(dir, head, ['union']).problem, /decisive/);
 });
 
-test('retired oracle rows stay UNCOVERED while native goldens and AGE remain decisive', t => {
+test('retired oracle rows stay UNCOVERED while native fixtures and AGE remain decisive', t => {
   const dir=temporary(t);
   const receipt={...successful(),phase:'fixtures',steps:[
-    {name:'shared-native-results',verdict:'PASS'},
+    {name:'frozen-inputs',verdict:'PASS'},
     {name:'run-crypto-fixtures-4',verdict:'PASS'},
-    {name:'run-display-goldens-1',verdict:'UNCOVERED',cardRequired:true},
     {name:'freeze-age-fixtures-0',verdict:'UNCOVERED',cardRequired:true},
   ],runners:[{name:'freeze-age-fixtures.mjs',verdict:'UNCOVERED'}]};
   publication(dir,receipt);
-  assert.equal(readPrerequisite(dir,head,['shared-native-results','run-crypto-fixtures-4'],'fixtures').problem,null);
+  assert.equal(readPrerequisite(dir,head,['frozen-inputs','run-crypto-fixtures-4'],'fixtures').problem,null);
   assert.match(readPrerequisite(dir,head,['freeze-age-fixtures-0'],'fixtures').problem,/not PASS/);
-  for(const name of ['shared-native-results','run-crypto-fixtures-4']) {
+  for(const name of ['frozen-inputs','run-crypto-fixtures-4']) {
     publication(dir,{...receipt,steps:receipt.steps.map(row=>row.name===name?{...row,verdict:'FAIL'}:row)});
     assert.match(readPrerequisite(dir,head,[],'fixtures').problem,/failed/);
   }
@@ -59,7 +57,7 @@ test('retired oracle rows stay UNCOVERED while native goldens and AGE remain dec
 test('timeout preserves partial evidence and publishes an explicit completed failure', t => {
   const dir = temporary(t), partial = {...successful(), complete: false, verdict: 'RUNNING'};
   writePhaseReceipt(dir, partial);
-  const done = finalizeDriver(dir, {head, phase: 'goldens', runId: 'unit', code: 124});
+  const done = finalizeDriver(dir, {head, phase: 'boundary', runId: 'unit', code: 124});
   assert.equal(done.complete, true); assert.equal(done.verdict, 'FAIL');
   assert.equal(done.steps[0].name, 'union'); assert.equal(done.steps[1].code, 124);
   assert.deepEqual(JSON.parse(fs.readFileSync(done.steps[1].partial, 'utf8')), partial);
@@ -68,7 +66,7 @@ test('timeout preserves partial evidence and publishes an explicit completed fai
 
 test('an old completed verdict cannot survive a new run without its receipt', t => {
   const dir = temporary(t); publication(dir);
-  const done = finalizeDriver(dir, {head, phase: 'goldens', runId: 'new-run', code: 0});
+  const done = finalizeDriver(dir, {head, phase: 'boundary', runId: 'new-run', code: 0});
   assert.equal(done.verdict, 'FAIL'); assert.equal(done.steps.length, 1);
   assert.match(done.steps[0].partial, /incomplete-new-run/);
   assert.equal(fs.readFileSync(path.join(dir, 'driver.rc'), 'utf8'), '0\n');
@@ -76,21 +74,10 @@ test('an old completed verdict cannot survive a new run without its receipt', t 
 
 test('normal completed verdicts retain the real driver result', t => {
   const dir = temporary(t); publication(dir);
-  assert.equal(finalizeDriver(dir, {head, phase: 'goldens', runId: 'unit', code: 0}).verdict, 'PASS');
+  assert.equal(finalizeDriver(dir, {head, phase: 'boundary', runId: 'unit', code: 0}).verdict, 'PASS');
   const blocked = {...successful(), verdict: 'BLOCKED', steps: [{name: 'pack', verdict: 'BLOCKED'}]};
   publication(dir, blocked, '2\n');
-  assert.equal(finalizeDriver(dir, {head, phase: 'goldens', runId: 'unit', code: 2}).verdict, 'BLOCKED');
-});
-
-test('prepared corpora are copied exactly once after inventory and hash verification', t => {
-  const dir = temporary(t), source = path.join(dir, 'prepared'), destination = path.join(dir, 'consumer');
-  fs.mkdirSync(source); fs.writeFileSync(path.join(source, 'cases.list'), 'case\n');
-  const manifest = preparedFiles(source);
-  consumePrepared(source, destination, manifest);
-  assert.deepEqual(preparedFiles(destination), manifest);
-  assert.throws(() => consumePrepared(source, destination, manifest), /already exists/);
-  fs.writeFileSync(path.join(source, 'cases.list'), 'drift\n');
-  assert.throws(() => consumePrepared(source, path.join(dir, 'other'), manifest), /digest differs/);
+  assert.equal(finalizeDriver(dir, {head, phase: 'boundary', runId: 'unit', code: 2}).verdict, 'BLOCKED');
 });
 
 function packFixture(dir) {
@@ -124,7 +111,7 @@ test('malformed and failed producer receipts cannot become published runtime inp
   assert.throws(() => readSharedPack(options), /real driver/);
 });
 
-test('all six generated S5 holds have scheduler-valid kinds and shell syntax', t => {
+test('all five generated S5 holds have scheduler-valid kinds and shell syntax', t => {
   const dir = temporary(t);
   const generator = fs.readFileSync(new URL('./make-jobs.sh', import.meta.url), 'utf8');
   const start = generator.indexOf('\njob() {');
@@ -135,7 +122,7 @@ test('all six generated S5 holds have scheduler-valid kinds and shell syntax', t
     input: generator.slice(start), env, encoding: 'utf8',
   });
   assert.equal(generated.status, 0, generated.stderr);
-  for (const phase of ['build', 'gates', 'runtime', 'boundary', 'goldens', 'fixtures']) {
+  for (const phase of ['build', 'gates', 'runtime', 'boundary', 'fixtures']) {
     const file = path.join(dir, `Main-RuntimeLead12-s5-${phase}-r4.sh.mainhold`);
     const text = fs.readFileSync(file, 'utf8');
     const header = text.split('\n')[1];

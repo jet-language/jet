@@ -1,9 +1,19 @@
 // Source/CmdDevTools.rs lint --complexity and the JSON-aware --a11y host.
 use core.time as cli_time
-use jet_driver.[JetDriverVerbOutput, JetDriverCompileMode, jet_driver_parse_user_source, jet_driver_present_diagnostics, jet_driver_report_problems, jet_driver_is_a11y_lint, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_driver.[
+    JetDriverVerbOutput,
+    JetDriverCompileMode,
+    jet_driver_parse_user_source,
+    jet_driver_present_diagnostics,
+    jet_driver_report_problems,
+    jet_driver_is_a11y_lint,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USAGE,
+    JET_DRIVER_EXIT_USER_ERROR,
+    TCostReport,
+]
 use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all]
 use jet_driver.[jet_driver_cost_query]
-use jet_codegen.[TCostReport]
 use jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, tir_cost_operation, tir_cost_fix]
 
 fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput {

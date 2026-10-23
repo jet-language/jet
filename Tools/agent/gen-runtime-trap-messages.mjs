@@ -20,12 +20,12 @@ function field(code, name) {
   if (!value) throw new Error(`missing ${code}.${name}`);
   return JSON.parse(value[1]).replaceAll("{{", "{").replaceAll("}}", "}");
 }
-// The native TLS refusal is defined once, in the lowering that reports it at
+// The native TLS refusal is defined once, in the IR route table that reports it at
 // compile time; the runtime's stop and String-error leaves use this projection.
 function nativeTlsRefusal() {
-  const routes = readFileSync(resolve(root, "Compiler/JetBackend/Source/Lower/Routes.jet"), "utf8");
-  const value = /\nfn lower_tls_transport_message\(\) -> String Never! \{\n    ("(?:[^"\\]|\\.)*")\n\}/.exec(routes);
-  if (!value) throw new Error("missing Lower/Routes.jet lower_tls_transport_message literal");
+  const routes = readFileSync(resolve(root, "Compiler/JetIR/Source/RouteCarriers.jet"), "utf8");
+  const value = /\nfn ir_tls_transport_message\(\) -> String Never! \{\n    ("(?:[^"\\]|\\.)*")\n\}/.exec(routes);
+  if (!value) throw new Error("missing RouteCarriers.jet ir_tls_transport_message literal");
   const text = JSON.parse(value[1]);
   if (!/^[\x20-\x7e]+$/.test(text)) throw new Error("native TLS refusal must be printable ASCII for word projection");
   return text;

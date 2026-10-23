@@ -157,13 +157,6 @@ fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -> Bo
     }
 }
 
-fn core_call_symbol_name(symbol: CoreCallSymbol) -> String Never! {
-    if symbol == {
-        .Prelude(name) | .Rust(name) -> name
-        .SourceOwned -> panic("source-owned Core declarations have no host symbol")
-    }
-}
-
 fn core_call_is_receiver(row: CoreCallRecord) -> Bool Never! {
     row.receiver_types.len() > 0
 }
@@ -176,10 +169,6 @@ fn core_call_key(row: CoreCallRecord) -> String Never! {
 
 fn core_call_accepts_arity(row: CoreCallRecord, count: Int) -> Bool Never! {
     count >= row.signature.arity && count <= row.signature.max_arity
-}
-
-fn core_call_has_direct_symbol(row: CoreCallRecord) -> Bool Never! {
-    row.aot_direct && !core_call_is_receiver(row) && core_call_symbol_name(row.symbol) != ""
 }
 
 fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {

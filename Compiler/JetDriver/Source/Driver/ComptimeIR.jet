@@ -3,10 +3,10 @@
 // (jet_eval_ir_comptime_build), laid out by the run's staged declaration
 // rows, and each entry runs its own item function on it
 // (jet_eval_ir_comptime_run) over the runtime pack's IR.
-use jet_foundation.[Span, TConstantDef, TImplDef, TStmt, TTypeDef, TVisibility]
+use jet_foundation.[Span, TComptimeValue, TConstantDef, TImplDef, TStmt, TTypeDef, TVisibility]
 use jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
-use jet_codegen.[jet_codegen_comptime_item_function]
-use jet_eval.[JetEvalIRComptime, jet_eval_ir_comptime_build]
+use jet_ir.[ir_comptime_item_function]
+use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_invoke]
 
 // The type, impl and constant rows of every module of a run's graph
 // (jet_driver_comptime_stage).
@@ -45,7 +45,7 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
     loop index in start..<batch.entries.len() {
         entry :: batch.entries[index]
         if entry.plain != None -> next
-        item := jet_codegen_comptime_item_function(entry.request, entry.request.module_identity)
+        item := ir_comptime_item_function(entry.request, entry.request.module_identity)
         item.body = [TStmt]{TStmt.Return{value: Val(entry.request.expression.copy()), span: entry.request.span}}
         &keys.push(item.key.copy())
         &functions.push(^item)
@@ -64,4 +64,26 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
 // The constant row of landed value `value` under `key`.
 fn jet_driver_comptime_value_row(value: SemaComptimeItemValue, key: String) -> TConstantDef Never! {
     TConstantDef{module_identity: value.module_identity.copy(), key: key.copy(), name: key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()}
+}
+
+// A fn-build or fn-dev invocation's run (`result`): the checked entry
+// function of `inputs`, built as slot IR with the declarations it lays
+// values out by, run on its context `args`, the config carrying the
+// invocation's build host. Without a result, `problem` says what kept the
+// entry from running.
+struct JetDriverInvocationRun {
+    result: JetEvalIRResult?
+    problem: String?
+}
+
+fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetDriverInvocationRun {
+    checked := ^inputs
+    keys := [String]{}
+    if checked.entry_key == .Val(key) -> &keys.push(key.copy())
+    if keys.len() == 0 -> return JetDriverInvocationRun{result: None, problem: Val("the checked invocation lost its entry function")}
+    declarations := jet_driver_checked_declarations(&checked)
+    built := jet_eval_ir_comptime_build(^checked.functions, keys, ^declarations.type_defs, ^declarations.impls, ^declarations.constants)
+    if built.build_failures.len() > 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder refused the invocation's code: {built.build_failures.join("; ")}")}
+    if built.items[0] < 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder did not build the invocation's entry function")}
+    JetDriverInvocationRun{result: Val(jet_eval_ir_comptime_invoke(&built, 0, args, config, span)), problem: None}
 }

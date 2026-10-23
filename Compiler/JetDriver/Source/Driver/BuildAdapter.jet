@@ -1,7 +1,7 @@
-// Invocation-owned adapter for checked fn-build calls. Unrelated Core and
-// native operations keep their original adapter and ownership receipts.
-use jet_foundation.[MIRCallFallibility, MIRScopeKind, Span, TComptimeValue]
-use jet_eval.[JetEvalMachine, JetEvalBuildHostAdapter, JetEvalHostArgument, JetEvalHostCallTarget, JetEvalHostResult, JetEvalHostOutcome, JetEvalHostValue, JetEvalErrorKind, jet_eval_build_context_host_id, jet_eval_build_session_host_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
+// Invocation-owned adapter for checked fn-build calls, which the IR machine
+// hands every Build and BuildPlan host method of the invocation.
+use jet_foundation.[Span, TComptimeValue]
+use jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_context_id, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
 
 use core.crypto as build_input_crypto
 use core.net.url as build_input_url
@@ -21,97 +21,79 @@ struct JetDriverBuildAdapter {
     base_dir: String
 }
 
-fn jet_driver_build_host_result(outcome: ^JetEvalHostOutcome) -> JetEvalHostResult Never! {
-    {transfers: [], callback_transfers: [], fixed_backing_transfers: [], writebacks: [], outcome: ^outcome}
-}
-fn jet_driver_build_host_failure(session: BuildSession, span: Span, message: String) -> JetEvalHostResult Never! {
+fn jet_driver_build_host_failure(session: BuildSession, span: Span, message: String) -> JetEvalBuildReply Never! {
     permit :: session.storage.guard_read()
     error := build_session_diag(permit.value, message)
     error.start = span.start
     error.end = span.end
-    jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)})
+    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
 }
 fn jet_driver_build_context_owned(session: BuildSession, owner: Int) -> Bool Never! {
     permit :: session.storage.guard_read()
     permit.value.id == owner && permit.value.active
 }
-fn jet_driver_build_impure(machine: JetEvalMachine) -> Bool Never! {
-    loop frame in machine.frames {
-        loop function in machine.program.functions {
-            if function.id.value != frame.function.value -> next
-            loop active in frame.scopes {
-                loop scope in function.scopes { if scope.id.value == active.value && scope.kind == MIRScopeKind.Impure -> return true }
-            }
-        }
+fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
+    if member == "BuildPlan.graph" {
+        if args.len() != 1 -> return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
+        returned :: jet_eval_build_session_input(args[0]) ?? return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
+        projected :: build_session_graph(session, returned)
+        if projected.diagnostic == .Val(error) -> return Val(JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)})
+        graph :: projected.graph ?? return Val(jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph"))
+        return Val(JetEvalBuildReply.Value{value: jet_eval_build_graph_value(graph)})
     }
-    false
-}
-fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
-    if target == .Prelude(row) {
-        if row.module_name != "core.host" -> return None
-        if row.member == "BuildPlan.graph" {
-            if args.len() != 1 -> return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
-            returned :: jet_eval_build_session_host_input(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
-            projected :: build_session_graph(session, returned)
-            if projected.diagnostic == .Val(error) -> return Val(jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)}))
-            graph :: projected.graph ?? return Val(jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph"))
-            return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: jet_eval_build_graph_value(graph)}}))
-        }
-        if !row.member.starts_with("Build.") -> return None
-        if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
-        owner :: jet_eval_build_context_host_id(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method requires its checked context"))
-        if !jet_driver_build_context_owned(session, owner) -> return Val(jet_driver_build_host_failure(session, span, "build context expired"))
-        method :: row.member.slice("Build.".len(), row.member.len())
-        values := [BuildSessionValue]{}
-        generated := String?{None}
-        loop index in 1..<args.len() {
-            value :: jet_eval_build_session_host_input(args[index].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
-            if method == "generate" && index == 2 {
-                // copy: `generated` outlives this loop and is handed to build_session_call, while
-                // `source` is only a view of the `.Text` payload inside `value`; Jet has no
-                // consuming match, so the payload cannot be moved out.
-                if value == .Text(source) -> generated = Val(source.copy())
-                else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
-            } else { &values.push(value) }
-        }
-        reply := build_session_call(&session, method, values, generated, jet_driver_build_impure(machine), span.start, span.end)
-        if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, http_inputs, network_declared, base_dir, service, request_args, span)
-        if reply == {
-            .Value(value) -> {
-                data := jet_eval_build_session_output(value)
-                if row.fallibility != MIRCallFallibility.Infallible -> data = TComptimeValue.Present{value: ^data}
-                return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: ^data}}))
-            }
-            .Failure(error) -> {
-                if row.fallibility != MIRCallFallibility.Infallible && jet_eval_build_failed_value(error) == .Val(value) {
-                    // copy: the host result owns the failure's data value, but `value` is a view of
-                    // the payload in jet_eval_build_failed_value's result; Jet has no consuming
-                    // match to move it out.
-                    return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: value.copy()}}))
-                }
-                return Val(jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)}))
-            }
-            .HostRequest(service_method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable"))
-        }
+    if !member.starts_with("Build.") -> return None
+    if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
+    owner :: jet_eval_build_context_id(args[0]) ?? return Val(jet_driver_build_host_failure(session, span, "build method requires its checked context"))
+    if !jet_driver_build_context_owned(session, owner) -> return Val(jet_driver_build_host_failure(session, span, "build context expired"))
+    method :: member.slice("Build.".len(), member.len())
+    values := [BuildSessionValue]{}
+    generated := String?{None}
+    loop index in 1..<args.len() {
+        value :: jet_eval_build_session_input(args[index]) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
+        if method == "generate" && index == 2 {
+            // copy: `generated` outlives this loop and is handed to build_session_call, while
+            // `source` is only a view of the `.Text` payload inside `value`; Jet has no
+            // consuming match, so the payload cannot be moved out.
+            if value == .Text(source) -> generated = Val(source.copy())
+            else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
+        } else { &values.push(value) }
     }
-    None
+    reply := build_session_call(&session, method, values, generated, impure, span.start, span.end)
+    if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, http_inputs, network_declared, base_dir, service, request_args, span)
+    if reply == {
+        .Value(value) -> {
+            data := jet_eval_build_session_output(value)
+            if fallible -> data = TComptimeValue.Present{value: ^data}
+            return Val(JetEvalBuildReply.Value{value: ^data})
+        }
+        .Failure(error) -> {
+            if fallible && jet_eval_build_failed_value(error) == .Val(value) {
+                // copy: the reply owns the failure's data value, but `value` is a view of the
+                // payload in jet_eval_build_failed_value's result; Jet has no consuming match to
+                // move it out.
+                return Val(JetEvalBuildReply.Value{value: value.copy()})
+            }
+            return Val(JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)})
+        }
+        .HostRequest(service_method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable"))
+    }
 }
 
 impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
     // Fork the adapter without changing its invocation-owned session authority.
     // Raw transports remain host-owned; build policy stays in this adapter.
     fn clone_adapter(self) -[]> JetEvalBuildHostAdapter {
-        // copy: clone_adapter exists to fork the adapter: the evaluator keeps this adapter and
-        // installs the fork in a child machine, so each needs its own session handle, inputs and
+        // copy: clone_adapter exists to fork the adapter: the machine keeps this adapter and
+        // answers each host call on a fork, so each needs its own session handle, inputs and
         // base_dir.
         JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), network_declared: self.network_declared, base_dir: self.base_dir.copy()}
     }
-    fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
+    fn build_call(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
         // copy: build_call has a read `self`, but jet_driver_build_host_call writes its session
         // (`&`). This call writes a session of its own, and the adapter keeps its session for the
         // next build_call.
         session := self.session.copy()
-        jet_driver_build_host_call(&session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, &machine, target, args, span)
+        jet_driver_build_host_call(&session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, member, args, fallible, impure, span)
     }
 }
 

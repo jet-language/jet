@@ -1096,12 +1096,12 @@ fn field_owner_indexed_optional_and_guard_projections_run() {
     if !have_rustc() {
         return;
     }
-    let source = include_str!("../Compiler/JetCodegen/Tests/FieldOwnerShapes.jet");
+    let source = include_str!("../Compiler/JetIR/Tests/FieldOwnerShapes.jet");
     let (code, stdout) = build_and_run("tir_field_owner_shapes", source);
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        include_str!("../Compiler/JetCodegen/Tests/FieldOwnerShapes.out")
+        include_str!("../Compiler/JetIR/Tests/FieldOwnerShapes.out")
     );
 }
 

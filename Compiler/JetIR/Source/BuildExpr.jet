@@ -3,8 +3,6 @@
 // closures, constants and program stops (Build.jet holds the shared state).
 
 use jet_foundation.[AccessConvention, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TForInMethod, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, tir_each_expr_child, tir_each_stmt_list_child, tir_generated_local, tir_user_local, type_carrier_identity]
-use jet_backend.[lower_constant_u64_bits, lower_float_constant_bits]
-use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route, jet_codegen_precise_source_helper]
 
 fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: TFunc) Never! {
     b.line = function.line
@@ -430,7 +428,14 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         }
         // Scopes whose markers lower to nothing outside a sentry build
         // (Lower lower_scope): their body runs as a plain scope.
-        .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Live(body, _) -> ir_stmts(&m, p, &b, body)
+        .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Live(body, _) -> ir_stmts(&m, p, &b, body)
+        // An `#Impure` body is a plain scope whose build host calls may
+        // touch the ambient world (ir_host_method).
+        .Impure(body, _) -> {
+            b.impure += 1
+            ir_stmts(&m, p, &b, body)
+            b.impure -= 1
+        }
         .MixedSwitch(subject, _, arms, else_body, span) -> ir_mixed_switch(&m, p, &b, subject, arms, else_body, span)
         .Reactive(_, span) -> ir_fail(&b, span, "statement Reactive")
         .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
@@ -995,7 +1000,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .FloatLit(value) -> {
             ty :: ir_type_row(&m, expression.ty) ?? return ir_type_fail(&b, span, expression.ty)
             slot :: ir_temp(&m, &b, ty)
-            ir_emit(&b.f, IROp.Const, slot, lower_float_constant_bits(value, expression.ty == Type.Float32), -1, -1, b.line)
+            ir_emit(&b.f, IROp.Const, slot, ir_float_constant_bits(value, expression.ty == Type.Float32), -1, -1, b.line)
             return slot
         }
         .StrLit(parts) -> return ir_string(&m, p, &b, parts, span)
@@ -1189,6 +1194,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
                 lent :: ir_handle_field(&m, p, &b, receiver.ty, base, field.name, expression.ty, span)
                 if lent != -2 -> return lent
             }
+            if base >= 0 && ir_host_value_row(m, p, b.f.slot_type[base]) != None -> return ir_host_field(&m, p, &b, expression.ty, base, field.name, span)
             if base < 0 || ir_kind_of(m, b, base) != .Aggregate -> return ir_fail_slot(&b, span, "field of {ir_type_name(receiver.ty)}")
             member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "field {field.name} of {ir_type_name(receiver.ty)}")
             return ir_member_read(&m, &b, base, member)
@@ -1226,6 +1232,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
                     if method == "shared.read" -> return ir_shared_read(&m, p, &b, expression.ty, receiver, args, span)
                     if method == "same" && args.len() == 1 -> return ir_shared_same(&m, p, &b, receiver, args[0], span)
                 }
+                receiver_row :: ir_value_type(&m, p, receiver.ty) ?? return ir_type_fail(&b, span, receiver.ty)
+                if ir_host_value_row(m, p, receiver_row) == .Val(owner) -> return ir_host_method(&m, p, &b, expression.ty, owner, method, receiver, args, span)
             }
             return ir_fail_slot(&b, span, "host call {ir_host_call_name(call)}")
         }
@@ -1439,8 +1447,8 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         }
         return ir_route(&m, p, &b, data_symbol, operands, mask, ty, span)
     }
-    carrier :: jet_codegen_failure_carrier_for_type(ty)
-    route :: jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier) ?? return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
+    carrier :: ir_failure_carrier_for_type(ty)
+    route :: ir_general_handle_route(operation, receiver.ty, args.len(), carrier) ?? return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
     // A mutating receiver (codegen jet_codegen_handle_receiver_is_mutating)
     // still crosses as its handle: the route mutates the runtime value
     // behind it (Lower Routes.jet lower_route_args, a HandleMut carrier).
@@ -2054,7 +2062,7 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
 // (the type is then its runtime handle) it is the `jet_<type>_<function>`
 // route, its constructors taking their arguments by value.
 fn ir_precise_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, args: [TExpr], span: Span) -> Int Never! {
-    helper :: jet_codegen_precise_source_helper(type_name, function) ?? ""
+    helper :: ir_precise_source_helper(type_name, function) ?? ""
     key :: "function:<corelib>/core.math::{helper}"
     if helper == "" || p.rows.get(key) == None {
         type_key :: if type_name == {
@@ -3961,7 +3969,7 @@ fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComp
         .Char(code) -> return ir_int_constant(&m, &b, row, code)
         .Float(number, _) -> {
             narrow :: m.types[row].kind == .Float32
-            return ir_int_constant(&m, &b, row, lower_float_constant_bits(number, narrow))
+            return ir_int_constant(&m, &b, row, ir_float_constant_bits(number, narrow))
         }
         .String(text) -> {
             slot :: ir_temp(&m, &b, row)
@@ -3970,8 +3978,8 @@ fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComp
         }
         .BigInt(decimal) -> {
             // A U64 beyond the exact-Int range keeps its decimal; its word
-            // destination takes the bit pattern (Lower lower_constant_u64_bits).
-            if m.types[row].kind == .Word -> return ir_int_constant(&m, &b, row, lower_constant_u64_bits(decimal))
+            // destination takes the bit pattern (Lower ir_constant_u64_bits).
+            if m.types[row].kind == .Word -> return ir_int_constant(&m, &b, row, ir_constant_u64_bits(decimal))
             slot :: ir_fresh_temp(&m, &b, row)
             ir_emit(&b.f, IROp.ConstBigInt, slot, ir_intern_name(&m, decimal), -1, -1, b.line)
             return slot

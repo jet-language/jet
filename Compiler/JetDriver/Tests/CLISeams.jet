@@ -4,14 +4,14 @@ use jet_driver.[
     JET_DRIVER_CORE_SOURCE_ROOT, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
     JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
     JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_checked_projection,
-    jet_driver_compile, jet_driver_has_errors, jet_driver_load, jet_driver_lowering_inputs,
+    jet_driver_compile, jet_driver_has_errors, jet_driver_invocation_run, jet_driver_load, jet_driver_lowering_inputs,
     jet_driver_module_display, jet_driver_registration_module_inputs,
     jet_driver_schema_pending_breaks, jet_driver_source_query,
 ]
 use jet_cli.[jet_cli_checked_semindex, jet_cli_driver_request]
 use jet_sema.[SchemaSnapshot, SemaForeignProviderInput, SnapshotField]
 use jet_foundation.[Diagnostic, Item, Span, TComptimeValue]
-use jet_eval.[jet_eval_comptime_value, jet_eval_default_config, jet_eval_function]
+use jet_eval.[jet_eval_default_config]
 use jet_parser.[parse_source]
 
 fn seams_require(ok: Bool, detail: String) Never! {
@@ -90,7 +90,7 @@ fn seams_registration_inputs(request: JetDriverCompileRequest, expected_source_r
 fn seams_checked_projection() {
     source :: "fn serve() -> Int {{ 7 }}"
     retained :: jet_driver_checked_projection(seams_request(source, JetDriverCompileMode.Check))
-    seams_require(retained.compile.complete && retained.compile.internal_problem == None && retained.compile.mir == None, "retained Check stops after the actual completed front end")
+    seams_require(retained.compile.complete && retained.compile.internal_problem == None, "retained Check stops after the actual completed front end")
     entry :: retained.entry_module ?? panic("checked canonical entry missing")
     seams_require(retained.source_modules.contains(entry) && retained.compile.doc_modules[entry].source == source && retained.compile.doc_modules[entry].physical_path == "/seams-fixture/main.jet", "canonical entry binds the owned immutable source")
     index :: jet_cli_checked_semindex(retained.compile)
@@ -163,21 +163,13 @@ fn seams_checked_projection() {
     loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Eval, JetDriverCompileMode.Interpreter}) {
         request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
-        result := jet_driver_compile(^request)
-        seams_require(result.complete && result.internal_problem == None && !jet_driver_has_errors(result.diagnostics), "named job compile")
-        entry :: result.entry_function ?? panic("selected entry missing")
-        program := ^result.mir ?? panic("selected MIR missing")
-        selected := false
-        loop function in program.functions {
-            if function.id == entry && function.name == "serve" -> selected = true
-        }
-        seams_require(selected, "entry is the declared function, not a run wrapper")
-        job_retained := false
-        loop job in program.jobs { if job.name == "serve" && job.function == entry -> job_retained = true }
-        seams_require(job_retained, "canonical checked Job metadata binds selected entry")
-        evaluated := jet_eval_function(^program, entry, [TComptimeValue]{}, jet_eval_default_config())
-        value :: jet_eval_comptime_value(&evaluated, Span{start: 0, end: 0})
-        seams_require(value == (Val(TComptimeValue.Int{value: 7})), "selected declared body executes")
+        front := jet_driver_lowering_inputs(^request, None)
+        seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job compile")
+        seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
+        inputs := ^front.inputs ?? panic("selected checked inputs missing")
+        run :: jet_driver_invocation_run(^inputs, [TComptimeValue]{}, jet_eval_default_config(), Span{start: 0, end: 0})
+        evaluated :: run.result ?? panic(run.problem ?? "selected entry did not build")
+        seams_require(evaluated.value == (Val(TComptimeValue.Int{value: 7})), "selected declared body executes")
     }
     // A named generator does not need a synthetic or pre-existing run body.
     generate := seams_request("#Job fn generate_files() -> Int {{ 3 }}", JetDriverCompileMode.Program)
@@ -214,7 +206,7 @@ fn seams_checked_projection() {
     breaking :: jet_driver_compile(^schema)
     schema_error := false
     loop diagnostic in breaking.diagnostics { if diagnostic.code == "E0910" -> schema_error = true }
-    seams_require(schema_error && !breaking.complete && breaking.mir == None, "schema fails before codegen")
+    seams_require(schema_error && !breaking.complete, "schema fails in the checker")
     schema_check := seams_request("#PublishedSchema struct Account {{\n    name: String\n    verified: Bool\n}}\nfn serve() {{ }}", JetDriverCompileMode.Check)
     schema_check.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
     schema_retained :: jet_driver_checked_projection(schema_check)

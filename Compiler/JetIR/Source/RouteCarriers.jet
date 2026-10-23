@@ -1,0 +1,54 @@
+// Core calls, static Prelude routes and builtin methods through the runtime's
+// C-ABI routes (their carriers in RuntimeRoutes.jet). Every argument is checked against its
+// adapter carrier, so a call never hands the runtime a value of another
+// representation. A List argument passes its slot buffer and length; a List
+// result comes back as its length with its slot buffer in an out slot; an
+// Option or Result result comes back as the adapter's tag word plus one out
+// slot. The lowering builds its own List, Option or Result box from them.
+
+fn ir_route_nested_carrier(carrier: IRRouteCarrier) -> Bool Never! {
+    if carrier == .List(elem) -> return elem == .List(_)
+    false
+}
+
+// Seed Rust adapters exchange eight-byte list slots, never nested headers.
+// Only a Jet runtime provider (native_lists) owns a nested List carrier.
+// A List of Core records crosses every route, seed or Jet-owned, as a buffer
+// of eight-byte record handles (Records.jet): the runtime record shape (its
+// nullable OptText words, its sequence owners) is not the native inline row,
+// so no provider may hand back inline rows. Jet providers that return a
+// record List (jet_std_fs_list_dir_raw, jet_dyn_field, the codec failures)
+// build that handle buffer; the handles are converted and dropped here.
+fn ir_route_nested(route: IRRoute) -> Bool Never! {
+    loop param in route.params {
+        if ir_route_nested_carrier(param) -> return true
+    }
+    if route.result == {
+        .Plain(carrier) -> ir_route_nested_carrier(carrier)
+        .Option(some) -> ir_route_nested_carrier(some)
+        .Result(ok, err) -> ir_route_nested_carrier(ok) || ir_route_nested_carrier(err)
+        .Tuple(items) -> {
+            loop item in items {
+                if ir_route_nested_carrier(item) -> return true
+            }
+            false
+        }
+    }
+}
+
+// The one definition of the native TLS refusal text. gen-runtime-trap-messages
+// projects this literal into TrapMessages.jet (trap_msg_native_tls), which the
+// runtime's jet_rt_http_tls_refuse stop and build HTTP leaf report verbatim.
+fn ir_tls_transport_message() -> String Never! {
+    "TLS transport is not available in native builds until Jet's own TLS implementation lands; use plain HTTP or TCP meanwhile"
+}
+
+// ProcessReceipt144/ProcessPlan72 are Jet-owned carriers, never hosted Rust
+// records, in pack and program builds alike (the IR makes the
+// compiler-owned process records handles), and the compiler-owned `Test` is
+// the runtime's JetTestSuite snapshot (TestSuite.jet). Validate canonical
+// identity and actual member types before lending their storage to the typed
+// read/clone glue.
+fn ir_native_runtime_carrier(handle: IRRuntimeHandle, name: String) -> Bool Never! {
+    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild" || handle.runtime == "JetTestSuite") && name == handle.jet_name
+}

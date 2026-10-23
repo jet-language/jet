@@ -24,8 +24,8 @@ const cacheDir = resolve(homedir(), ".cache/jet-dev/compiler-modules/ast");
 const jetCmd = (process.env.JET_CMD ?? `${repo}/Tools/agent/jet-env jet`).split(/\s+/);
 
 export const PACKAGES = [
-  "JetFoundation", "JetLexer", "JetParser", "JetOptimizer",
-  "JetSema", "JetCodegen", "JetEval", "JetDriver", "Bootstrap",
+  "JetFoundation", "JetLexer", "JetParser",
+  "JetSema", "JetEval", "JetDriver", "Bootstrap",
 ];
 
 export function packageOf(file) {

@@ -22,7 +22,7 @@ for (const row of table.cases.filter(row => row.name.startsWith('rust-0.10.1-'))
 if (files.length !== 14 || files.some(file => !/^[a-f0-9]{64}$/.test(file.sha256))) throw Error('preserved input census or digest drift');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const destination = path.resolve(output);
-const manifest = {head, files, missing: [{runner: 'run-display-goldens.mjs', inputs: ['rust.stdout', 'rust32.stdout', 'rust-benchmark.stdout'], because: 'Rust-captured oracle not preserved'}, {runner: 'freeze-age-fixtures.mjs', inputs: ['age testkit/'], because: 'Rust-captured oracle not preserved'}]};
+const manifest = {head, files, missing: [{runner: 'freeze-age-fixtures.mjs', inputs: ['age testkit/'], because: 'Rust-captured oracle not preserved'}]};
 if (fs.existsSync(destination)) {
   const actual = JSON.parse(fs.readFileSync(path.join(destination, 'manifest.json'), 'utf8'));
   if (JSON.stringify(actual) !== JSON.stringify(manifest)) throw Error('immutable input manifest changed');

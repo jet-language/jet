@@ -5,7 +5,6 @@
 // ScopeGuard carrier they produce.
 
 use jet_foundation.[Span, TCoreClosureKind, TExpr, TLambda, Type, type_carrier_identity]
-use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_lambda_function_type]
 
 // The element of a `Task<T>` (Lower Tasks.jet lower_task_element).
 fn ir_task_element(ty: Type) -> Type? Never! {
@@ -125,8 +124,8 @@ fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: TEx
     ir_emit(&b.f, IROp.ConstText, label_slot, label_text, -1, -1, b.line)
     checked := executable
     checked.ret = if element == (Type.Named{name: "Unit"}) -> None else -> Val(element.copy())
-    checked.failure_carrier = jet_codegen_failure_carrier_for_type(element)
-    closure_ty :: jet_codegen_lambda_function_type(checked)
+    checked.failure_carrier = ir_failure_carrier_for_type(element)
+    closure_ty :: ir_lambda_function_type(checked)
     env :: ir_lambda(&m, p, &b, closure_ty, checked, span)
     if ir_failed(b) || env < 0 -> return -1
     invoke_id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
@@ -163,7 +162,7 @@ fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: TEx
 // `core.mem.scope.guard(callback)`: the callback's closure box, reowned as
 // the ScopeGuard whose scope-end drop runs it (Lower Closures.jet:517).
 fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: TLambda, span: Span) -> Int Never! {
-    closure_ty :: jet_codegen_lambda_function_type(executable)
+    closure_ty :: ir_lambda_function_type(executable)
     env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return -1
     guard_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)

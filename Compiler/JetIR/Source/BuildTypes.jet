@@ -3,8 +3,6 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TExpr, TField, TFunc, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, type_carrier_identity, type_name, type_union_member_tag]
-use jet_backend.[LOWER_GENERATED_RECORDS, LOWER_RECORD_SCHEMAS, LOWER_WORD_RECORDS, LowerRecordSchema, LowerRuntimeHandle, lower_handle_field, lower_native_runtime_carrier, lower_native_type, lower_record_variant_position, lower_runtime_handle, lower_runtime_route, lower_wide_word, runtime_abi_atom]
-use jet_codegen.[JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS, JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS, JET_CODEGEN_COMPILER_OWNED_ENUMS, JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS, JET_CODEGEN_RANGE_RECORD, JetCodegenCompilerOwnedPayload, jet_codegen_compiler_owned_enum_payload, jet_codegen_compiler_owned_generic_params, jet_codegen_compiler_owned_record_fields]
 
 // A rendered type's identity: its declaration key when it names one (every
 // instance of a generic declaration shares it).
@@ -246,6 +244,7 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         // The compiler-owned `ParseError` (of Int.parse, String.to_int, ...)
         // is an alias of String (codegen jet_codegen_parse_error_alias_definition).
         if name == "ParseError" -> return ir_type_row(&m, Type.String)
+        if args.len() == 0 && ir_host_value_name(name) -> return Val(ir_intern_type(&m, "host:{name}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, false, 64, "")))
         return None
     }
     definition :: p.types[row]
@@ -255,7 +254,7 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
     // carriers, not its declared fields, unless Core source owns the
     // declaration (DataStream<T>, DataLoader<T>: its Jet fields on every tier).
     if definition.generic_params.len() != args.len() -> return None
-    if args.len() > 0 && !core_source_owns_type(definition.key) && (definition.key.starts_with("<corelib>/") || lower_runtime_handle(name) != None) -> return None
+    if args.len() > 0 && !core_source_owns_type(definition.key) && (definition.key.starts_with("<corelib>/") || ir_runtime_handle(name) != None) -> return None
     identity :: ir_instance_identity(definition.key, args)
     if definition.kind == {
         .Enum(variants, _) -> {
@@ -404,14 +403,14 @@ fn ir_instance_type(p: IRProgram, row: Int, args: [Type], written: Type) -> Type
 // lower_runtime_handle_type): the default Err is the runtime's JetErr; a
 // Core declaration the handle table does not name by its key is named by
 // its own name.
-fn ir_handle_runtime(p: IRProgram, name: String) -> LowerRuntimeHandle? Never! {
-    runtime := lower_runtime_handle(name)
+fn ir_handle_runtime(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
+    runtime := ir_runtime_handle(name)
     if ir_type_def(p, name) == .Val(row) {
         definition :: p.types[row]
         if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
-            runtime = lower_runtime_handle("Err")
+            runtime = ir_runtime_handle("Err")
         } else if runtime == None && definition.key.starts_with("<corelib>/") {
-            runtime = lower_runtime_handle(definition.name)
+            runtime = ir_runtime_handle(definition.name)
         }
     }
     runtime
@@ -440,7 +439,7 @@ fn ir_handle_row_laid(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int
     // binding so); Core's data `Group` is always applied to its arguments.
     if found == .Val(row) && name != "Group" {
         definition :: p.types[row]
-        native :: lower_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
+        native :: ir_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
         // A compiler-owned row (its key is its bare name) is no program
         // type: Lower lower_runtime_handle_type takes a bare spelling's
         // runtime row before any declaration. The canonical Dyn enum is the
@@ -450,12 +449,94 @@ fn ir_handle_row_laid(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int
         core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/") || definition.key == definition.name
         // A bare spelling of a Core declaration is that declaration: both
         // spellings take the row its key does.
-        owned_shape :: ir_record_schema(handle) || lower_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (lower_native_type(definition.key) != None || core_source_owns_type(definition.key)))
+        owned_shape :: ir_record_schema(handle) || ir_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (ir_native_type(definition.key) != None || core_source_owns_type(definition.key)))
         if !native && (!core || owned_shape) -> return None
     }
     atom :: runtime_abi_atom(handle.runtime)
     clone :: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
     Val(ir_intern_type(&m, "handle:{handle.runtime}", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_{atom}", clone)))
+}
+
+// A compiler value with no declaration that build and comptime code hold
+// (the build context and its handles, `Dev`, the ProgramInfo snapshot and
+// its reflection records): a word naming the value in the evaluator's host
+// table, whose methods and fields the evaluator answers (ir_host_method).
+fn ir_host_value_name(name: String) -> Bool Never! {
+    if name == {
+        "Build" | "BuildPlan" | "BuildTarget" | "BuildAction" | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildError" | "Dev" | "SourceSpan" -> true
+        "ProgramInfo" | "TypeInfo" | "FunctionInfo" | "PackageInfo" | "CompilerDefinition" | "CompilerReference" | "CompilerCall" | "CompilerStructuralNode" -> true
+        "LayoutInfo" | "FieldInfo" | "MethodInfo" | "TypeParamInfo" | "MarkerInfo" | "StateInfo" | "TransitionInfo" | "FactInfo" | "DimensionInfo" | "DimensionAxis" | "EffectInfo" | "ArithmeticOperationInfo" -> true
+        else -> false
+    }
+}
+
+// The compiler value name type row `row` holds as a host word, if any.
+fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
+    if m.types[row].kind != .Word -> return None
+    if m.types[row].ty == .Named(name) {
+        if ir_host_value_name(name) && ir_type_def(p, name) == None -> return Val(name.copy())
+    }
+    None
+}
+
+// Method `method` of compiler value `owner`, which the evaluator answers:
+// jet_comptime_host_method(`{owner}.{method}`, impure, (row, word)...) over
+// the receiver and the arguments, `impure` inside an `#Impure` block.
+fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: TExpr, args: [TExpr], span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    string_row :: ir_string_row(&m)
+    member :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, member, ir_intern_text(&m, "{owner}.{method}"), -1, -1, b.line)
+    impure :: if b.impure > 0 -> 1 else -> 0
+    operands := [Int]{member, ir_word_const(&m, &b, impure)}
+    words := [Int]{}
+    if !ir_host_operand(&m, p, &b, receiver, &operands, &words) -> return -1
+    loop argument in args {
+        if !ir_host_operand(&m, p, &b, argument, &operands, &words) -> return -1
+    }
+    answer :: ir_runtime(&m, &b, "jet_comptime_host_method", operands, row)
+    loop word in words -> ir_release(&m, &b, word)
+    answer
+}
+
+// Appends operand `operand`'s type row and word to a host method's operands.
+fn ir_host_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: TExpr, operands: &[Int], words: &[Int]) -> Bool Never! {
+    word :: ir_expr(&m, p, &b, operand)
+    if ir_failed(b) -> return false
+    if word < 0 {
+        ir_fail(&b, operand.span, "Unit operand of a compiler host method")
+        return false
+    }
+    word_row :: b.f.slot_type[word]
+    &operands.push(ir_host_row_key(&m, &b, word_row))
+    &operands.push(word)
+    &words.push(word)
+    true
+}
+
+// A host route names an operand's type row by its intern key, a text the
+// evaluator looks up in the running module's type_rows: the merge
+// (BuildMerge.jet) renumbers rows and data rows but no Const word.
+fn ir_host_row_key(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
+    string_row :: ir_string_row(&m)
+    key :: ir_temp(&m, &b, string_row)
+    text :: ir_row_key(m, row)
+    ir_emit(&b.f, IROp.ConstText, key, ir_intern_text(&m, text), -1, -1, b.line)
+    key
+}
+
+// Field `field` of the compiler value in slot `base`, which the evaluator
+// answers: jet_comptime_host_field(field, row key, word).
+fn ir_host_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, field: String, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    string_row :: ir_string_row(&m)
+    name :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, name, ir_intern_text(&m, field), -1, -1, b.line)
+    base_row :: b.f.slot_type[base]
+    row_key :: ir_host_row_key(&m, &b, base_row)
+    value :: ir_runtime(&m, &b, "jet_comptime_host_field", [Int]{name, row_key, base}, row)
+    ir_release(&m, &b, base)
+    value
 }
 
 // A field of a Jet-owned process carrier behind its handle (Lower Places.jet
@@ -484,7 +565,7 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
 }
 
 // Field `name` a runtime handle lends (Lower Places.jet
-// lower_handle_field_place, RuntimeRoutes.jet LOWER_HANDLE_FIELDS), read
+// lower_handle_field_place, RuntimeRoutes.jet IR_HANDLE_FIELDS), read
 // through the runtime's field export: a Float or Bool through the address it
 // returns, a String or converted carrier through the header it writes into a
 // frame slot, a nested handle as the word it returns. The handle keeps the
@@ -494,7 +575,7 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
     if !ir_is_handle(m, b.f.slot_type[base]) -> return -2
     nominal :: ir_nominal_name(ir_untag(ty)) ?? return -2
     handle :: ir_handle_runtime(p, nominal) ?? return -2
-    lent :: lower_handle_field(handle.runtime, name) ?? return -2
+    lent :: ir_runtime_handle_field(handle.runtime, name) ?? return -2
     row :: ir_value_type(&m, p, field_ty) ?? return ir_type_fail(&b, span, field_ty)
     kind :: m.types[row].kind
     matches :: if lent.kind == {
@@ -542,20 +623,20 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
 
 // Whether a runtime handle row has a record schema: such a type keeps its
 // declared layout and converts at a route boundary.
-fn ir_record_schema(handle: LowerRuntimeHandle) -> Bool Never! {
+fn ir_record_schema(handle: IRRuntimeHandle) -> Bool Never! {
     ir_record_schema_row(handle) != None
 }
 
 // The record schema of a runtime handle row (Lower Records.jet
-// lower_record_schema_with_handle): a LOWER_RECORD_SCHEMAS row by its Jet
+// lower_record_schema_with_handle): a IR_RECORD_SCHEMAS row by its Jet
 // name, or a generated row keyed by its runtime type.
-fn ir_record_schema_row(handle: LowerRuntimeHandle) -> LowerRecordSchema? Never! {
-    loop schema in LOWER_RECORD_SCHEMAS {
+fn ir_record_schema_row(handle: IRRuntimeHandle) -> IRRecordSchema? Never! {
+    loop schema in IR_RECORD_SCHEMAS {
         // copy: the row stays in the global table, which can't be moved from.
         if schema.jet_name == handle.jet_name -> return Val(schema.copy())
     }
-    loop schema in LOWER_GENERATED_RECORDS {
-        if schema.jet_name == handle.runtime -> return Val(LowerRecordSchema{jet_name: handle.jet_name, variants: schema.variants, fields: schema.fields})
+    loop schema in IR_GENERATED_RECORDS {
+        if schema.jet_name == handle.runtime -> return Val(IRRecordSchema{jet_name: handle.jet_name, variants: schema.variants, fields: schema.fields})
     }
     None
 }
@@ -563,7 +644,7 @@ fn ir_record_schema_row(handle: LowerRuntimeHandle) -> LowerRecordSchema? Never!
 // The runtime record a value of `ty` crosses a route as (Lower
 // lower_record_handle): a struct or payload enum the program lays out
 // itself whose runtime handle row has a record schema.
-fn ir_record_runtime(m: &IRModule, p: IRProgram, ty: Type) -> LowerRuntimeHandle? Never! {
+fn ir_record_runtime(m: &IRModule, p: IRProgram, ty: Type) -> IRRuntimeHandle? Never! {
     plain :: ir_untag(ty)
     if plain == .Apply(_, args) {
         if args.len() > 0 -> return None
@@ -696,7 +777,7 @@ fn ir_record_in_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, row: I
     word_row :: ir_word_row(&m)
     runtime_tag :: ir_runtime(&m, &a, "jet_rt_record_tag_{atom}", [Int]{handle}, word_row)
     loop (index, variant) in variants {
-        ordinal :: lower_record_variant_position(schema, variant.name) ?? return ir_fail(&a, span, "variant {variant.name} outside the {schema.jet_name} record schema")
+        ordinal :: ir_record_variant_position(schema, variant.name) ?? return ir_fail(&a, span, "variant {variant.name} outside the {schema.jet_name} record schema")
         expected :: ir_word_const(&m, &a, ordinal)
         selected :: ir_bool_op(&m, &a, IROp.Eq, runtime_tag, expected)
         ir_open_if(&a.f, selected, a.line)
@@ -859,10 +940,10 @@ fn ir_word_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
     if !ir_is_handle(m, row) -> return None
     name :: ir_nominal_name(ir_untag(m.types[row].ty)) ?? return None
     handle :: ir_handle_runtime(p, name) ?? return None
-    loop record in LOWER_WORD_RECORDS {
+    loop record in IR_WORD_RECORDS {
         if record.runtime == handle.runtime {
             fields :: "{record.field}=Int"
-            loop schema in LOWER_GENERATED_RECORDS {
+            loop schema in IR_GENERATED_RECORDS {
                 if schema.jet_name == handle.runtime && schema.variants == "" && schema.fields == fields {
                     atom :: runtime_abi_atom(handle.runtime)
                     return Val(IRWordRecord{field: record.field.copy(), getter: "jet_rt_record_get_{atom}_{runtime_abi_atom(record.field)}", constructor: "jet_rt_record_new_{atom}"})
@@ -1760,7 +1841,7 @@ fn ir_order_handle(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, left: In
         return ir_order_step(&m, &b, order, zero, sign, decided)
     }
     symbol :: if handle.runtime == "JetDecimal" -> "jet_decimal_compare" else -> "{handle.runtime}::compare_value"
-    route :: lower_runtime_route(symbol) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    route :: ir_runtime_route(symbol) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
     word_row :: ir_word_row(&m)
     order :: ir_runtime(&m, &b, route.export, [Int]{left, right}, word_row)
     equal :: ir_word_const(&m, &b, 1)
@@ -2213,7 +2294,7 @@ fn ir_default_err(p: IRProgram, ty: Type) -> Bool Never! {
 
 // The compiler-owned rows no checked module declares, added as codegen
 // jet_codegen_declared_type_slots adds them: each runtime enum
-// (JET_CODEGEN_COMPILER_OWNED_ENUMS), each plain Core enum leaf no program
+// (IR_COMPILER_OWNED_ENUMS), each plain Core enum leaf no program
 // type and no single loaded Core source declares, then `FieldError`, `Range`
 // and the carrier, Core and math records, each under its bare canonical key
 // unless a row already owns it. A program type spelling a record's leaf
@@ -2234,10 +2315,10 @@ fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
             core_enums[definition.name] = (core_enums.get(definition.name) ?? 0) + 1
         }
     }
-    loop row in JET_CODEGEN_COMPILER_OWNED_ENUMS {
+    loop row in IR_COMPILER_OWNED_ENUMS {
         if declared.get(row.name) != None -> next
         declared[row.name] = true
-        variants :: loop variant in row.variants -> ir_compiler_owned_variant(variant, jet_codegen_compiler_owned_enum_payload(row.name, variant))
+        variants :: loop variant in row.variants -> ir_compiler_owned_variant(variant, ir_compiler_owned_enum_payload(row.name, variant))
         &types.push(ir_compiler_owned_def(module_identity, row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
     }
     loop core_row in CORE_ENUM_ROWS {
@@ -2245,23 +2326,23 @@ fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
         if (core_enums.get(core_row.name) ?? 0) == 1 -> next
         if core_row.kind == .Enum(names) {
             declared[core_row.name] = true
-            variants :: loop variant in names -> ir_compiler_owned_variant(variant, JetCodegenCompilerOwnedPayload.Unit)
+            variants :: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
             &types.push(ir_compiler_owned_def(module_identity, core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
         }
     }
-    records := [String]{"FieldError", JET_CODEGEN_RANGE_RECORD}
-    loop name in JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
-    loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
-    loop record in JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
+    records := [String]{"FieldError", IR_RANGE_RECORD}
+    loop name in IR_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
+    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
+    loop record in IR_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
     loop name in records {
         if declared.get(name) != None || program_names.get(name) != None -> next
         declared[name] = true
-        fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
+        fields :: ir_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
         &types.push(ir_compiler_owned_def(module_identity, name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}}))
     }
 }
 
-fn ir_compiler_owned_variant(name: String, payload: JetCodegenCompilerOwnedPayload) -> TVariant Never! {
+fn ir_compiler_owned_variant(name: String, payload: IRCompilerOwnedPayload) -> TVariant Never! {
     checked :: if payload == {
         .Unit -> TVariantPayload.Unit
         .Single(ty) -> TVariantPayload.Single{value: ty.copy()}
@@ -2289,7 +2370,7 @@ fn ir_compiler_owned_fields(record_fields: [TypeTupleField]) -> [TField] Never! 
 // One compiler-owned row under its bare canonical key, with the row's type
 // parameters (jet_codegen_compiler_owned_definition).
 fn ir_compiler_owned_def(module_identity: String, name: String, kind: ^TTypeDefKind) -> TTypeDef Never! {
-    generic_params :: loop param in jet_codegen_compiler_owned_generic_params(name) -> TGenericParam{name: param, bounds: [SymbolID]{}}
+    generic_params :: loop param in ir_compiler_owned_generic_params(name) -> TGenericParam{name: param, bounds: [SymbolID]{}}
     TTypeDef{
         module_identity: module_identity.copy(),
         key: name.copy(),
@@ -2718,7 +2799,7 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         // the runtime's own kernels (jet_int_checked_fixed), written with
         // sized literals, from calling themselves.
         if ir_int_literal(receiver) == .Val(value) {
-            if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, lower_wide_word(value))
+            if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, ir_wide_word(value))
         }
     }
     value :: ir_expr(&m, p, &b, receiver)

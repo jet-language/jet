@@ -22,7 +22,6 @@
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
 
-use jet_backend.[lower_int_inline]
 
 IR_OPT_SIMPLIFY_ROUNDS :: 8
 
@@ -140,7 +139,7 @@ fn ir_opt_fold_value(ty: IRX64Shape, op: IROp, left: Int, right: Int, trap: Bool
         else -> left * right
     }
     if ty.kind == .Int {
-        if lower_int_inline(exact) -> return Val(exact)
+        if ir_int_inline(exact) -> return Val(exact)
         return None
     }
     ir_opt_word(ty, exact, trap)
@@ -187,7 +186,7 @@ fn ir_opt_fold(m: IRModule, f: &IRFunction, report: &IROptReport) -> Int Never! 
             ty :: ir_opt_type(m, f, f.a[at])
             value :: ir_opt_const_at(f, facts, f.a[at], at) ?? next
             folded := Int?{None}
-            if ty.kind == .Int && lower_int_inline(0 - value) -> folded = Val(0 - value)
+            if ty.kind == .Int && ir_int_inline(0 - value) -> folded = Val(0 - value)
             if ty.kind == .Word && ty.signed -> folded = ir_opt_word(ty, 0 - value, f.c[at] != IR_OVERFLOW_WRAP)
             result :: folded ?? next
             ir_opt_set_const(&f, at, result)

@@ -7,8 +7,6 @@
 // lazy.callback), as Lower's lazy glue helpers are.
 
 use jet_foundation.[AccessConvention, Span, Type, TClosureOp, TExpr, TLocal, TStmt, TypeTupleField, type_carrier_identity]
-use jet_backend.[runtime_abi_atom]
-use jet_codegen.[jet_codegen_closure_route]
 
 // The C export of an Iter route symbol: `jet_iter_take` is
 // jet_rt_native_iter_take (LazyIter.jet:352 lower_lazy_runtime_symbol).
@@ -736,7 +734,7 @@ fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
     if ir_iter_element(receiver_ty) != None {
         if operation == .Any || operation == .All || operation == .Position -> return ir_lazy_search(&m, p, &b, ty, receiver, operation, args, span)
     }
-    route :: jet_codegen_closure_route(operation, receiver_ty)
+    route :: ir_closure_route(operation, receiver_ty)
     symbol :: route.symbol
     scans :: symbol == "jet_iter_scan"
     list_source :: ir_lazy_list_callback_route(symbol) || (symbol == "jet_iter_is_sorted_by" && ir_iter_element(receiver_ty) == None)

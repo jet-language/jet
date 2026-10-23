@@ -25,14 +25,83 @@
 // call jet_rt_int_clone / the type's drop only for a big integer.
 
 use jet_backend.[
-    LIRDataID, LIRDebugVariable, LIRFunctionID,
-    X64Alu, X64Cond, X64CompiledFunction, X64DebugLocation, X64FloatOp, X64FunctionDebug, X64LineRow, X64Reloc, X64RelocTarget, X64Shift, X64VariableRange,
-    X64_R10, X64_R11, X64_R8, X64_R9, X64_RAX, X64_RBP, X64_RCX, X64_RDI, X64_RDX, X64_RSI, X64_RSP,
-    dwarf_cfa_advance, dwarf_cfa_def_cfa, dwarf_cfa_def_cfa_offset, dwarf_cfa_def_cfa_register, dwarf_cfa_offset, dwarf_cfa_remember_state, dwarf_cfa_restore_state,
-    x64_alu_ri, x64_alu_rr, x64_call_reg, x64_call_rel32, x64_cond_invert, x64_cqo, x64_cvtsd2ss, x64_cvtsi2sd, x64_cvtsi2ss, x64_cvtss2sd, x64_cvttsd2si, x64_cvttss2si, x64_debug_line, x64_div, x64_dwarf_register, x64_fits_i32,
-    x64_float_load, x64_float_op, x64_float_store, x64_idiv, x64_imul_rr, x64_jcc_rel32, x64_jmp_rel32, x64_lea, x64_lea_rip,
-    x64_load, x64_load_indexed, x64_mov_ri, x64_mov_rr, x64_movzx_r8, x64_mul, x64_neg,
-    x64_patch_rel32, x64_pop, x64_push, x64_rep_movsb, x64_ret, x64_setcc, x64_shift_cl, x64_shift_ri, x64_store, x64_store_indexed, x64_test_rr, x64_ucomisd, x64_ucomiss, x64_ud2,
+    LIRDataID,
+    LIRDebugVariable,
+    LIRFunctionID,
+    X64Alu,
+    X64Cond,
+    X64CompiledFunction,
+    X64DebugLocation,
+    X64FloatOp,
+    X64FunctionDebug,
+    X64LineRow,
+    X64Reloc,
+    X64RelocTarget,
+    X64Shift,
+    X64VariableRange,
+    X64_R10,
+    X64_R11,
+    X64_R8,
+    X64_R9,
+    X64_RAX,
+    X64_RBP,
+    X64_RCX,
+    X64_RDI,
+    X64_RDX,
+    X64_RSI,
+    X64_RSP,
+    dwarf_cfa_advance,
+    dwarf_cfa_def_cfa,
+    dwarf_cfa_def_cfa_offset,
+    dwarf_cfa_def_cfa_register,
+    dwarf_cfa_offset,
+    dwarf_cfa_remember_state,
+    dwarf_cfa_restore_state,
+    x64_alu_ri,
+    x64_alu_rr,
+    x64_call_reg,
+    x64_call_rel32,
+    x64_cond_invert,
+    x64_cqo,
+    x64_cvtsd2ss,
+    x64_cvtsi2sd,
+    x64_cvtsi2ss,
+    x64_cvtss2sd,
+    x64_cvttsd2si,
+    x64_cvttss2si,
+    x64_div,
+    x64_dwarf_register,
+    x64_fits_i32,
+    x64_float_load,
+    x64_float_op,
+    x64_float_store,
+    x64_idiv,
+    x64_imul_rr,
+    x64_jcc_rel32,
+    x64_jmp_rel32,
+    x64_lea,
+    x64_lea_rip,
+    x64_load,
+    x64_load_indexed,
+    x64_mov_ri,
+    x64_mov_rr,
+    x64_movzx_r8,
+    x64_mul,
+    x64_neg,
+    x64_patch_rel32,
+    x64_pop,
+    x64_push,
+    x64_rep_movsb,
+    x64_ret,
+    x64_setcc,
+    x64_shift_cl,
+    x64_shift_ri,
+    x64_store,
+    x64_store_indexed,
+    x64_test_rr,
+    x64_ucomisd,
+    x64_ucomiss,
+    x64_ud2,
 ]
 
 IR_X64_ARGUMENT_REGISTERS :: prep { [Int]{7, 6, 2, 1, 8, 9} }
@@ -1487,6 +1556,22 @@ fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64Functio
     }
 }
 
+// The line row for code starting at `at`: a new row when the line changes,
+// replacing a row at the same offset that no code followed.
+fn ir_x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
+    if line <= 0 -> return
+    count :: lines.len()
+    if count > 0 {
+        last :: lines[count - 1]
+        if last.line == line -> return
+        if last.at == at {
+            lines[count - 1] = X64LineRow{at: at, line: line}
+            return
+        }
+    }
+    &lines.push(X64LineRow{at: at, line: line})
+}
+
 // Function row `row` (`f`, borrowed from `m`).
 fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al :: ir_x64_allocate(m, f)
@@ -1556,7 +1641,7 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     positions := [Int]{}
     loop at in 0..<f.op.len() {
         &positions.push(e.code.len())
-        x64_debug_line(&lines, e.code.len(), f.code_line[at])
+        ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
         ir_x64_select(&e, m, f, al, tables, at)
     }
     &positions.push(e.code.len())

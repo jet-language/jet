@@ -23,7 +23,7 @@ test('real composed Core registry and Jet providers admit all six env primitives
   for (const name of ['jet_rt_logical_env_get_os', 'jet_rt_logical_env_set', 'jet_rt_logical_env_unset', 'jet_rt_logical_env_columns', 'jet_rt_startup_env_columns', 'jet_rt_env_key_compare']) {
     assert.equal(rows.filter(row => row.name === name).length, 1, `${name} requires fresh composed source/registry`);
   }
-  assert.match(emitNativeEnvironmentRoutes(rows).join('\n'), /LOWER_ENVIRONMENT_ROUTES/);
+  assert.match(emitNativeEnvironmentRoutes(rows).join('\n'), /IR_ENVIRONMENT_ROUTES/);
 });
 
 test('absent real provider manifest ownership cannot generate a binding', () => {

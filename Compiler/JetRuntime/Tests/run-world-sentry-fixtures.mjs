@@ -44,12 +44,13 @@ if (mode === 'assemble') {
   command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'render') {
   mkdirSync(out, { recursive: true });
-  const selected = 'Compiler/JetRuntime/Tests/link-render-cases.list';
-  const destination = join(out, 'render-goldens');
-  command('typed-render-goldens', process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-goldens.mjs'), destination, '--front', 'jet', '--case-list', join(root, selected)], { timeout: 0 });
-  const results = new Map(readFileSync(join(destination, 'results.tsv'), 'utf8').trim().split('\n').map(row => row.split('\t')).map(([stem, verdict]) => [stem, verdict]));
-  for (const stem of readFileSync(join(root, selected), 'utf8').trim().split('\n')) {
-    if (results.get(stem) !== 'pass') throw Error(`typed render ${stem}: ${results.get(stem) ?? 'missing result'}`);
+  const stems = readFileSync(join(root, 'Compiler/JetRuntime/Tests/link-render-cases.list'), 'utf8').trim().split('\n');
+  const run = spawnSync(process.execPath, [join(root, 'Tools/agent/run-feature-examples.mjs'), '--json', ...stems], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27 });
+  writeFileSync(join(out, 'typed-render-goldens.receipt.json'), JSON.stringify({ status: run.status, signal: run.signal, error: run.error?.message ?? null, stdout: run.stdout, stderr: run.stderr }, null, 2) + '\n');
+  if (run.error || ![0, 1].includes(run.status)) throw Error(`typed-render-goldens: ${run.error?.message ?? run.status}\n${run.stderr ?? ''}`);
+  const results = new Map(JSON.parse(run.stdout).results.map(result => [result.stem, result.status]));
+  for (const stem of stems) {
+    if (results.get(stem) !== 'passed') throw Error(`typed render ${stem}: ${results.get(stem) ?? 'missing result'}`);
   }
 } else if (mode === 'link') {
   // Aggregated fixture.o already contains the complete Jet runtime.

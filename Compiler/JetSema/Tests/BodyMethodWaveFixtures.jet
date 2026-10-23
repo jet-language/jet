@@ -20,11 +20,10 @@ use jet_sema.[
 use jet_parser.[parse_source]
 use jet_driver.[jet_driver_canonical_effect_module]
 use jet_foundation.[
-    AccessConvention, CompilerThreads, DIAGNOSTIC_ERROR, MIRSourceFile, Span, TExpr, TFunc,
+    AccessConvention, CompilerThreads, DIAGNOSTIC_ERROR, Span, TExpr,
     TGenericParam, TTypeDef, Type, compiler_threads_admit, compiler_threads_single,
-    jet_target_machine_hosted, mir_source_file_id, tir_each_expr_child, tir_each_stmt_child,
+    jet_target_machine_hosted, tir_each_expr_child, tir_each_stmt_child,
 ]
-use jet_codegen.[JetCodegenFunctions, lower_functions]
 
 fn method_wave_require(ok: Bool, message: String) Never! {
     if !ok -> panic("BodyMethodWaveFixtures: {message}")
@@ -84,15 +83,6 @@ fn method_wave_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, c
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None, None)
-}
-
-fn method_wave_lowered(checked: SemaGraphResult, source: String) -> JetCodegenFunctions {
-    modules := checked.modules.copy()
-    functions := [TFunc]{}
-    loop module_result in modules {
-        loop function in module_result.functions -> &functions.push(function)
-    }
-    lower_functions(&functions, &modules, [MIRSourceFile]{MIRSourceFile{id: mir_source_file_id("method-wave.jet"), path: "method-wave.jet", source: source}}, compiler_threads_single(), None, false, "2028", false)
 }
 
 fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int Never! {
@@ -242,11 +232,6 @@ fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_compti
     method_wave_require("{single:Debug}" == "{parallel:Debug}", "all checked rows, diagnostics, spans and facts are byte-identical")
     method_wave_require("{single:Debug}" == "{default_checked:Debug}", "default thread policy has identical checked products")
     method_wave_product_witnesses(graph, single, negative, keep_going, host_retry)
-    single_lowered :: method_wave_lowered(single, source)
-    parallel_lowered :: method_wave_lowered(parallel, source)
-    method_wave_require("{single_lowered:Debug}" == "{parallel_lowered:Debug}", "lowered MIR rows and diagnostics are byte-identical")
-    default_lowered :: method_wave_lowered(default_checked, source)
-    method_wave_require("{single_lowered:Debug}" == "{default_lowered:Debug}", "default thread policy has identical lowered products")
 }
 
 fn method_wave_cached_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cache: SemaIncrementalCache) -> SemaGraphResult {
@@ -436,5 +421,5 @@ fn method_wave_cache_utf8_bytes_case() {
     method_wave_cache_host_case(unit_source)
     generated_source :: "{positive}\nderive T.BrokenWave {{ fn generated_value(self) -> Int Never! {{ missing_generated_value }} }}\n#BrokenWave\nstruct GeneratedOwner {{ value: Int }}\n"
     method_wave_case(generated_source, true, true, false, false)
-    print("method body wave: real serial/parallel checked and lowered equivalence passed")
+    print("method body wave: real serial/parallel checked equivalence passed")
 }

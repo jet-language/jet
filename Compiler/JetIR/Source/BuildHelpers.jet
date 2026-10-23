@@ -1,0 +1,216 @@
+// Typed expression lowering preserves checked MIR types and ownership facts.
+// Every produced MIR value retains its checked type, span, and ownership.
+use core.math as math
+use jet_foundation.[
+    MIRConstant,
+    mir_integer_constant,
+    MIRIntegerWidth,
+    TFailureCarrier,
+    Type,
+    type_name,
+]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs::string_format_route
+// (`is_int`): an integer-valued selector takes the integer kernel.
+fn ir_string_format_integer(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .IntN(_, _) -> true
+        .InlineRange(base, _, _) -> ir_string_format_integer(base)
+        .Named(name) -> name == "Int"
+        .Tagged(_, inner) -> ir_string_format_integer(inner)
+        else -> false
+    }
+}
+
+fn ir_precise_type_key(type_name: String) -> String Never! {
+    if type_name == "Decimal" -> return "decimal"
+    if type_name == "Fraction" -> return "fraction"
+    if type_name == "Complex" -> return "complex"
+    if type_name == "Measurement" -> return "measurement"
+    panic("checked precise builtin has an unregistered numeric type")
+}
+
+fn ir_precise_source_helper(owner: String, operation: String) -> String? Never! {
+    if owner == "Int" && operation == "abs" -> return Val("abs")
+    if owner == "Fraction" {
+        return if operation == {
+            "new" -> Val("__fraction_new")
+            "from_parts" -> Val("__fraction_from_parts")
+            "from_owned_parts" -> Val("__fraction_from_owned_parts")
+            "from_int" -> Val("__fraction_from_int")
+            "from_float" -> Val("__fraction_from_float")
+            "from_decimal" -> Val("__decimal_to_fraction")
+            "add" -> Val("__fraction_add")
+            "sub" -> Val("__fraction_sub")
+            "mul" -> Val("__fraction_mul")
+            "div" -> Val("__fraction_div")
+            "equal" -> Val("__fraction_equal")
+            "numerator" -> Val("__fraction_numerator")
+            "denominator" -> Val("__fraction_denominator")
+            "owned_numerator" -> Val("__fraction_owned_numerator")
+            "owned_denominator" -> Val("__fraction_owned_denominator")
+            "is_zero" -> Val("__fraction_is_zero")
+            "to_int" -> Val("__fraction_to_int")
+            "to_float" -> Val("__fraction_to_float")
+            "to_decimal" -> Val("__fraction_to_decimal")
+            "to_string" -> Val("__fraction_to_string")
+            else -> None
+        }
+    }
+    if owner == "Decimal" {
+        return if operation == {
+            "from_str" -> Val("__decimal_from_str")
+            "from_int" -> Val("__decimal_from_int")
+            "from_float" -> Val("__decimal_from_float")
+            "from_fraction" -> Val("__decimal_from_fraction")
+            "add" -> Val("__decimal_add")
+            "sub" -> Val("__decimal_sub")
+            "mul" -> Val("__decimal_mul")
+            "div" -> Val("__decimal_div")
+            "equal" -> Val("__decimal_equal")
+            "compare" -> Val("__decimal_compare")
+            "floor" -> Val("__decimal_floor")
+            "ceil" -> Val("__decimal_ceil")
+            "round" -> Val("__decimal_round")
+            "to_int" -> Val("__decimal_to_int")
+            "to_float" -> Val("__decimal_to_float")
+            "to_fraction" -> Val("__decimal_to_fraction")
+            "to_string" -> Val("__decimal_to_string")
+            else -> None
+        }
+    }
+    if owner == "Complex" {
+        return if operation == {
+            "abs" -> Val("__complex_abs")
+            "from_parts" -> Val("__complex_from_parts")
+            "add" -> Val("__complex_add")
+            "sub" -> Val("__complex_sub")
+            "mul" -> Val("__complex_mul")
+            "div" -> Val("__complex_div")
+            "to_string" -> Val("__complex_to_string")
+            else -> None
+        }
+    }
+    None
+}
+
+fn ir_failure_carrier_for_type(ty: Type) -> TFailureCarrier Never! {
+    if ty == {
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
+        else -> TFailureCarrier.Infallible
+    }
+}
+
+fn ir_math_scalar_type(type_name: String) -> Type Never! {
+    if type_name == "F32x4" || type_name == "F32x8" -> return Type.Float32
+    if type_name.starts_with("I8x") -> return Type.IntN{signed: true, bits: 8}
+    if type_name.starts_with("I16x") -> return Type.IntN{signed: true, bits: 16}
+    if type_name.starts_with("I32x") -> return Type.IntN{signed: true, bits: 32}
+    if type_name.starts_with("I64x") -> return Type.IntN{signed: true, bits: 64}
+    if type_name.starts_with("U8x") -> return Type.IntN{signed: false, bits: 8}
+    if type_name.starts_with("U16x") -> return Type.IntN{signed: false, bits: 16}
+    if type_name.starts_with("U32x") -> return Type.IntN{signed: false, bits: 32}
+    if type_name.starts_with("U64x") -> return Type.IntN{signed: false, bits: 64}
+    Type.Float
+}
+
+// Rust's f64::NAN, the positive quiet NaN 0x7FF8000000000000, from its bits.
+// `0.0 / 0.0` is not a constant: a compiler built by rustc folds it to this
+// value while a natively built compiler divides at run time and gets x86's
+// negative default NaN 0xFFF8000000000000, so the emitted bits would depend
+// on which compiler built the compiler.
+fn ir_canonical_nan() -> Float Never! {
+    math.from_bits(0x7FF8000000000000)
+}
+
+fn ir_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {
+    if ty == Type.Float32 {
+        if member == "MAX" -> return Val(MIRConstant.Float{value: 3.4028234663852886e38, f32: true, spelling: None})
+        if member == "MIN" -> return Val(MIRConstant.Float{value: -3.4028234663852886e38, f32: true, spelling: None})
+        if member == "NAN" -> return Val(MIRConstant.Float{value: ir_canonical_nan(), f32: true, spelling: None})
+        if member == "INFINITY" -> return Val(MIRConstant.Float{value: 1.0 / 0.0, f32: true, spelling: None})
+        if member == "NEG_INFINITY" -> return Val(MIRConstant.Float{value: -(1.0 / 0.0), f32: true, spelling: None})
+        if member == "EPSILON" -> return Val(MIRConstant.Float{value: 1.1920928955078125e-7, f32: true, spelling: None})
+    }
+    if ty == Type.Float {
+        if member == "MAX" -> return Val(MIRConstant.Float{value: 1.7976931348623157e308, f32: false, spelling: None})
+        if member == "MIN" -> return Val(MIRConstant.Float{value: -1.7976931348623157e308, f32: false, spelling: None})
+        if member == "NAN" -> return Val(MIRConstant.Float{value: ir_canonical_nan(), f32: false, spelling: None})
+        if member == "INFINITY" -> return Val(MIRConstant.Float{value: 1.0 / 0.0, f32: false, spelling: None})
+        if member == "NEG_INFINITY" -> return Val(MIRConstant.Float{value: -(1.0 / 0.0), f32: false, spelling: None})
+        if member == "EPSILON" -> return Val(MIRConstant.Float{value: 2.220446049250313e-16, f32: false, spelling: None})
+    }
+    if ty == Type.Int {
+        if member == "MAX" -> return Val(mir_integer_constant(9223372036854775807, None, None))
+        if member == "MIN" -> return Val(mir_integer_constant(-9223372036854775808, None, None))
+    }
+    if ty == {
+        .IntN(signed, bits) -> {
+            if bits < 1 || bits > 64 || (member != "MAX" && member != "MIN") -> return None
+            width := Val(MIRIntegerWidth{signed: signed, bits: bits})
+            value := 0
+            if {
+                member == "MAX" -> {
+                    if {
+                        signed -> {
+                            if {
+                                bits == 64 -> {
+                                    value = 9223372036854775807
+                                } else -> {
+                                    bound := 1
+                                    shift := 1
+                                    loop shift < bits {
+                                        bound *= 2
+                                        shift += 1
+                                    }
+                                    value = bound - 1
+                                }
+                            }
+                        }
+                        bits == 64 -> {
+                            value = -1
+                        }
+                        bits == 63 -> {
+                            value = 9223372036854775807
+                        }
+                        else -> {
+                            bound := 1
+                            shift := 0
+                            loop shift < bits {
+                                bound *= 2
+                                shift += 1
+                            }
+                            value = bound - 1
+                        }
+                    }
+                }
+                signed -> {
+                    if {
+                        bits == 64 -> {
+                            value = -9223372036854775808
+                        } else -> {
+                            bound := 1
+                            shift := 1
+                            loop shift < bits {
+                                bound *= 2
+                                shift += 1
+                            }
+                            value = -bound
+                        }
+                    }
+                }
+            }
+            return Val(mir_integer_constant(value, width, None))
+        }
+        else -> {}
+    }
+    None
+}
+
+#Test("Int.abs extends the existing source helper gate by one exact key") {
+    assert_eq(ir_precise_source_helper("Int", "abs"), Val("abs"))
+    assert_eq(ir_precise_source_helper("Int", "add"), None)
+}

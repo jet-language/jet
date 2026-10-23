@@ -16,6 +16,15 @@ struct X64AsmState {
     result: Int
 }
 
+// The template's operand registers, in binding order: rdi, rsi, rdx, rcx,
+// r8, r9, r10.
+X64_ASM_INPUTS :: prep { [Int]{7, 6, 2, 1, 8, 9, 10} }
+
+// The caller-saved registers a template `call` clobbers.
+fn x64_asm_call_clobbers(reg: Int) -> Bool Never! {
+    reg == 0 || reg == 1 || reg == 2 || reg == 6 || reg == 7 || (reg >= 8 && reg <= 11)
+}
+
 struct X64AsmMemory {
     base: Int
     disp: Int
@@ -59,7 +68,7 @@ fn x64_asm_reg(s: X64AsmState, text: String, read: Bool) -> Int Never! {
             if !tail.starts_with(input) -> next
             suffix :: tail.after(input)
             if suffix != "}}" -> next
-            reg :: LIR_ASM_INPUTS[i]
+            reg :: X64_ASM_INPUTS[i]
             if read && s.written[reg] -> return -1
             return reg
         }
@@ -147,7 +156,7 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             if s.depth % 2 != 0 -> return Val("call requires a 16-byte aligned stack")
             x64_call_reg(&s.code, reg)
             loop r in 0..<16 {
-                if lir_asm_register(r) -> s.written[r] = true
+                if x64_asm_call_clobbers(r) -> s.written[r] = true
             }
         }
     } else if mnemonic == "syscall" || mnemonic == "pause" {
@@ -259,10 +268,10 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
 
 fn x64_assemble_template(template: String, names: [String], returns: Bool) -> X64AsmResult Never! {
     regs := [Int]{}
-    if names.len() > LIR_ASM_INPUTS.len() {
+    if names.len() > X64_ASM_INPUTS.len() {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: more than seven operands")}
     }
-    loop (i, _) in names -> &regs.push(LIR_ASM_INPUTS[i])
+    loop (i, _) in names -> &regs.push(X64_ASM_INPUTS[i])
     s := X64AsmState{code: [U8]{}, names: names, written: [Bool]{}, depth: 0, result: -1}
     loop _ in 0..<16 -> &s.written.push(false)
     lines :: template.split("\n").to_list()

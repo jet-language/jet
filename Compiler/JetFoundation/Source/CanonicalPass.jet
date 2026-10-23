@@ -1,96 +1,22 @@
-// Opt-in, invocation-owned pass-boundary evidence. No process-global journal.
-CANONICAL_PASS_SCHEMA :: "jet.canonical-pass-record.v1"
-CANONICAL_PASS_PROTOCOL :: "jet.canonical-pass.v1"
-
-struct CanonicalPassRecord {
-    stage: String
-    operation_id: String
-    occurrence: Int
-    order: Int
-    source: String
-    input_representation: String
-    input_payload: String
-    input_identity: String
-    output_representation: String
-    output_payload: String
-    output_identity: String
-    premises: [String]
-    disposition: String
-}
+// Opt-in, invocation-owned pass-boundary availability. No process-global journal.
 struct CanonicalPassOptions {
     adapter_mode: String{""}
     operation_ids: [String]{[String]{}}
 }
-struct CanonicalPassJournal {
-    options: CanonicalPassOptions
-    records: [CanonicalPassRecord]
-    occurrences: [String:Int]
-}
-struct CanonicalPassSnapshot {
-    representation: String
-    payload: String
-    identity: String
-}
-fn canonical_pass_journal(options: CanonicalPassOptions) -> CanonicalPassJournal Never! {
-    CanonicalPassJournal{options: options, records: [], occurrences: [String:Int]{}}
-}
 fn canonical_pass_enabled(options: CanonicalPassOptions) -> Bool Never! {
     options.adapter_mode.len() > 0 && options.operation_ids.len() > 0
 }
-fn canonical_pass_requested(journal: CanonicalPassJournal, operation_id: String) -> Bool Never! {
-    if !canonical_pass_enabled(journal.options) -> return false
-    loop candidate in journal.options.operation_ids { if candidate == operation_id -> return true }
-    false
-}
-fn canonical_pass_record(journal: &CanonicalPassJournal, stage: String, operation_id: String, source: String, input: CanonicalPassSnapshot, output: CanonicalPassSnapshot, disposition: String) Never! {
-    if !canonical_pass_requested(journal, operation_id) -> return
-    occurrence :: (journal.occurrences.get(operation_id) ?? 0) + 1
-    journal.occurrences[operation_id] = occurrence
-    order :: journal.records.len() + 1
-    &journal.records.push(CanonicalPassRecord{
-        stage: stage, operation_id: operation_id, occurrence: occurrence, order: order, source: source,
-        input_representation: input.representation, input_payload: input.payload, input_identity: input.identity,
-        output_representation: output.representation, output_payload: output.payload, output_identity: output.identity,
-        premises: [String]{"source_origin_is_retained", "typed_failure_is_retained", "mutation_is_retained", "input_consumption_is_exact", "ordered_effects_are_retained", "cleanup_edges_are_retained", "resource_premises_are_explicit", "target_applicability_is_checked"},
-        disposition: disposition,
-    })
-}
-fn canonical_pass_take(journal: &CanonicalPassJournal) -> [CanonicalPassRecord] Never! {
-    rows := compiler_take_rows(&journal.records)
-    journal.occurrences = [String:Int]{}
-    rows
-}
-
-// Join a nested pass owner's captured rows in execution order. Transport is
-// by value; record numbering belongs to the enclosing compiler invocation.
-fn canonical_pass_merge(journal: &CanonicalPassJournal, child: &CanonicalPassJournal) Never! {
-    rows := canonical_pass_take(&child)
-    &rows.reverse()
-    loop rows.len() > 0 {
-        row := &rows.pop() ?? break
-        occurrence :: (journal.occurrences.get(row.operation_id) ?? 0) + 1
-        journal.occurrences[row.operation_id] = occurrence
-        row.occurrence = occurrence
-        row.order = journal.records.len() + 1
-        &journal.records.push(row)
-    }
-}
-
-// Availability is not evidence: these rows never enter the pass journal.
+// Availability is not evidence: these rows are never execution records.
 // Normalization availability is distinct from source-language behavior.
 // Only an exercised feature probe can establish folded versus missing meaning.
 struct CanonicalPassBoundaryGap {
     operation_id: String
     status: String
 }
+// No Jet pass records a canonical boundary, so every selected operation is a gap.
 fn canonical_pass_boundary_gaps(options: CanonicalPassOptions) -> [CanonicalPassBoundaryGap] Never! {
     rows := [CanonicalPassBoundaryGap]{}
     if !canonical_pass_enabled(options) -> return rows
-    absent :: [String]{"sema.desugar-os-switches", "sema.desugar-migrations", "sema.desugar-member-spreads", "sema.desugar-multi-head-functions", "sema.normalize-operator-rhs", "tir.optimize-program", "tir.canonicalize-loop-forms"}
-    loop operation in absent {
-        selected := false
-        loop candidate in options.operation_ids { if candidate == operation -> selected = true }
-        if selected -> &rows.push(CanonicalPassBoundaryGap{operation_id: operation, status: "no Jet pass"})
-    }
+    loop operation in options.operation_ids -> &rows.push(CanonicalPassBoundaryGap{operation_id: operation.copy(), status: "no Jet pass"})
     rows
 }

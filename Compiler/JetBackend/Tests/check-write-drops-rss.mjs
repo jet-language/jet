@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-// Runtime check that a write of an owned value releases the value it overwrites
-// (Lower.jet lower_release_write_drops / lower_release_slot_deaths): every owned
-// heap kind rebound inside a loop, then written through the rebound place, and
-// nested places (a field of a local, an element or map entry of a field).
+// Runtime check that a write of an owned value releases the value it overwrites:
+// every owned heap kind rebound inside a loop, then written through the rebound
+// place, and nested places (a field of a local, an element or map entry of a field).
 // Each shape is built natively at two round counts and run under GNU time; every
 // round rewrites the place 20000 times, so a leaked old value grows the peak RSS
-// by about 1 MB per round. The static LIR check cannot see these leaks: an
-// inline List or Map is a stack aggregate whose buffer pointer only lives in
-// memory. The programs import nothing (no corelib module beyond the prelude),
+// by about 1 MB per round. The programs import nothing (no corelib module beyond the prelude),
 // so each build stays small.
 //
 // usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]

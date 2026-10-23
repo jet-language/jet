@@ -633,18 +633,18 @@ fn render_services_messages(registry: String) -> String GeneratorError! {
 
 TRAP_TARGET_PATH :: "Compiler/JetRuntime/Source/TrapMessages.jet"
 TRAP_DEFECT_TARGET_PATH :: "Compiler/JetRuntime/Source/TrapDefectMessages.jet"
-ROUTES_PATH :: "Compiler/JetBackend/Source/Lower/Routes.jet"
+ROUTES_PATH :: "Compiler/JetIR/Source/RouteCarriers.jet"
 DEBUG_PATH :: "Compiler/JetFoundation/Source/Text/RustDebug.jet"
 
-// The native TLS refusal is defined once, in the lowering that reports it at
+// The native TLS refusal is defined once, in the IR route table that reports it at
 // compile time; the runtime's stop and String-error leaves use this projection.
 fn native_tls_refusal(routes: String) -> String GeneratorError! {
-    marker :: "\nfn lower_tls_transport_message() -> String Never! {{\n    "
+    marker :: "\nfn ir_tls_transport_message() -> String Never! {{\n    "
     at :: routes.find(marker)
-    if at < 0 -> return Err(generator_fail("missing Lower/Routes.jet lower_tls_transport_message literal"))
+    if at < 0 -> return Err(generator_fail("missing RouteCarriers.jet ir_tls_transport_message literal"))
     rest :: byte_slice(routes, at + byte_len(marker), byte_len(routes))
-    literal :: quoted_literal(rest) ?? return Err(generator_fail("missing Lower/Routes.jet lower_tls_transport_message literal"))
-    if !String.from_bytes_lossy(rest.bytes()[literal.spelling_len..<rest.bytes().len()]).starts_with("\n}}") -> return Err(generator_fail("missing Lower/Routes.jet lower_tls_transport_message literal"))
+    literal :: quoted_literal(rest) ?? return Err(generator_fail("missing RouteCarriers.jet ir_tls_transport_message literal"))
+    if !String.from_bytes_lossy(rest.bytes()[literal.spelling_len..<rest.bytes().len()]).starts_with("\n}}") -> return Err(generator_fail("missing RouteCarriers.jet ir_tls_transport_message literal"))
     if literal.value == "" -> return Err(generator_fail("native TLS refusal must be printable ASCII for word projection"))
     loop byte in literal.value.bytes() {
         code :: Int.from_u8(byte)

@@ -135,7 +135,7 @@ const AREA_DIRS = {
   sema: ['Compiler/JetSema/', 'Compiler/JetFoundation/'],
   comptime: ['Compiler/'],
   evalhost: ['Compiler/'],
-  codegen: ['Compiler/JetCodegen/', 'Compiler/JetBackend/', 'Compiler/JetOptimizer/', 'Compiler/JetFoundation/'],
+  codegen: ['Compiler/JetIR/', 'Compiler/JetBackend/', 'Compiler/JetFoundation/'],
   driver: ['Compiler/JetDriver/', 'Compiler/JetBuildSession/', 'Compiler/JetQueries/', 'Compiler/JetCli/'],
   foundation: ['Compiler/', 'Core/'],
   cli: ['Compiler/'],
@@ -618,8 +618,8 @@ function coreRegistry(jetFiles, idx) {
     if (!m[3]) for (const x of m[4].matchAll(/"([^"]+)"/g)) row.members.add(x[1]);
     owned.set(k, row);
   }
-  const routes = read('Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet');
-  const exportOf = new Map([...routes.matchAll(/LowerRoute\{symbol: "([^"]+)", export: "([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  const routes = read('Compiler/JetIR/Source/RuntimeRoutes.jet');
+  const exportOf = new Map([...routes.matchAll(/IRRoute\{symbol: "([^"]+)", export: "([^"]+)"/g)].map((m) => [m[1], m[2]]));
   const callRows = [];
   for (const line of read('Compiler/JetFoundation/Source/Registry/CoreCallRows.jet').split('\n')) {
     const m = /module_name: "([^"]+)", member: "([^"]+)".*symbol: CoreCallSymbol\.Prelude\{name: "([^"]+)"\}/.exec(line);
@@ -805,10 +805,10 @@ function main() {
   const N = jetItems.length;
   DF = (f) => idx.post.get(f)?.length ?? 0;
   // Prelude symbols the native lowering implements inline: compared against a
-  // symbol (`symbol == "jet_map_setdefault"`, `"jet_x" ->`) in JetBackend/JetCodegen.
+  // symbol (`symbol == "jet_map_setdefault"`, `"jet_x" ->`) in JetBackend/JetIR.
   const lowered = new Map();
   for (const [file, text] of jetFiles) {
-    if (!/^Compiler\/(JetBackend|JetCodegen)\//.test(file) || file.endsWith('/RuntimeRoutes.jet') || !isJetSource(file)) continue;
+    if (!/^Compiler\/(JetBackend|JetIR)\//.test(file) || file.endsWith('/RuntimeRoutes.jet') || !isJetSource(file)) continue;
     const ls = text.split('\n');
     ls.forEach((l, i) => {
       for (const m of l.matchAll(/==\s*"(jet_\w+)"/g)) {

@@ -1,0 +1,29 @@
+// Compiler-owned native layouts. This is boundary metadata, not a second
+// codec policy: every size/offset comes from the ordinary lowering layout.
+struct X64ValueMember {
+    name: String
+    offset: Int
+    descriptor: Int
+    boxed: Bool
+}
+struct X64ValueVariant {
+    name: String
+    selector: Int
+    members: [X64ValueMember]
+    named: Bool{true}
+}
+struct X64ValueDescriptor {
+    kind: String
+    name: String
+    size: Int
+    align: Int
+    stride: Int{0}
+    children: [Int]{[Int]{}}
+    members: [X64ValueMember]{[X64ValueMember]{}}
+    variants: [X64ValueVariant]{[X64ValueVariant]{}}
+}
+struct X64ValueBoundary {
+    root: Int
+    descriptors: [X64ValueDescriptor]
+    errors: [String]
+}

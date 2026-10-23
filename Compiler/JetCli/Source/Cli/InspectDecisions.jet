@@ -1,9 +1,9 @@
 // `jet inspect decisions`: the IR optimizer's report for the checked program,
 // optimized at the level `jet build` compiles it (jet_cli_native_level: O1,
 // O2 under a release profile), plus the functions the IR builder could not
-// build and the invocation's canonical-pass records.
-use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, MIRArtifactBuildMode, canonical_pass_boundary_gaps]
+// build and the invocation's selected canonical-pass gaps.
+use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
+use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, canonical_pass_boundary_gaps]
 use jet_ir.[IROptReport, ir_build_program, ir_optimize_module, ir_opt_report_text]
 use core.sys as decisions_sys
 
@@ -17,7 +17,7 @@ struct JetCLIDecisions {
 // Builds `inputs` into one IR module from its entry and optimizes it at `level`.
 fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, level: Int, threads: CompilerThreads) -> JetCLIDecisions Never! {
     checked := ^inputs
-    declarations := jet_cli_checked_declarations(&checked)
+    declarations := jet_driver_checked_declarations(&checked)
     built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
@@ -25,7 +25,7 @@ fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, level: Int, threads: Comp
     JetCLIDecisions{report: report, unbuilt: ^unbuilt}
 }
 
-fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: String, profile: String, canonical_routes: [JetCLIStatusValue], canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
+fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: String, profile: String, canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
     r :: decisions.report
     if !json {
         text := "decisions: scope={scope} source={file} profile={profile}\n{ir_opt_report_text(r)}\n"
@@ -43,7 +43,6 @@ fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: Str
         jet_cli_status_field("dead_removed", jet_cli_status_int(r.dead_removed)), jet_cli_status_field("unreachable_removed", jet_cli_status_int(r.unreachable_removed)),
         jet_cli_status_field("aggregates_replaced", jet_cli_status_int(r.aggregates_replaced)),
         jet_cli_status_field("unbuilt", jet_cli_status_texts(decisions.unbuilt)),
-        jet_cli_status_field("canonical_routes", jet_cli_status_array(canonical_routes)),
     }
     // Explicit opt-in gaps are a separately labeled extension, never execution records.
     if canonical_route_gaps.len() > 0 -> &fields.push(jet_cli_status_field("canonical_route_gaps", jet_cli_status_array(jet_cli_canonical_route_gap_values(canonical_route_gaps))))
@@ -52,7 +51,7 @@ fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: Str
 
 // The checked Program compile of the authorized sources under the job's
 // profile, the check failure every inspect plane reports, then the IR
-// optimizer's report. Canonical-route evidence is opt-in through the adapter
+// optimizer's report. Canonical-route gaps are opt-in through the adapter
 // evidence environment (`JET_ADAPTER_MODE` and comma-separated
 // `JET_ADAPTER_OPERATION_IDS`).
 fn jet_cli_inspect_decisions_host(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
@@ -63,26 +62,21 @@ fn jet_cli_inspect_decisions_host(job: JetCLIInspectJob, source: String) -> JetD
         .Prepared(value, _) -> {
             request := ^value
             request.profile = job.profile
-            if job.release_build -> request.build_mode = MIRArtifactBuildMode.Release
             ids :: decisions_sys.get("JET_ADAPTER_OPERATION_IDS") ?? ""
             operation_ids := [String]{}
             if ids != "" -> operation_ids = ids.split(",").to_list()
-            options :: CanonicalPassOptions{adapter_mode: decisions_sys.get("JET_ADAPTER_MODE") ?? "", operation_ids: operation_ids.copy()}
-            request.adapter_mode = options.adapter_mode.copy()
-            request.adapter_operation_ids = ^operation_ids
+            options :: CanonicalPassOptions{adapter_mode: decisions_sys.get("JET_ADAPTER_MODE") ?? "", operation_ids: ^operation_ids}
             sources := request.authorized_sources
             compiler_threads :: request.compiler_threads.copy()
             front := jet_cli_lowering_inputs(^request, None)
             errors :: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
             if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
             if front.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
-            process :: decisions_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
-            routes :: jet_cli_canonical_routes(front.compile.canonical_routes, process)
             inputs := ^front.inputs ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             if inputs.entry_key == None -> jet_cli_inspect_finish(job, jet_cli_build_failed("`{job.file}` has no `fn run` to optimize", "the IR optimizer reports the program reachable from its `fn run`", "add `fn run()` to the file, or check it with `jet check {job.file}`", job.color))
             threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
             decisions :: jet_cli_decisions(^inputs, jet_cli_native_level("build", job.release_build), threads)
-            report :: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, routes, canonical_pass_boundary_gaps(options), job.json)
+            report :: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }

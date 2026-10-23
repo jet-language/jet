@@ -323,7 +323,7 @@ function append(text) {
 // source map still matches). A repeated single-line Core import after its first
 // occurrence is blanked the same way (a duplicate import name is E0105), and
 // grouped Core member imports are deduplicated per member.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_sema|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
 const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();

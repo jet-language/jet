@@ -20,6 +20,7 @@ use jet_driver.[
     JetDriverDocModule,
     JetDriverForeignLinkFacts,
     JetDriverLoweringInputs,
+    jet_driver_checked_declarations,
     JetDriverRustForeignError,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
@@ -220,7 +221,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
     checked := ^inputs ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its checked functions"))
     entry_key :: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
-    declarations := jet_cli_checked_declarations(&checked)
+    declarations := jet_driver_checked_declarations(&checked)
     // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
     layouts :: ir_program_new([TFunc]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     // A failure the evaluator reports points at `run`.
@@ -503,7 +504,7 @@ fn jet_cli_native_object_failure(failure: JetCLINativeFailure) -> JetCLINativeOb
 fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String]) -[FS]> JetCLINativeObject Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
-    declarations := jet_cli_checked_declarations(&checked)
+    declarations := jet_driver_checked_declarations(&checked)
     // The program's C closure defines its foreign functions' symbols.
     closure_symbols := [String:Bool]{}
     loop row in declarations.foreign -> closure_symbols[row.symbol.copy()] = true
@@ -575,29 +576,6 @@ fn jet_cli_ir_trap(function: &IRFunction) Never! {
     function.code_line = [Int]{0}
     function.args = [Int]{}
     function.open = [Int]{}
-}
-
-// The checked modules' declarations the IR builder reads, in module order,
-// moved out of `checked`.
-struct JetCLICheckedDeclarations {
-    type_defs: [TTypeDef]
-    impls: [TImplDef]
-    constants: [TConstantDef]
-    foreign: [SemaCheckedForeignFunction]
-}
-
-fn jet_cli_checked_declarations(checked: &JetDriverLoweringInputs) -> JetCLICheckedDeclarations Never! {
-    type_defs := [TTypeDef]{}
-    impls := [TImplDef]{}
-    constants := [TConstantDef]{}
-    foreign := [SemaCheckedForeignFunction]{}
-    loop index in 0..<checked.modules.len() {
-        compiler_transfer_rows<TTypeDef>(&type_defs, &checked.modules[index].declarations.type_defs)
-        compiler_transfer_rows<TImplDef>(&impls, &checked.modules[index].declarations.impls)
-        compiler_transfer_rows<TConstantDef>(&constants, &checked.modules[index].declarations.constants)
-        compiler_transfer_rows<SemaCheckedForeignFunction>(&foreign, &checked.modules[index].foreign_functions)
-    }
-    JetCLICheckedDeclarations{type_defs: ^type_defs, impls: ^impls, constants: ^constants, foreign: ^foreign}
 }
 
 // `jet build`'s and `jet run`'s report of the native route, at the command's

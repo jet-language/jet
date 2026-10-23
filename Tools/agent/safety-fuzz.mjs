@@ -1,17 +1,12 @@
-#!/usr/bin/env node
-// Type-directed fuzz harness for the post-Rust safety net (#4619 criterion 3).
+// Type-directed fuzz case generator for the post-Rust safety net (#4619
+// criterion 3).
 //
 // Each case is a generated Jet program and the stdout a model evaluator
-// computes for it, written in the Examples/features layout:
+// computes for it. prepareCorpus in safety-gate.mjs writes them in the
+// Examples/features layout:
 //   <out>/corpus/Examples/features/fuzz/s<seed>_<n>.jet
 //   <out>/corpus/Examples/features/expected/fuzz/s<seed>_<n>.out
-// The corpus then runs through the same tools as the real goldens, with
-// JET_GOLDEN_FEATURES pointing at it:
-//   goldens:      Compiler/JetBackend/Tests/run-goldens.mjs <out>/goldens (the
-//                 Rust path's `jet run` reference, the checked MIR, the native
-//                 lowering and run; native legs follow its JET_RUNTIME_* env);
-//   differential: Compiler/JetBackend/Tests/run-differential.mjs <out>/goldens;
-//   lint:         Compiler/JetOptimizer/Tests/run-lint-corpus.mjs <out>/goldens.
+// and the standing native safety gate checks admitted native outputs of them.
 //
 // The generator draws from the syntax the feature goldens and the memory
 // corpus use: Int and Bool bindings (`::`, `:=` only when the program mutates
@@ -29,35 +24,9 @@
 // overflows, divides by zero, indexes out of range or runs too long is
 // discarded and redrawn, so every expected output is defined behavior.
 // Indexes are `e % xs.len()` (floored, so in range) or literal 0, and divisors
-// are mostly `e % k + 1`, which keeps the discard rate low.
-//
-// With --sanitize-runtime-library <archive> (the instrumented native runtime
-// archive of the native runtime pack, built with ASan/LSan and named with
-// JET_RUNTIME_JET_OBJECT set), Compiler/JetBackend/Tests/run-sanitized.mjs also
-// runs over the corpus (set JET_LOWER_SANITIZE=1 so native code is checked too).
-//
-// Verdicts (fuzz.tsv): reference = uncovered for every case (the retired Rust
-// MIR oracle; no rustc is invoked and no mir/*.ref is read); then the
-// run-differential, run-sanitized and run-lint-corpus verdicts of the case.
-// The gate (exit 1) fails on native-diverges, a sanitizer report or
-// sanitized-diverges, lint findings and lint-crash; a retired reference alone
-// exits 2 with UNCOVERED (cardRequired true). A
-// failing case reproduces from its seed; the .jet is the repro. Any harness
-// failure (a model error, a tool that did not run) exits 2 and writes no
-// receipt, so it can never read as a gate verdict.
-//
-// usage: [JET=<jet binary>] [JET_RUNTIME_PACK=... | JET_RUNTIME_C_LIB=...] [JET_LOWER_SANITIZE=1]
-//        node Tools/agent/safety-fuzz.mjs <outdir> [--seed N] [--count K]
-//        [--until generate|goldens|differential|lint] [--sanitize-runtime-library <archive>]
-// Writes <out>/fuzz.tsv and <out>/fuzz-summary.txt (and each tool's receipt
-// under <out>/goldens).
+// are mostly `e % k + 1`, which keeps the discard rate low. A failing case
+// reproduces from its seed; the .jet is the repro.
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const I64_MAX = (1n << 63n) - 1n;
 const I64_MIN = -(1n << 63n);
@@ -795,129 +764,4 @@ export function generateCoreCase(seed, index) {
     source: `// Core API fuzz: seed ${seed}, case ${index}\nfn run() {\n${statements.map((line) => `    ${line}`).join("\n")}\n}\n`,
     stdout: output.map((value) => `${value}\n`).join(""),
   };
-}
-
-// ---------------------------------------------------------------- driver
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.on("uncaughtException", (error) => {
-    console.error(error?.stack ?? String(error));
-    process.exit(2);
-  });
-  const args = process.argv.slice(2);
-  const outDir = args.length ? resolve(args.shift()) : null;
-  if (!outDir) {
-    console.error("usage: safety-fuzz.mjs <outdir> [--seed N] [--count K] [--until generate|goldens|differential|lint] [--sanitize-runtime-library <instrumented native archive>]");
-    process.exit(64);
-  }
-  let seed = 1;
-  let count = 50;
-  let until = "lint";
-  let sanitizeRuntimeLibrary = null;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--seed") seed = Number(args[++i]);
-    else if (args[i] === "--count") count = Number(args[++i]);
-    else if (args[i] === "--until") until = args[++i];
-    else if (args[i] === "--sanitize-runtime-library") {
-      if (!args[i + 1]) throw new Error("--sanitize-runtime-library needs an archive path");
-      sanitizeRuntimeLibrary = resolve(args[++i]);
-    }
-    else throw new Error(`unknown option ${args[i]}`);
-  }
-  const STAGES = ["generate", "goldens", "differential", "lint"];
-  const last = STAGES.indexOf(until);
-  if (last < 0 || !Number.isSafeInteger(seed) || !Number.isSafeInteger(count) || count < 1) throw new Error("bad --seed, --count or --until");
-  if (sanitizeRuntimeLibrary && !existsSync(sanitizeRuntimeLibrary)) throw new Error(`--sanitize-runtime-library not found: ${sanitizeRuntimeLibrary}`);
-
-  // 1. Corpus.
-  const features = join(outDir, "corpus/Examples/features");
-  const sources = join(features, "fuzz");
-  const expected = join(features, "expected/fuzz");
-  rmSync(join(outDir, "corpus"), { recursive: true, force: true });
-  mkdirSync(sources, { recursive: true });
-  mkdirSync(expected, { recursive: true });
-  const stems = [];
-  for (let index = 0; index < count; index++) {
-    const name = `s${seed}_${String(index).padStart(4, "0")}`;
-    const c = generateCase(seed, index);
-    writeFileSync(join(sources, `${name}.jet`), c.source);
-    writeFileSync(join(expected, `${name}.out`), c.stdout);
-    stems.push(`fuzz/${name}`);
-  }
-  console.log(`generate: ${count} cases (seed ${seed}) in ${features}`);
-  if (last === 0) process.exit(0);
-
-  // 2-4. The golden, differential and lint tools over the corpus.
-  const goldens = join(outDir, "goldens");
-  mkdirSync(goldens, { recursive: true });
-  // Receipts of an earlier run must not stand in for a stage this run skips.
-  for (const receipt of ["results.tsv", "differential.tsv", "sanitize.tsv", "lint.tsv"]) rmSync(join(goldens, receipt), { force: true });
-  const tool = (label, script, extra) => {
-    const log = openSync(join(outDir, `${label}.log`), "w");
-    const run = spawnSync(process.execPath, [join(repo, script), goldens, ...extra], {
-      cwd: repo, stdio: ["ignore", log, log], env: { ...process.env, JET_GOLDEN_FEATURES: features },
-    });
-    closeSync(log);
-    console.log(`${label}: exit ${run.status ?? run.signal}`);
-    return run.status;
-  };
-  if (tool("goldens", "Compiler/JetBackend/Tests/run-goldens.mjs", []) !== 0) throw new Error(`run-goldens failed: see ${outDir}/goldens.log`);
-  if (last >= 2 && ![0, 1].includes(tool("differential", "Compiler/JetBackend/Tests/run-differential.mjs", []))) throw new Error("run-differential failed");
-  if (last >= 2 && sanitizeRuntimeLibrary && ![0, 1].includes(tool("sanitize", "Compiler/JetBackend/Tests/run-sanitized.mjs", ["--runtime-library", sanitizeRuntimeLibrary]))) throw new Error("run-sanitized failed");
-  if (last >= 3 && ![0, 1].includes(tool("lint", "Compiler/JetOptimizer/Tests/run-lint-corpus.mjs", []))) throw new Error("run-lint-corpus failed");
-
-  // 5. Receipt.
-  const table = (file) => {
-    const path = join(goldens, file);
-    if (!existsSync(path)) return new Map();
-    return new Map(readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => {
-      const [stem, verdict, ...rest] = line.split("\t");
-      return [stem, { verdict, detail: rest.at(-1) ?? "" }];
-    }));
-  };
-  const harness = table("results.tsv");
-  const differential = table("differential.tsv");
-  const sanitize = table("sanitize.tsv");
-  const lint = table("lint.tsv");
-  const rows = [];
-  const failures = [];
-  const uncovered = [];
-  for (const stem of stems) {
-    const reference = "uncovered";
-    const detail = "retired Rust MIR reference: cardRequired true; no rustc invoked";
-    const native = differential.get(stem)?.verdict ?? harness.get(stem)?.verdict ?? "-";
-    if (last >= 2 && native !== "agree") failures.push(`native-incomplete\t${stem}\t${native}`);
-    const sanitized = sanitize.get(stem)?.verdict ?? "-";
-    const linted = lint.get(stem)?.verdict ?? "-";
-    rows.push([stem, reference, native, sanitized, linted, detail || differential.get(stem)?.detail || sanitize.get(stem)?.detail || lint.get(stem)?.detail || ""].join("\t"));
-    if (reference === "uncovered") uncovered.push(stem);
-    if (native === "native-diverges") failures.push(`native-diverges\t${stem}\t${differential.get(stem).detail}`);
-    if (sanitized === "report" || sanitized === "sanitized-diverges") failures.push(`sanitize-${sanitized}\t${stem}\t${sanitize.get(stem).detail}`);
-    if (last >= 2 && sanitizeRuntimeLibrary && sanitized !== "clean" && sanitized !== "report" && sanitized !== "sanitized-diverges") failures.push(`sanitize-incomplete\t${stem}\t${sanitized}`);
-    if (linted === "findings" || linted === "lint-crash") failures.push(`lint-${linted}\t${stem}\t${lint.get(stem).detail}`);
-    if (last >= 3 && linted !== "clean" && linted !== "findings" && linted !== "lint-crash") failures.push(`lint-incomplete\t${stem}\t${linted}`);
-  }
-  writeFileSync(join(outDir, "fuzz.tsv"), rows.join("\n") + "\n");
-  const tally = (column) => {
-    const counts = new Map();
-    for (const row of rows) {
-      const value = row.split("\t")[column];
-      counts.set(value, (counts.get(value) ?? 0) + 1);
-    }
-    return [...counts].sort((a, b) => b[1] - a[1]).map(([value, n]) => `${value} ${n}`).join(", ");
-  };
-  const summary = [
-    `cases: ${stems.length} (seed ${seed})`,
-    `reference: ${tally(1)}`,
-    `native: ${tally(2)}`,
-    `sanitize: ${tally(3)}`,
-    `lint: ${tally(4)}`,
-    "",
-    `gate: ${failures.length ? `FAIL (${failures.length})` : uncovered.length ? "UNCOVERED (cardRequired true)" : "PASS"}`,
-    ...(uncovered.length ? [`uncovered\treference\t${uncovered.length} cases\tretired Rust MIR reference; cardRequired true`] : []),
-    ...failures,
-  ];
-  writeFileSync(join(outDir, "fuzz-summary.txt"), summary.join("\n") + "\n");
-  console.log(summary.join("\n"));
-  process.exit(failures.length ? 1 : uncovered.length ? 2 : 0);
 }

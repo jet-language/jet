@@ -337,58 +337,10 @@ fn jet_eval_compiler_services_token_kind(kind: Int) -> String? {
     None
 }
 
-struct JetCompilerServicesSourceMapFacts {
-    value: TComptimeValue
-}
-
 fn jet_eval_compiler_services_string_values(values: [String]) -> TComptimeValue Never! {
     output := [TComptimeValue]{}
     loop value in values -> &output.push(jet_eval_compiler_services_string(value))
     TComptimeValue.List{values: output}
-}
-
-fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServicesSourceMapFacts Never! {
-    sources := [String]{}
-    generated_lines := [TComptimeValue]{}
-    current_source := String?{None}
-    source_prefix := "// jet:source-map source="
-    line_prefix := "// jet:line "
-    // Rust `str::lines`: a `\r` is dropped only as part of a `\r\n`
-    // terminator, so the final unterminated segment keeps a bare `\r`.
-    lines := source.split("\n").to_list()
-    loop index in 0..<lines.len() {
-        line := lines[index].trim_start()
-        bytes := line.bytes()
-        if index + 1 < lines.len() && bytes.len() > 0 && bytes[bytes.len() - 1] == 13 {
-            line = String.from_bytes(bytes[0..<bytes.len() - 1]) ?? line
-        }
-        if line.starts_with(source_prefix) {
-            source_name := line.slice(source_prefix.len(), line.len())
-            current_source = Val(source_name)
-            found := false
-            loop existing in sources {
-                if existing == source_name -> found = true
-            }
-            if !found -> &sources.push(source_name)
-            next
-        }
-        if !line.starts_with(line_prefix) -> next
-        // Rust parses the line number as `usize`: a signed spelling is not a row.
-        line_text :: line.slice(line_prefix.len(), line.len()).trim()
-        if line_text.starts_with("-") -> next
-        source_line :: Int.parse(line_text) ?? next
-        &generated_lines.push(TComptimeValue.Struct{type_name: "CompilerGeneratedLine", fields: [TComptimeField]{
-            TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(index + 1)},
-            TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(current_source)},
-            TComptimeField{name: "source_line", value: jet_eval_compiler_services_int(source_line)},
-        }})
-    }
-    value := TComptimeValue.Struct{type_name: "CompilerSourceMap", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
-        TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(sources)},
-        TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: generated_lines}},
-    }}
-    JetCompilerServicesSourceMapFacts{value: value}
 }
 
 fn jet_eval_compiler_services_token_value(tables: TokenTables, token: Token) -> TComptimeValue? {
@@ -752,4 +704,3 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
 // accept only a BuildPlan handle from the active build session and return the
 // canonical checked BuildGraph projection; receipt_diff stays source-owned by
 // Core/Build and must consume those exact typed graph values.
-

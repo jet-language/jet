@@ -26,58 +26,10 @@ struct TTestFact {
     generation_unavailable_reason: String?
 }
 
-struct TJobArgumentFact {
-    name: String
-    label: String
-    ty: String
-    required: Bool
-    default: String?
-    variadic: Bool
-    zone: ParamZone
-}
-
-struct TJobFact {
-    key: String
-    function: TFunctionRef?
-    name: String
-    scope: JobScope
-    doc: String?
-    arguments: [TJobArgumentFact]
-    schedule: EverySchedule?
-    after: [String]
-    parallel: Int
-    packages: [String]
-    working_directory: String?
-    input_paths: [String]
-    output_paths: [String]
-    skip: JobSkip?
-    cache: JobCachePolicy
-    limits: [StringMapEntry]
-}
-
 struct TOutputCheckFact {
     key: String
     name: String
     function: TFunctionRef
-}
-
-struct TCoveragePointFact {
-    key: String
-    function: TFunctionRef
-    block: String?
-    span: Span
-}
-
-enum THarnessKind { Test Fuzz Coverage }
-
-struct THarnessPlanFact {
-    key: String
-    kind: THarnessKind
-    tests: [String]
-    output_checks: [TOutputCheckFact]
-    selected_test: String?
-    coverage_points: [TCoveragePointFact]
-    command_override: Bool
 }
 
 fn tir_test_artifact_key(module_identity: String, test: TestDef) -> String Never! {
@@ -127,28 +79,5 @@ fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact N
         contract_generated: false,
         eligibility: None,
         generation_unavailable_reason: None,
-    }
-}
-
-fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: String?, arguments: [TJobArgumentFact], schedule: EverySchedule?, metadata: JobMetadata) -> TJobFact Never! {
-    local := "job::{name}"
-    key := if function.module_identity == "" -> local else -> "{function.module_identity}::{local}"
-    TJobFact{
-        key: key,
-        function: Val(function),
-        name: name,
-        scope: metadata.scope,
-        doc: doc,
-        arguments: arguments,
-        schedule: schedule,
-        after: metadata.after,
-        parallel: metadata.parallel ?? 1,
-        packages: metadata.packages,
-        working_directory: metadata.cwd,
-        input_paths: metadata.inputs,
-        output_paths: metadata.outputs,
-        skip: metadata.skip,
-        cache: metadata.cache,
-        limits: metadata.limits,
     }
 }

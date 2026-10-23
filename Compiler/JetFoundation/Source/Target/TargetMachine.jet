@@ -552,17 +552,6 @@ fn jet_target_provider_identity(machine: MIRTargetMachine) -> String Never! {
     "target-providers-v1:{mir_sha256_hex_bytes(bytes)}"
 }
 
-fn jet_target_linker_identity(machine: MIRTargetMachine) -> String Never! {
-    audit :: jet_target_linker_json(machine.linker)
-    kind :: if machine.linker == {
-        .HostedDefault -> "hosted-default"
-        .Unspecified -> "unspecified"
-        .Generated -> "generated"
-        .File(_, _) -> "file"
-    }
-    "linker-{kind}-v1:{mir_sha256_hex(audit)}"
-}
-
 fn jet_target_allocator_provides_heap(policy: MIRAllocatorPolicy) -> Bool Never! {
     if policy == {
         .HostedDefault | .Provider(_) | .Fixed(_, _) | .Counting(_) -> true
@@ -641,28 +630,6 @@ fn jet_target_machine_wasm_wasi(package_version: String) -> MIRTargetMachine Nev
     }
     machine.startup = MIRStartupPolicy.Generated{provider: jet_target_wasm_provider("wasm.wasi.startup", "wasm-wasi-startup")}
     machine
-}
-
-fn jet_target_dossier_for_usage(machine: MIRTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MIRTargetDossier Never! {
-    closure :: jet_ring_classify_prelude_closure(used_core)
-    closure_bytes := [U8]{}
-    layer := MIRRuntimeLayer.Core
-    loop row in closure {
-        jet_target_append_frame(&closure_bytes, "api", row.key)
-        jet_target_append_frame(&closure_bytes, "layer", jet_ring_layer_name(row.layer))
-        if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
-    }
-    MIRTargetDossier{
-        machine: Val(machine),
-        layer: layer,
-        provider_identity: jet_target_provider_identity(machine),
-        closure_identity: "prelude-closure-v1:{mir_sha256_hex_bytes(closure_bytes)}",
-        linker_identity: jet_target_linker_identity(machine),
-        tier_identity: tier,
-        compiler_identity: compiler_identity,
-        environment_identity: jet_target_environment_identity(machine),
-        dependency_identity: dependency_identity,
-    }
 }
 
 fn jet_target_package_version_from_compiler_identity(identity: String) -> String? {

@@ -13,7 +13,6 @@ use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
     CORE_SOURCE_OWNED_ROWS,
-    MIRArtifactBuildMode,
     compiler_take_rows,
     compiler_transfer_rows,
     foundation_json_quote,
@@ -39,6 +38,7 @@ use jet_driver.[
     jet_driver_compile,
     jet_driver_compile_keep_going,
     jet_driver_lowering_inputs,
+    jet_driver_checked_declarations,
     jet_driver_c_symbol,
     jet_driver_compile_escaped_failure,
     jet_driver_shared_build_inputs,
@@ -77,12 +77,12 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, trace_sink: JetCLI
 // stopped before lowering, with the checked inputs the route builds from
 // (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
 fn jet_cli_lowering_inputs(request: ^JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
-    if !jet_cli_keep_going_enabled() -> return jet_driver_lowering_inputs(^request, None)
+    if !jet_cli_keep_going_enabled() -> return jet_driver_lowering_inputs(request, None)
     skip := [String]{}
     loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
         if row.trim().len() > 0 -> &skip.push(row.trim())
     }
-    front := jet_driver_lowering_inputs(^request, Val(JetDriverKeepGoing{skip: skip}))
+    front := jet_driver_lowering_inputs(request, Val(JetDriverKeepGoing{skip: skip}))
     if front.compile.keep_going_rows.len() > 0 -> front.compile.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem :: jet_cli_keep_going_report(front.compile.keep_going_rows)
@@ -131,7 +131,7 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     lifecycle_path :: cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text :: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
     rows :: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
-    declarations := jet_cli_checked_declarations(&checked)
+    declarations := jet_driver_checked_declarations(&checked)
     library := ir_build_library(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
     issues := compiler_take_rows<String>(&library.errors)
     loop failure in library.failures -> &issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
@@ -694,10 +694,6 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         eval_config: jet_cli_eval_config(),
         record_store: None,
         trace_sink: None,
-        // Dev verification knob: JET_MIR_LINT_EVERY_PASS=1 checks legality and
-        // MIR Lint after every optimizer pass, and a failure names the pass and
-        // carries the rejected function's MIR.
-        mir_lint_every_pass: (cli_sys.get("JET_MIR_LINT_EVERY_PASS") ?? "") == "1",
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
@@ -924,9 +920,7 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRead
 
 // Build the request for `file` (the entry as the user named it) and run the
 // Jet compiler on it in `mode` with at most `threads` compiler threads
-// (`--threads N`; `None` admits threads automatically). Only the Eval,
-// Interpreter and REPL modes lower past the checked functions
-// (Pipeline `jet_driver_lowers_mir`).
+// (`--threads N`; `None` admits threads automatically).
 // Untraced: only the compiling verbs trace (`jet_cli_compile_entry`).
 // `jet_driver_compile` declares no effect row or failure (its Eval host
 // adapter makes dynamic calls with no effect bound), so this function and the
@@ -1111,10 +1105,7 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, release: Bool, input_lo
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
-            if release {
-                selected.profile = "release"
-                selected.build_mode = MIRArtifactBuildMode.Release
-            }
+            if release -> selected.profile = "release"
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
             front := jet_cli_lowering_inputs(^selected, trace_sink)

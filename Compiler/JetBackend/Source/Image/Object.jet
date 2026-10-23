@@ -37,8 +37,6 @@ ELF64_OBJECT_DEBUG_ABBREV :: prep { 11 }
 ELF64_OBJECT_DEBUG_INFO :: prep { 12 }
 ELF64_OBJECT_DEBUG_LINE :: prep { 14 }
 ELF64_OBJECT_DEBUG_LOCLISTS :: prep { 16 }
-ELF64_OBJECT_SECTIONS :: prep { 17 }
-
 // Local symbols before the functions: null, then the section symbols
 // relocations name.
 ELF64_OBJECT_SYMBOL_TEXT :: prep { 1 }
@@ -142,34 +140,6 @@ fn x64_object_rela_section(name: String, relas: [X64ObjectRela], target: Int) ->
 // A DWARF section: PROGBITS, not loaded.
 fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never! {
     X64ObjectSection{name: name, kind: 1, flags: 0, bytes: bytes, link: 0, info: 0, align: 1, entry_size: 0}
-}
-
-// Compile `program` into a relocatable object whose `main` runs `entry`,
-// which takes no parameters and returns nothing, on the calling thread
-// (x64_compile_module). The native route's object, on the threads it admits
-// and at its level, is x64_relocatable_object_owned (Opt/Opt.jet).
-fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
-    if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
-    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
-    returns_nothing := false
-    if signature.result == None -> returns_nothing = true
-    if signature.params.len() != 0 || !returns_nothing -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
-    compiled :: x64_compile_module(program)
-    if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
-    main :: x64_object_main(entry)
-    functions := [X64CompiledFunction]{main}
-    loop function in compiled.functions -> &functions.push(function)
-    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
-    loop row in compiled.debug -> &debug.push(row)
-
-    x64_object_functions(lir_object_module(program), functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
-}
-
-// Shared section/relocation writer for hosted program and runtime objects,
-// on the calling thread. The native route's object, whose debug sections
-// build on the threads it admits, is x64_object_functions_threads.
-fn x64_object_functions(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport]) -> X64ExecutableResult Never! {
-    x64_object_functions_threads(program, functions, debug, exports, compiler_threads_single())
 }
 
 // x64_object_functions with the `.debug_info` subprograms built on the

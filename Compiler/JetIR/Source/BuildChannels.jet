@@ -3,7 +3,6 @@
 // one runtime channel into the tuple, the endpoint methods cross the native
 // channel exports, and `loop value in rx` walks the receiver as an Iter.
 
-use jet_codegen.[jet_codegen_select_payload_type]
 use jet_foundation.[Span, TExpr, THandleOp, TLocal, TStmt, Type, type_carrier_identity]
 
 // The element of a `Sender<T>` / `Receiver<T>` endpoint (Lower Tasks.jet
@@ -159,8 +158,8 @@ fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, va
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, item_row, body)
 }
 
-// `select { ... }` (codegen jet_codegen_lower_select_wait, Lower Tasks.jet
-// lower_task_select): the readiness table's receivers and timer deadlines
+// `select { ... }` (Tasks.jet lower_task_select on the old path): the
+// readiness table's receivers and timer deadlines
 // (exact nanoseconds) become two owned Lists, which the runtime empties, and
 // the runtime writes the ready arm and its payload (the received value's
 // box, or None for a timer) into the result tuple.
@@ -172,7 +171,7 @@ fn ir_select_wait(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, table: TE
     receivers := [TExpr]{}
     durations := [TExpr]{}
     if !ir_select_table(table, &receivers, &durations) -> return ir_fail_slot(&b, span, "select over a non-canonical readiness table")
-    payload :: jet_codegen_select_payload_type(result_ty)
+    payload :: ir_select_payload_type(result_ty)
     receiver_list_ty :: Type.List{element: Type.Apply{name: "Receiver", args: [Type]{payload}}}
     recvs :: ir_list_literal(&m, p, &b, receiver_list_ty, receivers, span)
     if ir_failed(b) || recvs < 0 -> return -1
@@ -199,6 +198,16 @@ fn ir_select_wait(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, table: TE
     ir_release(&m, &b, recvs)
     ir_release(&m, &b, timers)
     storage
+}
+
+// The received value's type of a select over `ty`: through Result/Option
+// wrappers to the `Task<T>` payload T; any other type is its own payload.
+fn ir_select_payload_type(ty: Type) -> Type Never! {
+    if ir_untag(ty) == {
+        .Result(ok, _) | .Option(ok) -> ir_select_payload_type(ok)
+        .Apply(name, args) -> if name == "Task" && args.len() == 1 -> args[0] else -> ty
+        else -> ty
+    }
 }
 
 // The receivers and timer durations of a readiness table, latest arm first

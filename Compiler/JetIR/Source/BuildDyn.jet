@@ -6,7 +6,6 @@
 // lends the receiver place's Dyn to the runtime and stores the rebuilt tree
 // back; `decode<T>()` calls T's Decode implementation.
 
-use jet_backend.[LowerRouteCarrier]
 use jet_foundation.[Span, TBuiltinOp, TCallArg, TExpr, TExprKind, THandleOp, TPanicLoc, TStmt, Type, tir_generated_local, tir_user_local]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
@@ -243,7 +242,7 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
     if ir_failed(b) || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String -> return ir_fail_slot(&b, span, "Dyn.remove by {ir_type_name(args[0].ty)}")
     place :: ir_dyn_place_open(&m, p, &b, dyn_row, receiver, span) ?? return -1
-    removed :: ir_route_option(&m, p, &b, "jet_dyn_remove", [Int]{place.tree, key}, LowerRouteCarrier.Handle{name: "Dyn"}, ty, span)
+    removed :: ir_route_option(&m, p, &b, "jet_dyn_remove", [Int]{place.tree, key}, IRRouteCarrier.Handle{name: "Dyn"}, ty, span)
     if ir_failed(b) -> return -1
     ir_release(&m, &b, key)
     ir_dyn_place_close(&m, p, &b, dyn_row, place, span)

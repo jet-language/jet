@@ -17,9 +17,18 @@
 // JET_EVAL_IR_UNIT + function), never an address, so a Load through it is
 // an internal problem, never silent garbage.
 use core.math as math
-use jet_foundation.[Span]
-use jet_backend.[lower_float_constant_bits]
-use jet_ir.[IRFunction, IRModule, IROp, IRType, IRTypeKind, IR_OVERFLOW_WRAP, ir_box_share]
+use jet_foundation.[Span, TComptimeValue]
+use jet_ir.[
+    IRFunction,
+    IRModule,
+    IRProgram,
+    IROp,
+    IRType,
+    IRTypeKind,
+    IR_OVERFLOW_WRAP,
+    ir_box_share,
+    ir_float_constant_bits,
+]
 
 JET_EVAL_IR_REGION :: 4294967296
 JET_EVAL_IR_FUNCTION_TAG :: 2305843009213693952
@@ -85,6 +94,13 @@ struct JetEvalIRState {
     exit_code: Int?
     // The compiler's answer to `embed_file` / `embed_bytes` / `find`.
     inputs: JetEvalComptimeInputAdapter?
+    // A build or dev invocation's host (Host.jet): the type rows and
+    // layouts its values are read and written by, its build host, and the
+    // compiler values its code holds (a host word is index + 1).
+    host_types: Shared<IRModule>?{None}
+    host_layouts: Shared<IRProgram>?{None}
+    host_adapter: JetEvalBuildHostAdapter?{None}
+    host_values: [TComptimeValue]{[TComptimeValue]{}}
 }
 
 fn jet_eval_ir_state_new(m: IRModule, config: JetEvalConfig, span: Span) -> JetEvalIRState Never! {
@@ -242,7 +258,7 @@ fn jet_eval_ir_float32(bits: Int) -> Float Never! {
 
 // The binary32 bits of `value`, rounded once to nearest-even.
 fn jet_eval_ir_float32_word(value: Float) -> Int Never! {
-    lower_float_constant_bits(value, true)
+    ir_float_constant_bits(value, true)
 }
 
 // The word `raw` as a value of `ty` holds it in a register: a Bool its low

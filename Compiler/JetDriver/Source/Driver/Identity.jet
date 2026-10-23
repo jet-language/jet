@@ -1,10 +1,8 @@
 use core.build.[BuildGraphNode]
-use jet_codegen.[TCostReport]
 use jet_backend.[X64ExecutionHost, X64ExecutionRequest, X64ExecutionResponse]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
 use jet_foundation.[
-    CanonicalPassRecord,
     AppAuthorizedDirectory,
     CompilerThreads,
     compiler_threads_single,
@@ -18,9 +16,7 @@ use jet_foundation.[
     Item,
     JetTargetLayout,
     MIRAllocatorPolicy,
-    MIRArtifactBuildMode,
     MIRFunctionID,
-    MIRProgram,
     MIRRuntimeLayer,
     MIRSourceFile,
     NameLedger,
@@ -44,7 +40,7 @@ use jet_foundation.[
     record_decode,
     record_encode,
 ]
-use jet_foundation.[TComptimeValue]
+use jet_foundation.[TComptimeValue, TLambda]
 use jet_sema.[
     SemaCallSiteFact,
     SemaNameReferenceFact,
@@ -56,9 +52,15 @@ use jet_sema.[
     SemaSourceSegment,
     SchemaSnapshot,
 ]
-use jet_codegen.[JetCodegenClosureSource]
 use jet_eval.[JetEvalConfig]
-use jet_repl.[ReplSession]
+
+// Original checked source of a comptime closure. The execution host pins
+// these rows under its checked snapshot identity before admitting code.
+struct JetDriverClosureSource {
+    function: MIRFunctionID
+    source_file: String
+    lambda: TLambda
+}
 
 struct JetDriverAuthorizedSourceFile {
     path: String
@@ -107,12 +109,13 @@ struct JetDriverHostFacts {
 // `Doc` compiles as `Program` does and also keeps each user module's checked
 // declarations (`JetDriverDocModule`) for `jet doc`.
 // `Comptime` checks the program and runs its build-time values through the
-// canonical comptime stage (checked, lowered to MIR, evaluated by JetEval),
-// then stops: nothing is lowered or emitted for run time. Config surfaces
+// canonical comptime stage (checked, built to JetIR, evaluated by JetEval),
+// then stops: nothing is built or emitted for run time. Config surfaces
 // (Jetpack EnvModel) evaluate their typed values this way.
-// `Eval` and `Interpreter` produce the same checked MIR for canonical JetEval,
-// without AOT emission. Eval checks the selected root's transitive pure row;
-// Interpreter leaves effects to its runtime authorizer (REPL turns).
+// `Eval` and `Interpreter` check the selected root of the entry module for
+// JetEval's IR evaluation, without AOT emission. Eval checks the selected
+// root's transitive pure row; Interpreter leaves effects to its runtime
+// authorizer.
 enum JetDriverCompileMode {
     Program
     Test
@@ -120,7 +123,6 @@ enum JetDriverCompileMode {
     Comptime
     Eval
     Interpreter
-    Repl
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
@@ -192,11 +194,6 @@ struct JetDriverCompileRequest {
     schema_snapshots: [String:SchemaSnapshot]?{None}
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     trace_sink: CompilerTraceSink?
-    // Full verification: the optimizer re-verifies legality and runs MIR
-    // Lint on the lowered program and the result of every pass, not only
-    // legality on entry and Lint on the final program. Tests and `--verify`
-    // turn it on; ordinary compiles leave it off.
-    mir_lint_every_pass: Bool
     // The compiler threads this compile may use (`--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
@@ -213,9 +210,6 @@ struct JetDriverCompileRequest {
     // Explicit callable shared by named jobs, generation and evaluation.
     selected_entry: String?{None}
     profile: String{"dev"}
-    build_mode: MIRArtifactBuildMode{MIRArtifactBuildMode.Dev}
-    adapter_mode: String{""}
-    adapter_operation_ids: [String]{[String]{}}
     capture_build_program: Bool{false}
     capture_build_nodes: Bool{false}
     build_output_names: [String]{[String]{}}
@@ -228,16 +222,6 @@ struct JetDriverCompileRequest {
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
     execution_host: JetDriverExecutionHost?{None}
-    // Unified host/stop contract (#4720): the comptime lowering session
-    // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
-    // only for a native execution host. Compile-time code runs in the
-    // in-process evaluator until native in-memory O0 lands, and the evaluator
-    // refuses stop points, so every compile leaves it off.
-    comptime_stop_points: Bool{false}
-    // Ordinary native Program/Test/Doc artifacts use returning-stop MIR.
-    // This is independent of the comptime stop points above; evaluator, Rust
-    // emission and library assembly leave it disabled.
-    native_stop_points: Bool{false}
 }
 
 struct JetDriverGatePolicy {
@@ -270,8 +254,8 @@ trait JetDriverRecordStore {
 trait JetDriverExecutionHost {
     fn execute(self, request: X64ExecutionRequest) -[Exec, IO, FFI.C, FFI.Asm, Time.Wait]> X64ExecutionResponse
     fn session_resource(self) -[]> X64ExecutionHost Never!
-    fn register_closure_sources(self, snapshot: String, sources: [JetCodegenClosureSource]) Never! -[Time.Wait]>
-    fn closure_source(self, snapshot: String, function: MIRFunctionID) -[Time.Wait]> JetCodegenClosureSource? Never!
+    fn register_closure_sources(self, snapshot: String, sources: [JetDriverClosureSource]) Never! -[Time.Wait]>
+    fn closure_source(self, snapshot: String, function: MIRFunctionID) -[Time.Wait]> JetDriverClosureSource? Never!
 }
 
 // The raw build-input transport a host supplies for checked `fn build` input
@@ -541,8 +525,6 @@ struct JetDriverCompileResult {
     generated_source_files: [MIRSourceFile]
     package_identity: String
     entry_module_identity: String
-    entry_function: MIRFunctionID?
-    mir: MIRProgram?
     // The effects the checked entry function requires: its own declared
     // effects and those of every function it reaches through call edges.
     entry_effects: [String]{[String]{}}
@@ -568,9 +550,6 @@ struct JetDriverCompileResult {
     // `JetDriverCompileMode.Comptime`: every build-time value the comptime
     // stage produced, constants included. Empty in the other modes.
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
-    // A Repl compile retains its checked scope and canonical MIR machine.
-    repl_session: ReplSession?{None}
-    canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
     build_program: TComptimeValue?{None}
     build_nodes: [BuildGraphNode]?{None}
     cost_report: TCostReport?{None}

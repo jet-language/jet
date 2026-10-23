@@ -14,7 +14,6 @@
 // constant on ir_comptime, built at each read.
 
 use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, Type]
-use jet_backend.[lower_constant_u64_bits, lower_float_constant_bits, lower_int_inline]
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
@@ -157,18 +156,18 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
     kind :: m.types[row].kind
     if value == {
         .Int(number) -> {
-            if kind == .Int && !lower_int_inline(number) -> return None
+            if kind == .Int && !ir_int_inline(number) -> return None
             return Val(IRStaticWord{word: number})
         }
         .Bool(flag) -> return Val(IRStaticWord{word: if flag -> 1 else -> 0})
         .Char(code) -> return Val(IRStaticWord{word: code})
-        .Float(number, _) -> return Val(IRStaticWord{word: lower_float_constant_bits(number, kind == .Float32)})
+        .Float(number, _) -> return Val(IRStaticWord{word: ir_float_constant_bits(number, kind == .Float32)})
         .String(text) -> {
             if kind != .String -> return None
             return Val(IRStaticWord{word: 0, target: ir_intern_text(&m, text), text: true})
         }
         .BigInt(decimal) -> {
-            if kind == .Word -> return Val(IRStaticWord{word: lower_constant_u64_bits(decimal)})
+            if kind == .Word -> return Val(IRStaticWord{word: ir_constant_u64_bits(decimal)})
             return None
         }
         .Present(inner) -> {

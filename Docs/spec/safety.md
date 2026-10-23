@@ -70,8 +70,9 @@ decoding, including invalid sequences. The golden slice includes successful
 memory, collections, strings, low-level, safety and concurrency examples.
 Native stdout, stderr and status must agree with the model or golden. This is
 independent of generated Rust; agreement at every tier also implies tier-to-tier
-agreement on those observables. Independent MIR Lint receipts are required for
-each case. Generated-Rust differential runs are supplemental, not Rust-free proof.
+agreement on those observables. Each case also needs an independent post-sema
+check receipt; none exists yet (see below), so that leg reports a gap.
+Generated-Rust differential runs are supplemental, not Rust-free proof.
 
 The native artifact producer adds `native_safety.tiers.O0`, `.O1` and `.O2`
 to the admitted artifacts JSON. Each tier has `fuzz` and `golden` objects with
@@ -90,13 +91,10 @@ evidence of native O2.
 `sha256`; that JSON receipt names the same `head`, `runtime_sha256` and
 `detected` error kinds (`heap-buffer-overflow`, `heap-use-after-free`, `leak`).
 Only an exact-head, hash-matched, negatively tested archive is admitted.
-`run-sanitized.mjs --runtime-library ARCHIVE` links prebuilt native code without
-invoking rustc. Its older `--runtime runtime.rs` mode still instruments the
-current Rust runtime, but cannot satisfy Rust-free runtime coverage.
-Every requested native object must be instrumented. Missing objects, missing
-references, link errors, empty corpora, timeouts/crashes and missing
-instrumentation fail rather than silently passing. ASan/LSan reports and any
-sanitized/plain stdout, stderr or status difference fail too.
+No native code sanitizer exists on the JetIR backend, so every admitted tier
+records its `sanitize` leg as an explicit coverage gap rather than a pass.
+Missing objects, missing references, empty corpora, timeouts/crashes and
+missing receipts likewise fail or stay open; none is silently passed.
 
 Additional instrumentation/self-build producers publish
 `native_safety.additional_coverage[NAME]` with a receipt path and SHA-256.
@@ -133,8 +131,8 @@ release entry remains; a native producer can instead bind
 `native_safety.checker` with `path` and `head`. Core source is embedded in the
 compiler, so an older release cannot prove a newly audited wrapper.
 
-Current limits: native lowering has non-frame Load/Store ASan checks, not
-stack redzones/use-after-return, uninitialized-memory/UB or data-race checks.
+Current limits: the JetIR backend emits no ASan Load/Store checks, stack
+redzones/use-after-return, uninitialized-memory/UB or data-race checks.
 The gate explicitly lists these, sanitized native compiler self-build and
 mutation-control proofs for MIR `alias.exclusive`, `view.valid` and
 `send.boundary` as missing. The current runtime/frontend still require Rust,
@@ -150,28 +148,25 @@ exist.
 
 The post-Rust safety argument requires two independent checks before code is
 generated. Sema owns every user-facing check (I3) and reports each violation as
-a registered diagnostic. MIR Lint ([mir-lint.md](mir-lint.md)) independently
-checks the canonical MIR; a failure is an internal compiler error. On the Rust
-path rustc's borrow checker and `Send` checks provide another check (I2).
-The native backend has no rustc and must admit the independent MIR controls
-alongside its runtime instrumentation receipts:
+a registered diagnostic. On the Rust path rustc's borrow checker and `Send`
+checks provide the second check (I2). The native backend has no rustc, so it
+needs an independent checker over JetIR, alongside its runtime instrumentation
+receipts, that backs:
 
-- `ownership.move` backs use-after-move (E0121);
-- `alias.exclusive` backs in-call aliasing (E0204), closures that keep a write
-  live, and overlapping task-group loans (E1101);
-- `view.valid` backs views whose owner changed (E0212), owners changed while
-  lent to a task (E1101), and views that escape their owners (E2305);
-- `send.boundary` backs mutable or borrowed captures that cross a task or
-  parallel boundary (E1101) and Cell, view, or function values that cross one
-  (E1102).
+- use-after-move (E0121);
+- in-call aliasing (E0204), closures that keep a write live, and overlapping
+  task-group loans (E1101);
+- views whose owner changed (E0212), owners changed while lent to a task
+  (E1101), and views that escape their owners (E2305);
+- mutable or borrowed captures that cross a task or parallel boundary (E1101)
+  and Cell, view, or function values that cross one (E1102);
+- writes through a frozen value (E1113).
 
-The MIR Lint fixtures pair clean and planted, hand-built MIR shapes and bypass
-sema entirely. They are independent mutation controls, not receipts obtained by
-deleting semantic checks in a compiler build. Source-bound control receipts
-must still be admitted to the standing gate; their presence alone does not
-close the native runtime or sanitizer gaps above. Writing through a frozen value
-(E1113) is not backed yet, because the MIR has no frozen fact; the native backend
-still relies on sema alone for that rule.
+That checker does not exist yet: the earlier MIR Lint checked the MIR program,
+which the compiler no longer builds. Until it lands, the native backend relies
+on sema alone for these rules, and its controls must be independent mutation
+controls (clean and planted programs that bypass sema), not receipts obtained by
+deleting semantic checks in a compiler build.
 
 ## Unsafe-region ratchet
 
@@ -225,9 +220,9 @@ example retains the negative unsafe-outside-vetted scan.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1124,
+  "total": 1105,
   "counts": {
-    "Compiler": 510,
+    "Compiler": 491,
     "Core": 204,
     "Examples": 38,
     "Jetpack": 9,
@@ -235,111 +230,6 @@ example retains the negative unsafe-outside-vetted scan.
     "tests": 359
   },
   "regions": [
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Calls.jet",
-      "line": 74,
-      "column": 9,
-      "reason": "each argument cell is inside this call's writable mapping"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Calls.jet",
-      "line": 79,
-      "column": 5,
-      "reason": "loaded.entry is the selector-generated pointer-to-cells adapter; all cells remain mapped through its return"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
-      "line": 48,
-      "column": 5,
-      "reason": "function is the resolved (ptr,len)->word runtime constructor; buffer remains readable until it returns"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
-      "line": 117,
-      "column": 5,
-      "reason": "word is a live String handle and both functions borrow it through the canonical runtime C ABI"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
-      "line": 124,
-      "column": 9,
-      "reason": "the runtime's borrowed UTF-8 projection holds length readable bytes until the owning String is dropped"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
-      "line": 144,
-      "column": 13,
-      "reason": "word is a live exact-Int carrier and stringify returns a fresh owning String"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
-      "line": 148,
-      "column": 13,
-      "reason": "the temporary String is owned here and decoding has copied its bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
-      "line": 186,
-      "column": 5,
-      "reason": "word transfers one live String owner to the runtime's canonical consuming drop"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/CoreSharedParent.jet",
-      "line": 265,
-      "column": 5,
-      "reason": "the admitted canonical control surrounds the producer's checked no-argument System V getter and its owned Shared result; the Core image remains process-pinned"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 165,
-      "column": 9,
-      "reason": "the slot is an aligned word inside the writable mapping, checked above"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 171,
-      "column": 9,
-      "reason": "the relocation is an aligned word inside the writable mapping, checked above"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 191,
-      "column": 5,
-      "reason": "the admitted control uses begin(fuel,depth,session), status(), end(); startup is the producer's checked no-argument Unit static-fixup boundary"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 212,
-      "column": 5,
-      "reason": "`main` is the runtime's `int32_t jet_rt_main(void (*)(void))` and `entry` is the image's checked no-argument entry"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 234,
-      "column": 5,
-      "reason": "the slot is an aligned word inside the mapping, now writable"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 247,
-      "column": 9,
-      "reason": "this loaded image's checked zero-argument Unit finalizer remains executable; no native owners or returning frames survive"
-    },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
@@ -1039,34 +929,6 @@ example retains the negative unsafe-outside-vetted scan.
       "line": 235,
       "column": 13,
       "reason": "index is within the bytes just read into this mapping"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/Fragments.fixture/CallImages.jet",
-      "line": 139,
-      "column": 5,
-      "reason": "the separate observer mapping remains owned, readable and writable until the final assertion"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet",
-      "line": 77,
-      "column": 5,
-      "reason": "the loaded image owns both observer pointers and their writable static cells through unload; fini is the checked zero-argument Unit function"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet",
-      "line": 151,
-      "column": 9,
-      "reason": "half-close only this owned socket's write side; leave read open for HostError"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet",
-      "line": 291,
-      "column": 5,
-      "reason": "the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call"
     },
     {
       "package": "Compiler",
@@ -8111,33 +7973,18 @@ example retains the negative unsafe-outside-vetted scan.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 510 |
+| Compiler | 491 |
 | Core | 204 |
 | Examples | 38 |
 | Jetpack | 9 |
 | Tools | 4 |
 | tests | 359 |
-| **total** | **1124** |
+| **total** | **1105** |
 
 ### Regions
 
 | crate/package | file | line | reason |
 | --- | --- | ---: | --- |
-| Compiler | Compiler/JetBackend/Source/Image/Calls.jet | 74:9 | "each argument cell is inside this call's writable mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Calls.jet | 79:5 | "loaded.entry is the selector-generated pointer-to-cells adapter; all cells remain mapped through its return" |
-| Compiler | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 48:5 | "function is the resolved (ptr,len)-&gt;word runtime constructor; buffer remains readable until it returns" |
-| Compiler | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 117:5 | "word is a live String handle and both functions borrow it through the canonical runtime C ABI" |
-| Compiler | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 124:9 | "the runtime's borrowed UTF-8 projection holds length readable bytes until the owning String is dropped" |
-| Compiler | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 144:13 | "word is a live exact-Int carrier and stringify returns a fresh owning String" |
-| Compiler | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 148:13 | "the temporary String is owned here and decoding has copied its bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 186:5 | "word transfers one live String owner to the runtime's canonical consuming drop" |
-| Compiler | Compiler/JetBackend/Source/Image/CoreSharedParent.jet | 265:5 | "the admitted canonical control surrounds the producer's checked no-argument System V getter and its owned Shared result; the Core image remains process-pinned" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 165:9 | "the slot is an aligned word inside the writable mapping, checked above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 171:9 | "the relocation is an aligned word inside the writable mapping, checked above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 191:5 | "the admitted control uses begin(fuel,depth,session), status(), end(); startup is the producer's checked no-argument Unit static-fixup boundary" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 212:5 | "`main` is the runtime's `int32_t jet_rt_main(void (*)(void))` and `entry` is the image's checked no-argument entry" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 234:5 | "the slot is an aligned word inside the mapping, now writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 247:9 | "this loaded image's checked zero-argument Unit finalizer remains executable; no native owners or returning frames survive" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 180:5 | "state is the compiler-process-lifetime fourteen-word execution resource" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 184:5 | "state is the compiler-process-lifetime fourteen-word execution resource" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 207:5 | "terminated paths and admitted identity and five writable resource words remain live through posix_spawn" |
@@ -8238,10 +8085,6 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetBackend/Source/OS/SessionTransport.jet | 165:5 | "the newline follows at most5 digits in32 writable header bytes" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionTransport.jet | 213:9 | "one byte was read into this owned mapping" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionTransport.jet | 235:13 | "index is within the bytes just read into this mapping" |
-| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/CallImages.jet | 139:5 | "the separate observer mapping remains owned, readable and writable until the final assertion" |
-| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet | 77:5 | "the loaded image owns both observer pointers and their writable static cells through unload; fini is the checked zero-argument Unit function" |
-| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet | 151:9 | "half-close only this owned socket's write side; leave read open for HostError" |
-| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet | 291:5 | "the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call" |
 | Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 112:19 | "rename within the retained parent descriptor; C names remain live" |
 | Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 142:35 | "mkdir relative to retained directory with live encoded name" |
 | Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 216:11 | "openat borrows live retained parent and terminated encoded name" |

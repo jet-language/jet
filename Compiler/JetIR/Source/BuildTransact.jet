@@ -11,7 +11,6 @@
 // exit's own drops (ir_tx_unwind).
 
 use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TLambda, TLocal, TMethodRef, TPlace, TStmt, TTransactionSnapshot, TTryConvert, Type, tir_generated_local]
-use jet_codegen.[jet_codegen_lambda_function_type]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
@@ -295,7 +294,7 @@ fn ir_tx_unwind_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span:
 // the callback's closure box goes on the front of its list.
 fn ir_transaction_hook(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_name: String, executable: TLambda, commit: Bool, span: Span) -> Int Never! {
     binding :: ir_lookup_binding(b, handle_name) ?? return ir_fail_slot(&b, span, "transaction hook without the handle {handle_name}")
-    closure_ty :: jet_codegen_lambda_function_type(executable)
+    closure_ty :: ir_lambda_function_type(executable)
     env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return -1
     offset :: if commit -> 8 else -> 16

@@ -87,8 +87,7 @@ export function phase(name) {
   const prerequisites = {
     runtime: [['build', process.env.S5_BUILD, ['shared-build-artifacts', 'shared-native-cli']]],
     boundary: [['build', process.env.S5_BUILD, ['shared-build-artifacts', 'shared-native-cli']], ['gates', process.env.S5_GATES, []]],
-    goldens: [['build', process.env.S5_BUILD, ['shared-build-artifacts', 'shared-native-cli']], ['runtime', process.env.S5_RUNTIME, ['runtime-pack', 'pack-publication', 'pack-exports', 'abi-witness', 'pack-roots']], ['boundary', process.env.S5_BOUNDARY, []]],
-    fixtures: [['build', process.env.S5_BUILD, ['shared-build-artifacts', 'shared-native-cli']], ['runtime', process.env.S5_RUNTIME, ['runtime-pack', 'pack-publication', 'pack-exports', 'abi-witness', 'pack-roots']], ['goldens', process.env.S5_GOLDENS, ['native-golden-union-results', 'jet-native-140-parity']]],
+    fixtures: [['build', process.env.S5_BUILD, ['shared-build-artifacts', 'shared-native-cli']], ['runtime', process.env.S5_RUNTIME, ['runtime-pack', 'pack-publication', 'pack-exports', 'abi-witness', 'pack-roots']]],
   };
   const results = (prerequisites[name] ?? []).map(([phase, directory, decisive]) => recorder.prerequisite(`${phase}-prerequisite`, directory, decisive, phase));
   recorder.ready = results.every(Boolean);

@@ -13,7 +13,9 @@
 // - the stops (Trap.jet's jet_rt_*_stop / panic routes and
 //   jet_rt_require_stop), which report the diagnostic the MIR evaluator
 //   reports for the same stop;
-// - jet_comptime_input, the compiler's answer to a Tier-1 comptime input.
+// - jet_comptime_input, the compiler's answer to a Tier-1 comptime input;
+// - jet_comptime_host_method and jet_comptime_host_field, the compiler
+//   values of a fn-build or fn-dev invocation (Host.jet).
 use core.math as math
 use jet_foundation.[TComptimeValue, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights]
 use jet_ir.[IRModule, ir_module_decode, ir_module_new]
@@ -110,6 +112,8 @@ JET_EVAL_IR_P_UNREACHABLE :: 24
 JET_EVAL_IR_P_REQUIRE_STOP :: 25
 JET_EVAL_IR_P_COMPTIME_INPUT :: 26
 JET_EVAL_IR_P_LIBM :: 27
+JET_EVAL_IR_P_COMPTIME_HOST_METHOD :: 28
+JET_EVAL_IR_P_COMPTIME_HOST_FIELD :: 29
 
 // The primitive an `#FFI(asm)` leaf named `name` is (OS/Linux.jet), or 0.
 fn jet_eval_ir_leaf_primitive(name: String) -> Int Never! {
@@ -146,6 +150,8 @@ fn jet_eval_ir_symbol_primitive(symbol: String) -> Int Never! {
         "jet_rt_unreachable" -> JET_EVAL_IR_P_UNREACHABLE
         "jet_rt_require_stop" -> JET_EVAL_IR_P_REQUIRE_STOP
         "jet_comptime_input" -> JET_EVAL_IR_P_COMPTIME_INPUT
+        "jet_comptime_host_method" -> JET_EVAL_IR_P_COMPTIME_HOST_METHOD
+        "jet_comptime_host_field" -> JET_EVAL_IR_P_COMPTIME_HOST_FIELD
         // The C math the runtime imports (CompilerNeededMath.jet), which the
         // platform archive supplies natively and runtime.ir does not hold.
         "acos" | "acosh" | "asin" | "asinh" | "atan" | "atan2" | "atanh" | "cbrt" | "ceil" | "cos" | "cosh" | "exp" | "expm1" | "exp2" | "floor" | "fma" | "fmod" | "hypot" | "log" | "log1p" | "log10" | "log2" | "pow" | "round" | "sin" | "sinh" | "sqrt" | "tan" | "tanh" | "trunc" -> JET_EVAL_IR_P_LIBM
@@ -187,6 +193,8 @@ fn jet_eval_ir_route(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetE
     }
     if target <= -2 {
         if target == -2 - JET_EVAL_IR_P_COMPTIME_INPUT -> return jet_eval_ir_comptime_input_route(code, m, rt, &s, args, dst_row)
+        if target == -2 - JET_EVAL_IR_P_COMPTIME_HOST_METHOD -> return jet_eval_ir_host_method_route(code, m, rt, &s, args, dst_row, area)
+        if target == -2 - JET_EVAL_IR_P_COMPTIME_HOST_FIELD -> return jet_eval_ir_host_field_route(m, rt, &s, args, dst_row, area)
         return jet_eval_ir_primitive(m, rt, &s, -2 - target, code.names[row], args, dst_row)
     }
     if target == -1 {

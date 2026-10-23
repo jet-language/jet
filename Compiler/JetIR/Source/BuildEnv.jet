@@ -4,7 +4,6 @@
 // from ordinary route calls. Every argument is borrowed.
 
 use jet_foundation.[Span, Type]
-use jet_backend.[LowerEnvironmentRoute]
 
 // Whether `row` is a compact byte List (`[U8]`, stride 1; Lower
 // lower_environment_bytes).
@@ -18,7 +17,7 @@ fn ir_environment_bytes(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     false
 }
 
-fn ir_environment_call(m: &IRModule, p: IRProgram, b: &IRBuilder, route: LowerEnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+fn ir_environment_call(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != route.arity -> return ir_fail_slot(&b, span, "environment route has incorrect arity")
     loop slot in inputs {
         if slot < 0 -> return ir_fail_slot(&b, span, "environment argument has no checked type")
@@ -35,7 +34,7 @@ fn ir_environment_call(m: &IRModule, p: IRProgram, b: &IRBuilder, route: LowerEn
     value
 }
 
-fn ir_environment_value(m: &IRModule, p: IRProgram, b: &IRBuilder, route: LowerEnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+fn ir_environment_value(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if route.op == .Seed {
         if !ir_unit_type(result) -> return ir_fail_slot(&b, span, "environment seed requires Unit")
         _ :: ir_runtime(&m, &b, route.export, inputs, -1)
@@ -117,7 +116,7 @@ fn ir_environment_byte_payload(m: &IRModule, b: &IRBuilder, boxed: Int, out: Int
 // A mutation's status word: >= 0 is Ok (for unset, whether a key was
 // removed), -1 is EnvError.InvalidName, any other negative status
 // EnvError.InvalidValue (Lower lower_environment_status).
-fn ir_environment_status(m: &IRModule, p: IRProgram, b: &IRBuilder, route: LowerEnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+fn ir_environment_status(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     ok_ty := Type.Int
     err_ty := Type.Int
     if ir_untag(result) == .Result(success, failure) {

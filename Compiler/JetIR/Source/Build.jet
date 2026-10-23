@@ -6,8 +6,6 @@
 // module build keeps going and reports every failure (collect-all).
 
 use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, TCallArg, TConstantDef, TExpr, TFailureCarrier, TFunc, TGenericParam, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
-use jet_backend.[lower_int_inline]
-use jet_codegen.[jet_codegen_impl_method_leaf]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -84,6 +82,9 @@ struct IRBuilder {
     // The variable slot an explicit move (`^x`) just read (-1: none): that
     // read moves even where a plain read of the variable would share.
     moving: Int{-1}
+    // The `#Impure` blocks open around the code being built: a build host
+    // call made inside one may touch the ambient world (ir_host_method).
+    impure: Int{0}
     // The closures this body created so far, by key base (ir_lambda).
     lambdas: [String:Int]
 }
@@ -272,7 +273,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
         trait_short :: ir_short_name(trait_name)
         owner_key :: ir_render_type_key(type_rows, types, implementation.self_type)
         loop key in implementation.methods {
-            slot_key :: "{implementation.module_identity}|{owner_key}|{jet_codegen_impl_method_leaf(key)}"
+            slot_key :: "{implementation.module_identity}|{owner_key}|{ir_impl_method_leaf(key)}"
             slot := impl_slots.get(slot_key) ?? -1
             if slot < 0 {
                 slot = impl_traits.len()
@@ -1611,7 +1612,7 @@ fn ir_copy_value(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Spa
 // An integer constant of type row `row`: an exact Int outside the inline
 // range is built by the runtime (jet_int_owned_from_i64).
 fn ir_int_constant(m: &IRModule, b: &IRBuilder, row: Int, value: Int) -> Int Never! {
-    if m.types[row].kind == .Int && !lower_int_inline(value) {
+    if m.types[row].kind == .Int && !ir_int_inline(value) {
         raw :: ir_word_const(&m, &b, value)
         return ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, row)
     }

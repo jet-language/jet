@@ -41,14 +41,6 @@ reject that component rather than reading invalid references. With `JET_DUMP_MIR
 also set, the checked lowering pipeline saves the pre-verification program at
 `<dump-path>.before-legality`; the usual post-optimization dump remains unchanged.
 
-The native compiler's `JET_MIR_LINT_EVERY_PASS=1` (the bootstrap host's
-`JET_BOOTSTRAP_MIR_LINT_EVERY_PASS`) turns on full verification: legality and
-MIR Lint run on the entry program and after every optimizer pass. A failure
-then names the pass whose output was rejected and carries the rejected
-function's MIR as text (locals, place rows, blocks, operations and their
-value and place operands). A rejected move names the moved root and both move
-positions in every mode.
-
 The native runtime object's `jet_rt_alloc` and `jet_rt_free` own C-carrier
 allocation. Generated Rust adapters allocate List result buffers through that
 same allocator because native List paths release them with `jet_rt_free`.
@@ -293,9 +285,6 @@ runtime-owned statics before the loader unmaps code and data. Initialization
 and finalization share a live flag, so repeated calls reuse the same statics
 without duplicating owners. Calls through the x86-64 assembly host boundary
 declare all System V caller-saved vector registers as clobbered.
-The callable lifetime witness in `Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet`
-starts with MIR and uses the admitted runtime's actual constructors and drops,
-observing reuse, live-flag clearing, and reinitialization before loader unload.
 
 ### Build graph and compiler nodes
 
@@ -384,8 +373,8 @@ the program's representation. O0 builds never construct one.
 | Consumer today | Reads | Replacement |
 |---|---|---|
 | TIR→MIR lowering and assembly (`JetCodegen/Source/Codegen`, Driver assemble) | TIR | IR builder (`JetIR/Source/Build*.jet`), from the same checked rows |
-| MIR legality and lint (`JetOptimizer/Source/Verification`) | MIR | one structural IR verifier that runs only in verify mode; sema remains the single semantic check |
-| MIR optimizer (`JetOptimizer/Source/Transforms`) and LIR passes (`JetBackend/Source/Opt`) | MIR, LIR | none at O0; O1/O2 passes are rewritten on the IR (inlining splices slot arenas; loop work uses the structured loops; SSA views where needed) |
+| MIR legality and lint (deleted with `JetOptimizer`) | MIR | one structural IR verifier that runs only in verify mode; sema remains the single semantic check |
+| MIR optimizer (deleted with `JetOptimizer`) and LIR passes (`JetBackend/Source/Opt`) | MIR, LIR | none at O0; O1/O2 passes are rewritten on the IR (inlining splices slot arenas; loop work uses the structured loops; SSA views where needed) |
 | MIR→LIR lowering (`JetBackend/Source/Lower`) and LIR selection/allocation (`X64/Select.jet`, `X64/RegAlloc.jet`) | MIR, LIR | IR x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) |
 | Encoder, object writer, DWARF, static linker | x64 rows | unchanged (emission boundary); DWARF variables are slots |
 | Comptime evaluator (`JetEval`) and in-memory native comptime | MIR | runs the IR (in-memory machine code from the same selector), one meaning for comptime and run time |
@@ -479,23 +468,19 @@ identity rather than accepting matching display names.
 
 ### Native representation boundaries
 
-The [Jet x86-64 selector](../../Compiler/JetBackend/Source/X64/Select.jet)
+The [Jet x86-64 selector](../../Compiler/JetIR/Source/X64Select.jet)
 normalizes incoming and returned `Bool` values from the low System V ABI byte;
 unspecified upper register or stack-slot bits must not change Jet truth.
 Image origins preserve the linker's relative alignment: relocatable read-only
 sections advertise and use their maximum datum alignment, and static ELF text
 starts after header padding to the maximum function/data alignment.
-The [ABI fixtures](../../Compiler/JetBackend/Tests/Fragments.fixture/AbiFixtures.jet) exercise
-dirty upper bits and aligned data addresses, including a system-linked object.
 
 Hosted program and runtime objects share the [section-table writer](../../Compiler/JetBackend/Source/Image/Object.jet).
 Its content rows also determine section names, offsets, links and header count;
 DWARF and unwind relocations use those same indices. Each compiled function has
 one matching debug row, including handwritten entry adapters. Lifecycle exports
 append priority-named init/fini sections and their relocations, with equal
-priorities ordered by export symbol. The [object regression adapter](../../Compiler/JetBackend/Tests/test-runtime-object.mjs)
-emits current program/runtime objects and independently checks their ELF tables;
-it does not use a historical compiler as an oracle.
+priorities ordered by export symbol.
 
 Runtime fixed-width negation uses `wrapping(I64{0} - value)`: the per-operation
 overflow opt-in admits a binary integer operation (D-NUMOPS1), not unary
@@ -1273,7 +1258,7 @@ the closure contains C++. Shared globals may resolve from a sibling body;
 references missing from the full closure still fail. Only a successful proof
 is archived. The cache identity includes the build script itself, so changing
 this proof invalidates stale bridge artifacts without changing the ABI schema.
-`Compiler/JetCodegen/Tests/run-inline-foreign-link.mjs` executes all three
+`Compiler/JetIR/Tests/run-inline-foreign-link.mjs` executes all three
 production build-script templates, including shared mutex state, mixed C/C++
 state and rejection of an actually missing definition.
 

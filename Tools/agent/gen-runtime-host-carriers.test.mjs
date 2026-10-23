@@ -63,13 +63,3 @@ test('generated Jet helpers have one declaration per function', () => fixture((t
   assert.equal(new Set(names).size, names.length);
   assert.equal(names.filter(name => name === 'host_arguments_refused').length, 1);
 }));
-
-test('borrowed C-field lowering supplies stack storage and retains its borrow flag', () => {
-  const lower = readFileSync(join(root, 'Compiler/JetBackend/Source/Lower/Places.jet'), 'utf8');
-  const body = lower.slice(lower.indexOf('fn lower_handle_field_place('), lower.indexOf('fn lower_projected_move_supported('));
-  assert.match(body, /lent\.header_bytes > 0/);
-  assert.match(body, /StackSlot\{dst: address, size: bytes, align: 8\}/);
-  assert.match(body, /\[LIRValueID\]\{handle, address\}, None/);
-  assert.match(body, /ty: field\.ty, borrowed: true/);
-  assert.doesNotMatch(body, /lower_alloc\(/);
-});

@@ -33,7 +33,7 @@ assert.throws(() => nativeRecordExports([{ ...types[0], record: { kind: 'struct'
 assert.throws(() => nativeRecordExports([{ ...types[0], record: { kind: 'struct', members: [{ name: 'bad', kind: null }] } }]), /no carrier/);
 
 const source = types.map((type, index) => `pub struct Record${index} { value: Int }`).join('\n');
-const routes = types.map((type) => `LowerRuntimeHandle{jet_name: "${type.jetName}", runtime: "${type.runtime}"},\nLowerRecordSchema{jet_name: "${type.runtime}", variants: "", fields: "value=Int"},`).join('\n') + '\nLowerRuntimeHandle{jet_name: "RustOnly", runtime: "RustOnly"},';
+const routes = types.map((type) => `IRRuntimeHandle{jet_name: "${type.jetName}", runtime: "${type.runtime}"},\nLowerRecordSchema{jet_name: "${type.runtime}", variants: "", fields: "value=Int"},`).join('\n') + '\nLowerRuntimeHandle{jet_name: "RustOnly", runtime: "RustOnly"},';
 const inventory = 'symbol\tlayer\n' + descriptors.map((row) => `${row.name}\tcabi-glue`).join('\n') + '\njet_rt_handle_drop_rust_only\tcabi-glue\n';
 const report = classifyNativeInventory(inventory, routes, (path) => path === 'Core/fixture/fixture.jet' ? source : null);
 assert.equal(report.counts.types, 11);

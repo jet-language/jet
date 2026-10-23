@@ -4,49 +4,10 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
-import { compilerPackages } from './compiler-packages.mjs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { parseRuntimeExports, runtimeLifecycleList } from './runtime-route-abi.mjs';
-import { jetWriter } from '../../Compiler/JetBackend/Tests/front-feed-codec.mjs';
-import { loadMirSchema } from '../../Compiler/JetBackend/Tests/mir-debug.mjs';
 
 export const nativeTransportPackage = 'name: "compiler_registry_transport"\nversion: "0.0.1"\nedition: "2028"\nauthority: { holds: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] } }\n';
-// The checked-MIR driver's entry: the production front end compiles one source,
-// and the schema's generated observation writer (front-feed-codec.mjs) streams
-// the checked MIR.
-const checkedMirDriverEntry = `
-fn run() {
-    args :: cli_process.args()
-    if args.len() != 2 { panic("expected source and checked MIR output") }
-    compiled :: jet_cli_compile_file(args[0], false, None, JetDriverCompileMode.Program)
-    if compiled == {
-        .Refused(refusal) -> panic("registry MIR request refused: {refusal.stderr}")
-        .Compiled(result, _) -> {
-            if !result.complete || result.internal_problem != None { panic("registry MIR compile did not complete") }
-            program :: result.mir ?? panic("registry MIR compile omitted MIR")
-            entry :: result.entry_function ?? MIRFunctionID{value: 0}
-            stream := [String]{"{entry.value}"}
-            mirw_mir_program(program, &stream)
-            cli_files.write(args[1], stream.join("\\n")) ?? panic("cannot write checked registry MIR")
-            print("checked registry MIR: pass")
-        }
-    }
-}
-`;
-// Write the checked-MIR driver package into `out`: package.jet (the compiler
-// packages as path dependencies, JetCli's authority) and run.jet.
-export function writeCheckedMirDriver({ repo, out }) {
-    mkdirSync(out, { recursive: true });
-    const packages = compilerPackages(repo);
-    const authority = /^authority:\s*\{[\s\S]*?^\}/m.exec(readFileSync(join(repo, 'Compiler/JetCli/package.jet'), 'utf8'))?.[0];
-    if (!authority) throw Error('Compiler/JetCli/package.jet declares no authority');
-    writeFileSync(join(out, 'package.jet'), `name: "checked_mir_driver"\nversion: "0.0.1"\nedition: "2026"\ndeps: {\n${[...packages].map(([name, directory]) => `    ${name}: ${relative(out, directory)},`).join('\n')}\n}\n${authority}\n`);
-    const schema = loadMirSchema(repo), writer = jetWriter(schema);
-    const types = [...new Set(['MIRFunctionID', ...[...schema.keys()].filter(type => new RegExp(`\\b${type}\\b`).test(writer))])];
-    const source = join(out, 'run.jet');
-    writeFileSync(source, `use jet_cli.[jet_cli_compile_file]\nuse jet_driver.[JetDriverCompileMode]\nuse jet_foundation.[${types.join(', ')}]\nuse core.files as cli_files\nuse core.math as math\nuse core.process as cli_process\n${checkedMirDriverEntry}\n${writer}`);
-    return source;
-}
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 export function nativeCommandProblem(run) {
@@ -106,13 +67,6 @@ export function runNativeProgram({ jet, file, root = dirname(file), prefix, env 
     if (!existsSync(built)) return { run, problem: { verdict: 'no-mir', detail: 'native build did not emit a fresh executable' } };
     copyFileSync(built, prefix + '.exe'); chmodSync(prefix + '.exe', 0o755);
     return { run, problem: null, binary: prefix + '.exe' };
-}
-
-export function buildNativeCheckedMirDriver({ jet, repo, out, env = process.env, execute, timeout }) {
-    const source = writeCheckedMirDriver({ repo, out });
-    const result = runNativeProgram({ jet, file: source, root: out, prefix: join(out, 'transport'), env, execute, timeout });
-    if (result.problem) throw Error(result.problem.detail);
-    return result.binary;
 }
 
 export function runNativeCheckedMir({ driver, file, mir, prefix, cwd = dirname(file), env = process.env, execute, timeout }) {

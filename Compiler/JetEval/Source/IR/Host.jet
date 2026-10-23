@@ -1,0 +1,389 @@
+// The compiler values of a fn-build or fn-dev invocation on the IR machine.
+// The builder lays a compiler value type with no declaration (`Build`,
+// `BuildTarget`, `ProgramInfo`, ...: ir_host_value_name) out as a host word,
+// a handle (index + 1) into the state's host_values, and lowers its methods
+// and fields to the routes jet_comptime_host_method(member, impure,
+// (row key, word)...) and jet_comptime_host_field(field, row key, word). A
+// route reads its operands back as compiler data by their type rows, answers the
+// call (reflection and compiler value projections here, Build, BuildPlan
+// and Dev methods by the invocation's build host), and writes the answer as
+// the IR value of the call's result row: as the builder lays the checked
+// type out, with the runtime's own texts, buffers and boxes so the program
+// owns and drops them as any other. Rows are read and interned in a copy of
+// the running module (host_types), whose existing rows are the module's.
+use jet_foundation.[TComptimeValue, Type, type_name]
+use jet_ir.[IRMember, IRModule, IRProgram, ir_align8, ir_enum_box_size, ir_enum_def, ir_host_value_row, ir_list_stride, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+
+// Whether module `m` calls a host route, which a run of it answers from the
+// host values of its own copy of `m` and `p` (jet_eval_ir_host_open).
+fn jet_eval_ir_host_routed(m: IRModule) -> Bool Never! {
+    m.name_rows.get("jet_comptime_host_method") != None || m.name_rows.get("jet_comptime_host_field") != None
+}
+
+// Installs the host of a run of `m` laid out by `p`, with the build host
+// `adapter` of a fn-build or fn-dev invocation.
+fn jet_eval_ir_host_open(s: &JetEvalIRState, m: IRModule, p: IRProgram, adapter: JetEvalBuildHostAdapter?) Never! {
+    // copy: the machine keeps running `m` and reading `p`; host values intern
+    // their rows in a module of their own.
+    types := shared m.copy()
+    layouts := shared p.copy()
+    s.host_types = Val(^types)
+    s.host_layouts = Val(^layouts)
+    if adapter == .Val(installed) -> s.host_adapter = Val(installed.clone_adapter())
+}
+
+// The compiler value host word `word` holds.
+fn jet_eval_ir_host_value(s: &JetEvalIRState, word: Int) -> TComptimeValue? Never! {
+    if word < 1 || word > s.host_values.len() {
+        jet_eval_ir_problem(&s, "compiler value handle {word} is not live")
+        return None
+    }
+    Val(s.host_values[word - 1].copy())
+}
+
+fn jet_eval_ir_host_types(s: &JetEvalIRState) -> Shared<IRModule>? Never! {
+    if s.host_types == {
+        .Val(cell) -> Val(cell.copy())
+        .None -> {
+            jet_eval_ir_unsupported(&s, "compiler values outside a fn-build or fn-dev invocation")
+            None
+        }
+    }
+}
+
+fn jet_eval_ir_host_layouts(s: &JetEvalIRState) -> Shared<IRProgram>? Never! {
+    if s.host_layouts == {
+        .Val(cell) -> Val(cell.copy())
+        .None -> {
+            jet_eval_ir_unsupported(&s, "compiler values outside a fn-build or fn-dev invocation")
+            None
+        }
+    }
+}
+
+// The words of entry `entry`'s parameters for `args`, none for an entry
+// run without arguments.
+fn jet_eval_ir_host_arguments(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, entry: Int, args: [TComptimeValue]) -> [Int]? {
+    if args.len() == 0 -> return Val([Int]{})
+    f :: m.functions[entry]
+    if args.len() != f.param_count {
+        jet_eval_ir_problem(&s, "the entry takes {f.param_count} parameters, given {args.len()}")
+        return None
+    }
+    types_cell :: jet_eval_ir_host_types(&s) ?? return None
+    layouts_cell :: jet_eval_ir_host_layouts(&s) ?? return None
+    types := types_cell.guard_edit()
+    layouts :: layouts_cell.guard_read()
+    words := [Int]{}
+    loop (index, value) in args {
+        &words.push(jet_eval_ir_host_store(&types.value, layouts.value, m, rt, &s, value, f.slot_type[index], 0) ?? return None)
+    }
+    Val(words)
+}
+
+// jet_comptime_host_method(member, impure, (row key, word)...): method
+// `member` (`Owner.method`) on the receiver and arguments, each a word of
+// the type row its key names; `impure` when the call sits in an `#Impure`
+// block.
+fn jet_eval_ir_host_method_route(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+    if args.len() < 4 || args.len() % 2 != 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
+    member :: jet_eval_ir_text(&s, args[0]) ?? return None
+    parts :: jet_eval_compiler_value_method_owner(member) ?? return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
+    types_cell :: jet_eval_ir_host_types(&s) ?? return None
+    layouts_cell :: jet_eval_ir_host_layouts(&s) ?? return None
+    types := types_cell.guard_edit()
+    layouts :: layouts_cell.guard_read()
+    values := [TComptimeValue]{}
+    at := 2
+    loop at < args.len() {
+        row :: jet_eval_ir_host_row(types.value, &s, args[at]) ?? return None
+        &values.push(jet_eval_ir_data(&types.value, layouts.value, &s, args[at + 1], row) ?? return None)
+        at += 2
+    }
+    fallible :: dst_row >= 0 && ir_untag(code.types[dst_row].ty) == .Result(_, _)
+    answer :: jet_eval_ir_host_answer(&s, parts[0], parts[1], member, values, fallible, args[1] != 0) ?? return None
+    if dst_row < 0 -> return Val(0)
+    jet_eval_ir_host_store(&types.value, layouts.value, m, rt, &s, answer, dst_row, area)
+}
+
+// jet_comptime_host_field(field, row key, word): field `field` of the
+// compiler value `word` of the type row its key names.
+fn jet_eval_ir_host_field_route(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+    if args.len() != 3 || dst_row < 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_field")
+    field :: jet_eval_ir_text(&s, args[0]) ?? return None
+    types_cell :: jet_eval_ir_host_types(&s) ?? return None
+    layouts_cell :: jet_eval_ir_host_layouts(&s) ?? return None
+    types := types_cell.guard_edit()
+    layouts :: layouts_cell.guard_read()
+    row :: jet_eval_ir_host_row(types.value, &s, args[1]) ?? return None
+    base :: jet_eval_ir_data(&types.value, layouts.value, &s, args[2], row) ?? return None
+    found := TComptimeValue?{None}
+    if base == .Struct(_, fields) -> found = jet_eval_compiler_value_field(fields, field)
+    value :: found ?? {
+        jet_eval_ir_problem(&s, "compiler value {type_name(types.value.types[row].ty)} has no field `{field}`")
+        return None
+    }
+    jet_eval_ir_host_store(&types.value, layouts.value, m, rt, &s, value, dst_row, area)
+}
+
+// The type row of `types` whose intern key is the String at `key` (the
+// builder's ir_host_row_key).
+fn jet_eval_ir_host_row(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? Never! {
+    text :: jet_eval_ir_text(&s, key) ?? return None
+    if types.type_rows.get(text) == .Val(row) -> return Val(row)
+    jet_eval_ir_problem(&s, "host operand type `{text}` is not a row of the module")
+    None
+}
+
+// The answer of `owner.method` (`member`) on `values`, the receiver first:
+// a reflection predicate or compiler value projection, or the build host's.
+fn jet_eval_ir_host_answer(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool) -> TComptimeValue? {
+    if jet_eval_reflection_metadata_supported(owner, method) -> return jet_eval_ir_host_projection(&s, jet_eval_reflection_answer(owner, method, values))
+    if jet_eval_compiler_value_method_supported(owner, method, values.len() - 1) -> return jet_eval_ir_host_projection(&s, jet_eval_compiler_value_answer(owner, method, values))
+    adapter :: if s.host_adapter == {
+        .Val(installed) -> installed.clone_adapter()
+        .None -> {
+            jet_eval_ir_unsupported(&s, "compiler host method {member} without a build host")
+            return None
+        }
+    }
+    reply :: adapter.build_call(member, values, fallible, impure, s.span) ?? {
+        jet_eval_ir_unsupported(&s, "compiler host method {member}")
+        return None
+    }
+    if reply == {
+        .Value(value) -> Val(value)
+        .Failure(diagnostic) -> {
+            if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic})
+            None
+        }
+    }
+}
+
+fn jet_eval_ir_host_projection(s: &JetEvalIRState, answer: JetEvalCompilerValueAnswer) -> TComptimeValue? Never! {
+    if answer == {
+        .Value(value) -> Val(value)
+        .Fault(message) -> {
+            jet_eval_ir_problem(&s, message)
+            None
+        }
+    }
+}
+
+fn jet_eval_ir_host_unwritable(s: &JetEvalIRState, value: TComptimeValue, ty: Type) Never! {
+    jet_eval_ir_unsupported(&s, "writing compiler value {value} as an IR value of {type_name(ty)}")
+}
+
+// The IR word of compiler value `value` as type row `row` of `types`, laid
+// out by `p`: a host row's handle, a scalar, a runtime text or box; an
+// aggregate written to `area` (its own storage when 0), which is its word.
+fn jet_eval_ir_host_store(types: &IRModule, p: IRProgram, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, value: TComptimeValue, row: Int, area: Int) -> Int? {
+    if ir_host_value_row(types, p, row) != None {
+        &s.host_values.push(value.copy())
+        return Val(s.host_values.len())
+    }
+    ty :: types.types[row]
+    checked :: ir_untag(ty.ty)
+    if ty.kind == {
+        .Unit -> return Val(0)
+        .Bool -> {
+            if value == .Bool(flag) -> return Val(if flag -> 1 else -> 0)
+        }
+        .Int -> {
+            if value == .Int(number) -> return jet_eval_ir_host_int(m, rt, &s, number)
+        }
+        .Char -> {
+            if value == .Char(code) -> return Val(code)
+        }
+        .String -> {
+            if value == .String(text) -> return jet_eval_ir_store_text(m, rt, &s, text)
+        }
+        .Word -> {
+            if ir_enum_def(types, p, row) == .Val(definition) {
+                if value == .Enum(_, variant, _) -> return jet_eval_ir_host_variant(&s, p, definition, variant)
+            } else if value == .Int(number) {
+                return Val(number)
+            }
+        }
+        .Pointer -> return jet_eval_ir_host_box(&types, p, m, rt, &s, value, row)
+        .Aggregate -> {
+            target :: if area != 0 -> area else -> jet_eval_ir_alloc(&s, ty.size)
+            if !jet_eval_ir_host_fill(&types, p, m, rt, &s, value, row, target) -> return None
+            return Val(target)
+        }
+        else -> {}
+    }
+    jet_eval_ir_host_unwritable(&s, value, checked)
+    None
+}
+
+// An Int word: inline, or a runtime node built from its decimal text.
+fn jet_eval_ir_host_int(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, number: Int) -> Int? {
+    if jet_eval_ir_inline(number) -> return Val(number)
+    decimal :: "{number}"
+    bytes :: jet_eval_ir_text_bytes(&s, decimal)
+    jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_int_from_static", [Int]{bytes, decimal.bytes().len()})
+}
+
+// The index of variant `variant` of enum declaration `definition`.
+fn jet_eval_ir_host_variant(s: &JetEvalIRState, p: IRProgram, definition: Int, variant: String) -> Int? Never! {
+    declaration :: p.types[definition]
+    if declaration.kind == .Enum(variants, _) {
+        loop (index, row) in variants {
+            if row.name == variant -> return Val(index)
+        }
+    }
+    jet_eval_ir_problem(&s, "{declaration.name} has no variant {variant}")
+    None
+}
+
+// A runtime box of `bytes` bytes (the builder's ir_box_alloc).
+fn jet_eval_ir_host_alloc(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, bytes: Int) -> Int? {
+    jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_alloc", [Int]{ir_align8(bytes), 8})
+}
+
+// The word of a pointer row: an Option (0 when absent), a Result box
+// (selector 1 for success at 0, the payload at 8) or a boxed enum case
+// (discriminant at 0, its payload members).
+fn jet_eval_ir_host_box(types: &IRModule, p: IRProgram, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, value: TComptimeValue, row: Int) -> Int? {
+    checked :: ir_untag(types.types[row].ty)
+    if checked == .Option(inner) {
+        if value == .Failed(_) -> return Val(0)
+        payload :: if value == .Present(present) -> present else -> value
+        inner_row :: ir_value_type(&types, p, inner) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return None
+        }
+        boxed :: jet_eval_ir_host_alloc(m, rt, &s, types.types[inner_row].size) ?? return None
+        if !jet_eval_ir_host_put(&types, p, m, rt, &s, payload, inner_row, boxed) -> return None
+        return Val(boxed)
+    }
+    if checked == .Result(ok_ty, err_ty) {
+        success := true
+        if value == .Failed(_) -> success = false
+        payload :: if value == {
+            .Present(present) -> present
+            .Failed(report) -> {
+                if report == .Told(told) -> told else -> {
+                    jet_eval_ir_host_unwritable(&s, value, checked)
+                    return None
+                }
+            }
+            else -> value
+        }
+        ok_row :: ir_value_type(&types, p, ok_ty) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return None
+        }
+        err_row :: ir_value_type(&types, p, err_ty) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return None
+        }
+        widest :: if types.types[ok_row].size > types.types[err_row].size -> types.types[ok_row].size else -> types.types[err_row].size
+        boxed :: jet_eval_ir_host_alloc(m, rt, &s, 8 + ir_align8(widest)) ?? return None
+        if !jet_eval_ir_write(&s, boxed, 8, if success -> 1 else -> 0) -> return None
+        if !jet_eval_ir_host_put(&types, p, m, rt, &s, payload, if success -> ok_row else -> err_row, boxed + 8) -> return None
+        return Val(boxed)
+    }
+    if ir_enum_def(types, p, row) == .Val(definition) && value == .Enum(_, variant, cases) {
+        index :: jet_eval_ir_host_variant(&s, p, definition, variant) ?? return None
+        type_args :: ir_row_args(types, row)
+        size :: ir_enum_box_size(&types, p, definition, type_args) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return None
+        }
+        members :: ir_variant_members(&types, p, definition, type_args, index) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return None
+        }
+        if members.len() != cases.len() {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return None
+        }
+        boxed :: jet_eval_ir_host_alloc(m, rt, &s, size) ?? return None
+        if !jet_eval_ir_write(&s, boxed, 8, index) -> return None
+        loop (position, member) in members {
+            if !jet_eval_ir_host_member(&types, p, m, rt, &s, cases[position].value, member, boxed) -> return None
+        }
+        return Val(boxed)
+    }
+    jet_eval_ir_host_unwritable(&s, value, checked)
+    None
+}
+
+// Writes `value` of type row `row` at `address`: an aggregate in place,
+// anything else as its word.
+fn jet_eval_ir_host_put(types: &IRModule, p: IRProgram, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, value: TComptimeValue, row: Int, address: Int) -> Bool {
+    if types.types[row].kind == .Aggregate -> return jet_eval_ir_host_fill(&types, p, m, rt, &s, value, row, address)
+    word :: jet_eval_ir_host_store(&types, p, m, rt, &s, value, row, 0) ?? return false
+    width :: jet_eval_ir_width(types.types[row])
+    width == 0 || jet_eval_ir_write(&s, address, width, word)
+}
+
+// Writes `value` as member `member` of the storage at `base`: in place, or
+// in a box of its own when the member is boxed.
+fn jet_eval_ir_host_member(types: &IRModule, p: IRProgram, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, value: TComptimeValue, member: IRMember, base: Int) -> Bool {
+    if !member.boxed -> return jet_eval_ir_host_put(&types, p, m, rt, &s, value, member.ty, base + member.offset)
+    holder :: jet_eval_ir_host_alloc(m, rt, &s, types.types[member.ty].size) ?? return false
+    if !jet_eval_ir_write(&s, base + member.offset, 8, holder) -> return false
+    jet_eval_ir_host_put(&types, p, m, rt, &s, value, member.ty, holder)
+}
+
+// Writes the aggregate `value` of type row `row` at `address`: a List
+// header over a runtime buffer, or a tuple's or struct's members.
+fn jet_eval_ir_host_fill(types: &IRModule, p: IRProgram, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, value: TComptimeValue, row: Int, address: Int) -> Bool {
+    checked :: ir_untag(types.types[row].ty)
+    if checked == .List(element) {
+        items :: if value == .List(values) -> values else -> {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return false
+        }
+        element_row :: ir_value_type(&types, p, element) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return false
+        }
+        stride :: ir_list_stride(types, element_row)
+        data := 0
+        if items.len() > 0 -> data = jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_alloc", [Int]{stride * items.len(), 8}) ?? return false
+        loop (index, item) in items {
+            if !jet_eval_ir_host_put(&types, p, m, rt, &s, item, element_row, data + index * stride) -> return false
+        }
+        return jet_eval_ir_write(&s, address, 8, items.len()) && jet_eval_ir_write(&s, address + 8, 8, items.len()) && jet_eval_ir_write(&s, address + 16, 8, data)
+    }
+    members := [IRMember]{}
+    if checked == .Tuple(tuple_fields) {
+        members = ir_tuple_members(&types, p, tuple_fields) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return false
+        }
+    } else {
+        name :: if checked == {
+            .Named(name) -> name
+            .Apply(name, _) -> name
+            else -> {
+                jet_eval_ir_host_unwritable(&s, value, checked)
+                return false
+            }
+        }
+        definition :: ir_type_def(p, name) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return false
+        }
+        members = ir_struct_members(&types, p, definition, ir_type_args(checked)) ?? {
+            jet_eval_ir_host_unwritable(&s, value, checked)
+            return false
+        }
+    }
+    fields :: if value == .Struct(_, written) -> written else -> {
+        jet_eval_ir_host_unwritable(&s, value, checked)
+        return false
+    }
+    loop member in members {
+        field :: jet_eval_compiler_value_field(fields, member.name) ?? {
+            jet_eval_ir_problem(&s, "compiler value {type_name(checked)} lacks member `{member.name}`")
+            return false
+        }
+        if !jet_eval_ir_host_member(&types, p, m, rt, &s, field, member, address) -> return false
+    }
+    true
+}
