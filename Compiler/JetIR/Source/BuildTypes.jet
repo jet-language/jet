@@ -232,6 +232,8 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         return Val(ir_mark_counted(&m, interned))
     }
     if ir_task_element(ty) != None -> return Val(ir_task_row(&m, ty))
+    if ir_channel_element(ty, "Sender") != None -> return Val(ir_channel_row(&m, ty, "Sender"))
+    if ir_channel_element(ty, "Receiver") != None -> return Val(ir_channel_row(&m, ty, "Receiver"))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
     name :: ir_nominal_name(ty) ?? return None
     args :: ir_type_args(ty)
@@ -2493,10 +2495,10 @@ fn ir_set_element(ty: Type) -> Type? Never! {
 }
 
 // Whether `ty` is a native carrier Lower lays out itself (a Set, Rank,
-// PriorityQueue, Iter, Task, ScopeGuard or Shared handle), not as its
-// declared fields.
+// PriorityQueue, Iter, Task, channel endpoint, ScopeGuard or Shared
+// handle), not as its declared fields.
 fn ir_native_carrier(ty: Type) -> Bool Never! {
-    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
+    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
 }
 
 // The Bool test of a text pattern on the String `subject` (Lower

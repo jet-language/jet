@@ -418,8 +418,10 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
             chars :: method_kind == (Val(TForInMethod.Chars)) && ir_untag(collection.ty) == .List(_)
             file_lines :: method_kind == (Val(TForInMethod.LinesFile))
             lines :: file_lines || method_kind == (Val(TForInMethod.LinesStdin))
-            if (method_kind != None && !chars && !lines) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
+            received :: method_kind == (Val(TForInMethod.ChannelReceiver))
+            if (method_kind != None && !chars && !lines && !received) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
             if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, collection, file_lines, body, span)
+            if received -> return ir_channel_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             if ir_iter_element(ir_subst(m, collection.ty)) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
         }
@@ -1297,8 +1299,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .TaskGroupAny(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 1, span)
         .TaskGroupRace(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 2, span)
         .TraitBox(value, target) -> return ir_trait_box(&m, p, &b, value, target, span)
-        // A distinct value lays out as its base (codegen: a Transparent convert).
-        .DistinctCtor(argument) -> return ir_expr(&m, p, &b, argument)
+        // A distinct value lays out as its base, so construction and raw
+        // extraction are the value itself (codegen: a Transparent convert).
+        .DistinctCtor(argument) | .DistinctRaw(argument) -> return ir_expr(&m, p, &b, argument)
         .DistinctConvert(_, argument, operation, range, fallible) -> return ir_distinct_convert(&m, p, &b, expression.ty, argument, operation, range, fallible, span)
         else -> return ir_fail_slot(&b, span, "expression {ir_expr_kind_name(expression.kind)}")
     }
@@ -1385,14 +1388,18 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .TaskDetach -> return ir_task_detach(&m, p, &b, receiver, span)
     if operation == .TaskJoin -> return ir_task_join(&m, p, &b, ty, receiver, span)
     if operation == .DynLen(site, location) -> return ir_dyn_len(&m, p, &b, ty, receiver, site, location, span)
+    if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
+    if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     // Encoding a Dyn is the Dyn itself (codegen jet_codegen_lower_serde_encode).
     if operation == .SerdeEncode && (ir_nominal_name(ir_untag(ir_subst(m, receiver.ty))) ?? "") == "Dyn" -> return ir_expr(&m, p, &b, receiver)
     dedicated :: if operation == {
         .SerdeEncode | .Hardware(_) | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
         .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
-        // Their Err is a List of FieldError records, which no route here
-        // converts; to_text and equal_unordered cross the Dyn as a tree.
+        // ir_dyn_method lowered key lookups, path writes, remove, decode and
+        // the scalar, Field and At reads on the canonical Dyn; another
+        // receiver of them, and the index, keys and operator forms, have no
+        // route here.
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> true
