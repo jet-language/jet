@@ -141,6 +141,12 @@ fn cases_test_source(root: String, name: String, text: String) {
     assert_eq(header.run.code, 7)
     assert(header.verdict.detail.contains("#4865"))
     assert_eq(kit_cases_run(cases_test_entry("ledger"), context)[0].verdict.status, "KNOWN-FAILING")
+    cases_test_source(root, "crash", "step: jet -c 'exit 101'\n")
+    assert_eq(kit_cases_run(cases_test_entry("crash"), context)[0].verdict.status, "ERROR")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 101'\n")
+    crash :: kit_cases_run(cases_test_entry("header"), context)[0]
+    assert_eq(crash.verdict.status, "KNOWN-FAILING")
+    assert(crash.verdict.detail.contains("internal compiler error (exit 101)"))
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 0'\n")
     cases_test_source(root, "ledger", "step: jet -c 'exit 0'\n")
     assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "UNEXPECTED-PASS")
