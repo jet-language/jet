@@ -2490,14 +2490,59 @@ fn ir_default_err(p: IRProgram, ty: Type) -> Bool Never! {
     p.types[row].compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
 }
 
+// How a program filters one compiler-owned row: a runtime enum yields only to
+// a declared row of its key; a plain Core enum and a record also yield to a
+// program type spelling their name, and a plain Core enum to a single loaded
+// Core source that declares it.
+enum IRCompilerOwnedRowClass {
+    RuntimeEnum
+    CoreEnum
+    Record
+}
+
+struct IRCompilerOwnedTypeRow {
+    class: IRCompilerOwnedRowClass
+    definition: TTypeDef
+}
+
+// Every compiler-owned row, in program order, built when the compiler itself
+// is built: each runtime enum (IR_COMPILER_OWNED_ENUMS), each plain Core enum
+// leaf (CORE_ENUM_ROWS), then `FieldError`, `Range` and the carrier, Core and
+// math records. Rows leave their module identity empty; a program fills in
+// its own.
+IR_COMPILER_OWNED_TYPE_ROWS :: comptime { ir_compiler_owned_type_rows() }
+
+fn ir_compiler_owned_type_rows() -> [IRCompilerOwnedTypeRow] Never! {
+    rows := [IRCompilerOwnedTypeRow]{}
+    loop row in IR_COMPILER_OWNED_ENUMS {
+        variants :: loop variant in row.variants -> ir_compiler_owned_variant(variant, ir_compiler_owned_enum_payload(row.name, variant))
+        &rows.push(IRCompilerOwnedTypeRow{class: .RuntimeEnum, definition: ir_compiler_owned_def("", row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
+    }
+    loop core_row in CORE_ENUM_ROWS {
+        if core_row.kind == .Enum(names) {
+            variants :: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
+            &rows.push(IRCompilerOwnedTypeRow{class: .CoreEnum, definition: ir_compiler_owned_def("", core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
+        }
+    }
+    records := [String]{"FieldError", IR_RANGE_RECORD}
+    loop name in IR_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
+    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
+    loop record in IR_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
+    core :: ir_compiler_owned_core_fields()
+    loop name in records {
+        fields :: ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
+        &rows.push(IRCompilerOwnedTypeRow{class: .Record, definition: ir_compiler_owned_def("", name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}})})
+    }
+    rows
+}
+
 // The compiler-owned rows no checked module declares, added as codegen
-// jet_codegen_declared_type_slots adds them: each runtime enum
-// (IR_COMPILER_OWNED_ENUMS), each plain Core enum leaf no program
-// type and no single loaded Core source declares, then `FieldError`, `Range`
-// and the carrier, Core and math records, each under its bare canonical key
-// unless a row already owns it. A program type spelling a record's leaf
-// keeps that bare spelling: the builder resolves names by leaf, and a bare
-// name in the declaring module is its own declaration (codegen
+// jet_codegen_declared_type_slots adds them, in IR_COMPILER_OWNED_TYPE_ROWS
+// order, each under its bare canonical key unless a row already owns it. A
+// plain Core enum leaf also yields to a program type and to a single loaded
+// Core source declaring it; a record yields to a program type spelling its
+// leaf, which keeps that bare spelling: the builder resolves names by leaf, and
+// a bare name in the declaring module is its own declaration (codegen
 // jet_codegen_find_source_nominal_identity looks in the module scope first).
 fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
     if types.len() == 0 -> return
@@ -2513,31 +2558,15 @@ fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
             core_enums[definition.name] = (core_enums.get(definition.name) ?? 0) + 1
         }
     }
-    loop row in IR_COMPILER_OWNED_ENUMS {
-        if declared.get(row.name) != None -> next
-        declared[row.name] = true
-        variants :: loop variant in row.variants -> ir_compiler_owned_variant(variant, ir_compiler_owned_enum_payload(row.name, variant))
-        &types.push(ir_compiler_owned_def(module_identity, row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
-    }
-    loop core_row in CORE_ENUM_ROWS {
-        if declared.get(core_row.name) != None || program_names.get(core_row.name) != None -> next
-        if (core_enums.get(core_row.name) ?? 0) == 1 -> next
-        if core_row.kind == .Enum(names) {
-            declared[core_row.name] = true
-            variants :: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
-            &types.push(ir_compiler_owned_def(module_identity, core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
-        }
-    }
-    records := [String]{"FieldError", IR_RANGE_RECORD}
-    loop name in IR_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
-    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
-    loop record in IR_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
-    core :: ir_compiler_owned_core_fields()
-    loop name in records {
-        if declared.get(name) != None || program_names.get(name) != None -> next
+    loop row in IR_COMPILER_OWNED_TYPE_ROWS {
+        name :: row.definition.name
+        if declared.get(name) != None -> next
+        if row.class != .RuntimeEnum && program_names.get(name) != None -> next
+        if row.class == .CoreEnum && (core_enums.get(name) ?? 0) == 1 -> next
         declared[name] = true
-        fields :: ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
-        &types.push(ir_compiler_owned_def(module_identity, name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}}))
+        definition := row.definition
+        definition.module_identity = module_identity
+        &types.push(^definition)
     }
 }
 
