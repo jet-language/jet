@@ -1,0 +1,77 @@
+// A Map constant is frozen at build time like a List constant: its entries
+// sit in static data in key order, and every read borrows them instead of
+// building the Map again. A copy shares the frozen entries; the first write
+// to the copy gives it entries of its own, so the constant never changes.
+PRICES :: [String:Int]{"pear": 3, "apple": 1, "fig": 2}
+
+SIGNS :: [Int:String]{3: "three", -7: "minus seven", 0: "zero"}
+
+NESTED :: [String:[Int]]{"b": [3], "a": [1, 2]}
+
+LETTERS :: [Char:Bool]{'z': true, 'a': false}
+
+struct Shelf {
+    name: String
+    stock: [String:Int]
+    tags: [String]
+}
+
+SHELF :: Shelf{name: "front", stock: ["kiwi": 4, "date": 9], tags: ["new", "sale"]}
+
+// Built by running Jet at compile time, in insertion order; the frozen Map
+// still keeps its keys in order.
+fn make_index() -> [String:Int] {
+    index := [String:Int]{}
+    loop (position, word) in ["delta", "alpha", "charlie", "bravo"] -> index[word] = position
+    index
+}
+
+INDEX :: comptime { make_index() }
+
+// Compile-time code reads the same frozen Map, and a write there copies too.
+fn bumped_fig() -> Int {
+    prices := PRICES
+    prices["fig"] = 50
+    prices["fig"] + PRICES["fig"]
+}
+
+BUMPED :: comptime { bumped_fig() }
+
+fn raise(prices: &[String:Int]) {
+    prices["apple"] = 100
+}
+
+fn total(prices: [String:Int]) -> Int {
+    sum := 0
+    loop (_, price) in prices -> sum += price
+    sum
+}
+
+fn run() {
+    print("{PRICES} {SIGNS} {NESTED} {LETTERS} {INDEX}")
+    print("{SHELF.name} {SHELF.stock} {SHELF.tags}")
+    print("fig {PRICES["fig"]} kiwi {PRICES.get("kiwi") ?? -1} has pear {PRICES.has_key("pear")} len {PRICES.len()}")
+    print("keys {PRICES.keys().to_list()} -7 is {SIGNS[-7]} bravo at {INDEX["bravo"]}")
+
+    // Every write to a copy leaves the constant as it was.
+    prices := PRICES
+    prices["kiwi"] = 5
+    prices["fig"] = PRICES["fig"] + 10
+    old :: &prices.add("pear", 30)
+    gone :: &prices.pop("apple")
+    fresh :: &prices.add_new("plum", 6)
+    print("copy {prices} old pear {old ?? -1} popped {gone ?? -1} fresh plum {fresh}")
+    raised := PRICES
+    raise(&raised)
+    print("raised {raised} total {total(raised)}")
+    nested := NESTED
+    nested["a"] = [9]
+    shelf := SHELF
+    shelf.stock["date"] = 0
+    &shelf.tags.push("last")
+    merged :: PRICES.merge(["fig": 7])
+    print("{nested} {shelf.stock} {shelf.tags} {merged}")
+
+    print("constants {PRICES} {NESTED} {SHELF.stock} {SHELF.tags}")
+    print("unchanged {PRICES == [String:Int]{"apple": 1, "fig": 2, "pear": 3}} {total(PRICES)} compile-time copy {BUMPED}")
+}

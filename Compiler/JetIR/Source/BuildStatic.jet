@@ -1,19 +1,25 @@
 // Module constants as static data (#5001 frozen statics; Lower Statics.jet):
 // a constant's value is laid out once, at build time, as read-only static
 // objects (IRModule.data_relocs), and every read borrows it. A static List
-// is frozen (capacity 0 over static storage), a static Option/Result/enum
-// box carries an immortal (negative) count word 24 bytes before the address
-// its readers hold, and a String is the immortal String of a data row (as
-// ConstText): the runtime's retain/release/unique and every glue's capacity
-// test leave them untouched, a copy shares them, and a write first makes its
-// own copy. Compile-time code runs the same machine code over the same
-// objects, so a constant has one meaning on every tier.
+// or Map is frozen (capacity 0 over static storage; a Map's entries in its
+// ascending key order), a static Option/Result/enum box carries an immortal
+// (negative) count word 24 bytes before the address its readers hold, and a
+// String is the immortal String of a data row (as ConstText): the runtime's
+// retain/release/unique and every glue's capacity test leave them untouched,
+// a copy shares them, and a write first makes its own copy. Compile-time
+// code runs the same machine code over the same objects, so a constant has
+// one meaning on every tier.
 //
-// A value the build cannot freeze (a Map, an exact Int outside the inline
-// range: both runtime-owned, built at startup by the old path) keeps the
-// constant on ir_comptime, built at each read.
+// The objects' address words are relocations: in an ET_EXEC image (jet and
+// the executables it builds) the linker resolves them, so a read needs no
+// fix-up; a position-independent image applies them as relative
+// relocations at load.
+//
+// A value the build cannot freeze (an exact Int outside the inline range,
+// runtime-owned; a Map whose key order the build does not reproduce) keeps
+// the constant on ir_comptime, built at each read.
 
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, Type]
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type]
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
@@ -322,6 +328,24 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
             }
             return false
         }
+        .Map(entries) -> {
+            shape :: ir_map_shape(&m, p, row) ?? return false
+            if entries.len() == 0 -> return true
+            order :: ir_static_map_order(shape.kind, entries) ?? return false
+            key_ty :: m.types[shape.key.ty].ty.copy()
+            value_ty :: m.types[shape.value.ty].ty.copy()
+            key_row :: ir_value_type(&m, p, key_ty) ?? return false
+            value_row :: ir_value_type(&m, p, value_ty) ?? return false
+            data :: ir_static_new(&s, order.len() * shape.stride)
+            loop (index, position) in order {
+                at :: index * shape.stride
+                if !ir_static_member(&m, p, &s, data, at, shape.key, key_ty, key_row, ir_comptime_key_value(entries[position].key)) -> return false
+                if !ir_static_member(&m, p, &s, data, at, shape.value, value_ty, value_row, entries[position].value) -> return false
+            }
+            ir_static_put(&s, object, offset, IRStaticWord{word: order.len()}, 8)
+            ir_static_put(&s, object, offset + 16, IRStaticWord{word: 0, target: data, local: true}, 8)
+            return true
+        }
         .Bytes(bytes) -> {
             element_row := -1
             if ir_untag(ir_subst(m, ty)) == .List(element) {
@@ -335,6 +359,45 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
         }
         else -> return false
     }
+}
+
+// The positions of a Map constant's `entries` in the order its Map keeps
+// them (ir_comptime_map's map.set): ascending keys (BuildMaps ir_map_order),
+// a later duplicate key's value replacing the earlier one. None for a key
+// order this does not reproduce ("order": tuple, List and Option keys).
+fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Never! {
+    if kind != "int" && kind != "word" && kind != "uword" && kind != "string" -> return None
+    // Each key with its position; sorting the pairs orders equal keys by
+    // position, so the last of a run is the later duplicate. "uword" keys
+    // are Int keys below 2^63 (a larger one is a BigInt key), so their
+    // signed order is their unsigned order.
+    words := [(key: Int, at: Int)]{}
+    texts := [(key: String, at: Int)]{}
+    loop (index, entry) in entries {
+        if entry.key == {
+            .Int(value) | .Char(value) -> &words.push((key: value, at: index))
+            .Bool(flag) -> &words.push((key: if flag -> 1 else -> 0, at: index))
+            .String(text) -> &texts.push((key: text, at: index))
+            else -> return None
+        }
+    }
+    kept := [Int]{}
+    if kind == "string" {
+        if texts.len() != entries.len() -> return None
+        &texts.sort()
+        loop (index, pair) in texts {
+            if index + 1 < texts.len() && texts[index + 1].key == pair.key -> next
+            &kept.push(pair.at)
+        }
+    } else {
+        if words.len() != entries.len() -> return None
+        &words.sort()
+        loop (index, pair) in words {
+            if index + 1 < words.len() && words[index + 1].key == pair.key -> next
+            &kept.push(pair.at)
+        }
+    }
+    Val(kept)
 }
 
 // The members of the tuple or struct type row `row` (ir_member_of).
