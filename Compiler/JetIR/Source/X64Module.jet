@@ -172,27 +172,24 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
         }
         return IRX64Result{program: ^m, functions: ^functions, debug: ^debug, variables: ^variables, errors: ^errors, tables: ^tables, threads: threads}
     }
+    seats := [IRX64Seat]{}
+    loop _ in 0..<workers -> &seats.push(IRX64Seat{row: -1})
+    inputs :: shared IRX64Inputs{programs: [IRModule]{^m}, tables: [IRX64Tables]{^tables}, order: compiler_threads_heaviest_first(weights), next: 0, seats: ^seats}
     outputs := [[IRX64FunctionResult]]{}
     stops := [String]{}
     loop _ in 0..<count {
         &outputs.push([IRX64FunctionResult]{})
         &stops.push("")
     }
-    seats := [Int]{}
-    loop _ in 0..<workers -> &seats.push(-1)
-    inputs :: shared IRX64Inputs{programs: [IRModule]{^m}, tables: [IRX64Tables]{^tables}}
-    store :: shared IRX64Store{order: compiler_threads_heaviest_first(weights), next: 0, seats: ^seats, outputs: ^outputs, stops: ^stops}
-    _ := ir_x64_claimers(inputs, store, 0, workers) ?? panic("the x64 selection threads failed")
-    loop ir_x64_unclaimed(store) -> _ := ir_x64_claimers(inputs, store, 0, workers) ?? panic("the x64 selection threads failed")
+    ir_x64_select_rows(inputs, workers, &outputs, &stops)
     shells := ir_x64_take_inputs(inputs)
-    results := ir_x64_take_store(store)
     // The rows leave their lists last-first (moved, never copied) and are
     // reversed into function order.
     row_errors := [[String]]{}
     row := count - 1
     loop row >= 0 {
-        taken := &results.outputs.pop() ?? panic("the x64 selection store lost a function row")
-        stop :: &results.stops.pop() ?? ""
+        taken := &outputs.pop() ?? panic("the x64 selection lost a function row")
+        stop :: &stops.pop() ?? ""
         if (&taken.pop()) == .Val(compiled) {
             selected := ^compiled
             &row_errors.push(compiler_take_rows<String>(&selected.errors))
@@ -219,94 +216,110 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
     IRX64Result{program: ^program_back, functions: ^functions, debug: ^debug, variables: ^variables, errors: ^errors, tables: ^tables_back, threads: threads}
 }
 
-// The selecting threads' read-only inputs: the module and its tables, moved
-// in and taken back after the join.
+// The selecting threads' inputs, read-only while they run: the module and
+// its tables (moved in and taken back after the join), the claim order
+// (heaviest first) and its next rank, which a thread takes with one atomic
+// add, and per seat the row its thread is selecting (-1 none).
 struct IRX64Inputs {
     programs: [IRModule]
     tables: [IRX64Tables]
+    order: [Int]
+    next: Atomic<Int>
+    seats: [IRX64Seat]
 }
 
-// The claim queue and the results: `order` is the claim order (heaviest
-// first) and `next` its next rank; `seats[s]` the function thread `s` is
-// selecting (-1 none); per function row, its result once selected and the
-// panic text of a thread that stopped on it ("" none).
-struct IRX64Store {
-    order: [Int]
-    next: Int
-    seats: [Int]
-    outputs: [[IRX64FunctionResult]]
-    stops: [String]
+struct IRX64Seat {
+    row: Atomic<Int>
+}
+
+// A function row and its selection, kept by the thread that selected it
+// until the join.
+struct IRX64Selected {
+    row: Int
+    compiled: IRX64FunctionResult
+}
+
+// Runs the selecting threads until every row of `outputs` holds its result
+// or `stops` the panic text of a thread that stopped on it. A stopped
+// thread's finished rows go with it and are selected again (selection is
+// deterministic), so a round that leaves rows behind has stopped on one.
+fn ir_x64_select_rows(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[[IRX64FunctionResult]], stops: &[String]) {
+    loop {
+        parts := ir_x64_claimers(inputs, 0, workers, &stops) ?? panic("the x64 selection threads failed")
+        loop parts.len() > 0 {
+            part := &parts.pop() ?? { break }
+            loop part.len() > 0 {
+                selected := &part.pop() ?? { break }
+                &outputs[selected.row].push(^selected.compiled)
+            }
+        }
+        missing := [Int]{}
+        stopped := 0
+        loop row in 0..<outputs.len() {
+            if stops[row] != "" {
+                stopped += 1
+            } else if outputs[row].len() == 0 {
+                &missing.push(row)
+            }
+        }
+        if missing.len() == 0 -> return
+        if stopped == 0 -> panic("the x64 selection threads left {missing.len()} functions unselected")
+        ir_x64_reclaim(inputs, ^missing)
+    }
+}
+
+// The next round claims `rows`.
+fn ir_x64_reclaim(inputs: Shared<IRX64Inputs>, rows: ^[Int]) {
+    permit := inputs.guard_edit()
+    permit.value.order = ^rows
+    permit.value.next.store(0)
 }
 
 // Runs `tasks` claiming threads from seat `seat` on, one task each; returns
-// how many functions they selected. A stopped thread's function keeps its
-// panic text (ir_x64_stopped).
-fn ir_x64_claimers(inputs: Shared<IRX64Inputs>, store: Shared<IRX64Store>, seat: Int, tasks: Int) -> Int {
-    if tasks <= 0 -> return 0
-    selected := 0
+// their selections. A stopped thread's function keeps its panic text in
+// `stops` (ir_x64_stopped).
+fn ir_x64_claimers(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: &[String]) -> [[IRX64Selected]] {
+    if tasks <= 0 -> return [[IRX64Selected]]{}
+    parts := [[IRX64Selected]]{}
     task.group ir_x64_threads {
-        head :: task ir_x64_claimed(inputs, store, seat)
-        selected = ir_x64_claimers(inputs, store, seat + 1, tasks - 1)
-        selected += head.join() ?? ir_x64_stopped(store, seat, err)
+        head :: task ir_x64_claimed(inputs, seat)
+        parts = ir_x64_claimers(inputs, seat + 1, tasks - 1, &stops)
+        part :: head.join() ?? ir_x64_stopped(inputs, seat, err, &stops)
+        &parts.push(^part)
     }
-    selected
+    parts
 }
 
 // One thread at `seat`: claims and selects functions until none is left.
-fn ir_x64_claimed(inputs: Shared<IRX64Inputs>, store: Shared<IRX64Store>, seat: Int) -> Int {
+fn ir_x64_claimed(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
     reads :: inputs.guard_read()
-    selected := 0
+    selected := [IRX64Selected]{}
     loop {
-        row :: ir_x64_claim(store, seat)
-        if row < 0 -> break
+        rank :: reads.value.next.add(1)
+        if rank >= reads.value.order.len() -> break
+        row :: reads.value.order[rank]
+        reads.value.seats[seat].row.store(row)
         compiled := ir_x64_compile_function(reads.value.programs[0], reads.value.tables[0], row)
-        ir_x64_settle(store, seat, row, ^compiled)
-        selected += 1
+        &selected.push(IRX64Selected{row: row, compiled: ^compiled})
     }
+    reads.value.seats[seat].row.store(-1)
     selected
 }
 
-// The next function row in claim order for `seat`, or -1 when none is left.
-fn ir_x64_claim(store: Shared<IRX64Store>, seat: Int) -> Int {
-    permit := store.guard_edit()
-    rank :: permit.value.next
-    if rank >= permit.value.order.len() -> return -1
-    row :: permit.value.order[rank]
-    permit.value.next = rank + 1
-    permit.value.seats[seat] = row
-    row
-}
-
-fn ir_x64_settle(store: Shared<IRX64Store>, seat: Int, row: Int, compiled: ^IRX64FunctionResult) {
-    permit := store.guard_edit()
-    &permit.value.outputs[row].push(^compiled)
-    permit.value.seats[seat] = -1
-}
-
 // A thread at `seat` stopped: the function it was selecting keeps the panic text.
-fn ir_x64_stopped(store: Shared<IRX64Store>, seat: Int, failure: TaskFailure) -> Int {
-    permit := store.guard_edit()
-    row :: permit.value.seats[seat]
+fn ir_x64_stopped(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure, stops: &[String]) -> [IRX64Selected] {
+    reads :: inputs.guard_read()
+    row :: reads.value.seats[seat].row.load()
     if row >= 0 {
-        permit.value.stops[row] = compiler_threads_failure_text(failure)
-        permit.value.seats[seat] = -1
+        stops[row] = compiler_threads_failure_text(failure)
+        reads.value.seats[seat].row.store(-1)
     }
-    0
-}
-
-fn ir_x64_unclaimed(store: Shared<IRX64Store>) -> Bool {
-    permit :: store.guard_read()
-    permit.value.next < permit.value.order.len()
+    [IRX64Selected]{}
 }
 
 fn ir_x64_take_inputs(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
     permit := inputs.guard_edit()
-    IRX64Inputs{programs: compiler_take_rows<IRModule>(&permit.value.programs), tables: compiler_take_rows<IRX64Tables>(&permit.value.tables)}
-}
-
-fn ir_x64_take_store(store: Shared<IRX64Store>) -> IRX64Store {
-    permit := store.guard_edit()
-    IRX64Store{order: [Int]{}, next: 0, seats: [Int]{}, outputs: compiler_take_rows<[IRX64FunctionResult]>(&permit.value.outputs), stops: compiler_take_rows<String>(&permit.value.stops)}
+    IRX64Inputs{programs: compiler_take_rows<IRModule>(&permit.value.programs), tables: compiler_take_rows<IRX64Tables>(&permit.value.tables), order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
 }
 
 // The relocatable object of `compiled` (moved in, every row moved on): its
