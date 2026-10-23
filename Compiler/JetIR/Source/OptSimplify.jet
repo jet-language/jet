@@ -28,13 +28,23 @@ IR_OPT_SIMPLIFY_ROUNDS :: 8
 fn ir_opt_simplify(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     round := 0
     loop round < IR_OPT_SIMPLIFY_ROUNDS {
-        changed := 0
-        changed += ir_opt_fold(m, &f, &report)
+        // The facts stay true until a sweep changes the function, so they
+        // are computed again only after one does (most sweeps change
+        // nothing, and the last round none).
+        facts := ir_opt_facts(f)
+        changed := ir_opt_fold(m, &f, facts, &report)
         changed += ir_opt_unreachable(&f, &report)
-        changed += ir_opt_fuse_compares(m, &f, &report)
-        changed += ir_opt_propagate(m, &f, &report)
-        changed += ir_opt_coalesce(&f, &report)
-        changed += ir_opt_dead(m, &f, &report)
+        if changed > 0 -> facts = ir_opt_facts(f)
+        step := ir_opt_fuse_compares(m, &f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        step = ir_opt_propagate(m, &f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        step = ir_opt_coalesce(&f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        changed += ir_opt_dead(m, &f, facts, &report)
         changed += ir_opt_structure(&f, &report)
         changed += ir_opt_unwrap(&f)
         ir_opt_compact(&f)
@@ -160,8 +170,7 @@ fn ir_opt_set_copy(f: &IRFunction, at: Int, source: Int) Never! {
     f.c[at] = -1
 }
 
-fn ir_opt_fold(m: IRModule, f: &IRFunction, report: &IROptReport) -> Int Never! {
-    facts :: ir_opt_facts(f)
+fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     nesting :: ir_opt_nesting(f)
     changed := 0
     loop at in 0..<f.op.len() {
@@ -322,8 +331,7 @@ fn ir_opt_unreachable(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // ---------------------------------------------------------------------------
 // Compare fusion.
 
-fn ir_opt_fuse_compares(m: IRModule, f: &IRFunction, report: &IROptReport) -> Int Never! {
-    facts :: ir_opt_facts(f)
+fn ir_opt_fuse_compares(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     changed := 0
     loop at in 1..<f.op.len() {
         if f.op[at] != .Not -> next
@@ -355,8 +363,7 @@ fn ir_opt_fuse_compares(m: IRModule, f: &IRFunction, report: &IROptReport) -> In
 // read of x: the reads of x read y, and the Move/Copy goes. A Copy of a
 // value with a drop is a clone and stays.
 
-fn ir_opt_propagate(m: IRModule, f: &IRFunction, report: &IROptReport) -> Int Never! {
-    facts :: ir_opt_facts(f)
+fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     count :: f.slot_type.len()
     replace := [Int]{}
     loop _ in 0..<count -> &replace.push(-1)
@@ -444,8 +451,7 @@ fn ir_opt_renamed(replace: [Int], slot: Int) -> Int Never! {
 // ---------------------------------------------------------------------------
 // Coalescing.
 
-fn ir_opt_coalesce(f: &IRFunction, report: &IROptReport) -> Int Never! {
-    facts :: ir_opt_facts(f)
+fn ir_opt_coalesce(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     changed := 0
     reads := [Int]{}
     loop at in 0..<f.op.len() {
@@ -502,31 +508,38 @@ fn ir_opt_removable(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     }
 }
 
-fn ir_opt_dead(m: IRModule, f: &IRFunction, report: &IROptReport) -> Int Never! {
-    total := 0
-    loop {
-        facts :: ir_opt_facts(f)
-        removed := 0
-        loop at in 0..<f.op.len() {
-            op :: f.op[at]
-            if op == .Drop {
-                slot :: f.a[at]
-                if ir_opt_type(m, f, slot).kind == .Int && ir_opt_const_at(f, facts, slot, at) != None {
-                    ir_opt_kill(&f, at)
-                    removed += 1
-                }
-                next
-            }
-            dst :: f.dst[at]
-            if dst < 0 || facts.uses[dst] != 0 || !ir_opt_removable(m, f, at) -> next
-            ir_opt_kill(&f, at)
-            removed += 1
-        }
+// `facts` are the function's as it is now; each sweep after one that removed
+// something reads new ones.
+fn ir_opt_dead(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+    total := ir_opt_dead_sweep(m, &f, facts)
+    removed := total
+    loop removed > 0 {
+        fresh :: ir_opt_facts(f)
+        removed = ir_opt_dead_sweep(m, &f, fresh)
         total += removed
-        if removed == 0 -> break
     }
     report.dead_removed += total
     total
+}
+
+fn ir_opt_dead_sweep(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
+    removed := 0
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .Drop {
+            slot :: f.a[at]
+            if ir_opt_type(m, f, slot).kind == .Int && ir_opt_const_at(f, facts, slot, at) != None {
+                ir_opt_kill(&f, at)
+                removed += 1
+            }
+            next
+        }
+        dst :: f.dst[at]
+        if dst < 0 || facts.uses[dst] != 0 || !ir_opt_removable(m, f, at) -> next
+        ir_opt_kill(&f, at)
+        removed += 1
+    }
+    removed
 }
 
 // ---------------------------------------------------------------------------
