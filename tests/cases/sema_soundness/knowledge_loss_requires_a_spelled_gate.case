@@ -1,0 +1,25 @@
+# tests/sema_soundness.rs::knowledge_loss_requires_a_spelled_gate at tests/sema_soundness.rs:8; hand-port.
+# Sources are the original inline strings, byte for byte. quantity/typestate/taint are copies of the tests/ui files
+# it include_str!'d. The original asserted expect_err plus diagnostic-code membership only.
+fixture: knowledge_loss_requires_a_spelled_gate.fixture
+step: jet check exactness/run.jet
+exit: nonzero # tests/sema_soundness.rs:11 expect_err
+stderr: ~ "[E0112]" # tests/sema_soundness.rs:12-15; narrowing an approximate value needs a named conversion
+step: jet check range_add/run.jet
+exit: nonzero # tests/sema_soundness.rs:11 expect_err
+stderr: ~ "[E0156]" # tests/sema_soundness.rs:12-15; arithmetic leaves the bounded carrier
+step: jet check range_param/run.jet
+exit: nonzero # tests/sema_soundness.rs:11 expect_err
+stderr: ~ "[E0156]" # tests/sema_soundness.rs:12-15; parameter boundary cannot erase the range proof
+step: jet check range_neg/run.jet
+exit: nonzero # tests/sema_soundness.rs:11 expect_err
+stderr: ~ "[E0156]" # tests/sema_soundness.rs:12-15; unary arithmetic leaves the proven interval
+step: jet check quantity/run.jet
+exit: nonzero # tests/sema_soundness.rs:74 rejects(ui/quantity_implicit_rounding.jet)
+stderr: ~ "[E0127]" # tests/sema_soundness.rs:74
+step: jet check typestate/run.jet
+exit: nonzero # tests/sema_soundness.rs:75 rejects(ui/typestate_wrong_state.jet)
+stderr: ~ "[E0150]" # tests/sema_soundness.rs:75
+step: jet check taint/run.jet
+exit: nonzero # tests/sema_soundness.rs:76 rejects(ui/taint_sink_unsanitized.jet)
+stderr: ~ "[E0721]" # tests/sema_soundness.rs:76
