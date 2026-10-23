@@ -336,7 +336,12 @@ function runJet(args, options) {
   return runProcess(JET, args, options);
 }
 
-function runProcess(command, args, options) {
+// Each example runs in its own process group. A timeout kills the whole group,
+// and a descendant that keeps the output pipes open after the example exits
+// cannot hold the result: the pipes get a short drain window, then close.
+const PIPE_DRAIN_MS = 2000;
+
+export function runProcess(command, args, options) {
   return new Promise((resolveRun) => {
     const child = spawn(command, args, {
       cwd: options.cwd ?? ROOT,
@@ -350,6 +355,7 @@ function runProcess(command, args, options) {
         TEMP: options.scratch,
       },
       stdio: [options.stdin == null ? "ignore" : "pipe", "pipe", "pipe"],
+      detached: true,
     });
     if (options.stdin != null) {
       child.stdin.on("error", () => {});
@@ -358,19 +364,41 @@ function runProcess(command, args, options) {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
+    let drain = null;
+    const timeoutSec = Math.round(options.timeoutMs / 1000);
+    const killGroup = () => {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} }
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(drain);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolveRun(result);
+    };
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
+    // A process killed in uninterruptible sleep (a whole-system sync, say)
+    // exits only when that call returns, so a timeout does not wait for it.
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup();
+      drain = setTimeout(() => finish({ code: null, stdout, stderr, timedOut, timeoutSec }), PIPE_DRAIN_MS);
     }, options.timeoutMs);
+    child.on("exit", (code) => {
+      drain = setTimeout(() => {
+        killGroup();
+        finish({ code, stdout, stderr, timedOut, timeoutSec });
+      }, PIPE_DRAIN_MS);
+    });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolveRun({ code, stdout, stderr, timedOut, timeoutSec: Math.round(options.timeoutMs / 1000) });
+      finish({ code, stdout, stderr, timedOut, timeoutSec });
     });
     child.on("error", (error) => {
-      clearTimeout(timer);
-      resolveRun({ code: null, stdout, stderr: `${stderr}${error.message}\n`, timedOut, timeoutSec: Math.round(options.timeoutMs / 1000) });
+      finish({ code: null, stdout, stderr: `${stderr}${error.message}\n`, timedOut, timeoutSec });
     });
   });
 }

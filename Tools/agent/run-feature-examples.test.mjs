@@ -9,6 +9,7 @@ import {
   nativeRunIsWebTarget,
   parseArgs,
   runArgs,
+  runProcess,
   warningOnlyStderr,
   withoutWarningDiagnostics,
 } from "./run-feature-examples.mjs";
@@ -119,4 +120,21 @@ test("the build tier compares compile-time diagnostics with the `jet run` comman
   const expected = { out: null, err: fix("jet run"), stderrOut: null };
   assert.equal(classifyRun(entry, built, expected, "build").status, "passed");
   assert.equal(classifyRun(entry, built, expected).status, "no-match");
+});
+
+test("a timeout does not wait for a descendant that keeps the output pipes open", async () => {
+  const started = Date.now();
+  const run = await runProcess("sh", ["-c", "setsid sleep 30 & echo started; sleep 30"], { cwd: process.cwd(), timeoutMs: 500, scratch: process.cwd() });
+  assert.equal(run.timedOut, true);
+  assert.match(run.stdout, /started/);
+  assert.ok(Date.now() - started < 5000, "the timed-out step settled within the drain window");
+});
+
+test("an exited program is not held by a background child that keeps the pipes open", async () => {
+  const started = Date.now();
+  const run = await runProcess("sh", ["-c", "setsid sleep 30 & echo done"], { cwd: process.cwd(), timeoutMs: 20000, scratch: process.cwd() });
+  assert.equal(run.timedOut, false);
+  assert.equal(run.code, 0);
+  assert.equal(run.stdout, "done\n");
+  assert.ok(Date.now() - started < 5000, "the finished step settled within the drain window");
 });
