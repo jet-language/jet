@@ -1,0 +1,6 @@
+fn run() {
+    header :: [69, 0, 0, 40]
+    r :: Reader.over(header)
+    parsed :: r.take_pattern([U8]{"prefix-{{literal}}-{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("no match")
+    print("{parsed.version} {parsed.ihl} {parsed.tos} {parsed.len}")
+}

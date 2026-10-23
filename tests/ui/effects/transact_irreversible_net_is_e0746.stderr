@@ -1,0 +1,10 @@
+Error [E0746]: `function:get` has the `Net` effect, which can't be rolled back inside a `#Transact` block
+  --> transact_irreversible_net_is_e0746.jet:6:19
+    |
+  6 |         r :: http.get("http://x") ?? server.response(200, "")
+    |                   ^^^
+ Why: A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`) leaves committed external state a rollback can't take back
+ Fix: Move this call after the block, or register it with `<handle>.on_commit(() -> { … })` so it runs only on a clean commit
+ Denial: transaction
+ Call chain: function:<corelib>/core.http::get
+More: jet-lang.dev/e/E0746

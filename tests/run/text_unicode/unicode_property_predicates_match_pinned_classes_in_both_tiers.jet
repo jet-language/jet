@@ -1,0 +1,38 @@
+
+use core.text as text
+fn alpha(value: String, expected: Bool) {
+    print(text.is_alphabetic(value) == expected)
+}
+fn numeric(value: String, expected: Bool) {
+    print(text.is_numeric(value) == expected)
+}
+fn run() {
+    alpha("", false)
+    alpha("Az", true)
+    alpha("A9", false)
+    alpha("µ", true)
+    alpha("×", false)
+    alpha("ͅ", true)
+    alpha("̀", false)
+    alpha(";", false)
+    alpha("Ⅻ", true)
+    alpha("𞀰", true)
+    alpha("𑶰", true)
+    alpha("Aͅ𑶰", true)
+    alpha("À", false)
+    numeric("", false)
+    numeric("09", true)
+    numeric("²", true)
+    numeric("¼", true)
+    numeric("Ⅻ", true)
+    numeric("٣", true)
+    numeric("𝟎", true)
+    numeric("𞓰", true)
+    numeric("𝋀", true)
+    numeric("2Ⅻ𝋀", true)
+    numeric("A", false)
+    numeric("×", false)
+    numeric("̀", false)
+    numeric("²A", false)
+    numeric("-2", false)
+}

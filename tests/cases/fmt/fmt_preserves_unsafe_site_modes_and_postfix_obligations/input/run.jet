@@ -1,0 +1,16 @@
+use core.mem
+
+#Unsafe("caller keeps address live", obligations: .Track)
+fn read(address: Int) -> Int {
+    pointer :: mem.Ptr<Int>.from_addr(address)
+    assert valid_ptr, aligned
+    value :: mem.volatile_read(pointer)
+    assert valid_ptr, aligned
+    return value
+}
+
+fn run() {
+    #Unsafe("calling audited reader", obligations: .Skip) {
+        print(read(1))
+    }
+}

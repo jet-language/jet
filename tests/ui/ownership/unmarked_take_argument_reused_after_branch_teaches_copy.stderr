@@ -1,0 +1,12 @@
+Error [E0209]: `consume` takes `msg`, but `msg` is used again later
+  --> unmarked_take_argument_reused_after_branch_teaches_copy.jet:11:17
+    |
+ 11 |         consume(msg)
+    |                 ^^^
+  --> unmarked_take_argument_reused_after_branch_teaches_copy.jet:13:11
+    |
+ 13 |     print(msg)
+    |           ^^^ `msg` is used again here
+ Why: `consume` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `msg`
+ Fix: Write `msg.copy()` to pass a copy and keep `msg`, or reorder so this call is the last use of `msg`
+More: jet-lang.dev/e/E0209

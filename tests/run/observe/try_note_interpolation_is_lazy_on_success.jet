@@ -1,0 +1,16 @@
+
+fn present() -> String { Ok("ok") }
+fn note_value() -[IO]> String {
+    print("evaluated")
+    return "unexpected"
+}
+fn wrapped() -[IO]> String {
+    value :: present()?("never {note_value()}")
+    return Ok(value)
+}
+fn run() {
+    if wrapped() == {
+        .Ok(value) -> { print(value) }
+        .Err(_) -> { print("failed") }
+    }
+}

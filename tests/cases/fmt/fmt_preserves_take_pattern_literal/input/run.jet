@@ -1,0 +1,8 @@
+fn run() {
+    c :: Cursor.over("inc-4411 sev 3: disk full")
+    &c.skip_ws()
+    m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("no match")
+    raw :: c.take_pattern(String{"inc-\d-{id:Int} "}) ?? panic("no match")
+    rest :: c.take_pattern("disk ") ?? panic("no match")
+    print("{m.id} {m.sev}")
+}
