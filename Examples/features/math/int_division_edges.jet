@@ -1,0 +1,37 @@
+// The three whole-number divisions at the edges of the exact Int domain.
+// `/%` floors the quotient, `%` takes the divisor's sign and `%%` the
+// dividend's. They give the same answers for small and big operands alike.
+// That holds at the smallest and largest one-word Ints, just past them, and
+// for the smallest one-word Int divided by -1, whose quotient no longer fits
+// in a word. A zero divisor stops the program.
+fn keep(n: Int) -> Int { n }
+
+fn show(a: Int, b: Int) {
+    print("{a} {b}: {a /% b} {a % b} {a %% b}")
+}
+
+fn run() {
+    low :: keep(-4611686018427387904)
+    high :: keep(4611686018427387903)
+    values :: [Int]{0, 1, -1, 7, -7, 1000003, -1000003, high, low, high + 1, low - 1, keep(9223372036854775807), keep(-9223372036854775808)}
+    divisors :: [Int]{1, -1, 2, -2, 3, -3, 7, -7, 8, -8, 1000003, high, low, high + 1, low - 1}
+    loop a in values {
+        loop b in divisors -> show(a, b)
+    }
+    // Literal divisors.
+    loop a in values {
+        print("{a} 3: {a /% 3} {a % 3} {a %% 3}")
+        print("{a} -1: {a /% -1} {a % -1} {a %% -1}")
+        print("{a} 8: {a /% 8} {a % 8} {a %% 8}")
+        print("{a} -7: {a /% -7} {a % -7} {a %% -7}")
+        print("{a} 1000003: {a /% 1000003} {a % 1000003} {a %% 1000003}")
+    }
+    // The running remainder of a long sum stays in range.
+    s := 0
+    loop i in 1..<100001 {
+        s = (s + i * 7) % 1000003
+    }
+    print(s)
+    print(keep(5) % keep(0))
+    print("unreachable")
+}

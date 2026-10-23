@@ -1488,9 +1488,10 @@ fn ir_route_member(op: TBinaryOp) -> String Never! {
 }
 
 // `left op right` (codegen jet_codegen_binary_dispatch + Lower lower_binary):
-// exact Int `+ - *` and comparisons are IR ops (inline with a big-integer
-// spill); its other operators call their located Prelude route; a fixed
-// width with overflow checking (or a trapping op) calls jet_<w>_trap_<op>.
+// exact Int arithmetic, division, bit operators and comparisons are IR ops
+// (inline, with the big-integer or located runtime route as the slow path);
+// its other operators call their located Prelude route; a fixed width with
+// overflow checking (or a trapping op) calls jet_<w>_trap_<op>.
 fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow: Bool, line: Int, left_ty: Type, left: Int, right: Int, right_ty: Type, span: Span) -> Int Never! {
     if left < 0 || right < 0 -> return ir_fail_slot(&b, span, "binary operator on Unit")
     kind :: ir_kind_of(m, b, left)
@@ -1525,9 +1526,11 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
         return dst
     }
     if kind == .Int {
-        // Exact Int `+ - *` and bit operators are IR ops (inline with a
-        // big-integer spill in the selector); the rest call located routes.
-        if op == .Add || op == .Sub || op == .Mul || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Shl || op == .Shr {
+        // Exact Int arithmetic, division and bit operators are IR ops (the
+        // selector divides inline and keeps the located runtime route, with
+        // its division-by-zero stop and big results, as the slow path); the
+        // rest call located routes.
+        if op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Shl || op == .Shr {
             dst :: ir_fresh_like(&m, &b, left)
             ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, IR_OVERFLOW_TRAP, site)
             return dst
