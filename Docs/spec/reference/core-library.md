@@ -3306,23 +3306,60 @@ the helper types only control inputs and observations.
 
 `core.regex` is a Thompson/Pike VM over Unicode scalars, so every tier gives
 one answer. Matching is linear in the text, with no recursion and no step
-budget. It supports concatenation, alternation, capture groups numbered by
-their `(`, `(?:…)`, `(?<name>…)`, `*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}` (a count
-may be at most 1000), `.`, `^`, `$` (end of text), classes over scalars (`[]`,
-`[^]`, ranges), `\d` and `\w` (ASCII), `\s` (Unicode White_Space), and
-`\p{L}`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}`, `\p{White_Space}`
-with `\P{…}` outside `[]`. `ignore_case` compares Unicode simple lowercase
-mappings; `multiline` lets `^` match after a newline; `dot_matches_newline`
-lets `.` match `\n`. A `RegexFlags` value displays as its inline-flag letters
-(`"im"`). Backreferences and lookaround are syntax errors. A malformed pattern
-is a typed `RegexError`. The implementation is in
-[`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
+budget. Matching is leftmost-first, as in RE2 and Rust: the leftmost match
+wins, and among the matches that start there, alternation prefers its earlier
+arm and a repetition prefers its greedy count. `Regex{"a|ab"}.find("ab")` is
+`"a"`, while `full_match` asks whether any reading covers the whole text, so
+`Regex{"a|ab"}.full_match("ab")` is `true`.
+
+The syntax:
+
+- concatenation, alternation `|`, capture groups numbered by their `(`,
+  `(?:…)`, and named groups `(?<name>…)` or `(?P<name>…)`. A group name is
+  ASCII letters, digits and `_`, does not start with a digit, and is unique.
+- `*`, `+`, `?`, `{n}`, `{n,}` and `{n,m}` (a count may be at most 1000), each
+  with a lazy form written with a trailing `?` (`*?`, `{2,5}?`), which prefers
+  the smallest count. A repetition cannot directly follow another, so `a**`
+  is an error.
+- `.` (any scalar except `\n`), `^` (start of text), `$` and `\z` (end of
+  text), `\A` (start of text), and `\b`/`\B` (an ASCII word boundary, or its
+  absence).
+- classes over scalars: `[]`, `[^]`, ranges, and a `]` written first as a
+  member (`[]a]`). A literal `[` inside a class is written `\[`.
+- the class escapes `\d` and `\w` (ASCII), `\s` (Unicode White_Space), and
+  `\p{L}`/`\pL`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}` and
+  `\p{White_Space}`. `\D`, `\W`, `\S` and `\P{…}` are their negations. All
+  of them work inside `[]` too, so `[\D_]` and `[^\P{L}]` are classes.
+- the escapes `\n \r \t \f \v \a`, `\xHH`, `\uHHHH`, and `\x{…}`/`\u{…}` for any
+  Unicode scalar value. A `\` before ASCII punctuation or a space matches that
+  character; any other escape is an error.
+
+`ignore_case` compares Unicode simple case mappings; a range matches a scalar
+when either its lowercase or its uppercase form is in the range.
+`multiline` lets `^` match after a newline. `dot_matches_newline` lets `.`
+match `\n`. A `RegexFlags` value displays as its inline-flag letters (`"im"`).
+
+Backreferences, lookaround and inline flags (`(?i)`) are syntax errors: the
+first two would break the linear bound, and flags go through `compile_with`.
+Groups nest at most 250 deep, and a compiled program holds at most 100000
+instructions (nested counted repetitions multiply), so compile time and
+memory stay proportional to a bounded pattern.
+
+A malformed pattern is a `RegexError { offset: Int, reason: String }`.
+`offset` is the zero-based character position in the pattern where the
+problem is, and the error displays as
+`invalid regex at position {offset}: {reason}`. `RegexError` converts to
+`Err`, so `rx :: re.compile(text)` propagates inside a fallible function. The
+implementation is in [`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
 
 Checked `Regex{"…"}` literals and inferred-head `{"…"}` arguments in a
 `Regex`-typed slot produce the same source-owned `Regex` as `compile`; there is
-no separate native regex carrier or engine. The compiler validates the complete
-literal before lowering it through the source `compile` function and retaining
-its checked success value.
+no separate native regex carrier or engine. The compiler checks the complete
+literal by running the same Core `compile`, so a literal and a run-time
+pattern can never disagree about what a pattern means. An invalid literal is
+E0152, which carries the same position and reason as the run-time
+`RegexError`. The literal then lowers through the source `compile` function,
+which keeps its checked success value.
 
 `Regex` has the public fields `pattern` and `flags`. `Match` has the public
 fields `start`, `end`, `text` and `groups`; `start` and `end` are character

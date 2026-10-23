@@ -1,5 +1,6 @@
 // Checked struct and enum construction expressions.
 use core.net.url as boundary_url
+use core.regex as boundary_regex
 use core.text as boundary_unicode
 use core.time as boundary_time
 use jet_foundation.[
@@ -43,7 +44,6 @@ use jet_foundation.[
     core_type_modules,
     expr_span,
     typed_head_kind_of,
-    regex_syntax_validate,
     symbol_id,
     type_identity_key,
     type_name,
@@ -1571,8 +1571,10 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
             }
         }
     }
-    if regex_syntax_validate(pattern) == .Val(error) {
-        &diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {error.offset}", error.reason, "fix the pattern at the reported position"))
+    // The literal is checked by the same Core parser that compiles it at run
+    // time, so the two can never disagree about what a pattern means.
+    _ :: boundary_regex.compile(pattern) ?? {
+        &diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {err.offset}", err.reason, "fix the pattern at that position; a `\\` before ASCII punctuation matches it literally"))
         return None
     }
     route :: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 1, false, span, &diagnostics) ?? return None

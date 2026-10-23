@@ -490,8 +490,8 @@ const CORE_MODULE_76_MEMBERS: &[&str] = &["of", "ReflectValue", "inspect"];
 const CORE_MODULE_76_TYPES: &[(&str, CoreLeafKind)] = &[("ReflectValue", CoreLeafKind::Plain)];
 const CORE_MODULE_76_DEPENDENCIES: &[&str] = &["core.text"];
 
-const CORE_MODULE_77_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "find", "find_all", "finditer", "flags", "full_match", "is_match", "match", "matches", "purge", "replace", "replace_first", "split", "split_limit", "Match", "Node", "Pattern", "Regex", "RegexFlag", "RegexFlags", "expand", "regex", "join", "search", "findall", "fullmatch", "sub", "subn", "RegexError"];
-const CORE_MODULE_77_TYPES: &[(&str, CoreLeafKind)] = &[("Pattern", CoreLeafKind::Plain), ("RegexFlag", CoreLeafKind::Plain), ("Match", CoreLeafKind::Plain), ("Node", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain), ("RegexError", CoreLeafKind::Enum(&["Syntax", "Cache"]))];
+const CORE_MODULE_77_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "find", "find_all", "finditer", "flags", "full_match", "is_match", "match", "matches", "purge", "replace", "replace_first", "split", "split_limit", "Match", "Regex", "RegexFlags", "expand", "regex", "join", "search", "findall", "fullmatch", "sub", "subn", "RegexError"];
+const CORE_MODULE_77_TYPES: &[(&str, CoreLeafKind)] = &[("Match", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain), ("RegexError", CoreLeafKind::Plain)];
 const CORE_MODULE_77_DEPENDENCIES: &[&str] = &["core.text"];
 
 const CORE_MODULE_78_MEMBERS: &[&str] = &["callback", "RealtimeStream", "__callback", "__next_deadline", "__receipt", "__cancel", "__is_cancelled"];
@@ -988,9 +988,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "Regex" },
     CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "Match" },
     CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "RegexFlags" },
-    CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "RegexFlag" },
-    CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "Pattern" },
-    CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "Node" },
+    CoreSourceOwnedType { path: "Core/Regex/Regex.jet", name: "RegexError" },
     CoreSourceOwnedType { path: "Core/Service/Service.jet", name: "DeliveryEvent" },
     CoreSourceOwnedType { path: "Core/Term/Term.jet", name: "Stdout" },
     CoreSourceOwnedType { path: "Core/Term/Term.jet", name: "Stderr" },

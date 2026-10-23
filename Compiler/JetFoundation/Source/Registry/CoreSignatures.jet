@@ -531,12 +531,12 @@ fn core_sig_regex(module_name: String, member: String) -> CoreTypedCallSignature
     regex := Type.Named{name: "Regex"}
     matched := Type.Named{name: "Match"}
     string := Type.String
+    failure := Type.Named{name: "RegexError"}
     read := AccessConvention.Read
     if member == "flags" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read), core_sig_positional(Type.Bool, read), core_sig_positional(Type.Bool, read)}, Val(Type.Named{name: "RegexFlags"})))
     if member == "escape" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
-    if member == "compile" || member == "regex" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(regex, string))))
-    if member == "compile_with" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(Type.Named{name: "RegexFlags"}, read)}, Val(core_sig_result(regex, string))))
-    if member == "literal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(regex)))
+    if member == "compile" || member == "regex" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(regex, failure))))
+    if member == "compile_with" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(Type.Named{name: "RegexFlags"}, read)}, Val(core_sig_result(regex, failure))))
     if member == "purge" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, None))
     if member == "join" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read)}, Val(string)))
     if member == "expand" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(matched, read), core_sig_positional(string, read)}, Val(string)))
