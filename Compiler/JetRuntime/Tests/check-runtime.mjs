@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Assemble only the runtime's explicit source manifest. The E2 object driver
 // consumes the same unit; neither bootstrap nor backend harnesses include it.
-// A default invocation runs the narrow jet check through the single cheap slot.
+// A default invocation runs the narrow jet check through the single cheap slot,
+// with $JET_CHECKER, else the admitted `jet` that Tools/agent/jet-env resolves.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -44,15 +45,17 @@ const bodies = paths.map((path) => {
 mkdirSync(out, { recursive: true });
 const unit = join(out, "unit.jet");
 writeFileSync(unit, [...uses, "", ...bodies].join("\n"));
+// A --test unit takes the one language edition the driver accepts.
+const edition = /^JET_DRIVER_EDITION :: "([^"]+)"$/mu.exec(readFileSync(join(root, "Compiler/JetDriver/Source/Driver/Loader.jet"), "utf8"))?.[1];
+if (!edition) throw new Error("JET_DRIVER_EDITION not found in Compiler/JetDriver/Source/Driver/Loader.jet");
 const packageSource = test !== null
-  ? 'name: "jet_runtime_tests"\nversion: "0.0.1"\nedition: "2028"\n'
+  ? `name: "jet_runtime_tests"\nversion: "0.0.1"\nedition: "${edition}"\n`
   : readFileSync(join(root, "Compiler/JetRuntime/package.jet"));
 writeFileSync(join(out, "package.jet"), packageSource);
 console.log(unit);
 if (!assembleOnly) {
-  const home = process.env.HOME;
-  const check = spawnSync(join(home, ".cache/jet-dev/cheap.sh"), [
-    join(root, "Tools/agent/jet-env"), process.env.JET_CHECKER ?? join(home, ".cache/jet-dev/checker-jet"), "check", unit,
+  const check = spawnSync(join(process.env.HOME, ".cache/jet-dev/cheap.sh"), [
+    join(root, "Tools/agent/jet-env"), process.env.JET_CHECKER ?? "jet", "check", unit,
   ], { cwd: out, stdio: "inherit" });
   if (check.error) throw check.error;
   process.exitCode = check.status ?? 1;
