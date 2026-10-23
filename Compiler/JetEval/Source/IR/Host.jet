@@ -12,7 +12,7 @@
 // out, with the runtime's own texts, buffers and boxes so the program owns
 // and drops them as any other. Rows are read and interned in the batch's
 // own rows (host_types), whose existing rows are the module's.
-use jet_foundation.[TComptimeValue, Type, type_name]
+use jet_foundation.[Span, TComptimeValue, Type, type_name]
 use jet_ir.[IRMember, IRModule, IRProgram, ir_align8, ir_enum_box_size, ir_enum_def, ir_host_value_row, ir_list_stride, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // The compiler value host word `word` holds.
@@ -63,12 +63,12 @@ fn jet_eval_ir_host_arguments(s: &JetEvalIRState, params: [Int], args: [TComptim
     Val(words)
 }
 
-// jet_comptime_host_method(member, impure, (row key, word)...): method
-// `member` (`Owner.method`) on the receiver and arguments, each a word of
-// the type row its key names; `impure` when the call sits in an `#Impure`
-// block.
+// jet_comptime_host_method(member, impure, start, end, (row key, word)...):
+// method `member` (`Owner.method`) on the receiver and arguments, each a word
+// of the type row its key names; `impure` when the call sits in an `#Impure`
+// block; `start` and `end` the call's span (ir_host_method).
 fn jet_eval_ir_host_method_route(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
-    if args.len() < 4 || args.len() % 2 != 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
+    if args.len() < 6 || args.len() % 2 != 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
     member :: jet_eval_ir_text(&s, args[0]) ?? return None
     parts :: jet_eval_compiler_value_method_owner(member) ?? return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
     types_cell :: jet_eval_ir_host_types(&s) ?? return None
@@ -76,14 +76,14 @@ fn jet_eval_ir_host_method_route(s: &JetEvalIRState, args: [Int], dst_row: Int, 
     types := types_cell.guard_edit()
     layouts :: layouts_cell.guard_read()
     values := [TComptimeValue]{}
-    at := 2
+    at := 4
     loop at < args.len() {
         row :: jet_eval_ir_host_row(types.value, &s, args[at]) ?? return None
         &values.push(jet_eval_ir_data(&types.value, layouts.value[0], &s, args[at + 1], row) ?? return None)
         at += 2
     }
     fallible :: dst_row >= 0 && ir_untag(types.value.types[dst_row].ty) == .Result(_, _)
-    answer :: jet_eval_ir_host_answer(&s, parts[0], parts[1], member, values, fallible, args[1] != 0) ?? return None
+    answer :: jet_eval_ir_host_answer(&s, parts[0], parts[1], member, values, fallible, args[1] != 0, Span{start: args[2], end: args[3]}) ?? return None
     if dst_row < 0 -> return Val(0)
     jet_eval_ir_host_store(&types.value, layouts.value[0], &s, answer, dst_row, area)
 }
@@ -118,8 +118,9 @@ fn jet_eval_ir_host_row(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? N
 }
 
 // The answer of `owner.method` (`member`) on `values`, the receiver first:
-// a reflection predicate or compiler value projection, or the build host's.
-fn jet_eval_ir_host_answer(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool) -> TComptimeValue? {
+// a reflection predicate or compiler value projection, or the build host's,
+// which places its record or failure at the call's `span`.
+fn jet_eval_ir_host_answer(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -> TComptimeValue? {
     if jet_eval_reflection_metadata_supported(owner, method) -> return jet_eval_ir_host_projection(&s, jet_eval_reflection_answer(owner, method, values))
     if jet_eval_compiler_value_method_supported(owner, method, values.len() - 1) -> return jet_eval_ir_host_projection(&s, jet_eval_compiler_value_answer(owner, method, values))
     adapter :: if s.host_adapter == {
@@ -129,7 +130,7 @@ fn jet_eval_ir_host_answer(s: &JetEvalIRState, owner: String, method: String, me
             return None
         }
     }
-    reply :: adapter.build_call(member, values, fallible, impure, s.span) ?? {
+    reply :: adapter.build_call(member, values, fallible, impure, span) ?? {
         jet_eval_ir_unsupported(&s, "compiler host method {member}")
         return None
     }

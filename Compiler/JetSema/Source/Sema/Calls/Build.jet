@@ -1,6 +1,6 @@
 // Exact compiler-value contract from Collections.rs::build_context_method_*.
 // This table is arity-polymorphic; Core owns the session semantics, not sema.
-use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program]
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_row, build_option_value_of_variant, build_option_variants_text]
 use jet_parser.[jfmt_format_program_with_tokens]
 use jet_lexer.[Token]
 
@@ -105,6 +105,7 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
 fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Build"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    if method == "pin" || build_option_row(method) != None -> return sema_call_build_option(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &diagnostics)
     contract :: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
             if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -161,4 +162,63 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
     }
     value :: sema_tir_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// #5005 build options (BuildOptions.jet): `b.optimize(.Full)` sets a row's
+// value in fn build; `b.pin(.optimize, .Full)` sets and pins it, so a flag
+// can't change it. The session receives the row name and the value's table
+// spelling (`optimize`, `full`).
+fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    pinned :: method == "pin"
+    wanted :: if pinned -> 2 else -> 1
+    shape :: if pinned -> "b.pin(.optimize, .Full)" else -> "b.{method}(.Full)"
+    takes :: if pinned -> "a build option and one of its values" else -> "one value"
+    if args.len() != wanted {
+        &diagnostics.push(sema_error("E3502", span, "`b.{method}` takes {takes}, got {args.len()} arguments", "a build option call names one value of the option's row", "write `{shape}`"))
+        return failed
+    }
+    loop argument in args {
+        if argument.label != None || argument.spread || argument.flags.template_items != None {
+            &diagnostics.push(sema_error("E3502", argument.span, "`b.{method}` takes positional leading-dot arguments", "a build option and its value are written as `.name`", "write `{shape}`"))
+            return failed
+        }
+    }
+    name := method.copy()
+    if pinned {
+        // A lower-case `.optimize` parses as the implicit-receiver member
+        // shorthand (a Field of the empty name), not as an enum value.
+        name = ""
+        if args[0].expr == .Field(base, member, _, _) {
+            if base == .Ident(base_name, _, _) {
+                if base_name.len() == 0 && build_option_row(member) != None -> name = member.copy()
+            }
+        }
+        if name.len() == 0 {
+            &diagnostics.push(sema_error("E3502", args[0].span, "`b.pin` names a build option first", "the first argument is the option a pin holds, such as `.optimize`", "write `{shape}`"))
+            return failed
+        }
+    }
+    row :: build_option_row(name) ?? return failed
+    argument :: args[wanted - 1]
+    value := ""
+    if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
+        if leading_dot && enum_args.len() == 0 -> value = build_option_value_of_variant(row, variant) ?? ""
+    }
+    if value.len() == 0 {
+        &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes one of {build_option_variants_text(row)}", "write `{shape}`"))
+        return failed
+    }
+    // Only the value is an ordinary argument: a pin's option name is a row
+    // name, not an expression of the body.
+    params :: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ordinary := [CallArg]{argument.copy()}
+    ownership :: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    values :: [TExpr]{
+        sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, args[0].span),
+        sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, argument.span),
+    }
+    result :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
 }

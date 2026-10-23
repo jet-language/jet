@@ -103,6 +103,19 @@ struct JetCLIManifest {
     members: [JetCLIMemberRef]
     outputs: [JetCLIOutputFact]
     default_run: String?
+    // `build: { fast: Build{ optimize: full } }`: each profile's fields that
+    // name a build-option row (JET_BUILD_OPTIONS), as written.
+    profiles: [JetCLIBuildProfile]
+}
+
+struct JetCLIBuildProfile {
+    name: String
+    fields: [JetCLIProfileField]
+}
+
+struct JetCLIProfileField {
+    name: String
+    value: String
 }
 
 struct JetCLIMemberRef {
@@ -277,11 +290,54 @@ fn jet_cli_outputs(tokens: [Token], tables: TokenTables, open: Int, close: Int) 
     outputs
 }
 
+// `build: { release: Build{ optimize: full, debug_info: true }, fast: Build{...} }`:
+// the profiles and their plain fields (`name: word`). A policy field
+// (`build: { allow: Exec }`) or a nested value (`settings: { ... }`) is skipped;
+// PackageModel reads and checks the whole block when the compile loads it.
+fn jet_cli_build_profiles(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIBuildProfile] Never! {
+    profiles := [JetCLIBuildProfile]{}
+    index := open + 1
+    loop index < close {
+        if tokens[index].kind != TOKEN_IDENT || index + 3 >= close || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT || token_decoded(tables, tokens[index + 2]) != "Build" || tokens[index + 3].kind != TOKEN_LBRACE {
+            if tokens[index].kind == TOKEN_LBRACE || tokens[index].kind == TOKEN_LBRACKET || tokens[index].kind == TOKEN_LPAREN {
+                skipped :: jet_cli_matching_close(tokens, index)
+                if skipped < 0 -> break
+                index = skipped
+            }
+            index += 1
+            next
+        }
+        name :: token_decoded(tables, tokens[index])
+        body :: index + 3
+        body_close :: jet_cli_matching_close(tokens, body)
+        if body_close < 0 || body_close > close -> break
+        fields := [JetCLIProfileField]{}
+        field := body + 1
+        loop field < body_close {
+            if tokens[field].kind == TOKEN_LBRACE || tokens[field].kind == TOKEN_LBRACKET || tokens[field].kind == TOKEN_LPAREN {
+                skipped :: jet_cli_matching_close(tokens, field)
+                if skipped < 0 -> break
+                field = skipped + 1
+                next
+            }
+            if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
+                &fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: token_decoded(tables, tokens[field + 2])})
+                field += 3
+                next
+            }
+            field += 1
+        }
+        &profiles.push(JetCLIBuildProfile{name: name, fields: fields})
+        index = body_close + 1
+    }
+    profiles
+}
+
 // The top-level `package.jet` fields entry resolution reads. A field the
 // reader cannot follow stays empty; the compile reports the manifest's own
 // shape errors.
 fn jet_cli_manifest_facts(source: String, origin: String) -> JetCLIManifest Never! {
-    facts := JetCLIManifest{name: "", origin: origin, members: [JetCLIMemberRef]{}, outputs: [JetCLIOutputFact]{}, default_run: None}
+    facts := JetCLIManifest{name: "", origin: origin, members: [JetCLIMemberRef]{}, outputs: [JetCLIOutputFact]{}, default_run: None, profiles: [JetCLIBuildProfile]{}}
     lexed :: lex_config(source.bytes())
     tokens :: jet_cli_significant_tokens(lexed.tokens)
     depth := 0
@@ -337,6 +393,16 @@ fn jet_cli_manifest_facts(source: String, origin: String) -> JetCLIManifest Neve
                     }
                 }
             }
+            "build" -> {
+                if tokens[value].kind == TOKEN_LBRACE {
+                    close :: jet_cli_matching_close(tokens, value)
+                    if close > value {
+                        facts.profiles = jet_cli_build_profiles(tokens, lexed.tables, value, close)
+                        index = close + 1
+                        next
+                    }
+                }
+            }
             else -> {}
         }
         index += 1
@@ -356,6 +422,16 @@ fn jet_cli_root_manifest(root: String) -[FS]> JetCLIManifest? Never! {
     block :: jet_driver_inline_package(source)
     if !block.found -> return None
     Val(jet_cli_manifest_facts(jet_driver_inline_package_body(source, block), carrier))
+}
+
+// The manifest facts `file` (whose bytes are `source`) compiles under: its
+// own inline `package { }` block, else the `package.jet` at or above it.
+// None for a loose file.
+fn jet_cli_file_manifest(file: String, source: String) -[FS]> JetCLIManifest? Never! {
+    block :: jet_driver_inline_package(source)
+    if block.found -> return Val(jet_cli_manifest_facts(jet_driver_inline_package_body(source, block), file))
+    root :: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return None
+    jet_cli_root_manifest(root)
 }
 
 // Loader.rs `checked_inline_package_entry`: the stock entry (`run.jet`, then

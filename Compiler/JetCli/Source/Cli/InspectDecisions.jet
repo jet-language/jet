@@ -3,7 +3,7 @@
 // O2 under a release profile), plus the functions the IR builder could not
 // build and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
-use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, canonical_pass_boundary_gaps]
+use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, canonical_pass_boundary_gaps]
 use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_optimize_module_measured, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
@@ -82,7 +82,8 @@ fn jet_cli_inspect_decisions_host(job: JetCLIInspectJob, source: String) -> JetD
             inputs := ^front.inputs ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             if inputs.entry_key == None -> jet_cli_inspect_finish(job, jet_cli_build_failed("`{job.file}` has no `fn run` to optimize", "the IR optimizer reports the program reachable from its `fn run`", "add `fn run()` to the file, or check it with `jet check {job.file}`", job.color))
             threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-            decisions :: jet_cli_decisions(^inputs, jet_cli_native_level("build", job.release_build), threads)
+            build :: if job.release_build -> jet_cli_stock_release_options() else -> build_options_stock("build")
+            decisions :: jet_cli_decisions(^inputs, jet_cli_native_level(build), threads)
             report :: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }

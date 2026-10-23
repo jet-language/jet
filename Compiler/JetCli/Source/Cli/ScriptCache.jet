@@ -24,7 +24,7 @@ use jet_driver.[
     JetDriverVerbOutput,
     schema_cache_dir,
 ]
-use jet_foundation.[CORE_SOURCE_OWNED_ROWS]
+use jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
 
 // Names the kept-program records; a new layout is a new name.
 JET_CLI_SCRIPT_RECORD :: "jet.script-run/v3"
@@ -47,7 +47,6 @@ struct JetCLIScriptKeep {
     toolchain: String
     core_files: Bool
     sources: String
-    release: Bool
     input_log: Shared<JetDriverComptimeInputLog>
 }
 
@@ -63,7 +62,7 @@ struct JetCLIScriptToolchain {
 // Core files and the runtime pack are named by their file identities (size,
 // modification time, device, inode), as `make` names its inputs. They are
 // not hashed: a rerun compares them with the record's.
-fn jet_cli_script_toolchain(identity: String, release: Bool) -> JetCLIScriptToolchain? {
+fn jet_cli_script_toolchain(identity: String, options: BuildOptions) -> JetCLIScriptToolchain? {
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
     runtime_dir :: jet_cli_runtime_dir()
     runtime_key :: jet_cli_runtime_key(runtime_dir) ?? return None
@@ -75,7 +74,7 @@ fn jet_cli_script_toolchain(identity: String, release: Bool) -> JetCLIScriptTool
         identity,
         "{executable} {jet_cli_script_file_identity(executable_stat)}",
         jet_cli_host_triple(cli_sys.arch(), cli_sys.name()),
-        if release -> "release" else -> "dev",
+        build_options_key(options),
         "{pack} {jet_cli_script_file_identity(pack_stat)}",
         toolchain,
     }
@@ -146,12 +145,12 @@ fn jet_cli_script_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> String
     script_crypto.sha256(framed).hex()
 }
 
-// The slot of the entry file `entry_path` under the profile. A new compiler
+// The slot of the entry file `entry_path` under the build options. A new compiler
 // replaces the program in the same slot (the record's toolchain names it),
 // so compilers that come and go don't add programs.
-fn jet_cli_script_slot(release: Bool, entry_path: String) -> String Never! {
+fn jet_cli_script_slot(options: BuildOptions, entry_path: String) -> String Never! {
     framed := [U8]{}
-    jet_cli_script_frame(&framed, if release -> "release" else -> "dev")
+    jet_cli_script_frame(&framed, build_options_key(options))
     jet_cli_script_frame(&framed, entry_path)
     script_crypto.sha256(framed).hex()
 }
@@ -192,7 +191,7 @@ fn jet_cli_script_record_program(rows: [String]) -> String? Never! {
 // program, so the file compiles. The kept program runs from memory as a
 // compiled one does, or from the file `binary` (jet_cli_launch). A program
 // a concurrent keep removed before it was read is a miss too.
-fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String, binary: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
+fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String, binary: String, color: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
     directory :: jet_cli_script_cache_dir() ?? return None
     record :: "{directory}/{keep.slot}.run"
     text :: cli_files.read(record) ?? return None
@@ -205,7 +204,7 @@ fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String,
     refused :: jet_cli_authority_report(file, source, color, "run", authority)
     if refused != None -> return refused
     jet_cli_script_used(record, text)
-    Val(jet_cli_launch(executable, file, binary, program_args, release, invocation, false, color))
+    Val(jet_cli_launch(executable, file, binary, program_args, options, invocation, false, color))
 }
 
 // Mark the slot record `record`, whose text is `text`, as just used: a copy
@@ -257,15 +256,14 @@ fn jet_cli_script_trim(directory: String) {
 
 // The keeper of a `jet run` compile of `snapshot`; None keeps nothing (no
 // compiler identity, or a toolchain that can't be read).
-fn jet_cli_script_keeper(release: Bool, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIScriptKeep? {
+fn jet_cli_script_keeper(options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIScriptKeep? {
     identity :: jet_cli_compiler_identity() ?? return None
-    toolchain :: jet_cli_script_toolchain(identity, release) ?? return None
+    toolchain :: jet_cli_script_toolchain(identity, options) ?? return None
     Val(JetCLIScriptKeep{
-        slot: jet_cli_script_slot(release, snapshot.entry_path),
+        slot: jet_cli_script_slot(options, snapshot.entry_path),
         toolchain: toolchain.rows,
         core_files: toolchain.core_files,
         sources: jet_cli_script_sources(snapshot),
-        release: release,
         input_log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}},
     })
 }

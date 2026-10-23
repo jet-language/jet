@@ -1,0 +1,198 @@
+// D-JAI-BUILDOPT1=A and D-SETTING-ORDER1=A (#5005, #4913): the one build-option
+// table. By one naming rule a row is the field of a `package.jet` build profile
+// (`build: { fast: Build{ optimize: full } }`), the flag `--optimize=full` (`_`
+// is `-` in a flag), the `fn build` method `b.optimize(.Full)` and the pin
+// `b.pin(.optimize, .Full)`; a value's method spelling is its PascalCase form.
+// One order holds: the command's stock value, then the selected profile, then
+// `fn build`, then the flag, each later layer replacing the earlier. A pin makes
+// a flag with another value an error (E2113) that names the pin.
+struct BuildOptionRow {
+    name: String
+    // The value spellings, as the profile field and the flag write them.
+    values: [String]
+    // The stock value of `jet build`, and of `jet run`, `jet dev` and `jet test`.
+    stock_build: String
+    stock_run: String
+    help: String
+}
+
+JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
+    // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
+    {name: "optimize", values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", help: "How hard to optimize: none, basic or full"},
+} }
+
+// The layer a value came from, in D-SETTING-ORDER1 order.
+enum BuildOptionLayer {
+    Stock
+    Profile
+    Code
+    Flag
+}
+
+// One written value of a row. `written` is its spelling (`--optimize=full`,
+// `b.optimize(.Full)`, `optimize: full`) and `site` the phrase placing it
+// (`at @build.jet:3`, "in profile `fast` of package.jet"); both are "" at the
+// stock layer and for a flag. `pinned` marks a `b.pin` call.
+struct BuildOptionChoice {
+    name: String
+    value: String
+    layer: BuildOptionLayer
+    written: String
+    site: String
+    pinned: Bool
+}
+
+// The options one command compiles under. `profile` is the selected profile
+// (`release`, a declared name), "" when none is; `written` keeps every
+// non-stock value in layer order, so a `fn build` layer can still go under the
+// flags; `values` is the resolved value of each row, in table order.
+struct BuildOptions {
+    command: String
+    profile: String
+    written: [BuildOptionChoice]
+    values: [BuildOptionChoice]
+}
+
+enum BuildOptionsResolved {
+    // `notes` are the stderr lines naming each value a flag replaced.
+    Resolved(options: BuildOptions, notes: [String])
+    Refused(code: String, what: String, fix: String)
+}
+
+fn build_option_row(name: String) -> BuildOptionRow? {
+    loop row in JET_BUILD_OPTIONS {
+        if row.name == name -> return Val(row.copy())
+    }
+    None
+}
+
+fn build_option_flag(name: String) -> String Never! {
+    "--{name.replace("_", "-")}"
+}
+
+// The row a jet flag (`--optimize` or `--optimize=full`) names.
+fn build_option_flag_row(argument: String) -> BuildOptionRow? {
+    head :: argument.split("=").to_list()[0]
+    loop row in JET_BUILD_OPTIONS {
+        if build_option_flag(row.name) == head -> return Val(row.copy())
+    }
+    None
+}
+
+// `min_size` -> `MinSize`: the value's spelling as a `fn build` argument.
+fn build_option_method_value(value: String) -> String {
+    sema_casing_pascal_words(value)
+}
+
+// The row value a `fn build` argument `.Variant` spells, if any.
+fn build_option_value_of_variant(row: BuildOptionRow, variant: String) -> String? {
+    loop value in row.values {
+        if build_option_method_value(value) == variant -> return Val(value)
+    }
+    None
+}
+
+// `none, basic or full`
+fn build_option_values_text(row: BuildOptionRow) -> String Never! {
+    build_option_join(row.values)
+}
+
+// `.None, .Basic or .Full`: the values as `fn build` writes them.
+fn build_option_variants_text(row: BuildOptionRow) -> String Never! {
+    words := [String]{}
+    loop value in row.values -> &words.push(".{build_option_method_value(value)}")
+    build_option_join(words)
+}
+
+fn build_option_join(words: [String]) -> String Never! {
+    out := ""
+    loop i in 0..<words.len() {
+        joint := ", "
+        if i == 0 -> joint = ""
+        if i > 0 && i == words.len() - 1 -> joint = " or "
+        out = "{out}{joint}{words[i]}"
+    }
+    out
+}
+
+// The options' identity in a cache key: the profile, then each resolved row.
+fn build_options_key(options: BuildOptions) -> String Never! {
+    out := if options.profile == "" -> "dev" else -> options.profile
+    loop choice in options.values -> out = "{out};{choice.name}={choice.value}"
+    out
+}
+
+// The stock options of `command`: no profile, no flag.
+fn build_options_stock(command: String) -> BuildOptions Never! {
+    if build_options_resolve(command, "", [BuildOptionChoice]{}) == {
+        .Resolved(options, _) -> return options
+        .Refused(_, what, _) -> panic("the stock build options refused: {what}")
+    }
+}
+
+// The resolved value of row `name`.
+fn build_options_value(options: BuildOptions, name: String) -> String Never! {
+    loop choice in options.values {
+        if choice.name == name -> return choice.value
+    }
+    panic("build option `{name}` is not a row of JET_BUILD_OPTIONS")
+}
+
+// The jet flags of `argv` that name a row, as Flag-layer choices, or the
+// refusal of a value outside its row.
+fn build_option_flags(argv: [String]) -> BuildOptionsResolved Never! {
+    flags := [BuildOptionChoice]{}
+    loop argument in argv {
+        if argument == "--" -> break
+        row :: build_option_flag_row(argument) ?? next
+        flag :: build_option_flag(row.name)
+        if !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with one of {build_option_values_text(row)}"}
+        value :: argument.slice(flag.len() + 1..<argument.len())
+        if !row.values.contains(value) -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with one of {build_option_values_text(row)}"}
+        loop earlier in flags {
+            if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: "pass `{flag}` once"}
+        }
+        &flags.push(BuildOptionChoice{name: row.name.copy(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
+    }
+    BuildOptionsResolved.Resolved{options: BuildOptions{command: "", profile: "", written: flags, values: [BuildOptionChoice]{}}, notes: [String]{}}
+}
+
+// Resolve `written` (layer order: profile, then code, then flags) over the
+// stock values of `command`. A flag that replaces a profile or code value
+// leaves a note; a flag against a pin with another value is E2113.
+fn build_options_resolve(command: String, profile: String, written: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
+    values := [BuildOptionChoice]{}
+    notes := [String]{}
+    loop row in JET_BUILD_OPTIONS {
+        stock :: if command == "build" -> row.stock_build else -> row.stock_run
+        current := BuildOptionChoice{name: row.name, value: stock, layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false}
+        loop choice in written {
+            if choice.name != row.name -> next
+            if choice.layer == BuildOptionLayer.Flag {
+                if current.pinned && current.value != choice.value {
+                    return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{current.value}` {current.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {current.site}"}
+                }
+                if current.layer == BuildOptionLayer.Profile || current.layer == BuildOptionLayer.Code {
+                    if current.value != choice.value -> &notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                }
+            }
+            current = choice.copy()
+        }
+        &values.push(current)
+    }
+    BuildOptionsResolved.Resolved{options: BuildOptions{command: command, profile: profile, written: written, values: values}, notes: notes}
+}
+
+// `options` with the `fn build` layer `code` placed between its profile
+// values and its flags, resolved again.
+fn build_options_with_code(options: BuildOptions, code: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
+    written := [BuildOptionChoice]{}
+    loop choice in options.written {
+        if choice.layer == BuildOptionLayer.Profile -> &written.push(choice.copy())
+    }
+    loop choice in code -> &written.push(choice.copy())
+    loop choice in options.written {
+        if choice.layer == BuildOptionLayer.Flag -> &written.push(choice.copy())
+    }
+    build_options_resolve(options.command, options.profile, written)
+}

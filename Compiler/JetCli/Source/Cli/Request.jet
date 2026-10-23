@@ -9,6 +9,7 @@ use core.files as cli_files
 use core.sys as cli_sys
 use jet_foundation.[
     AppAuthorizedDirectory,
+    BuildOptions,
     AppAuthorizedDirectoryEntry,
     CompilerThreads,
     CompilerTraceSink,
@@ -1169,16 +1170,17 @@ enum JetCLIExecutableCompiled {
 }
 
 // The executable compile of `file` (its source walk is the `sources` span).
-fn jet_cli_compile_executable_file(file: String, color: Bool, threads: Int?, release: Bool, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+fn jet_cli_compile_executable_file(file: String, color: Bool, threads: Int?, options: BuildOptions, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_executable(^prepared, release, None, trace_sink)
+    jet_cli_compile_executable(^prepared, options, None, trace_sink)
 }
 
-// jet_cli_compile_prepared for the native executable route: `release`
-// selects the release profile of the front end; `input_log` as there.
-fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, release: Bool, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+// jet_cli_compile_prepared for the native executable route under the build
+// `options`: their selected profile is the front end's (`$build.profile`, its
+// package.jet settings); `input_log` as there.
+fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
     if ^prepared == {
         .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1186,7 +1188,7 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, release: Bool, input_lo
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
-            if release -> selected.profile = "release"
+            if options.profile != "" -> selected.profile = options.profile
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
             front := jet_cli_lowering_inputs(^selected, trace_sink)

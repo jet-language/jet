@@ -4,7 +4,7 @@
 // Source owns session mutation, validation and projection on every tier.
 use core.crypto as build_crypto
 use core.build.[BuildGraph, BuildGraphTarget, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphNode, BuildGraphInputDigest]
-use jet_foundation.[Span, type_name]
+use jet_foundation.[Span, build_option_row, type_name]
 
 struct BuildSessionPolicy {
     legacy_denied: String?
@@ -125,6 +125,17 @@ struct BuildSessionTarget {
     plugin: Int?
 }
 
+// A build option `fn build` set (`b.optimize(.Full)`) or pinned
+// (`b.pin(.optimize, .Full)`): its row and value as the option table spells
+// them (JetFoundation BuildOptions.jet), and the call's span.
+struct BuildSessionOption {
+    name: String
+    value: String
+    pinned: Bool
+    start: Int
+    end: Int
+}
+
 struct BuildSessionState {
     id: Int
     active: Bool
@@ -141,6 +152,8 @@ struct BuildSessionState {
     contributions: [BuildSessionContribution]
     diagnostics: [BuildSessionDiagnostic]
     nodes: [BuildGraphNode]
+    // One row per option `fn build` set, the last call's value.
+    options: [BuildSessionOption]
     // The target `b.default(t)` selected, or -1 for every target.
     default_target: Int
     start: Int
@@ -156,7 +169,7 @@ fn build_session_new(session_id: Int, package: String, compiler_version: String,
         toolchains: [BuildSessionToolchain]{{name: "host", role: "host", host_triple: "host", target_triple: "host", sdk: None, linker: None, sysroot: None}},
         signing: [BuildSessionSigning]{}, probes: [BuildSessionProbe]{}, plugins: [BuildSessionPlugin]{},
         generated: [BuildSessionGeneratedModule]{}, contributions: [BuildSessionContribution]{},
-        diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, default_target: -1, start: 0, end: 0,
+        diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, options: [BuildSessionOption]{}, default_target: -1, start: 0, end: 0,
     }}
 }
 
@@ -335,6 +348,8 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
     if method == "toolchain" -> return build_session_add_toolchain(&state, args)
     if method == "signing" -> return build_session_add_signing(&state, args)
     if method == "probe" -> return build_session_add_probe(&state, args, in_impure_gate)
+    if method == "pin" -> return build_session_set_option(&state, args, true, start, end)
+    if build_option_row(method) != None -> return build_session_set_option(&state, args, false, start, end)
     if method == "generate" {
         if args.len() != 1 -> return build_session_fail(state, "`b.generate` requires a name and typed item block")
         name :: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
@@ -372,6 +387,26 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
     // is run and no generated source is written by this request.
     if method == "find" || method == "embed" || method == "fetch" -> return BuildSessionReply.HostRequest{method: method, args: args}
     build_session_fail(state, "unknown build method `{method}`")
+}
+
+// `b.optimize(.Full)` (args: the row name, the value) or `b.pin(...)`: the
+// last call's value holds; a pinned value can't change in the same fn build.
+fn build_session_set_option(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
+    if args.len() != 2 -> return build_session_fail(state, "a build option call takes an option and a value")
+    name :: build_session_text(args, 0) ?? return build_session_fail(state, "build option name must be a string")
+    value :: build_session_text(args, 1) ?? return build_session_fail(state, "build option value must be a string")
+    row :: build_option_row(name) ?? return build_session_fail(state, "`{name}` isn't a build option")
+    if !row.values.contains(value) -> return build_session_fail(state, "`{value}` isn't a value of build option `{name}`")
+    loop index in 0..<state.options.len() {
+        if state.options[index].name != name -> next
+        if state.options[index].pinned && state.options[index].value != value -> return build_session_fail(state, "build option `{name}` is pinned to `{state.options[index].value}`; `fn build` can't change it")
+        // A pinned option keeps its pin's span: the pin is what a flag meets.
+        if state.options[index].pinned && !pinned -> return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+        state.options[index] = BuildSessionOption{name: name.copy(), value: value.copy(), pinned: pinned, start: start, end: end}
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
+    &state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end})
+    BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
 fn build_session_safe_name(name: String) -> String {

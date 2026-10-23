@@ -3602,6 +3602,21 @@ claim's execution record.
 
 ## Size-oriented builds and language tooling
 
+### Build options
+
+Build options come from one table (`JET_BUILD_OPTIONS`, #5005). Each row is
+settable in three places that spell it the same way: a profile field in
+`package.jet` (`build: { release: Build{ optimize: full } }`), a call in
+`fn build` (`b.optimize(.Full)`), and a flag (`--optimize=full`; the `=` is
+required). Layers apply in order over the command's stock values (`jet build`
+optimizes `basic`; `jet run`, `jet dev` and `jet test` optimize `none`):
+profile, then `fn build`, then the flag. A flag that replaces a profile or
+`fn build` value prints one `note:` line naming the replaced value and where it
+was written. `b.pin(.optimize, .Full)` fixes the value for every build; a flag
+with another value is E2113. `jet run` reads profiles and flags, not
+`fn build`. Example:
+[`Examples/features/tooling/build_options`](../../Examples/features/tooling/build_options/run.jet).
+
 ### Size-oriented builds
 
 `jet build --small` selects the size-oriented build profile. The profile uses

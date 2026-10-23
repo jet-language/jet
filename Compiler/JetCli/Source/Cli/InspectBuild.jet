@@ -4,14 +4,17 @@ use jet_driver.[
     JetDriverVerbOutput, jet_driver_query_build_plan,
     jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
     jet_driver_report_problems, JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
+    JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
 ]
-use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, SourceFile]
+use jet_foundation.[
+    BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile,
+    build_option_method_value, build_options_with_code,
+]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
 use core.files as build_files
 use core.math as build_math
 use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-use jet_build_session.[BuildPlanSelection, build_plan_selection]
+use jet_build_session.[BuildPlanSelection, BuildSessionOption, build_plan_selection]
 
 fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
     plan :: query.plan ?? {
@@ -57,7 +60,8 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
 }
 // `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
 // then compile each selected executable target from its source, named after the target.
-fn jet_cli_build_package(file: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+// The options fn build set go between `options`' profile values and its flags.
+fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     selection := BuildPlanSelection?{None}
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     if ^prepared == {
@@ -75,14 +79,49 @@ fn jet_cli_build_package(file: String, color: Bool, release: Bool, threads: Int?
     if selected.unsupported.len() > 0 {
         return jet_cli_build_failed("`jet build` doesn't run these build targets yet: {selected.unsupported.join(", ")}", jet_cli_why("E2105"), "select an executable target with `b.default(...)`, or build its source file directly", color)
     }
+    merged := build_options_with_code(options, jet_cli_build_code_options(file, selected.options))
+    resolved_options := BuildOptions?{None}
+    if ^merged == {
+        .Refused(code, what, fix) -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
+        .Resolved(resolved, notes) -> {
+            loop note in notes -> jet_cli_write_notice("{note}\n")
+            resolved_options = Val(^resolved)
+        }
+    }
+    selected_options :: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
     root :: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
     loop executable in selected.executables {
         source_path :: jet_cli_entry_join(root, executable.source)
         source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
-        built :: jet_cli_compile_target(source_path, executable.name, source, color, release, threads, invocation, trace_sink)
+        built :: jet_cli_compile_target(source_path, executable.name, source, color, selected_options.copy(), threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// fn build's layer of the build options: each option `selected` set, placed
+// at its call in `file` (`at @build.jet:3`, relative to the package root).
+fn jet_cli_build_code_options(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {
+    choices := [BuildOptionChoice]{}
+    if set.len() == 0 -> return choices
+    source :: build_files.read(file) ?? ""
+    directory :: jet_cli_parent(file) ?? "."
+    root :: jet_cli_manifest_root(directory) ?? directory
+    relative := file.copy()
+    if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
+    bytes :: source.bytes()
+    loop option in set {
+        end := option.start
+        if end > bytes.len() -> end = bytes.len()
+        line := 1
+        loop index in 0..<end {
+            if bytes[index] == (U8{10}) -> line += 1
+        }
+        value :: build_option_method_value(option.value)
+        written :: if option.pinned -> "b.pin(.{option.name}, .{value})" else -> "b.{option.name}(.{value})"
+        &choices.push(BuildOptionChoice{name: option.name.copy(), value: option.value.copy(), layer: BuildOptionLayer.Code, written: written, site: "at {relative}:{line}", pinned: option.pinned})
+    }
+    choices
 }
 
 fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {

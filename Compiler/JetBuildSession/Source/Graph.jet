@@ -178,8 +178,9 @@ fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> 
 // What `jet build` runs: the selected targets (the default and its dependencies, or every
 // target), dependencies first. `executables` compile their first source; `unsupported` names
 // the selected targets the build executor does not run yet (other kinds, or own actions).
+// `options` are the build options fn build set, its layer of D-SETTING-ORDER1.
 struct BuildPlanExecutable { name: String source: String }
-struct BuildPlanSelection { executables: [BuildPlanExecutable] unsupported: [String] }
+struct BuildPlanSelection { executables: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
 fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     permit :: plan.storage.guard_read()
     order := [Int]{}
@@ -220,7 +221,7 @@ fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
             &unsupported.push("{target.name} ({target.kind})")
         }
     }
-    {executables: executables, unsupported: unsupported}
+    {executables: executables, unsupported: unsupported, options: permit.value.options.copy()}
 }
 fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
     permit :: plan.storage.guard_read()

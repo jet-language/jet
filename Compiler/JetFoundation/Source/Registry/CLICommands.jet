@@ -743,7 +743,21 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     },
 } }
 
-JET_CLI_FLAGS :: comptime { [JetCLIFlagSpec]{
+// Every jet flag: the fixed rows, with one row per build option
+// (BuildOptions.jet) after `--profile`.
+JET_CLI_FLAGS :: comptime { jet_cli_flag_rows() }
+
+fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
+    rows := [JetCLIFlagSpec]{}
+    loop spec in JET_CLI_FIXED_FLAGS {
+        &rows.push(spec.copy())
+        if spec.long != "--profile" -> next
+        loop option in JET_BUILD_OPTIONS -> &rows.push(JetCLIFlagSpec{long: build_option_flag(option.name), help: "With build/run/dev/test: {option.help}"})
+    }
+    rows
+}
+
+JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--live", help: "With inspect: Process id for a live plane scope"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
     {long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},

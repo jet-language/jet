@@ -496,15 +496,17 @@ fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
 }
 
 // Method `method` of compiler value `owner`, which the compiler answers
-// (ir_host_route kind 1): `{owner}.{method}`, impure, (row, word)... over
-// the receiver and the arguments, `impure` inside an `#Impure` block.
+// (ir_host_route kind 1): `{owner}.{method}`, impure, the call's span start
+// and end, (row, word)... over the receiver and the arguments, `impure`
+// inside an `#Impure` block. The span places a build host call's record and
+// failure at the call, not at the invocation.
 fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: Int, args: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     string_row :: ir_string_row(&m)
     member :: ir_temp(&m, &b, string_row)
     ir_emit(&b.f, IROp.ConstText, member, ir_intern_text(&m, "{owner}.{method}"), -1, -1, b.line)
     impure :: if b.impure > 0 -> 1 else -> 0
-    operands := [Int]{member, ir_word_const(&m, &b, impure)}
+    operands := [Int]{member, ir_word_const(&m, &b, impure), ir_word_const(&m, &b, span.start), ir_word_const(&m, &b, span.end)}
     words := [Int]{}
     if !ir_host_operand(&m, p, &b, receiver, &operands, &words) -> return -1
     loop argument in args {
