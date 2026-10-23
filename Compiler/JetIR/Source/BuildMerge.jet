@@ -15,9 +15,11 @@
 // type row by its intern key, a name by its text, a data row by its text or
 // bytes key or, for a constant's static object, by the constant and type
 // (m.constant_rows). A data row with no key belongs to its part alone.
-// Before the walk every part row is put in its sharing group: the rows'
-// keys sorted once, so the walk itself compares no keys, and the merged
-// module's key maps are filled in ascending key order.
+// Before the walk every part row is put in its sharing group: each part's
+// keys come in ascending order (its key maps keep them so; its functions
+// are sorted) and one merge of those runs numbers the groups, so the walk
+// itself compares no keys, and the merged module's key maps are filled in
+// ascending key order.
 
 use jet_foundation.[compiler_apply_order]
 
@@ -147,45 +149,56 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
     out
 }
 
-// A part row's sharing key (`(space, key, part, local)`): its key space
-// (data rows: 0 text or bytes, 1 a constant's static object; other rows 0),
-// key, part and row there.
+// Each part's rows as runs in ascending key order (`(key, local)`: the key
+// and the part's row): the type, name and data runs straight from its key
+// maps, the function run sorted. Data groups are the text and bytes keys,
+// then the constants' static objects.
 fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
     sides := [IRMergeSide]{}
-    functions := [(space: Int, key: String, part: Int, local: Int)]{}
-    types := [(space: Int, key: String, part: Int, local: Int)]{}
-    names := [(space: Int, key: String, part: Int, local: Int)]{}
-    data := [(space: Int, key: String, part: Int, local: Int)]{}
+    functions := [[(key: String, local: Int)]]{}
+    types := [[(key: String, local: Int)]]{}
+    names := [[(key: String, local: Int)]]{}
+    texts := [[(key: String, local: Int)]]{}
+    constants := [[(key: String, local: Int)]]{}
     function_group := [[Int]]{}
     type_group := [[Int]]{}
     name_group := [[Int]]{}
     data_group := [[Int]]{}
-    loop (part, m) in parts {
+    loop m in parts {
         &sides.push(IRMergeSide{function_new: ir_merge_unset(m.functions.len()), type_new: ir_merge_unset(m.types.len()), name_new: ir_merge_unset(m.names.len()), data_new: ir_merge_unset(m.data.len())})
         &function_group.push(ir_merge_unset(m.functions.len()))
         &type_group.push(ir_merge_unset(m.types.len()))
         &name_group.push(ir_merge_unset(m.names.len()))
         &data_group.push(ir_merge_unset(m.data.len()))
-        loop (local, f) in m.functions -> &functions.push((space: 0, key: f.key.copy(), part: part, local: local))
-        loop (row, key) in m.type_keys -> &types.push((space: 0, key: key.copy(), part: part, local: row))
-        loop (row, text) in m.names -> &names.push((space: 0, key: text.copy(), part: part, local: row))
-        loop (key, row) in m.data_rows -> &data.push((space: 0, key: key.copy(), part: part, local: row))
+        function_run := [(key: String, local: Int)]{}
+        loop (local, f) in m.functions -> &function_run.push((key: f.key.copy(), local: local))
+        &function_run.sort()
+        &functions.push(^function_run)
+        type_run := [(key: String, local: Int)]{}
+        loop (key, row) in m.type_rows -> &type_run.push((key: key.copy(), local: row))
+        &types.push(^type_run)
+        name_run := [(key: String, local: Int)]{}
+        loop (text, row) in m.name_rows -> &name_run.push((key: text.copy(), local: row))
+        &names.push(^name_run)
+        text_run := [(key: String, local: Int)]{}
+        loop (key, row) in m.data_rows -> &text_run.push((key: key.copy(), local: row))
+        &texts.push(^text_run)
+        constant_run := [(key: String, local: Int)]{}
         loop (memo, row) in m.constant_rows {
-            if row >= 0 -> &data.push((space: 1, key: memo.copy(), part: part, local: row))
+            if row >= 0 -> &constant_run.push((key: memo.copy(), local: row))
         }
+        &constants.push(^constant_run)
     }
-    function_keys :: ir_merge_group(&functions, &function_group)
-    type_keys :: ir_merge_group(&types, &type_group)
-    name_keys :: ir_merge_group(&names, &name_group)
-    data_keys :: ir_merge_group(&data, &data_group)
-    // The text groups come first (space 0 sorts first).
-    data_texts := data_keys.len()
-    loop row in data {
-        if row.space == 1 {
-            data_texts = data_group[row.part][row.local]
-            break
-        }
-    }
+    function_keys := [String]{}
+    ir_merge_group(functions, &function_group, &function_keys)
+    type_keys := [String]{}
+    ir_merge_group(types, &type_group, &type_keys)
+    name_keys := [String]{}
+    ir_merge_group(names, &name_group, &name_keys)
+    data_keys := [String]{}
+    ir_merge_group(texts, &data_group, &data_keys)
+    data_texts :: data_keys.len()
+    ir_merge_group(constants, &data_group, &data_keys)
     function_job := ir_merge_unset(function_keys.len())
     loop (index, root) in roots {
         group :: function_group[root.part][root.local]
@@ -204,19 +217,34 @@ fn ir_merge_unset(count: Int) -> [Int] Never! {
     rows
 }
 
-// Sorts `rows` and numbers their groups (one per space and key, ascending)
-// into `groups[part][local]`; returns each group's key. A row is in one
-// group: every key names a row its module made for it (IR.jet ir_intern_*,
-// BuildStatic), so no data row has a text key and a constant key.
-fn ir_merge_group(rows: &[(space: Int, key: String, part: Int, local: Int)], groups: &[[Int]]) -> [String] Never! {
-    &rows.sort()
-    keys := [String]{}
-    loop (index, row) in rows {
-        if index == 0 || rows[index - 1].space != row.space || rows[index - 1].key != row.key -> &keys.push(row.key.copy())
-        if groups[row.part][row.local] >= 0 -> panic("build part {row.part} row {row.local} has two sharing keys")
-        groups[row.part][row.local] = keys.len() - 1
+// Numbers the groups of `runs` (one ascending run per part) after the ones
+// already in `keys`: one group per distinct key, ascending, its key appended
+// to `keys` and its number put in `groups[part][local]` for each row with
+// that key. A row is in one group: every key names a row its module made for
+// it (IR.jet ir_intern_*, BuildStatic), so no data row has a text key and a
+// constant key.
+fn ir_merge_group(runs: [[(key: String, local: Int)]], groups: &[[Int]], keys: &[String]) Never! {
+    heads := ir_merge_unset(runs.len())
+    loop part in 0..<runs.len() -> heads[part] = 0
+    loop {
+        // The first part whose next key is the least; parts before it are past that key.
+        least := -1
+        loop part in 0..<runs.len() {
+            if heads[part] >= runs[part].len() -> next
+            if least < 0 || runs[part][heads[part]].key < runs[least][heads[least]].key -> least = part
+        }
+        if least < 0 -> break
+        group :: keys.len()
+        &keys.push(runs[least][heads[least]].key.copy())
+        loop part in least..<runs.len() {
+            loop heads[part] < runs[part].len() && runs[part][heads[part]].key == keys[group] {
+                local :: runs[part][heads[part]].local
+                if groups[part][local] >= 0 -> panic("build part {part} row {local} has two sharing keys")
+                groups[part][local] = group
+                heads[part] = heads[part] + 1
+            }
+        }
     }
-    keys
 }
 
 // The merged id of function `local` of part `part`. A job's id stands for
