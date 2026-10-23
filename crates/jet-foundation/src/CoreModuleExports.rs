@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: Compiler/Prelude/Core.jet
-// Source SHA-256: adbd7f9c759541a966120b29114424cecfc59ac917aef019ff3a9282c31d36d6
+// Source SHA-256: f44f3cf3af1ce69b93dc67e71f3216b9b6795aaa3d7e7b7568204d051d0ba0d7
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -893,6 +893,14 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataLoaderStatus" },
     CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataWatchStatus" },
     CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataSummary" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataSnapshot" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataLoader" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataStream" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataJoin" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "Group" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "Query" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataTracked" },
+    CoreSourceOwnedType { path: "Core/Data/Data.jet", name: "DataWatch" },
     CoreSourceOwnedType { path: "Core/Data/Sketch/Cms.jet", name: "CountMinSketch" },
     CoreSourceOwnedType { path: "Core/Data/Sketch/Hll.jet", name: "HyperLogLog" },
     CoreSourceOwnedType { path: "Core/Data/Sketch/Reservoir.jet", name: "ReservoirSampler" },
@@ -921,6 +929,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/Encoding/Cbor.jet", name: "CBORReader" },
     CoreSourceOwnedType { path: "Core/Encoding/Cbor.jet", name: "CBORWriter" },
     CoreSourceOwnedType { path: "Core/Encoding/Csv.jet", name: "CSVReader" },
+    CoreSourceOwnedType { path: "Core/Encoding/Csv.jet", name: "CSVRow" },
     CoreSourceOwnedType { path: "Core/Encoding/Csv.jet", name: "CSVWriter" },
     CoreSourceOwnedType { path: "Core/Encoding/Json.jet", name: "JSONReader" },
     CoreSourceOwnedType { path: "Core/Encoding/Json.jet", name: "JSONWriter" },
