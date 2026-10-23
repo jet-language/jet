@@ -22,7 +22,7 @@
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_transfer_rows]
 
 // What the optimizer runs: the level, the passes `disabled` names (to
-// bisect a difference to one pass: "unique", "scalar", "promote", "ssa"), whether every SSA
+// bisect a difference to one pass: "unique", "once", "scalar", "promote", "range", "ssa"), whether every SSA
 // form is verified (`verify`), whether every SSA value leaves SSA in a
 // fresh slot (`stress`, which exercises the moves out of SSA), and the
 // name of the functions whose IR before and after the passes the report
@@ -73,6 +73,7 @@ struct IROptReport {
     unreachable_removed: Int
     aggregates_replaced: Int
     unique_hoisted: Int
+    int_facts: Int
     ssa_functions: Int
     ssa_changed: Int
     ssa_moves: Int
@@ -84,11 +85,11 @@ struct IROptReport {
 }
 
 fn ir_opt_report(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, dumps: [String]{}}
+    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, dumps: [String]{}}
 }
 
 fn ir_opt_report_text(r: IROptReport) -> String Never! {
-    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh})"
+    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh})"
     loop dump in r.dumps -> text = "{text}\n{dump}"
     text
 }
@@ -104,6 +105,7 @@ fn ir_opt_report_add(total: &IROptReport, part: IROptReport) Never! {
     total.unreachable_removed += part.unreachable_removed
     total.aggregates_replaced += part.aggregates_replaced
     total.unique_hoisted += part.unique_hoisted
+    total.int_facts += part.int_facts
     total.ssa_functions += part.ssa_functions
     total.ssa_changed += part.ssa_changed
     total.ssa_moves += part.ssa_moves
@@ -158,7 +160,8 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
         id :: m.name_rows.get(route) ?? -1
         if id >= 0 -> view.name_rows[route] = id
     }
-    inputs :: shared IROptInputs{views: [IRModule]{^view}, bodies: ^bodies, recursive: ^order.recursive, options: options.copy()}
+    sites :: ir_opt_call_sites(bodies)
+    inputs :: shared IROptInputs{views: [IRModule]{^view}, bodies: ^bodies, recursive: ^order.recursive, sites: ^sites, options: options.copy()}
     loop wave in waves {
         total := 0
         loop id in wave -> total += weights[id]
@@ -190,9 +193,9 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     report
 }
 
-// The runtime routes a pass recognizes by name (OptUnique.jet).
+// The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet).
 fn ir_opt_routes() -> [String] Never! {
-    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free"}
+    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed"}
 }
 
 // Whether instruction `at` calls the runtime route `route`.
@@ -203,11 +206,11 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 // One function's passes: at level 2 uniqueness hoisting, then inlining its
 // callees' final bodies (`bodies`), then Simplify, and at level 2 scalar
 // replacement, Simplify again and the SSA round trip.
-fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursive: [Bool], options: IROptOptions, report: &IROptReport) -> IRFunction Never! {
+fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursive: [Bool], sites: [Int], options: IROptOptions, report: &IROptReport) -> IRFunction Never! {
     level :: options.level
     body := ^f
     if level >= 2 && ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_hoist_unique(m, &body, bodies)
-    out := ir_opt_inline_build(m, bodies, body, recursive, level, &report) ?? ^body
+    out := ir_opt_inline_build(m, bodies, body, recursive, sites, level >= 2 && ir_opt_enabled(options, "once"), level, &report) ?? ^body
     ir_opt_simplify(m, &out, &report)
     if level >= 2 {
         if ir_opt_enabled(options, "scalar") {
@@ -220,15 +223,20 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursiv
     out
 }
 
-// The SSA round trip: build, verify when asked, and back to slots.
+// The SSA round trip: build, verify when asked, the inline Int facts
+// (OptRange.jet), and back to slots.
 fn ir_opt_ssa(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROptReport) Never! {
     if f.op.len() == 0 -> return
-    s :: ir_ssa_build(f)
+    s := ir_ssa_build(f)
     if options.verify {
         errors :: ir_ssa_verify(f, s)
         if errors.len() > 0 -> panic("the SSA form of {f.key} is invalid: {errors.join("; ")}")
     }
+    facts :: if ir_opt_enabled(options, "range") -> ir_opt_int_facts(m, &f, &s) else -> 0
+    report.int_facts += facts
     stats :: ir_ssa_out(m, &f, s, options.stress)
+    // The comparisons the ranges decided leave constant branches and Nops.
+    if facts > 0 -> ir_opt_simplify(m, &f, &report)
     report.ssa_functions += 1
     if stats.changed {
         report.ssa_changed += 1
@@ -262,12 +270,29 @@ fn ir_opt_waves(functions: [IRFunction], order: OptOrder) -> [[Int]] Never! {
 // What every optimizing thread reads and nothing writes while a wave runs:
 // the module's type rows (in a module of their own), every function's body
 // (a one-row list; the wave's own rows are empty while it runs), which
-// functions are recursive, and the level.
+// functions are recursive, how many direct call sites each has, and the
+// level.
 struct IROptInputs {
     views: [IRModule]
     bodies: [[IRFunction]]
     recursive: [Bool]
+    sites: [Int]
     options: IROptOptions
+}
+
+// Per function, the direct Calls of it in the whole module.
+fn ir_opt_call_sites(bodies: [[IRFunction]]) -> [Int] Never! {
+    sites := [Int]{}
+    loop _ in bodies -> &sites.push(0)
+    loop row in bodies {
+        loop f in row {
+            loop at in 0..<f.op.len() {
+                callee :: f.a[at]
+                if f.op[at] == .Call && callee >= 0 && callee < sites.len() -> sites[callee] = sites[callee] + 1
+            }
+        }
+    }
+    sites
 }
 
 // A wave's bodies (`work[k]` the wave's k-th function, empty once claimed),
@@ -283,7 +308,7 @@ fn ir_opt_wave_inline(inputs: Shared<IROptInputs>, wave: [Int], report: &IROptRe
     permit := inputs.guard_edit()
     loop id in wave {
         body := &permit.value.bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
-        optimized := ir_opt_function(permit.value.views[0], permit.value.bodies, ^body, permit.value.recursive, permit.value.options, &report)
+        optimized := ir_opt_function(permit.value.views[0], permit.value.bodies, ^body, permit.value.recursive, permit.value.sites, permit.value.options, &report)
         &permit.value.bodies[id].push(^optimized)
     }
 }
@@ -340,7 +365,7 @@ fn ir_opt_claimed(inputs: Shared<IROptInputs>, store: Shared<IROptStore>) -> IRO
     loop {
         claimed := ir_opt_claim(store)
         body := &claimed.body.pop() ?? { break }
-        optimized := ir_opt_function(reads.value.views[0], reads.value.bodies, ^body, reads.value.recursive, reads.value.options, &report)
+        optimized := ir_opt_function(reads.value.views[0], reads.value.bodies, ^body, reads.value.recursive, reads.value.sites, reads.value.options, &report)
         ir_opt_settle(store, claimed.at, ^optimized)
     }
     report
@@ -367,7 +392,7 @@ fn ir_opt_settle(store: Shared<IROptStore>, at: Int, optimized: ^IRFunction) {
 
 fn ir_opt_take_inputs(inputs: Shared<IROptInputs>) -> IROptInputs {
     permit := inputs.guard_edit()
-    IROptInputs{views: compiler_take_rows<IRModule>(&permit.value.views), bodies: compiler_take_rows<[IRFunction]>(&permit.value.bodies), recursive: [Bool]{}, options: permit.value.options.copy()}
+    IROptInputs{views: compiler_take_rows<IRModule>(&permit.value.views), bodies: compiler_take_rows<[IRFunction]>(&permit.value.bodies), recursive: [Bool]{}, sites: [Int]{}, options: permit.value.options.copy()}
 }
 
 // Instructions that do something (Nop and End excluded): the size inlining

@@ -1145,10 +1145,16 @@ fn ir_x64_string_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
 }
 
+// An Int Add, Sub, Mul or comparison marked IR_OVERFLOW_WRAP (Build marks
+// Int arithmetic IR_OVERFLOW_TRAP) has operands and a result proven inline
+// (OptRange.jet): the plain i64 instruction.
 fn ir_x64_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, at: Int) Never! {
     ty :: ir_x64_type(m, f, f.a[at])
     if ty.kind == {
-        .Int -> ir_x64_int_binary(&e, m, f, al, at)
+        .Int -> {
+            if f.c[at] == IR_OVERFLOW_WRAP -> return ir_x64_word_binary(&e, m, f, al, tables, at, IRX64Shape{kind: .Word, size: 8, align: 8, signed: true, bits: 64})
+            ir_x64_int_binary(&e, m, f, al, at)
+        }
         .Float | .Float32 -> ir_x64_float_binary(&e, m, f, al, at, ty)
         .String -> {
             if ir_x64_is_compare(f.op[at]) -> return ir_x64_string_binary(&e, m, f, al, at)

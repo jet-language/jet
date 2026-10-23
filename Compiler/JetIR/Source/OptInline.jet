@@ -5,7 +5,10 @@
 // (ir_opt_size) is at most the level's callee limit and the caller's budget
 // still covers it, it never writes a parameter, and its stops name the
 // caller's source file (selection reports a stop at the function's file, so a
-// callee whose arithmetic can stop is inlined only into its own file).
+// callee whose arithmetic can stop is inlined only into its own file). At O2
+// a callee with one direct call site in the module is inlined there up to a
+// larger limit, outside the budget: its body then sees the caller's
+// arguments (constants, ranges), and the copy adds at most its own size.
 //
 // The body sits in a Block of its own. Parameters read the call's argument
 // slots (a callee that wrote one is refused); every other callee slot is a
@@ -18,23 +21,36 @@ IR_OPT_INLINE_CALLEE_O1 :: 40
 IR_OPT_INLINE_BUDGET_O1 :: 200
 IR_OPT_INLINE_CALLEE_O2 :: 60
 IR_OPT_INLINE_BUDGET_O2 :: 400
+// A once-called callee (O2), and the caller size past which none is taken.
+IR_OPT_INLINE_ONCE_O2 :: 1500
+IR_OPT_INLINE_ONCE_CALLER_O2 :: 3000
 
 // `caller`'s body with its selected call sites inlined, None when it selects
 // none. `bodies[g]` holds function g's final body (one row); the caller's
-// own row and the rows of recursive functions are never read.
-fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], level: Int, report: &IROptReport) -> IRFunction? Never! {
+// own row and the rows of recursive functions are never read. `sites[g]`
+// counts the direct calls of g in the module; `once_called` takes the
+// once-called ones (O2).
+fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, report: &IROptReport) -> IRFunction? Never! {
     limit :: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
     budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
-    sites := [Bool]{}
+    grown := ir_opt_size(caller)
+    selected_sites := [Bool]{}
     any := false
     loop at in 0..<caller.op.len() {
-        size :: if caller.op[at] == .Call -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit) else -> -1
-        selected :: size >= 0 && size <= budget
+        once :: once_called && caller.op[at] == .Call && caller.a[at] >= 0 && caller.a[at] < sites.len() && sites[caller.a[at]] == 1
+        size :: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
+        selected := false
+        if size >= 0 && once && size > limit {
+            selected = grown + size <= IR_OPT_INLINE_ONCE_CALLER_O2
+        } else if size >= 0 {
+            selected = size <= budget
+            if selected -> budget -= size
+        }
         if selected {
-            budget -= size
+            grown += size
             any = true
         }
-        &sites.push(selected)
+        &selected_sites.push(selected)
     }
     if !any -> return None
     out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
@@ -42,7 +58,7 @@ fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     out.result = caller.result
     loop value in caller.args -> &out.args.push(value)
     loop at in 0..<caller.op.len() {
-        if sites[at] {
+        if selected_sites[at] {
             ir_opt_splice(m, &out, caller, at, bodies[caller.a[at]][0])
             report.inlined_calls += 1
         } else {
