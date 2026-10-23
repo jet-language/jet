@@ -2844,6 +2844,18 @@ fn sema_check_registered_memory_position(job: SemaBodyJob, module_index: Int, me
     panic("a registered Jet body check lost its owning graph")
 }
 
+// The memory plan row of top-level job `job_index`: the one its checking
+// thread looked up when that body is the next one `ready` pops, else looked
+// up here.
+fn sema_check_ready_memory_position(ready: [SemaPreparedBody], job_index: Int, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
+    if ready.len() > 0 {
+        if ready[ready.len() - 1] == .Checked(body) {
+            if body.job_index == job_index && body.memory_known -> return body.memory_position
+        }
+    }
+    sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
+}
+
 fn sema_check_registered_method_label(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
     if program.registration_graph == .Val(graph) {
         if job == {
@@ -3344,7 +3356,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             function_comptime_requests := [SemaComptimeRequest]{}
             function_name_references := [SemaNameReferenceFact]{}
             function_diagnostic_start :: result.diagnostics.len()
-            memory_position :: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
+            memory_position :: sema_check_ready_memory_position(ready, item_index, job, module_index, memory_plan, environment, program)
             if memory_position == {
                 .Val(position) -> {
                     loop diagnostic in memory_plan.functions[position].diagnostics -> &result.diagnostics.push(diagnostic)
@@ -3724,6 +3736,10 @@ struct SemaParallelBody {
     host_reached: Bool{false}
     volatile: Bool{false}
     cache_hit: Bool{false}
+    // A top-level body's memory plan row, as the thread that checked it
+    // looked it up (memory_known), so the module pass need not look it up again.
+    memory_position: Int?{None}
+    memory_known: Bool{false}
 }
 
 // Replay carries an input descriptor, never a fabricated checked function.
@@ -4152,7 +4168,7 @@ fn sema_check_body_claimed(environment: SemaScopeEnvironment, program: SemaProgr
                     checked := sema_function_check_registered_shared(claim.job, module_index, memory_plan, memory_position, symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index)), TFuncKind.TopLevel, false, environment, program, &part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), &diagnostics, &call_facts, &comptime_requests, &name_references)
                     checked = sema_check_walk_prelude_demands(^checked, graph.modules[module_index].module_identity)
                     reach :: sema_incremental_reach(observed)
-                    &part.bodies.push(SemaPreparedBody.Checked{body: SemaParallelBody{job_index: item_index, checked: Val(^checked), diagnostics: ^diagnostics, call_facts: ^call_facts, comptime_requests: ^comptime_requests, name_references: ^name_references, method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), host_reached: reach.host, volatile: reach.foreign_raw_body}})
+                    &part.bodies.push(SemaPreparedBody.Checked{body: SemaParallelBody{job_index: item_index, checked: Val(^checked), diagnostics: ^diagnostics, call_facts: ^call_facts, comptime_requests: ^comptime_requests, name_references: ^name_references, method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), host_reached: reach.host, volatile: reach.foreign_raw_body, memory_position: memory_position, memory_known: true}})
                     &part.positions.push(claim.position)
                 }
             }
@@ -7915,18 +7931,14 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop settle_index in 0..<modules.len() {
         if sema_failure_settle_obligations(&modules[settle_index].diagnostics, infallible_keys) -> modules[settle_index].complete = false
     }
-    // The `#Inline(Always)` promise (E0917-E0919) needs
-    // every body's function-value references first.
-    if sema_marker_rules_check_inline_always(final_graph, modules, &diagnostics) -> complete = false
-    if sema_check_script_entries(final_graph, &diagnostics) -> complete = false
-    if sema_effect_check_declared_leaves(final_graph, &diagnostics) -> complete = false
-    if sema_effect_check_authority_handles(final_graph, &diagnostics) -> complete = false
-
+    // The `#Inline(Always)` promise (E0917-E0919) needs every body's
+    // function-value references first. These read-only checks, the effect
+    // inputs and the liveness verdicts run side by side.
+    if trace_sink == .Val(sink) -> sink.begin("sema.side", "", -1, -1)
     effect_inputs := [SemaEffectModuleInput]{}
-    loop module_index in 0..<modules.len() {
-        source_index :: sema_registration_module_index(final_graph, modules[module_index].module_identity) ?? next
-        &effect_inputs.push(sema_effect_module_input(final_graph.modules[source_index], module_index))
-    }
+    liveness := sema_finalize_side_liveness_empty()
+    final_graph = sema_finalize_side_checks(^final_graph, &modules, threads, &diagnostics, &complete, &effect_inputs, &liveness)
+    if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy :: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
     package_memory_denials :: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
@@ -8043,9 +8055,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop diagnostic in sema_http_unmounted_warnings(final_graph, modules) -> &diagnostics.push(diagnostic)
     // Bundle-owned structure verdicts share the same checked references on
     // success and failure; consumers never reconstruct them from source text.
-    if trace_sink == .Val(sink) -> sink.begin("sema.liveness", "", -1, -1)
-    liveness :: sema_liveness_structure(final_graph, modules)
-    if trace_sink == .Val(sink) -> sink.end("sema.liveness", liveness.facts.len())
+    // The liveness verdicts were read with the side checks, before the effect
+    // pass, which changes no reference, call fact or declaration they read.
     if trace_sink == .Val(sink) -> sink.begin("sema.lifecycle", "", -1, -1)
     lifecycle :: sema_lifecycle_structure(final_graph, modules, stage.package_policies)
     if trace_sink == .Val(sink) -> sink.end("sema.lifecycle", lifecycle.facts.len())
@@ -8122,11 +8133,13 @@ SEMA_CORE_JOBS_PER_THREAD :: 8
 // only part that grows with the program, so the jobs are consecutive item
 // ranges (one module each, about equal source bytes, every module's ranges
 // consecutive), claimed dynamically; each thread walks its claimed ranges
-// into their own rows, and the caller joins the rows in job order
-// (sema_core_collected_append) before the per-module prefix and script-body
-// usages, so the usage sets, the first span of each usage and the callback
-// keys read exactly as one thread's walk of every module in order. The
-// graph and the module contexts move into the threads' shared state and
+// into their own rows. A job that covers its whole module also assembles
+// that module's usage on its thread (sema_core_module_usage_assemble: the
+// prefix and script-body usages and the reachable closure); the caller joins
+// any other module's rows in job order (sema_core_collected_append) and
+// assembles it, so the usage sets, the first span of each usage and the
+// callback keys read exactly as one thread's walk of every module in order.
+// The graph and the module contexts move into the threads' shared state and
 // back; the graph is returned. A program whose work admits one thread walks
 // on the calling thread.
 fn sema_finalize_core_usage(graph: ^SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads, cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
@@ -8157,30 +8170,39 @@ fn sema_finalize_core_usage(graph: ^SemaRegistrationGraph, modules: [SemaGraphMo
     count := workers * SEMA_CORE_JOBS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     jobs :: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)
-    shared_state :: shared SemaFinalizeCoreShared{graphs: [SemaRegistrationGraph]{}, contexts: [SemaCoreModuleContext]{}, jobs: jobs}
+    exact_int := loop module_row in modules -> module_row.exact_int_reachable
+    shared_state :: shared SemaFinalizeCoreShared{graphs: [SemaRegistrationGraph]{}, contexts: [SemaCoreModuleContext]{}, jobs: jobs, exact_int: ^exact_int}
     sema_finalize_core_fill(shared_state, ^owned, &contexts)
     queue :: shared SemaFinalizeCoreQueue{next: 0}
     results := [SemaCoreCollected]{}
-    loop _ in 0..<jobs.len() -> &results.push(sema_core_collected_empty())
-    sema_finalize_core_claimers(shared_state, queue, 0, workers, &results)
-    returned := sema_finalize_core_take(shared_state, &contexts)
-    // Each module's item ranges, joined in job order (jobs are in module and
-    // item order, so a module's rows arrive consecutively).
-    joined := [SemaCoreCollected]{}
-    loop _ in 0..<returned.modules.len() -> &joined.push(sema_core_collected_empty())
-    &results.reverse()
-    job := 0
-    loop results.len() > 0 {
-        collected := &results.pop() ?? break
-        sema_core_collected_append(&joined[jobs[job].module_index], collected)
-        job += 1
+    assembled := [SemaCoreModuleUsageResult?]{}
+    loop _ in 0..<jobs.len() {
+        &results.push(sema_core_collected_empty())
+        &assembled.push(None)
     }
-    &joined.reverse()
-    joined_index := 0
-    loop joined.len() > 0 {
-        collected := &joined.pop() ?? break
-        &cores.push(sema_core_module_usage_assemble(returned.modules[joined_index], contexts[joined_index], modules[joined_index].exact_int_reachable, collected))
-        joined_index += 1
+    sema_finalize_core_claimers(shared_state, queue, 0, workers, &results, &assembled)
+    returned := sema_finalize_core_take(shared_state, &contexts)
+    // Each module in order: a module walked whole by one job was assembled
+    // on its thread; any other module's item ranges are joined in job order
+    // (jobs are in module and item order, so a module's jobs are
+    // consecutive) and assembled here.
+    &results.reverse()
+    &assembled.reverse()
+    job := 0
+    loop module_index in 0..<returned.modules.len() {
+        collected := sema_core_collected_empty()
+        whole := SemaCoreModuleUsageResult?{None}
+        loop job < jobs.len() && jobs[job].module_index == module_index {
+            part := &results.pop() ?? panic("a Core usage job left its rows")
+            done := &assembled.pop() ?? panic("a Core usage job left its rows")
+            if done == None {
+                sema_core_collected_append(&collected, part)
+            } else {
+                whole = ^done
+            }
+            job += 1
+        }
+        &cores.push(whole ?? sema_core_module_usage_assemble(returned.modules[module_index], contexts[module_index], modules[module_index].exact_int_reachable, collected))
     }
     returned
 }
@@ -8219,11 +8241,13 @@ fn sema_finalize_core_jobs(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJob
 
 // What every walking thread reads: the registration graph (the one row of
 // its list, moved in and back out; its modules' items are read in place),
-// each module's walk context and the jobs.
+// each module's walk context, the jobs and whether each module reaches
+// exact Int (for assembling a module one job walks whole).
 struct SemaFinalizeCoreShared {
     graphs: [SemaRegistrationGraph]
     contexts: [SemaCoreModuleContext]
     jobs: [SemaFinalizeCoreJob]
+    exact_int: [Bool]
 }
 
 // The next unclaimed job.
@@ -8231,10 +8255,12 @@ struct SemaFinalizeCoreQueue {
     next: Int
 }
 
-// One job's rows, walked by one thread.
+// One job's rows, walked by one thread, or the module's assembled usage when
+// the job walked the whole module.
 struct SemaFinalizeCoreCollected {
     job: Int
     collected: SemaCoreCollected
+    assembled: SemaCoreModuleUsageResult?
 }
 
 fn sema_finalize_core_fill(shared_state: Shared<SemaFinalizeCoreShared>, graph: ^SemaRegistrationGraph, contexts: &[SemaCoreModuleContext]) {
@@ -8251,21 +8277,23 @@ fn sema_finalize_core_take(shared_state: Shared<SemaFinalizeCoreShared>, context
 }
 
 // Runs walking threads `from..<workers`, one task each, and moves every job
-// row a thread returned into its slot of `results`.
-fn sema_finalize_core_claimers(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, results: &[SemaCoreCollected]) {
+// row a thread returned into its slot of `results` and `assembled`.
+fn sema_finalize_core_claimers(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?]) {
     if from >= workers -> return
     task.group sema_finalize_core_threads {
         head :: task sema_finalize_core_claimed(shared_state, queue)
-        sema_finalize_core_claimers(shared_state, queue, from + 1, workers, &results)
+        sema_finalize_core_claimers(shared_state, queue, from + 1, workers, &results, &assembled)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
             done := &claimed.pop() ?? break
             results[done.job] = ^done.collected
+            assembled[done.job] = ^done.assembled
         }
     }
 }
 
-// One thread: walks the jobs it claims, in order, each into its own rows.
+// One thread: walks the jobs it claims, in order, each into its own rows; a
+// job that walks its module's every item assembles the module's usage too.
 fn sema_finalize_core_claimed(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaFinalizeCoreCollected] {
     inputs :: shared_state.guard_read()
     claimed := [SemaFinalizeCoreCollected]{}
@@ -8276,7 +8304,11 @@ fn sema_finalize_core_claimed(shared_state: Shared<SemaFinalizeCoreShared>, queu
         collected := sema_core_collected_empty()
         // Passed straight through: a local binding of a guarded row would copy it.
         sema_core_collect_item_range(inputs.value.graphs[0].modules[module_index].program.items, inputs.value.jobs[job].first, inputs.value.jobs[job].last, inputs.value.contexts[module_index], &collected)
-        &claimed.push(SemaFinalizeCoreCollected{job: job, collected: ^collected})
+        if inputs.value.jobs[job].first == 0 && inputs.value.jobs[job].last == inputs.value.graphs[0].modules[module_index].program.items.len() {
+            &claimed.push(SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: Val(sema_core_module_usage_assemble(inputs.value.graphs[0].modules[module_index], inputs.value.contexts[module_index], inputs.value.exact_int[module_index], collected))})
+            next
+        }
+        &claimed.push(SemaFinalizeCoreCollected{job: job, collected: ^collected, assembled: None})
     }
     claimed
 }
@@ -8286,4 +8318,140 @@ fn sema_finalize_core_claim(queue: Shared<SemaFinalizeCoreQueue>) -> Int {
     index :: permit.value.next
     permit.value.next = index + 1
     index
+}
+
+// The finalization's read-only checks before the effect pass: each reads
+// the final graph and the checked modules and writes neither, so they run
+// side by side on compiler threads. Jobs are numbered in the serial order
+// their diagnostics join in; threads claim them heaviest first (the liveness
+// walk, the effect inputs, then the declaration checks).
+SEMA_FINALIZE_SIDE_INLINE_ALWAYS :: 0
+SEMA_FINALIZE_SIDE_SCRIPT_ENTRIES :: 1
+SEMA_FINALIZE_SIDE_DECLARED_LEAVES :: 2
+SEMA_FINALIZE_SIDE_AUTHORITY_HANDLES :: 3
+SEMA_FINALIZE_SIDE_EFFECT_INPUTS :: 4
+SEMA_FINALIZE_SIDE_LIVENESS :: 5
+SEMA_FINALIZE_SIDE_JOBS :: 6
+// A program of fewer modules per admitted thread checks them on the calling
+// thread.
+SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD :: 16
+
+// What every side-check thread reads: the registration graph (the one row of
+// its list) and the checked modules, moved in and back out.
+struct SemaFinalizeSideShared {
+    graphs: [SemaRegistrationGraph]
+    modules: [SemaGraphModuleResult]
+}
+
+// One side check's result: a declaration check's diagnostics and whether it
+// found any, the effect inputs, or the liveness verdicts.
+struct SemaFinalizeSide {
+    job: Int
+    found: Bool
+    diagnostics: [Diagnostic]
+    effect_inputs: [SemaEffectModuleInput]
+    liveness: SemaLivenessResult
+}
+
+fn sema_finalize_side_liveness_empty() -> SemaLivenessResult {
+    SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
+}
+
+// Runs every side check, on threads when the program is large enough, and
+// joins them in order: the declaration checks' diagnostics onto
+// `diagnostics` (any found leaves the graph incomplete), the effect inputs
+// onto `effect_inputs` and the liveness verdicts into `liveness`.
+fn sema_finalize_side_checks(graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], liveness: &SemaLivenessResult) -> SemaRegistrationGraph {
+    owned := ^graph
+    sides := [SemaFinalizeSide]{}
+    workers :: compiler_threads_admit(threads, SEMA_FINALIZE_SIDE_JOBS, modules.len(), SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(sema_finalize_side_run(job, owned, modules))
+        sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &liveness)
+        return owned
+    }
+    loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, liveness: sema_finalize_side_liveness_empty()})
+    shared_state :: shared SemaFinalizeSideShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}}
+    sema_finalize_side_fill(shared_state, ^owned, &modules)
+    queue :: shared SemaFinalizeCoreQueue{next: 0}
+    sema_finalize_side_claimers(shared_state, queue, 0, workers, &sides)
+    returned := sema_finalize_side_take(shared_state, &modules)
+    sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &liveness)
+    returned
+}
+
+// One side check over the graph and the checked modules.
+fn sema_finalize_side_run(job: Int, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaFinalizeSide {
+    side := SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, liveness: sema_finalize_side_liveness_empty()}
+    if {
+        job == SEMA_FINALIZE_SIDE_INLINE_ALWAYS -> { side.found = sema_marker_rules_check_inline_always(graph, modules, &side.diagnostics) }
+        job == SEMA_FINALIZE_SIDE_SCRIPT_ENTRIES -> { side.found = sema_check_script_entries(graph, &side.diagnostics) }
+        job == SEMA_FINALIZE_SIDE_DECLARED_LEAVES -> { side.found = sema_effect_check_declared_leaves(graph, &side.diagnostics) }
+        job == SEMA_FINALIZE_SIDE_AUTHORITY_HANDLES -> { side.found = sema_effect_check_authority_handles(graph, &side.diagnostics) }
+        job == SEMA_FINALIZE_SIDE_EFFECT_INPUTS -> {
+            loop module_index in 0..<modules.len() {
+                source_index :: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
+                &side.effect_inputs.push(sema_effect_module_input(graph.modules[source_index], module_index))
+            }
+        }
+        else -> { side.liveness = sema_liveness_structure(graph, modules) }
+    }
+    side
+}
+
+// Joins the side checks in job order.
+fn sema_finalize_side_join(sides: ^[SemaFinalizeSide], diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], liveness: &SemaLivenessResult) {
+    owned := ^sides
+    &owned.reverse()
+    loop owned.len() > 0 {
+        side := &owned.pop() ?? break
+        if side.found -> complete = false
+        &diagnostics.extend(^side.diagnostics)
+        &effect_inputs.extend(^side.effect_inputs)
+        if side.job == SEMA_FINALIZE_SIDE_LIVENESS {
+            liveness = ^side.liveness
+        }
+    }
+}
+
+fn sema_finalize_side_fill(shared_state: Shared<SemaFinalizeSideShared>, graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult]) {
+    permit :: shared_state.guard_edit()
+    &permit.value.graphs.push(^graph)
+    compiler_transfer_rows<SemaGraphModuleResult>(&permit.value.modules, &modules)
+}
+
+// Moves the modules back and returns the graph.
+fn sema_finalize_side_take(shared_state: Shared<SemaFinalizeSideShared>, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaGraphModuleResult>(&modules, &permit.value.modules)
+    &permit.value.graphs.pop() ?? panic("the finalization graph left the side checks' shared state")
+}
+
+// Runs side-check threads `from..<workers`, one task each, and moves every
+// result a thread returned into its job's slot of `sides`.
+fn sema_finalize_side_claimers(shared_state: Shared<SemaFinalizeSideShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, sides: &[SemaFinalizeSide]) {
+    if from >= workers -> return
+    task.group sema_finalize_side_threads {
+        head :: task sema_finalize_side_claimed(shared_state, queue)
+        sema_finalize_side_claimers(shared_state, queue, from + 1, workers, &sides)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            job :: done.job
+            sides[job] = ^done
+        }
+    }
+}
+
+// One thread: runs the side checks it claims, heaviest (last job) first.
+fn sema_finalize_side_claimed(shared_state: Shared<SemaFinalizeSideShared>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaFinalizeSide] {
+    inputs :: shared_state.guard_read()
+    claimed := [SemaFinalizeSide]{}
+    loop {
+        rank :: sema_finalize_core_claim(queue)
+        if rank >= SEMA_FINALIZE_SIDE_JOBS -> break
+        // Passed straight through: a local binding of a guarded row would copy it.
+        &claimed.push(sema_finalize_side_run(SEMA_FINALIZE_SIDE_JOBS - 1 - rank, inputs.value.graphs[0], inputs.value.modules))
+    }
+    claimed
 }
