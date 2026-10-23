@@ -107,6 +107,17 @@ boundaries deliver that report and preserve its status; they do not classify
 the fault from its prose. An unresolved diagnostic row remains a host defect
 with status 101.
 
+A native program's fatal signal is reported the same way under `jet run` and
+`jet build`. The handler runs on a per-thread alternate stack, so an exhausted
+stack is reported too. A SIGSEGV within the guard region below the stack
+pointer is a stack overflow: `Stop [E3012]` names the Jet function and its
+source line and exits 70. Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
+`Fault [SIGNAME]: invalid memory access at address 0x…` (or the signal's own
+reason) and a backtrace of the Jet frames (`name at file:line`, from the
+image's DWARF). It then re-raises the signal with its default action, so the
+status is the signal's (128 + number in a shell). Addresses other than the
+faulting one are not printed, because they differ between the two tiers.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is

@@ -196,6 +196,15 @@ fn host_is_tty(fd: I64) -> Bool {
     host_unlock()
 }
 
+// The fault report's flush (Fault.jet): skipped when the lock is held, since
+// the faulting thread may hold it mid-write and would wait forever.
+fn host_stdout_flush_fault() {
+    if (host_root == I64{0}) -> return
+    if !sync_mutex_try_lock(host_root) -> return
+    _ := host_stdout_flush_locked()
+    host_unlock()
+}
+
 #Export(c) fn jet_term_write_stdout_line(value: I64, flush: U8) {
     if jet_rt_test_capture_print(value) -> return
     #Unsafe("value is a borrowed E4 JetCText header; stdout copies its bytes before returning") {

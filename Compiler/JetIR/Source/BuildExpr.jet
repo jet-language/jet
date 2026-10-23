@@ -210,6 +210,7 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     b.moving = -1
     if ir_body_stmt(p, b, statement) == {
         .Let(local, let_ty, init, _, _, span) -> {
+            ir_stmt_line(p, &b, span)
             // `name := &place` binds an alias of the place, never a copy (codegen
             // Statements.jet TStmt.Let alias_place): a write borrow's edits reach
             // the owner. A range borrow keeps its View value below.
@@ -305,12 +306,16 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
             if binding.owned -> ir_reown(&b, binding)
             ir_close_rearm(&b, binding.slot)
         }
-        .ExprStmt(value, _) -> {
+        .ExprStmt(value, span) -> {
+            ir_stmt_line(p, &b, span)
             result :: ir_expr(&m, p, &b, value)
             if ir_failed(b) -> return
             ir_release(&m, &b, result)
         }
-        .Return(value, span) -> ir_return(&m, p, &b, value, span)
+        .Return(value, span) -> {
+            ir_stmt_line(p, &b, span)
+            ir_return(&m, p, &b, value, span)
+        }
         .If(condition, then_body, else_body, _, span) -> {
             ir_scope_open(&b)
             named :: b.bindings.len()
@@ -479,6 +484,15 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
         .Transact(handle, snapshots, stm, body, span) -> ir_transact(&m, p, &b, handle, snapshots, stm, body, span)
         .GCEdit(_, _, _, _, _, _, span) -> ir_fail(&b, span, "statement GCEdit")
     }
+}
+
+// The line of a call, binding or return statement starts the code it emits,
+// so the line table (and a fault backtrace) names the statement, not the last
+// line an operator set.
+fn ir_stmt_line(p: IRProgram, b: &IRBuilder, span: Span) Never! {
+    if span.end <= span.start -> return
+    line :: ir_source_line_of(p, b.f.source_file, span.start) ?? return
+    if line > 0 -> b.line = line
 }
 
 // `pattern :: init else { fallback }` (codegen

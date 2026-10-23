@@ -235,7 +235,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `subst_names`/`subst_types` the type parameters of the instance being
 // built and their arguments. `stop_points`: calls that can deliver a
 // runtime stop are followed by a stop check (Build.jet ir_stop_check); the
-// runtime library manages its own stops and has none.
+// runtime library manages its own stops and has none. `debug_directory`:
+// the compilation directory the image's DWARF records ("": the working
+// directory), which relative source paths (a fault report's) resolve from.
 struct IRModule {
     types: [IRType]
     type_keys: [String]
@@ -267,6 +269,7 @@ struct IRModule {
     subst_names: [String]
     subst_types: [Type]
     stop_points: Bool{false}
+    debug_directory: String{""}
 }
 
 fn ir_module_new() -> IRModule Never! {

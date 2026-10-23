@@ -411,8 +411,9 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // A span a failure returns from stays open. An image for LINK_RUN_BASE whose
 // C closure can't link there (absolute 32-bit relocations in non-PIC C) is
 // linked at LINK_BASE instead: the loader then can't map it into jet and
-// `jet run` runs the file (Image/Loader.jet).
-fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
+// `jet run` runs the file (Image/Loader.jet). `file` is the entry path the
+// command named (jet_cli_debug_directory).
+fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String], file: String) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     if harness == None && checked.entry_key == None -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.NoEntry}
@@ -435,7 +436,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     foreign_link :: result.foreign_link.copy()
     task.group native_foreign {
         realizing :: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE)
-        object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census)
+        object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census, file)
         if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
         &objects.push(^object)
         &closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
@@ -587,13 +588,21 @@ fn jet_cli_native_object_failure(failure: JetCLINativeFailure) -> JetCLINativeOb
 }
 
 // `ir.build`, `ir.opt`, `ir.x64` and `ir.object` of jet_cli_native_executable.
-fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String]) -[FS, Env]> JetCLINativeObject Never! {
+fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String], file: String) -[FS, Env]> JetCLINativeObject Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     declarations := jet_driver_checked_declarations(&checked)
     // The program's C closure defines its foreign functions' symbols.
     closure_symbols := [String:Bool]{}
     loop row in declarations.foreign -> closure_symbols[row.symbol.copy()] = true
+    entry_key :: checked.entry_key ?? ""
+    entry_source := ""
+    loop function in checked.functions {
+        if function.key == entry_key {
+            entry_source = function.source_file.copy()
+            break
+        }
+    }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", result.compiler_threads)
     function_count :: built.program.functions.len()
@@ -643,6 +652,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
         _ := ir_optimize_module(&built.program, jet_cli_opt_options(level), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
     }
+    built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
     compiled := ir_x64_compile_module(^built.program, threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
@@ -663,6 +673,17 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
         if !keep_going || object.bytes.len() == 0 -> return jet_cli_native_object_failure(JetCLINativeFailure.Object{errors: object.errors})
     }
     JetCLINativeObject{bytes: ^object.bytes, failure: None}
+}
+
+// The compilation directory the image's DWARF records for `file`, the entry
+// path the command named, whose module's source path is `source`: the part
+// of `file` before `source`, as written, so a fault report run from where
+// the command ran finds the source, and the image does not depend on where
+// the checkout lives. "" (the working directory) when `file` is `source` or
+// does not end with it.
+fn jet_cli_debug_directory(file: String, source: String) -> String Never! {
+    if source == "" || file == source || !file.ends_with("/{source}") -> return ""
+    file.slice(0, file.len() - source.len() - 1)
 }
 
 // The body of a function the IR builder can't build: one Unreachable. Its
@@ -692,7 +713,7 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: Je
     keep_going :: jet_cli_keep_going_enabled()
     census := [String]{}
     base :: if command == "run" -> LINK_RUN_BASE else -> LINK_BASE
-    linked := jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), binary, base, keep_going, &census)
+    linked := jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), binary, base, keep_going, &census, file)
     if census.len() > 0 {
         problem :: jet_cli_keep_going_append(census)
         if problem != "" -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
@@ -1096,7 +1117,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     // The harness's build, object and link are one traced span.
     if result.trace_sink == .Val(sink) -> sink.begin("native.build", "", -1, -1)
     census := [String]{}
-    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), binary, LINK_BASE, false, &census)
+    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), binary, LINK_BASE, false, &census, file)
     if native == {
         .Failed(failure) -> return jet_cli_test_native_failure(file, failure, color)
         .Image(executable) -> {
