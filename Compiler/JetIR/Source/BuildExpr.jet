@@ -99,9 +99,11 @@ fn ir_cell_params(m: &IRModule, b: &IRBuilder) Never! {
     }
 }
 
-// The names of the variables a closure in `body` captures to write.
+// The names of the variables a closure in `body` captures to write: none
+// when no node `body` can reach is a closure (most functions).
 fn ir_mutable_captures(p: IRProgram, b: IRBuilder, body: [Int]) -> [String] Never! {
     names := [String]{}
+    if !ir_nodes_have_lambda(b.made.nodes) && (b.row < 0 || !ir_nodes_have_lambda(p.functions[b.row].tree.nodes)) -> return names
     loop statement in body {
         kind :: ir_body_stmt(p, b, statement)
         if b.row >= 0 {
@@ -125,6 +127,13 @@ fn ir_collect_mutable_captures(p: IRProgram, b: IRBuilder, expression: Int, name
     } else {
         body_each_expr_child(b.made, node, (child: Int) -> ir_collect_mutable_captures(p, b, child, &names))
     }
+}
+
+fn ir_nodes_have_lambda(nodes: [BodyNode]) -> Bool Never! {
+    loop node in nodes {
+        if node.kind == .Lambda(_) -> return true
+    }
+    false
 }
 
 // A top-level infallible function whose written failure set is empty
