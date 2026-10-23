@@ -5,16 +5,28 @@ use jet_parser.[parse_generated_source]
 // Prelude source SEMA_PRELUDE_UNITS_SOURCE (Registration/PreludeUnits.jet). This
 // stage changes AST items only; it never adds a physical/loaded module.
 // Parsing it (exact scales included) is most of a small program's compile,
-// so it runs only once some source mentions a catalog unit
+// so the compiler's own build parses it once into SEMA_UNITS_CATALOG, read in
+// place only once some source mentions a catalog unit
 // (sema_units_mentioned); the scan for mentions reads the outline.
+struct SemaUnitsCatalog {
+    families: [UnitFamilyDef]
+    diagnostics: [Diagnostic]
+}
+
+SEMA_UNITS_CATALOG :: comptime { sema_units_catalog_build() }
+
 fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
+    loop diagnostic in SEMA_UNITS_CATALOG.diagnostics -> &diagnostics.push(diagnostic)
+    SEMA_UNITS_CATALOG.families
+}
+
+fn sema_units_catalog_build() -> SemaUnitsCatalog {
     parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
-    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
-    if sema_has_error_since(parsed.diagnostics, 0) -> return [UnitFamilyDef]{}
+    if sema_has_error_since(parsed.diagnostics, 0) -> return SemaUnitsCatalog{families: [UnitFamilyDef]{}, diagnostics: parsed.diagnostics}
     families := [UnitFamilyDef]{}
     loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
     sema_units_resolve_standard(&families)
-    families
+    SemaUnitsCatalog{families: ^families, diagnostics: parsed.diagnostics}
 }
 
 // One catalog family's name and its members' names, in catalog order.
@@ -28,7 +40,10 @@ struct SemaUnitsOutlineFamily {
 // `#UnitFamily(Name, …) {` opens family Name, each indented line inside
 // names one member (`name` or `name(…)`), and `}` closes the family. The
 // parser test standard_units_outline_matches_the_parsed_catalog pins this to
-// the parsed catalog, family for family and member for member.
+// the parsed catalog, family for family and member for member. The compiler's
+// own build folds it into SEMA_UNITS_OUTLINE, which every run reads in place.
+SEMA_UNITS_OUTLINE :: comptime { sema_units_catalog_outline() }
+
 fn sema_units_catalog_outline() -> [SemaUnitsOutlineFamily] Never! {
     source :: SEMA_PRELUDE_UNITS_SOURCE.bytes()
     families := [SemaUnitsOutlineFamily]{}
@@ -108,6 +123,9 @@ struct SemaUnitsCatalogNames {
     wanted: NameTable
     type_names: [[String]]
 }
+
+// The names of SEMA_UNITS_OUTLINE, folded when the compiler is built.
+SEMA_UNITS_NAMES :: comptime { sema_units_catalog_names(SEMA_UNITS_OUTLINE) }
 
 fn sema_units_catalog_names(outline: [SemaUnitsOutlineFamily]) -> SemaUnitsCatalogNames Never! {
     wanted := name_table()

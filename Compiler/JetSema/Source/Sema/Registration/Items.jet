@@ -1559,7 +1559,28 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
     }
 }
 
+// The original Prelude error module and its parse diagnostics, built once
+// when the compiler itself is built: a run reads this frozen constant in
+// place instead of parsing SEMA_PRELUDE_ERROR_SOURCE again.
+struct SemaRegistrationOriginalErrorModule {
+    input: SemaRegistrationModuleInput?
+    diagnostics: [Diagnostic]
+}
+
+SEMA_REGISTRATION_ORIGINAL_ERROR_MODULE :: comptime { sema_registration_original_error_build() }
+
 fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRegistrationModuleInput? {
+    loop diagnostic in SEMA_REGISTRATION_ORIGINAL_ERROR_MODULE.diagnostics -> &diagnostics.push(diagnostic)
+    SEMA_REGISTRATION_ORIGINAL_ERROR_MODULE.input
+}
+
+fn sema_registration_original_error_build() -> SemaRegistrationOriginalErrorModule {
+    diagnostics := [Diagnostic]{}
+    input :: sema_registration_original_error_parse(&diagnostics)
+    SemaRegistrationOriginalErrorModule{input: input, diagnostics: ^diagnostics}
+}
+
+fn sema_registration_original_error_parse(diagnostics: &[Diagnostic]) -> SemaRegistrationModuleInput? {
     // Only this exact embedded original parse can mint the DefaultErr marker.
     parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
@@ -2429,11 +2450,14 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
 // source to prepare.
 SEMA_REGISTRATION_PREPARE_MIN_BYTES_PER_THREAD :: 262144
 
-// One module's sema_registration_prepare_module_row inputs.
+// One module's sema_registration_prepare_module_row inputs. A `frozen` job is
+// the original Prelude error module as the driver loads it: its prepared row
+// is SEMA_REGISTRATION_FROZEN_ERROR_ROW's.
 struct SemaRegistrationPrepareJob {
     input: SemaRegistrationModuleInput
     templates: [SemaGenericModuleSource]
     policies: [UserPolicyDecl]
+    frozen: Bool{false}
 }
 
 // A prepared module row and the diagnostics its preparation reported.
@@ -2444,12 +2468,48 @@ struct SemaRegistrationPreparedRow {
 
 fn sema_registration_prepare_job(job: ^SemaRegistrationPrepareJob) -> SemaRegistrationPreparedRow {
     owned := ^job
+    if owned.frozen {
+        // copy: the row is the constant's; the graph owns this one.
+        if SEMA_REGISTRATION_FROZEN_ERROR_ROW.row == .Val(row) -> return row.copy()
+    }
     input := ^owned.input
     templates := ^owned.templates
     policies := ^owned.policies
     diagnostics := [Diagnostic]{}
     module_row := sema_registration_prepare_module_row(^input, templates, policies, &diagnostics)
     SemaRegistrationPreparedRow{module_row: ^module_row, diagnostics: ^diagnostics}
+}
+
+// The original Prelude error module's input as the driver loads it, and its
+// prepared row, folded when the compiler is built. The driver's input has the
+// identity jet_driver_module_identity gives (`module:<package length>:
+// <package>:<path>`) and the module path without its `.jet`
+// (jet_driver_module_display).
+struct SemaRegistrationFrozenErrorRow {
+    input: SemaRegistrationModuleInput?
+    row: SemaRegistrationPreparedRow?
+}
+
+SEMA_REGISTRATION_FROZEN_ERROR_ROW :: comptime { sema_registration_frozen_error_row_build() }
+
+fn sema_registration_frozen_error_row_build() -> SemaRegistrationFrozenErrorRow {
+    parse_diagnostics := [Diagnostic]{}
+    original := sema_registration_original_error_module(&parse_diagnostics) ?? return SemaRegistrationFrozenErrorRow{input: None, row: None}
+    original.module_identity = "module:{original.package_identity.len()}:{original.package_identity}:{original.module_path}"
+    if original.module_path.ends_with(".jet") -> original.module_path = original.module_path.slice(0, original.module_path.len() - 4)
+    input :: original.copy()
+    row_diagnostics := [Diagnostic]{}
+    module_row := sema_registration_prepare_module_row(^original, [SemaGenericModuleSource]{}, [UserPolicyDecl]{}, &row_diagnostics)
+    SemaRegistrationFrozenErrorRow{input: Val(input), row: Val(SemaRegistrationPreparedRow{module_row: ^module_row, diagnostics: ^row_diagnostics})}
+}
+
+// Whether a prepare job of `input` with no templates and no policies may read
+// the frozen error row: the input is the frozen one, field for field, after
+// every rewrite that precedes preparation (unit families, marker bindings).
+fn sema_registration_frozen_error_row_matches(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl]) -> Bool {
+    if templates.len() > 0 || policies.len() > 0 -> return false
+    if SEMA_REGISTRATION_FROZEN_ERROR_ROW.input == .Val(frozen) -> return input.source_file == frozen.source_file && input == frozen
+    false
 }
 
 // The prepared row of each job, in job order. A module's preparation reads
@@ -3502,8 +3562,8 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // takes no catalog families.
     prepared_inputs := ^inputs
     sema_registration_retain_original_error_module(&prepared_inputs, &diagnostics)
-    units_outline :: sema_units_catalog_outline()
-    units_names :: sema_units_catalog_names(units_outline)
+    units_outline :: SEMA_UNITS_OUTLINE
+    units_names :: SEMA_UNITS_NAMES
     units_mentions :: sema_units_scan_mentions(&prepared_inputs, canonical_effect_module_identity, units_names.wanted, threads)
     // The catalog is parsed at the first input that mentions a unit; an input
     // that mentions none takes no family.
@@ -3551,7 +3611,8 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         input := &prepared_inputs.pop() ?? break
         templates := &imported_templates.pop() ?? break
         policies :: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
-        &jobs.push(SemaRegistrationPrepareJob{input: ^input, templates: ^templates, policies: policies})
+        frozen :: sema_registration_frozen_error_row_matches(input, templates, policies)
+        &jobs.push(SemaRegistrationPrepareJob{input: ^input, templates: ^templates, policies: policies, frozen: frozen})
     }
     prepared := sema_registration_prepare_rows(^jobs, threads)
     // Each prepared row moves out (front to back) into its module row, after
