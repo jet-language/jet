@@ -6509,7 +6509,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // #3980: lower only the Core source bodies the program reaches (Rust
     // TIR `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := jet_codegen_reachable_core_rows(checked_functions, ^lowering_candidates, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules))
+    lowering_rows := jet_codegen_reachable_core_rows(&checked_functions, ^lowering_candidates, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules), request.compiler_threads)
     sema_functions := [TFunc]{}
     unlowered_functions := [TFunc]{}
     jet_driver_partition_checked_functions(&checked_functions, lowering_rows, &sema_functions, &unlowered_functions)

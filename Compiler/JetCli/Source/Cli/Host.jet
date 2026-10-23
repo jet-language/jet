@@ -18,6 +18,7 @@ use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverDocModule,
+    JetDriverForeignLinkFacts,
     JetDriverLoweringInputs,
     JetDriverRustForeignError,
     JetDriverVerbOutput,
@@ -55,6 +56,7 @@ use jet_foundation.[
     gate_ledger_push,
     mir_sha256_hex,
     compiler_transfer_rows,
+    compiler_threads_failure_text,
     CompilerThreads,
     TConstantDef,
     TImplDef,
@@ -360,7 +362,11 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // runtime of `runtime_dir` into a static x86-64 executable at
 // `executable_path` (the one compiled runtime). Link inputs are always
 // [object, runtime, C closure...]; a program with a C closure links the
-// Jet-only runtime object instead of the pack.
+// Jet-only runtime object instead of the pack. The C closure reads only the
+// checked foreign facts, so it is realized on a thread of its own (its C
+// compiler children and archive digests, then the read of the runtime it
+// selects) while this thread builds the object; its failures are reported
+// after the object's, as when they came after it.
 // A function the builder can't build becomes one trap, so selection still
 // runs over the whole module and the failure lists every builder and
 // selection finding. `level` is the IR passes' optimization level
@@ -370,7 +376,8 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
 // trace sink: `native.rust_foreign` (a Rust foreign helper's realization),
 // `ir.build`, `ir.opt` (level > 0), `ir.x64` (on the threads the compile
-// admits), `ir.object`, `native.foreign` (the C closure) and `native.link`.
+// admits), `ir.object`, `native.foreign` (the wait for the C closure and the
+// runtime's bytes once the object is built) and `native.link`.
 // A span a failure returns from stays open.
 fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     trace_sink :: result.trace_sink
@@ -384,87 +391,33 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     }
     if trace_sink == .Val(sink) -> sink.end("native.rust_foreign", if helper == None -> 0 else -> 1)
     rust_helper :: if helper == .Val(artifact) -> Val(jet_cli_rust_foreign_archive(artifact)) else -> None
-    declarations := jet_cli_checked_declarations(&checked)
-    // The program's C closure defines its foreign functions' symbols.
-    closure_symbols := [String:Bool]{}
-    loop row in declarations.foreign -> closure_symbols[row.symbol.copy()] = true
-    if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", result.compiler_threads)
-    function_count :: built.program.functions.len()
-    if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
-    rows := [String]{}
-    loop failure in built.failures {
-        item :: "{failure.name} [{failure.key}]"
-        message :: "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
-        if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
-        if built.program.function_rows.get(failure.key) == .Val(id) -> jet_cli_ir_trap(&built.program.functions[id])
+    // The runtime's key and export list are read before either thread
+    // starts: queued behind the closure thread's archive reads, these small
+    // reads would stall the object between ir.build and ir.opt.
+    runtime_exports :: jet_cli_runtime_exports(runtime_dir)
+    runtime_key :: if runtime_exports.failure == None -> Val(runtime_exports.key.copy()) else -> None
+    objects := [JetCLINativeObject]{}
+    closures := [JetCLIForeignRealized]{}
+    // copy: the closure's thread owns its inputs; this function still reads them.
+    foreign_link :: result.foreign_link.copy()
+    task.group native_foreign {
+        realizing :: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key)
+        object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census)
+        if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
+        &objects.push(^object)
+        &closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
     }
-    // A runtime call the runtime does not export would fail the whole link;
-    // its function fails here instead, like any construct the builder rejects.
-    key :: jet_cli_runtime_key(runtime_dir) ?? return Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})
-    exports_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
-    exports_text :: cli_files.read(exports_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})
-    exported := [String:Bool]{}
-    loop line in exports_text.split("\n").to_list() {
-        if line != "" -> exported[line] = true
-    }
-    loop index in 0..<built.program.functions.len() {
-        missing := String?{None}
-        loop (at, op) in built.program.functions[index].op {
-            if op == .CallRuntime && exported.get(built.program.names[built.program.functions[index].a[at]]) == None && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None {
-                missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
-                break
-            }
-        }
-        symbol :: missing ?? next
-        item :: "{built.program.functions[index].name} [{built.program.functions[index].key}]"
-        message :: "runtime route {symbol}: the Jet runtime {key} exports no `{symbol}`"
-        if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
-        jet_cli_ir_trap(&built.program.functions[index])
-    }
-    // The memory term is read now: the compile before this holds most of it.
-    threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    if level > 0 {
-        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(&built.program, level, threads)
-        if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
-    }
-    if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-    compiled := ir_x64_compile_module(^built.program, threads)
-    if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
-    loop error in compiled.errors {
-        if keep_going -> &census.push(jet_cli_keep_going_row("ir.x64", "-", error)) else -> &rows.push(error)
-    }
-    if rows.len() > 0 -> return Val(JetCLINativeFailure.Build{rows: rows})
-    if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
-    object := ir_x64_object(^compiled)
-    if trace_sink == .Val(sink) {
-        sink.end("ir.object", function_count)
-        sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)
-    }
-    if object.errors.len() > 0 {
-        if keep_going {
-            loop error in object.errors -> &census.push(jet_cli_keep_going_row("ir.object", "-", error))
-        }
-        if !keep_going || object.bytes.len() == 0 -> return Val(JetCLINativeFailure.Object{errors: object.errors})
-    }
-    if trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
-    foreign := JetCLIForeignInputs?{None}
-    foreign_error := ""
-    if jet_cli_native_c_inputs(result.foreign_link, rust_helper, sources, runtime_dir) == {
-        .Ok(found) -> foreign = Val(found)
-        .Err(error) -> foreign_error = error.message
-    }
-    if trace_sink == .Val(sink) -> sink.end("native.foreign", if foreign == .Val(found) -> found.names.len() else -> 0)
-    closure :: foreign ?? return Val(JetCLINativeFailure.Foreign{message: foreign_error})
-    runtime_file :: if closure.platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
-    runtime_path :: "{runtime_dir}/{key}/{runtime_file}"
-    runtime :: cli_files.read_bytes(runtime_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"})
+    built := &objects.pop() ?? panic("the native route lost its object")
+    if built.failure == .Val(failure) -> return Val(failure)
+    realized := &closures.pop() ?? panic("the native route lost its C closure")
+    if trace_sink == .Val(sink) -> sink.end("native.foreign", if realized.inputs == .Val(found) -> found.names.len() else -> 0)
+    closure :: realized.inputs ?? return Val(JetCLINativeFailure.Foreign{message: realized.error})
+    runtime := ^realized.runtime ?? return Val(JetCLINativeFailure.Runtime{what: realized.runtime_error})
     // Input names appear only in link diagnostics; the image is a function of
     // the bytes and their order. The object and runtime move in, uncopied; the
     // object never touches the disk.
-    names := [String]{"{executable_path} (program object)", runtime_path}
-    bytes := [[U8]]{^object.bytes, ^runtime}
+    names := [String]{"{executable_path} (program object)", realized.runtime_path}
+    bytes := [[U8]]{^built.bytes, ^runtime}
     loop name in closure.names -> &names.push(name)
     loop input in closure.bytes -> &bytes.push(input)
     input_count :: names.len()
@@ -483,6 +436,139 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     cli_files.write_bytes(executable_path, image.bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {executable_path}: {err}"})
     cli_files.set_mode(executable_path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {executable_path} executable: {err}"})
     None
+}
+
+// The program's C closure as its own thread realized it
+// (jet_cli_native_foreign_realize): the link inputs, else why it failed;
+// then the runtime the link reads from `runtime_path` (the Jet-only object
+// for a platform closure, else the pack), else why reading it failed.
+struct JetCLIForeignRealized {
+    inputs: JetCLIForeignInputs?
+    error: String
+    runtime: [U8]?
+    runtime_path: String
+    runtime_error: String
+}
+
+// `runtime_key` is None when the object's route already fails on it; the
+// runtime is read only for a realized closure, as the link would read it.
+fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?) -[FS, Env, Exec, Time.Wait]> JetCLIForeignRealized {
+    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_error: ""}
+    platform := false
+    if jet_cli_native_c_inputs(facts, rust_helper, sources, runtime_dir) == {
+        .Ok(found) -> {
+            platform = found.platform
+            realized.inputs = Val(found)
+        }
+        .Err(error) -> {
+            realized.error = error.message
+            return realized
+        }
+    }
+    key :: runtime_key ?? return realized
+    runtime_file :: if platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
+    realized.runtime_path = "{runtime_dir}/{key}/{runtime_file}"
+    if cli_files.read_bytes(realized.runtime_path) == {
+        .Ok(bytes) -> realized.runtime = Val(bytes)
+        .Err(err) -> realized.runtime_error = "couldn't read the Jet runtime {realized.runtime_path}: {err}"
+    }
+    realized
+}
+
+// The runtime's key and the symbols it exports (one per line of its
+// exports file), else the failure jet_cli_native_object reports where it
+// reads them.
+struct JetCLIRuntimeExports {
+    key: String
+    exported: [String:Bool]
+    failure: JetCLINativeFailure?
+}
+
+fn jet_cli_runtime_exports(runtime_dir: String) -[FS]> JetCLIRuntimeExports Never! {
+    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exported: [String:Bool]{}, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
+    exports_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
+    exports_text :: cli_files.read(exports_path) ?? return JetCLIRuntimeExports{key: key, exported: [String:Bool]{}, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
+    exported := [String:Bool]{}
+    loop line in exports_text.split("\n").to_list() {
+        if line != "" -> exported[line] = true
+    }
+    JetCLIRuntimeExports{key: key, exported: ^exported, failure: None}
+}
+
+// The program's object (jet_cli_native_executable), else why the route
+// stopped before it.
+struct JetCLINativeObject {
+    bytes: [U8]
+    failure: JetCLINativeFailure?
+}
+
+fn jet_cli_native_object_failure(failure: JetCLINativeFailure) -> JetCLINativeObject Never! {
+    JetCLINativeObject{bytes: [U8]{}, failure: Val(failure)}
+}
+
+// `ir.build`, `ir.opt`, `ir.x64` and `ir.object` of jet_cli_native_executable.
+fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String]) -[FS]> JetCLINativeObject Never! {
+    trace_sink :: result.trace_sink
+    checked := ^inputs
+    declarations := jet_cli_checked_declarations(&checked)
+    // The program's C closure defines its foreign functions' symbols.
+    closure_symbols := [String:Bool]{}
+    loop row in declarations.foreign -> closure_symbols[row.symbol.copy()] = true
+    if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
+    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", result.compiler_threads)
+    function_count :: built.program.functions.len()
+    if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
+    rows := [String]{}
+    loop failure in built.failures {
+        item :: "{failure.name} [{failure.key}]"
+        message :: "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
+        if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
+        if built.program.function_rows.get(failure.key) == .Val(id) -> jet_cli_ir_trap(&built.program.functions[id])
+    }
+    // A runtime call the runtime does not export would fail the whole link;
+    // its function fails here instead, like any construct the builder rejects.
+    if runtime.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
+    loop index in 0..<built.program.functions.len() {
+        missing := String?{None}
+        loop (at, op) in built.program.functions[index].op {
+            if op == .CallRuntime && runtime.exported.get(built.program.names[built.program.functions[index].a[at]]) == None && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None {
+                missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
+                break
+            }
+        }
+        symbol :: missing ?? next
+        item :: "{built.program.functions[index].name} [{built.program.functions[index].key}]"
+        message :: "runtime route {symbol}: the Jet runtime {runtime.key} exports no `{symbol}`"
+        if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
+        jet_cli_ir_trap(&built.program.functions[index])
+    }
+    // The memory term is read now: the compile before this holds most of it.
+    threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    if level > 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
+        _ := ir_optimize_module(&built.program, level, threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
+    }
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
+    compiled := ir_x64_compile_module(^built.program, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
+    loop error in compiled.errors {
+        if keep_going -> &census.push(jet_cli_keep_going_row("ir.x64", "-", error)) else -> &rows.push(error)
+    }
+    if rows.len() > 0 -> return jet_cli_native_object_failure(JetCLINativeFailure.Build{rows: rows})
+    if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
+    object := ir_x64_object(^compiled)
+    if trace_sink == .Val(sink) {
+        sink.end("ir.object", function_count)
+        sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)
+    }
+    if object.errors.len() > 0 {
+        if keep_going {
+            loop error in object.errors -> &census.push(jet_cli_keep_going_row("ir.object", "-", error))
+        }
+        if !keep_going || object.bytes.len() == 0 -> return jet_cli_native_object_failure(JetCLINativeFailure.Object{errors: object.errors})
+    }
+    JetCLINativeObject{bytes: ^object.bytes, failure: None}
 }
 
 // The body of a function the IR builder can't build: one Unreachable. Its

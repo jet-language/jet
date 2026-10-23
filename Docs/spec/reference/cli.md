@@ -612,10 +612,11 @@ counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
 intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
 `cli.authority`) and the native backend's (`native.sources`,
-`native.rust_foreign`, `native.lower`, `native.object` (per function: the LIR
-passes of the level, the one LIR check, x86-64 selection and encoding; then the
-object), `native.foreign`, `native.link`; one `native.build` for a test
-harness). The readable stream is written through
+`native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
+`native.foreign` (the wait for the program's C closure and the runtime's
+bytes, which its own thread realizes and reads while the object builds),
+`native.link`; one `native.build` around
+them for a test harness). The readable stream is written through
 `/dev/stderr`, so redirect stderr to a file with `2>>`, or use
 `--trace=FILE`. A trace that cannot be written stops; the compile does not.
 

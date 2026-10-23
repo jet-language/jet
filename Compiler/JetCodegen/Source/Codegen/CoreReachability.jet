@@ -1,11 +1,17 @@
 // Core source-body reachability (Rust Codegen/TIR/mod.rs
 // `reachable_core_source_callables`, `should_lower_imported_core_body`).
 use jet_foundation.[
+    CompilerThreads,
     TExpr,
     TFunc,
     TFuncKind,
     TStmt,
     TLambda,
+    compiler_take_rows,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
+    compiler_transfer_rows,
     tir_each_expr_child,
     tir_each_stmt_child,
     TStrFormat,
@@ -313,11 +319,20 @@ fn jet_codegen_core_reach_template_key(key: String) -> String Never! {
 // unreached derive then loses its impl row (Rust `lower_impl_rows`), so no
 // impl is emitted for a runtime-backed Core carrier (`Cursor` -> `JetCursor`,
 // `URL`/`MIME` -> `jet_std`).
-fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core_module_identities: [String]) -> [Bool] {
+//
+// The roots' bodies, nearly every kept body, are read on the threads
+// `threads` admits (jet_codegen_core_reach_root_targets); the rows they
+// reach, and the rows those reach, are then read on the calling thread.
+// Reachability is a closure, so the flags are the same for any thread
+// count. `functions` leaves for the threads and comes back unchanged.
+fn jet_codegen_reachable_core_rows(functions: &[TFunc], candidates: ^[Bool], core_module_identities: [String], threads: CompilerThreads) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
+    core_modules := [String:Bool]{}
+    loop identity in core_module_identities -> core_modules[identity] = true
     by_key := [String:Int]{}
     reachable := [Bool]{}
-    pending := [Int]{}
+    roots := [Int]{}
+    weights := [Int]{}
     fmt_keys := [String:String]{}
     loop (index, function) in functions {
         if !candidates[index] {
@@ -326,21 +341,125 @@ fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core
         }
         _ := &by_key.add(function.key, index)
         if jet_codegen_string_format_source(function) -> fmt_keys[function.name] = function.key
-        rooted :: !core_module_identities.contains(function.module_identity) || (!jet_codegen_core_reach_is_top_level(function.kind) && !function.synthetic) || jet_codegen_precise_source_target(function)
+        rooted :: !core_modules.has_key(function.module_identity) || (!jet_codegen_core_reach_is_top_level(function.kind) && !function.synthetic) || jet_codegen_precise_source_target(function)
         &reachable.push(rooted)
-        if rooted -> &pending.push(index)
+        if rooted {
+            &roots.push(index)
+            &weights.push(function.source_span.end - function.source_span.start)
+        }
     }
+    slot :: shared JetCodegenReachShared{functions: [[TFunc]]{compiler_take_rows<TFunc>(&functions)}, by_key: [[String:Int]]{^by_key}, fmt_keys: [[String:String]]{^fmt_keys}, roots: ^roots}
+    pending := [Int]{}
+    loop target in jet_codegen_core_reach_root_targets(slot, weights, threads) {
+        if !reachable[target] {
+            reachable[target] = true
+            &pending.push(target)
+        }
+    }
+    permit :: slot.guard_edit()
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
-        loop key in jet_codegen_core_reach_function_keys(functions[caller], functions, fmt_keys) {
-            target :: by_key.get(key) ?? by_key.get(jet_codegen_core_reach_template_key(key)) ?? next
+        found := [Int]{}
+        // Passed straight through: a local binding of the guarded rows would copy them.
+        jet_codegen_core_reach_row_targets(permit.value.functions[0], permit.value.by_key[0], permit.value.fmt_keys[0], caller, &found)
+        loop target in found {
             if !reachable[target] {
                 reachable[target] = true
                 &pending.push(target)
             }
         }
     }
+    back := &permit.value.functions.pop() ?? panic("the checked functions left the reachability state")
+    compiler_transfer_rows<TFunc>(&functions, &back)
     reachable
+}
+
+// What every reachability thread reads: the checked functions, their rows by
+// key and the format helpers' keys, each the one row of its list, and the
+// rooted rows.
+struct JetCodegenReachShared {
+    functions: [[TFunc]]
+    by_key: [[String:Int]]
+    fmt_keys: [[String:String]]
+    roots: [Int]
+}
+
+// The rows one part of the roots names: its number and the rows.
+struct JetCodegenReachPart {
+    part: Int
+    targets: [Int]
+}
+
+// Root source bytes per admitted reachability thread.
+JET_CODEGEN_REACH_MIN_BYTES_PER_THREAD :: 65536
+// Parts per admitted reachability thread: a thread that drew light bodies
+// claims more while another reads a heavy one.
+JET_CODEGEN_REACH_PARTS_PER_THREAD :: 4
+
+// Every row a root's body names, the roots read on the threads `threads`
+// admits for their source bytes (`weights`, one per root), in consecutive
+// parts each thread claims until none is left, joined in part order.
+fn jet_codegen_core_reach_root_targets(slot: Shared<JetCodegenReachShared>, weights: [Int], threads: CompilerThreads) -> [Int] {
+    total := 0
+    loop weight in weights -> total += weight
+    workers :: compiler_threads_admit(threads, weights.len(), total, JET_CODEGEN_REACH_MIN_BYTES_PER_THREAD, 0, 0)
+    count := workers * JET_CODEGEN_REACH_PARTS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    if workers <= 1 || count <= 1 -> return jet_codegen_core_reach_part_targets(slot, 0, weights.len())
+    bounds :: compiler_threads_partition(weights, count)
+    queue :: shared JetCodegenPartQueue{next: 0}
+    parts := [[Int]]{}
+    loop _ in 0..<count -> &parts.push([Int]{})
+    jet_codegen_core_reach_claimers(slot, bounds, queue, 0, workers, &parts)
+    targets := [Int]{}
+    loop part in 0..<count -> &targets.extend(compiler_take_rows<Int>(&parts[part]))
+    targets
+}
+
+// Runs claiming threads `from..<workers`, one task each, and moves every
+// part a thread returned into `parts`.
+fn jet_codegen_core_reach_claimers(slot: Shared<JetCodegenReachShared>, bounds: [Int], queue: Shared<JetCodegenPartQueue>, from: Int, workers: Int, parts: &[[Int]]) {
+    if from >= workers -> return
+    task.group core_reach_threads {
+        head :: task jet_codegen_core_reach_claimed(slot, bounds, queue)
+        jet_codegen_core_reach_claimers(slot, bounds, queue, from + 1, workers, &parts)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            parts[done.part] = compiler_take_rows<Int>(&done.targets)
+        }
+    }
+}
+
+// One thread: the rows named by the parts it claims until none is left.
+fn jet_codegen_core_reach_claimed(slot: Shared<JetCodegenReachShared>, bounds: [Int], queue: Shared<JetCodegenPartQueue>) -> [JetCodegenReachPart] {
+    claimed := [JetCodegenReachPart]{}
+    loop {
+        part :: jet_codegen_lower_claim(queue)
+        if part >= bounds.len() - 1 -> break
+        &claimed.push(JetCodegenReachPart{part: part, targets: jet_codegen_core_reach_part_targets(slot, bounds[part], bounds[part + 1])})
+    }
+    claimed
+}
+
+// The rows roots [first, last) name, in root order.
+fn jet_codegen_core_reach_part_targets(slot: Shared<JetCodegenReachShared>, first: Int, last: Int) -> [Int] {
+    inputs :: slot.guard_read()
+    targets := [Int]{}
+    loop position in first..<last {
+        // Passed straight through: a local binding of the guarded rows would copy them.
+        jet_codegen_core_reach_row_targets(inputs.value.functions[0], inputs.value.by_key[0], inputs.value.fmt_keys[0], inputs.value.roots[position], &targets)
+    }
+    targets
+}
+
+// The rows checked function row `row` names (resolved by key, or by its
+// generic declaration's key), appended to `targets`.
+fn jet_codegen_core_reach_row_targets(functions: [TFunc], by_key: [String:Int], fmt_keys: [String:String], row: Int, targets: &[Int]) Never! {
+    loop key in jet_codegen_core_reach_function_keys(functions[row], functions, fmt_keys) {
+        target :: by_key.get(key) ?? by_key.get(jet_codegen_core_reach_template_key(key)) ?? next
+        &targets.push(target)
+    }
 }
 
 #Test("Precise reachability roots the closed source registry at any Core path") {
