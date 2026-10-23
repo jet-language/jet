@@ -1,0 +1,14 @@
+use core.encoding.hex as comptime_diff_hex
+use core.reactive.loadable as loadable
+COMPTIME_VALUE :: prep { loadable.loaded(7).loaded() ?? 0 }
+
+fn run() {
+    r :: loadable.loaded(7).loaded() ?? 0
+    comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

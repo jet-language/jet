@@ -1,0 +1,10 @@
+
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {
+    text := files.read("inclusive11-input.xml") ?? panic("read")
+    tree := xml.parse(text) ?? panic("parse")
+    options := xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }
+    print(xml.canonical(tree, options) ?? panic("canonical"))
+}

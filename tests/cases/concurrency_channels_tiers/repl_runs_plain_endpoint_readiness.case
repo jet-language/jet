@@ -1,0 +1,11 @@
+# tests/concurrency_channels_tiers.rs::repl_runs_plain_endpoint_readiness at tests/concurrency_channels_tiers.rs:86; hand-port
+# The in-process REPL transcript is gone (`jet repl` is E2104 in the Jet-hosted CLI); the transcript source runs as a program on `jet run` and the forced interpreter (the REPL tier it exercised) and keeps the transcript's exact output (minus the REPL's `ok` acknowledgement of the definitions).
+fixture: repl_runs_plain_endpoint_readiness.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "7\n"
+step interp: jet run --interpret main.jet
+exit: 0
+stdout: = "7\n"

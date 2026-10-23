@@ -1,0 +1,31 @@
+
+use core.files as files
+
+struct Pair { left: files.TempFile, right: files.TempFile }
+
+#Pre(pair.left.path != pair.right.path, "distinct owners")
+fn inspect(pair: Pair) {
+    print(files.exists(pair.left.path))
+    print(files.exists(pair.right.path))
+}
+
+fn exercise() -> String {
+    pair := Pair{
+        left: files.temp_file("alias-left") ?? panic("left"),
+        right: files.temp_file("alias-right") ?? panic("right")
+    }
+    left :: pair.left.path
+    right :: pair.right.path
+    inspect(pair)
+    print(files.exists(left))
+    print(files.exists(right))
+    close(^pair.left)
+    print(!files.exists(left))
+    print(files.exists(right))
+    right
+}
+
+fn run() {
+    remaining :: exercise()
+    print(!files.exists(remaining))
+}

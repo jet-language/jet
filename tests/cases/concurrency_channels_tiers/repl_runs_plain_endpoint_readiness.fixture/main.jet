@@ -1,0 +1,13 @@
+
+fn wait_for_value(receiver: Receiver<Int>) {
+    if {
+        value, receiver -> print(value)
+        after 0ms -> print(-1)
+    }
+}
+
+fn run() {
+    (sender, receiver) :: channel<Int>()
+    sender.send(7)
+    wait_for_value(receiver)
+}

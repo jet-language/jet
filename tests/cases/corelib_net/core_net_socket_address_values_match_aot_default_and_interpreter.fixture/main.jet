@@ -1,0 +1,19 @@
+
+use core.net as net
+
+fn run() -[IO, Net, Time.Wait]> {
+    address :: net.socket_addr("::1", 53) ?? panic("socket address")
+    print(net.socket_to_string(address))
+    if net.socket_addr("::1", 65536) == {
+        .Ok(_) -> panic("out-of-range port succeeded")
+        .Err(error) -> {
+            print(net.error_operation(error))
+            print(net.error_address(error) ?? "missing address")
+            print(net.error_message(error))
+            if error == {
+                .InvalidInput(_) -> { print("invalid-input") }
+                else -> { panic("wrong network error kind") }
+            }
+        }
+    }
+}

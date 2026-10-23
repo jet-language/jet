@@ -1,0 +1,12 @@
+
+use core.net as net
+use core.net.tls as tls
+
+fn run() -[Net, Time.Wait]> {
+    roots :: tls.RootCertificates.from_pem("invalid".bytes()) ?? return
+    config :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? return
+    bounded :: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? return
+    protocols :: bounded.with_alpn(["http/1.1"]) ?? return
+    tcp :: net.tcp_connect("127.0.0.1:1") ?? return
+    _ :: tls.client(^tcp, host: "localhost", config: protocols, deadline: 1s)
+}

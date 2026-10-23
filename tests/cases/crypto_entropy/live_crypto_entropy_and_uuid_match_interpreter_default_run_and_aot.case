@@ -1,0 +1,19 @@
+# tests/crypto_entropy.rs::live_crypto_entropy_and_uuid_match_interpreter_default_run_and_aot at tests/crypto_entropy.rs:507; hand-port
+# The in-process load/check of the bundle is subsumed by the tier runs.
+fixture: live_crypto_entropy_and_uuid_match_interpreter_default_run_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+stderr: empty
+step interp: jet run --interpret main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+stderr: empty

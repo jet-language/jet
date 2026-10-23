@@ -1,0 +1,10 @@
+# tests/core_encoding_foundations.rs::user_duplicate_display_is_rejected_as_e0908 at tests/core_encoding_foundations.rs:59; hand-port
+fixture: user_duplicate_display_is_rejected_as_e0908.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: nonzero
+stderr: count "Error [" = 1 # original assert_eq: the error codes are exactly ["E0908"]
+stderr: ~ "Error [E0908]" # original assert
+stderr: ~ "UserMessage" # original: the diagnostic names its owner
+stderr: ~ "Display" # original: the diagnostic names its trait

@@ -1,0 +1,9 @@
+# tests/core_net_tls.rs::configured_tls_client_keeps_native_builder_identity_and_exact_labels at tests/core_net_tls.rs:98; hand-port
+fixture: configured_tls_client_keeps_native_builder_identity_and_exact_labels.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build good/main.jet
+exit: 0
+step: jet check bad/main.jet
+exit: nonzero
+stderr: ~ "Error [E0764]: `tls.client` has no parameter labelled `host`" # original: code E0764 with this exact what

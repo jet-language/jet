@@ -1,0 +1,14 @@
+# tests/core_runtime_units.rs::user_program_cannot_import_a_runtime_unit at tests/core_runtime_units.rs:18; hand-port
+fixture: user_program_cannot_import_a_runtime_unit.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check alias/main.jet
+exit: nonzero
+stderr: ~ "[E1001]" # original: code E1001
+stderr: ~ "is private to Core" # original: what names the Core-private unit
+stderr: ~ "`core.text`" # original: fix points at core.text
+step: jet check grouped/main.jet
+exit: nonzero
+stderr: ~ "[E1001]" # original: code E1001
+stderr: ~ "is private to Core" # original: what names the Core-private unit
+stderr: ~ "`core.text`" # original: fix points at core.text

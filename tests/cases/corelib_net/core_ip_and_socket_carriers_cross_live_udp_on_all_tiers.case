@@ -1,0 +1,19 @@
+# tests/corelib_net.rs::core_ip_and_socket_carriers_cross_live_udp_on_all_tiers at tests/corelib_net.rs:141; hand-port
+# main.jet is tests/net_carrier_interop.jet, which the original included.
+fixture: core_ip_and_socket_carriers_cross_live_udp_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "::ffff:192.0.2.1\n[fe80::1%4294967295]:65535\n4\n127.0.0.1\n127.0.0.1\ntrue\nA�B\n4\ntrue\n"
+stderr: empty
+step interp: jet run --interpret main.jet
+exit: 0
+stdout: = "::ffff:192.0.2.1\n[fe80::1%4294967295]:65535\n4\n127.0.0.1\n127.0.0.1\ntrue\nA�B\n4\ntrue\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "::ffff:192.0.2.1\n[fe80::1%4294967295]:65535\n4\n127.0.0.1\n127.0.0.1\ntrue\nA�B\n4\ntrue\n"
+stderr: empty

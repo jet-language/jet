@@ -1,0 +1,14 @@
+use core.encoding.hex as comptime_diff_hex
+use core.encoding.json as json
+COMPTIME_VALUE :: prep { json.canonical(json.parse("{{\"b\":1,\"a\":2}}") ?? panic("bad")) ?? panic("value is not canonical JSON") }
+
+fn run() {
+    r :: json.canonical(json.parse("{{\"b\":1,\"a\":2}}") ?? panic("bad")) ?? panic("value is not canonical JSON")
+    comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

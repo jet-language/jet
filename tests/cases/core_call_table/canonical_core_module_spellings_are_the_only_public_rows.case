@@ -1,0 +1,14 @@
+# tests/core_call_table.rs::canonical_core_module_spellings_are_the_only_public_rows at tests/core_call_table.rs:685; hand-port
+# The original read the Rust dispatcher table (jet_foundation::Syntax::CORE_CALLS / core_module_for_alias). Its
+# Jet-observable meaning: core.tasks and core.service resolve; the retired core.task and core.services spellings do not.
+fixture: canonical_core_module_spellings_are_the_only_public_rows.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check tasks/main.jet
+exit: 0
+step: jet check service/main.jet
+exit: 0
+step: jet check task/main.jet
+exit: nonzero
+step: jet check services/main.jet
+exit: nonzero

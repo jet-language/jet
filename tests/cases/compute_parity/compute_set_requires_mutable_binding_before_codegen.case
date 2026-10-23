@@ -1,0 +1,21 @@
+# tests/compute_parity.rs::compute_set_requires_mutable_binding_before_codegen at tests/compute_parity.rs:98; hand-port
+# immutable.jet is tests/ui/compute_set_immutable.jet, which the original included.
+fixture: compute_set_requires_mutable_binding_before_codegen.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check immutable/main.jet
+exit: nonzero
+stderr: ~ "Error [E0111]: `tensor` was made with `::`, so it can't be changed" # original assert_eq on what
+stderr: ~ "Why: `set` will change this value, so it must be mutable (`:=`)" # original assert_eq on why
+stderr: ~ "Fix: Declare it with `tensor := ...`" # original assert_eq on fix
+step run: jet run mutable/main.jet
+exit: 0
+stdout: = "values:[0.0, 3.0, 0.0, 0.0]\n"
+step interp: jet run --interpret mutable/main.jet
+exit: 0
+stdout: = "values:[0.0, 3.0, 0.0, 0.0]\n"
+step build: jet build mutable/main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "values:[0.0, 3.0, 0.0, 0.0]\n"

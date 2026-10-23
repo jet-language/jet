@@ -1,0 +1,17 @@
+use core.encoding.hex as comptime_diff_hex
+use core.archive.zstd as zstd
+
+BYTES :: prep { [U8]{ 72, 101, 108, 108, 111 } }
+ENCODED :: prep { zstd.compress(BYTES) ?? [U8]{} }
+EXPECTED :: prep { zstd.decompress(ENCODED) ?? [U8]{} }
+
+fn run() {
+    restored :: zstd.decompress(ENCODED) ?? [U8]{}
+    comptime_diff_frame("{EXPECTED}", "{restored}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

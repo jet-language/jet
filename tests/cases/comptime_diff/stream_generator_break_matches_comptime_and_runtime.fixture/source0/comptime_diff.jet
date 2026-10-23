@@ -1,0 +1,27 @@
+use core.encoding.hex as comptime_diff_hex
+
+fn stop_after_two() -> Stream<Int> {
+    yield 1
+    yield 2
+    yield 3
+}
+
+fn first() -> [Int] {
+    return loop value in stop_after_two() -> {
+        if value == 2 { break }
+        value
+    }
+}
+
+EXPECTED :: prep { first() }
+
+fn run() {
+    actual :: first()
+    comptime_diff_frame("{EXPECTED}", "{actual}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

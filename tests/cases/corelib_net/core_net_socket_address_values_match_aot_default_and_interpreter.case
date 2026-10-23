@@ -1,0 +1,18 @@
+# tests/corelib_net.rs::core_net_socket_address_values_match_aot_default_and_interpreter at tests/corelib_net.rs:8; hand-port
+fixture: core_net_socket_address_values_match_aot_default_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "[::1]:53\nsocket_addr\n::1\nport must be in 0..=65535\ninvalid-input\n"
+stderr: empty
+step interp: jet run --interpret main.jet
+exit: 0
+stdout: = "[::1]:53\nsocket_addr\n::1\nport must be in 0..=65535\ninvalid-input\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "[::1]:53\nsocket_addr\n::1\nport must be in 0..=65535\ninvalid-input\n"
+stderr: empty

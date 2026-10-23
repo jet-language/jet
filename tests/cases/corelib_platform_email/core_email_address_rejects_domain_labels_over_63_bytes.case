@@ -1,0 +1,15 @@
+# tests/corelib_platform_email.rs::core_email_address_rejects_domain_labels_over_63_bytes at tests/corelib_platform_email.rs:6; hand-port
+fixture: core_email_address_rejects_domain_labels_over_63_bytes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: lines = ["true", "overlong-label-rejected"] # original: trimmed stdout is the two lines true, overlong-label-rejected
+step interp: jet run --interpret main.jet
+exit: 0
+stdout: lines = ["true", "overlong-label-rejected"] # original: trimmed stdout is the two lines true, overlong-label-rejected
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: lines = ["true", "overlong-label-rejected"] # original: trimmed stdout is the two lines true, overlong-label-rejected

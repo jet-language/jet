@@ -1,0 +1,14 @@
+use core.encoding.hex as comptime_diff_hex
+use core.encoding.cbor as cbor
+COMPTIME_VALUE :: prep { cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic("bad") }
+
+fn run() {
+    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic("bad")
+    comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}
