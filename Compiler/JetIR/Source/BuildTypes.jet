@@ -2773,11 +2773,11 @@ fn ir_render_list(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
 // Lists: the address of a 24-byte header (len, cap, data); elements lie at
 // data + index * stride (Lower Lists.jet).
 
-// Lower lower_list_stride: a fixed-width integer or Float32 is packed at its
-// width; any other element takes its size rounded up to whole words.
+// Lower lower_list_stride: a fixed-width integer, Float32 or Bool is packed
+// at its width; any other element takes its size rounded up to whole words.
 fn ir_list_stride(m: IRModule, row: Int) -> Int Never! {
     kind :: m.types[row].kind
-    if kind == .Word || kind == .Float32 -> return m.types[row].size
+    if kind == .Word || kind == .Float32 || kind == .Bool -> return m.types[row].size
     ir_align8(m.types[row].size)
 }
 
