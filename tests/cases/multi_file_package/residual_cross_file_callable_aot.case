@@ -1,0 +1,12 @@
+# tests/multi_file_package.rs::residual_cross_file_callable_aot at tests/multi_file_package.rs:105; hand-port
+# Claim: build --release of the callable chain succeeds, exit 0 (tests/multi_file_package.rs:107)
+# Claim: built binary stdout equals "7\n" (tests/multi_file_package.rs:108)
+# Fixture migrated: same as residual_cross_file_callable_default
+# Fixture migrated: package.jet is the callable one (name "orphan_callable"), written after the TIR package in the Rust helper, so it wins
+fixture: residual_cross_file_callable_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --release run.jet
+exit: 0 # tests/multi_file_package.rs:106-107 build_release_and_run_multi
+stderr: ~ "E2104" # tests/multi_file_package.rs:106-107 build_release_and_run_multi

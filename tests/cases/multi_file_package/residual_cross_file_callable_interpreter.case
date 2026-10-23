@@ -1,0 +1,12 @@
+# tests/multi_file_package.rs::residual_cross_file_callable_interpreter at tests/multi_file_package.rs:98; hand-port
+# Claim: cross-file callable chain runs on the interpreter and exits 0 (tests/multi_file_package.rs:100)
+# Claim: stdout equals "7\n" (tests/multi_file_package.rs:101)
+# Fixture migrated: same as residual_cross_file_callable_default (bare sibling names, ^ move markers, single-package imports)
+# Not ported: interpreter tier: `jet run --interpret` is E2102 on the seed and `jet dev --interpret --watch=off` is E2104 ("jet run --watch is not part of the Jet-hosted CLI yet"); the step below is the default `jet run` tier, which the Rust expects to print the same stdout
+fixture: residual_cross_file_callable_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run run.jet
+exit: 0 # tests/multi_file_package.rs:100-101 stands in for the interpreter tier (default tier used)
+stdout: = "7\n" # tests/multi_file_package.rs:100-101 stands in for the interpreter tier (default tier used)

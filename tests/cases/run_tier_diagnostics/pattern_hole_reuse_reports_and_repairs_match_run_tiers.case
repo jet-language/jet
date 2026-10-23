@@ -1,0 +1,58 @@
+# tests/run_tier_diagnostics.rs::pattern_hole_reuse_reports_and_repairs_match_run_tiers at tests/run_tier_diagnostics.rs:398; hand-port
+# Claim: for each position in if,value,route,bytes,or,and,optional,constant,typed the AOT front end reports exactly one E0118 (tests/run_tier_diagnostics.rs:409-412)
+# Claim: the plain-text comparison positions have a structured repair edit that starts and ends with parentheses (tests/run_tier_diagnostics.rs:414-418)
+# Claim: the rendered text equals tests/ui/pattern_hole_reuse_<position>.stderr (tests/run_tier_diagnostics.rs:431)
+# Claim: run and interpreter report the same JSON and text as AOT (tests/run_tier_diagnostics.rs:432-443)
+# Not ported: exactly one E0118 per fixture: stderr_has cannot count occurrences (the constant fixture also has E0357, which the Rust test ignores)
+# Not ported: parenthesis-repair compile check (tests/run_tier_diagnostics.rs:419-427): the repaired file is not run by a step
+# Not ported: structured JSON report equality across tiers has no CLI counterpart
+# Not ported: interpreter-tier comparison: no interpreter flag on check, only the check step is run
+fixture: pattern_hole_reuse_reports_and_repairs_match_run_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: if
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position if
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position if
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position if
+step: jet check main.jet
+cwd: value
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position value
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position value
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position value
+step: jet check main.jet
+cwd: route
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position route
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position route
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position route
+step: jet check main.jet
+cwd: bytes
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position bytes
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position bytes
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position bytes
+step: jet check main.jet
+cwd: or
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position or
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position or
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position or
+step: jet check main.jet
+cwd: and
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position and
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position and
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position and
+step: jet check main.jet
+cwd: optional
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position optional
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position optional
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position optional
+step: jet check main.jet
+cwd: constant
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position constant
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position constant
+stderr: ~ "Pattern hole `{FILE_EXT}` would make a new `FILE_EXT`, but `FILE_EXT` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position constant
+step: jet check main.jet
+cwd: typed
+exit: 1 # tests/run_tier_diagnostics.rs:403-412 position typed
+stderr: ~ "Error [E0118]" # tests/run_tier_diagnostics.rs:403-412 position typed
+stderr: ~ "Pattern hole `{root}` would make a new `root`, but `root` already holds a value" # tests/run_tier_diagnostics.rs:403-412 position typed

@@ -3306,7 +3306,7 @@ For example, the browser conformance surface uses
 runtime uses `addEventListener`, DOM selection, `localStorage`, and
 `sessionStorage`; native codegen provides inert checked routes rather than
 asking rustc to type-check browser APIs. The round-trip is exercised by
-[`tests/web_build.rs`](../../tests/web_build.rs).
+[`tests/cases/web_build/`](../../tests/cases/web_build/).
 
 ### Web queries
 

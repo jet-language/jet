@@ -1,0 +1,16 @@
+# tests/marker_rule_signatures.rs::a_constant_only_row_teaches_the_marked_binding at tests/marker_rule_signatures.rs:309; hand-port
+# Claim: unmarked `#Static limit :: 10` yields E0355 whose fix teaches `#Static NAME :: comptime { value }` (tests/marker_rule_signatures.rs:314-318)
+# Claim: `#Off` yields E0355 with fix 'Move `#Off` to one of its registered sites' (tests/marker_rule_signatures.rs:326)
+# Not ported: fix text compared by exact equality in Rust (tests/marker_rule_signatures.rs:326); the CLI pins the substring only
+fixture: a_constant_only_row_teaches_the_marked_binding.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check unmarked/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:314 wrong-site fix teaches the marked binding
+stderr: ~ "E0355" # tests/marker_rule_signatures.rs:314 wrong-site fix teaches the marked binding
+stderr: ~ "`#Static NAME :: comptime { value }`" # tests/marker_rule_signatures.rs:314 wrong-site fix teaches the marked binding
+step: jet check off/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:326 generic fix for multi-site row
+stderr: ~ "E0355" # tests/marker_rule_signatures.rs:326 generic fix for multi-site row
+stderr: ~ "Move `#Off` to one of its registered sites" # tests/marker_rule_signatures.rs:326 generic fix for multi-site row

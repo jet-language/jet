@@ -7535,7 +7535,7 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
   holds the registry rows plus the `derive T.Name { … }` providers a build can
   see, and it answers both "may this name be written?" and "did you mean?". The
   separate `known_derive_names` set is deleted.
-- `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads
+- `tests/cases/marker_declarations/` is the drift guard: the real Jet parser reads
   both files and must agree with the registry on every row, and no Rust file may
   build a marker row or keep a copy of the effect roots.
 

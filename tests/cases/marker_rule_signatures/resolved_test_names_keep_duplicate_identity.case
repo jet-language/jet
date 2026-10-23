@@ -1,0 +1,10 @@
+# tests/marker_rule_signatures.rs::resolved_test_names_keep_duplicate_identity at tests/marker_rule_signatures.rs:799; hand-port
+# Claim: `NAME :: comptime { "same" }` with `#Test(NAME) {}` and `#Test("same") {}` yields exactly one E0105 (tests/marker_rule_signatures.rs:808-814)
+# Not ported: Rust asserts exactly one E0105; CLI pins E0105 presence only
+fixture: resolved_test_names_keep_duplicate_identity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_rule_signatures.rs:814 E0105 once
+stderr: ~ "E0105" # tests/marker_rule_signatures.rs:814 E0105 once

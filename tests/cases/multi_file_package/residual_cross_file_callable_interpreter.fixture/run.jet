@@ -1,0 +1,13 @@
+
+use values
+use functions
+use functions as calls
+use functions.[apply as transform]
+use values.[Item as Weight, Pool as Store, BASE as OFFSET]
+fn run() {
+    first :: transform(Weight{weight: OFFSET}, (item: Weight) -> Weight{weight: item.weight + 1})
+    second :: calls.apply(first, (item: Weight) -> Weight{weight: item.weight + 2})
+    copied :: duplicate(second)
+    pool :: Store<Weight>{items: [copied]}
+    print(total(pool_copy(pool)))
+}

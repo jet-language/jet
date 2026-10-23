@@ -1,0 +1,15 @@
+# tests/marker_declarations.rs::source_rule_collision_names_generated_and_written_spans at tests/marker_declarations.rs:605; hand-port
+# Claim: a source rule must not shadow a written member (tests/marker_declarations.rs:625)
+# Claim: the collision diagnostic is E0105 (tests/marker_declarations.rs:628)
+# Claim: the detail names the generated member, its rule, and the existing member (tests/marker_declarations.rs:630-634)
+# Not ported: the byte-span numbers of the Rust detail are not asserted; the CLI shows source spans, so only the named members and rule are checked
+fixture: source_rule_collision_names_generated_and_written_spans.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_declarations.rs:625-634 expect_err; E0105 with generated member, from rule, and existing member in detail
+stderr: ~ "E0105" # tests/marker_declarations.rs:625-634 expect_err; E0105 with generated member, from rule, and existing member in detail
+stderr: ~ "generated member `greeting`" # tests/marker_declarations.rs:625-634 expect_err; E0105 with generated member, from rule, and existing member in detail
+stderr: ~ "from rule `AddGreeting`" # tests/marker_declarations.rs:625-634 expect_err; E0105 with generated member, from rule, and existing member in detail
+stderr: ~ "existing member `Person.greeting`" # tests/marker_declarations.rs:625-634 expect_err; E0105 with generated member, from rule, and existing member in detail

@@ -1,0 +1,11 @@
+# tests/marker_rule_signatures.rs::invariant_marker_is_retired_in_favor_of_range_types at tests/marker_rule_signatures.rs:705; hand-port
+# Claim: `#Invariant("...") Index4 :: distinct Int` yields E0927 whose what contains "#Invariant" and fix contains "Int(lo..hi)" (tests/marker_rule_signatures.rs:711-715)
+fixture: invariant_marker_is_retired_in_favor_of_range_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_rule_signatures.rs:711 E0927 with #Invariant and Int(lo..hi)
+stderr: ~ "E0927" # tests/marker_rule_signatures.rs:711 E0927 with #Invariant and Int(lo..hi)
+stderr: ~ "#Invariant" # tests/marker_rule_signatures.rs:711 E0927 with #Invariant and Int(lo..hi)
+stderr: ~ "Int(lo..hi)" # tests/marker_rule_signatures.rs:711 E0927 with #Invariant and Int(lo..hi)

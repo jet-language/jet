@@ -1,0 +1,34 @@
+# tests/web_build.rs::dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens at tests/web_build.rs:261; hand-port
+# Claim: builds Examples/features/serde/dyn_exact_int.jet for web and its JS output equals the golden (tests/web_build.rs:266-271)
+# Claim: the same program's Wasm output equals the golden (tests/web_build.rs:272-282)
+# Claim: json_coerce.jet and json_duplicate_keys.jet web goldens match the same way (tests/web_build.rs:266)
+# Fixture migrated: none; the three Examples files are copied unchanged, each in its own directory with no package.jet, because each defines `fn run()` and files under one package share one namespace (E0624)
+# Not ported: the Wasm harness (dyn_rules_wasm_harness.mjs, tests/web_build.rs:272-282) and the node JS runtime (run_web_app) are not reachable from the jet CLI, so only the web build and the native run are observed
+fixture: dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target web dyn_exact_int.jet
+cwd: dyn_exact_int
+exit: 0 # tests/web_build.rs:270 JS web build of dyn_exact_int succeeds (Rust expected a built web app)
+stderr: !~ "E2104" # tests/web_build.rs:270 JS web build of dyn_exact_int succeeds (Rust expected a built web app)
+step: jet run dyn_exact_int.jet
+cwd: dyn_exact_int
+exit: 0 # tests/web_build.rs:271 output equals Examples/features/expected/serde/dyn_exact_int.out
+stdout: = dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens-2.out # tests/web_build.rs:271 output equals Examples/features/expected/serde/dyn_exact_int.out
+step: jet build --target web json_coerce.jet
+cwd: json_coerce
+exit: 0 # tests/web_build.rs:266-271 JS web build of json_coerce succeeds
+stderr: !~ "E2104" # tests/web_build.rs:266-271 JS web build of json_coerce succeeds
+step: jet run json_coerce.jet
+cwd: json_coerce
+exit: 0 # tests/web_build.rs:271 output equals Examples/features/serde/json_coerce.out
+stdout: = dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens-4.out # tests/web_build.rs:271 output equals Examples/features/serde/json_coerce.out
+step: jet build --target web json_duplicate_keys.jet
+cwd: json_duplicate_keys
+exit: 0 # tests/web_build.rs:266-271 JS web build of json_duplicate_keys succeeds
+stderr: !~ "E2104" # tests/web_build.rs:266-271 JS web build of json_duplicate_keys succeeds
+step: jet run json_duplicate_keys.jet
+cwd: json_duplicate_keys
+exit: 0 # tests/web_build.rs:271 output equals Examples/features/serde/json_duplicate_keys.out
+stdout: = dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens-6.out # tests/web_build.rs:271 output equals Examples/features/serde/json_duplicate_keys.out

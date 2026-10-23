@@ -1,0 +1,21 @@
+# tests/observe.rs::default_report_keeps_conversion_identity_at_the_aot_edge at tests/observe.rs:616; hand-port
+# Claim: exit 1 (tests/observe.rs:652)
+# Claim: stdout is empty (tests/observe.rs:653)
+# Claim: stderr starts with Error [E_STORE], type IOError, and cause disk offline (tests/observe.rs:654-657)
+# Claim: source-linked context frame `): loading store` (tests/observe.rs:658-661)
+# Claim: conversion history `conversion: IOError -> Err` (tests/observe.rs:662-665)
+# Claim: Trail header with 2 hops, hops get_user and run (tests/observe.rs:666-670)
+# Not ported: generated Rust text: `jet::compile(src)` must succeed and `generated.rust` must contain `jet_entry_error_exit_jet(` (tests/observe.rs:646-650): reads generated Rust text through the Rust jet::compile API; no Jet CLI equivalent
+fixture: default_report_keeps_conversion_identity_at_the_aot_edge.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run default_report_conversion.jet
+exit: 1 # tests/observe.rs:651-670
+stdout: = "" # tests/observe.rs:651-670
+stderr: ~ "Error [E_STORE]: store unavailable (type: IOError)\n  cause: disk offline\n" # tests/observe.rs:651-670
+stderr: ~ "): loading store\n" # tests/observe.rs:651-670
+stderr: ~ "  conversion: IOError -> Err\n" # tests/observe.rs:651-670
+stderr: ~ "Trail [E3002] (2 hops via ?, origin first):" # tests/observe.rs:651-670
+stderr: ~ "  1. get_user (" # tests/observe.rs:651-670
+stderr: ~ "  2. run (" # tests/observe.rs:651-670

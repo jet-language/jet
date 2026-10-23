@@ -152,8 +152,8 @@ The `tls:` label is part of the API; an unlabeled third argument is rejected.
 
 `jet version` and `jet --version` render the same deterministic banner. The
 SemVer and release state come from `manifest::version_banner`; the exact output
-is golden-tested in `tests/release/version_banner.txt` and
-`tests/release_gates.rs`:
+is golden-tested in `tests/release/version_banner.txt` and the
+`pkg_version_banner` assertions in `Jetpack/PackageModel/Tests/Manifest.jet`:
 
 ```text
 Jet 0.1.0

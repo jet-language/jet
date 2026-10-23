@@ -1,0 +1,16 @@
+marker Recorded($sites: [.Type])
+
+marker AddGreeting($sites: [.Type]) {
+    tname :: target.name
+    impl $tname {
+        fn greeting(self) -> String { "hello" }
+    }
+}
+
+#[Recorded, AddGreeting]
+struct Person { name: String }
+
+fn run() {
+    person :: Person{name: "ada"}
+    print(person.greeting())
+}

@@ -1,0 +1,19 @@
+# tests/run_tier_diagnostics.rs::e0311_suggested_fix_matches_aot_run_and_interpreter at tests/run_tier_diagnostics.rs:256; hand-port
+# Claim: AOT rejects map_method_typo.jet with exactly 4 diagnostics, all code E0311 (tests/run_tier_diagnostics.rs:306-307)
+# Claim: every diagnostic carries an edit and FixApplicability::Suggested (tests/run_tier_diagnostics.rs:308-310)
+# Claim: jet run and the interpreter tier report the same shape as AOT (tests/run_tier_diagnostics.rs:313-317)
+# Claim: rendered text equals tests/ui/map_method_typo.stderr (tests/run_tier_diagnostics.rs:328-336)
+# Not ported: edit presence and FixApplicability::Suggested are structured fields, not visible in the default CLI output (no --json step run)
+# Not ported: Structured JSON report equality across tiers has no CLI counterpart
+fixture: e0311_suggested_fix_matches_aot_run_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics
+stderr: ~ "Error [E0311]" # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics
+stderr: ~ "Did you mean `get`?" # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics
+stderr: ~ "Did you mean `try_push`?" # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics
+stderr: ~ "Did you mean `has`?" # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics
+stderr: ~ "Did you mean `to_upper`?" # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics
+stderr: ~ "4 problems found" # tests/run_tier_diagnostics.rs:306-307 four E0311 diagnostics

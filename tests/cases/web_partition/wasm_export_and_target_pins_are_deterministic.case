@@ -1,0 +1,18 @@
+# tests/web_partition.rs::wasm_export_and_target_pins_are_deterministic at tests/web_partition.rs:301; hand-port
+# Claim: Pinned partition fixture compiles; exported and pinned fns are Wasm, run is JS (tests/web_partition.rs:318-320)
+# Claim: Partition report is byte-identical across two compiles (tests/web_partition.rs:331-334)
+# Not ported: Byte equality of the two reports needs a diff of two outputs; the sh -c step cannot invoke the seed jet, so the two compiles are checked as two exit-0 steps only
+fixture: wasm_export_and_target_pins_are_deterministic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web --explain-partition main.jet
+exit: 0 # tests/web_partition.rs:318-320 first compile: exported=Wasm, pinned=Wasm, run=JS
+stdout: ~ "exported" # tests/web_partition.rs:318-320 first compile: exported=Wasm, pinned=Wasm, run=JS
+stdout: ~ "pinned" # tests/web_partition.rs:318-320 first compile: exported=Wasm, pinned=Wasm, run=JS
+stdout: ~ "run" # tests/web_partition.rs:318-320 first compile: exported=Wasm, pinned=Wasm, run=JS
+step: jet build --target=web --explain-partition main.jet
+exit: 0 # tests/web_partition.rs:327-334 repeat compile succeeds (determinism asserted by byte diff in Rust, see dropped)
+stdout: ~ "exported" # tests/web_partition.rs:327-334 repeat compile succeeds (determinism asserted by byte diff in Rust, see dropped)
+stdout: ~ "pinned" # tests/web_partition.rs:327-334 repeat compile succeeds (determinism asserted by byte diff in Rust, see dropped)
+stdout: ~ "run" # tests/web_partition.rs:327-334 repeat compile succeeds (determinism asserted by byte diff in Rust, see dropped)

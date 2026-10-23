@@ -1,0 +1,22 @@
+# tests/observe.rs::error_return_trace_frames at tests/observe.rs:471; hand-port
+# Claim: exit 1 (tests/observe.rs:507)
+# Claim: stdout is empty (tests/observe.rs:508-511)
+# Claim: the Trail header says 3 hops via ?, origin first (tests/observe.rs:521-524)
+# Claim: hop 1 is load with note loading age (tests/observe.rs:527-530)
+# Claim: hop 2 is double with note doubling age (tests/observe.rs:531-534)
+# Claim: hop 3 is run with no note (tests/observe.rs:535-538)
+# Fixture migrated: added `#Error` above `enum ParseError`: without it the seed fails with E2417 "Explicit failure domain `ParseError` is not an Error type"
+# Not ported: the root line is non-empty and leads the report (tests/observe.rs:517-520): no matcher for "non-empty text before the Trail header"; observed output shows `Empty` leading
+fixture: error_return_trace_frames.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run error_trace.jet
+exit: 1 # tests/observe.rs:506-538
+stdout: = "" # tests/observe.rs:506-538
+stderr: ~ "Trail [E3002] (3 hops via ?, origin first):" # tests/observe.rs:506-538
+stderr: ~ "  1. load (" # tests/observe.rs:506-538
+stderr: ~ ") — loading age" # tests/observe.rs:506-538
+stderr: ~ "  2. double (" # tests/observe.rs:506-538
+stderr: ~ ") — doubling age" # tests/observe.rs:506-538
+stderr: ~ "  3. run (" # tests/observe.rs:506-538

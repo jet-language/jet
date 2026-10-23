@@ -1,0 +1,9 @@
+fn fail() -> String { Err("outer", code: "E_OUTER", cause: Err("root")) }
+fn pass_through() -[]> {
+    _ :: fail()?("loading")
+}
+fn run() {
+    recovered :: fail() ?? "fallback"
+    print(recovered)
+    _ :: pass_through()
+}

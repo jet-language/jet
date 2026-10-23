@@ -1,0 +1,17 @@
+# tests/run_tier_diagnostics.rs::e0999_row_fix_matches_aot_run_and_interpreter at tests/run_tier_diagnostics.rs:171; hand-port
+# Claim: AOT front end rejects single_bracket_marker.jet with exactly 1 diagnostic, code E0999 (tests/run_tier_diagnostics.rs:220-221)
+# Claim: the diagnostic's structured edit new_text is '#Codable' (tests/run_tier_diagnostics.rs:222-225)
+# Claim: jet run and the interpreter tier report the same shape as AOT (tests/run_tier_diagnostics.rs:227-232)
+# Claim: rendered text equals tests/ui/single_bracket_marker.stderr (tests/run_tier_diagnostics.rs:243-251)
+# Not ported: Structured edit new_text '#Codable' is only visible through the fix prose on the CLI, not as a structured edit field
+# Not ported: Snapshot capitalisation: snapshot 'one marker is written without brackets', seed 'One marker is written without brackets' (sentence-case projection, wording-only)
+# Not ported: Structured JSON report equality across tiers has no CLI counterpart
+fixture: e0999_row_fix_matches_aot_run_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/run_tier_diagnostics.rs:220-225 one E0999 whose edit new_text is #Codable
+stderr: ~ "Error [E0999]" # tests/run_tier_diagnostics.rs:220-225 one E0999 whose edit new_text is #Codable
+stderr: ~ "Replace `#[Codable]` with `#Codable`" # tests/run_tier_diagnostics.rs:220-225 one E0999 whose edit new_text is #Codable
+stderr: ~ "1 problem found" # tests/run_tier_diagnostics.rs:220-225 one E0999 whose edit new_text is #Codable

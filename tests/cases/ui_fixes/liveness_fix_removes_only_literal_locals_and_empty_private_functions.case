@@ -1,0 +1,24 @@
+# tests/ui_fixes.rs::liveness_fix_removes_only_literal_locals_and_empty_private_functions at tests/ui_fixes.rs:158; hand-port
+# Claim: fix --dry-run exits 0 and changes nothing (tests/ui_fixes.rs:167-179)
+# Claim: fix removes empty_private and pure_local, renames effectful to _effectful (tests/ui_fixes.rs:181-197)
+# Claim: fixed file checks with no L0101 (tests/ui_fixes.rs:199-210)
+fixture: liveness_fix_removes_only_literal_locals_and_empty_private_functions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fix liveness.jet --dry-run
+exit: 0 # tests/ui_fixes.rs:167-178
+step: sh {work}/step-2.sh
+exit: 0 # tests/ui_fixes.rs:179 dry-run leaves source unchanged
+stdout: = liveness_fix_removes_only_literal_locals_and_empty_private_functions-2.out # tests/ui_fixes.rs:179 dry-run leaves source unchanged
+step: jet fix liveness.jet
+exit: 0 # tests/ui_fixes.rs:181-192
+step: sh {work}/step-4.sh
+exit: 0 # tests/ui_fixes.rs:193-197
+stdout: ~ "fn public_api() {}" # tests/ui_fixes.rs:193-197
+stdout: ~ "_effectful :: random.normal(0.0, 1.0)" # tests/ui_fixes.rs:193-197
+stdout: !~ "empty_private" # tests/ui_fixes.rs:193-197
+stdout: !~ "pure_local" # tests/ui_fixes.rs:193-197
+step: jet check liveness.jet
+exit: 0 # tests/ui_fixes.rs:199-210
+stderr: !~ "L0101" # tests/ui_fixes.rs:199-210

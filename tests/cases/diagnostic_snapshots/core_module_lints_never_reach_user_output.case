@@ -1,0 +1,14 @@
+# tests/diagnostic_snapshots.rs::core_module_lints_never_reach_user_output at tests/diagnostic_snapshots.rs:940; hand-port
+# Claim: a Core-origin lint never reaches the user's lint stream (tests/diagnostic_snapshots.rs:958-962)
+# Claim: a lint without origin points inside the user's source (tests/diagnostic_snapshots.rs:963-968)
+# Claim: the user's own compound-assignment lint L0503 still surfaces (tests/diagnostic_snapshots.rs:970-973)
+# Not ported: compile_with_path/render_diagnostics Rust API calls; the lint-origin and span checks are only observable as CLI stderr (checked via stderr_lacks core.* and stderr_has L0503)
+fixture: core_module_lints_never_reach_user_output.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check core_lint_boundary.jet
+exit: 0 # tests/diagnostic_snapshots.rs:958-973 no Core-origin lint in output, L0503 present
+stderr: ~ "L0503" # tests/diagnostic_snapshots.rs:958-973 no Core-origin lint in output, L0503 present
+stderr: !~ "core.math" # tests/diagnostic_snapshots.rs:958-973 no Core-origin lint in output, L0503 present
+stderr: !~ "core.encoding" # tests/diagnostic_snapshots.rs:958-973 no Core-origin lint in output, L0503 present

@@ -1,0 +1,39 @@
+# tests/marker_rule_signatures.rs::parser_binds_the_authoritative_declaration_site_matrix at tests/marker_rule_signatures.rs:231; hand-port
+# Claim: field-site #allow(float_money, ...) parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: variant-site #Rename parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: method-site #Inline parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: file-site #HTML("index.html") parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: test-site #Test("works") parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: function-site #Job parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: constant-site #Static on marked constant parses clean (tests/marker_rule_signatures.rs:273)
+# Claim: #Policy(copies: .Explicit) module declaration parses (tests/marker_rule_signatures.rs:293)
+# Not ported: program.rule_facts RuleSite equality per fixture (tests/marker_rule_signatures.rs:280-288): internal AST, no CLI equivalent
+# Not ported: program.policy_declarations scope == Module (tests/marker_rule_signatures.rs:294-300): internal AST, no CLI equivalent
+fixture: parser_binds_the_authoritative_declaration_site_matrix.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check field/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 field site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 field site parses clean
+step: jet check variant/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 variant site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 variant site parses clean
+step: jet check method/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 method site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 method site parses clean
+step: jet check file/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 file site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 file site parses clean
+step: jet check test/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 test site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 test site parses clean
+step: jet check function/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 function site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 function site parses clean
+step: jet check constant/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:273 constant site parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:273 constant site parses clean
+step: jet check policy/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:293 #Policy module declaration parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:293 #Policy module declaration parses clean

@@ -1,0 +1,19 @@
+#Target(Web)
+
+module left {
+    #Target(JS)
+    fn helper() -> Int { return 1 }
+
+    #Target(JS)
+    fn value() -> Int { return helper() }
+}
+
+module right {
+    fn helper() -> Int { return 2 }
+
+    #WasmExport
+    fn value() -> Int { return helper() }
+}
+
+#Target(JS)
+fn run() { print(left.value() + right.value()) }

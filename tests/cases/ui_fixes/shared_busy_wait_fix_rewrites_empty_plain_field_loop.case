@@ -1,0 +1,17 @@
+# tests/ui_fixes.rs::shared_busy_wait_fix_rewrites_empty_plain_field_loop at tests/ui_fixes.rs:214; hand-port
+# Claim: fix produces the guard_edit().wait call (tests/ui_fixes.rs:231-237)
+# Claim: the #allow-suppressed loop is kept (tests/ui_fixes.rs:243-246)
+# Claim: fixed busy-loop source checks (tests/ui_fixes.rs:248-258)
+# Not ported: count==1 of bare `loop flag.ready == false {}` (tests/ui_fixes.rs:238-242): *_has cannot count occurrences
+fixture: shared_busy_wait_fix_rewrites_empty_plain_field_loop.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fix busy_spin.jet
+exit: 0 # tests/ui_fixes.rs:219-230
+step: sh {work}/step-2.sh
+exit: 0 # tests/ui_fixes.rs:231-246
+stdout: ~ "flag.guard_edit().wait(_changed, value -> value.ready) ?? panic(\"wait failed\")" # tests/ui_fixes.rs:231-246
+stdout: ~ "#allow(shared_busy_wait, \"the fixture exercises suppression of this occurrence\") loop flag.ready == false {}" # tests/ui_fixes.rs:231-246
+step: jet check busy_spin.jet
+exit: 0 # tests/ui_fixes.rs:248-258

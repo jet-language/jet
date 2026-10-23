@@ -1,0 +1,100 @@
+# tests/observe.rs::panic_context_uses_only_lexically_live_locals at tests/observe.rs:306; hand-port
+# Claim: each of 11 scopes exits 70, not a rustc ICE (tests/observe.rs:391-394)
+# Claim: the exact header `Stop [E3001]: `panic: missing value`` plus newline (tests/observe.rs:395-398)
+# Claim: the live local `live = 3` is shown (tests/observe.rs:399-402)
+# Claim: out-of-scope scoped locals are absent (tests/observe.rs:403-408)
+# Claim: no backend diagnostic leaks (tests/observe.rs:409-412)
+# Fixture migrated: Rust one-liner scoped statements `{ x :: 7; print(x) }` rewritten as multi-line blocks: Jet rejects `;` inside a line (E0373 "This explicit semicolon is not part of canonical Jet syntax.")
+fixture: panic_context_uses_only_lexically_live_locals.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run panic_lexical_if_branch.jet
+cwd: if_branch
+exit: 70 # tests/observe.rs:391-410 scope if_branch: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope if_branch: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope if_branch: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "branch_only =" # tests/observe.rs:391-410 scope if_branch: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope if_branch: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope if_branch: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_region.jet
+cwd: region
+exit: 70 # tests/observe.rs:391-410 scope region: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope region: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope region: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "region_only =" # tests/observe.rs:391-410 scope region: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope region: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope region: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_counted_loop.jet
+cwd: counted_loop
+exit: 70 # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "i =" # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "counted_only =" # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope counted_loop: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_unsafe.jet
+cwd: unsafe
+exit: 70 # tests/observe.rs:391-410 scope unsafe: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope unsafe: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope unsafe: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "unsafe_only =" # tests/observe.rs:391-410 scope unsafe: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope unsafe: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope unsafe: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_impure.jet
+cwd: impure
+exit: 70 # tests/observe.rs:391-410 scope impure: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope impure: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope impure: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "impure_only =" # tests/observe.rs:391-410 scope impure: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope impure: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope impure: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_shield.jet
+cwd: shield
+exit: 70 # tests/observe.rs:391-410 scope shield: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope shield: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope shield: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "shield_only =" # tests/observe.rs:391-410 scope shield: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope shield: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope shield: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_authority.jet
+cwd: authority
+exit: 70 # tests/observe.rs:391-410 scope authority: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope authority: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope authority: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "authority_only =" # tests/observe.rs:391-410 scope authority: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope authority: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope authority: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_grant.jet
+cwd: grant
+exit: 70 # tests/observe.rs:391-410 scope grant: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope grant: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope grant: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "grant_only =" # tests/observe.rs:391-410 scope grant: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope grant: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope grant: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_transact.jet
+cwd: transact
+exit: 70 # tests/observe.rs:391-410 scope transact: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope transact: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope transact: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "transact_only =" # tests/observe.rs:391-410 scope transact: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope transact: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope transact: exit 70, E3001 header, live = 3, dead names absent
+step: jet run panic_lexical_context.jet
+cwd: context
+exit: 70 # tests/observe.rs:391-410 #Context scope (its own ICE step): Rust expects the E3001 stop; seed gives rc=101 ICE
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 #Context scope (its own ICE step): Rust expects the E3001 stop; seed gives rc=101 ICE
+stderr: ~ "live = 3" # tests/observe.rs:391-410 #Context scope (its own ICE step): Rust expects the E3001 stop; seed gives rc=101 ICE
+stderr: !~ "context_only =" # tests/observe.rs:391-410 #Context scope (its own ICE step): Rust expects the E3001 stop; seed gives rc=101 ICE
+stderr: !~ "rustc" # tests/observe.rs:391-410 #Context scope (its own ICE step): Rust expects the E3001 stop; seed gives rc=101 ICE
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 #Context scope (its own ICE step): Rust expects the E3001 stop; seed gives rc=101 ICE
+step: jet run panic_lexical_task.group.jet
+cwd: task_group
+exit: 70 # tests/observe.rs:391-410 scope task_group: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "Stop [E3001]: `panic: missing value`\n" # tests/observe.rs:391-410 scope task_group: exit 70, E3001 header, live = 3, dead names absent
+stderr: ~ "live = 3" # tests/observe.rs:391-410 scope task_group: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "task_group_only =" # tests/observe.rs:391-410 scope task_group: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "rustc" # tests/observe.rs:391-410 scope task_group: exit 70, E3001 header, live = 3, dead names absent
+stderr: !~ "internal compiler error" # tests/observe.rs:391-410 scope task_group: exit 70, E3001 header, live = 3, dead names absent

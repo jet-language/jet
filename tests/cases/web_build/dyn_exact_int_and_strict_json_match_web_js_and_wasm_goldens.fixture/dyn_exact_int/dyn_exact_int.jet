@@ -1,0 +1,20 @@
+// Dyn.Int owns its exact value, including integers wider than machine carriers.
+use core.encoding.json as json
+
+#Codable
+struct Counter { value: Int }
+
+fn run() {
+    large :: 12345678901234567890123456789012345678901234567890
+    tree :: Dyn.Int(large)
+    if tree == .Int(value) -> print(value)
+    print(tree.int() ?? panic("owned Int read"))
+    print(json.to_string(tree))
+    roundtrip :: json.parse(json.to_string(tree)) ?? panic("parse")
+    if roundtrip == .Number(text) -> print(text)
+    print(roundtrip.int() ?? panic("Number read"))
+    encoded :: Dyn.from(Counter{value: large})
+    decoded :: encoded.decode<Counter>() ?? panic("typed read")
+    print(decoded.value)
+    print(json.to_string(Dyn.Int(-large)))
+}

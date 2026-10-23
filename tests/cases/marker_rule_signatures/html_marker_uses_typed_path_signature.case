@@ -1,0 +1,16 @@
+# tests/marker_rule_signatures.rs::html_marker_uses_typed_path_signature at tests/marker_rule_signatures.rs:603; hand-port
+# Claim: `#HTML(Path{"index.html"})` produces no E0930 (tests/marker_rule_signatures.rs:607)
+# Claim: `#HTML("index.html")` yields exactly one E0930 whose what is "`#HTML` arguments do not match `HTML(page: Path)`" (tests/marker_rule_signatures.rs:625-629)
+# Not ported: module.html_path AST assert (tests/marker_rule_signatures.rs:610-613) and parser-only diagnostic list (615-619): internal AST, no CLI equivalent
+# Not ported: Rust asserts E0930 exactly once; CLI pins E0930 presence and the message
+fixture: html_marker_uses_typed_path_signature.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:607 no E0930
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:607 no E0930
+step: jet check invalid/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:625-629 E0930 with exact what
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:625-629 E0930 with exact what
+stderr: ~ "`#HTML` arguments do not match `HTML(page: Path)`" # tests/marker_rule_signatures.rs:625-629 E0930 with exact what

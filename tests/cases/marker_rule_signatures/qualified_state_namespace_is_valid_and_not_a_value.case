@@ -1,0 +1,14 @@
+# tests/marker_rule_signatures.rs::qualified_state_namespace_is_valid_and_not_a_value at tests/marker_rule_signatures.rs:142; hand-port
+# Claim: qualified Door.State markers in #State/#Transition do not yield E0151 (tests/marker_rule_signatures.rs:146)
+# Claim: print(Door.State.Open) yields E0302 (tests/marker_rule_signatures.rs:150)
+# Not ported: the valid case asserts only the absence of E0151; exit 0 is pinned as the expected clean result
+fixture: qualified_state_namespace_is_valid_and_not_a_value.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:146 no E0151
+stderr: !~ "E0151" # tests/marker_rule_signatures.rs:146 no E0151
+step: jet check value/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:150 state name as value gives E0302
+stderr: ~ "E0302" # tests/marker_rule_signatures.rs:150 state name as value gives E0302

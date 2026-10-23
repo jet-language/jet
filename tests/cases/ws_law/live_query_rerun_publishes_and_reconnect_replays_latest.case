@@ -1,0 +1,14 @@
+# tests/ws_law.rs::live_query_rerun_publishes_and_reconnect_replays_latest at tests/ws_law.rs:402; hand-port
+# Claim: live query rerun publishes the new value to the subscriber (tests/ws_law.rs:402-473)
+# Claim: reconnect replays the latest value (tests/ws_law.rs:402-473)
+# Not ported: the websocket reconnect/ws_register path is only in the Rust runtime (crates/jet-evalhost), not reachable from Jet source
+fixture: live_query_rerun_publishes_and_reconnect_replays_latest.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/ws_law.rs:402-473 live rerun publishes the new value and the rerun is visible through live_show
+stdout: ~ "v1" # tests/ws_law.rs:402-473 live rerun publishes the new value and the rerun is visible through live_show
+stdout: ~ "v2" # tests/ws_law.rs:402-473 live rerun publishes the new value and the rerun is visible through live_show
+stdout: ~ "generation=2" # tests/ws_law.rs:402-473 live rerun publishes the new value and the rerun is visible through live_show
+stderr: !~ "internal compiler error" # tests/ws_law.rs:402-473 live rerun publishes the new value and the rerun is visible through live_show

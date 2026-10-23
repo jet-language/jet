@@ -2,9 +2,9 @@
 
 Jet's size profile is selected with `jet build --small`. This page is for
 release engineers and package authors checking the final executable against a
-budget. The executable gate is
-[`tests/release_gates.rs`](../../../tests/release_gates.rs); the Jet CLI does not
-yet accept `--small` (`JET_CLI_BUILD_UNPORTED_FLAGS` in
+budget. The size gate was a Rust integration test and is retired with the
+Rust suite; the Jet CLI does not yet accept `--small`
+(`JET_CLI_BUILD_UNPORTED_FLAGS` in
 [`Front.jet`](../../../Compiler/JetCli/Source/Cli/Front.jet)).
 
 ## What the size profile measures

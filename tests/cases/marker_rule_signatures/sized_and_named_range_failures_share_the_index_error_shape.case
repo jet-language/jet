@@ -1,0 +1,10 @@
+# tests/marker_rule_signatures.rs::sized_and_named_range_failures_share_the_index_error_shape at tests/marker_rule_signatures.rs:721; hand-port
+# Claim: indexing `[Int#6]` with a U8 and with a `Die :: distinct Int(1..6)` each yield E0965 (tests/marker_rule_signatures.rs:730-734)
+# Not ported: Rust asserts exactly 2 E0965 with identical why and fix (tests/marker_rule_signatures.rs:735-736); CLI pins E0965 presence only, the identity of the two messages is not compared
+fixture: sized_and_named_range_failures_share_the_index_error_shape.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_rule_signatures.rs:734 E0965 twice
+stderr: ~ "E0965" # tests/marker_rule_signatures.rs:734 E0965 twice

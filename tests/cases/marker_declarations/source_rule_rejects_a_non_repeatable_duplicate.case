@@ -1,0 +1,14 @@
+# tests/marker_declarations.rs::source_rule_rejects_a_non_repeatable_duplicate at tests/marker_declarations.rs:555; hand-port
+# Claim: a non-repeatable source rule rejects a second application (tests/marker_declarations.rs:557-558)
+# Claim: the duplicate diagnostic code is E0999 (tests/marker_declarations.rs:561)
+# Claim: the detail names the first and second application spans (tests/marker_declarations.rs:564-565)
+# Not ported: the Diagnostic.detail field is checked as CLI stderr text; the exact span wording is asserted only by the has-substrings below
+fixture: source_rule_rejects_a_non_repeatable_duplicate.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_declarations.rs:557-565 expect_err with E0999 whose detail names both application spans
+stderr: ~ "E0999" # tests/marker_declarations.rs:557-565 expect_err with E0999 whose detail names both application spans
+stderr: ~ "first application span" # tests/marker_declarations.rs:557-565 expect_err with E0999 whose detail names both application spans
+stderr: ~ "second application span" # tests/marker_declarations.rs:557-565 expect_err with E0999 whose detail names both application spans

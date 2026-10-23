@@ -1,0 +1,11 @@
+# tests/marker_declarations.rs::source_rule_body_can_reject_a_function_target at tests/marker_declarations.rs:571; hand-port
+# Claim: a function-site source rule runs its checked body (tests/marker_declarations.rs:587)
+# Claim: the registered E0927 diagnostic is raised (tests/marker_declarations.rs:588-593)
+# Claim: the rule surfaces only E0927 directly (tests/marker_declarations.rs:594-599)
+fixture: source_rule_body_can_reject_a_function_target.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_declarations.rs:587-599 expect_err; E0927 present and every diagnostic is E0927
+stderr: ~ "E0927" # tests/marker_declarations.rs:587-599 expect_err; E0927 present and every diagnostic is E0927

@@ -1,0 +1,15 @@
+# tests/multi_file_package.rs::residual_cross_file_callable_default at tests/multi_file_package.rs:91; hand-port
+# Claim: cross-file callable chain (apply/duplicate/pool_copy/total) runs and exits 0 (tests/multi_file_package.rs:92-93)
+# Claim: stdout equals "7\n" (tests/multi_file_package.rs:94)
+# Fixture migrated: `use "values"` / `use "functions"` quoted file imports -> bare `use values` / `use functions` (files of one package share a namespace; E0623)
+# Fixture migrated: `~x` move marker -> `^x` (E0120)
+# Fixture migrated: `use functions.[apply as transform, duplicate, pool_copy, total]` -> `use functions.[apply as transform]` (names already in package namespace; E0105)
+# Fixture migrated: added `use values` / `use functions` before aliased `use values.[...]` / `use functions.[...]` (E0610)
+# Fixture migrated: `fn pool_copy` parameter `pool` -> `pool: ^Pool<T>` (E0120)
+fixture: residual_cross_file_callable_default.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run run.jet
+exit: 0 # tests/multi_file_package.rs:92-94 run_default_multi
+stdout: = "7\n" # tests/multi_file_package.rs:92-94 run_default_multi

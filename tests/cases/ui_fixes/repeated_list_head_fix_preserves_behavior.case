@@ -1,0 +1,70 @@
+# tests/ui_fixes.rs::repeated_list_head_fix_preserves_behavior at tests/ui_fixes.rs:262; hand-port
+# Claim: fix --dry-run leaves main.jet unchanged (tests/ui_fixes.rs:309-325)
+# Claim: run and run --release print coffee:450 and tea:325 before and after the fix (tests/ui_fixes.rs:327-415)
+# Claim: fix applies [LineItem]{ and keeps both comments (tests/ui_fixes.rs:351-366)
+# Claim: ordinary fmt does not apply the L0523 fix (tests/ui_fixes.rs:417-437)
+# Claim: generic Box<Int> repeated head fixes to [Box<Int>]{ (tests/ui_fixes.rs:439-472)
+# Claim: fixed-length [LineItem#2] and commented constructor heads get no edit (tests/ui_fixes.rs:474-523)
+# Fixture migrated: the L0523 edit is observed through `jet fix` output text, not the Rust FixEngine::apply_edits API
+# Not ported: `expected_fixed` exact equality with FixEngine::apply_edits output: Rust API; replaced by *_has on fixed text
+# Not ported: idempotence byte-compare (tests/ui_fixes.rs:374-390): second fix not re-diffed; the check is observed by a second `jet fix` run exiting 0 only
+fixture: repeated_list_head_fix_preserves_behavior.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fix main/main.jet --dry-run
+exit: 0 # tests/ui_fixes.rs:309-320
+step: sh {work}/step-2.sh
+exit: 0 # tests/ui_fixes.rs:321-325 dry-run leaves source unchanged
+stdout: = repeated_list_head_fix_preserves_behavior-2.out # tests/ui_fixes.rs:321-325 dry-run leaves source unchanged
+step: jet run main/main.jet
+exit: 0 # tests/ui_fixes.rs:331 before output
+stdout: = repeated_list_head_fix_preserves_behavior-3.out # tests/ui_fixes.rs:331 before output
+step: jet run --release main/main.jet
+exit: 0 # tests/ui_fixes.rs:332 before output
+stdout: = repeated_list_head_fix_preserves_behavior-4.out # tests/ui_fixes.rs:332 before output
+step: jet fix main/main.jet
+exit: 0 # tests/ui_fixes.rs:351-362
+step: sh {work}/step-6.sh
+exit: 0 # tests/ui_fixes.rs:363-366
+stdout: ~ "[LineItem]{" # tests/ui_fixes.rs:363-366
+stdout: ~ "// field comment stays with the first item" # tests/ui_fixes.rs:363-366
+stdout: ~ "// The second item keeps its position" # tests/ui_fixes.rs:363-366
+step: jet check main/main.jet
+exit: 0 # tests/ui_fixes.rs:369-373
+stderr: !~ "L0523" # tests/ui_fixes.rs:369-373
+step: jet fix main/main.jet
+exit: 0 # tests/ui_fixes.rs:374-385 second fix exits 0
+step: jet run main/main.jet
+exit: 0 # tests/ui_fixes.rs:400-415 after output
+stdout: = repeated_list_head_fix_preserves_behavior-9.out # tests/ui_fixes.rs:400-415 after output
+step: jet run --release main/main.jet
+exit: 0 # tests/ui_fixes.rs:401 after output
+stdout: = repeated_list_head_fix_preserves_behavior-10.out # tests/ui_fixes.rs:401 after output
+step: jet fmt fmt/fmt.jet
+exit: 0 # tests/ui_fixes.rs:419-430
+step: sh {work}/step-12.sh
+exit: 0 # tests/ui_fixes.rs:431-437
+stdout: ~ "// field comment stays with the first item" # tests/ui_fixes.rs:431-437
+stdout: ~ "// The second item keeps its position" # tests/ui_fixes.rs:431-437
+stdout: !~ "[LineItem]{" # tests/ui_fixes.rs:431-437
+step: jet fix generic/generic.jet
+exit: 0 # tests/ui_fixes.rs:461-464
+step: sh {work}/step-14.sh
+exit: 0 # tests/ui_fixes.rs:463
+stdout: ~ "[Box<Int>]{" # tests/ui_fixes.rs:463
+step: jet check generic/generic.jet
+exit: 0 # tests/ui_fixes.rs:465-472
+stderr: !~ "L0523" # tests/ui_fixes.rs:465-472
+step: jet fix fixed/fixed_shape.jet
+exit: 0 # tests/ui_fixes.rs:489-498 no growable-list edit
+step: sh {work}/step-17.sh
+exit: 0 # tests/ui_fixes.rs:491-498
+stdout: ~ "fn fixed() -> [LineItem#2] {" # tests/ui_fixes.rs:491-498
+stdout: !~ "[LineItem#2]{" # tests/ui_fixes.rs:491-498
+step: jet fix commented/commented.jet
+exit: 0 # tests/ui_fixes.rs:513-522 no edit when constructor comment
+step: sh {work}/step-19.sh
+exit: 0 # tests/ui_fixes.rs:516-522
+stdout: ~ "LineItem /* keep this constructor spelling */ {label" # tests/ui_fixes.rs:516-522
+stdout: !~ "[LineItem]{" # tests/ui_fixes.rs:516-522

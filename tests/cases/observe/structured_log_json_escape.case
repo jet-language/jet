@@ -1,0 +1,9 @@
+# tests/observe.rs::structured_log_json_escape at tests/observe.rs:191; hand-port
+# Claim: the log line contains `\"hello\"` with the quotes escaped (tests/observe.rs:204-212)
+fixture: structured_log_json_escape.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run log_escape.jet
+exit: 0 # tests/observe.rs:200-212 quotes escaped in the JSON line
+stderr: ~ "\"body\":\"say \\\"hello\\\"\"" # tests/observe.rs:200-212 quotes escaped in the JSON line

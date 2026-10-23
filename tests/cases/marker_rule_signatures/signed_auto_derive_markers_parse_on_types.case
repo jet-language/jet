@@ -1,0 +1,25 @@
+# tests/marker_rule_signatures.rs::signed_auto_derive_markers_parse_on_types at tests/marker_rule_signatures.rs:163; hand-port
+# Claim: each signed auto-derive marker form on a struct produces no diagnostics (tests/marker_rule_signatures.rs:172)
+# Not ported: Rust asserts parse-only diagnostics; jet check also runs sema on the same clean fixture
+fixture: signed_auto_derive_markers_parse_on_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check printable/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:173 #!Printable parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:173 #!Printable parses clean
+step: jet check mixed/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:173 #[!Debug, !Equatable, Printable] parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:173 #[!Debug, !Equatable, Printable] parses clean
+step: jet check codable/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:173 #!Codable parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:173 #!Codable parses clean
+step: jet check encode/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:173 #!Encode parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:173 #!Encode parses clean
+step: jet check decode/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:173 #!Decode parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:173 #!Decode parses clean
+step: jet check comparable/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:173 #!Comparable parses clean
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:173 #!Comparable parses clean

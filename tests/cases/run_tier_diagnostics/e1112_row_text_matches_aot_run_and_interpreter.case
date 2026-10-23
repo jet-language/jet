@@ -1,0 +1,18 @@
+# tests/run_tier_diagnostics.rs::e1112_row_text_matches_aot_run_and_interpreter at tests/run_tier_diagnostics.rs:14; hand-port
+# Claim: AOT front end rejects empty_task_combinator.jet with exactly 3 diagnostics, all code E1112 (tests/run_tier_diagnostics.rs:62-63)
+# Claim: jet run and the interpreter tier report the same diagnostic shape as AOT (tests/run_tier_diagnostics.rs:64-69)
+# Claim: rendered text equals tests/ui/empty_task_combinator.stderr (tests/run_tier_diagnostics.rs:79-88)
+# Not ported: Rendered text equals the UI snapshot: wording differs (snapshot Why 'A task combinator must have a child to join or select', Fix 'Write `task.all` { work() } with one or more branches'; seed Why 'A task-group combinator cannot wait for an empty set', Fix 'Give it one or more task branches'); code, count and what-line match, so wording-only
+# Not ported: Structured JSON report equality across tiers (jet::render_all_json) has no CLI counterpart
+# Not ported: Interpreter-tier comparison: no interpreter flag on check, only the check step is run
+fixture: e1112_row_text_matches_aot_run_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/run_tier_diagnostics.rs:62-63 three E1112 diagnostics, all E1112
+stderr: ~ "Error [E1112]" # tests/run_tier_diagnostics.rs:62-63 three E1112 diagnostics, all E1112
+stderr: ~ "`task.all` needs at least one task branch" # tests/run_tier_diagnostics.rs:62-63 three E1112 diagnostics, all E1112
+stderr: ~ "`task.race` needs at least one task branch" # tests/run_tier_diagnostics.rs:62-63 three E1112 diagnostics, all E1112
+stderr: ~ "`task.any` needs at least one task branch" # tests/run_tier_diagnostics.rs:62-63 three E1112 diagnostics, all E1112
+stderr: ~ "3 problems found" # tests/run_tier_diagnostics.rs:62-63 three E1112 diagnostics, all E1112

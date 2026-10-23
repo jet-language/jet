@@ -1,0 +1,13 @@
+# tests/observe.rs::structured_log_level_filter at tests/observe.rs:81; hand-port
+# Claim: exactly 1 non-empty stderr line at info level (tests/observe.rs:96-102)
+# Claim: that line has level info (tests/observe.rs:103-106)
+# Not ported: exactly 1 non-empty stderr line (tests/observe.rs:96-102): the spec has no line-count matcher; stderr_lacks checks that the debug record is absent
+fixture: structured_log_level_filter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run log_filter.jet
+exit: 0 # tests/observe.rs:91-106 info record visible, debug record suppressed
+stderr: ~ "{\"level\":\"info\",\"body\":\"visible\",\"ts\":" # tests/observe.rs:91-106 info record visible, debug record suppressed
+stderr: !~ "\"level\":\"debug\"" # tests/observe.rs:91-106 info record visible, debug record suppressed
+stderr: !~ "hidden" # tests/observe.rs:91-106 info record visible, debug record suppressed
