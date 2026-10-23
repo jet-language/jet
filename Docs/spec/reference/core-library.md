@@ -1751,7 +1751,7 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `username()` | `String -[Env]>` | Return process facts. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier. |
 | `hostname()` | `String -[Env, FS]>` | Return the host name. |
 | `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |

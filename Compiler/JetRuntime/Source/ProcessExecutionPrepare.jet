@@ -168,6 +168,42 @@ fn process_execution_pack(spec: I64) -> I64 {
     }
     mechanical
 }
+// Owner ruling (relaunch): a program `jet run` runs from memory that
+// launches its own script path (`os.executable()`) runs it through the same
+// jet at the same level. The loader's 0x4a455404 auxiliary entry lists that
+// command prefix (jet's path, `run`, its level flags) as NUL-terminated
+// words ending in an empty one. Returns the command to run instead, a list
+// the caller drops, or 0 to run `cmd` as given.
+HOST_AT_RELAUNCH :: prep { I64{1246057476} }
+fn process_execution_relaunch(cmd: I64) -> I64 {
+    prefix :: host_getauxval(HOST_AT_RELAUNCH)
+    loaded :: host_getauxval(HOST_AT_EXECUTABLE)
+    if (prefix == I64{0} || loaded == I64{0}) -> return I64{0}
+    first :: fd_word(fd_word(cmd, I64{16}), I64{0})
+    length :: host_startup_byte_length(loaded)
+    if (rt_text_len(first) != length) -> return I64{0}
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(rt_text_data(first) + at) != rt_text_byte(loaded + at)) -> return I64{0}
+        at += I64{1}
+    }
+    list :: data_sequence_new(I64{0}, I64{8})
+    word := prefix
+    loop {
+        size :: host_startup_byte_length(word)
+        if (size == I64{0}) -> break
+        text :: rt_text_lossy(word, size)
+        process_text_list_push(list, text)
+        jet_rt_string_drop(text)
+        word = wrapping(word + size + I64{1})
+    }
+    at = I64{0}
+    loop at < fd_word(cmd, I64{0}) {
+        process_text_list_push(list, fd_word(fd_word(cmd, I64{16}), at * I64{8}))
+        at += I64{1}
+    }
+    list
+}
 fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
     cmd :: fd_word(spec, PROCESS_SPEC_CMD)
     if (fd_word(cmd, I64{0}) == I64{0}) {
@@ -206,22 +242,26 @@ fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
         jet_rt_string_drop(entry)
         at += I64{1}
     }
-    candidates :: process_execution_candidates(process_execution_first(spec), env)
+    relaunch :: process_execution_relaunch(cmd)
+    words :: if (relaunch == I64{0}) -> cmd else -> relaunch
+    first :: fd_word(fd_word(words, I64{16}), I64{0})
+    candidates :: process_execution_candidates(first, env)
     process_text_list_drop(env, true)
     candidate_columns :: process_execution_nul_columns(candidates)
-    argv :: process_execution_nul_columns(cmd)
+    argv :: process_execution_nul_columns(words)
     envp :: process_execution_nul_columns(env_list)
     facts :: jet_rt_alloc(I64{64}, I64{8})
     fd_put(facts, I64{0}, fd_word(candidates, I64{0}))
     fd_put(facts, I64{8}, candidate_columns)
     fd_put(facts, I64{16}, I64{0}) // Rust Command does not run ENOEXEC scripts.
-    fd_put(facts, I64{24}, if (process_execution_has(process_execution_first(spec), I64{47})) -> { I64{0} } else -> { I64{1} })
+    fd_put(facts, I64{24}, if (process_execution_has(first, I64{47})) -> { I64{0} } else -> { I64{1} })
     mechanical :: process_execution_pack(spec)
     child :: jet_process_spawn_raw(mechanical, facts, argv, envp, I64{0}, facts + I64{32})
     if (child == I64{0}) -> _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, host_errno_cause(fd_word(facts, I64{40})), err)
     jet_rt_free(mechanical, I64{216}, I64{8})
     process_execution_nul_drop(candidate_columns, candidates)
-    process_execution_nul_drop(argv, cmd)
+    process_execution_nul_drop(argv, words)
+    if (relaunch != I64{0}) -> process_text_list_drop(relaunch, false)
     process_execution_nul_drop(envp, env_list)
     process_text_list_drop(candidates, false)
     process_text_list_drop(env_list, false)

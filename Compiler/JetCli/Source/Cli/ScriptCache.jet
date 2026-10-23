@@ -140,17 +140,18 @@ fn jet_cli_script_authority_decode(bytes: [U8]) -> JetCLIAuthority? Never! {
 // Run the program kept for `snapshot` under `toolchain` with this
 // invocation's authority; None when no program is kept for it, so the script
 // compiles. The authority record is written last, so its presence means the
-// program beside it is complete.
-fn jet_cli_script_kept_run(toolchain: String, snapshot: JetDriverAuthorizedSourceSnapshot, file: String, source: String, color: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
+// program beside it is complete. The kept program runs from memory as a
+// compiled one does, or from its own file (jet_cli_launch).
+fn jet_cli_script_kept_run(toolchain: String, snapshot: JetDriverAuthorizedSourceSnapshot, file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
     directory :: jet_cli_script_cache_dir() ?? return None
     program :: "{directory}/{jet_cli_script_key(toolchain, snapshot)}"
     bytes :: cli_files.read_bytes("{program}.authority") ?? return None
     authority := jet_cli_script_authority_decode(bytes) ?? return None
-    if !cli_files.is_file(program) -> return None
+    image :: cli_files.read_bytes(program) ?? return None
     jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, invocation))
     refused :: jet_cli_authority_report(file, source, color, "run", authority)
     if refused != None -> return refused
-    Val(jet_cli_exec(program, program_args, color))
+    Val(jet_cli_launch(image, file, program, true, program_args, release, invocation, false, color))
 }
 
 // The keeper of a script compile under `toolchain`; None keeps nothing.
@@ -172,13 +173,13 @@ fn jet_cli_script_inputs_read(log: Shared<JetDriverComptimeInputLog>) -> Int Nev
     permit.value.records.len()
 }
 
-// Keep the program `binary` that `keep`'s compile built from `snapshot`,
+// Keep the program `image` that `keep`'s compile built from `snapshot`,
 // with its `authority` before any invocation rows. Nothing is kept when the
 // compile read a comptime input or the toolchain changed while it compiled.
 // Each file is written beside its place and renamed into it, so a concurrent
 // run never sees a partial one; a cache that can't be written leaves the
 // next run to compile again.
-fn jet_cli_script_keep(keep: JetCLIScriptKeep, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, authority: JetCLIAuthority) {
+fn jet_cli_script_keep(keep: JetCLIScriptKeep, snapshot: JetDriverAuthorizedSourceSnapshot, image: [U8], authority: JetCLIAuthority) {
     if jet_cli_script_inputs_read(keep.input_log) > 0 -> return
     current :: jet_cli_script_toolchain(keep.release) ?? return
     if current != keep.toolchain -> return
@@ -186,8 +187,7 @@ fn jet_cli_script_keep(keep: JetCLIScriptKeep, snapshot: JetDriverAuthorizedSour
     cli_files.create_dir_all(directory) ?? return
     program :: "{directory}/{jet_cli_script_key(keep.toolchain, snapshot)}"
     staged :: "{program}.{cli_sys.pid()}"
-    bytes :: cli_files.read_bytes(binary) ?? return
-    cli_files.write_bytes(staged, bytes) ?? return
+    cli_files.write_bytes(staged, image) ?? return
     cli_files.set_mode(staged, 0o755) ?? return
     cli_files.rename(staged, program) ?? return
     cli_files.write("{staged}.authority", jet_cli_script_authority_encode(authority)) ?? return

@@ -1179,8 +1179,12 @@ fn alloc_check_hex(value: I64) {
     }
 }
 
-// A read-only private mapping of /proc/self/exe for symbol names, or 0.
+// A read-only private mapping of this executable's ELF file for symbol
+// names, or 0: the loader's view of an image run from memory
+// (HOST_AT_IMAGE), else /proc/self/exe mapped here.
 fn alloc_check_image() -> I64 {
+    loaded :: host_getauxval(HOST_AT_IMAGE)
+    if (loaded != I64{0}) { return loaded }
     path :: alloc_map_try(I64{4096})
     if (path == I64{0}) { return I64{0} }
     image := I64{0}
@@ -1202,8 +1206,8 @@ fn alloc_check_image() -> I64 {
     image
 }
 
-// The load bias of a position-independent executable (ET_DYN): the kernel's
-// AT_PHDR (/proc/self/auxv) minus the program headers' link-time address.
+// The load bias of a position-independent executable (ET_DYN): the
+// start stack's AT_PHDR minus the program headers' link-time address.
 // A fixed-address executable (every Jet program) has bias 0.
 fn alloc_check_bias(image: I64) -> I64 {
     if (image == I64{0}) { return I64{0} }
@@ -1227,29 +1231,8 @@ fn alloc_check_bias(image: I64) -> I64 {
             index = wrapping(index + I64{1})
         }
     }
-    page :: alloc_map_try(I64{4096})
-    if (page == I64{0}) { return I64{0} }
-    bias := I64{0}
-    #Unsafe("page is a fresh private page: the path occupies its first 16 bytes and read fills at most the remaining 4080") {
-        // "/proc/self/auxv\0", little-endian; auxv is [type, value] word pairs.
-        os_store_i64(page, I64{7310238724270485551})
-        os_store_i64(wrapping(page + I64{8}), I64{33346492788860524})
-        fd :: os_syscall_i64(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
-        if (fd >= I64{0}) {
-            length :: os_syscall_i64(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
-            at := I64{16}
-            loop wrapping(at + I64{16}) <= wrapping(length + I64{16}) {
-                if (os_load_i64(wrapping(page + at)) == I64{3}) {
-                    bias = wrapping(os_load_i64(wrapping(page + wrapping(at + I64{8}))) - phdr_address)
-                    break
-                }
-                at = wrapping(at + I64{16})
-            }
-            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
-    }
-    alloc_unmap(page, I64{4096})
-    bias
+    // AT_PHDR
+    wrapping(host_getauxval(I64{3}) - phdr_address)
 }
 
 // Print the .symtab symbol whose range holds address (less the load bias), as

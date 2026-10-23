@@ -1,16 +1,28 @@
-// `os.executable()` names the file of the running process on every tier: the
-// `jet` host under `jet run`, the built binary after `jet build`.
+// `os.executable()` names the running program: the script's absolute path
+// under `jet run`, the built binary after `jet build`. Launching that path
+// runs the same program again on either tier; under `jet run` it runs
+// through the same jet at the same level.
 package {
     name: "sys_executable"
-    authority: { holds: { allow: [Env, FS.Read, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [Env, Exec, Exec.Args, FS.Read, IO, Mem.Alloc] } }
 }
 
 use core.files as files
+use core.process as process
 use core.sys as os
 
 fn run() {
     exe :: os.executable()
+    args :: process.argv()
+    if (args.get(1) ?? "") == "again" {
+        print("again: {(args.get(2) ?? "") == exe}")
+        process.exit(4)
+    }
     print("named: {exe.len() > 0}")
+    print("absolute: {exe.starts_with("/")}")
     print("exists: {files.exists(exe)}")
     print("stable: {os.executable() == exe}")
+    receipt :: process.run_spec(process.cmd([exe, "again", exe]).stdout(.Capture)) ?? panic("relaunching {exe} failed")
+    print("relaunched: exit {receipt.code}")
+    loop line in process.stdout_lines(receipt) -> print("  {line}")
 }

@@ -110,10 +110,25 @@ fn compiler_process_status_text(status: I64) -> I64 {
 // PlatformFamily.rs:3 std::env::consts::FAMILY of the Linux build target.
 #Export(c) fn jet_std_os_family() -> I64 { jet_rt_string_clone(rt_static_text("unix")) }
 
+// musl's getauxval: an entry of the start stack's auxiliary vector, 0 when
+// it has none. An image Image/Loader.jet runs from memory carries Jet
+// entries: 0x4a455401 the absolute path `os.executable()` reports (the
+// script `jet run` ran), 0x4a455402 a read-only mapping of the whole ELF
+// file and 0x4a455403 its size. A kernel exec carries none.
+#Import(c) fn host_getauxval(kind: I64) -> I64 = "getauxval"
+HOST_AT_EXECUTABLE :: prep { I64{1246057473} }
+HOST_AT_IMAGE :: prep { I64{1246057474} }
+
 // OsExtra.rs jet_sys_executable_raw: std::env::current_exe on Linux reads the
 // /proc/self/exe link, decoded lossily; any failure is None. The native
-// compiler locates its jet-runtime pack beside this path.
+// compiler locates its jet-runtime pack beside this path. A program run from
+// memory reports the path its loader gave (HOST_AT_EXECUTABLE).
 #Export(c) fn jet_sys_executable_raw(some: I64) -> I64 {
+    loaded :: host_getauxval(HOST_AT_EXECUTABLE)
+    if (loaded != I64{0}) {
+        rt_text_store(some, rt_text_lossy(loaded, host_startup_byte_length(loaded)))
+        return I64{1}
+    }
     path :: rt_static_text("/proc/self/exe")
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     capacity := I64{256}

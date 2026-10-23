@@ -20,10 +20,29 @@ use core.mem
 
 OS_SYS_READ :: prep { 0 }
 OS_SYS_WRITE :: prep { 1 }
+OS_SYS_CLOSE :: prep { 3 }
 OS_SYS_MMAP :: prep { 9 }
 OS_SYS_MPROTECT :: prep { 10 }
 OS_SYS_MUNMAP :: prep { 11 }
+OS_SYS_RT_SIGACTION :: prep { 13 }
+OS_SYS_RT_SIGPROCMASK :: prep { 14 }
+OS_SYS_PREAD64 :: prep { 17 }
+OS_SYS_DUP2 :: prep { 33 }
+OS_SYS_GETPID :: prep { 39 }
+OS_SYS_EXECVE :: prep { 59 }
+OS_SYS_FORK :: prep { 57 }
+OS_SYS_WAIT4 :: prep { 61 }
+OS_SYS_KILL :: prep { 62 }
+OS_SYS_FCNTL :: prep { 72 }
+OS_SYS_SIGALTSTACK :: prep { 131 }
+OS_SYS_PRCTL :: prep { 157 }
+OS_SYS_ARCH_PRCTL :: prep { 158 }
 OS_SYS_EXIT_GROUP :: prep { 231 }
+OS_SYS_OPENAT :: prep { 257 }
+OS_SYS_PRLIMIT64 :: prep { 302 }
+OS_SYS_GETRANDOM :: prep { 318 }
+OS_SYS_MEMFD_CREATE :: prep { 319 }
+OS_SYS_CLOSE_RANGE :: prep { 436 }
 
 OS_PROT_READ :: prep { 1 }
 OS_PROT_WRITE :: prep { 2 }
@@ -31,7 +50,16 @@ OS_PROT_EXEC :: prep { 4 }
 
 OS_PAGE_SIZE :: prep { 4096 }
 
+OS_MAP_PRIVATE :: prep { 0x02 }
 OS_MAP_PRIVATE_ANONYMOUS :: prep { 0x22 }
+OS_MAP_NORESERVE :: prep { 0x4000 }
+// Map exactly at the hint or fail with EEXIST; never replace a mapping.
+OS_MAP_FIXED_NOREPLACE :: prep { 0x100000 }
+
+OS_AT_FDCWD :: prep { -100 }
+
+OS_EEXIST :: prep { 17 }
+OS_EINTR :: prep { 4 }
 
 // One raw system call with up to six arguments. Every input is pushed before
 // any argument register is written, so the operands may live in any register;

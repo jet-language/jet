@@ -1,0 +1,735 @@
+// The in-process loader: `jet run`, `jet dev` and native comptime run a
+// program's linked image (Image/StaticLink.jet at LINK_RUN_BASE) inside the
+// jet process instead of writing it to a file and executing it. The image is
+// the same bytes `jet build` would write; this does in userland what
+// execve(2) does for a static executable, on the OS layer (OS/Linux.jet):
+//
+// 1. Map (x64_image_load): every PT_LOAD at its own address with
+//    MAP_FIXED_NOREPLACE, read+write; the file bytes go in through a memfd
+//    (one kernel copy, nothing on disk); then each segment gets its final
+//    protection. No page is ever writable and executable at once. The whole
+//    file stays mapped read-only for the runtime's symbol lookups.
+// 2. Plan (loader_plan): what execve resets -- handled signals back to
+//    default, an empty signal mask, no alternate signal stack, close-on-exec
+//    descriptors closed, the thread name -- as a list of raw system calls,
+//    and a fresh main stack holding argc, argv, envp and the auxiliary vector
+//    the image's libc startup reads.
+// 3. Enter: a machine-code executor (LOADER_EXECUTOR) makes the plan's calls,
+//    switches to the new stack and jumps to the image's entry. In process
+//    (x64_image_exec) it needs a single-threaded jet; after a fork
+//    (x64_image_spawn) the child runs only the executor, never Jet code, so
+//    no lock another jet thread held at the fork matters.
+//
+// Every failure before the executor runs returns its reason; the caller then
+// writes the same image to a file and executes it (x64_file_exec): when
+// executable memory is refused, the image's address range is taken, or the
+// process can't be quiesced.
+//
+// The auxiliary vector carries Jet entries above the kernel's AT_* range
+// (libc ignores types it doesn't know). The runtime reads them with musl's
+// getauxval (JetRuntime CompilerHost.jet host_getauxval) and falls back to
+// /proc/self when absent, as under a kernel exec.
+use core.files as loader_files
+
+// The absolute path the program's `os.executable()` reports (a char*);
+// absent when X64Launch.executable is "".
+LOADER_AT_EXECUTABLE :: prep { 0x4a455401 }
+// The read-only mapping of the whole ELF file (symbols for alloc-check).
+LOADER_AT_IMAGE :: prep { 0x4a455402 }
+// Its size in bytes.
+LOADER_AT_IMAGE_SIZE :: prep { 0x4a455403 }
+// The command that runs the program's own path again (X64Launch.relaunch),
+// as NUL-terminated words ending in an empty one; absent when empty. The
+// runtime's process spawn puts it in front of a command whose first word is
+// the LOADER_AT_EXECUTABLE path (JetRuntime ProcessExecutionPrepare.jet).
+LOADER_AT_RELAUNCH :: prep { 0x4a455404 }
+
+// The executor, called as `executor(plan)`. plan[0] is the record count N,
+// then N records of eight words (number, a1..a6, kind), then the new stack
+// pointer and the entry. Each record is one system call; a kind-1 record (a
+// fork) returns its result to the caller unless it is 0 (the child goes on).
+// After the records: rsp = stack, rbp = rdx = 0, jump to entry.
+//   0: push rbx; push r12; mov rbx, rdi; mov r12, [rbx]; add rbx, 8
+//  13: test r12, r12; jz 72
+//  18: mov rax, [rbx]; mov rdi, [rbx+8]; mov rsi, [rbx+16]; mov rdx, [rbx+24]
+//      mov r10, [rbx+32]; mov r8, [rbx+40]; mov r9, [rbx+48]; syscall
+//  47: cmp qword ptr [rbx+56], 0; je 59; test rax, rax; jnz 68
+//  59: add rbx, 64; dec r12; jmp 13
+//  68: pop r12; pop rbx; ret
+//  72: mov rsp, [rbx]; mov rax, [rbx+8]; xor ebp, ebp; xor edx, edx; jmp rax
+LOADER_EXECUTOR :: prep {
+    [Int]{
+        0x53, 0x41, 0x54, 0x48, 0x89, 0xfb, 0x4c, 0x8b, 0x23, 0x48, 0x83, 0xc3, 0x08,
+        0x4d, 0x85, 0xe4, 0x74, 0x36,
+        0x48, 0x8b, 0x03, 0x48, 0x8b, 0x7b, 0x08, 0x48, 0x8b, 0x73, 0x10, 0x48, 0x8b, 0x53, 0x18,
+        0x4c, 0x8b, 0x53, 0x20, 0x4c, 0x8b, 0x43, 0x28, 0x4c, 0x8b, 0x4b, 0x30, 0x0f, 0x05,
+        0x48, 0x83, 0x7b, 0x38, 0x00, 0x74, 0x05, 0x48, 0x85, 0xc0, 0x75, 0x09,
+        0x48, 0x83, 0xc3, 0x40, 0x49, 0xff, 0xcc, 0xeb, 0xc9,
+        0x41, 0x5c, 0x5b, 0xc3,
+        0x48, 0x8b, 0x23, 0x48, 0x8b, 0x43, 0x08, 0x31, 0xed, 0x31, 0xd2, 0xff, 0xe0,
+    }
+}
+
+// A mapped image. [low, high) holds its segments; `file` maps the whole ELF
+// file read-only. `failure` is "" for a loaded image, else why it isn't.
+struct X64LoadedImage {
+    low: Int
+    high: Int
+    entry: Int
+    phdr: Int
+    phnum: Int
+    file: Int
+    file_size: Int
+    failure: String
+}
+
+// What the program starts with besides its image: argv (argv[0] included),
+// the environment as NAME=value rows, the absolute path `os.executable()`
+// reports (also AT_EXECFN), the thread name (its first 15 bytes) and the
+// command prefix that relaunches `executable` (LOADER_AT_RELAUNCH).
+struct X64Launch {
+    argv: [String]
+    env: [String]
+    executable: String
+    name: String
+    relaunch: [String]
+}
+
+// A process started from an image: its pid, else why it didn't start.
+struct X64Spawned {
+    pid: Int
+    failure: String
+}
+
+// The plan the executor runs (see LOADER_EXECUTOR): `plan` is the record
+// block, `executor` the code page, `data` a page of constants the records
+// point at, `stack_low`/`stack_size` the new main stack.
+struct LoaderPlan {
+    plan: Int
+    plan_size: Int
+    executor: Int
+    data: Int
+    stack_low: Int
+    stack_size: Int
+    failure: String
+}
+
+fn loader_u16(bytes: [U8], at: Int) -> Int Never! {
+    Int.from_u8(bytes[at]).bit_or(Int.from_u8(bytes[at + 1]) << 8)
+}
+
+fn loader_u32(bytes: [U8], at: Int) -> Int Never! {
+    loader_u16(bytes, at).bit_or(loader_u16(bytes, at + 2) << 16)
+}
+
+fn loader_u64(bytes: [U8], at: Int) -> Int Never! {
+    loader_u32(bytes, at).bit_or(loader_u32(bytes, at + 4) << 32)
+}
+
+fn loader_hex(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    text := ""
+    rest := value
+    loop {
+        text = "{String.from_bytes([U8]{digits[rest.bit_and(15)]}) ?? ""}{text}"
+        rest = rest >> 4
+        if rest == 0 -> break
+    }
+    "0x{text}"
+}
+
+fn loader_failed(failure: String) -> X64LoadedImage Never! {
+    X64LoadedImage{low: 0, high: 0, entry: 0, phdr: 0, phnum: 0, file: 0, file_size: 0, failure: failure}
+}
+
+// Unmap whatever of `image` is mapped.
+fn x64_image_unload(image: X64LoadedImage) {
+    if image.high > image.low -> _ := os_unmap(image.low, image.high - image.low)
+    if image.file != 0 -> _ := os_unmap(image.file, image.file_size)
+}
+
+// A NUL-terminated copy of `text` in a fresh private page run, or 0.
+fn loader_c_string(text: String) -> Int {
+    address :: os_map(text.len() + 1, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(address) -> return 0
+    os_copy_in(address, text.bytes())
+    address
+}
+
+// A memfd for the image's bytes, or -errno. It is never executed:
+// MFD_CLOEXEC | MFD_NOEXEC_SEAL, or MFD_CLOEXEC on kernels before 6.3.
+fn loader_memfd() -> Int {
+    name :: loader_c_string("jet-image")
+    if name == 0 -> return -12
+    fd := 0
+    #Unsafe("memfd_create reads the NUL-terminated name at `name`") {
+        fd = os_syscall(OS_SYS_MEMFD_CREATE, name, 9, 0, 0, 0, 0)
+        if fd == -22 -> fd = os_syscall(OS_SYS_MEMFD_CREATE, name, 1, 0, 0, 0, 0)
+    }
+    _ := os_unmap(name, 16)
+    fd
+}
+
+fn loader_fill(fd: Int, bytes: [U8]) -> String {
+    loader_files.write_bytes("/proc/self/fd/{fd}", bytes) ?? return "couldn't fill the image memfd: {err}"
+    ""
+}
+
+fn loader_close(fd: Int) {
+    #Unsafe("the caller owns `fd` and nothing uses it any more") {
+        _ := os_syscall(OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0)
+    }
+}
+
+// Read `count` bytes at `offset` of `fd` to `address`; "" or why not.
+fn loader_pread(fd: Int, address: Int, count: Int, offset: Int) -> String {
+    done := 0
+    loop done < count {
+        got := 0
+        #Unsafe("the caller mapped `count` writable bytes at `address`") {
+            got = os_syscall(OS_SYS_PREAD64, fd, address + done, count - done, offset + done, 0, 0)
+        }
+        if got == -OS_EINTR -> next
+        if got <= 0 -> return "reading the image memfd failed ({got})"
+        done += got
+    }
+    ""
+}
+
+// One PT_LOAD: `file_size` bytes at file `offset` go to `vaddr`, zeros up
+// to `memory_size`; `flags` is p_flags (4 read, 2 write, 1 execute).
+struct X64Segment {
+    vaddr: Int
+    file_size: Int
+    memory_size: Int
+    flags: Int
+    offset: Int
+}
+
+// The load plan of an executable: its PT_LOADs (ascending, page-disjoint,
+// none writable and executable) spanning the pages [low, high), the entry
+// point and the program headers' address and count. `failure` is "" for a
+// valid image, else why it isn't one.
+struct X64Segments {
+    segments: [X64Segment]
+    low: Int
+    high: Int
+    entry: Int
+    phdr: Int
+    phnum: Int
+    failure: String
+}
+
+fn loader_segments_failed(failure: String) -> X64Segments Never! {
+    X64Segments{segments: [X64Segment]{}, low: 0, high: 0, entry: 0, phdr: 0, phnum: 0, failure: failure}
+}
+
+// Read and check the PT_LOADs of the static x86-64 executable `bytes`.
+fn x64_image_segments(bytes: [U8]) -> X64Segments Never! {
+    size :: bytes.len()
+    if size < 64 || loader_u32(bytes, 0) != 0x464c457f || Int.from_u8(bytes[4]) != 2 || loader_u16(bytes, 16) != 2 || loader_u16(bytes, 18) != 62 {
+        return loader_segments_failed("the image is not a static x86-64 ELF executable")
+    }
+    phoff :: loader_u64(bytes, 32)
+    phnum :: loader_u16(bytes, 56)
+    if loader_u16(bytes, 54) != 56 || phoff + phnum * 56 > size -> return loader_segments_failed("the image's program headers are malformed")
+    low := -1
+    high := 0
+    phdr := 0
+    phdr_known := false
+    segments := [X64Segment]{}
+    loop k in 0..<phnum {
+        at :: phoff + k * 56
+        kind :: loader_u32(bytes, at)
+        if kind == 6 {
+            phdr = loader_u64(bytes, at + 16)
+            phdr_known = true
+        }
+        if kind != 1 -> next
+        segment :: X64Segment{vaddr: loader_u64(bytes, at + 16), file_size: loader_u64(bytes, at + 32), memory_size: loader_u64(bytes, at + 40), flags: loader_u32(bytes, at + 4), offset: loader_u64(bytes, at + 8)}
+        if segment.vaddr % OS_PAGE_SIZE != segment.offset % OS_PAGE_SIZE || segment.file_size > segment.memory_size || segment.offset + segment.file_size > size {
+            return loader_segments_failed("PT_LOAD {k} of the image is malformed")
+        }
+        if segment.flags.bit_and(3) == 3 -> return loader_segments_failed("PT_LOAD at {loader_hex(segment.vaddr)} is writable and executable")
+        start :: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
+        // Ascending (as ELF requires) and page-disjoint, so each page has
+        // one protection.
+        if start < high -> return loader_segments_failed("PT_LOAD {k} of the image shares a page with the one before")
+        if low < 0 -> low = start
+        high = os_page_round(segment.vaddr + segment.memory_size)
+        if segment.offset == 0 && !phdr_known -> phdr = segment.vaddr + phoff
+        &segments.push(segment)
+    }
+    if low < 0 -> return loader_segments_failed("the image has no PT_LOAD segment")
+    X64Segments{segments: segments, low: low, high: high, entry: loader_u64(bytes, 24), phdr: phdr, phnum: phnum, failure: ""}
+}
+
+// Map the static x86-64 executable `bytes` at its link addresses.
+fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
+    plan :: x64_image_segments(bytes)
+    if plan.failure != "" -> return loader_failed(plan.failure)
+    low :: plan.low
+    high :: plan.high
+    mapped := 0
+    #Unsafe("MAP_FIXED_NOREPLACE never replaces an existing mapping") {
+        mapped = os_syscall(OS_SYS_MMAP, low, high - low, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_FIXED_NOREPLACE, -1, 0)
+    }
+    if mapped == -OS_EEXIST -> return loader_failed("the image's address range {loader_hex(low)}..{loader_hex(high)} is taken")
+    if os_failed(mapped) -> return loader_failed("mapping the image failed (errno {-mapped})")
+    if mapped != low {
+        // Kernels before 4.17 take the address as a hint only.
+        _ := os_unmap(mapped, high - low)
+        return loader_failed("the image's address range {loader_hex(low)}..{loader_hex(high)} is taken")
+    }
+    size :: bytes.len()
+    image := X64LoadedImage{low: low, high: high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: size, failure: ""}
+    fd :: loader_memfd()
+    if fd < 0 {
+        x64_image_unload(image)
+        return loader_failed("memfd_create failed (errno {-fd})")
+    }
+    failure := loader_fill(fd, bytes)
+    loop segment in plan.segments {
+        if failure != "" -> break
+        failure = loader_pread(fd, segment.vaddr, segment.file_size, segment.offset)
+    }
+    if failure == "" {
+        file := 0
+        #Unsafe("a private read-only view of the memfd aliases nothing writable") {
+            file = os_syscall(OS_SYS_MMAP, 0, size, OS_PROT_READ, OS_MAP_PRIVATE, fd, 0)
+        }
+        if os_failed(file) { failure = "mapping the image file view failed (errno {-file})" } else { image.file = file }
+    }
+    loader_close(fd)
+    loop segment in plan.segments {
+        if failure != "" -> break
+        start :: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
+        end :: os_page_round(segment.vaddr + segment.memory_size)
+        protection := 0
+        if segment.flags.bit_and(4) != 0 -> protection += OS_PROT_READ
+        if segment.flags.bit_and(2) != 0 -> protection += OS_PROT_WRITE
+        if segment.flags.bit_and(1) != 0 -> protection += OS_PROT_EXEC
+        if protection == OS_PROT_READ + OS_PROT_WRITE -> next
+        result :: os_protect(start, end - start, protection)
+        if os_failed(result) {
+            failure = if protection.bit_and(OS_PROT_EXEC) != 0 -> "executable memory was refused (errno {-result})" else -> "protecting the image failed (errno {-result})"
+        }
+    }
+    if failure != "" {
+        x64_image_unload(image)
+        return loader_failed(failure)
+    }
+    image
+}
+
+// The number of threads in this process, or -1 when /proc can't tell.
+fn x64_process_threads() -> Int {
+    listed :: loader_files.list_dir("/proc/self/task") ?? return -1
+    listed.len()
+}
+
+// Store `text` and a NUL below `at`; returns its address.
+fn loader_put_text(at: Int, text: String) -> Int {
+    bytes :: text.bytes()
+    start :: at - bytes.len() - 1
+    #Unsafe("the caller owns the stack bytes below `at`") {
+        loop (k, byte) in bytes { os_store_byte(start + k, Int.from_u8(byte)) }
+        os_store_byte(start + bytes.len(), 0)
+    }
+    start
+}
+
+fn loader_free(plan: LoaderPlan) {
+    if plan.plan != 0 -> _ := os_unmap(plan.plan, plan.plan_size)
+    if plan.executor != 0 -> _ := os_unmap(plan.executor, OS_PAGE_SIZE)
+    if plan.data != 0 -> _ := os_unmap(plan.data, OS_PAGE_SIZE)
+    if plan.stack_low != 0 -> _ := os_unmap(plan.stack_low, plan.stack_size)
+}
+
+fn loader_plan_failed(plan: LoaderPlan, failure: String) -> LoaderPlan {
+    loader_free(plan)
+    LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: failure}
+}
+
+fn loader_record(rows: &[Int], number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, kind: Int) Never! {
+    &rows.push(number)
+    &rows.push(a1)
+    &rows.push(a2)
+    &rows.push(a3)
+    &rows.push(a4)
+    &rows.push(a5)
+    &rows.push(a6)
+    &rows.push(kind)
+}
+
+// The data page's layout: a zeroed kernel sigaction (SIG_DFL, 32 bytes), a
+// stack_t with SS_DISABLE, a zeroed signal set, the thread name, this
+// process's auxiliary vector, and scratch for queries.
+LOADER_DATA_DEFAULT :: prep { 0 }
+LOADER_DATA_ALTSTACK :: prep { 64 }
+LOADER_DATA_MASK :: prep { 96 }
+LOADER_DATA_NAME :: prep { 128 }
+LOADER_DATA_SCRATCH :: prep { 192 }
+LOADER_DATA_AUXV :: prep { 256 }
+
+// The main stack's size: RLIMIT_STACK's soft limit, between 128 KiB and
+// 8 GiB (unlimited means 8 GiB); reserved, not committed.
+fn loader_stack_size(scratch: Int) -> Int {
+    limit := 0
+    #Unsafe("prlimit64 writes one rlimit (two words) at `scratch`") {
+        if os_syscall(OS_SYS_PRLIMIT64, 0, 3, 0, scratch, 0, 0) == 0 -> limit = os_load_word(scratch)
+    }
+    if limit <= 0 || limit > 0x200000000 -> return 0x200000000
+    if limit < 0x20000 -> return 0x20000
+    os_page_round(limit)
+}
+
+// The end of the user address space (47-bit; nothing maps above it unless
+// asked for).
+LOADER_TASK_END :: prep { 0x7ffffffff000 }
+
+fn loader_hex_parse(text: String) -> Int Never! {
+    value := 0
+    loop byte in text.bytes() {
+        digit :: Int.from_u8(byte)
+        nibble := digit - 48
+        if digit >= 97 -> nibble = digit - 87
+        value = value * 16 + nibble
+    }
+    value
+}
+
+// The [vdso] and [vvar] mappings, as [start, end) pairs: the program's libc
+// finds the vDSO through AT_SYSINFO_EHDR.
+fn loader_kernel_ranges() -> [Int] {
+    ranges := [Int]{}
+    maps :: loader_files.read("/proc/self/maps") ?? return ranges
+    loop line in maps.split("\n").to_list() {
+        if !line.contains("[vdso]") && !line.contains("[vvar") -> next
+        bounds :: line.split(" ").to_list()[0].split("-").to_list()
+        if bounds.len() != 2 -> next
+        &ranges.push(loader_hex_parse(bounds[0]))
+        &ranges.push(loader_hex_parse(bounds[1]))
+    }
+    ranges
+}
+
+// munmap records for every gap between the disjoint [start, end) pairs of
+// `kept`, from 0 to LOADER_TASK_END.
+fn loader_unmap_records(rows: &[Int], kept: [Int]) Never! {
+    at := 0
+    last := -1
+    loop {
+        soonest := -1
+        soonest_end := 0
+        loop k in 0..<(kept.len() /% 2) {
+            start :: kept[2 * k]
+            if start > last && (soonest < 0 || start < soonest) {
+                soonest = start
+                soonest_end = kept[2 * k + 1]
+            }
+        }
+        if soonest < 0 -> break
+        if soonest > at -> loader_record(&rows, OS_SYS_MUNMAP, at, soonest - at, 0, 0, 0, 0, 0)
+        if soonest_end > at -> at = soonest_end
+        last = soonest
+    }
+    if at < LOADER_TASK_END -> loader_record(&rows, OS_SYS_MUNMAP, at, LOADER_TASK_END - at, 0, 0, 0, 0, 0)
+}
+
+// Build everything the executor needs to start `image` with `launch`.
+// `fds` empty: descriptors as execve leaves them (close-on-exec ones closed);
+// else child descriptor i becomes this process's fds[i] (-1: stays i) and every
+// descriptor from fds.len() up is closed. `fork`: the first record forks.
+fn loader_plan(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool) -> LoaderPlan {
+    plan := LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: ""}
+    if image.failure != "" -> return loader_plan_failed(plan, image.failure)
+    data :: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(data) -> return loader_plan_failed(plan, "mapping the launch data failed (errno {-data})")
+    plan.data = data
+    #Unsafe("the data page is this plan's own fresh mapping") {
+        os_store_word(data + LOADER_DATA_ALTSTACK + 8, 2)
+        name :: launch.name.bytes()
+        loop k in 0..<15 {
+            if k < name.len() -> os_store_byte(data + LOADER_DATA_NAME + k, Int.from_u8(name[k]))
+        }
+    }
+    // The executor: written, then read+execute, never both.
+    executor :: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(executor) -> return loader_plan_failed(plan, "mapping the executor failed (errno {-executor})")
+    plan.executor = executor
+    #Unsafe("the executor page is this plan's own fresh mapping") {
+        loop (k, byte) in LOADER_EXECUTOR { os_store_byte(executor + k, byte) }
+    }
+    protected :: os_protect(executor, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_EXEC)
+    if os_failed(protected) -> return loader_plan_failed(plan, "executable memory was refused (errno {-protected})")
+
+    rows := [Int]{}
+    if fork -> loader_record(&rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
+    if fds.len() > 0 {
+        // Two rounds through descriptors above every source, so no move
+        // overwrites a source a later move reads.
+        spare := fds.len()
+        loop fd in fds { if fd >= spare -> spare = fd + 1 }
+        loop (k, fd) in fds { if fd >= 0 -> loader_record(&rows, OS_SYS_DUP2, fd, spare + k, 0, 0, 0, 0, 0) }
+        loop (k, fd) in fds { if fd >= 0 -> loader_record(&rows, OS_SYS_DUP2, spare + k, k, 0, 0, 0, 0, 0) }
+        loader_record(&rows, OS_SYS_CLOSE_RANGE, fds.len(), 0xffffffff, 0, 0, 0, 0, 0)
+    } else {
+        listed :: loader_files.list_dir("/proc/self/fd") ?? return loader_plan_failed(plan, "couldn't list /proc/self/fd: {err}")
+        loop entry in listed {
+            fd :: Int.parse(entry.name) ?? next
+            flags := 0
+            #Unsafe("F_GETFD only reads the descriptor's flags") {
+                flags = os_syscall(OS_SYS_FCNTL, fd, 1, 0, 0, 0, 0)
+            }
+            if !os_failed(flags) && flags.bit_and(1) != 0 -> loader_record(&rows, OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0, 0)
+        }
+    }
+    // Handled signals go back to the default; ignored ones stay ignored.
+    loop signal in 1..<65 {
+        if signal == 9 || signal == 19 -> next
+        handler := 0
+        #Unsafe("rt_sigaction with no new action writes the old one (32 bytes) to the scratch") {
+            if os_syscall(OS_SYS_RT_SIGACTION, signal, 0, data + LOADER_DATA_SCRATCH, 8, 0, 0) == 0 -> handler = os_load_word(data + LOADER_DATA_SCRATCH)
+        }
+        if handler != 0 && handler != 1 -> loader_record(&rows, OS_SYS_RT_SIGACTION, signal, data + LOADER_DATA_DEFAULT, 0, 8, 0, 0, 0)
+    }
+    loader_record(&rows, OS_SYS_SIGALTSTACK, data + LOADER_DATA_ALTSTACK, 0, 0, 0, 0, 0, 0)
+    // SIG_SETMASK to the empty set.
+    loader_record(&rows, OS_SYS_RT_SIGPROCMASK, 2, data + LOADER_DATA_MASK, 0, 8, 0, 0, 0)
+    // PR_SET_NAME
+    loader_record(&rows, OS_SYS_PRCTL, 15, data + LOADER_DATA_NAME, 0, 0, 0, 0, 0)
+
+    // The main stack, with a guard page below it.
+    stack_size :: loader_stack_size(data + LOADER_DATA_SCRATCH)
+    stack := 0
+    #Unsafe("a fresh anonymous reservation aliases nothing") {
+        stack = os_syscall(OS_SYS_MMAP, 0, stack_size + OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_NORESERVE, -1, 0)
+    }
+    if os_failed(stack) -> return loader_plan_failed(plan, "mapping the main stack failed (errno {-stack})")
+    plan.stack_low = stack
+    plan.stack_size = stack_size + OS_PAGE_SIZE
+    _ := os_protect(stack, OS_PAGE_SIZE, 0)
+    at := stack + plan.stack_size
+    at -= 16
+    random :: at
+    #Unsafe("getrandom fills the 16 stack bytes at `random`") {
+        _ := os_syscall(OS_SYS_GETRANDOM, random, 16, 0, 0, 0, 0)
+    }
+    at = loader_put_text(at, "x86_64")
+    platform :: at
+    at = loader_put_text(at, launch.executable)
+    executable :: at
+    relaunch := 0
+    if launch.relaunch.len() > 0 {
+        // NUL-terminated words, then an empty one.
+        at = loader_put_text(at, "")
+        loop k in 0..<launch.relaunch.len() {
+            at = loader_put_text(at, launch.relaunch[launch.relaunch.len() - 1 - k])
+        }
+        relaunch = at
+    }
+    env := [Int]{}
+    loop row in launch.env {
+        at = loader_put_text(at, row)
+        &env.push(at)
+    }
+    argv := [Int]{}
+    loop argument in launch.argv {
+        at = loader_put_text(at, argument)
+        &argv.push(at)
+    }
+    at -= at % 16
+    words := [Int]{launch.argv.len()}
+    loop address in argv -> &words.push(address)
+    &words.push(0)
+    loop address in env -> &words.push(address)
+    &words.push(0)
+    // This process's auxiliary vector, less what describes the image.
+    auxv := 0
+    #Unsafe("the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs") {
+        path :: loader_c_string("/proc/self/auxv")
+        if path != 0 {
+            fd :: os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, path, 0x80000, 0, 0, 0)
+            if fd >= 0 {
+                auxv = os_syscall(OS_SYS_READ, fd, data + LOADER_DATA_AUXV, OS_PAGE_SIZE - LOADER_DATA_AUXV, 0, 0, 0)
+                loader_close(fd)
+            }
+            _ := os_unmap(path, 16)
+        }
+    }
+    if auxv <= 0 -> return loader_plan_failed(plan, "couldn't read /proc/self/auxv")
+    pair := 0
+    loop pair + 16 <= auxv {
+        kind := 0
+        value := 0
+        #Unsafe("the pair lies inside the bytes read into the data page") {
+            kind = os_load_word(data + LOADER_DATA_AUXV + pair)
+            value = os_load_word(data + LOADER_DATA_AUXV + pair + 8)
+        }
+        pair += 16
+        if kind == 0 -> break
+        // AT_PHDR AT_PHENT AT_PHNUM AT_BASE AT_ENTRY AT_PLATFORM AT_BASE_PLATFORM AT_RANDOM AT_EXECFN
+        if kind == 3 || kind == 4 || kind == 5 || kind == 7 || kind == 9 || kind == 15 || kind == 24 || kind == 25 || kind == 31 -> next
+        if kind >= LOADER_AT_EXECUTABLE && kind <= LOADER_AT_RELAUNCH -> next
+        &words.push(kind)
+        &words.push(value)
+    }
+    own := [Int]{3, image.phdr, 4, 56, 5, image.phnum, 7, 0, 9, image.entry, 15, platform, 25, random, 31, executable, LOADER_AT_IMAGE, image.file, LOADER_AT_IMAGE_SIZE, image.file_size}
+    if launch.executable != "" {
+        &own.push(LOADER_AT_EXECUTABLE)
+        &own.push(executable)
+    }
+    if relaunch != 0 {
+        &own.push(LOADER_AT_RELAUNCH)
+        &own.push(relaunch)
+    }
+    &own.push(0)
+    &own.push(0)
+    loop word in own -> &words.push(word)
+    if words.len() % 2 != 0 -> &words.push(0)
+    sp :: at - words.len() * 8
+    if sp < stack + OS_PAGE_SIZE + 0x10000 -> return loader_plan_failed(plan, "the arguments and environment don't fit the main stack")
+    #Unsafe("the words lie in the stack mapping, above its guard page") {
+        loop (k, word) in words { os_store_word(sp + k * 8, word) }
+    }
+
+    // Last, as execve drops the old address space: every mapping goes but
+    // the image, its file view, this plan's pages, the new stack and the
+    // kernel's [vdso]/[vvar]; and the old thread pointer goes (ARCH_SET_FS
+    // 0; the program's libc sets its own). Only the executor runs then.
+    kept := [Int]{image.low, image.high, image.file, image.file + os_page_round(image.file_size), executor, executor + OS_PAGE_SIZE, data, data + OS_PAGE_SIZE, stack, stack + plan.stack_size}
+    loop word in loader_kernel_ranges() -> &kept.push(word)
+    // The record block: count, records, stack, entry. Room for the unmaps
+    // (one more than the kept ranges, the block's own included) and the
+    // ARCH_SET_FS record.
+    plan.plan_size = os_page_round((rows.len() + 8 * (kept.len() /% 2 + 3) + 3) * 8)
+    block :: os_map(plan.plan_size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(block) -> return loader_plan_failed(plan, "mapping the launch plan failed (errno {-block})")
+    plan.plan = block
+    &kept.push(block)
+    &kept.push(block + plan.plan_size)
+    loader_unmap_records(&rows, kept)
+    loader_record(&rows, OS_SYS_ARCH_PRCTL, 0x1002, 0, 0, 0, 0, 0, 0)
+    #Unsafe("the block is this plan's own fresh mapping of plan_size bytes") {
+        os_store_word(block, rows.len() /% 8)
+        loop (k, word) in rows { os_store_word(block + 8 + k * 8, word) }
+        os_store_word(block + 8 + rows.len() * 8, sp)
+        os_store_word(block + 16 + rows.len() * 8, image.entry)
+    }
+    plan
+}
+
+// Run `image` in place of this process, as execve would; returns only when
+// it can't, with why (nothing has been changed then). The caller flushes
+// its own output first.
+fn x64_image_exec(image: X64LoadedImage, launch: X64Launch) -> String {
+    threads :: x64_process_threads()
+    if threads != 1 -> return "{threads} threads are running"
+    plan :: loader_plan(image, launch, [Int]{}, false)
+    if plan.failure != "" -> return plan.failure
+    #Unsafe("the executor's records only reset process state; it then enters the loaded image on its own stack") {
+        _ := os_call_address(plan.executor, plan.plan)
+    }
+    "the image returned to the loader"
+}
+
+// Start `image` in a forked child (fds as for loader_plan). This process
+// keeps its own copy of the image; the caller unloads it when done.
+fn x64_image_spawn(image: X64LoadedImage, launch: X64Launch, fds: [Int]) -> X64Spawned {
+    plan :: loader_plan(image, launch, fds, true)
+    if plan.failure != "" -> return X64Spawned{pid: -1, failure: plan.failure}
+    pid := 0
+    #Unsafe("the executor's first record forks; the child runs only the executor and enters the image, the parent returns here") {
+        pid = os_call_address(plan.executor, plan.plan)
+    }
+    loader_free(plan)
+    if os_failed(pid) -> return X64Spawned{pid: -1, failure: "fork failed (errno {-pid})"}
+    X64Spawned{pid: pid, failure: ""}
+}
+
+// Wait for the child `pid`: its wait status, or -errno.
+fn x64_process_wait(pid: Int) -> Int {
+    word :: os_map(8, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(word) -> return word
+    result := -OS_EINTR
+    #Unsafe("wait4 writes one int status to the fresh page") {
+        loop result == -OS_EINTR -> result = os_syscall(OS_SYS_WAIT4, pid, word, 0, 0, 0, 0)
+        if result == pid -> result = os_load_word(word).bit_and(0xffffffff)
+    }
+    _ := os_unmap(word, 8)
+    result
+}
+
+// Stop and wait for the child `pid` (a dev run being replaced).
+fn x64_process_stop(pid: Int) {
+    #Unsafe("SIGKILL to a child this process started and has not reaped") {
+        _ := os_syscall(OS_SYS_KILL, pid, 9, 0, 0, 0, 0)
+    }
+    _ := x64_process_wait(pid)
+}
+
+// Ignore SIGINT and SIGQUIT while a child runs in the foreground, as
+// system(3) does: the terminal signals the child, which decides.
+fn x64_process_wait_foreground(pid: Int) -> Int {
+    action :: os_map(32, OS_PROT_READ + OS_PROT_WRITE)
+    if !os_failed(action) {
+        #Unsafe("a kernel sigaction with handler SIG_IGN on a fresh page") {
+            os_store_word(action, 1)
+            _ := os_syscall(OS_SYS_RT_SIGACTION, 2, action, 0, 8, 0, 0)
+            _ := os_syscall(OS_SYS_RT_SIGACTION, 3, action, 0, 8, 0, 0)
+        }
+        _ := os_unmap(action, 32)
+    }
+    x64_process_wait(pid)
+}
+
+// End this process the way wait status `status` says its child ended: the
+// same exit code, or death by the same signal. Returns the shell's code
+// (128 + signal) only if the signal doesn't end the process.
+fn x64_process_mirror(status: Int) -> Int {
+    signal :: status.bit_and(0x7f)
+    if signal == 0 -> return (status >> 8).bit_and(0xff)
+    page :: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if !os_failed(page) {
+        #Unsafe("a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page") {
+            _ := os_syscall(OS_SYS_RT_SIGACTION, signal, page, 0, 8, 0, 0)
+            _ := os_syscall(OS_SYS_RT_SIGPROCMASK, 2, page + 64, 0, 8, 0, 0)
+            _ := os_syscall(OS_SYS_KILL, os_syscall(OS_SYS_GETPID, 0, 0, 0, 0, 0, 0), signal, 0, 0, 0, 0)
+        }
+    }
+    128 + signal
+}
+
+// The fallback: execute the image file at `path` in place of this process
+// with `launch`'s argv and environment. Returns only on failure, with why.
+fn x64_file_exec(path: String, launch: X64Launch) -> String {
+    texts := [String]{path}
+    loop argument in launch.argv -> &texts.push(argument)
+    loop row in launch.env -> &texts.push(row)
+    bytes := 8 * (launch.argv.len() + launch.env.len() + 2) + 16
+    loop text in texts -> bytes += text.bytes().len() + 1
+    size :: os_page_round(bytes)
+    block :: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(block) -> return "mapping execve's arguments failed (errno {-block})"
+    at := block + size
+    addresses := [Int]{}
+    loop text in texts {
+        at = loader_put_text(at, text)
+        &addresses.push(at)
+    }
+    argv :: block + 16
+    envp :: argv + 8 * (launch.argv.len() + 1)
+    result := 0
+    #Unsafe("execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start") {
+        loop k in 0..<launch.argv.len() { os_store_word(argv + 8 * k, addresses[1 + k]) }
+        os_store_word(argv + 8 * launch.argv.len(), 0)
+        loop k in 0..<launch.env.len() { os_store_word(envp + 8 * k, addresses[1 + launch.argv.len() + k]) }
+        os_store_word(envp + 8 * launch.env.len(), 0)
+        // execve keeps the signal mask; the program starts with none blocked.
+        _ := os_syscall(OS_SYS_RT_SIGPROCMASK, 2, block, 0, 8, 0, 0)
+        result = os_syscall(OS_SYS_EXECVE, addresses[0], argv, envp, 0, 0, 0)
+    }
+    _ := os_unmap(block, size)
+    "execve of {path} failed (errno {-result})"
+}
