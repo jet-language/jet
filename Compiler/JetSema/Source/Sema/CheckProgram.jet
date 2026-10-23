@@ -433,6 +433,12 @@ struct SemaComptimeFunctionResult {
     complete: Bool
     // Why an incomplete result has no diagnostic, for the driver's report.
     incomplete_reasons: [String]{[String]{}}
+    // #3708: the body's failure row, which the bundle solve and a comptime
+    // closure's solve read (sema_comptime_failure_closure_settle).
+    failure: SemaFunctionFailureFacts?{None}
+    // Incomplete only because of failure obligations against unannotated
+    // callees: a solve over the callees' rows discharges or emits them.
+    obligations_pending: Bool{false}
 }
 
 // Sema publishes checked code as flat bodies (jet_foundation Facts/Body.jet);
@@ -2279,13 +2285,26 @@ fn sema_comptime_checked_function_rows(functions: [SemaComptimeFunctionResult]) 
     rows
 }
 
+// A result whose only errors are failure obligations is appended too: the
+// caller carries those obligations to the solve that settles them.
 fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
     function :: result.checked ?? return false
     &functions.push(function)
     loop fact in result.call_facts -> &call_facts.push(fact)
     loop request in result.calls -> &comptime_requests.push(request)
     loop reference in result.name_references -> &name_references.push(reference)
-    result.complete
+    result.complete || result.obligations_pending
+}
+
+// The failure obligations of a comptime-checked body, which the body pass
+// that reuses it settles with the bundle solve, as it does for a body it
+// checks itself.
+fn sema_comptime_push_obligations(result: SemaComptimeFunctionResult, diagnostics: &[Diagnostic]) Never! {
+    if !result.obligations_pending -> return
+    mark :: sema_failure_obligation_mark()
+    loop diagnostic in result.diagnostics {
+        if sema_failure_obligation_callee(diagnostic, mark) != None -> &diagnostics.push(diagnostic)
+    }
 }
 
 // sema_comptime_append_checked_function into one module result in place,
@@ -2477,6 +2496,8 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
         if checked.incomplete_reasons.len() == 0 -> &incomplete_reasons.push("body checking is incomplete")
         loop reason in checked.incomplete_reasons -> &incomplete_reasons.push(reason)
     }
+    settled :: memory_complete && checked.complete && owner_generic_complete && waiting.len() == 0
+    complete :: settled && !sema_has_error_since(diagnostics, 0)
     published := SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
@@ -2493,8 +2514,10 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
         exact_int_reachable: checked.exact_int_reachable,
         copy_events: checked.copy_events.copy(),
         diagnostics: diagnostics,
-        complete: memory_complete && checked.complete && owner_generic_complete && !sema_has_error_since(diagnostics, 0) && waiting.len() == 0,
+        complete: complete,
         incomplete_reasons: incomplete_reasons,
+        failure: checked.failure,
+        obligations_pending: settled && !complete && !sema_check_function_failed(diagnostics, 0, true),
     }
     sema_publish_comptime_function(&published)
     ^published
@@ -3302,6 +3325,10 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             }
             loop source in checked_function.comptime_body_sources -> &result.comptime_body_sources.push(source)
             &result.compute_facts.push(checked_function.compute_facts)
+            // #3708: the reused body joins the bundle solve like one checked
+            // here: its failure row, and the obligations the solve settles.
+            if checked_function.failure == .Val(facts) -> &result.failure_facts.push(facts)
+            sema_comptime_push_obligations(checked_function, &result.diagnostics)
         }
         .None -> {
             function_call_facts := [SemaCallSiteFact]{}
@@ -3375,6 +3402,7 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
             loop event in checked_function.copy_events -> &copy_events.push(event)
             loop source in checked_function.comptime_body_sources -> &comptime_body_sources.push(source)
             &compute_facts.push(checked_function.compute_facts)
+            sema_comptime_push_obligations(checked_function, &diagnostics)
             if sema_comptime_append_checked_function(checked_function, &functions, &call_facts, &comptime_requests, &name_references) -> return true
             &reasons.push("{label}: comptime-checked body is incomplete")
             if keep_going {
@@ -7002,13 +7030,7 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
     inferred := [String:Bool]{}
     loop module_result in modules {
         source_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
-        loop facts in module_result.failure_facts {
-            if facts.direct || address_taken.get(facts.function_key) != None -> next
-            row :: sema_failure_function_row(graph, source_index, facts.function_key)
-            if row < 0 || !sema_failure_inference_candidate(graph.modules[source_index].functions[row].declaration) -> next
-            &candidates.push(facts)
-            inferred[facts.function_key] = true
-        }
+        loop facts in module_result.failure_facts -> sema_failure_add_candidate(graph, source_index, facts, address_taken, &candidates, &inferred)
     }
     // Rust checks every declared function as a body job; a per-callable
     // `#Import(c)` declaration returns before its (empty) body, so its summary
@@ -7024,10 +7046,25 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
             inferred[key] = true
         }
     }
-    // The greatest fixpoint by propagation: a candidate with an edge to a
-    // key that is not (or no longer) inferred falls, and its fall reaches
-    // every candidate with an edge to it through `dependents`, so each edge
-    // is visited a bounded number of times instead of once per round.
+    sema_failure_fixpoint(candidates, &inferred)
+}
+
+// A function the solve may infer: its body has no failure source of its own,
+// it is not used as a value, and it is an inference candidate.
+fn sema_failure_add_candidate(graph: SemaRegistrationGraph, source_index: Int, facts: SemaFunctionFailureFacts, address_taken: [String:Bool], candidates: &[SemaFunctionFailureFacts], inferred: &[String:Bool]) Never! {
+    if facts.direct || address_taken.get(facts.function_key) != None -> return
+    row :: sema_failure_function_row(graph, source_index, facts.function_key)
+    if row < 0 || !sema_failure_inference_candidate(graph.modules[source_index].functions[row].declaration) -> return
+    &candidates.push(facts)
+    inferred[facts.function_key] = true
+}
+
+// The greatest fixpoint over `candidates`, each of which starts inferred;
+// returns the keys that stay infallible. By propagation: a candidate with an
+// edge to a key that is not (or no longer) inferred falls, and its fall
+// reaches every candidate with an edge to it through `dependents`, so each
+// edge is visited a bounded number of times instead of once per round.
+fn sema_failure_fixpoint(candidates: [SemaFunctionFailureFacts], inferred: &[String:Bool]) -> [String] Never! {
     dependent_slots := [String:Int]{}
     dependents := [[Int]]{}
     fallen := [String]{}
@@ -7099,6 +7136,49 @@ fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String:B
     }
     diagnostics = kept
     survived
+}
+
+// #3708 for one comptime function closure: the failure rows, function-value
+// uses and failure obligations of its checked bodies. Every function a
+// comptime body reaches is in its closure, so the closure's own solve proves
+// what the bundle solve proves for those callees; the body pass that reuses a
+// body settles its obligations again with the bundle solve.
+struct SemaComptimeFailureClosure {
+    owners: [Int]{[Int]{}}
+    facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}}
+    address_taken: [String:Bool]{[String:Bool]{}}
+    obligations: [Diagnostic]{[Diagnostic]{}}
+}
+
+fn sema_comptime_failure_closure_add(graph: SemaRegistrationGraph, closure: &SemaComptimeFailureClosure, result: SemaComptimeFunctionResult) Never! {
+    loop reference in result.name_references {
+        if reference.kind == "function" -> closure.address_taken[reference.symbol.id.key] = true
+    }
+    if result.failure == .Val(facts) {
+        if sema_registration_module_index(graph, result.module_identity) == .Val(source_index) {
+            &closure.owners.push(source_index)
+            &closure.facts.push(facts)
+        }
+    }
+    sema_comptime_push_obligations(result, &closure.obligations)
+}
+
+// Settles the closure's obligations with a solve over its rows; each one
+// that survives is reported in `diagnostics`. A discharged callee keeps its
+// carrier, as every function compile-time evaluation reached does in the
+// bundle (sema_failure_project_infallible). Returns whether every obligation
+// was discharged.
+fn sema_comptime_failure_closure_settle(graph: SemaRegistrationGraph, closure: SemaComptimeFailureClosure, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if closure.obligations.len() == 0 -> return true
+    candidates := [SemaFunctionFailureFacts]{}
+    inferred := [String:Bool]{}
+    loop (index, facts) in closure.facts -> sema_failure_add_candidate(graph, closure.owners[index], facts, closure.address_taken, &candidates, &inferred)
+    solved := [String:Bool]{}
+    loop key in sema_failure_fixpoint(candidates, &inferred) -> solved[key] = true
+    obligations := closure.obligations
+    if !sema_failure_settle_obligations(&obligations, solved) -> return true
+    loop diagnostic in obligations -> &diagnostics.push(diagnostic)
+    false
 }
 
 // One finalize body pass: its checked modules, and the pass graph moved back
@@ -7698,9 +7778,15 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         loop type_definition in staged_module.declarations.type_defs -> &checked_types.push(type_definition)
     }
     complete := resolved_graph.complete && stage.complete
+    obligation_mark :: sema_failure_obligation_mark()
     loop result in comptime_functions {
-        loop diagnostic in result.diagnostics -> &diagnostics.push(diagnostic)
-        if !result.complete -> complete = false
+        // A pending result's obligations reach the failure solve through the
+        // body pass that reuses it (sema_comptime_push_obligations).
+        loop diagnostic in result.diagnostics {
+            if result.obligations_pending && sema_failure_obligation_callee(diagnostic, obligation_mark) != None -> next
+            &diagnostics.push(diagnostic)
+        }
+        if !result.complete && !result.obligations_pending -> complete = false
     }
     if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
     all_modules :: loop module_index in 0..<resolved_graph.modules.len() -> module_index

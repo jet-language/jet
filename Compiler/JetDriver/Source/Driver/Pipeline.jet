@@ -35,6 +35,9 @@ use jet_sema.[
     SemaSourceOrigin,
     SemaSourceSegment,
     sema_check_comptime_function,
+    SemaComptimeFailureClosure,
+    sema_comptime_failure_closure_add,
+    sema_comptime_failure_closure_settle,
     check_pure_program_root,
     sema_check_comptime_item,
     sema_comptime_call_facts_pure,
@@ -768,6 +771,8 @@ fn jet_driver_comptime_function_closure(
     incomplete_reasons := [String]{}
     dependencies := [String]{}
     pure := true
+    // #3708: obligations against unannotated callees settle over the closure.
+    failure_closure := SemaComptimeFailureClosure{}
     cursor := 0
     loop cursor < queue.len() {
         current := queue[cursor]
@@ -775,7 +780,7 @@ fn jet_driver_comptime_function_closure(
         checked_key :: "{current.module_identity}\n{current.function_key}"
         reused_row := -1
         if index.checked_rows.get(checked_key) == .Val(row) {
-            if checked_functions[row].complete -> reused_row = row
+            if checked_functions[row].complete || checked_functions[row].obligations_pending -> reused_row = row
         }
         if reused_row < 0 && memory_plan.len() == 0 -> &memory_plan.push(sema_function_memory_plan_from_graph(graph))
         checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, &environment, program, &probe, available, memory_plan[0], values, current.module_identity, current.function_key)
@@ -785,7 +790,7 @@ fn jet_driver_comptime_function_closure(
             if pure && !sema_comptime_call_facts_pure(graph, checked.call_facts) -> pure = false
         }
         if {
-            !checked.complete || jet_driver_has_errors(checked.diagnostics) -> {
+            !checked.obligations_pending && (!checked.complete || jet_driver_has_errors(checked.diagnostics)) -> {
                 loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
                 if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) -> &incomplete_reasons.push("{current.function_key}: incomplete (no recorded cause)")
                 loop reason in checked.incomplete_reasons -> &incomplete_reasons.push("{current.function_key}: {reason}")
@@ -803,6 +808,7 @@ fn jet_driver_comptime_function_closure(
                 }
                 jet_driver_comptime_precise_refs(graph, &index, function.tree, defaults, function.body, &queue, &queued)
                 &functions.push(function)
+                sema_comptime_failure_closure_add(graph, &failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None {
                     index.checked_rows[checked_key] = checked_functions.len()
                     &checked_functions.push(checked)
@@ -825,6 +831,7 @@ fn jet_driver_comptime_function_closure(
             }
         }
     }
+    if !sema_comptime_failure_closure_settle(graph, failure_closure, &diagnostics) -> complete = false
     JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons, dependencies: dependencies, pure: pure}
 }
 
