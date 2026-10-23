@@ -329,6 +329,27 @@ fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String
     None
 }
 
+// The field types of many Core records in one pass over the rows:
+// `table[k][f]` is the first matching row's type of `owners[k]`.`fields[k][f]`,
+// None when no row types it. `owners` are distinct record leaves. JetIR adds
+// about 140 compiler-owned records to every program, and core_record_field
+// would rescan the rows from the top for each of their fields.
+fn core_record_field_table(owners: [String], fields: [[String]]) -> [[Type?]] Never! {
+    at := [String:Int]{}
+    table := [[Type?]]{}
+    loop (k, owner) in owners {
+        at[owner] = k
+        &table.push(loop _ in fields[k] -> Type?{None})
+    }
+    loop row in CORE_RECORD_FIELD_ROWS {
+        k :: at.get(row.owner) ?? next
+        loop (f, field) in fields[k] {
+            if field == row.field && table[k][f] == None -> table[k][f] = Val(row.ty)
+        }
+    }
+    table
+}
+
 fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
     core_record_literal_fields_in(CORE_RECORD_LITERAL_ROWS, core_record_leaf(owner))
 }

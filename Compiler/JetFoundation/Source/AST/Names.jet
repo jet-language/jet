@@ -86,7 +86,7 @@ fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Na
         slot = (slot + 1).bit_and(table.mask)
     }
     id :: table.texts.len()
-    loop index in start..<end -> &table.bytes.push(bytes[index])
+    &table.bytes.extend(bytes[start..<end])
     &table.ends.push(table.bytes.len())
     &table.hashes.push(hash)
     &table.texts.push(String.from_bytes(bytes.slice(start, end)) ?? "")

@@ -2471,10 +2471,11 @@ fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
     loop name in IR_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
     loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
     loop record in IR_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
+    core :: ir_compiler_owned_core_fields()
     loop name in records {
         if declared.get(name) != None || program_names.get(name) != None -> next
         declared[name] = true
-        fields :: ir_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
+        fields :: ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
         &types.push(ir_compiler_owned_def(module_identity, name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}}))
     }
 }

@@ -5,7 +5,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     core_enum_variant_payload,
-    core_record_field,
+    core_record_field_table,
     type_name,
 ]
 
@@ -175,28 +175,53 @@ IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "ModGrant", fields: [String]{"read"}},
 } }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_core_record
-fn ir_compiler_owned_core_record_fields(record: IRCompilerOwnedRecord) -> [TypeTupleField] Never! {
-    fields := [TypeTupleField]{}
-    loop field in record.fields {
-        ty :: core_record_field(record.name, field) ?? panic("missing canonical Core field {record.name}.{field}")
-        &fields.push(TypeTupleField{name: field, ty: ty})
+// The compiler-owned records whose fields are typed by the Core record rows
+// (Rust compiler_owned_core_record): `FieldError`, the geometry points,
+// `DataPivotCell`, `AllocError`, `DataSummary` and the Core records, by
+// name, all read in one pass over the rows.
+fn ir_compiler_owned_core_fields() -> [String:[TypeTupleField]] Never! {
+    records := [IRCompilerOwnedRecord]{
+        {name: "FieldError", fields: [String]{"path", "reason"}},
+        {name: "DataPivotCell", fields: [String]{"row_key", "column_key", "count", "sum", "mean"}},
+        {name: "AllocError", fields: [String]{"requested_bytes", "allocator"}},
+        {name: "DataSummary", fields: [String]{"count", "sum", "mean", "min", "max", "median", "variance", "stddev"}},
     }
-    fields
+    loop name in IR_COMPILER_OWNED_GEOMETRY_POINTS -> &records.push(IRCompilerOwnedRecord{name: name.copy(), fields: [String]{"x", "y"}})
+    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.copy())
+    owners := [String]{}
+    fields := [[String]]{}
+    seen := [String:Bool]{}
+    loop record in records {
+        if seen.get(record.name) != None -> next
+        seen[record.name] = true
+        &owners.push(record.name.copy())
+        &fields.push(record.fields.copy())
+    }
+    types :: core_record_field_table(owners, fields)
+    out := [String:[TypeTupleField]]{}
+    loop (k, owner) in owners {
+        row := [TypeTupleField]{}
+        loop (f, field) in fields[k] {
+            ty :: types[k][f] ?? panic("missing canonical Core field {owner}.{field}")
+            &row.push(TypeTupleField{name: field.copy(), ty: ty.copy()})
+        }
+        out[owner] = row
+    }
+    out
 }
 
 // The fields of the compiler-owned record row spelled `name`, written over the
 // row's own type parameters (`ir_compiler_owned_generic_params`), or
-// None when no such row exists. Rows follow Rust compiler_owned_type_defs:
+// None when no such row exists; `core` is ir_compiler_owned_core_fields.
+// Rows follow Rust compiler_owned_type_defs:
 // `FieldError`, `Range`, the generic Core carriers, the geometry records, the
 // keyed-vault records, the data summaries, `AllocError`,
 // `VJPRun`, the Core records and the math records. Callers resolve declared
 // nominals first, as Rust's rows dedupe by key in favour of declarations.
-fn ir_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
+fn ir_compiler_owned_record_fields(name: String, core: [String:[TypeTupleField]]) -> [TypeTupleField]? Never! {
     if name == IR_RANGE_RECORD -> return Val(ir_range_record_fields())
     t :: Type.Named{name: "T"}
     bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
-    if name == "FieldError" -> return Val(ir_compiler_owned_core_record_fields(IRCompilerOwnedRecord{name: name, fields: [String]{"path", "reason"}}))
     if name == "DataJoin" -> return Val([TypeTupleField]{TypeTupleField{name: "left", ty: Type.Named{name: "L"}}, TypeTupleField{name: "right", ty: Type.Named{name: "R"}}})
     if name == "Group" -> return Val([TypeTupleField]{TypeTupleField{name: "key", ty: Type.Named{name: "K"}}, TypeTupleField{name: "value", ty: Type.Named{name: "V"}}})
     if name == "DataSnapshot" {
@@ -224,15 +249,11 @@ fn ir_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
         loop field in names -> &fields.push(TypeTupleField{name: field, ty: scalar})
         return Val(fields)
     }
-    if IR_COMPILER_OWNED_GEOMETRY_POINTS.contains(name) -> return Val(ir_compiler_owned_core_record_fields(IRCompilerOwnedRecord{name: name, fields: [String]{"x", "y"}}))
     if name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" -> return Val([TypeTupleField]{})
     if name == "Rotation" {
         key :: Type.Apply{name: "KeyRef", args: [Type]{t}}
         return Val([TypeTupleField]{TypeTupleField{name: "previous", ty: key}, TypeTupleField{name: "current", ty: key}})
     }
-    if name == "DataPivotCell" -> return Val(ir_compiler_owned_core_record_fields(IRCompilerOwnedRecord{name: name, fields: [String]{"row_key", "column_key", "count", "sum", "mean"}}))
-    if name == "AllocError" -> return Val(ir_compiler_owned_core_record_fields(IRCompilerOwnedRecord{name: name, fields: [String]{"requested_bytes", "allocator"}}))
-    if name == "DataSummary" -> return Val(ir_compiler_owned_core_record_fields(IRCompilerOwnedRecord{name: name, fields: [String]{"count", "sum", "mean", "min", "max", "median", "variance", "stddev"}}))
     if name == "VJPRun" {
         tensor :: Type.Named{name: "Tensor"}
         return Val([TypeTupleField]{
@@ -241,9 +262,7 @@ fn ir_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
             {name: "grads", ty: Type.Fn{params: [Type]{}, ret: Val(t), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}},
         })
     }
-    loop record in IR_COMPILER_OWNED_CORE_RECORDS {
-        if record.name == name -> return Val(ir_compiler_owned_core_record_fields(record))
-    }
+    if core.get(name) == .Val(fields) -> return Val(fields)
     loop record in IR_COMPILER_OWNED_MATH_RECORDS {
         if record.name != name -> next
         scalar :: ir_math_scalar_type(name)
