@@ -1,0 +1,27 @@
+
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("rollout-rollback")
+    path :: Path.from(temp).join("events.log").to_string()
+    tree := service.tree("rollback")
+    store :: service.state_store(path) ?? panic("store")
+    tree.set_state_event_log(store, "events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.append_event("before") ?? panic("before")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    tree.handoff_generation() ?? panic("handoff")
+    receipt :: tree.upgrade_receipt() ?? panic("receipt")
+    print("receipt:{receipt}")
+    tree.append_event("after") ?? panic("after")
+    rolled :: tree.rollback_generation()
+    if rolled == {
+        .Ok(generation) -> { print("rolled:{generation}:{tree.replay_events()}") }
+        .Err(_) -> { print("rolled:refused") }
+    }
+    tree.stop() ?? panic("stop")
+}

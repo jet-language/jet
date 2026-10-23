@@ -1,0 +1,40 @@
+
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    late :: hook.on(scope, (value: Int) -> {
+        print("late {value}")
+        HookDecision.Continue
+    })
+    hook.on_priority(scope, 10, (value: Int) -> {
+        print("first {value}")
+        late.unsubscribe()
+        HookDecision.Transform(value + 1)
+    })
+    hook.once(scope, (value: Int) -> {
+        print("once {value}")
+        if value == 2 { hook.run(10) }
+        HookDecision.Continue
+    })
+    hook.on(scope, (value: Int) -> {
+        print("last {value}")
+        HookDecision.Continue
+    })
+    hook.run(1)
+    hook.run(2)
+    print("active {scope.active_count()}")
+    scope.cancel()
+    hook.run(3)
+
+    owned :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    if true {
+        owner :: event.scope()
+        owned.on(owner, (value: Int) -> {
+            print("leaked {value}")
+            HookDecision.Continue
+        })
+    }
+    owned.run(9)
+}

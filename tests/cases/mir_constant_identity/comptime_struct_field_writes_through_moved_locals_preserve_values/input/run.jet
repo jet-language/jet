@@ -1,0 +1,49 @@
+
+enum AccessConvention {
+    Read
+    Write
+}
+
+struct Coverage {
+    bits: Int
+    reserved: Int
+}
+
+struct Row {
+    access: AccessConvention
+    coverage: Coverage
+    untouched: Int
+}
+
+fn write(row: ^Row) -> Row Never! {
+    updated := row
+    updated.access = AccessConvention.Write
+    updated
+}
+
+fn write_nested(row: ^Row) -> Row Never! {
+    updated := row
+    updated.coverage.bits = (updated.coverage.bits).bit_or(4)
+    updated
+}
+
+SIMPLE_ROWS :: [write(^Row{
+    access: AccessConvention.Read,
+    coverage: Coverage{bits: 1, reserved: 7},
+    untouched: 9,
+})]
+
+ROWS :: [write_nested(write(^Row{
+    access: AccessConvention.Read,
+    coverage: Coverage{bits: 1, reserved: 7},
+    untouched: 9,
+}))]
+
+fn run() {
+    print(SIMPLE_ROWS[0].access == AccessConvention.Write)
+    print(SIMPLE_ROWS[0].coverage.bits)
+    print(ROWS[0].access == AccessConvention.Write)
+    print(ROWS[0].coverage.bits)
+    print(ROWS[0].coverage.reserved)
+    print(ROWS[0].untouched)
+}

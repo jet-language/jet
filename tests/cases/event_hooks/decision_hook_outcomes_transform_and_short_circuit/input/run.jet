@@ -1,0 +1,43 @@
+
+use core.event as event
+
+fn show(outcome: HookOutcome<String, String>) {
+    if outcome == {
+        .Continue(value) -> print("continue {value}")
+        .Cancel -> print("cancel")
+        .Fail(error) -> print("fail {error}")
+    }
+}
+
+fn run() {
+    zero :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    show(zero.run("original"))
+
+    scope :: event.scope()
+    transformed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    transformed.on_priority(scope, 10, (value: String) -> {
+        print("first {value}")
+        HookDecision.Transform("{value}-one")
+    })
+    transformed.on(scope, (value: String) -> {
+        print("second {value}")
+        HookDecision.Continue
+    })
+    show(transformed.run("start"))
+
+    cancelled :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    cancelled.on_priority(scope, 10, (value: String) -> HookDecision.Cancel)
+    cancelled.on(scope, (value: String) -> {
+        print("must not run {value}")
+        HookDecision.Continue
+    })
+    show(cancelled.run("stop"))
+
+    failed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    failed.on_priority(scope, 10, (value: String) -> HookDecision.Fail("denied {value}"))
+    failed.on(scope, (value: String) -> {
+        print("must not run {value}")
+        HookDecision.Continue
+    })
+    show(failed.run("save"))
+}

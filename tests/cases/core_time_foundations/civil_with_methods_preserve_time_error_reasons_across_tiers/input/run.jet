@@ -1,0 +1,20 @@
+
+use core.time as time
+
+fn run() {
+    date :: time.new(2024, 1, 31)
+    if date.with(2024, 2, 31, "reject") == {
+        .Ok(_) -> print("date accepted")
+        .Err(error) -> print(error.reason == "date fields are outside the valid range: 2024-02-31")
+    }
+    datetime :: time.datetime(2024, 1, 31, 12, 0, 0)
+    if datetime.with(2024, 1, 31, 24, 0, 0, "reject") == {
+        .Ok(_) -> print("time accepted")
+        .Err(error) -> print(error.reason == "time fields are outside the valid range: 24:00:00")
+    }
+    zoned :: datetime.in_zone(time.utc())
+    if zoned.with_time(time.local_time(1, 2, 3), "invalid") == {
+        .Ok(_) -> print("zone accepted")
+        .Err(error) -> print(error.reason == "invalid disambiguation: invalid")
+    }
+}

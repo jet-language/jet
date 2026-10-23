@@ -1,0 +1,11 @@
+use core.reactive as reactive
+fn run() {
+    n := reactive.signal(1)
+    doubled := reactive.derived(() -> (n.get() * 2))
+    print(doubled.get())
+    subscription := reactive.effect(() -> {
+        print(doubled.get())
+    })
+    n.set(5)
+    print(doubled.get())
+}

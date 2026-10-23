@@ -1,0 +1,13 @@
+
+#Codable
+struct Event { id: Int }
+fn round_trip<T: [Encode, Decode]>(value: T) -> T Never! { value }
+enum Cause { Manual }
+fn mark<T>(value: T, cause: Cause) -> T Never! { value }
+fn run() {
+    events :: round_trip<[Event]>([Event{id: 1}])
+    trees :: round_trip<[DataTree]>([DataTree.Null])
+    optional :: round_trip<Event?>(Val(Event{id: 2}))
+    mapped :: round_trip<[String:Event]>(["event": Event{id: 3}])
+    marked :: mark(events, .Manual)
+}

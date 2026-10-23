@@ -1,0 +1,6 @@
+use core.compiler as facts
+LEXED :: prep { facts.lex(`fn run() {}`) ?? panic("lex") }
+PARSED :: prep { facts.parse(`fn run() {}`) ?? panic("parse") }
+CHECKED :: prep { facts.check(PARSED) ?? panic("check") }
+MAPPED :: prep { facts.source_map(`fn run() {}`) ?? panic("map") }
+fn run() { print("compiler queries") }

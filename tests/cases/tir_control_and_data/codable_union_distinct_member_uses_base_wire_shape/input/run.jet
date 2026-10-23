@@ -1,0 +1,22 @@
+
+use core.encoding.json as json
+
+#CodableAsBase
+Usd :: distinct Int
+
+#Codable
+struct Row {
+    value: Usd | String
+}
+
+fn run() {
+    row :: Row{ value: Usd.from_int(7) }
+    wire :: json.to_string(row)
+    print(wire)
+    decoded :: json.decode<Row>(wire) ?? panic("row")
+    decoded_value :: decoded.value
+    if decoded_value == {
+        .Usd(value) -> print(value.raw())
+        .String(value) -> print(value)
+    }
+}

@@ -1,0 +1,16 @@
+use core.reactive as reactive
+fn run() {
+    choose_left := reactive.signal(true)
+    left := reactive.signal(1)
+    right := reactive.signal(10)
+    subscription := reactive.effect(() -> {
+        if choose_left.get() {
+            print(left.get())
+        } else {
+            print(right.get())
+        }
+    })
+    choose_left.set(false)
+    left.set(2)
+    right.set(11)
+}

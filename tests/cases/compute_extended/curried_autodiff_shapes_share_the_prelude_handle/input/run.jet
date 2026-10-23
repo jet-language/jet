@@ -1,0 +1,28 @@
+
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
+
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    tangent_w :: compute.ones([1]) ?? panic("tangent_w")
+    tangent_x :: compute.ones([1]) ?? panic("tangent_x")
+
+    value_and_gradient :: compute.value_and_gradient(loss)
+    (value, gradients) :: value_and_gradient(w, x)
+    print("value:{compute.to_list(value)}")
+    print("value_gradient_w:{compute.to_list(gradients.w)}")
+
+    jvp :: compute.jvp(loss)
+    (jvp_value, jvp_tangent) :: jvp(w, x, tangent_w, tangent_x)
+    print("jvp_value:{compute.to_list(jvp_value)}")
+    print("jvp_tangent:{compute.to_list(jvp_tangent)}")
+
+    vjp :: compute.vjp(loss)
+    vjp_run :: vjp(w, x)
+    pull_fn :: vjp_run.pull
+    pull :: pull_fn(tangent_w.copy())
+    print("vjp_pull_w:{compute.to_list(pull.w)}")
+    print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
+}

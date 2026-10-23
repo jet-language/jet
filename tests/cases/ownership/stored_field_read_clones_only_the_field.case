@@ -1,0 +1,10 @@
+# tests/ownership.rs::stored_field_read_clones_only_the_field: the original's literal expectations; Jet does not meet them yet (I9 disagreement, Tools/testkit/known-failing.tsv).
+fixture: stored_field_read_clones_only_the_field/input
+step: jet check o1/run.jet
+exit: 0 # tests/ownership.rs:160 expect
+step: jet run o2/run.jet
+exit: 0 # tests/ownership.rs:183 tir_support::assert_tiers_agree
+stdout: = "24\n8\n" # tests/ownership.rs:183 tir_support::assert_tiers_agree
+step: jet run --interpret o2/run.jet
+exit: 0 # tests/ownership.rs:183 tir_support::assert_tiers_agree
+stdout: = "24\n8\n" # tests/ownership.rs:183 tir_support::assert_tiers_agree

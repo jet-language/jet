@@ -1,0 +1,13 @@
+
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) -[]> Bool {
+    return secret.with((borrowed) -> borrowed.public_key()) == .Ok(_)
+}
+fn run() {
+    ttl := Duration.seconds(1) ?? panic("duration")
+    key := crypto.SigningKey.new_random() ?? panic("key")
+    secret := vault.ExpiringSecret.new(^key, ttl, Clock.system())
+    print(inspect(&secret))
+}

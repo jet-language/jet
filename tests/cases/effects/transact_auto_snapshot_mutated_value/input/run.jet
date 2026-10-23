@@ -1,0 +1,18 @@
+
+enum Fail { Bad }
+fn transfer(from: &Int, to: &Int, amount: Int) -> Int Fail! {
+    #Transact(tx) {
+        from -= amount
+        to += amount
+        if amount > 100 {
+            return Err(Fail.Bad)
+        }
+    }
+    return Ok(amount)
+}
+fn run() {
+    a := 100
+    b := 0
+    n :: transfer(&a, &b, 40) ?? (-1)
+    print("{n}")
+}

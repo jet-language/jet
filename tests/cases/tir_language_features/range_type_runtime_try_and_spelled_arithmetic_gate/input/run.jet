@@ -1,0 +1,16 @@
+#Numeric Severity :: distinct Int(0..10)
+
+fn checked(raw: Int) -> Severity String! {
+    return Ok(Severity.from_int(raw))
+}
+
+fn pass_checked(value: Severity String!) -> Severity String! { return value.copy() }
+fn direct() -> Severity { return Severity.from_u8(8) }
+
+fn run() {
+    a :: pass_checked(checked(4)) ?? panic("range")
+    b :: checked(6) ?? panic("range")
+    widened :: wrapping(a + b)
+    print("{widened}")
+    print(direct().raw())
+}

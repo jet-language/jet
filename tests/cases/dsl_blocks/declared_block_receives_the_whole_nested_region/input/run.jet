@@ -1,0 +1,20 @@
+
+marker Check($sites: [.Block]) {
+    if !target.contains("after") {
+        reject(
+            code: "E0927",
+            what: "the complete block text is required",
+            why: "the checker reads one lexical region",
+            fix: "keep the trailing statement inside the block"
+        )
+    }
+}
+
+fn run() {
+    #Check {
+        if true {
+            print("inside")
+        }
+        print("after")
+    }
+}

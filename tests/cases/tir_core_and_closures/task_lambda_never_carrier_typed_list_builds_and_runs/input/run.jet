@@ -1,0 +1,12 @@
+
+fn report() -> String Never! { "done" }
+fn run() {
+    workers := [Task<String Never!>]{}
+    task.group group {
+        &workers.push(task { report() })
+        loop pending in workers {
+            joined :: ^pending.join() ?? panic("join failed")
+            print(joined ?? panic("infallible worker"))
+        }
+    }
+}

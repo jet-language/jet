@@ -1,0 +1,6 @@
+use core as root
+LEXED :: prep { root.compiler.lex(`fn run() {}`) ?? panic("lex") }
+PARSED :: prep { root.compiler.parse(`fn run() {}`) ?? panic("parse") }
+CHECKED :: prep { root.compiler.check(PARSED) ?? panic("check") }
+MAPPED :: prep { root.compiler.source_map(`fn run() {}`) ?? panic("map") }
+fn run() { print("compiler queries") }

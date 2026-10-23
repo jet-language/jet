@@ -1,0 +1,11 @@
+
+#Layout(c)
+struct TargetPointer { pointer: *Int }
+POINTER_BYTES :: prep { pointer_bytes() }
+fn pointer_bytes() -> Int Never! {
+    layout :: TargetPointer.$layout
+    layout.size ?? panic("target pointer layout is missing")
+}
+fn run() {
+    print(POINTER_BYTES == prep { TargetPointer.$layout.size ?? 0 })
+}

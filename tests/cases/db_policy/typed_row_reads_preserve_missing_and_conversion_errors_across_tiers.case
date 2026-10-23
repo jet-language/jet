@@ -1,0 +1,8 @@
+# tests/db_policy.rs::typed_row_reads_preserve_missing_and_conversion_errors_across_tiers: the original's literal expectations; Jet does not meet them yet (ref build failed, Tools/testkit/known-failing.tsv).
+fixture: typed_row_reads_preserve_missing_and_conversion_errors_across_tiers/input
+step: jet run run.jet
+exit: 0 # tests/db_policy.rs:336 tir_support::assert_tiers_agree
+stdout: = "42\n42.0\n1.5\njet\ntrue\nfalse\ntrue\nmissing column `missing`\nexpected an int, got jet\nexpected a float, got null\nexpected text, got 42\nexpected a bool, got 2\nexpected an int, got 1\nexpected an int, got 1000000000000000000000\nexpected an int, got 0.0000001\nexpected text, got [1, 2]\n" # tests/db_policy.rs:336 tir_support::assert_tiers_agree
+step: jet run --interpret run.jet
+exit: 0 # tests/db_policy.rs:336 tir_support::assert_tiers_agree
+stdout: = "42\n42.0\n1.5\njet\ntrue\nfalse\ntrue\nmissing column `missing`\nexpected an int, got jet\nexpected a float, got null\nexpected text, got 42\nexpected a bool, got 2\nexpected an int, got 1\nexpected an int, got 1000000000000000000000\nexpected an int, got 0.0000001\nexpected text, got [1, 2]\n" # tests/db_policy.rs:336 tir_support::assert_tiers_agree

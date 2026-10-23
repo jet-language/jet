@@ -1,0 +1,34 @@
+
+use core.encoding.json as json
+
+struct WriteOnly {
+    marker: Int
+}
+
+impl WriteOnly.Encode {
+    fn encode(self) -> Dyn {
+        return Dyn.Text("write")
+    }
+}
+
+#Encode
+struct Output {
+    value: Int | WriteOnly
+}
+
+#Decode
+struct ReadOnly {
+    marker: Int
+}
+
+#Decode
+struct Input {
+    value: Int | ReadOnly
+}
+
+fn run() {
+    output :: Output{ value: WriteOnly{ marker: 1 } }
+    print(json.to_string(output))
+    _ :: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+    print("ok")
+}

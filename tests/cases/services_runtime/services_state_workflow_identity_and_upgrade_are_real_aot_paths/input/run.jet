@@ -1,0 +1,69 @@
+
+use core.service as services
+use core.testing as testing
+
+fn lifecycle_worker() {}
+
+fn run() {
+    temp := testing.temp_dir("service-state")
+    snapshot := services.tree("snapshot")
+    snapshot_store :: Path.from(temp).join("snapshot.state").to_string()
+    snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
+    snapshot.set_state_snapshot(snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
+    snapshot_worker :: snapshot.worker("worker", lifecycle_worker, capacity: 2) ?? panic("snapshot worker")
+    snapshot.start() ?? panic("snapshot start")
+    snapshot.commit_snapshot("state-v1") ?? panic("snapshot commit")
+    restored :: snapshot.restore_snapshot() ?? panic("snapshot restore")
+    print("snapshot:{restored}")
+    snapshot.stop() ?? panic("snapshot stop")
+
+    events := services.tree("events")
+    event_store :: Path.from(temp).join("events.state").to_string()
+    event_authority :: services.state_store(event_store) ?? panic("event store")
+    events.set_state_event_log(event_authority, "events", 1, "reversible") ?? panic("event state")
+    event_worker :: events.worker("worker", lifecycle_worker, capacity: 2) ?? panic("event worker")
+    events.start() ?? panic("event start")
+    events.append_event("first") ?? panic("event one")
+    events.append_event("second") ?? panic("event two")
+    print("events:{events.replay_events()}")
+    print("event_count:{events.event_count()}")
+    events.stop() ?? panic("event stop")
+
+    workflow := services.tree("workflow")
+    workflow_store_path :: Path.from(temp).join("workflow.state").to_string()
+    workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
+    workflow.set_state_event_log(workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
+    workflow_worker :: workflow.worker("worker", lifecycle_worker, capacity: 2) ?? panic("workflow worker")
+    workflow.start() ?? panic("workflow start")
+    run_id :: workflow.workflow_start("checkout", 1) ?? panic("workflow id")
+    same_run :: workflow.workflow_start("checkout", 1) ?? panic("workflow duplicate")
+    workflow.workflow_step(run_id, "charge") ?? panic("workflow step")
+    history :: workflow.workflow_history(run_id) ?? panic("workflow history")
+    print("workflow:{run_id}:{same_run}:{history}")
+    versioned :: workflow.workflow_start("checkout", 2)
+    if versioned == {
+        .Ok(_) -> { print("workflow_version:accepted") }
+        .Err(_) -> { print("workflow_version:rejected") }
+    }
+    workflow.stop() ?? panic("workflow stop")
+
+    cluster := services.tree("cluster")
+    endpoint :: cluster.worker("api", lifecycle_worker, capacity: 2) ?? panic("cluster worker")
+    cluster.start() ?? panic("cluster start")
+    cluster.directory_register("api", endpoint) ?? panic("directory register")
+    cluster.drain_worker(endpoint) ?? panic("cluster drain")
+    handed :: cluster.handoff_generation() ?? panic("handoff")
+    receipt :: cluster.upgrade_receipt() ?? panic("upgrade receipt")
+    current :: cluster.directory_resolve("api") ?? panic("directory resolve")
+    print("generation:{handed}:{cluster.directory_generation()}:{current.show()}:{receipt}")
+    stale :: cluster.send(endpoint, "late")
+    if stale == {
+        .Ok(_) -> { print("stale:accepted") }
+        .Err(_) -> { print("stale:rejected") }
+    }
+    rolled :: cluster.rollback_generation() ?? panic("rollback")
+    print("rollback:{rolled}:{cluster.directory_generation()}")
+    cluster.chaos_fail() ?? panic("chaos")
+    print(&cluster.observe())
+    cluster.stop() ?? panic("cluster stop")
+}

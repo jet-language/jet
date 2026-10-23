@@ -1,0 +1,15 @@
+use core.encoding.json as json
+fn run() {
+    raw :: "{{\"port\":\"8080\",\"name\":\"api\"}}"
+    data :: json.decode(raw) ?? panic("bad json")
+    if data == .Object(entries) {
+        port :: entries["port"]
+        name :: entries["name"]
+        if port == .Int(n) {
+            print(n + 1)
+        }
+        if name == .Text(s) {
+            print(s)
+        }
+    }
+}

@@ -1,0 +1,17 @@
+use core.http as http
+use core.http.server as server
+fn handle_root(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "welcome"))
+}
+
+fn handle_user(id: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "user={id}"))
+}
+fn run() {
+    router :: http.router()
+    router.get("/", handle_root)
+    router.get("/users/:id", handle_user)
+    req :: http.parse("GET / HTTP/1.1\nHost: localhost")
+    resp :: http.dispatch(router, req) ?? panic("dispatch")
+    print(resp.body().text(1024) ?? panic("body"))
+}

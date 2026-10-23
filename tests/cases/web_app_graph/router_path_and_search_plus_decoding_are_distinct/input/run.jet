@@ -1,0 +1,23 @@
+use core.web.router as router
+fn page(nav: WebNavigation) -> String { return "" }
+fn rejects_invalid_utf8(r: WebRouter) -> Bool {
+    if router.navigate(r, "/item/%FF") == {
+        .Err(_) -> return true
+        .Ok(_) -> return false
+    }
+}
+fn run() {
+    r :: router.route(
+        router.new(),
+        "/item/:slug",
+        [WebRouterField]{WebRouterField{name: "slug", value: ""}},
+        [WebRouterField]{WebRouterField{name: "q", value: ""}},
+        page
+    ) ?? panic("route")
+    nav :: router.navigate(r, "/item/a+b?q=a+b") ?? panic("navigate")
+    if nav.params[0].value != "a+b" -> panic("path plus changed")
+    if nav.search[0].value != "a b" -> panic("query plus did not decode")
+    rejected :: rejects_invalid_utf8(r)
+    if !rejected -> panic("invalid UTF-8 was accepted")
+    print("ok")
+}

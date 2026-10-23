@@ -1,0 +1,21 @@
+
+use core.compute as compute
+
+fn tiled_loss(left: Tensor, right: Tensor) -> Tensor {
+    return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
+}
+
+fn run() {
+    left :: compute.full([1, 1], 2.0) ?? panic("left")
+    right :: compute.full([1, 1], 3.0) ?? panic("right")
+    (grad_left, grad_right) :: compute.gradient(tiled_loss, left.copy(), right.copy())
+    print("grad_left:{compute.to_list(grad_left)}")
+    print("grad_right:{compute.to_list(grad_right)}")
+
+    tangent_left :: compute.full([1, 1], 1.0) ?? panic("tangent_left")
+    tangent_right :: compute.full([1, 1], 1.0) ?? panic("tangent_right")
+    tiled_jvp :: compute.jvp(tiled_loss)
+    (value, tangent) :: tiled_jvp(left, right, tangent_left, tangent_right)
+    print("value:{compute.to_list(value)}")
+    print("tangent:{compute.to_list(tangent)}")
+}

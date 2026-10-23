@@ -1,0 +1,11 @@
+
+use core.process as process
+
+fn run() {
+    policy :: Authority.from_rights(["Net:example.com"])
+    spec :: process.cmd(["/usr/bin/true"]).under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("accepted")
+        .Err(_) -> print("refused")
+    }
+}
