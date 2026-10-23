@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, tir_expr_type, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt]
+use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, tir_expr_type, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -193,19 +193,27 @@ struct IRProgram {
 struct IRImplMethod { method: String, trait_short: String, owner_key: String }
 
 // The checked source files (`path` -> text) as rows of bytes and line
-// starts (codegen Builder.jet jet_codegen_source_index).
-fn ir_source_index(p: &IRProgram, sources: ^[String:String]) Never! {
-    loop (path, text) in ^sources {
-        if p.source_rows.get(path) != None -> next
+// starts (codegen Builder.jet jet_codegen_source_index): IRProgram's
+// `source_bytes`, `source_lines` and `source_rows`.
+struct IRSourceIndex {
+    bytes: [[U8]]
+    lines: [[Int]]
+    rows: [String:Int]
+}
+
+fn ir_source_index(sources: [String:String]) -> IRSourceIndex Never! {
+    index := IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, rows: [String:Int]{}}
+    loop (path, text) in sources {
         bytes := text.bytes()
         starts := [Int]{0}
-        loop (index, byte) in bytes {
-            if byte == (U8{10}) -> &starts.push(index + 1)
+        loop (at, byte) in bytes {
+            if byte == (U8{10}) -> &starts.push(at + 1)
         }
-        p.source_rows[path] = p.source_bytes.len()
-        &p.source_bytes.push(^bytes)
-        &p.source_lines.push(^starts)
+        index.rows[path] = index.bytes.len()
+        &index.bytes.push(^bytes)
+        &index.lines.push(^starts)
     }
+    index
 }
 
 // The 1-based line holding byte `offset` of `path` (codegen
@@ -277,10 +285,34 @@ struct IRLambdaJob {
 struct IRCaptureSlot { name: String, offset: Int, row: Int, by_ref: Bool }
 
 fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
-    p := ir_program_declared(^type_defs, ^impl_defs, ^constant_defs, functions)
-    ir_program_bind(&p, ^functions)
-    ir_source_index(&p, ^sources)
-    p
+    owned_sources :: ^sources
+    programs := [IRProgram]{}
+    // The sources are indexed on their own thread while the declarations bind.
+    task.group ir_program_sources {
+        indexing :: task ir_source_index(owned_sources)
+        p := ir_program_declared(^type_defs, ^impl_defs, ^constant_defs, functions)
+        ir_program_bind(&p, ^functions)
+        index := indexing.join() ?? panic(compiler_threads_failure_text(err))
+        p.source_bytes = ^index.bytes
+        p.source_lines = ^index.lines
+        p.source_rows = ^index.rows
+        &programs.push(^p)
+    }
+    &programs.pop() ?? panic("the program build lost its program")
+}
+
+// Each key of `entries` to the `row` of its entry with the least `at` (the
+// entries' `at` are distinct): the first row of a key in `at` order. The
+// entries are sorted, so the map fills in ascending key order and every
+// insert appends (a map put in row order shifts every later key).
+fn ir_first_rows(entries: ^[(key: String, at: Int, row: Int)]) -> [String:Int] Never! {
+    order := ^entries
+    &order.sort()
+    rows := [String:Int]{}
+    loop (index, entry) in order {
+        if index == 0 || order[index - 1].key != entry.key -> rows[entry.key] = entry.row
+    }
+    rows
 }
 
 // A program over the checked declarations with no function bound yet
@@ -288,25 +320,29 @@ fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TIm
 // compiler-owned ones and the union types the declarations and `functions`'
 // signatures name, and the host target's trait implementations.
 fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_defs: ^[TConstantDef], functions: [FnBody]) -> IRProgram Never! {
-    constants := [String:TConstantDef]{}
-    startup := [String]{}
-    loop definition in ^constant_defs {
-        if definition.init != None && constants.get(definition.key) == None -> &startup.push(definition.key.copy())
-        if constants.get(definition.key) == None -> constants[definition.key] = definition
-        // A ConstRef names `constant:<module>::<name>`.
-        qualified :: "constant:{definition.module_identity}::{definition.name}"
-        if constants.get(qualified) == None -> constants[qualified] = definition
+    // A constant by its key, then by the `constant:<module>::<name>` a
+    // ConstRef names; the first definition of a key holds it.
+    defs := ^constant_defs
+    constant_keys := [(key: String, at: Int, row: Int)]{}
+    loop (index, definition) in defs {
+        &constant_keys.push((key: definition.key.copy(), at: 2 * index, row: 2 * index))
+        &constant_keys.push((key: "constant:{definition.module_identity}::{definition.name}", at: 2 * index + 1, row: 2 * index + 1))
     }
+    constant_rows :: ir_first_rows(^constant_keys)
+    startup := [String]{}
+    loop (index, definition) in defs {
+        if definition.init != None && constant_rows.get(definition.key) == Val(2 * index) -> &startup.push(definition.key.copy())
+    }
+    constants := [String:TConstantDef]{}
+    loop (key, at) in constant_rows -> constants[key] = defs[at /% 2]
     types := ^type_defs
     ir_add_compiler_owned_types(&types)
     ir_add_union_types(&types, functions)
-    type_rows := [String:Int]{}
-    loop (index, definition) in types {
-        if type_rows.get(definition.key) == None -> type_rows[definition.key] = index
-    }
-    loop (index, definition) in types {
-        if type_rows.get(definition.name) == None -> type_rows[definition.name] = index
-    }
+    // A type row by its key, then by its name where no key names one.
+    type_keys := [(key: String, at: Int, row: Int)]{}
+    loop (index, definition) in types -> &type_keys.push((key: definition.key.copy(), at: index, row: index))
+    loop (index, definition) in types -> &type_keys.push((key: definition.name.copy(), at: types.len() + index, row: index))
+    type_rows :: ir_first_rows(^type_keys)
     // The Display, Printable and Close implementations of the host target
     // (Lower lower_render_impl_applies, lower_close_index), and the user
     // Comparable ones (a derived Comparable orders structurally: Lower
@@ -354,10 +390,9 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
     owned := ^functions
     ir_declared_owners(&owned, p.types)
     ir_add_signature_union_types(&p.types, &p.type_rows, owned)
-    rows := [String:Int]{}
-    loop (index, function) in owned {
-        if rows.get(function.key) == None -> rows[function.key] = index
-    }
+    function_keys := [(key: String, at: Int, row: Int)]{}
+    loop (index, function) in owned -> &function_keys.push((key: function.key.copy(), at: index, row: index))
+    rows :: ir_first_rows(^function_keys)
     // An implementation method is checked as its owner's method of that name
     // (a TraitMethod when its trait resolves in the implementing module,
     // else a plain Method, as codegen jet_codegen_impl_method_matches reads it).

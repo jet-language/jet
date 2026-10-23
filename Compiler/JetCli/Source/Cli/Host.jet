@@ -698,18 +698,27 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     if runtime.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
     // Each runtime call the C closure doesn't define, true once the runtime's
     // exports name it: one walk over the thousands of exports looks up only
-    // the few names the program calls.
-    exported := [String:Bool]{}
+    // the few names the program calls. The calls are read by name row, so
+    // each called name is looked up once, not once per call.
+    called := [Bool]{}
+    loop _ in 0..<built.program.names.len() -> &called.push(false)
     loop index in 0..<built.program.functions.len() {
         loop (at, op) in built.program.functions[index].op {
-            if op == .CallRuntime && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None && exported.get(built.program.names[built.program.functions[index].a[at]]) == None -> exported[built.program.names[built.program.functions[index].a[at]].copy()] = false
+            if op == .CallRuntime -> called[built.program.functions[index].a[at]] = true
         }
     }
+    exported := [String:Bool]{}
+    loop (row, calls) in called {
+        if calls && closure_symbols.get(built.program.names[row]) == None -> exported[built.program.names[row].copy()] = false
+    }
     if exported.len() > 0 -> jet_cli_runtime_exports_mark(runtime.exports, &exported)
+    // Per name row: a runtime call of it fails its function.
+    unexported := [Bool]{}
+    loop (row, calls) in called -> &unexported.push(calls && !(exported.get(built.program.names[row]) ?? true))
     loop index in 0..<built.program.functions.len() {
         missing := String?{None}
         loop (at, op) in built.program.functions[index].op {
-            if op == .CallRuntime && !(exported.get(built.program.names[built.program.functions[index].a[at]]) ?? true) {
+            if op == .CallRuntime && unexported[built.program.functions[index].a[at]] {
                 missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
                 break
             }
