@@ -3899,19 +3899,62 @@ fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, ac
             view_ty :: if ir_untag(ir_ty(p, b, base)) == .List(element) -> Type.Apply{name: "View", args: [Type]{element}} else -> ty
             return ir_slice(&m, p, &b, view_ty, base, start, end, range, location, span)
         }
+        // An Option or enum box is written through its payload in place
+        // (`if &x == .Variant(payload) -> ... &payload`): the box at the
+        // place, made its holder's own first (ir_window_subject).
+        if ir_window_box(&m, p, value_ty) {
+            if ir_body_node(p, b, value).kind == {
+                .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .SharedGuardValue(_) -> return ir_window_subject(&m, p, &b, value, value_ty, span)
+                else -> {}
+            }
+        }
         place :: ir_write_base(&m, p, &b, value, span)
         if ir_failed(b) || place < 0 -> return place
         if ir_kind_of(m, b, place) == .Aggregate -> return place
-        // An Option or enum box is written through its payload in place
-        // (`if &x == .Variant(payload) -> ... &payload`), and a runtime
-        // handle through the value behind it (a HandleMut route operand);
-        // a call's write argument goes through ir_place_address instead.
+        // A runtime handle is written through the value behind it (a
+        // HandleMut route operand); a call's write argument goes through
+        // ir_place_address instead.
         if ir_kind_of(m, b, place) == .Pointer {
             place_row :: b.f.slot_type[place]
             if ir_is_option(value_ty) || ir_enum_def(m, p, place_row) != None || ir_is_handle(m, place_row) -> return place
         }
     }
     ir_fail_slot(&b, span, "borrow {access} of {ir_type_name(value_ty)}")
+}
+
+// Whether `ty` is held in a box (an Option, or an enum with a payload).
+fn ir_window_box(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    row :: ir_value_type(&m, p, ty) ?? return false
+    m.types[row].kind == .Pointer && (ir_is_option(ty) || ir_enum_def(m, p, row) != None)
+}
+
+// The box a write window (`if &place == .Variant(payload)`) writes through:
+// the box at `place`, first made its holder's own (Lower
+// lower_box_make_unique) and stored back, so a write through a payload
+// never reaches a box another holder shares: a copy (`b := a`), the
+// caller's value behind a write parameter, or another thread's view of the
+// same data. A variable that does not own its box keeps it as is.
+fn ir_window_subject(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, place_ty: Type, span: Span) -> Int Never! {
+    if ir_body_node(p, b, place).kind == .Local(local) {
+        binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "write of unknown local {local.name}")
+        if binding.indirect < 0 {
+            if ir_owned_binding(b, binding.slot) -> ir_box_make_unique(&m, p, &b, binding.slot)
+            return binding.slot
+        }
+        boxed :: ir_read_binding(&m, &b, binding)
+        ir_box_make_unique(&m, p, &b, boxed)
+        ir_emit(&b.f, IROp.Store, -1, binding.slot, 0, boxed, b.line)
+        return boxed
+    }
+    backs := [IRWriteBack]{}
+    address :: ir_place_address(&m, p, &b, place, &backs, span)
+    if ir_failed(b) || address < 0 -> return -1
+    row :: ir_value_type(&m, p, place_ty) ?? return ir_type_fail(&b, span, place_ty)
+    boxed :: ir_load_at(&m, &b, address, 0, row)
+    ir_box_make_unique(&m, p, &b, boxed)
+    ir_emit(&b.f, IROp.Store, -1, address, 0, boxed, b.line)
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    boxed
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,97 @@
+// A copy is its own value: a write through a write window (`if &place ==
+// .Variant(payload)`) into one copy never shows in another, whatever place
+// holds the copy. Each case edits a copy through a window and prints the
+// original, then the copy.
+
+enum Expr {
+    Lit(n: Int)
+    Pair(left: Expr, n: Int)
+    Many(items: [Int])
+}
+
+struct Holder {
+    expr: Expr
+    note: String?
+}
+
+fn show(e: Expr) -> String {
+    if e == {
+        .Lit(n) -> "lit {n}"
+        .Pair(left, n) -> "pair({show(left)}, {n})"
+        .Many(items) -> "many {items.len()}"
+    }
+}
+
+// Writes through the write parameter's own window.
+fn bump(e: &Expr) {
+    if &e == {
+        .Pair(_, n) -> n = n + 100
+        .Many(items) -> &items.push(7)
+        .Lit(n) -> n = n + 1000
+    }
+}
+
+// Writes through the recursive edge `left`, a window inside the window.
+fn bump_left(e: &Expr) {
+    if &e == {
+        .Pair(left, _) -> bump(&left)
+        else -> {}
+    }
+}
+
+fn sample() -> Expr {
+    Expr.Pair{left: Expr.Lit{n: 1}, n: 2}
+}
+
+fn run() {
+    // An owned local.
+    a :: sample()
+    local := a
+    if &local == {
+        .Pair(_, n) -> n = 7
+        else -> {}
+    }
+    print("local: {show(a)} / {show(local)}")
+
+    // A write parameter.
+    param := a
+    bump(&param)
+    print("param: {show(a)} / {show(param)}")
+
+    // A nested recursive edge.
+    nested := a
+    bump_left(&nested)
+    print("nested: {show(a)} / {show(nested)}")
+
+    // A list inside the payload.
+    many :: Expr.Many{items: [Int]{1, 2}}
+    pushed := many
+    bump(&pushed)
+    print("payload list: {show(many)} / {show(pushed)}")
+
+    // A field place.
+    holder :: Holder{expr: sample(), note: Val("kept")}
+    field := holder
+    if &field.expr == {
+        .Pair(_, n) -> n = 30
+        else -> {}
+    }
+    if &field.note == {
+        .Val(text) -> text = "edited"
+        None -> {}
+    }
+    print("field: {show(holder.expr)} {holder.note ?? "none"} / {show(field.expr)} {field.note ?? "none"}")
+
+    // An index place, written through a write parameter's window.
+    list :: [Expr]{sample(), Expr.Lit{n: 5}}
+    index := list
+    bump(&index[1])
+    bump_left(&index[0])
+    print("index: {show(list[0])} {show(list[1])} / {show(index[0])} {show(index[1])}")
+
+    // A Map value, written through a write parameter's window.
+    map :: [String:Expr]{"k": sample()}
+    entry := map
+    bump(&entry["k"])
+    print("map: {show(map["k"])} / {show(entry["k"])}")
+}

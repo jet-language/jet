@@ -1036,18 +1036,15 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     pending :: b.pending
     b.pending = [IRPending]{}
     loop row in pending {
-        // A window into a variable's own box writes a box only it holds
-        // (Lower lower_box_make_unique); a copy sharing the box keeps its
-        // payload. The subject is unique before any payload address is taken.
-        if row.window && !row.loaded && ir_owned_binding(b, row.subject) -> ir_box_make_unique(&m, p, &b, row.subject)
-    }
-    loop row in pending {
         // An aggregate payload is already bound by address (ir_pending_load).
+        // A window's subject is already its holder's own box
+        // (ir_window_subject), and so is a recursive edge's wrapper in it:
+        // the name binds the payload's storage, the wrapper's for an edge.
         row_type :: b.f.slot_type[row.slot]
-        if row.window && !row.boxed && !row.loaded && m.types[row_type].kind != .Aggregate {
+        if row.window && !row.loaded && m.types[row_type].kind != .Aggregate {
             pointer_row :: ir_pointer_row(&m)
             address :: ir_temp(&m, &b, pointer_row)
-            ir_emit(&b.f, IROp.Offset, address, row.subject, row.offset, -1, b.line)
+            ir_emit(&b.f, if row.boxed -> IROp.Load else -> IROp.Offset, address, row.subject, row.offset, -1, b.line)
             &b.bindings.push(IRBinding{name: row.name, slot: address, indirect: row_type})
             next
         }
