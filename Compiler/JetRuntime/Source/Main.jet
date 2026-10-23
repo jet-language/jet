@@ -103,6 +103,9 @@ fn main_exit_cleanup() -> I64 {
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins
     // the worker executing the process boundary and cannot self-wait.
     jet_scheduler_drain_after_exit()
+    // JET_CHECKED_ALLOC=1 (Alloc.jet): a write after one of the last frees
+    // traps here rather than going unseen.
+    alloc_check_sweep()
     main_flush(main_exit_root + I64{16})
     if (parked_code != I64{0}) {
         // Core.rs:1192 exits rather than returning to a loaded-image host.

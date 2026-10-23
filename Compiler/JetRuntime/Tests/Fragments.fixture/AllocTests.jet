@@ -46,8 +46,8 @@ fn alloc_test_boundaries(align: I64) {
         boundary :: wrapping(slot - alloc_header(align) - (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
         if {
             boundary > (I64{0}) -> {
-                alloc_test_require(alloc_class(boundary, align) == slot)
-                alloc_test_require(alloc_class(wrapping(boundary + I64{1}), align) == (if (slot == I64{4096}) -> I64{0} else -> wrapping(slot * I64{2})))
+                alloc_test_require(alloc_class(boundary, align, ALLOC_CLASS_LIMIT) == slot)
+                alloc_test_require(alloc_class(wrapping(boundary + I64{1}), align, ALLOC_CLASS_LIMIT) == (if (slot == I64{4096}) -> I64{0} else -> wrapping(slot * I64{2})))
                 alloc_test_payload(wrapping(boundary - I64{1}), align)
                 alloc_test_payload(boundary, align)
                 alloc_test_payload(wrapping(boundary + I64{1}), align)

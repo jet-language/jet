@@ -54,6 +54,7 @@ one exists instead of adding another spelling for the same job.
 | --- | --- | --- |
 | `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`). When set, `Tools/agent/verify-full.sh` runs `Tools/agent/compiler-diff.mjs` (canary, then all corpora) against the reference compiler. |
 | `JET_CANVAS_PREREQUISITES` | `strict` | Makes Canvas scenario verification fail instead of skip when a prerequisite is absent. |
+| `JET_CHECKED_ALLOC` | `1` | **Internal** debugging aid for generated programs, read once at process start: every runtime heap block carries a canary, a tail guard and its allocating call chain, freed payloads are poisoned and quarantined, and a double free, foreign free, wrong-layout free, write past the end or write after free aborts with a report naming the call sites (`Compiler/JetRuntime/Source/Alloc.jet`, checked mode). Off, it costs one branch per allocation and free. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
 | `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `target/debug/jet`. |

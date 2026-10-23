@@ -16,6 +16,7 @@ extern int32_t jet_rt_main(void (*)(void));
 extern Text jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text);
 extern void *jet_rt_alloc(int64_t,int64_t);
+extern void jet_rt_free(void *,int64_t,int64_t);
 extern Text jet_rt_string_clone(Text);
 extern const unsigned char *jet_rt_string_data(Text);
 extern int64_t jet_rt_string_byte_len(Text);
@@ -119,7 +120,6 @@ static void refcount_threads(void) {
 // count and the payload never disturb each other); then 9 concurrent final
 // releases see exactly one last owner, which frees the block from its own
 // thread, not the allocating one.
-extern void jet_rt_free(void *,int64_t,int64_t);
 extern void jet_rt_block_retain(void *); extern bool jet_rt_block_release(void *); extern bool jet_rt_block_unique(void *);
 static const int64_t block_sizes[]={8,24,40,104,232,488,1000,2024,4000,70000};
 static void *shared_block;
@@ -220,6 +220,40 @@ static void panic_case(void) { require_stop(2,text("boom"),NULL,NULL,NULL); }
 #endif
 static void alloc_invalid_layout(void) { (void)jet_rt_alloc(1,3); }
 static void alloc_failure(void) { (void)jet_rt_alloc(INT64_MAX-7,8); }
+// JET_CHECKED_ALLOC=1 cases (Alloc.jet checked mode): each bad free traps
+// naming this function; checked-clean exercises good layouts end to end.
+static void alloc_checked_clean(void) {
+    static const int64_t aligns[]={1,8,16,64,4096};
+    for(int a=0;a<5;++a) for(int64_t size=0;size<=9000;size=size*3+1) {
+        unsigned char *p=jet_rt_alloc(size,aligns[a]);
+        assert(p && !((uintptr_t)p&(uintptr_t)(aligns[a]-1)));
+        memset(p,0x5a,(size_t)size);
+        jet_rt_free(p,size,aligns[a]);
+    }
+}
+static void alloc_double_free(void) {
+    void *p=jet_rt_alloc(40,8);
+    jet_rt_free(p,40,8);
+    jet_rt_free(p,40,8);
+}
+static void alloc_foreign_free(void) {
+    static int64_t words[8];
+    jet_rt_free(&words[4],16,8);
+}
+static void alloc_layout_mismatch(void) {
+    void *p=jet_rt_alloc(24,8);
+    jet_rt_free(p,16,8);
+}
+static void alloc_overflow(void) {
+    unsigned char *p=jet_rt_alloc(20,1);
+    memset(p,1,21);
+    jet_rt_free(p,20,1);
+}
+static void alloc_write_after_free(void) {
+    unsigned char *p=jet_rt_alloc(40,8);
+    jet_rt_free(p,40,8);
+    p[3]=1;
+}
 extern void jet_rt_host_arguments(int64_t,char **,char **);
 extern char **environ;
 int main(int argc,char **argv) {
@@ -242,6 +276,12 @@ int main(int argc,char **argv) {
 #endif
         if(!strcmp(argv[1],"alloc-invalid-layout")) entry=alloc_invalid_layout;
         else if(!strcmp(argv[1],"alloc-failure")) entry=alloc_failure;
+        else if(!strcmp(argv[1],"alloc-checked-clean")) entry=alloc_checked_clean;
+        else if(!strcmp(argv[1],"alloc-double-free")) entry=alloc_double_free;
+        else if(!strcmp(argv[1],"alloc-foreign-free")) entry=alloc_foreign_free;
+        else if(!strcmp(argv[1],"alloc-layout-mismatch")) entry=alloc_layout_mismatch;
+        else if(!strcmp(argv[1],"alloc-overflow")) entry=alloc_overflow;
+        else if(!strcmp(argv[1],"alloc-write-after-free")) entry=alloc_write_after_free;
     }
     if(!entry) { fputs("unknown C ABI case\n",stderr); return 2; }
     return jet_rt_main(entry);
