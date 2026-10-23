@@ -1,0 +1,1330 @@
+/// D-HL1: generated editor grammars mark their owned sections with these
+/// comments. Tests compare the committed section against fresh renderer output.
+pub const HIGHLIGHT_GENERATED_START: &str = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
+pub const HIGHLIGHT_GENERATED_END: &str = "END GENERATED JET SYNTAX HIGHLIGHTS";
+
+/// D-HL1: lexical highlight class for every token the generated grammars own.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum HighlightClass {
+    KeywordControl,
+    KeywordDeclaration,
+    KeywordOwnership,
+    KeywordOther,
+    Literal,
+    TypeBuiltin,
+    Builtin,
+    MarkerRule,
+    Operator,
+    Sigil,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct HighlightToken {
+    pub text: &'static str,
+    pub class: HighlightClass,
+}
+
+impl HighlightClass {
+    pub fn textmate_scope(self) -> &'static str {
+        match self {
+            HighlightClass::KeywordControl => "keyword.control.jet",
+            HighlightClass::KeywordDeclaration => "keyword.declaration.jet",
+            HighlightClass::KeywordOwnership => "keyword.other.ownership.jet",
+            HighlightClass::KeywordOther => "keyword.other.jet",
+            HighlightClass::Literal => "constant.language.jet",
+            HighlightClass::TypeBuiltin => "storage.type.builtin.jet",
+            HighlightClass::Builtin => "support.function.builtin.jet",
+            HighlightClass::MarkerRule => "entity.name.tag.rule.jet",
+            HighlightClass::Operator => "keyword.operator.jet",
+            HighlightClass::Sigil => "keyword.operator.sigil.jet",
+        }
+    }
+
+    pub fn zed_capture(self) -> &'static str {
+        match self {
+            HighlightClass::KeywordControl => "@keyword.control",
+            HighlightClass::KeywordDeclaration
+            | HighlightClass::KeywordOwnership
+            | HighlightClass::KeywordOther => "@keyword",
+            HighlightClass::Literal => "@constant.builtin",
+            HighlightClass::TypeBuiltin => "@type.builtin",
+            HighlightClass::Builtin => "@function.builtin",
+            HighlightClass::MarkerRule => "@attribute",
+            HighlightClass::Operator | HighlightClass::Sigil => "@operator",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            HighlightClass::KeywordControl => "keyword.control",
+            HighlightClass::KeywordDeclaration => "keyword.declaration",
+            HighlightClass::KeywordOwnership => "keyword.ownership",
+            HighlightClass::KeywordOther => "keyword.other",
+            HighlightClass::Literal => "literal",
+            HighlightClass::TypeBuiltin => "type.builtin",
+            HighlightClass::Builtin => "builtin",
+            HighlightClass::MarkerRule => "marker.rule",
+            HighlightClass::Operator => "operator",
+            HighlightClass::Sigil => "sigil",
+        }
+    }
+}
+
+/// D-HL1: one source of truth for lexical editor highlighting. FOREIGN_* words
+/// stay out; teaching diagnostics are not colored as live syntax.
+pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
+    // Control flow.
+    HighlightToken {
+        text: KW_IF,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_ELSE,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_LOOP,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_IN,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_BREAK,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_RETURN,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_DEFER,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_NEXT,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_YIELD,
+        class: HighlightClass::KeywordControl,
+    },
+    // D-CONC-SPAWN1=D: only `task` is reserved; qualified selectors remain
+    // spellings of the same surface without reserving bare `all`/`race`/etc.
+    HighlightToken {
+        text: KW_CONC_TASK,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_FREEZE,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: TASK_ALL,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_ANY,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_GROUP,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_RACE,
+        class: HighlightClass::KeywordControl,
+    },
+    // D-CONC-CHAN2=D: readiness timeout arm.
+    HighlightToken {
+        text: READINESS_AFTER,
+        class: HighlightClass::KeywordControl,
+    },
+    // Declarations and contextual structure.
+    HighlightToken {
+        text: KW_FN,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PUB,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PRIV,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_USE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_AS,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_EXTERN,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_RUST,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_MODULE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_STRUCT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ENUM,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ALIAS,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_IMPL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_POLICY,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_WRAP,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TRAIT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TAG,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_EFFECT_DECL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_DERIVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    // D-VERDICT-1308-1: retired `comptime` is teaching-only, not highlighted.
+    HighlightToken {
+        text: KW_DISTINCT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    // D-FACTDECL1: compiler-fact declarations.
+    HighlightToken {
+        text: KW_FACT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_MIGRATION,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_RENAME,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ADD,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_REMOVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_CHANGE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_VIA,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_UNSAFE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_IMPURE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_REACTIVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: CTX_BLOCK,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TRANSACT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TEST,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TODO,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_SCRUB,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_STATE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TRANSITION,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_STATE_DECL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PROTOCOL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_MARKER,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: PROTO_CLIENT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: PROTO_SERVER,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_VALIDATE_BLOCK,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    // D-PREP-SURFACE2=A / D-META-ROOT3=A / D-BUILD-FACT3=A: contextual prep,
+    // the subjectless `$` fact roots, and the metadata query roots that have
+    // no ratified `$` root yet.
+    HighlightToken {
+        text: KW_PREP,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: FACT_ROOT_BUILD,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: FACT_ROOT_PACKAGE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: FACT_ROOT_PHASE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: FACT_ROOT_PROGRAM,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_SOURCE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_TYPES,
+        class: HighlightClass::KeywordOther,
+    },
+    // Ownership / builtins.
+    HighlightToken {
+        text: KW_SELF,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: KW_UNINIT,
+        class: HighlightClass::KeywordOwnership,
+    },
+    HighlightToken {
+        text: KW_IT,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: KW_SHARED,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: BUILTIN_ASSERT,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: BUILTIN_ASSERT_EQ,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: BUILTIN_PRINT,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: BUILTIN_INPUT,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: VALIDATE_CHECK_FN,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: BUILTIN_CHANNEL,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: TASK_JOIN,
+        class: HighlightClass::Builtin,
+    },
+    // Literals.
+    HighlightToken {
+        text: LIT_TRUE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_FALSE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_NULL,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_VALUE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: TASK_FAILURE_CANCELLED,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: TASK_FAILURE_DEADLINE_BLOWN,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: TASK_FAILURE_PANICKED,
+        class: HighlightClass::Literal,
+    },
+    // Built-in types.
+    HighlightToken {
+        text: TYPE_INT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_FLOAT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BOOL,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_STRING,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_ERR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_UNIT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_CHAR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED_SNAPSHOT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED_REVISION_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED_GUARD,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED_WEAK,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_CONDITION,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_TASK,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_RECEIVER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SENDER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_TASK_FAILURE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BUDGET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BUDGET_APPLIES,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_HASH_MAP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BTREE_MAP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_QUEUE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_RANK,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_PRIORITY_QUEUE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_LRU,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BITS,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BYTES,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_STREAM,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_ITER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_VIEW_ITER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SIGNAL,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DERIVED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_COMPUTED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_HOOK,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SUBSCRIPTION,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT_SCOPE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT_POLICY,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT_TRACE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_WATCH_HANDLE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_WATCH_SET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_WATCH_EVENT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EFFECT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_MEASUREMENT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_MEMO_STATS,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_COMPLEX,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_PTR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DECIMAL,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: DURATION_TYPE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_KEY,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_IO_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_INSTANT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_UTF8_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_JSON,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_ENCODING_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA,
+        class: HighlightClass::TypeBuiltin,
+    },
+    // TYPE_DATA_JSON shares the "JSON" spelling with TYPE_JSON (D-ACRO-LEX1=A).
+    HighlightToken {
+        text: TYPE_DATA_TOML,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA_YAML,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA_CSV,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DB_VALUE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I8,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I16,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I32,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I64,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U8,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U16,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U32,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U64,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_F32,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_F64,
+        class: HighlightClass::TypeBuiltin,
+    },
+    // Operators and sigils.
+    HighlightToken {
+        text: SIGIL_BIND_IMMUT,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_BIND_MUT,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: COMPTIME_MARK,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_FENCE_OPEN,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_FENCE_CLOSE,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_MOVE,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_WRITE,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_SPREAD,
+        class: HighlightClass::Sigil,
+    },
+    // D-SPREAD1=A: member-spread sigil `prefix.[a, b]`.
+    HighlightToken {
+        text: OP_MEMBER_SPREAD,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_TRY_SUFFIX,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_RANGE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_RANGE_EXCLUSIVE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_UNIFIED_ARROW,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PLUS,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_MINUS,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_STAR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SLASH,
+        class: HighlightClass::Operator,
+    },
+    // D-FLOORDIV1=A: floor division and its compound.
+    HighlightToken {
+        text: OP_SLASH_PERCENT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SLASH_PERCENT_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PERCENT,
+        class: HighlightClass::Operator,
+    },
+    // D-MODSEM1=A: the truncated remainder and its compound.
+    HighlightToken {
+        text: OP_PERCENT_PERCENT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PERCENT_PERCENT_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PIPE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHL,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_AND,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_OR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_NOT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_NE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_LT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_GT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_LE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_GE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_COMPARE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PLUS_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_MINUS_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_STAR_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SLASH_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PERCENT_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHL_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHR_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_FALLBACK,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_OPTIONAL_CHAIN,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_NAMED_CTOR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: TYPE_FIXED_SIZE_SEP,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: MARKER_PREFIX,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: RULE_PREFIX,
+        class: HighlightClass::Sigil,
+    },
+];
+
+pub fn highlighted_tokens_sorted() -> Vec<HighlightToken> {
+    let mut tokens = JET_HIGHLIGHT_TOKENS.to_vec();
+    for row in crate::Policy::APPLIED_RULES
+        .iter()
+        .filter(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
+    {
+        tokens.push(HighlightToken {
+            text: row.name,
+            class: HighlightClass::MarkerRule,
+        });
+    }
+    tokens.sort_by(|a, b| a.class.cmp(&b.class).then(a.text.cmp(b.text)));
+    tokens.dedup_by(|a, b| a.text == b.text && a.class == b.class);
+    tokens
+}
+
+pub fn render_vscode_generated_highlights() -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "      \"comment\": \"{}\",\n",
+        HIGHLIGHT_GENERATED_START
+    ));
+    out.push_str("      \"patterns\": [\n");
+    let classes = [
+        HighlightClass::KeywordControl,
+        HighlightClass::KeywordDeclaration,
+        HighlightClass::KeywordOwnership,
+        HighlightClass::KeywordOther,
+        HighlightClass::Literal,
+        HighlightClass::TypeBuiltin,
+        HighlightClass::Builtin,
+        HighlightClass::MarkerRule,
+        HighlightClass::Sigil,
+        HighlightClass::Operator,
+    ];
+    let mut first = true;
+    for class in classes {
+        let words = class_words(class);
+        let symbols = class_symbols(class);
+        let (global_words, contextual_words) = split_vscode_keyword_words(class, words);
+        if !global_words.is_empty() {
+            let pattern = match class {
+                HighlightClass::MarkerRule => {
+                    // Applied rules are `#Error` / `#[Codable]` / `@allow`, not bare names.
+                    format!("#\\[?({})\\b", global_words.join("|"))
+                }
+                HighlightClass::Builtin => format!(
+                    "(?<![.A-Za-z0-9_])({})(?=\\s*\\()",
+                    global_words.join("|")
+                ),
+                HighlightClass::KeywordControl
+                | HighlightClass::KeywordDeclaration
+                | HighlightClass::KeywordOther
+                | HighlightClass::KeywordOwnership => format!(
+                    "(?<![.A-Za-z0-9_])({})(?![A-Za-z0-9_])",
+                    global_words.join("|")
+                ),
+                _ => format!("\\b({})\\b", global_words.join("|")),
+            };
+            push_vscode_pattern(
+                &mut out,
+                &mut first,
+                class.textmate_scope(),
+                &pattern,
+            );
+        }
+        if !contextual_words.is_empty() {
+            // Identifier-like keywords must not steal ordinary names. Keep
+            // them in the generated section, but only color declaration shape.
+            let mut as_word = false;
+            let rest: Vec<String> = contextual_words
+                .into_iter()
+                .filter(|word| {
+                    if word == "as" {
+                        as_word = true;
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+            if as_word {
+                push_vscode_pattern(
+                    &mut out,
+                    &mut first,
+                    class.textmate_scope(),
+                    "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
+                );
+            }
+            if !rest.is_empty() {
+                push_vscode_pattern(
+                    &mut out,
+                    &mut first,
+                    class.textmate_scope(),
+                    &format!(
+                        "(?<![.A-Za-z0-9_])({})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))",
+                        rest.join("|")
+                    ),
+                );
+            }
+        }
+        if !symbols.is_empty() {
+            push_vscode_pattern(
+                &mut out,
+                &mut first,
+                class.textmate_scope(),
+                &format!("({})", symbols.join("|")),
+            );
+        }
+    }
+    out.push_str("\n      ],\n");
+    out.push_str(&format!(
+        "      \"endComment\": \"{}\"\n",
+        HIGHLIGHT_GENERATED_END
+    ));
+    out
+}
+
+pub fn render_tree_sitter_generated_highlights() -> String {
+    let mut out = String::new();
+    out.push_str(&format!("// {}\n", HIGHLIGHT_GENERATED_START));
+    for class in [
+        HighlightClass::KeywordControl,
+        HighlightClass::KeywordDeclaration,
+        HighlightClass::KeywordOwnership,
+        HighlightClass::KeywordOther,
+        HighlightClass::Literal,
+        HighlightClass::TypeBuiltin,
+        HighlightClass::Builtin,
+        HighlightClass::MarkerRule,
+        HighlightClass::Sigil,
+        HighlightClass::Operator,
+    ] {
+        let values = class_texts(class);
+        out.push_str(&format!(
+            "const {} = [{}];\n",
+            tree_sitter_const_name(class),
+            values
+                .iter()
+                .map(|s| format!("{:?}", s))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    out.push_str(&format!("// {}\n", HIGHLIGHT_GENERATED_END));
+    out
+}
+
+pub fn render_zed_generated_highlights() -> String {
+    let mut out = String::new();
+    out.push_str(&format!("; {}\n", HIGHLIGHT_GENERATED_START));
+    for class in [
+        HighlightClass::KeywordControl,
+        HighlightClass::KeywordDeclaration,
+        HighlightClass::KeywordOwnership,
+        HighlightClass::KeywordOther,
+        HighlightClass::Literal,
+        HighlightClass::TypeBuiltin,
+        HighlightClass::Builtin,
+        HighlightClass::MarkerRule,
+        HighlightClass::Sigil,
+        HighlightClass::Operator,
+    ] {
+        let values = class_texts(class);
+        out.push_str(&format!("; {}: {}\n", class.label(), values.join(" ")));
+        if class == HighlightClass::MarkerRule {
+            continue;
+        }
+        let query_words = values
+            .iter()
+            .filter(|s| is_word_token(s) && is_zed_anonymous_word_token(s))
+            .filter(|s| match class {
+                HighlightClass::KeywordControl
+                | HighlightClass::KeywordDeclaration
+                | HighlightClass::KeywordOwnership
+                | HighlightClass::KeywordOther => vscode_global_keyword_word(s),
+                _ => true,
+            })
+            .map(|s| format!("  {:?}", s))
+            .collect::<Vec<_>>();
+        if !query_words.is_empty() {
+            out.push_str("[\n");
+            out.push_str(&query_words.join("\n"));
+            out.push_str(&format!("\n] {}\n\n", class.zed_capture()));
+        }
+    }
+    out.push_str(&format!("; {}\n", HIGHLIGHT_GENERATED_END));
+    out
+}
+
+fn push_vscode_pattern(out: &mut String, first: &mut bool, scope: &str, pattern: &str) {
+    if !*first {
+        out.push_str(",\n");
+    }
+    *first = false;
+    out.push_str("        {\n");
+    out.push_str(&format!("          \"name\": \"{}\",\n", scope));
+    out.push_str(&format!(
+        "          \"match\": \"{}\"\n",
+        json_escape(pattern)
+    ));
+    out.push_str("        }");
+}
+
+fn class_texts(class: HighlightClass) -> Vec<&'static str> {
+    let mut values = highlighted_tokens_sorted()
+        .into_iter()
+        .filter(|token| token.class == class)
+        .filter(|token| !is_bracket_token(token.text))
+        .map(|token| token.text)
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn class_words(class: HighlightClass) -> Vec<String> {
+    class_texts(class)
+        .into_iter()
+        .filter(|s| is_word_token(s))
+        .map(regex_escape)
+        .collect()
+}
+
+fn class_symbols(class: HighlightClass) -> Vec<String> {
+    class_texts(class)
+        .into_iter()
+        .filter(|s| !is_word_token(s) && !is_bracket_token(s))
+        .map(regex_escape)
+        .collect()
+}
+
+/// `{` / `[` / `(` are grammar brackets, not highlight operators. Coloring
+/// `{` as an operator makes nested braces and interpolations lose scopes.
+fn is_bracket_token(s: &str) -> bool {
+    matches!(s, "{" | "}" | "[" | "]" | "(" | ")")
+}
+
+/// Lexer-reserved words stay global. Identifier-like declaration words
+/// (`add`, `client`, `as`, …) are colored only in declaration-shaped positions.
+fn vscode_global_keyword_word(word: &str) -> bool {
+    matches!(
+        word,
+        "fn" | "pub" | "priv" | "if" | "else" | "in" | "break" | "true" | "false"
+            | "mutate" | "move" | "copy" | "struct" | "enum" | "impl" | "trait"
+            | "tag" | "effect" | "derive" | "self" | "it" | "null" | "const"
+            | "comptime" | "return" | "loop" | "yield" | "use" | "extern"
+            | "module"
+    )
+}
+
+fn split_vscode_keyword_words(
+    class: HighlightClass,
+    words: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    match class {
+        HighlightClass::KeywordControl
+        | HighlightClass::KeywordDeclaration
+        | HighlightClass::KeywordOther
+        | HighlightClass::KeywordOwnership => {
+            let mut global = Vec::new();
+            let mut contextual = Vec::new();
+            for word in words {
+                if vscode_global_keyword_word(&word) {
+                    global.push(word);
+                } else {
+                    contextual.push(word);
+                }
+            }
+            (global, contextual)
+        }
+        _ => (words, Vec::new()),
+    }
+}
+
+fn is_word_token(s: &str) -> bool {
+    s.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+        && s.chars()
+            .next()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+}
+
+fn is_zed_anonymous_word_token(s: &str) -> bool {
+    // Zed validates query string literals against anonymous tree-sitter tokens.
+    // Many generated highlight words are parsed as named nodes instead
+    // (`type_identifier`, `marker_name`, `identifier`, etc.); emitting them here
+    // makes the whole Jet language fail to load.
+    matches!(
+        s,
+        "Bool"
+            | "Char"
+            | "Err"
+            | "F32"
+            | "F64"
+            | "Float"
+            | "I16"
+            | "I32"
+            | "I64"
+            | "I8"
+            | "Int"
+            | "List"
+            | "Map"
+            | "String"
+            | "Test"
+            | "U16"
+            | "U32"
+            | "U64"
+            | "U8"
+            | "add"
+            | "alias"
+            | "as"
+            | "break"
+            | "change"
+            | "comptime"
+            | "continue"
+            | "copy"
+            | "defer"
+            | "derive"
+            | "distinct"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "if"
+            | "impl"
+            | "in"
+            | "loop"
+            | "marker"
+            | "migration"
+            | "module"
+            | "pub"
+            | "remove"
+            | "rename"
+            | "return"
+            | "rust"
+            | "self"
+            | "state"
+            | "step"
+            | "struct"
+            | "tag"
+            | "task"
+            | "trait"
+            | "true"
+            | "use"
+            | "via"
+    )
+}
+
+fn regex_escape(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        if matches!(
+            ch,
+            '\\' | '.'
+                | '+'
+                | '*'
+                | '?'
+                | '^'
+                | '$'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '|'
+                | '/'
+                | '-'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
+    match class {
+        HighlightClass::KeywordControl => "JET_HIGHLIGHT_KEYWORD_CONTROL",
+        HighlightClass::KeywordDeclaration => "JET_HIGHLIGHT_KEYWORD_DECLARATION",
+        HighlightClass::KeywordOwnership => "JET_HIGHLIGHT_KEYWORD_OWNERSHIP",
+        HighlightClass::KeywordOther => "JET_HIGHLIGHT_KEYWORD_OTHER",
+        HighlightClass::Literal => "JET_HIGHLIGHT_LITERAL",
+        HighlightClass::TypeBuiltin => "JET_HIGHLIGHT_TYPE_BUILTIN",
+        HighlightClass::Builtin => "JET_HIGHLIGHT_BUILTIN",
+        HighlightClass::MarkerRule => "JET_HIGHLIGHT_MARKER_RULE",
+        HighlightClass::Operator => "JET_HIGHLIGHT_OPERATOR",
+        HighlightClass::Sigil => "JET_HIGHLIGHT_SIGIL",
+    }
+}
+use super::{
+    BUILTIN_ASSERT, BUILTIN_ASSERT_EQ, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT,
+    COMPTIME_MARK, CTX_BLOCK, DURATION_TYPE, KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
+    KW_CONC_TASK, KW_DEFER, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN,
+    KW_FACT, KW_NEXT, KW_YIELD,
+    KW_FN, KW_FREEZE, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MARKER, KW_MIGRATION,
+    KW_MODULE, KW_POLICY, KW_PREP, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
+    KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG,
+    KW_TEST, KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE,
+    KW_VALIDATE_BLOCK, KW_VIA, KW_WRAP, LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, MARKER_PREFIX,
+    FACT_ROOT_BUILD, FACT_ROOT_PACKAGE, FACT_ROOT_PHASE, FACT_ROOT_PROGRAM, META_QUERY_SOURCE,
+    META_QUERY_TYPES,
+    OP_AND, OP_COMPARE, OP_EQ, OP_FALLBACK, OP_GE, OP_GT, OP_LE, OP_LT,
+    OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_NAMED_CTOR, OP_NE, OP_NOT,
+    OP_OPTIONAL_CHAIN, OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PERCENT_PERCENT, OP_PERCENT_PERCENT_EQ,
+    OP_PIPE, OP_PLUS, OP_PLUS_EQ, OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL,
+    OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_SLASH_PERCENT, OP_SLASH_PERCENT_EQ,
+    OP_STAR, OP_STAR_EQ, OP_TRY_SUFFIX, OP_UNIFIED_ARROW,
+    PROTO_CLIENT, PROTO_SERVER, READINESS_AFTER, RULE_PREFIX, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
+    SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
+    TASK_ALL, TASK_ANY, TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
+    TASK_GROUP, TASK_JOIN, TASK_RACE, TYPE_BITS, TYPE_BOOL, TYPE_BTREE_MAP, TYPE_BUDGET,
+    TYPE_BUDGET_APPLIES, TYPE_BYTES, TYPE_CHAR, TYPE_COMPLEX, TYPE_COMPUTED, TYPE_CONDITION,
+    TYPE_DATA, TYPE_DATA_CSV, TYPE_DATA_TOML, TYPE_DATA_YAML, TYPE_DB_VALUE, TYPE_DECIMAL,
+    TYPE_DERIVED, TYPE_EFFECT, TYPE_ERR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE,
+    TYPE_EVENT_TRACE, TYPE_F32, TYPE_F64, TYPE_FIXED_SIZE_SEP, TYPE_FLOAT, TYPE_HASH_MAP,
+    TYPE_HOOK, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INSTANT, TYPE_INT, TYPE_IO_ERROR,
+    TYPE_ITER, TYPE_JSON, TYPE_ENCODING_ERROR, TYPE_KEY, TYPE_LRU, TYPE_MEASUREMENT, TYPE_MEMO_STATS,
+    TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_QUEUE, TYPE_RANK, TYPE_RECEIVER, TYPE_SENDER, TYPE_SET,
+    TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_REVISION_ERROR, TYPE_SHARED_SNAPSHOT, TYPE_SHARED_WEAK,
+    TYPE_SIGNAL, TYPE_STREAM, TYPE_STRING, TYPE_SUBSCRIPTION, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16,
+    TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_UTF8_ERROR, TYPE_VIEW_ITER, TYPE_WATCH_EVENT,
+    TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
+    VALIDATE_CHECK_FN,
+};
+use crate::JSON::json_escape;

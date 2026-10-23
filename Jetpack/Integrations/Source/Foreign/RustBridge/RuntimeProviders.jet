@@ -86,38 +86,38 @@ FFI_FEATURED_DEPS :: prep { [FFIFeaturedDep]{
 
 // The hand-written Rust runtimes emitted into the bridge crate. Each is the
 // only code that touches its pinned crates.
-FFI_DB_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/DB.rs") }
-FFI_PARQUET_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/Parquet.rs") }
-FFI_HTTP_CLIENT_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/HTTP.rs") }
+FFI_DB_RUNTIME :: prep { embed_file("Runtime/DB.rs") }
+FFI_PARQUET_RUNTIME :: prep { embed_file("Runtime/Parquet.rs") }
+FFI_HTTP_CLIENT_RUNTIME :: prep { embed_file("Runtime/HTTP.rs") }
 // Mozilla Public Suffix List snapshot, IDNA-ToASCII and whitespace compacted
 // (https://publicsuffix.org/list/public_suffix_list.dat, MPL-2.0).
-FFI_HTTP_PUBLIC_SUFFIX_LIST :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/public_suffix_list.dat") }
-FFI_HTTP_SERVER_TLS_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/HTTPServerTLS.rs") }
-FFI_NET_TLS_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/NetTls.rs") }
-FFI_CRYPTO_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/Crypto.rs") }
-FFI_OUTCOME_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/Outcome.rs") }
-FFI_RUNTIME_DIAGNOSTIC_CORE :: prep { embed_file("../../../../../crates/jet-foundation/src/RuntimeDiagnosticCore.rs") }
-FFI_ENCODING_ERRORS_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/EncodingErrors.rs") }
-FFI_DYN_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/Dyn.rs") }
-FFI_ENCODING_JSON_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/EncodingJson.rs") }
+FFI_HTTP_PUBLIC_SUFFIX_LIST :: prep { embed_file("Runtime/public_suffix_list.dat") }
+FFI_HTTP_SERVER_TLS_RUNTIME :: prep { embed_file("Runtime/HTTPServerTLS.rs") }
+FFI_NET_TLS_RUNTIME :: prep { embed_file("Runtime/NetTls.rs") }
+FFI_CRYPTO_RUNTIME :: prep { embed_file("Runtime/Crypto.rs") }
+FFI_OUTCOME_RUNTIME :: prep { embed_file("Support/jet-foundation/src/Outcome.rs") }
+FFI_RUNTIME_DIAGNOSTIC_CORE :: prep { embed_file("Support/jet-foundation/src/RuntimeDiagnosticCore.rs") }
+FFI_ENCODING_ERRORS_RUNTIME :: prep { embed_file("Support/jet-foundation/src/EncodingErrors.rs") }
+FFI_DYN_RUNTIME :: prep { embed_file("Support/jet-foundation/src/Dyn.rs") }
+FFI_ENCODING_JSON_RUNTIME :: prep { embed_file("Support/jet-foundation/src/EncodingJson.rs") }
 // EncodingJson's two `include!` inputs, spliced in place by the emitter: the
 // embedded text lives in the generated bridge crate, not beside these files.
-FFI_ENCODING_TYPES_INCLUDE :: prep { "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");" }
-FFI_ENCODING_TYPES_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs") }
-FFI_ENCODING_ERROR_INCLUDE :: prep { "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");" }
-FFI_ENCODING_ERROR_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/Core/EncodingError.rs") }
-FFI_JSON_NUMBER_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/JSONNumber.rs") }
-FFI_CRYPTO_ENTROPY_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs") }
+FFI_ENCODING_TYPES_INCLUDE :: prep { "include!(\"../included/EncodingTypes.rs\");" }
+FFI_ENCODING_TYPES_RUNTIME :: prep { embed_file("Support/jet-foundation/included/EncodingTypes.rs") }
+FFI_ENCODING_ERROR_INCLUDE :: prep { "include!(\"../included/EncodingError.rs\");" }
+FFI_ENCODING_ERROR_RUNTIME :: prep { embed_file("Support/jet-foundation/included/EncodingError.rs") }
+FFI_JSON_NUMBER_RUNTIME :: prep { embed_file("Support/jet-foundation/src/JSONNumber.rs") }
+FFI_CRYPTO_ENTROPY_RUNTIME :: prep { embed_file("Runtime/CryptoEntropy.rs") }
 // Application plugin loader.
-FFI_PLUGIN_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/Plugin.rs") }
+FFI_PLUGIN_RUNTIME :: prep { embed_file("Runtime/Plugin.rs") }
 // Compiler-extension host runtime same wasmtime substrate,
 // distinct `compiler-extension-v1` world; compiled only by the isolated
 // jetpack binary, never mixed into application `core.plugin` bridges.
-FFI_COMPILER_EXTENSION_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/CompilerExtension.rs") }
-FFI_SECRETS_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs") }
-FFI_VAULT_KEY_WRAP_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs") }
-FFI_VAULT_NFC_RUNTIME :: prep { embed_file("../../../../../crates/jet-pkg-model/src/Prelude/VaultNfc.rs") }
-FFI_UNICODE_TABLES_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs") }
+FFI_COMPILER_EXTENSION_RUNTIME :: prep { embed_file("Runtime/CompilerExtension.rs") }
+FFI_SECRETS_RUNTIME :: prep { embed_file("Runtime/SecretsCrypto.rs") }
+FFI_VAULT_KEY_WRAP_RUNTIME :: prep { embed_file("Runtime/VaultKeyWrap.rs") }
+FFI_VAULT_NFC_RUNTIME :: prep { embed_file("Runtime/VaultNfc.rs") }
+FFI_UNICODE_TABLES_RUNTIME :: prep { embed_file("Support/jet-unicode/src/UnicodeTables.rs") }
 
 FFI_HOST_RUNTIME_STOP_BEGIN :: prep { "// JET_HOST_RUNTIME_STOP_BEGIN" }
 FFI_HOST_RUNTIME_STOP_END :: prep { "// JET_HOST_RUNTIME_STOP_END" }

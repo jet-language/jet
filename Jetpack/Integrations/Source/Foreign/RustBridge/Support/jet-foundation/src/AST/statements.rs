@@ -1,0 +1,923 @@
+use super::{BinOp, Binding, Expr, ForKind, LValue, Marker, Type};
+use crate::Diagnostics::Span;
+
+/// D-CANVASSTATE1=D: which statement switch a `Stmt::Switched` carries. `#Off`
+/// bodies never reach runtime; `#DebugOnly` bodies do, in debug and dev builds
+/// only. Every stage asks the retained marker instead of keeping its own flag.
+pub fn switched_off(marker: &Marker) -> bool {
+    marker.name == crate::Syntax::MARKER_OFF
+}
+
+/// One `if`/`else if`/`else` chain.
+#[derive(Debug, Clone)]
+pub struct IfStmt {
+    pub cond: Expr,
+    pub then_body: Vec<Stmt>,
+    pub else_branch: Option<ElseBranch>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ElseBranch {
+    ElseIf(Box<IfStmt>),
+    Else(Vec<Stmt>),
+}
+
+/// One `switch` arm: a condition and a body (S24).
+#[derive(Debug, Clone)]
+pub struct SwitchArm {
+    pub cond: Expr,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+/// D-CONC-CHAN2=D: the parser keeps a readiness head in the existing tuple
+/// node so every later stage can recognize one canonical shape without a
+/// second arm representation.
+pub enum ReadinessHead<'a> {
+    Receive { binding: &'a str, source: &'a Expr },
+    After { duration: &'a Expr },
+}
+
+pub fn readiness_head(expr: &Expr) -> Option<ReadinessHead<'_>> {
+    let Expr::TupleLit(fields, _, _) = expr else {
+        return None;
+    };
+    let [(name, value)] = fields.as_slice() else {
+        return None;
+    };
+    if name == crate::Syntax::INTERNAL_SELECT_AFTER_FIELD {
+        Some(ReadinessHead::After { duration: value })
+    } else {
+        Some(ReadinessHead::Receive {
+            binding: name,
+            source: value,
+        })
+    }
+}
+
+/// D-IFGUARD1=A: ordered arm tables without a named subject reuse
+/// `Stmt::Switch` with a compiler-private `true` subject at the `if` span.
+pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
+    matches!(subject, Expr::Bool(true, subject_span) if *subject_span == span)
+}
+
+/// Card #1440: does this `if` expression chain end in the parser-synthesized
+/// `Expr::NoElse` marker (an else-less all-pattern value dispatch)?
+///
+/// Every level of one parsed chain carries the chain's span. A nested `if`
+/// with its own span is a separate expression in the fallback value (an
+/// `else -> { found :: … \n if found == { … } }` arm), whose names may be
+/// declared by the fallback body, so the walk stops there.
+pub fn noelse_terminated(e: &Expr) -> bool {
+    let Expr::If { span: chain, .. } = e else {
+        return false;
+    };
+    let mut cur = e;
+    while let Expr::If {
+        else_body,
+        else_value,
+        span,
+        ..
+    } = cur
+    {
+        if span != chain {
+            return false;
+        }
+        // A user-authored diverging `else -> { return ... }` also has a
+        // `NoElse` tail marker, but its body is still a real fallback. Only
+        // the parser's empty-body marker denotes an omitted `else`.
+        if else_body.is_empty() && matches!(else_value.as_ref(), Expr::NoElse(_)) {
+            return true;
+        }
+        cur = else_value;
+    }
+    false
+}
+
+/// Whether a subjectless `Stmt::Switch` came from classic `if condition { ... }`
+/// spelling rather than `if { condition -> ... }`.
+///
+/// The parser intentionally gives both forms one semantic node. Tooling may
+/// still need the authored spelling for formatting and edit affordances. Look
+/// only at significant source between the `if` token and the first condition;
+/// braces inside comments are trivia and must not turn a classic branch into a
+/// guard table.
+pub fn uses_classic_if_spelling(src: &str, if_span: Span, first_condition: Span) -> bool {
+    let Some(gap) = src.get(if_span.end..first_condition.start) else {
+        return false;
+    };
+    let bytes = gap.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b if b.is_ascii_whitespace() => i += 1,
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                let mut depth = 1usize;
+                while i < bytes.len() && depth > 0 {
+                    if bytes.get(i..i + 2) == Some(b"/*") {
+                        depth += 1;
+                        i += 2;
+                    } else if bytes.get(i..i + 2) == Some(b"*/") {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b'{' => return false,
+            _ => return true,
+        }
+    }
+    true
+}
+
+/// D-SIMD3=B: sema's proof that one fixed-width range loop is an independent,
+/// effect-free elementwise loop. Codegen may use this fact to select the
+/// native vectorizable shape; it must not rediscover the proof from syntax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoVectorizationFacts {
+    pub element_type: Type,
+    pub no_aliasing: bool,
+    pub no_early_exit: bool,
+    pub effect_free_body: bool,
+    pub no_cross_iteration_deps: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    /// A call used for its effect, e.g. `print(x);`.
+    Expr(Expr),
+    Val(Binding),
+    /// `target = e;` (op None) or `target += e;` etc. (op Some, S17).
+    Assign {
+        target: LValue,
+        op: Option<BinOp>,
+        op_span: Span,
+        value: Expr,
+    },
+    Return(Option<Expr>, Span),
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        /// The body still uses the ordinary statement AST; sema owns the
+        /// discarded-value lint and codegen keeps the same lowering path.
+        arrow_body: bool,
+        /// D-LOOPLABEL3: optional compile-time loop name (`outer :: loop cond { }`).
+        label: Option<(String, Span)>,
+    },
+    /// `loop i in a..b` (S22) or `loop x in collection` /
+    /// `loop (k, v) in map` (M5).
+    For {
+        var: String,
+        var_span: Span,
+        /// Second binding for `loop (key, value) in map`.
+        var2: Option<(String, Span)>,
+        kind: ForKind,
+        body: Vec<Stmt>,
+        span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        arrow_body: bool,
+        /// D-LOOPLABEL3: optional compile-time loop name.
+        label: Option<(String, Span)>,
+        /// D-SIMD3=B: sema-proven safe elementwise-loop facts.
+        auto_vectorization: Option<AutoVectorizationFacts>,
+    },
+    Switch {
+        subject: Expr,
+        arms: Vec<SwitchArm>,
+        else_body: Option<Vec<Stmt>>,
+        span: Span,
+    },
+    Break(Span),
+    /// D-LOOPSTATE1: `break value` returns one final ordinary-loop value.
+    BreakValue(Expr, Span),
+    Continue(Span),
+    /// D-LOOPLABEL3 + D-ARROW-CONTROL1: `break(name)` / `next(name)`.
+    BreakLabel(String, Span),
+    /// D-LOOPSTATE1: `break(name, value)` returns from a named ordinary loop.
+    BreakLabelValue(String, Span, Expr, Span),
+    ContinueLabel(String, Span),
+    Loop {
+        body: Vec<Stmt>,
+        span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        arrow_body: bool,
+        /// D-LOOPLABEL3: optional compile-time loop name (`outer :: loop { }`).
+        label: Option<(String, Span)>,
+    },
+    /// D-LOOP-HEADER2=A: `loop name[: Type] := init, cond [, afterthought] { body }`.
+    CountedLoop {
+        init: Binding,
+        cond: Expr,
+        step: Option<Box<Stmt>>,
+        body: Vec<Stmt>,
+        span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        arrow_body: bool,
+        label: Option<(String, Span)>,
+    },
+    /// S58 (E2-M13): `#Unsafe("reason") { … }` audited region. `audit` carries
+    /// the mandatory-at-source reason; the option remains only for parser
+    /// recovery after E3112. `body` is the gated statements.
+    Unsafe {
+        audit: Option<String>,
+        /// Raw source argument retained until sema validates and constant-folds it.
+        audit_expr: Option<Expr>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the
+    /// audited Tier-2 comptime effect gate. `reason` is the argument of
+    /// `#Impure` itself (lint L3102 fires when it is `None`). Both this gate
+    /// AND `--gate impure=allow` at build time are required to execute ambient
+    /// comptime I/O (FS/Env/Exec/IO). Erases to a plain block at codegen;
+    /// the gate is enforced entirely in the comptime interpreter (I3). The
+    /// retained reason is the sema recording point for the shared gate ledger
+    /// planned by D-FACT-GATE1 / card #1571.
+    Impure {
+        reason: Option<String>,
+        /// Raw source argument retained until sema validates and constant-folds it.
+        reason_expr: Option<Expr>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-REACTCORE1 (ratified 2026-06-27, opt D): `#Reactive { … }` in statement
+    /// position. Lowers to a reactive effect registration at codegen.
+    Reactive {
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — a cancellation
+    /// shield region. A cancellation or blown deadline pending against the running
+    /// task is deferred until the block exits (deadline first, then cancel).
+    /// Lowers to `jet_scheduler_shield_enter()` / `_leave()` around `body` with a
+    /// RAII guard so `_leave` runs on every exit path including unwind. A no-op
+    /// outside a task (SHIELD_DEPTH is thread-local). No arguments.
+    Shield {
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-CANVASSTATE1=D (ratified 2026-07-09): a statement switch attribute,
+    /// `#Off <stmt>` or `#DebugOnly <stmt>`, in either the bare or the block
+    /// form. D-VERDICT-1455-1: the written marker is retained, so which switch
+    /// this is stays a question about the marker rather than a parse-time
+    /// choice of node. `#Off` bodies are parsed and checked but never emitted;
+    /// `#DebugOnly` bodies run in debug and dev builds and are stripped from
+    /// release output.
+    Switched {
+        marker: Marker,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-REGION1 / D-BLOCKPLANE1: explicit allocation region
+    /// `#Region(r) { … }`. `name` names the region; arena `view`s allocated
+    /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
+    /// emitted as a plain Rust block — the region bound is enforced entirely in
+    /// sema (I3: codegen stays dumb).
+    Region {
+        name: String,
+        name_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-MARK-SCOPE1: lexical scoped policy. Compile-time only; codegen emits its body.
+    Policy {
+        declarations: Vec<crate::Policy::PolicyDeclaration>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-CONC-SPAWN1=D: `task.group g(limit: n) { … }` — a lexical scope that
+    /// owns child tasks. The optional limit bounds concurrently active children.
+    /// Emitted as a plain block at codegen; lifetime is enforced in sema (I3).
+    TaskGroup {
+        name: String,
+        name_span: Span,
+        limit: Option<Expr>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29) + D-LAYOUT-CTOR1
+    /// (D-VERDICT-1306-1): `name :: Layout.{ … }` — a Cassowary-style
+    /// constraint typed-literal. Unlike `region`/`task.group`, `name` is declared
+    /// in the ENCLOSING scope and outlives the literal (solved values are read
+    /// after the layout is defined). The parser desugars each `box.anchor` /
+    /// `self.anchor` read inside `body` into a `name.h(box, anchor)` /
+    /// `name.v(box, anchor)` method call before sema ever sees it, so every
+    /// element is an ordinary `Stmt::Expr`/`Stmt::Val` comparison expression
+    /// checked by the general GATE-1/GATE-2 machinery — `body` carries no
+    /// layout-specific AST shape of its own. Formatter canonical container
+    /// spelling is `self.anchor` when the box id equals the binding name.
+    Layout {
+        name: String,
+        name_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-EFF1 / D-ABILITY-NAME2: a `#FX(Net, DB) { … }` effect-restriction
+    /// region, optionally with a named Authority handle:
+    /// `#FX(grant: FS, Net) { … }`. Bare `#FX` narrows; the named form also
+    /// binds the handle for the block. The effect list is validated in sema
+    /// and the lexical scope is emitted as a plain Rust block.
+    AuthorityScope {
+        caps: Vec<(String, Span)>,
+        caps_span: Span,
+        binding: Option<String>,
+        binding_span: Option<Span>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `@if <cond> { … } else { … }`.
+    /// The condition is evaluated at compile time; only the selected arm is
+    /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).
+    /// `else_body` is None when no `else` clause is written (statement position
+    /// only; in expression position both arms are required by the caller).
+    ComptimeIf {
+        cond: Expr,
+        cond_span: Span,
+        then_body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+        span: Span,
+        /// Filled by sema: true if the `then` arm is selected, false if `else`.
+        /// None before sema runs.
+        selected_then: Option<bool>,
+    },
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): `prep if $build.os == { .Linux
+    /// -> … .MacOS -> … .Windows -> … [else -> …] }` — the compile-time switch
+    /// that lets ungated code reach an OS-gated `impl`. `$build.os` is a
+    /// compiler-known comptime value; the switch folds to the arm matching the
+    /// build's active OS (`ProgramBundle.active_os`), discarding the others
+    /// *before* any OS-gating check or full type-check sees them. Sema desugars
+    /// this node into a chain of `ComptimeIf` (each arm's condition is the
+    /// compile-time constant `$build.os == .OS`) as the very first step of
+    /// `check_bundle`, so no later sema/codegen pass ever sees this variant —
+    /// only the parser, formatter, and semindex do. Arm heads are bare OS
+    /// variants (reuses the `Stmt::Switch` arm IR / `SwitchArm`).
+    ComptimeSwitch {
+        subject: Expr,
+        arms: Vec<SwitchArm>,
+        else_body: Option<Vec<Stmt>>,
+        span: Span,
+    },
+    /// D-META-STAGE1=B (ratified 2026-08-06, card #1537, retires D-CTMARKER1's
+    /// splice-only spelling): `@ { … }` — a build-time execution block. Runs
+    /// at compile time via the tree-walking comptime interpreter; erases
+    /// entirely (no runtime Rust emitted, I3).
+    /// Purity-checked (E3401, D-META-EFFECT1 c3) then tree-walked
+    /// (E0953/E0956); effect tiers per D-CTEFFECT1. Bindings declared inside
+    /// are the same compile-time names outside the block (S57): sema folds
+    /// them from the interpreter scope, and codegen never sees the block.
+    ComptimeBlock {
+        body: Vec<Stmt>,
+        /// Internal derive-template marker: `@loop` in a provider function is
+        /// expanded into ordinary statements before the generated item enters sema.
+        is_template_loop: bool,
+        span: Span,
+    },
+
+    /// D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
+    /// Swaps named ambient fields for the block's lexical+dynamic extent, then
+    /// restores them on all exit paths (return, break, ?, panic unwind) via
+    /// a RAII guard. Expert-tier; never surfaced in beginner diagnostics.
+    /// v1 fields: `allocator` (allocator handle), `logger` (logger handle),
+    /// `deadline` (absolute epoch-millis Int budget).
+    /// Q1 = A2: an explicit allocator arg at a call site overrides the ambient.
+    /// Q2 = Cβ: restore is per-block (on guard Drop).
+    ContextBlock {
+        /// `(field_name, value_expr, field_span)` — one entry per `field: value`.
+        fields: Vec<(String, Expr, Span)>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-TERM1 (ratified 2026-06-22): `live { … }` — enter un-buffered/no-echo
+    /// terminal input mode for the body, restore on every exit (normal, `return`,
+    /// `?`, and panic) via the D-DEFER1 scope-guard mechanism.
+    /// `use core.term as term` makes `term.read_key() -> Key` available.
+    Live {
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the expert
+    /// determinism-escape block. Inside a `#Pure fn`, the body's determinism
+    /// rejections (E3401 impure-call / E3403 non-deterministic Core call) are
+    /// **suspended** — the "I know this is deterministic" hatch. A semantic
+    /// footgun, v1-legal per the card. A lexical scope emitted as a plain Rust
+    /// block; the suppression is a compile-time fact, erased in codegen (I3).
+    AssumeDet {
+        reason: String,
+        /// Raw source argument retained until sema validates and constant-folds it.
+        reason_expr: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a
+    /// transaction block. `name` binds a user-chosen transaction handle (any
+    /// lowercase ident, mirroring `region r { … }`) typed `Transaction`.
+    /// Inside the block an irreversible effect (Net/FS/Exec) that can't be rolled
+    /// back is a compile error (E0746, D-TXN2) — the fix is to move it after the
+    /// block or register it via `name.on_commit(() -> { … })` (D-TXN3) so it runs
+    /// only on a clean commit. `on_commit` lambdas are Drop-backed and run LIFO on
+    /// commit, dropped on a `?`-failure/rollback. A lexical scope emitted as a
+    /// plain Rust block; effects/transaction state erase (I3).
+    Transact {
+        /// The user-chosen handle name, or `None` for a bare `#Transact { … }` with
+        /// no hooks (D-TXN4: a transaction without a handle stays legal). A name is
+        /// required only to call `name.on_commit(…)`.
+        name: Option<String>,
+        name_span: Option<Span>,
+        body: Vec<Stmt>,
+        /// D-CONC-SHARE1=A (card #1561): true when sema synthesized this
+        /// transaction so a plain statement that touches several `Shared`
+        /// cells commits through the one ordered engine
+        /// (`jet_shared_acquire_ordered`) instead of nesting one cell's lock
+        /// inside another's. It carries the commit plane but not the D-TXN2
+        /// effect wall, because the user did not open a transaction here.
+        implicit: bool,
+        span: Span,
+    },
+    /// D-STREAMYIELD1: `yield expr` — hand a value to a `Stream<T>` consumer
+    /// and suspend until the next pull. Legal only in a function whose return
+    /// type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 otherwise).
+    Yield(Expr, Span),
+    /// D-DOTSCOPE1 / D-META-DSL1: a contextual scope-member statement —
+    /// `.name { … }`, `.name(args) { … }`, or `#Name { … }` in statement
+    /// position. Dot members resolve against the enclosing marker's declared
+    /// vocabulary (`Syntax::scope_members`); checked text blocks resolve their
+    /// name through the bundle marker registry. The required trailing block
+    /// separates both forms from ordinary expressions.
+    ScopeMember {
+        /// The member name after the dot, or checked-block name after `#`.
+        name: String,
+        name_span: Span,
+        /// Call-style args, when written (`.timeout(500ms)`, `.skip("why")`).
+        args: Vec<Expr>,
+        /// The span of the whole `(…)` arg group, for arg-shape diagnostics.
+        args_span: Option<Span>,
+        /// The required trailing `{ … }` block body.
+        body: Vec<Stmt>,
+        /// D-META-DSL1=A: true when the leading `#Name` opened a library
+        /// checked text block; false for a leading-dot marker member.
+        dsl: bool,
+        /// The leading `.` or `#` position, anchoring the outside-scope or
+        /// undeclared-block error.
+        dot_span: Span,
+        span: Span,
+    },
+    /// D-SHAPE-RESOURCE2=A: `defer close(^resource)` keeps the consuming close
+    /// as a typed statement instead of encoding it in a private call name.
+    /// Kept last so existing statement discriminants remain stable for the
+    /// semantic index's structural keys.
+    DeferClose {
+        close: Expr,
+        span: Span,
+    },
+}
+
+/// One node of [`Stmt::for_each_node_mut`]: an expression, or an assignment
+/// target before the expressions inside it.
+pub enum WalkNode<'a> {
+    Expr(&'a mut Expr),
+    LValue(&'a mut LValue),
+}
+
+impl Stmt {
+    /// Visit every expression in this statement, including expressions in
+    /// nested statement bodies, without changing the checked AST.
+    pub fn for_each_expr(&self, mut f: impl FnMut(&Expr)) {
+        let mut copy = self.clone();
+        copy.for_each_expr_mut(|expr| f(expr));
+    }
+
+    /// Visit every expression in this statement, including expressions in
+    /// nested statement bodies. This is used when a parsed compiler-owned
+    /// fragment needs its expression diagnostics reanchored to the user item
+    /// that caused the fragment to be generated.
+    pub fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut Expr)) {
+        self.for_each_node_mut(|node| {
+            if let WalkNode::Expr(expr) = node {
+                f(expr);
+            }
+        });
+    }
+
+    /// Visit every expression and every assignment target in this statement
+    /// and its nested statement bodies. A target is visited before the
+    /// expressions inside it, so a caller may inspect the place it names.
+    pub fn for_each_node_mut(&mut self, mut f: impl FnMut(WalkNode<'_>)) {
+        fn visit_expr(expr: &mut Expr, f: &mut impl FnMut(WalkNode<'_>)) {
+            expr.for_each_expr_mut(|expr| f(WalkNode::Expr(expr)));
+        }
+
+        fn visit_body(body: &mut [Stmt], f: &mut impl FnMut(WalkNode<'_>)) {
+            for stmt in body {
+                visit_stmt(stmt, f);
+            }
+        }
+
+        fn visit_lvalue(lvalue: &mut LValue, f: &mut impl FnMut(WalkNode<'_>)) {
+            f(WalkNode::LValue(lvalue));
+            match lvalue {
+                LValue::Local { .. } => {}
+                LValue::Index { base, index, .. } => {
+                    visit_expr(base, f);
+                    visit_expr(index, f);
+                }
+                LValue::Field { base, .. } => visit_expr(base, f),
+            }
+        }
+
+        fn visit_for_kind(kind: &mut ForKind, f: &mut impl FnMut(WalkNode<'_>)) {
+            match kind {
+                ForKind::Range {
+                    start, end, step, ..
+                } => {
+                    visit_expr(start, f);
+                    visit_expr(end, f);
+                    if let Some(step) = step {
+                        visit_expr(step, f);
+                    }
+                }
+                ForKind::In { collection, step } => {
+                    visit_expr(collection, f);
+                    if let Some(step) = step {
+                        visit_expr(step, f);
+                    }
+                }
+            }
+        }
+
+        fn visit_stmt(stmt: &mut Stmt, f: &mut impl FnMut(WalkNode<'_>)) {
+            match stmt {
+                Stmt::Expr(expr) => visit_expr(expr, f),
+                Stmt::DeferClose { close, .. } => visit_expr(close, f),
+                Stmt::Val(binding) => visit_expr(&mut binding.init, f),
+                Stmt::Assign { target, value, .. } => {
+                    visit_lvalue(target, f);
+                    visit_expr(value, f);
+                }
+                Stmt::Return(value, _) => {
+                    if let Some(value) = value {
+                        visit_expr(value, f);
+                    }
+                }
+                Stmt::While { cond, body, .. } => {
+                    visit_expr(cond, f);
+                    visit_body(body, f);
+                }
+                Stmt::For { kind, body, .. } => {
+                    visit_for_kind(kind, f);
+                    visit_body(body, f);
+                }
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                }
+                | Stmt::ComptimeSwitch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    visit_expr(subject, f);
+                    for arm in arms {
+                        visit_expr(&mut arm.cond, f);
+                        visit_body(&mut arm.body, f);
+                    }
+                    if let Some(body) = else_body {
+                        visit_body(body, f);
+                    }
+                }
+                Stmt::BreakValue(value, _) | Stmt::Yield(value, _) => visit_expr(value, f),
+                Stmt::BreakLabelValue(_, _, value, _) => visit_expr(value, f),
+                Stmt::Loop { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Switched { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::AuthorityScope { body, .. }
+                | Stmt::ComptimeBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::Layout { body, .. } => visit_body(body, f),
+                Stmt::Unsafe {
+                    audit_expr, body, ..
+                } => {
+                    if let Some(expr) = audit_expr {
+                        visit_expr(expr, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::Impure {
+                    reason_expr, body, ..
+                } => {
+                    if let Some(expr) = reason_expr {
+                        visit_expr(expr, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    visit_expr(&mut init.init, f);
+                    visit_expr(cond, f);
+                    if let Some(step) = step {
+                        visit_stmt(step, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::TaskGroup { limit, body, .. } => {
+                    if let Some(limit) = limit {
+                        visit_expr(limit, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::ContextBlock { fields, body, .. } => {
+                    for (_, value, _) in fields {
+                        visit_expr(value, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::AssumeDet {
+                    reason_expr, body, ..
+                } => {
+                    visit_expr(reason_expr, f);
+                    visit_body(body, f);
+                }
+                Stmt::ComptimeIf {
+                    cond,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    visit_expr(cond, f);
+                    visit_body(then_body, f);
+                    if let Some(body) = else_body {
+                        visit_body(body, f);
+                    }
+                }
+                Stmt::ScopeMember { args, body, .. } => {
+                    for arg in args {
+                        visit_expr(arg, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::Break(_)
+                | Stmt::Continue(_)
+                | Stmt::BreakLabel(..)
+                | Stmt::ContinueLabel(..) => {}
+            }
+        }
+
+        visit_stmt(self, &mut f);
+    }
+
+    /// Reanchor a compiler-generated statement fragment to the source item
+    /// that requested it. Expression spans are not enough for branch nodes:
+    /// subjectless `if` guards use the statement span to distinguish their
+    /// compiler-private `true` subject from an authored `if true`.
+    pub fn reanchor(&mut self, span: Span) {
+        self.for_each_expr_mut(|expr| expr.reanchor(span));
+
+        fn visit(stmt: &mut Stmt, span: Span) {
+            match stmt {
+                Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } => {}
+                Stmt::DeferClose { span: current, .. } => *current = span,
+                Stmt::Return(_, current)
+                | Stmt::Break(current)
+                | Stmt::BreakValue(_, current)
+                | Stmt::Continue(current)
+                | Stmt::BreakLabel(_, current)
+                | Stmt::ContinueLabel(_, current)
+                | Stmt::Yield(_, current) => *current = span,
+                Stmt::BreakLabelValue(_, _, _, current) => *current = span,
+                Stmt::While {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::For {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Loop {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Unsafe {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Impure {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Reactive {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Shield {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Switched {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Region {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Policy {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::TaskGroup {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Layout {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::AuthorityScope {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::ComptimeBlock {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Live {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::AssumeDet {
+                    body,
+                    span: current,
+                    ..
+                }
+                | Stmt::Transact {
+                    body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+                Stmt::ComptimeIf {
+                    then_body,
+                    else_body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for child in then_body {
+                        visit(child, span);
+                    }
+                    if let Some(body) = else_body {
+                        for child in body {
+                            visit(child, span);
+                        }
+                    }
+                }
+                Stmt::Switch {
+                    arms,
+                    else_body,
+                    span: current,
+                    ..
+                }
+                | Stmt::ComptimeSwitch {
+                    arms,
+                    else_body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for arm in arms {
+                        for child in &mut arm.body {
+                            visit(child, span);
+                        }
+                    }
+                    if let Some(body) = else_body {
+                        for child in body {
+                            visit(child, span);
+                        }
+                    }
+                }
+                Stmt::CountedLoop {
+                    step,
+                    body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    if let Some(step) = step {
+                        visit(step, span);
+                    }
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+                Stmt::ContextBlock {
+                    body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+                Stmt::ScopeMember {
+                    body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+            }
+        }
+
+        visit(self, span);
+    }
+
+    /// The source span this statement occupies, used by the source-level
+    /// debugger (D-DBG3) to resolve a Jet line for a breakpoint or `<- here`
+    /// caret. For statements that carry no explicit `span` field, this falls
+    /// back to the span of the expression/sub-part that anchors them.
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Expr(e) => e.span(),
+            Stmt::DeferClose { span, .. } => *span,
+            Stmt::Val(b) => b.name_span,
+            Stmt::Assign { target, .. } => target.span(),
+            Stmt::Return(_, span)
+            | Stmt::Break(span)
+            | Stmt::BreakValue(_, span)
+            | Stmt::Continue(span)
+            | Stmt::BreakLabel(_, span)
+            | Stmt::BreakLabelValue(_, _, _, span)
+            | Stmt::ContinueLabel(_, span)
+            | Stmt::While { span, .. }
+            | Stmt::For { span, .. }
+            | Stmt::Switch { span, .. }
+            | Stmt::Loop { span, .. }
+            | Stmt::CountedLoop { span, .. }
+            | Stmt::Unsafe { span, .. }
+            | Stmt::Impure { span, .. }
+            | Stmt::Reactive { span, .. }
+            | Stmt::Shield { span, .. }
+            | Stmt::Switched { span, .. }
+            | Stmt::Region { span, .. }
+            | Stmt::Policy { span, .. }
+            | Stmt::TaskGroup { span, .. }
+            | Stmt::Layout { span, .. }
+            | Stmt::AuthorityScope { span, .. }
+            | Stmt::ComptimeIf { span, .. }
+            | Stmt::ComptimeSwitch { span, .. }
+            | Stmt::ComptimeBlock { span, .. }
+            | Stmt::ContextBlock { span, .. }
+            | Stmt::Live { span, .. }
+            | Stmt::AssumeDet { span, .. }
+            | Stmt::Transact { span, .. }
+            | Stmt::ScopeMember { span, .. } => *span,
+            Stmt::Yield(_, span) => *span,
+        }
+    }
+}

@@ -21,6 +21,8 @@
 //   Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet (NFC-only lookups)
 //   Compiler/JetRuntime/Source/UnicodeText_<n>.jet (native text-method lookups)
 //   Core/Text/... (JUCD schema-1 assets, names and segmentation tables)
+//   Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-unicode/src/UnicodeTables.rs
+//     (the Rust tables the `extern rust` bridge support crates compile)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -371,6 +373,19 @@ const sentenceRanges = encodeBreakRanges(sentenceProp, SENTENCE_TAGS);
 const INCB_TAGS = ["None", "Linker", "Consonant", "Extend"];
 const incbRanges = encodeBreakRanges(incbProp, INCB_TAGS);
 
+// ---- Rust table text for the RustBridge jet-unicode support crate -----------
+function fmtU32Triples(rows) {
+  return rows.map(([a, b, c]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()},${c})`).join(",");
+}
+function fmtU32Pairs(rows) {
+  return rows.map(([a, b]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()})`).join(",");
+}
+function fmtU32StringPairs(rows) {
+  return rows
+    .map(([cp, name]) => `(0x${cp.toString(16).toUpperCase()},${JSON.stringify(name)})`)
+    .join(",");
+}
+
 // decomposition pool: flatten canon+compat into one u32 pool with (cp,start,len,is_canon)
 const pool = [];
 const decompIndex = []; // [cp, start, len, isCanonU8]
@@ -415,6 +430,64 @@ const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Regenerate: node Tools/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
 // Every runtime lookup and Core text asset is emitted from this one run.
 `;
+const tablesBody = `
+pub const UNICODE_VERSION: &str = "17.0.0";
+
+// (codepoint, Unicode name; control rows use their Unicode 1.0 names)
+pub static UNICODE_NAME_INDEX: &[(u32, &str)] = &[${fmtU32StringPairs(unicodeNameIndex)}];
+
+pub static UNICODE_DECOMP_POOL: &[u32] = &[${pool.join(",")}];
+// (codepoint, pool_start, pool_len, is_canonical: 1/0)
+pub static UNICODE_DECOMP_INDEX: &[(u32,u32,u32,u8)] = &[${decompIndex
+  .map(([cp, s, l, c]) => `(0x${cp.toString(16).toUpperCase()},${s},${l},${c})`)
+  .join(",")}];
+
+pub static UNICODE_FOLD_POOL: &[u32] = &[${foldPool.join(",")}];
+// (codepoint, pool_start, pool_len)
+pub static UNICODE_FOLD_INDEX: &[(u32,u32,u32)] = &[${foldIndex
+  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
+  .join(",")}];
+
+// Default simple case fold (C+S rows), used by one-scalar regex matching.
+pub static UNICODE_SIMPLE_FOLD: &[(u32,u32)] = &[${fmtU32Pairs([...simpleCaseFold.entries()].sort((a, b) => a[0] - b[0]))}];
+
+// (start, end, canonical_combining_class)
+pub static UNICODE_CCC: &[(u32,u32,u8)] = &[${fmtU32Triples(cccRanges)}];
+
+// (start, end, general_category_tag) tags: ${GC_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_GENERAL_CATEGORY: &[(u32,u32,u8)] = &[${fmtU32Triples(gcRanges)}];
+
+pub static UNICODE_LETTER: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(letterRanges))}];
+pub static UNICODE_NUMERIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(numericRanges))}];
+pub static UNICODE_ALPHABETIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(alphabeticRanges))}];
+pub static UNICODE_DEFAULT_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(defaultIgnorableRanges))}];
+
+// composition exclusions (Full_Composition_Exclusion, DerivedNormalizationProps.txt)
+pub static UNICODE_COMPOSITION_EXCLUSIONS: &[(u32,u32)] = &[${fmtU32Pairs(fullCompositionExclusion)}];
+
+// canonical composition pairs (c1, c2) -> composed, sorted by (c1,c2)
+pub static UNICODE_COMPOSE_PAIRS: &[(u32,u32,u32)] = &[${composePairs
+  .map(([a, b, c]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()},0x${c.toString(16).toUpperCase()})`)
+  .join(",")}];
+
+// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F)
+pub static UNICODE_EAST_ASIAN_WIDTH: &[(u32,u32,u8)] = &[${fmtU32Triples(eawMerged)}];
+
+pub static UNICODE_EXTENDED_PICTOGRAPHIC: &[(u32,u32)] = &[${fmtU32Pairs(extPictographic)}];
+pub static UNICODE_EMOJI_PRESENTATION: &[(u32,u32)] = &[${fmtU32Pairs(emojiPresentation)}];
+pub static UNICODE_EMOJI: &[(u32,u32)] = &[${fmtU32Pairs(emoji)}];
+
+// Grapheme_Cluster_Break tags: ${GRAPHEME_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_GRAPHEME_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(graphemeRanges)}];
+// Word_Break tags: ${WORD_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_WORD_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(wordRanges)}];
+// Sentence_Break tags: ${SENTENCE_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceRanges)}];
+
+// Indic_Conjunct_Break (GB9c) tags: ${INCB_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
+`;
+const tablesFlatOut = HEADER_COMMENT + tablesBody;
 // ---- emit Jet runtime lookups -----------------------------------------------
 // The runtime cannot use Core lists/Int indexing to implement Core itself.
 // Balanced static decisions are the immutable tables: no heap, constructor,
@@ -555,6 +628,7 @@ for (const lookup of jetTextLookups) {
 }
 
 const outPaths = [
+  ["Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-unicode/src/UnicodeTables.rs", tablesFlatOut],
   ["Compiler/JetRuntime/Source/UnicodeTables.jet", jetTablesOut],
   ["Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet", jetNormalizeTablesOut],
   ...jetNormalizeChunks,
