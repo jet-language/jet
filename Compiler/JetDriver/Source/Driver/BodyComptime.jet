@@ -160,6 +160,19 @@ fn jet_driver_pending_comptime_body_sources(
     pending
 }
 
+// Whether the body recheck or the checked-text validation evaluates over
+// `graph` and so reads its name facts (jet_driver_comptime_body_pass,
+// jet_driver_validate_checked_text).
+fn jet_driver_comptime_reads_names(graph: SemaGraphResult, values: [SemaComptimeItemValue]) -> Bool Never! {
+    if jet_driver_pending_comptime_body_sources(graph, values).len() > 0 -> return true
+    loop graph_module in graph.modules {
+        loop call in graph_module.comptime_requests {
+            if call.checked_text != None -> return true
+        }
+    }
+    false
+}
+
 fn jet_driver_comptime_body_stage(
     stage: SemaComptimeDeclarationStage,
     graph: ^SemaGraphResult,
@@ -376,5 +389,5 @@ fn jet_driver_recheck_comptime_bodies(
     request: JetDriverCompileRequest,
 ) -> SemaGraphResult {
     body_stage := jet_driver_comptime_body_stage(stage, ^semantic_graph, ^body_sources)
-    sema_finalize_graph(^graph, &trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, request.trace_sink)
+    sema_finalize_graph(^graph, &trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
 }

@@ -7339,7 +7339,7 @@ fn sema_finalize_registration_graph(graph: ^SemaRegistrationGraph, resolved: ^Se
     owned := ^resolved
     resolved_graph := ^owned ?? sema_comptime_graph_with_values(^graph, values)
     trail := sema_graph_trail_init()
-    result := sema_finalize_graph(^resolved_graph, &trail, stage, values, comptime_functions, host_hooks, threads, session, trace_sink)
+    result := sema_finalize_graph(^resolved_graph, &trail, stage, values, comptime_functions, host_hooks, threads, session, true, trace_sink)
     result.registration_graph = None
     result
 }
@@ -7377,8 +7377,11 @@ fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, value
 // recorded on `trail`, and the graph comes back as the result's
 // `registration_graph`, so the caller can undo the edits instead of keeping
 // a copy of the registration graph. Values never change the graph's
-// identities or `complete`, which are read from `resolved`.
-fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, session: SemaIncrementalCache?, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
+// identities or `complete`, which are read from `resolved`. `build_names`
+// builds the bundle's name facts; without it the result carries only their
+// structure facts, for a caller that builds the names itself once it has
+// changed the modules (the driver's checked-text merge).
+fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, session: SemaIncrementalCache?, build_names: Bool, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
     resolved_graph := ^resolved
     // #4319 lookup counters are traced through `sema.check` only; counting
     // here would serialize the body-check threads on the shared counters.
@@ -7596,7 +7599,11 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop fact in lifecycle.facts -> &structure_facts.push(fact)
     loop fact in liveness.facts -> &structure_facts.push(fact)
     names := sema_name_facts_empty()
-    final_graph = sema_name_build_facts_threads(^final_graph, &modules, structure_facts, threads, &names)
+    if build_names {
+        final_graph = sema_name_build_facts_threads(^final_graph, &modules, structure_facts, threads, &names)
+    } else {
+        names.structure_facts = structure_facts
+    }
     if trace_sink == .Val(sink) -> sink.end("sema.names", names.references.len())
     // Core modules are checked in the same bundle so their errors keep the
     // program honest, but Core is library source: its lints are not the

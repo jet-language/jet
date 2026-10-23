@@ -406,7 +406,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
         jet_driver_comptime_diagnostics_add(&load.diagnostics, stage.diagnostics)
         if stage.modules.len() == registration_count {
             trail := sema_graph_trail_init()
-            provisional := sema_finalize_graph(^registration, &trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
+            provisional := sema_finalize_graph(^registration, &trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, None, true, input.request.trace_sink)
             restored := ^provisional.registration_graph
             provisional.registration_graph = None
             registration = ^restored ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
@@ -447,7 +447,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {
         if run.internal_problem == None {
-            provisional := sema_finalize_graph(^registration, &run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
+            provisional := sema_finalize_graph(^registration, &run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, None, true, input.request.trace_sink)
             restored := ^provisional.registration_graph
             provisional.registration_graph = None
             registration = ^restored ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
@@ -458,7 +458,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
         }
         return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, run.internal_problem)
     }
-    graph := sema_finalize_graph(^registration, &run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.sema_session, input.request.trace_sink)
+    graph := sema_finalize_graph(^registration, &run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.sema_session, true, input.request.trace_sink)
     restored := ^graph.registration_graph
     graph.registration_graph = None
     registration = ^restored ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
