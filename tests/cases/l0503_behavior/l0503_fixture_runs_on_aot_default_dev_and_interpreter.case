@@ -1,0 +1,19 @@
+# tests/l0503_behavior.rs::l0503_fixture_runs_on_aot_default_dev_and_interpreter at tests/l0503_behavior.rs:346; hand-port
+# prefer_compound_assign.jet is tests/ui_lint/prefer_compound_assign.jet (the original's include_str! source); package.jet is
+# the original run_dev package. Default run, forced interpreter, default dev and the AOT build print "80\n".
+fixture: l0503_fixture_runs_on_aot_default_dev_and_interpreter.fixture
+env: NO_COLOR=1
+step: jet run prefer_compound_assign.jet
+exit: 0
+stdout: = "80\n"
+step: jet run --interpret prefer_compound_assign.jet
+exit: 0
+stdout: = "80\n"
+step: jet dev prefer_compound_assign.jet --watch=off
+exit: 0
+stdout: = "80\n"
+step: jet build prefer_compound_assign.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "80\n"

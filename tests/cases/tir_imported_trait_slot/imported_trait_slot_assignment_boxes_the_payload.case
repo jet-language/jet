@@ -1,0 +1,10 @@
+# tests/tir_imported_trait_slot.rs::imported_trait_slot_assignment_boxes_the_payload at tests/tir_imported_trait_slot.rs:63; hand-port
+# `slot = Val(concrete)` into an optional field typed by a trait another module declares. The original checked with
+# no error and lowered the program for the native executable (then asserted a Rust MIR TraitBox, which went with the
+# Rust backend). Here: `jet check` is clean and `jet build` lowers it natively.
+fixture: imported_trait_slot_assignment_boxes_the_payload.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet build main.jet
+exit: 0

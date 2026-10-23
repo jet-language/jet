@@ -1,0 +1,11 @@
+# tests/jetpack_tasks.rs::jet_top_job_runs_by_name_and_unknown_suggests_jobs at tests/jetpack_tasks.rs:54; hand-port
+# run.jet is the original source (write_main, then renamed to run.jet); package.jet is the write_main package
+# (tests/cases/jetpack_tasks/fixtures/greet/package.jet).
+fixture: jet_top_job_runs_by_name_and_unknown_suggests_jobs.fixture
+step: jet --no-color greet
+exit: 0
+stdout: ~ "from-jobs" # tests/jetpack_tasks.rs:33-37 the job runs by name
+step: jet --no-color seed_dat
+exit: nonzero
+stderr: ~ "E2101" # tests/jetpack_tasks.rs:46 unknown word
+stderr: ~ "Did you mean `jet seed_data`" # tests/jetpack_tasks.rs:47 the suggestion names the project job
