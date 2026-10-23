@@ -8,7 +8,10 @@
 //    MAP_FIXED_NOREPLACE, read+write; the file bytes go in through a memfd
 //    (one kernel copy, nothing on disk); then each segment gets its final
 //    protection. No page is ever writable and executable at once. The whole
-//    file stays mapped read-only for the runtime's symbol lookups.
+//    file stays mapped read-only for the runtime's symbol lookups. A program
+//    bound to the runtime image (x64_executable_load, Image/MemoryLink.jet)
+//    maps the image's segments from the pack file itself, copy-on-write,
+//    and copies in only its own part.
 // 2. Plan (loader_plan): what execve resets -- handled signals back to
 //    default, an empty signal mask, no alternate signal stack, close-on-exec
 //    descriptors closed, the thread name -- as a list of raw system calls,
@@ -224,27 +227,33 @@ fn loader_segments_failed(failure: String) -> X64Segments Never! {
 
 // Read and check the PT_LOADs of the static x86-64 executable `bytes`.
 fn x64_image_segments(bytes: [U8]) -> X64Segments Never! {
-    size :: bytes.len()
-    if size < 64 || loader_u32(bytes, 0) != 0x464c457f || Int.from_u8(bytes[4]) != 2 || loader_u16(bytes, 16) != 2 || loader_u16(bytes, 18) != 62 {
+    loader_segments(bytes, bytes, 0, bytes.len())
+}
+
+// The same for a file of `size` bytes with the ELF header `header` (at
+// least its 64 bytes) and the program header table in `table`, the file's
+// bytes from offset `table_at`.
+fn loader_segments(header: [U8], table: [U8], table_at: Int, size: Int) -> X64Segments Never! {
+    if header.len() < 64 || loader_u32(header, 0) != 0x464c457f || Int.from_u8(header[4]) != 2 || loader_u16(header, 16) != 2 || loader_u16(header, 18) != 62 {
         return loader_segments_failed("the image is not a static x86-64 ELF executable")
     }
-    phoff :: loader_u64(bytes, 32)
-    phnum :: loader_u16(bytes, 56)
-    if loader_u16(bytes, 54) != 56 || phoff + phnum * 56 > size -> return loader_segments_failed("the image's program headers are malformed")
+    phoff :: loader_u64(header, 32)
+    phnum :: loader_u16(header, 56)
+    if loader_u16(header, 54) != 56 || phoff + phnum * 56 > size || phoff < table_at || phoff - table_at + phnum * 56 > table.len() -> return loader_segments_failed("the image's program headers are malformed")
     low := -1
     high := 0
     phdr := 0
     phdr_known := false
     segments := [X64Segment]{}
     loop k in 0..<phnum {
-        at :: phoff + k * 56
-        kind :: loader_u32(bytes, at)
+        at :: phoff - table_at + k * 56
+        kind :: loader_u32(table, at)
         if kind == 6 {
-            phdr = loader_u64(bytes, at + 16)
+            phdr = loader_u64(table, at + 16)
             phdr_known = true
         }
         if kind != 1 -> next
-        segment :: X64Segment{vaddr: loader_u64(bytes, at + 16), file_size: loader_u64(bytes, at + 32), memory_size: loader_u64(bytes, at + 40), flags: loader_u32(bytes, at + 4), offset: loader_u64(bytes, at + 8)}
+        segment :: X64Segment{vaddr: loader_u64(table, at + 16), file_size: loader_u64(table, at + 32), memory_size: loader_u64(table, at + 40), flags: loader_u32(table, at + 4), offset: loader_u64(table, at + 8)}
         if segment.vaddr % OS_PAGE_SIZE != segment.offset % OS_PAGE_SIZE || segment.file_size > segment.memory_size || segment.offset + segment.file_size > size {
             return loader_segments_failed("PT_LOAD {k} of the image is malformed")
         }
@@ -259,7 +268,7 @@ fn x64_image_segments(bytes: [U8]) -> X64Segments Never! {
         &segments.push(segment)
     }
     if low < 0 -> return loader_segments_failed("the image has no PT_LOAD segment")
-    X64Segments{segments: segments, low: low, high: high, entry: loader_u64(bytes, 24), phdr: phdr, phnum: phnum, failure: ""}
+    X64Segments{segments: segments, low: low, high: high, entry: loader_u64(header, 24), phdr: phdr, phnum: phnum, failure: ""}
 }
 
 // Append `value` in hex (no prefix) to `out`.
@@ -327,21 +336,10 @@ fn x64_image_perf_map(bytes: [U8], pid: Int) -> String {
 fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
     plan :: x64_image_segments(bytes)
     if plan.failure != "" -> return loader_failed(plan.failure)
-    low :: plan.low
-    high :: plan.high
-    mapped := 0
-    #Unsafe("MAP_FIXED_NOREPLACE never replaces an existing mapping") {
-        mapped = os_syscall(OS_SYS_MMAP, low, high - low, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_FIXED_NOREPLACE, -1, 0)
-    }
-    if mapped == -OS_EEXIST -> return loader_failed("the image's address range {loader_hex(low)}..{loader_hex(high)} is taken")
-    if os_failed(mapped) -> return loader_failed("mapping the image failed (errno {-mapped})")
-    if mapped != low {
-        // Kernels before 4.17 take the address as a hint only.
-        _ := os_unmap(mapped, high - low)
-        return loader_failed("the image's address range {loader_hex(low)}..{loader_hex(high)} is taken")
-    }
+    reserved :: loader_reserve(plan)
+    if reserved != "" -> return loader_failed(reserved)
     size :: bytes.len()
-    image := X64LoadedImage{low: low, high: high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: size, failure: ""}
+    image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: size, failure: ""}
     fd :: loader_memfd()
     if fd < 0 {
         x64_image_unload(image)
@@ -360,8 +358,94 @@ fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
         if os_failed(file) { failure = "mapping the image file view failed (errno {-file})" } else { image.file = file }
     }
     loader_close(fd)
+    if failure == "" -> failure = loader_protect(plan)
+    if failure != "" {
+        x64_image_unload(image)
+        return loader_failed(failure)
+    }
+    image
+}
+
+// Map the linked executable `exe` at its link addresses, as x64_image_load
+// maps its file. A bound executable's image part comes from the pack file
+// itself, mapped copy-on-write: only the pages the program touches are
+// read in, and only the ones it (or the patching here) writes are copied.
+// Only the program part is copied in. When the pack file is gone or no
+// longer the one `exe.image` was read from, the file's bytes are put
+// together and loaded as x64_image_load loads them.
+fn x64_executable_load(exe: X64Executable) -> X64LoadedImage {
+    if exe.image_end == 0 -> return x64_image_load(exe.tail)
+    // The file is opened between two checks of its identity, so the
+    // descriptor is the file the image was read from.
+    file := -1
+    if loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
+        file = loader_open(exe.image_path)
+        if file >= 0 && !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
+            loader_close(file)
+            file = -1
+        }
+    }
+    if file < 0 -> return x64_image_load(x64_executable_bytes(exe.copy()))
+    // The ELF header as patched: the image's own names the image's program headers.
+    header := exe.image[0..<64]
+    loop (k, at) in exe.patch_at {
+        loop (j, byte) in exe.patch_bytes[k] { if at + j < 64 -> header[at + j] = byte }
+    }
+    plan :: loader_segments(header, exe.tail, exe.tail_at, exe.tail_at + exe.tail.len())
+    failure := plan.failure
+    if failure == "" -> failure = loader_reserve(plan)
+    if failure != "" {
+        loader_close(file)
+        return loader_failed(failure)
+    }
+    image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: exe.tail_at + exe.tail.len(), failure: ""}
+    memfd :: loader_memfd()
+    failure = if memfd < 0 -> "memfd_create failed (errno {-memfd})" else -> loader_fill(memfd, exe.tail)
     loop segment in plan.segments {
         if failure != "" -> break
+        failure = if {
+            segment.offset + segment.file_size <= exe.image_end -> loader_map_file(file, segment)
+            segment.offset >= exe.tail_at -> loader_pread(memfd, segment.vaddr, segment.file_size, segment.offset - exe.tail_at)
+            else -> "PT_LOAD at {loader_hex(segment.vaddr)} lies across the image and the program"
+        }
+    }
+    if failure == "" {
+        loop segment in plan.segments {
+            if segment.offset + segment.file_size <= exe.image_end -> loader_patch(exe, segment.vaddr - segment.offset, segment.offset, segment.offset + segment.file_size)
+        }
+        failure = loader_view(&image, exe, file, memfd)
+    }
+    loader_close(file)
+    if memfd >= 0 -> loader_close(memfd)
+    if failure == "" -> failure = loader_protect(plan)
+    if failure != "" {
+        x64_image_unload(image)
+        return loader_failed(failure)
+    }
+    image
+}
+
+// Reserve the pages [plan.low, plan.high), read+write; "" or why not.
+fn loader_reserve(plan: X64Segments) -> String {
+    low :: plan.low
+    high :: plan.high
+    mapped := 0
+    #Unsafe("MAP_FIXED_NOREPLACE never replaces an existing mapping") {
+        mapped = os_syscall(OS_SYS_MMAP, low, high - low, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_FIXED_NOREPLACE, -1, 0)
+    }
+    if mapped == -OS_EEXIST -> return "the image's address range {loader_hex(low)}..{loader_hex(high)} is taken"
+    if os_failed(mapped) -> return "mapping the image failed (errno {-mapped})"
+    if mapped != low {
+        // Kernels before 4.17 take the address as a hint only.
+        _ := os_unmap(mapped, high - low)
+        return "the image's address range {loader_hex(low)}..{loader_hex(high)} is taken"
+    }
+    ""
+}
+
+// Give each segment of `plan` its final protection; "" or why not.
+fn loader_protect(plan: X64Segments) -> String {
+    loop segment in plan.segments {
         start :: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
         end :: os_page_round(segment.vaddr + segment.memory_size)
         protection := 0
@@ -371,14 +455,119 @@ fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
         if protection == OS_PROT_READ + OS_PROT_WRITE -> next
         result :: os_protect(start, end - start, protection)
         if os_failed(result) {
-            failure = if protection.bit_and(OS_PROT_EXEC) != 0 -> "executable memory was refused (errno {-result})" else -> "protecting the image failed (errno {-result})"
+            return if protection.bit_and(OS_PROT_EXEC) != 0 -> "executable memory was refused (errno {-result})" else -> "protecting the image failed (errno {-result})"
         }
     }
-    if failure != "" {
-        x64_image_unload(image)
-        return loader_failed(failure)
+    ""
+}
+
+// Map the PT_LOAD `segment` of a bound executable's image part from the
+// pack file `fd` over its reserved pages, private and writable until
+// loader_protect. A segment with zero-filled memory after its file bytes
+// (bss) gets zeros after them in its last file page, as execve gives it.
+fn loader_map_file(fd: Int, segment: X64Segment) -> String {
+    start :: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
+    end :: os_page_round(segment.vaddr + segment.file_size)
+    if end == start -> return ""
+    mapped := 0
+    #Unsafe("MAP_FIXED replaces only the image's own reserved pages") {
+        mapped = os_syscall(OS_SYS_MMAP, start, end - start, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, fd, segment.offset - segment.vaddr % OS_PAGE_SIZE)
     }
-    image
+    if os_failed(mapped) -> return "mapping the runtime image file failed (errno {-mapped})"
+    if segment.memory_size > segment.file_size {
+        #Unsafe("the bytes lie in the segment's last file page, mapped private and writable above") {
+            loop at in segment.vaddr + segment.file_size..<end { os_store_byte(at, 0) }
+        }
+    }
+    ""
+}
+
+// Write the patch bytes of `exe` at file offsets [from, to) to memory, the
+// byte at file offset o at o + delta.
+fn loader_patch(exe: X64Executable, delta: Int, from: Int, to: Int) {
+    loop (k, at) in exe.patch_at {
+        loop (j, byte) in exe.patch_bytes[k] {
+            if at + j < from || at + j >= to -> next
+            #Unsafe("the caller mapped [from, to) + delta private and writable") {
+                os_store_byte(at + j + delta, Int.from_u8(byte))
+            }
+        }
+    }
+}
+
+// The read-only view of the whole file of `exe` (LOADER_AT_IMAGE) into
+// image.file: the image part from the pack file `file`, patched, zeros up
+// to the program part, which comes from `memfd`.
+fn loader_view(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: Int) -> String {
+    view :: os_map(image.file_size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(view) -> return "mapping the image file view failed (errno {-view})"
+    image.file = view
+    head :: os_page_round(exe.image_end)
+    mapped := 0
+    #Unsafe("MAP_FIXED replaces only the view's own fresh pages") {
+        mapped = os_syscall(OS_SYS_MMAP, view, head, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, file, 0)
+    }
+    if os_failed(mapped) -> return "mapping the runtime image file failed (errno {-mapped})"
+    #Unsafe("the bytes lie in the view's last image page, mapped private and writable above") {
+        loop at in view + exe.image_end..<view + head { os_store_byte(at, 0) }
+    }
+    loader_patch(exe, view, 0, exe.image_end)
+    if exe.tail.len() > 0 {
+        #Unsafe("MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again") {
+            mapped = os_syscall(OS_SYS_MMAP, view + exe.tail_at, exe.tail.len(), OS_PROT_READ, OS_MAP_PRIVATE + OS_MAP_FIXED, memfd, 0)
+        }
+        if os_failed(mapped) -> return "mapping the image file view failed (errno {-mapped})"
+    }
+    result :: os_protect(view, exe.tail_at, OS_PROT_READ)
+    if os_failed(result) -> return "protecting the image file view failed (errno {-result})"
+    ""
+}
+
+// A runtime image file as read: its bytes and, when the file had the same
+// identity before and after the read, that identity (x64_executable_load
+// maps the file only while it still has it), else empty; `failure` is ""
+// or why it couldn't be read.
+struct X64ImageFile {
+    bytes: [U8]
+    stamp: [Int]
+    failure: String
+}
+
+// Read the runtime image file `path`. A pack file is replaced whole, never
+// rewritten in place, so the same identity before and after the read means
+// the bytes read are that file's.
+fn x64_image_file_read(path: String) -> X64ImageFile {
+    before :: loader_file_stamp(path)
+    bytes :: loader_files.read_bytes(path) ?? return X64ImageFile{bytes: [U8]{}, stamp: [Int]{}, failure: "{err}"}
+    after :: loader_file_stamp(path)
+    X64ImageFile{bytes: bytes, stamp: if loader_same_stamp(before, after) -> after else -> [Int]{}, failure: ""}
+}
+
+// The identity of the file at `path`: device, inode, size, and modification
+// and status-change times in nanoseconds; empty when it can't be read.
+fn loader_file_stamp(path: String) -> [Int] {
+    found :: loader_files.stat(path) ?? return [Int]{}
+    modified :: found.modified.to_unix_ns() ?? return [Int]{}
+    changed :: found.changed.to_unix_ns() ?? return [Int]{}
+    [Int]{found.id.device, found.id.inode, found.size, modified, changed}
+}
+
+// Open `path` read-only and close-on-exec: the descriptor, or -errno.
+fn loader_open(path: String) -> Int {
+    name :: loader_c_string(path)
+    if name == 0 -> return -12
+    fd := 0
+    #Unsafe("openat reads the NUL-terminated path at `name`") {
+        fd = os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, name, OS_O_RDONLY_CLOEXEC, 0, 0, 0)
+    }
+    _ := os_unmap(name, path.len() + 1)
+    fd
+}
+
+fn loader_same_stamp(a: [Int], b: [Int]) -> Bool Never! {
+    if a.len() == 0 || a.len() != b.len() -> return false
+    loop (k, value) in a { if value != b[k] -> return false }
+    true
 }
 
 // The number of threads in this process, or -1 when /proc can't tell.

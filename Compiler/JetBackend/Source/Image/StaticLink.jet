@@ -1726,34 +1726,36 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
     elf64_u32(&out, 6)
     loop _ in 0..<5 -> elf64_u64(&out, 0)
     elf64_u64(&out, 16)
-    link_write_contents(&c, &out, l)
+    base :: c.base
+    link_write_contents(&c, &out, l, base)
     out
 }
 
 // Append the loaded sections, unwind tables and GOT of layout `l` to `out`,
-// which ends at or before the first of them.
-fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout) Never! {
+// whose first byte is the one at address `origin` and which ends at or
+// before the first of them.
+fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int) Never! {
     file_classes :: [Int]{LINK_RODATA, LINK_EH, LINK_TEXT, LINK_TDATA, LINK_PREINIT, LINK_INIT, LINK_FINI, LINK_RELRO, LINK_DATA}
     loop class in file_classes {
         if class == LINK_EH {
-            link_pad_to(&out, c.eh_start - c.base, 0)
+            link_pad_to(&out, c.eh_start - origin, 0)
             link_emit_eh(&c, &out)
             next
         }
         loop row in l.order[class] {
-            link_pad_to(&out, c.live_addr[row] - c.base, if class == LINK_TEXT -> 0xcc else -> 0)
+            link_pad_to(&out, c.live_addr[row] - origin, if class == LINK_TEXT -> 0xcc else -> 0)
             link_emit_section(&c, &out, row)
         }
         if class == LINK_RELRO {
             // The GOT follows the read-only-after-relocation data.
-            link_pad_to(&out, c.got_start - c.base, 0)
+            link_pad_to(&out, c.got_start - origin, 0)
             loop key in c.got_keys {
                 value :: if key >= 0 -> link_global_addr(c, key) else -> link_got_local(c, -1 - key)
                 elf64_u64(&out, value)
             }
         }
     }
-    if l.has_rw -> link_pad_to(&out, l.file_end - c.base, 0)
+    if l.has_rw -> link_pad_to(&out, l.file_end - origin, 0)
 }
 
 // Address of the local file symbol `fsym` (a GOT entry for a local).
@@ -1942,21 +1944,23 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     strtab_at :: out.len()
     &out.extend(strtab)
     &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
-    link_write_section_headers(&out, headers)
+    shoff :: link_write_section_headers(&out, 0, headers)
+    link_elf_sections(&out, shoff, headers.len() + 2)
 }
 
 // Append the section name table and the section headers `headers` (after
-// the null header; the name table's own is added) to `out`, and point the
-// ELF header at them.
-fn link_write_section_headers(out: &[U8], headers: [LinkSectionHeader]) Never! {
+// the null header; the name table's own is added) to `out`, whose first
+// byte is at file offset `origin`. Returns the headers' file offset, for
+// link_elf_sections.
+fn link_write_section_headers(out: &[U8], origin: Int, headers: [LinkSectionHeader]) -> Int Never! {
     shstrtab := [U8]{U8{0}}
     name_offsets := [Int]{}
     loop header in headers -> &name_offsets.push(elf64_string(&shstrtab, header.name))
     names_offset :: elf64_string(&shstrtab, ".shstrtab")
-    shstrtab_at :: out.len()
+    shstrtab_at :: origin + out.len()
     &out.extend(shstrtab)
     elf64_pad(&out, 8)
-    shoff :: out.len()
+    shoff :: origin + out.len()
     loop _ in 0..<64 -> &out.push(U8{0})
     loop (index, header) in headers {
         elf64_u32(&out, name_offsets[index])
@@ -1971,13 +1975,18 @@ fn link_write_section_headers(out: &[U8], headers: [LinkSectionHeader]) Never! {
         elf64_u64(&out, header.entry_size)
     }
     elf64_section_header(&out, names_offset, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
-    // e_shoff, e_shentsize, e_shnum and e_shstrndx.
-    link_put64(&out, 40, shoff)
-    count :: headers.len() + 2
+    shoff
+}
+
+// Point the ELF header `elf` at `count` section headers at file offset
+// `shoff`, the name table's last: e_shoff, e_shentsize, e_shnum and
+// e_shstrndx.
+fn link_elf_sections(elf: &[U8], shoff: Int, count: Int) Never! {
+    link_put64(&elf, 40, shoff)
     fields :: [Int]{64, count, count - 1}
     loop (index, value) in fields {
-        out[58 + 2 * index] = U8{value.bit_and(255)}
-        out[59 + 2 * index] = U8{(value >> 8).bit_and(255)}
+        elf[58 + 2 * index] = U8{value.bit_and(255)}
+        elf[59 + 2 * index] = U8{(value >> 8).bit_and(255)}
     }
 }
 

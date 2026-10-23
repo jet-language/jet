@@ -9,15 +9,19 @@ use core.time as cli_time
 use jet_backend.[
     LINK_BASE,
     LINK_RUN_BASE,
+    X64Executable,
     X64Launch,
+    x64_bind_runtime_image,
+    x64_executable_bytes,
+    x64_executable_load,
+    x64_executable_whole,
     x64_file_exec,
     x64_image_exec,
-    x64_image_load,
+    x64_image_file_read,
     x64_image_perf_map,
     x64_image_spawn,
     x64_image_unload,
     x64_link_executable,
-    x64_link_with_runtime_image,
     x64_process_mirror,
     x64_process_nap,
     x64_process_stop,
@@ -362,9 +366,9 @@ enum JetCLINativeFailure {
     Link(errors: [String])
 }
 
-// The native route's result: the linked executable's bytes, else why not.
+// The native route's result: the linked executable, else why not.
 enum JetCLINativeLinked {
-    Image(bytes: [U8])
+    Image(executable: X64Executable)
     Failed(failure: JetCLINativeFailure)
 }
 
@@ -450,12 +454,13 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
         // init/fini arrays, an import the image lacks) links the pack in full.
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
-        bound := x64_link_with_runtime_image(executable_path, object.copy(), ^runtime)
+        bound := x64_bind_runtime_image(executable_path, object.copy(), ^runtime, runtime_path, realized.runtime_stamp)
         if trace_sink == .Val(sink) -> sink.end("native.link", 2)
         if bound.errors.len() == 0 {
-            if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.bytes.len(), -1)
-            return JetCLINativeLinked.Image{bytes: ^bound.bytes}
+            if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
+            return JetCLINativeLinked.Image{executable: ^bound.executable}
         }
+        // The image moved into the bind; the full link reads the pack.
         runtime_path = "{runtime_dir}/{runtime_key ?? ""}/{JET_CLI_RUNTIME_PACK_FILE}"
         runtime = cli_files.read_bytes(runtime_path) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"}}
     }
@@ -482,12 +487,16 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
         }
         return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Link{errors: image.errors}}
     }
-    JetCLINativeLinked.Image{bytes: ^image.bytes}
+    JetCLINativeLinked.Image{executable: x64_executable_whole(^image.bytes)}
 }
 
-// Write the linked image `bytes` as the executable `path`.
-fn jet_cli_native_write(path: String, bytes: [U8]) -[FS]> JetCLINativeFailure? Never! {
-    cli_files.write_bytes(path, bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
+// Write the linked executable `executable` as the file `path`.
+fn jet_cli_native_write(path: String, executable: X64Executable) -[FS]> JetCLINativeFailure? Never! {
+    if {
+        executable.image_end == 0 -> cli_files.write_bytes(path, executable.tail) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
+        // copy: the parts stay with the caller, which may still map them.
+        else -> cli_files.write_bytes(path, x64_executable_bytes(executable.copy())) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
+    }
     cli_files.set_mode(path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {path} executable: {err}"})
     None
 }
@@ -495,13 +504,15 @@ fn jet_cli_native_write(path: String, bytes: [U8]) -[FS]> JetCLINativeFailure? N
 // The program's C closure as its own thread realized it
 // (jet_cli_native_foreign_realize): the link inputs, else why it failed;
 // then the runtime the link reads from `runtime_path` (the prelinked runtime
-// image when `bound`, else the Jet-only object for a platform closure, else
-// the pack), else why reading it failed.
+// image when `bound`, its file's identity `runtime_stamp` the same before and
+// after the read, else empty; else the Jet-only object for a platform
+// closure, else the pack), else why reading it failed.
 struct JetCLIForeignRealized {
     inputs: JetCLIForeignInputs?
     error: String
     runtime: [U8]?
     runtime_path: String
+    runtime_stamp: [Int]
     runtime_error: String
     bound: Bool
 }
@@ -512,7 +523,7 @@ struct JetCLIForeignRealized {
 // runtime image (Image/MemoryLink.jet), so only the image is read; a pack
 // without one is read whole, as before.
 fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?, bind: Bool) -[FS, Env, Exec, Time.Wait]> JetCLIForeignRealized {
-    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_error: "", bound: false}
+    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_error: "", bound: false}
     platform := false
     no_closure := false
     if jet_cli_native_c_inputs(facts, rust_helper, sources, runtime_dir) == {
@@ -529,8 +540,12 @@ fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper:
     key :: runtime_key ?? return realized
     if bind && no_closure && !platform {
         image_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}"
-        if cli_files.read_bytes(image_path) == .Ok(bytes) {
-            realized.runtime = Val(bytes)
+        // The loader maps the image part from this file when it is still
+        // the one read here (Image/Loader.jet x64_executable_load).
+        image := x64_image_file_read(image_path)
+        if image.failure == "" {
+            realized.runtime = Val(^image.bytes)
+            realized.runtime_stamp = ^image.stamp
             realized.runtime_path = image_path
             realized.bound = true
             return realized
@@ -681,16 +696,16 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: Je
     if census.len() > 0 {
         problem :: jet_cli_keep_going_append(census)
         if problem != "" -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
-        if linked == .Image(bytes) {
+        if linked == .Image(executable) {
             fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
             if jet_cli_build_dir(jet_cli_parent(binary) ?? ".", color) == .Val(refused) -> return JetCLIBuilt.Failed{output: refused}
-            written :: jet_cli_native_write(binary, bytes)
+            written :: jet_cli_native_write(binary, executable)
             if written == .Val(failure) -> return JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
             return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet: {census.len()} findings in JET_KEEP_GOING_REPORT; {binary} traps at each", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
         }
     }
     if ^linked == {
-        .Image(bytes) -> JetCLIBuilt.Image{bytes: ^bytes, path: binary}
+        .Image(executable) -> JetCLIBuilt.Image{executable: ^executable, path: binary}
         .Failed(failure) -> JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
     }
 }
@@ -718,9 +733,9 @@ fn jet_cli_native_level(command: String, release: Bool) -> Int Never! {
 }
 
 enum JetCLIBuilt {
-    // The linked executable's bytes; `path` is its place in .jet/build
-    // (written there by `jet build`; by `jet run` only to run it from a file).
-    Image(bytes: [U8], path: String)
+    // The linked executable; `path` is its place in .jet/build (written
+    // there by `jet build`; by `jet run` only to run it from a file).
+    Image(executable: X64Executable, path: String)
     // The report that stopped the build.
     Failed(output: JetDriverVerbOutput)
 }
@@ -739,8 +754,8 @@ fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool
     if command == "run" -> return jet_cli_build_native(file, command, release, result, ^checked, snapshot, binary, color)
     if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return JetCLIBuilt.Failed{output: refused}
     built := jet_cli_build_native(file, command, release, result, ^checked, snapshot, binary, color)
-    if built == .Image(bytes, path) {
-        if jet_cli_native_write(path, bytes) == .Val(failure) -> return JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
+    if built == .Image(executable, path) {
+        if jet_cli_native_write(path, executable) == .Val(failure) -> return JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
     }
     built
 }
@@ -868,20 +883,23 @@ fn jet_cli_launch_plan(file: String, program_args: [String], release: Bool, invo
 
 #Import(c) fn jet_cli_scheduler_shutdown() -> I64 = "jet_rt_scheduler_shutdown"
 
-// JET_PERF_MAP=1 (Docs/spec/reference/environment.md): the program `image`
-// running from memory as `pid` gets a perf map, so `perf report` names its
-// functions (Image/Loader.jet x64_image_perf_map). Unset, nothing is written.
-// A spawned program also gets the map under jet's pid: jet mapped the image
-// before the fork, and perf keys anonymous code by the pid that mapped it.
-fn jet_cli_perf_map(image: [U8], pid: Int) {
+// JET_PERF_MAP=1 (Docs/spec/reference/environment.md): the program
+// `executable` running from memory as `pid` gets a perf map, so `perf report`
+// names its functions (Image/Loader.jet x64_image_perf_map). Unset, nothing
+// is written. A spawned program also gets the map under jet's pid: jet mapped
+// the image before the fork, and perf keys anonymous code by the pid that
+// mapped it.
+fn jet_cli_perf_map(executable: X64Executable, pid: Int) {
     if (cli_sys.get("JET_PERF_MAP") ?? "") != "1" -> return
     jet :: cli_process.current_pid()
+    // copy: the map reads the whole file's bytes; the parts stay mapped.
+    image :: x64_executable_bytes(executable.copy())
     failure := x64_image_perf_map(image, pid)
     if failure == "" && pid != jet -> failure = x64_image_perf_map(image, jet)
     if failure != "" -> cli_term.eprint("jet: no perf map for the program: {failure}")
 }
 
-// Run the linked program `image` of `file` with `program_args` on this
+// Run the linked program `executable` of `file` with `program_args` on this
 // process's stdin, stdout and stderr, as its built file would run, and end as
 // it ends: in memory (Image/Loader.jet) in place of jet when jet is
 // single-threaded, else in a child whose end jet mirrors (its exit code, or
@@ -889,9 +907,9 @@ fn jet_cli_perf_map(image: [U8], pid: Int) {
 // memory refused, its address range taken) it runs from the file `binary`,
 // written first unless `kept` (the file already holds these bytes);
 // `--verbose` says why. Returns only when jet must report or exit itself.
-fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetDriverVerbOutput {
+fn jet_cli_launch(executable: X64Executable, file: String, binary: String, kept: Bool, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetDriverVerbOutput {
     launch :: jet_cli_launch_plan(file, program_args, release, invocation)
-    loaded :: x64_image_load(image)
+    loaded :: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {
         // Joining the compile's scheduler threads leaves jet single-threaded,
@@ -910,7 +928,7 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
             waited += 1
         }
         if threads == 1 {
-            jet_cli_perf_map(image, cli_process.current_pid())
+            jet_cli_perf_map(executable, cli_process.current_pid())
             reason = x64_image_exec(loaded, launch)
             x64_image_unload(loaded)
         } else {
@@ -918,7 +936,7 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
             spawned :: x64_image_spawn(loaded, launch, [Int]{})
             x64_image_unload(loaded)
             if spawned.failure == "" {
-                jet_cli_perf_map(image, spawned.pid)
+                jet_cli_perf_map(executable, spawned.pid)
                 status :: x64_process_wait_foreground(spawned.pid)
                 if status < 0 -> return jet_cli_launch_failed("couldn't wait for the program (errno {-status})", color)
                 return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
@@ -929,7 +947,7 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
     if verbose -> cli_term.eprint("jet run: running {binary} from a file: {reason}")
     if !kept {
         if jet_cli_build_dir(jet_cli_parent(binary) ?? ".", color) == .Val(refused) -> return refused
-        if jet_cli_native_write(binary, image) == .Val(failure) -> return jet_cli_native_report(file, "run", failure, color)
+        if jet_cli_native_write(binary, executable) == .Val(failure) -> return jet_cli_native_report(file, "run", failure, color)
     }
     jet_cli_launch_failed(x64_file_exec(binary, launch), color)
 }
@@ -981,7 +999,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     built := jet_cli_run_build(file, source, color, release, verbose, invocation, result, ^inputs, snapshot)
     if ^built == {
         .Failed(failure) -> failure
-        .Image(bytes, path) -> jet_cli_launch(bytes, file, path, false, program_args, release, invocation, verbose, color)
+        .Image(executable, path) -> jet_cli_launch(executable, file, path, false, program_args, release, invocation, verbose, color)
     }
 }
 
@@ -1032,13 +1050,14 @@ fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, relea
     built := jet_cli_run_build(file, source, color, release, false, invocation, result, ^inputs, snapshot)
     if ^built == {
         .Failed(failure) -> failure
-        .Image(bytes, path) -> jet_cli_script_launch(keep, snapshot, authority, bytes, file, path, program_args, release, invocation, color)
+        .Image(executable, path) -> jet_cli_script_launch(keep, snapshot, authority, executable, file, path, program_args, release, invocation, color)
     }
 }
 
-fn jet_cli_script_launch(keep: JetCLIScriptKeep?, snapshot: JetDriverAuthorizedSourceSnapshot, authority: JetCLIAuthority, image: [U8], file: String, binary: String, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput {
-    if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, image, authority)
-    jet_cli_launch(image, file, binary, false, program_args, release, invocation, false, color)
+fn jet_cli_script_launch(keep: JetCLIScriptKeep?, snapshot: JetDriverAuthorizedSourceSnapshot, authority: JetCLIAuthority, executable: X64Executable, file: String, binary: String, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput {
+    // copy: the kept file holds the whole program; the parts stay to run it.
+    if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, x64_executable_bytes(executable.copy()), authority)
+    jet_cli_launch(executable, file, binary, false, program_args, release, invocation, false, color)
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
     row :: diagnostic_registry_row("E3015") ?? panic("native output-check failure is registered")
@@ -1080,8 +1099,8 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), binary, LINK_BASE, false, &census)
     if native == {
         .Failed(failure) -> return jet_cli_test_native_failure(file, failure, color)
-        .Image(bytes) -> {
-            if jet_cli_native_write(binary, bytes) == .Val(failure) -> return jet_cli_test_native_failure(file, failure, color)
+        .Image(executable) -> {
+            if jet_cli_native_write(binary, executable) == .Val(failure) -> return jet_cli_test_native_failure(file, failure, color)
         }
     }
     if result.trace_sink == .Val(sink) -> sink.end("native.build", -1)
@@ -2176,15 +2195,21 @@ enum JetCLIDevChild {
 }
 
 // Start `jet dev`'s program from its build `built` (a failed build prints
-// its report): from memory in a child, as jet_cli_launch runs it, else from
-// the written file. `port` is the dev server's (JET_DEV_PORT).
+// its report; jet_cli_dev_launch runs a built one).
 fn jet_cli_dev_start(built: JetCLIBuilt, file: String, program_args: [String], port: Int?, release: Bool, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetCLIDevChild {
-    if built == .Failed(output) {
-        cli_term.eprint(output.stderr)
-        return JetCLIDevChild.Idle
+    if built == {
+        .Failed(output) -> {
+            cli_term.eprint(output.stderr)
+            JetCLIDevChild.Idle
+        }
+        .Image(executable, binary) -> jet_cli_dev_launch(executable, binary, file, program_args, port, release, invocation, verbose, color)
     }
-    image :: if built == .Image(bytes, _) -> bytes else -> [U8]{}
-    binary :: if built == .Image(_, path) -> path else -> ""
+}
+
+// Run `jet dev`'s program `executable`: from memory in a child, as
+// jet_cli_launch runs it, else from its file `binary`, written first.
+// `port` is the dev server's (JET_DEV_PORT).
+fn jet_cli_dev_launch(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, release: Bool, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetCLIDevChild {
     launch := jet_cli_launch_plan(file, program_args, release, invocation)
     if port == .Val(number) {
         rows := [String]{}
@@ -2193,13 +2218,13 @@ fn jet_cli_dev_start(built: JetCLIBuilt, file: String, program_args: [String], p
         launch.env = rows
         cli_term.eprint("jet dev: dev server port {number} (JET_DEV_PORT)")
     }
-    loaded :: x64_image_load(image)
+    loaded :: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {
         spawned :: x64_image_spawn(loaded, launch, [Int]{})
         x64_image_unload(loaded)
         if spawned.failure == "" {
-            jet_cli_perf_map(image, spawned.pid)
+            jet_cli_perf_map(executable, spawned.pid)
             return JetCLIDevChild.Memory{pid: spawned.pid}
         }
         reason = spawned.failure
@@ -2210,7 +2235,7 @@ fn jet_cli_dev_start(built: JetCLIBuilt, file: String, program_args: [String], p
         cli_term.eprint(refused.stderr)
         return JetCLIDevChild.Idle
     }
-    if jet_cli_native_write(binary, image) == .Val(failure) {
+    if jet_cli_native_write(binary, executable) == .Val(failure) {
         cli_term.eprint(jet_cli_native_report(file, "run", failure, color).stderr)
         return JetCLIDevChild.Idle
     }

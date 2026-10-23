@@ -10,6 +10,7 @@
 use core.crypto as script_crypto
 use core.files as cli_files
 use core.sys as cli_sys
+use jet_backend.[x64_executable_whole]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverComptimeInputLog,
@@ -151,7 +152,7 @@ fn jet_cli_script_kept_run(toolchain: String, snapshot: JetDriverAuthorizedSourc
     jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, invocation))
     refused :: jet_cli_authority_report(file, source, color, "run", authority)
     if refused != None -> return refused
-    Val(jet_cli_launch(image, file, program, true, program_args, release, invocation, false, color))
+    Val(jet_cli_launch(x64_executable_whole(^image), file, program, true, program_args, release, invocation, false, color))
 }
 
 // The keeper of a script compile under `toolchain`; None keeps nothing.

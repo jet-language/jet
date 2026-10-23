@@ -2,14 +2,17 @@
 // `jet dev` and compile-time code link a program's object against the
 // runtime image its pack carries (Image/RuntimePack.jet
 // x64_link_runtime_image) instead of relinking the runtime. The image's
-// loaded bytes are copied as they are, the program goes on the pages after
-// them, the program's runtime imports resolve through the image's symbol
-// table, and the image's `main` places (its `.jet.bind` section) are pointed
-// at the program. The result is a complete static executable at the image's
-// base, the shape x64_link_executable writes (file offset equal to address
-// minus the base, a debug tail with `.symtab` and section headers), so
-// Image/Loader.jet maps it by its PT_LOAD segments and the file fallback
-// writes it and runs it as is.
+// loaded bytes stay as they are but for a few patched bytes (its ELF header
+// and its `main` places, its `.jet.bind` section, pointed at the program),
+// the program goes on the pages after them, and the program's runtime
+// imports resolve through the image's symbol table. The result is a
+// complete static executable at the image's base, the shape
+// x64_link_executable writes (file offset equal to address minus the base,
+// a debug tail with `.symtab` and section headers), held in parts
+// (X64Executable): the image, the patches, and the program part. So
+// Image/Loader.jet maps the image part from the pack file and copies in
+// only the program part, and the file fallback writes the file and runs it
+// as is.
 //
 // The program part, from the image's program base:
 // - read-only: the program header table of the whole executable (the
@@ -179,32 +182,39 @@ fn link_bind_layout(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
     }
 }
 
-// The loaded bytes: the image's, with its `main` places bound to `target`
-// and its ELF header naming the combined program header table, then the
-// program part.
-fn link_bind_write(c: &LinkContext, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
-    // The loaded bytes in one copy (a List range is a List of its own); the
-    // image's tail (symbol table, section headers) is left behind.
-    out := c.bufs[1][0..<view.load_end]
-    link_put64(&out, 32, view.program_base - c.base)
-    out[56] = U8{l.phnum.bit_and(255)}
-    out[57] = U8{(l.phnum >> 8).bit_and(255)}
+// The program part: the program header table, then the program's loaded
+// bytes, at file offset `exe.tail_at` (the program base); the image part's
+// `main` places bound to `target`. Returns the image's ELF header naming
+// the combined program header table, for link_bind_sections to finish.
+fn link_bind_write(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
+    elf := c.bufs[1][0..<LINK_EHDR_SIZE]
+    link_put64(&elf, 32, view.program_base - c.base)
+    elf[56] = U8{l.phnum.bit_and(255)}
+    elf[57] = U8{(l.phnum >> 8).bit_and(255)}
     loop k in 0..<view.sites.len().div_euclid(3) {
         address :: view.sites[3 * k]
         kind :: view.sites[3 * k + 1]
         addend :: view.sites[3 * k + 2]
-        if kind == LINK_R_64 {
-            link_put64(&out, address - c.base, target + addend)
+        at :: address - c.base
+        width :: if kind == LINK_R_64 -> 8 else -> 4
+        if at < LINK_EHDR_SIZE || at + width > view.load_end {
+            link_error(&c, "runtime image: a `main` place at {address} is outside its loaded bytes")
             next
         }
-        value :: target + addend - address
-        if !link_fits32(value) {
+        value :: if kind == LINK_R_64 -> target + addend else -> target + addend - address
+        if kind != LINK_R_64 && !link_fits32(value) {
             link_error(&c, "runtime image: `main` at {target} is out of rel32 range of {address}")
             next
         }
-        link_put32(&out, address - c.base, value)
+        bytes := [U8]{}
+        if {
+            kind == LINK_R_64 -> elf64_u64(&bytes, value)
+            else -> elf64_u32(&bytes, value)
+        }
+        &exe.patch_at.push(at)
+        &exe.patch_bytes.push(bytes)
     }
-    link_pad_to(&out, view.program_base - c.base, 0)
+    out := [U8]{}
     loop k in 0..<view.phnum {
         at :: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) == 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
@@ -217,14 +227,16 @@ fn link_bind_write(c: &LinkContext, view: LinkImageView, l: LinkLayout, target: 
         at :: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
     }
-    link_write_contents(&c, &out, l)
-    out
+    link_write_contents(&c, &out, l, view.program_base)
+    exe.tail = out
+    elf
 }
 
-// The debug tail: the image's loaded-section headers, the program's
-// sections and debug sections, then one `.symtab` holding the image's
-// symbols and the program's (locals first), and the section headers.
-fn link_bind_sections(c: &LinkContext, out: &[U8], view: LinkImageView, l: LinkLayout, debug: LinkDebug) Never! {
+// The debug tail, appended to `out`, the program part from file offset
+// `origin`: the image's loaded-section headers, the program's sections and
+// debug sections, then one `.symtab` holding the image's symbols and the
+// program's (locals first), and the section headers, which `elf` names.
+fn link_bind_sections(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: &[U8]) Never! {
     headers := [LinkSectionHeader]{}
     loop k in 1..<view.alloc_headers + 1 {
         h :: view.shoff + 64 * k
@@ -261,7 +273,7 @@ fn link_bind_sections(c: &LinkContext, out: &[U8], view: LinkImageView, l: LinkL
             link_emit_section(&c, &out, row)
         }
         link_pad_to(&out, start + debug.sizes[group], 0)
-        &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: debug.sizes[group], link: 0, info: 0, align: 1, entry_size: 0})
+        &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: origin + start, size: debug.sizes[group], link: 0, info: 0, align: 1, entry_size: 0})
     }
     // The image's string table and symbols are copied as they are: its
     // headers keep their indexes and its names their offsets.
@@ -295,20 +307,77 @@ fn link_bind_sections(c: &LinkContext, out: &[U8], view: LinkImageView, l: LinkL
         link_image_symbol(&symtab, &strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
     elf64_pad(&out, 8)
-    symtab_at :: out.len()
+    symtab_at :: origin + out.len()
     &out.extend(symtab)
     strtab_index :: headers.len() + 2
     &headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
-    strtab_at :: out.len()
+    strtab_at :: origin + out.len()
     &out.extend(strtab)
     &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
-    link_write_section_headers(&out, headers)
+    shoff :: link_write_section_headers(&out, origin, headers)
+    link_elf_sections(&elf, shoff, headers.len() + 2)
+}
+
+// A linked executable, whole or in two parts. Bound to a runtime image
+// (x64_bind_runtime_image), its file is the image's first `image_end` bytes
+// with each `patch_bytes[k]` written at file offset `patch_at[k]`, zeros up
+// to `tail_at`, then `tail`: the program part and the debug tail. The
+// image part is the pack's own bytes, so Image/Loader.jet maps it from the
+// pack file `image_path` (x64_executable_load) instead of copying it, when
+// the file still has the identity `image_stamp` (x64_image_file_read) it
+// had when `image` was read from it. A whole executable is all `tail`
+// (image_end and tail_at 0). x64_executable_bytes puts the file together.
+struct X64Executable {
+    image: [U8]
+    image_path: String
+    image_stamp: [Int]
+    image_end: Int
+    patch_at: [Int]
+    patch_bytes: [[U8]]
+    tail_at: Int
+    tail: [U8]
+}
+
+// The executable whose file is `bytes`.
+fn x64_executable_whole(bytes: ^[U8]) -> X64Executable Never! {
+    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_end: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: ^bytes}
+}
+
+// The file of `exe`.
+fn x64_executable_bytes(exe: ^X64Executable) -> [U8] Never! {
+    if exe.image_end == 0 -> return ^exe.tail
+    out := exe.image[0..<exe.image_end]
+    loop (k, at) in exe.patch_at {
+        loop (j, byte) in exe.patch_bytes[k] -> out[at + j] = byte
+    }
+    link_pad_to(&out, exe.tail_at, 0)
+    &out.extend(exe.tail)
+    out
+}
+
+// A bound executable, else (errors not empty) why the program can't be bound.
+struct X64BindResult {
+    executable: X64Executable
+    errors: [String]
+}
+
+// Bind the program object `program` (named `name` in reports) to the
+// runtime image `image`, read from the file `image_path` with identity
+// `image_stamp` ("" and empty when it came from elsewhere): a static
+// executable at the image's base, in parts.
+fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path: String, image_stamp: [Int]) -> X64BindResult Never! {
+    bound := link_bind_image(name, ^program, ^image, None)
+    if bound.errors.len() == 0 {
+        bound.executable.image_path = image_path
+        bound.executable.image_stamp = image_stamp
+    }
+    bound
 }
 
 // Link the program object `program` (named `name` in reports) against the
 // runtime image `image` into a static executable at the image's base.
 fn x64_link_with_runtime_image(name: String, program: ^[U8], image: ^[U8]) -> X64ExecutableResult Never! {
-    link_bind_image(name, ^program, ^image, None)
+    link_bind_bytes(link_bind_image(name, ^program, ^image, None))
 }
 
 // The same with the program's part at `program_base`, a page boundary at or
@@ -317,27 +386,36 @@ fn x64_link_with_runtime_image(name: String, program: ^[U8], image: ^[U8]) -> X6
 // `program_base` up. File offsets stay address - image base, so the bytes
 // grow with `program_base`.
 fn x64_link_with_runtime_image_at(name: String, program: ^[U8], image: ^[U8], program_base: Int) -> X64ExecutableResult Never! {
-    link_bind_image(name, ^program, ^image, Val(program_base))
+    link_bind_bytes(link_bind_image(name, ^program, ^image, Val(program_base)))
 }
 
-fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int?) -> X64ExecutableResult Never! {
+fn link_bind_bytes(bound: ^X64BindResult) -> X64ExecutableResult Never! {
+    if bound.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^bound.errors}
+    X64ExecutableResult{bytes: x64_executable_bytes(^bound.executable), errors: [String]{}}
+}
+
+fn link_bind_failure(c: LinkContext) -> X64BindResult Never! {
+    X64BindResult{executable: x64_executable_whole([U8]{}), errors: c.errors.copy()}
+}
+
+fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int?) -> X64BindResult Never! {
     c := link_context(^[[U8]]{^program, ^image}, LINK_RUN_BASE)
     view := link_image_view(&c, 1)
-    if c.errors.len() > 0 -> return link_image_failure(c)
+    if c.errors.len() > 0 -> return link_bind_failure(c)
     if program_base == .Val(chosen) {
         if chosen.bit_and(LINK_PAGE - 1) != 0 || chosen < view.program_base {
             link_error(&c, "runtime image: program base {chosen} is not a page boundary at or above {view.program_base}")
-            return link_image_failure(c)
+            return link_bind_failure(c)
         }
         view.program_base = chosen
     }
     c.base = view.base
     link_load_inputs(&c, [String]{name})
-    if c.errors.len() > 0 -> return link_image_failure(c)
+    if c.errors.len() > 0 -> return link_bind_failure(c)
     main_g :: c.g_index.get("main") ?? -1
     if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_FILE || c.g_section[link_final(c, main_g)] < 0 {
         link_error(&c, "{name}: the program does not define `main`")
-        return link_image_failure(c)
+        return link_bind_failure(c)
     }
     // The program's imports, and the binding startup's
     // `__register_frame_info`, resolve to the image's definitions.
@@ -357,18 +435,18 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int
     frames_g :: c.g_index.get("__register_frame_info") ?? -1
     if start_g < 0 || frames_g < 0 || !link_defined(c, frames_g) {
         link_error(&c, "runtime image: no `__register_frame_info` for the program's unwind tables")
-        return link_image_failure(c)
+        return link_bind_failure(c)
     }
     linker_names := [String:Bool]{}
     &linker_names.add("__jet_bind_eh", true).drop("a fresh map")
     entries :: [Int]{c.g_section[link_final(c, main_g)], c.g_section[start_g]}
     link_collect(&c, entries, linker_names)
-    if c.errors.len() > 0 -> return link_image_failure(c)
+    if c.errors.len() > 0 -> return link_bind_failure(c)
     order :: link_order(c)
     loop class in ([Int]{LINK_TDATA, LINK_TBSS, LINK_PREINIT, LINK_INIT, LINK_FINI}) {
         if order[class].len() > 0 {
             link_error(&c, "{name}: thread-local data and init/fini arrays are not bound to the runtime image; link it in full")
-            return link_image_failure(c)
+            return link_bind_failure(c)
         }
     }
     layout :: link_bind_layout(&c, view)
@@ -377,8 +455,16 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int
     c.g_addr[eh_g] = c.eh_start
     debug :: link_debug_sections(&c)
     target :: link_global_addr(c, start_g)
-    out := link_bind_write(&c, view, layout, target)
-    link_bind_sections(&c, &out, view, layout, debug)
-    if c.errors.len() > 0 -> return link_image_failure(c)
-    X64ExecutableResult{bytes: out, errors: [String]{}}
+    origin :: view.program_base - c.base
+    exe := x64_executable_whole([U8]{})
+    exe.image_end = view.load_end
+    exe.tail_at = origin
+    elf := link_bind_write(&c, &exe, view, layout, target)
+    link_bind_sections(&c, &exe.tail, origin, view, layout, debug, &elf)
+    if c.errors.len() > 0 -> return link_bind_failure(c)
+    &exe.patch_at.push(0)
+    &exe.patch_bytes.push(elf)
+    // The image (input 1) moves out of the context: the executable's image part.
+    exe.image = &c.bufs.remove(1, .Slot) ?? [U8]{}
+    X64BindResult{executable: exe, errors: [String]{}}
 }
