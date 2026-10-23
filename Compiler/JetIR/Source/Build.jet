@@ -1516,6 +1516,9 @@ fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span
         if b.fresh[slot] -> return ir_box_take(&m, p, &b, slot, 8, row)
         return ir_load_at(&m, &b, slot, 8, row)
     }
+    // A Result box of another size (an Ok or Err payload narrower or wider)
+    // is reboxed: a box is freed with its own type's size (ir_box_bytes).
+    if have_box && want_box && ir_box_bytes(&m, p, have) != ir_box_bytes(&m, p, row) -> return ir_result_rebox(&m, p, &b, slot, row, span)
     // A member value where its structural union is wanted (a `[A | B]`
     // literal's element) is boxed as that member's variant (widen_to_union).
     union_ty :: m.types[row].ty
@@ -1527,6 +1530,48 @@ fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span
     }
     if m.types[have].kind == m.types[row].kind && m.types[have].size == m.types[row].size -> return slot
     ir_fail_slot(&b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
+}
+
+// The Result box `slot` as a new box of the Result row `row`: the selector
+// word and the Ok or Err payload (adapted to `row`'s) move over; a fresh
+// `slot` is released with its own size.
+fn ir_result_rebox(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
+    have_raw :: m.types[b.f.slot_type[slot]].ty
+    want_raw :: m.types[row].ty
+    have_ty :: ir_untag(have_raw)
+    want_ty :: ir_untag(want_raw)
+    from := [Type]{}
+    to := [Type]{}
+    if have_ty == .Result(ok, err) -> from = [Type]{ok.copy(), err.copy()}
+    if want_ty == .Result(ok, err) -> to = [Type]{ok.copy(), err.copy()}
+    if from.len() != 2 || to.len() != 2 -> return ir_fail_slot(&b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
+    boxed :: ir_result_box(&m, p, &b, want_raw, true, -1)
+    selector :: ir_load_word(&m, &b, slot, 0)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, selector, b.line)
+    is_ok :: ir_result_is_ok(&m, &b, slot)
+    ir_open_if(&b.f, is_ok, b.line)
+    loop side in 0..<2 {
+        if side == 1 -> ir_else(&b.f, b.line)
+        // A `Never` side (an `Err(e)` literal's Ok) is never selected.
+        if ir_never_type(from[side]) {
+            ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+            next
+        }
+        from_row :: ir_value_type(&m, p, from[side]) ?? return ir_type_fail(&b, span, from[side])
+        to_row :: ir_value_type(&m, p, to[side]) ?? return ir_type_fail(&b, span, to[side])
+        payload :: ir_load_at(&m, &b, slot, 8, from_row)
+        if payload >= 0 {
+            moved :: if from_row == to_row -> payload else -> ir_adapt(&m, p, &b, payload, to_row, span)
+            if ir_failed(b) -> return -1
+            ir_store_at(&m, p, &b, boxed, 8, moved)
+        } else if m.types[to_row].kind != .Unit {
+            return ir_fail_slot(&b, span, "a Unit payload where {ir_type_name(to[side])} is expected")
+        }
+    }
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, slot)
+    b.fresh[boxed] = true
+    boxed
 }
 
 fn ir_option_is_some(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
