@@ -94,13 +94,19 @@ fn sema_window_collect_candidates(items: [Item], rows: [SemaWindowFunctionRow], 
 }
 
 // Name -> declaration positions in bundle order: one census answers both the
-// ambiguity count and every onward-edge lookup.
+// ambiguity count and every onward-edge lookup. The (name, position) pairs
+// are sorted once and each name set once, in key order: a Map is a sorted
+// list that every out-of-order insert shifts.
 fn sema_window_positions(rows: [SemaWindowFunctionRow]) -> [String:[Int]] Never! {
+    order := loop (index, row) in rows -> (name: row.name, index: index)
+    &order.sort_by((left: (name: String, index: Int), right: (name: String, index: Int)) -> (left.name <=> right.name).then(left.index <=> right.index))
     positions := [String:[Int]]{}
-    loop index in 0..<rows.len() {
-        found := positions.get(rows[index].name) ?? [Int]{}
-        &found.push(index)
-        positions[rows[index].name] = found
+    start := 0
+    loop start < order.len() {
+        stop := start + 1
+        loop stop < order.len() && order[stop].name == order[start].name -> stop += 1
+        positions[order[start].name] = loop position in start..<stop -> order[position].index
+        start = stop
     }
     positions
 }

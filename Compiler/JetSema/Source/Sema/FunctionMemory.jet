@@ -270,6 +270,7 @@ fn sema_function_memory_plan_new() -> SemaFunctionMemoryPlan Never! {
 // scoped-GC fact, so it can neither promote nor take a transfer).
 fn sema_function_memory_plan_rows(plan: &SemaFunctionMemoryPlan, sources: [SemaFunctionMemorySource], limit: Int) -> SemaFunctionMemoryPlanned {
     planned := SemaFunctionMemoryPlanned{functions: [Func]{}, rows: [Int]{}, promoted: [String]{}, shared_rows: [Int:Bool]{}}
+    keys := [String]{}
     loop (row, source) in sources {
         function_diagnostics := [Diagnostic]{}
         function_complete := true
@@ -285,14 +286,9 @@ fn sema_function_memory_plan_rows(plan: &SemaFunctionMemoryPlan, sources: [SemaF
         function_complete = function_complete && function_diagnostics.len() == 0
         loop diagnostic in function_diagnostics -> &plan.diagnostics.push(diagnostic)
         &plan.functions.push(SemaFunctionMemoryFunction{module_identity: source.module_identity, owner: source.owner, function: None, diagnostics: function_diagnostics, transfer_root: source.transfer_root, complete: function_complete})
-        key :: sema_function_memory_key(source.module_identity, source.owner, source.span)
-        first :: plan.positions.get(key) ?? -1
-        if first >= 0 {
-            planned.shared_rows[first] = true
-        } else {
-            plan.positions[key] = row
-        }
+        &keys.push(sema_function_memory_key(source.module_identity, source.owner, source.span))
     }
+    sema_function_memory_fill_positions(&plan, &planned, keys)
     iteration := 0
     loop iteration < limit {
         promoted :: sema_function_memory_promoted(plan, planned)
@@ -307,6 +303,24 @@ fn sema_function_memory_plan_rows(plan: &SemaFunctionMemoryPlan, sources: [SemaF
     }
     planned.promoted = sema_function_memory_promoted(plan, planned)
     planned
+}
+
+// Each key's first row into the plan's (empty) positions, and that row marked
+// shared when a later row has the same key. The (key, row) pairs are sorted
+// once and the table filled in key order: a Map is a sorted list that every
+// out-of-order insert shifts.
+fn sema_function_memory_fill_positions(plan: &SemaFunctionMemoryPlan, planned: &SemaFunctionMemoryPlanned, keys: [String]) Never! {
+    order := loop (row, key) in keys -> (key: key, row: row)
+    &order.sort_by((left: (key: String, row: Int), right: (key: String, row: Int)) -> (left.key <=> right.key).then(left.row <=> right.row))
+    first := -1
+    loop (position, entry) in order {
+        if position > 0 && order[position - 1].key == entry.key {
+            planned.shared_rows[first] = true
+            next
+        }
+        first = entry.row
+        plan.positions[entry.key] = entry.row
+    }
 }
 
 fn sema_function_memory_promoted(plan: SemaFunctionMemoryPlan, planned: SemaFunctionMemoryPlanned) -> [String] Never! {
