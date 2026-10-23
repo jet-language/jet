@@ -17,25 +17,25 @@ use core.process as process
 use core.files as files
 use core.sys as sys
 
-STORE_RUNTIME_CACHE_SCHEMA :: comptime { "jet-runtime-rlib-v9" }
-STORE_RUNTIME_CRATE_NAME :: comptime { "jet_runtime" }
-STORE_RUNTIME_RLIB_FILE :: comptime { "libjet_runtime.rlib" }
-STORE_RUNTIME_CRATE_PREFIX :: comptime { "#![allow(warnings)]\n" }
-STORE_RUNTIME_BEGIN :: comptime { "// jet:cached-runtime-begin\n" }
-STORE_RUNTIME_END :: comptime { "// jet:cached-runtime-end\n" }
-STORE_RUNTIME_CORE_BEGIN :: comptime { "// jet:cached-core-begin\n" }
-STORE_RUNTIME_CORE_END :: comptime { "// jet:cached-core-end\n" }
+STORE_RUNTIME_CACHE_SCHEMA :: "jet-runtime-rlib-v9"
+STORE_RUNTIME_CRATE_NAME :: "jet_runtime"
+STORE_RUNTIME_RLIB_FILE :: "libjet_runtime.rlib"
+STORE_RUNTIME_CRATE_PREFIX :: "#![allow(warnings)]\n"
+STORE_RUNTIME_BEGIN :: "// jet:cached-runtime-begin\n"
+STORE_RUNTIME_END :: "// jet:cached-runtime-end\n"
+STORE_RUNTIME_CORE_BEGIN :: "// jet:cached-core-begin\n"
+STORE_RUNTIME_CORE_END :: "// jet:cached-core-end\n"
 // Directory beside the `jet` executable holding prebuilt runtime rlibs as
 // `<key>/libjet_runtime.rlib`.
-STORE_RUNTIME_PREBUILT_DIR :: comptime { "jet-runtime" }
+STORE_RUNTIME_PREBUILT_DIR :: "jet-runtime"
 // When set, every runtime rlib a process links is also written to this
 // directory in the prebuilt layout. The packaging step sets it while building
 // a seed program to populate the shipped prebuilt directory.
-STORE_RUNTIME_PREBUILD_EXPORT_ENV :: comptime { "JET_RUNTIME_PREBUILD_DIR" }
+STORE_RUNTIME_PREBUILD_EXPORT_ENV :: "JET_RUNTIME_PREBUILD_DIR"
 // Separates the `rustc -vV` identity from the host CPU description when the
 // flags select `target-cpu=native`: the key must name the CPU the rlib was
 // tuned for, or a prebuilt rlib could reach a machine lacking its features.
-STORE_RUNTIME_NATIVE_CPU_IDENTITY :: comptime { "jet:target-cpu=native\n" }
+STORE_RUNTIME_NATIVE_CPU_IDENTITY :: "jet:target-cpu=native\n"
 
 // Why the runtime cache could not prepare a program: the tool (rustc) failed
 // to run, or the artifact store failed.

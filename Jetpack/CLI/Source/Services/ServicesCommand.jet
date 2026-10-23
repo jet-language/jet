@@ -3,13 +3,13 @@
 // jetpack::CLI::services_secrets_config.
 
 // The E1262 guidance for an unrecognized dev-service field.
-SERVICES_UNKNOWN_FIELD_WHY :: comptime { "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo." }
-SERVICES_UNKNOWN_FIELD_FIX :: comptime { "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it." }
+SERVICES_UNKNOWN_FIELD_WHY :: "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo."
+SERVICES_UNKNOWN_FIELD_FIX :: "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it."
 // U12: the readiness-poll ceiling before E1261; tests shorten it through
 // this env var (the same test-only escape hatch as JETPACK_ROOT).
-SERVICES_HEALTH_TIMEOUT_ENV :: comptime { "JETPACK_SERVICE_HEALTH_TIMEOUT_MS" }
-SERVICES_HEALTH_TIMEOUT_SECONDS :: comptime { 15 }
-SERVICES_PROBE_SAMPLES :: comptime { 20 }
+SERVICES_HEALTH_TIMEOUT_ENV :: "JETPACK_SERVICE_HEALTH_TIMEOUT_MS"
+SERVICES_HEALTH_TIMEOUT_SECONDS :: 15
+SERVICES_PROBE_SAMPLES :: 20
 
 // The `jet os services` verbs.
 enum ServicesVerb {
@@ -334,8 +334,8 @@ fn cli_services_order_or_report(theme: Theme, services: [DevServicePlan], name: 
     }
 }
 
-SERVICES_ORDER_FIX_DECLARE :: comptime { "declare each dependency once, keep it enabled, and remove dependency cycles." }
-SERVICES_ORDER_FIX_CYCLES :: comptime { "remove dependency cycles and unknown dependencies." }
+SERVICES_ORDER_FIX_DECLARE :: "declare each dependency once, keep it enabled, and remove dependency cycles."
+SERVICES_ORDER_FIX_CYCLES :: "remove dependency cycles and unknown dependencies."
 
 // `jet os services up|down|health|logs|wait|restart|watch [<name>]` (U12).
 // With no `<name>` every declared dev service is targeted; `logs` requires

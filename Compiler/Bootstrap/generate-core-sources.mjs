@@ -116,7 +116,7 @@ const output = [
   ...header,
   "",
   "// The canonical effect source, Compiler/Prelude/Effects.jet.",
-  `JET_CLI_EFFECT_SOURCE :: comptime { ${jetStringLiteral(effectSource, effectSourceDisplay)} }`,
+  `JET_CLI_EFFECT_SOURCE :: ${jetStringLiteral(effectSource, effectSourceDisplay)}`,
   "",
   "",
 ].join("\n");

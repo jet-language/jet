@@ -9,9 +9,9 @@ use core.process as process
 use core.math as math
 use core.sys as sys
 
-PKG_PYTHON_RUNTIME :: comptime { "python3" }
-PKG_PYTHON_TOOL_ACTION :: comptime { "rejected the Python binding" }
-PKG_PYTHON_COMPILE_CHECK :: comptime { "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')" }
+PKG_PYTHON_RUNTIME :: "python3"
+PKG_PYTHON_TOOL_ACTION :: "rejected the Python binding"
+PKG_PYTHON_COMPILE_CHECK :: "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')"
 
 // Bind the top-level scalar-annotated functions of the Python source.
 fn pkg_python_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {

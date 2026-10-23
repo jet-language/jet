@@ -5,7 +5,7 @@
 // Drop follows declaration order: TcpStream then peer_identity. There is no
 // seed Drop hook calling the TLS close callback; callbacks are never owners.
 // Canonical FD release: HostFiles.jet (047fb460b), jet_fd_drop_raw.
-TLS_STREAM_BYTES :: comptime { I64{112} }
+TLS_STREAM_BYTES :: I64{112}
 #Export(c) fn jet_rt_handle_drop_jet_tls_stream(value: I64) {
     if (value == I64{0}) -> return
     jet_fd_drop_raw(rt_text_word(value + I64{8}))

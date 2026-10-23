@@ -72,7 +72,7 @@ alloc_root := I64{0}
 // allocation and free takes the direct-mapping branch, which then hands it to
 // the checked heap: off, checked mode adds no branch to the class path, only
 // this word's load. Written only by jet_rt_alloc_init, before any allocation.
-ALLOC_CLASS_LIMIT :: comptime { I64{4096} }
+ALLOC_CLASS_LIMIT :: I64{4096}
 alloc_class_limit := I64{4096}
 
 // Layout::from_size_align(size.max(1), align): alignment must be a nonzero
@@ -304,7 +304,7 @@ fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
 // Empty slabs a class keeps linked per arena, so a burst of temporaries
 // (a thread's cache drains 32 blocks at a time) does not unmap a slab it
 // maps again moments later: at most 8 x 64 KiB per class and arena.
-ALLOC_RETAINED_EMPTY_SLABS :: comptime { I64{8} }
+ALLOC_RETAINED_EMPTY_SLABS :: I64{8}
 
 // Take up to `limit` free blocks of the class's head slab under the held
 // arena lock and thread them, as [next][slab], onto the cache row `row`
@@ -888,12 +888,12 @@ fn alloc_arena_give(pointer: I64) {
 // symbol and print as ??), then aborts.
 // State page words: quarantine lock 16, ring 24, pushes 32, parked count 40,
 // parked bytes 48, frame-pointer stub 56 (alloc_check_start).
-ALLOC_CHECK_LIVE :: comptime { I64{2397417249457849674} }
-ALLOC_CHECK_FREED :: comptime { I64{2397398596314219850} }
-ALLOC_CHECK_TAIL :: comptime { I64{2399373246418142538} }
-ALLOC_CHECK_POISON :: comptime { I64{-2314885530818453537} }
-ALLOC_CHECK_SLOTS :: comptime { I64{4096} }
-ALLOC_CHECK_BUDGET :: comptime { I64{67108864} }
+ALLOC_CHECK_LIVE :: I64{2397417249457849674}
+ALLOC_CHECK_FREED :: I64{2397398596314219850}
+ALLOC_CHECK_TAIL :: I64{2399373246418142538}
+ALLOC_CHECK_POISON :: I64{-2314885530818453537}
+ALLOC_CHECK_SLOTS :: I64{4096}
+ALLOC_CHECK_BUDGET :: I64{67108864}
 
 // Whether the environment holds exactly JET_CHECKED_ALLOC=1. Initialization
 // runs before any allocation and before the startup environment exists, so

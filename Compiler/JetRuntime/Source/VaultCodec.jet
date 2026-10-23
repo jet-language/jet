@@ -3,15 +3,15 @@
 // runtime carrier. IO/Internal alone own provider-redacted Text payloads.
 // Searches of all refs for vault_record_hash found no reusable Jet codec;
 // 5933a61b2/d587c4035 contain only the public facade and vault_02 state/Linux.
-VAULT_ERROR_BYTES :: comptime { I64{24} }
-VAULT_ERROR_TAG :: comptime { I64{0} }
-VAULT_ERROR_FIRST :: comptime { I64{8} }
-VAULT_ERROR_SECOND :: comptime { I64{16} }
-VAULT_CRYPTO_OPEN_FAILED :: comptime { I64{0} }
-VAULT_CRYPTO_VERIFY_FAILED :: comptime { I64{1} }
-VAULT_CRYPTO_KEY_REJECTED :: comptime { I64{2} }
-VAULT_CRYPTO_LENGTH :: comptime { I64{3} }
-VAULT_CRYPTO_UNAVAILABLE :: comptime { I64{4} }
+VAULT_ERROR_BYTES :: I64{24}
+VAULT_ERROR_TAG :: I64{0}
+VAULT_ERROR_FIRST :: I64{8}
+VAULT_ERROR_SECOND :: I64{16}
+VAULT_CRYPTO_OPEN_FAILED :: I64{0}
+VAULT_CRYPTO_VERIFY_FAILED :: I64{1}
+VAULT_CRYPTO_KEY_REJECTED :: I64{2}
+VAULT_CRYPTO_LENGTH :: I64{3}
+VAULT_CRYPTO_UNAVAILABLE :: I64{4}
 // Rich CryptoEntropy.rs:9-20 tags project by variant NAME, never by ordinal.
 // Every richer case is represented; public VerifyFailed has no rich seed case.
 fn vault_crypto_from_provider(kind: I64) -> I64 {
@@ -247,7 +247,7 @@ fn vault_payload_hash(payload: I64, length: I64, digest: I64, scratch: I64) {
 // Historical pair codec: SecretsCrypto.rs:88-131. Wire buffers use the E4
 // raw-byte header privately (not exposed as UTF-8 Text). Pairs own a native
 // List<(Text,Text)> with the canonical 16-byte pair stride.
-VAULT_PAIR_BYTES :: comptime { I64{16} }
+VAULT_PAIR_BYTES :: I64{16}
 fn vault_utf8_valid(data: I64, length: I64) -> Bool {
     at := I64{0}
     loop at < length {
@@ -376,11 +376,11 @@ fn vault_decode_pairs(bytes: I64, length: I64) -> I64 {
     result
 }
 
-VAULT_MAX_BYTES :: comptime { I64{16777216} }
-VAULT_MAX_STRINGS :: comptime { I64{4096} }
-VAULT_MAX_NAMES :: comptime { I64{1024} }
-VAULT_MAX_VERSIONS :: comptime { I64{8192} }
-VAULT_ID_NODE_BYTES :: comptime { I64{32} }
+VAULT_MAX_BYTES :: I64{16777216}
+VAULT_MAX_STRINGS :: I64{4096}
+VAULT_MAX_NAMES :: I64{1024}
+VAULT_MAX_VERSIONS :: I64{8192}
+VAULT_ID_NODE_BYTES :: I64{32}
 fn vault_record_compare(left: I64, right: I64) -> I64 {
     a :: rt_text_word(left + VAULT_RECORD_TYPE)
     b :: rt_text_word(right + VAULT_RECORD_TYPE)
@@ -749,7 +749,7 @@ fn vault_encode_v2(store: I64, output: I64) -> I64 {
     error
 }
 
-VAULT_GROUP_BYTES :: comptime { I64{32} }
+VAULT_GROUP_BYTES :: I64{32}
 // Cursor32 = borrowed bytes0/length8/position16/private error24.
 // All wire counts are nonnegative; remaining-length checks precede additions.
 fn vault_take_bytes(cursor: I64, count: I64) -> I64 {
