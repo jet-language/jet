@@ -975,6 +975,9 @@ fn sema_expr_expected_owned(value: ^TExpr, expected: Type?, environment: SemaSco
     // `expected` is known present below this line.
     if expected == None -> return Val(^owned)
     if sema_expr_expected_keeps(owned.ty, expected) -> return Val(^owned)
+    // A value of the very named type expected resolves to the same type on
+    // both sides: no Dyn wrap, lift, zone or trait coercion applies to it.
+    if sema_type_same_named(expected, owned.ty) -> return Val(^owned)
     required := sema_expr_expected_type(expected, environment, program)
     offered := sema_expr_expected_type(owned.ty, environment, program)
     // (Rust `wrap_dyn_value`): a Dyn has no truthiness, and a

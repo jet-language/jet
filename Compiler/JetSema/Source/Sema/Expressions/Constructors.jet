@@ -1608,7 +1608,7 @@ fn sema_expression_typed_literal_whole_value(head: Type, value: Expr, environmen
         .Spread(_, _, _) -> return false
         else -> {}
     }
-    if sema_expression_list_element_needs_expected_type(value) -> return false
+    if sema_expression_list_element_needs_expected_type(value) || sema_expression_never_whole_list(value) -> return false
     probe_diagnostics := [Diagnostic]{}
     // The probe reads the enclosing statement tails (its liveness frames in
     // `context` index this store), so it shares the store, never a fresh one.
@@ -1616,6 +1616,24 @@ fn sema_expression_typed_literal_whole_value(head: Type, value: Expr, environmen
     if probe_diagnostics.len() != 0 -> return false
     _ := sema_expr_expected(checked, Val(head), environment, program, &probe_diagnostics) ?? return false
     probe_diagnostics.len() == 0
+}
+
+// A lone element whose value can never be a list: a number, Bool or Char
+// literal, or a named record or variant literal whose every field is written
+// `name: value` (a shorthand body may be an alias head's elements). Its
+// whole-value probe always fails, so the element reading is taken without it.
+fn sema_expression_never_whole_list(value: Expr) -> Bool Never! {
+    if value == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) -> true
+        .StructLit(type_name, _, _, as_trait, fields, inferred, _, _) -> {
+            if type_name == "" || inferred || as_trait != None || fields.len() == 0 -> return false
+            loop field in fields {
+                if sema_expression_field_is_shorthand(field) -> return false
+            }
+            true
+        }
+        else -> false
+    }
 }
 
 fn sema_expression_typed_literal_whole(head: Type, value: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

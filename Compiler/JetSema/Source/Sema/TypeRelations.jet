@@ -1210,7 +1210,18 @@ fn sema_type_generic_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
     return Val(false)
 }
 
+// Whether `required` and `offered` are one named type spelled the same way:
+// both resolve to the same type (one caller, one set of generics), and a
+// resolved type is assignable to itself, so neither needs resolving.
+fn sema_type_same_named(required: Type, offered: Type) -> Bool Never! {
+    if required == .Named(name) {
+        if offered == .Named(other) -> return name != "" && name == other
+    }
+    false
+}
+
 fn sema_type_assignable_in_graph_with_generics(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
+    if sema_type_same_named(required, offered) -> return Val(true)
     caller :: sema_type_module_row(graph, caller_module_identity)
     required_resolved :: sema_type_resolve_declared_recursive(graph, required, caller, generic_params)
     offered_resolved :: sema_type_resolve_declared_recursive(graph, offered, caller, generic_params)

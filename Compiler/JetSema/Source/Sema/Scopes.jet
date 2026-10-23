@@ -861,6 +861,13 @@ fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program:
         // Matched in place: a pattern on the indexed path copies the whole item.
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if nominal.source == .SourceAST(definition) {
+            // The declaration's own name resolves to this nominal in its own
+            // module, so its edges are the ones keyed by the owner (what
+            // sema_checked_boxed_edges looks up after resolving that name).
+            if sema_registration_root_name(definition) == nominal.symbol.name {
+                edges :: program.boxed_edges.get(owner.key) ?? return false
+                return edges.contains(edge)
+            }
             return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
         }
     }
