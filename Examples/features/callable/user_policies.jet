@@ -5,11 +5,22 @@ policy audit(topic: String) {
     }
 }
 
+// A `wrap(call)` body is user code: `call()` inside an interpolation
+// propagates like any call and yields the success value (#5514).
+policy labeled(topic: String) {
+    wrap(call) { return "{topic}:{call()}" }
+}
+
 #Policy(audit("users.load")) fn load_user() -> Int { 7 }
+
+fn load_name() -> String { "ok" }
 
 fn run() {
     selected :: apply(audit("users.load"), load_user)
     print(selected())
+    tagged :: apply(labeled("users.load"), load_name)
+    print(tagged())
 }
 // --- expected output --------------------------------------------------
 // 7
+// users.load:ok

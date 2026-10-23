@@ -10,6 +10,13 @@ fn sema_policy_wrapper_name(policy: String, target: String) -> String Never! {
     "__jet_policy_{policy}_{target}"
 }
 
+// A generated wrapper's body is the policy's `wrap(call)` block, user code:
+// it is checked as user code (calls propagate automatically), as a `#Test`
+// body is (#5514).
+fn sema_policy_wrapper_function(func: Func) -> Bool Never! {
+    func.compiler_generated && func.name.starts_with("__jet_policy_")
+}
+
 fn sema_policy_calls(function: Func) -> [Call] Never! {
     calls := [Call]{}
     loop marker in function.markers {
