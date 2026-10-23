@@ -22,39 +22,6 @@ level? Character-code work or a hand-written search inside a higher-level
 helper belongs in a named lower-level brick. These prompts align the contract
 with the implementation; they do not add a second mechanism.
 
-### Rust-exit accounting
-
-[`Tools/agent/rust-leaves.tsv`](../../Tools/agent/rust-leaves.tsv) is the
-checked registry for remaining Rust-backed Core dispatchers (#4742).
-Every retained dispatcher requires a stable row identity and a reviewed hash
-of its dispatch expression, even when a Jet source wrapper shadows it or
-the generated/implicit runtime body is not yet mapped. Receiver identities
-include the type list and method, not a moving declaration line number.
-
-`leaf` records migrate the former CorelibInteg journals, preserving removal
-conditions and provenance; they do **not** establish that a branch has landed,
-that a leaf is policy-free, or that its behavior is proved. `port` records
-track the other retained dispatchers. Neither kind grants Jet census credit.
-A `-` hash records an unlanded leaf and cannot authorize a live dispatcher.
-Changing a dispatcher requires reviewing its registry hash; retiring it means
-removing the Rust provider, not merely hiding it behind a source-owned wrapper.
-
-Lane checks run `node Tools/agent/rust-exit.mjs --check`. The A–H table in
-[`rust-exit-ratchet.json`](../../Tools/agent/rust-exit-ratchet.json) partitions
-physical Rust source lines (including blanks and comments), with the original
-RUST-EXIT inventory snapshot retained separately. Inventory cross-references
-overlap; area totals do not. Rust source symlinks are not counted a second time.
-Build scripts belong to H before other area classifications; new nonignored
-Rust source is counted before staging. Emitted/build/scratch output is excluded
-by the repository ignore rules.
-
-After a port, lower the ceilings with
-`node Tools/agent/rust-exit.mjs --update`. This command refuses **any** increase
-and does not modify the registry. A zero ceiling permanently excludes Rust
-from that area. Run `node Tools/agent/rust-exit.mjs --check` for the focused
-inventory gate and `node --test Tools/agent/rust-exit.test.mjs` for the planted
-unregistered-leaf and one-line-growth refusal fixtures.
-
 ## Law 1 — Naming
 
 Use plain English words rather than abbreviations (`remove`, not `rm`). The
