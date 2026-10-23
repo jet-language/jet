@@ -12,14 +12,19 @@ struct X64ExecutableResult {
     errors: [String]
 }
 
+// Little-endian words, byte by byte without a loop: each `U8{x & 255}` is a
+// plain move (OptSimplify fold), so a word is its pushes alone.
 fn elf64_u16(bytes: &[U8], value: Int) Never! {
-    loop shift in 0..<2 -> &bytes.push(U8{((value >> (8 * shift))).bit_and(255)})
+    &bytes.push(U8{value.bit_and(255)})
+    &bytes.push(U8{(value >> 8).bit_and(255)})
 }
 
 fn elf64_u32(bytes: &[U8], value: Int) Never! {
-    loop shift in 0..<4 -> &bytes.push(U8{((value >> (8 * shift))).bit_and(255)})
+    elf64_u16(&bytes, value)
+    elf64_u16(&bytes, value >> 16)
 }
 
 fn elf64_u64(bytes: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> &bytes.push(U8{((value >> (8 * shift))).bit_and(255)})
+    elf64_u32(&bytes, value)
+    elf64_u32(&bytes, value >> 32)
 }

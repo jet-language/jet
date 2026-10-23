@@ -1,0 +1,23 @@
+// A fixed-width conversion of a masked Int, `U8{x.bit_and(255)}`, is the
+// masked value for every Int: negative, inline and beyond 64 bits (the
+// optimizer makes it a move when the mask fits the width).
+fn low_bytes(value: Int) -> [U8] {
+    [U8]{U8{value.bit_and(255)}, U8{(value >> 8).bit_and(255)}, U8{(value >> 56).bit_and(255)}}
+}
+
+fn masked(value: Int) -> String {
+    a :: I8{value.bit_and(127)}
+    b :: I16{value.bit_and(0x7fff)}
+    c :: U32{value.bit_and(0xffffffff)}
+    d :: I64{Int{255}.bit_and(value)}
+    "{a} {b} {c} {d}"
+}
+
+fn run() {
+    print(low_bytes(0x1122334455667788))
+    print(low_bytes(-2))
+    print(low_bytes((1 << 70) + 0x1ff))
+    print(masked(-1))
+    print(masked(0x123456789))
+    print(masked((1 << 80) - 3))
+}

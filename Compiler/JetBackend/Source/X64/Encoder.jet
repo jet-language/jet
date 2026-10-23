@@ -66,12 +66,17 @@ fn x64_byte(code: &[U8], value: Int) Never! {
     &code.push(U8{(value).bit_and(255)})
 }
 
+// Little-endian words without a loop (Image/ELF.jet elf64_u16).
 fn x64_u32(code: &[U8], value: Int) Never! {
-    loop shift in 0..<4 -> x64_byte(&code, value >> (8 * shift))
+    x64_byte(&code, value)
+    x64_byte(&code, value >> 8)
+    x64_byte(&code, value >> 16)
+    x64_byte(&code, value >> 24)
 }
 
 fn x64_u64(code: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> x64_byte(&code, value >> (8 * shift))
+    x64_u32(&code, value)
+    x64_u32(&code, value >> 32)
 }
 
 fn x64_fits_i8(value: Int) -> Bool Never! { value >= -128 && value <= 127 }
@@ -395,7 +400,10 @@ fn x64_jcc_rel32(code: &[U8], cond: X64Cond) -> Int Never! {
 // Point the rel32 field at `at` to `target`; both are offsets in `code`.
 fn x64_patch_rel32(code: &[U8], at: Int, target: Int) Never! {
     relative :: target - (at + 4)
-    loop shift in 0..<4 -> code[at + shift] = U8{((relative >> (8 * shift))).bit_and(255)}
+    code[at] = U8{relative.bit_and(255)}
+    code[at + 1] = U8{(relative >> 8).bit_and(255)}
+    code[at + 2] = U8{(relative >> 16).bit_and(255)}
+    code[at + 3] = U8{(relative >> 24).bit_and(255)}
 }
 
 // SSE scalar double/single and register bit moves. Mandatory prefix precedes

@@ -273,12 +273,20 @@ fn link_name_has(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) -> 
     end < row.len() && Int.from_u8(row[end]) == 0
 }
 
+// Little-endian words without a loop (ELF.jet elf64_u16).
+fn link_put16(out: &[U8], at: Int, value: Int) Never! {
+    out[at] = U8{value.bit_and(255)}
+    out[at + 1] = U8{(value >> 8).bit_and(255)}
+}
+
 fn link_put32(out: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<4 -> out[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+    link_put16(&out, at, value)
+    link_put16(&out, at + 2, value >> 16)
 }
 
 fn link_put64(out: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<8 -> out[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+    link_put32(&out, at, value)
+    link_put32(&out, at + 4, value >> 32)
 }
 
 fn link_align(value: Int, align: Int) -> Int Never! {

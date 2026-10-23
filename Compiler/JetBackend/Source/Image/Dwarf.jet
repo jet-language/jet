@@ -23,7 +23,7 @@
 // Addresses and section offsets in the other sections are relocations
 // against section symbols, so any ELF linker can place the sections.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
 
 ELF64_R_X86_64_32 :: 10
 
@@ -88,7 +88,10 @@ fn dwarf_string(bytes: &[U8], text: String) Never! {
 }
 
 fn dwarf_patch_u32(bytes: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<4 -> bytes[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+    bytes[at] = U8{value.bit_and(255)}
+    bytes[at + 1] = U8{(value >> 8).bit_and(255)}
+    bytes[at + 2] = U8{(value >> 16).bit_and(255)}
+    bytes[at + 3] = U8{(value >> 24).bit_and(255)}
 }
 
 // The 4-byte length field at `at`: the bytes after it, to the end.
@@ -591,15 +594,17 @@ fn dwarf_info(sections: &X64DwarfSections, program: X64ObjectModule, functions: 
         loop part in 0..<(bounds.len() - 1) -> &parts.push(shared DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}})
         _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
         loop part in parts {
-            rows := dwarf_info_part_take(part)
+            rows :: dwarf_info_part_take(part)
             info_base :: info.len()
             lists_base :: lists.len()
             loop rela in rows.relas {
                 addend :: if rela.symbol == symbols.loclists -> rela.addend + lists_base else -> rela.addend
                 &relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
             }
-            &info.extend(compiler_take_rows<U8>(&rows.info))
-            &lists.extend(compiler_take_rows<U8>(&rows.lists))
+            // Bytes append as one block copy; popping them out one by one
+            // (compiler_take_rows) grew the target per byte.
+            &info.extend(rows.info)
+            &lists.extend(rows.lists)
         }
     }
     dwarf_uleb(&info, 0)

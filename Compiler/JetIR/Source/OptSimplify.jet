@@ -7,7 +7,10 @@
 //               too, never Float); the identities x+0, 0+x, x-0, x*1, 1*x,
 //               x|0, x^0, x<<0, x>>0, x/1, x&-1, x&x, x|x (a copy) and x*0,
 //               0*x, x&0, x-x, x^x (zero); an If or BrIf on a constant keeps
-//               only the arm it takes
+//               only the arm it takes; the checked fixed-width conversion
+//               (jet_int_checked_fixed) of an Int masked by a constant,
+//               `x & c` with c >= 0 inside the kind, is a Move (an inline
+//               Int is its i64 bits)
 //   unreachable everything after a Br, Return or Unreachable up to the end
 //               of its region
 //   fuse        `t = a <cmp> b; n = not t` becomes `n = a <inverse> b` when t
@@ -18,7 +21,8 @@
 //   coalesce    `t = <op>; ...; x = move/copy t` writes x directly when t is a
 //               temporary read only there and nothing between touches x
 //   dead        an instruction without effects whose result nobody reads; the
-//               drop of an exact Int that holds an inline constant
+//               drop of an exact Int that holds an inline constant or a value
+//               masked by a nonnegative constant
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
 
@@ -27,12 +31,13 @@ IR_OPT_SIMPLIFY_ROUNDS :: 8
 
 fn ir_opt_simplify(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     round := 0
+    fixed :: m.name_rows.get("jet_int_checked_fixed") ?? -2
     loop round < IR_OPT_SIMPLIFY_ROUNDS {
         // The facts stay true until a sweep changes the function, so they
         // are computed again only after one does (most sweeps change
         // nothing, and the last round none).
         facts := ir_opt_facts(f)
-        changed := ir_opt_fold(m, &f, facts, &report)
+        changed := ir_opt_fold(m, &f, facts, fixed, &report)
         changed += ir_opt_unreachable(&f, &report)
         if changed > 0 -> facts = ir_opt_facts(f)
         step := ir_opt_fuse_compares(m, &f, facts, &report)
@@ -170,7 +175,7 @@ fn ir_opt_set_copy(f: &IRFunction, at: Int, source: Int) Never! {
     f.c[at] = -1
 }
 
-fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report: &IROptReport) -> Int Never! {
     nesting :: ir_opt_nesting(f)
     changed := 0
     loop at in 0..<f.op.len() {
@@ -199,6 +204,21 @@ fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptRepor
             if ty.kind == .Word && ty.signed -> folded = ir_opt_word(ty, 0 - value, f.c[at] != IR_OVERFLOW_WRAP)
             result :: folded ?? next
             ir_opt_set_const(&f, at, result)
+            report.folded += 1
+            changed += 1
+            next
+        }
+        if op == .CallRuntime {
+            if f.a[at] != fixed || f.c[at] != 5 || f.dst[at] < 0 -> next
+            value :: f.args[f.b[at]]
+            if ir_opt_type(m, f, value).kind != .Int -> next
+            mask :: ir_opt_masked_at(f, facts, value, at) ?? next
+            kind :: ir_opt_const_at(f, facts, f.args[f.b[at] + 1], at) ?? next
+            if mask > ir_opt_fixed_high(kind) -> next
+            f.op[at] = .Move
+            f.a[at] = value
+            f.b[at] = -1
+            f.c[at] = -1
             report.folded += 1
             changed += 1
             next
@@ -267,6 +287,36 @@ fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptRepor
         changed += 1
     }
     changed
+}
+
+// The constant c >= 0 an Int `slot` is masked by at instruction `at`, when
+// its single reaching write is `x & c` (or `c & x`): the value lies in
+// [0, c], an inline Int.
+fn ir_opt_masked_at(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int? Never! {
+    def :: ir_opt_reaching_def(f, facts, slot, at)
+    if def < 0 || f.op[def] != .BitAnd -> return None
+    right :: ir_opt_const_at(f, facts, f.b[def], def) ?? -1
+    if right >= 0 -> return Val(right)
+    left :: ir_opt_const_at(f, facts, f.a[def], def) ?? -1
+    if left >= 0 -> return Val(left)
+    None
+}
+
+// The largest value of jet_int_checked_fixed's `kind` (0..3 the signed
+// 8..64-bit integers, 4..7 the unsigned ones; OptRange ir_range_fixed_kind),
+// or -1 for none.
+fn ir_opt_fixed_high(kind: Int) -> Int Never! {
+    if kind == {
+        0 -> 127
+        1 -> 32767
+        2 -> 2147483647
+        3 -> 9223372036854775807
+        4 -> 255
+        5 -> 65535
+        6 -> 4294967295
+        7 -> 9223372036854775807
+        else -> -1
+    }
 }
 
 // An If or BrIf at `at` whose condition is the constant `taken`.
@@ -528,7 +578,7 @@ fn ir_opt_dead_sweep(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never!
         op :: f.op[at]
         if op == .Drop {
             slot :: f.a[at]
-            if ir_opt_type(m, f, slot).kind == .Int && ir_opt_const_at(f, facts, slot, at) != None {
+            if ir_opt_type(m, f, slot).kind == .Int && (ir_opt_const_at(f, facts, slot, at) != None || ir_opt_masked_at(f, facts, slot, at) != None) {
                 ir_opt_kill(&f, at)
                 removed += 1
             }
