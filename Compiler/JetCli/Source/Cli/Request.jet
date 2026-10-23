@@ -144,7 +144,9 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
         object := ir_x64_library_object(^compiled, library.exports)
         if object.errors.len() == 0 {
             cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
-            symbols :: loop row in library.exports -> row.symbol
+            // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).
+            symbols := loop row in library.exports -> row.symbol
+            &symbols.sort()
             cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
             cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
             return jet_cli_runtime_pack(^result, prefix, ^object.bytes)

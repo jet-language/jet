@@ -523,11 +523,16 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
 //     place its address, relocation type (PC32, PLT32 or 64) and addend.
 //
 // The unloaded tail keeps the `.symtab` (the runtime's symbols, for binding
-// and for symbolizers) and the section headers.
+// and for symbolizers) and the section headers. The `.jet.exports` section
+// indexes the `.symtab`'s defined globals by name (link_image_export_index),
+// so binding looks up only a program's imports.
 
 LINK_IMAGE_BIND_SECTION :: ".jet.bind"
 // "JETBIND1", little-endian.
 LINK_IMAGE_BIND_MAGIC :: 0x31444e494254454a
+LINK_IMAGE_EXPORTS_SECTION :: ".jet.exports"
+// "JETEXPT1", little-endian.
+LINK_IMAGE_EXPORTS_MAGIC :: 0x3154505845544548
 
 fn link_image_failure(c: LinkContext) -> X64ExecutableResult Never! {
     X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
@@ -600,6 +605,8 @@ fn x64_link_runtime_image(name: String, pack: ^[U8]) -> X64ExecutableResult Neve
     elf64_u64(&bind, count)
     &bind.extend(sites)
     link_image_add_section(&image, LINK_IMAGE_BIND_SECTION, bind)
+    exports :: link_image_export_index(image)
+    link_image_add_section(&image, LINK_IMAGE_EXPORTS_SECTION, exports)
     X64ExecutableResult{bytes: image, errors: [String]{}}
 }
 
@@ -630,4 +637,54 @@ fn link_image_add_section(image: &[U8], name: String, payload: [U8]) Never! {
     link_put64(&image, 40, new_shoff)
     image[60] = U8{(shnum + 1).bit_and(255)}
     image[61] = U8{((shnum + 1) >> 8).bit_and(255)}
+}
+
+// FNV-1a, 32 bits, of a symbol name: the `.jet.exports` hash.
+fn link_image_export_hash(bytes: [U8]) -> Int Never! {
+    hash := U32{0x811c9dc5}
+    loop byte in bytes -> hash = (hash.bit_xor(U32.from_u8(byte))).wrapping_mul(U32{0x01000193})
+    Int.from_u32(hash)
+}
+
+// The `.jet.exports` payload of the executable `image`: LINK_IMAGE_EXPORTS_MAGIC,
+// the slot count (a power of two, at least twice the defined globals), then
+// per slot the `.symtab` index of a defined global (0: empty), four bytes,
+// placed by link_image_export_hash of its name with linear probing.
+fn link_image_export_index(image: [U8]) -> [U8] Never! {
+    shoff :: link_image_i64(image, 40)
+    shnum :: link_image_u16(image, 60)
+    symtab_at := 0
+    symtab_count := 0
+    first_global := 0
+    strtab_at := 0
+    loop k in 1..<shnum {
+        h :: shoff + 64 * k
+        if link_image_u32(image, h + 4) != LINK_SHT_SYMTAB -> next
+        symtab_at = link_image_i64(image, h + 24)
+        symtab_count = link_image_i64(image, h + 32).div_euclid(24)
+        first_global = link_image_u32(image, h + 44)
+        strtab_at = link_image_i64(image, shoff + 64 * link_image_u32(image, h + 40) + 24)
+    }
+    defined := [Int]{}
+    loop k in first_global..<symtab_count {
+        if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> &defined.push(k)
+    }
+    slots := 1
+    loop slots < 2 * defined.len() -> slots = slots * 2
+    table := [Int]{}
+    loop _ in 0..<slots -> &table.push(0)
+    mask :: slots - 1
+    loop k in defined {
+        at := strtab_at + link_image_u32(image, symtab_at + 24 * k)
+        start :: at
+        loop at < image.len() && Int.from_u8(image[at]) != 0 -> at += 1
+        slot := link_image_export_hash(image[start..<at]).bit_and(mask)
+        loop table[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        table[slot] = k
+    }
+    out := [U8]{}
+    elf64_u64(&out, LINK_IMAGE_EXPORTS_MAGIC)
+    elf64_u64(&out, slots)
+    loop k in table -> elf64_u32(&out, k)
+    out
 }

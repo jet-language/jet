@@ -5,7 +5,8 @@
 // loaded bytes stay as they are but for a few patched bytes (its ELF header
 // and its `main` places, its `.jet.bind` section, pointed at the program),
 // the program goes on the pages after them, and the program's runtime
-// imports resolve through the image's symbol table. The result is a
+// imports resolve through the image's symbol table (by its `.jet.exports`
+// index, RuntimePack.jet link_image_export_index). The result is a
 // complete static executable at the image's base, the shape
 // x64_link_executable writes (file offset equal to address minus the base,
 // a debug tail with `.symtab` and section headers), held in parts
@@ -45,6 +46,10 @@ struct LinkImageView {
     shoff: Int
     alloc_headers: Int
     names_at: Int
+    // The `.jet.exports` index (RuntimePack.jet link_image_export_index):
+    // its slot table's offset and slot count, 0 slots when the image has none.
+    exports_at: Int
+    exports_slots: Int
 }
 
 fn link_image_u16(bytes: [U8], at: Int) -> Int Never! {
@@ -64,7 +69,7 @@ fn link_image_i64(bytes: [U8], at: Int) -> Int Never! {
 
 // Read the runtime image in buffer `b`; errors are reported on `c`.
 fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
-    v := LinkImageView{base: -1, phoff: 0, phnum: 0, load_end: 0, program_base: 0, sites: [Int]{}, symtab_at: 0, symtab_count: 0, first_global: 0, strtab_at: 0, strtab_size: 0, shoff: 0, alloc_headers: 0, names_at: 0}
+    v := LinkImageView{base: -1, phoff: 0, phnum: 0, load_end: 0, program_base: 0, sites: [Int]{}, symtab_at: 0, symtab_count: 0, first_global: 0, strtab_at: 0, strtab_size: 0, shoff: 0, alloc_headers: 0, names_at: 0, exports_at: 0, exports_slots: 0}
     size :: c.bufs[b].len()
     if size < LINK_EHDR_SIZE || link_u32(c.bufs, b, 0) != 0x464c457f || link_u16(c.bufs, b, 16) != 2 || link_u16(c.bufs, b, 18) != 62 {
         link_error(&c, "runtime image: not an x86-64 ELF executable")
@@ -90,19 +95,30 @@ fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
     v.names_at = link_s64(c.bufs, b, v.shoff + 64 * shstrndx + 24)
     bind_at := -1
     bind_size := 0
+    exports_at := -1
+    exports_size := 0
     loop k in 1..<shnum {
         h :: v.shoff + 64 * k
         if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8).bit_and(2)) != 0 -> v.alloc_headers = k
-        if link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB {
-            v.symtab_at = link_s64(c.bufs, b, h + 24)
-            v.symtab_count = link_s64(c.bufs, b, h + 32).div_euclid(24)
-            v.first_global = link_u32(c.bufs, b, h + 44)
-            strings :: v.shoff + 64 * link_u32(c.bufs, b, h + 40)
-            v.strtab_at = link_s64(c.bufs, b, strings + 24)
-            v.strtab_size = link_s64(c.bufs, b, strings + 32)
-        } else if link_name_has(c.bufs, b, v.names_at + link_u32(c.bufs, b, h), LINK_IMAGE_BIND_SECTION, true) {
-            bind_at = link_s64(c.bufs, b, h + 24)
-            bind_size = link_s64(c.bufs, b, h + 32)
+        name :: v.names_at + link_u32(c.bufs, b, h)
+        if {
+            link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB -> {
+                v.symtab_at = link_s64(c.bufs, b, h + 24)
+                v.symtab_count = link_s64(c.bufs, b, h + 32).div_euclid(24)
+                v.first_global = link_u32(c.bufs, b, h + 44)
+                strings :: v.shoff + 64 * link_u32(c.bufs, b, h + 40)
+                v.strtab_at = link_s64(c.bufs, b, strings + 24)
+                v.strtab_size = link_s64(c.bufs, b, strings + 32)
+            }
+            link_name_has(c.bufs, b, name, LINK_IMAGE_BIND_SECTION, true) -> {
+                bind_at = link_s64(c.bufs, b, h + 24)
+                bind_size = link_s64(c.bufs, b, h + 32)
+            }
+            link_name_has(c.bufs, b, name, LINK_IMAGE_EXPORTS_SECTION, true) -> {
+                exports_at = link_s64(c.bufs, b, h + 24)
+                exports_size = link_s64(c.bufs, b, h + 32)
+            }
+            else -> {}
         }
     }
     if v.base < 0 || v.symtab_count == 0 || bind_at < 0 || bind_size < 24 || bind_at + bind_size > size || link_s64(c.bufs, b, bind_at) != LINK_IMAGE_BIND_MAGIC {
@@ -115,6 +131,15 @@ fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
         link_error(&c, "runtime image: malformed `{LINK_IMAGE_BIND_SECTION}` section")
         return v
     }
+    if exports_at >= 0 && exports_size >= 16 && exports_at + exports_size <= size && link_s64(c.bufs, b, exports_at) == LINK_IMAGE_EXPORTS_MAGIC {
+        slots :: link_s64(c.bufs, b, exports_at + 8)
+        if slots < 1 || slots.bit_and(slots - 1) != 0 || 16 + 4 * slots != exports_size {
+            link_error(&c, "runtime image: malformed `{LINK_IMAGE_EXPORTS_SECTION}` section")
+            return v
+        }
+        v.exports_at = exports_at + 16
+        v.exports_slots = slots
+    }
     loop k in 0..<count {
         at :: bind_at + 24 + 24 * k
         &v.sites.push(link_s64(c.bufs, b, at))
@@ -122,6 +147,24 @@ fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
         &v.sites.push(link_s64(c.bufs, b, at + 16))
     }
     v
+}
+
+// The image's global symbol defining `name` by its export index; -1 when
+// the index has none. The name is compared in the image's string table, so
+// an index entry can only miss, never bind a wrong symbol.
+fn link_image_export(c: LinkContext, view: LinkImageView, name: String) -> Int Never! {
+    mask :: view.exports_slots - 1
+    slot := link_image_export_hash(name.bytes()).bit_and(mask)
+    loop _ in 0..<view.exports_slots {
+        k :: link_u32(c.bufs, 1, view.exports_at + 4 * slot)
+        if k == 0 -> return -1
+        if k >= view.first_global && k < view.symtab_count {
+            at :: view.symtab_at + 24 * k
+            if link_u16(c.bufs, 1, at + 6) != 0 && link_name_has(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at), name, true) -> return k
+        }
+        slot = (slot + 1).bit_and(mask)
+    }
+    -1
 }
 
 // `__jet_bind_main(argc, argv, envp)`: register the program's unwind tables
@@ -420,16 +463,31 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int
     // The program's imports, and the binding startup's
     // `__register_frame_info`, resolve to the image's definitions.
     link_load_synth(&c, link_bind_startup(), "<runtime image binding>")
-    imports := [String:Int]{}
-    loop g in 0..<c.g_name.len() {
-        if c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0 -> &imports.add(c.g_name[g], g).drop("global names are unique")
-    }
-    loop k in view.first_global..<view.symtab_count {
-        at :: view.symtab_at + 24 * k
-        if link_u16(c.bufs, 1, at + 6) == 0 -> next
-        g :: imports.get(link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at))) ?? next
-        c.g_kind[g] = LINK_G_LINKER
-        c.g_addr[g] = link_s64(c.bufs, 1, at + 8)
+    // Each import is looked up in the image's export index; an image packed
+    // by a compiler before the index has its global symbols scanned instead.
+    if {
+        view.exports_slots > 0 -> {
+            loop g in 0..<c.g_name.len() {
+                if c.g_kind[g] != LINK_G_NONE || c.g_alias[g] >= 0 -> next
+                k :: link_image_export(c, view, c.g_name[g])
+                if k < 0 -> next
+                c.g_kind[g] = LINK_G_LINKER
+                c.g_addr[g] = link_s64(c.bufs, 1, view.symtab_at + 24 * k + 8)
+            }
+        }
+        else -> {
+            imports := [String:Int]{}
+            loop g in 0..<c.g_name.len() {
+                if c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0 -> &imports.add(c.g_name[g], g).drop("global names are unique")
+            }
+            loop k in view.first_global..<view.symtab_count {
+                at :: view.symtab_at + 24 * k
+                if link_u16(c.bufs, 1, at + 6) == 0 -> next
+                g :: imports.get(link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at))) ?? next
+                c.g_kind[g] = LINK_G_LINKER
+                c.g_addr[g] = link_s64(c.bufs, 1, at + 8)
+            }
+        }
     }
     start_g :: c.g_index.get("__jet_bind_main") ?? -1
     frames_g :: c.g_index.get("__register_frame_info") ?? -1

@@ -329,7 +329,7 @@ JET_CLI_RUNTIME_IMAGE_FILE :: "jet_runtime.image"
 // Written by packaging: the toolchain's native runtime key for every profile.
 JET_CLI_RUNTIME_KEY_FILE :: "native.key"
 // Written by packaging beside the pack: every symbol the runtime exports, one
-// per line.
+// per line, sorted (Request.jet).
 JET_CLI_RUNTIME_EXPORTS_FILE :: "runtime.exports"
 
 // jet-runtime/ beside the `jet` executable.
@@ -561,18 +561,18 @@ fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper:
     realized
 }
 
-// The runtime's key and its exports file (one exported symbol per line),
-// else the failure jet_cli_native_object reports where it reads them.
+// The runtime's key and its exports file's bytes (one exported symbol per
+// line), else the failure jet_cli_native_object reports where it reads them.
 struct JetCLIRuntimeExports {
     key: String
-    exports: String
+    exports: [U8]
     failure: JetCLINativeFailure?
 }
 
 fn jet_cli_runtime_exports(runtime_dir: String) -[FS]> JetCLIRuntimeExports Never! {
-    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: "", failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
+    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
     exports_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
-    exports :: cli_files.read(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: "", failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
+    exports :: cli_files.read_bytes(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
     JetCLIRuntimeExports{key: key, exports: exports, failure: None}
 }
 
@@ -587,30 +587,64 @@ fn jet_cli_native_object_failure(failure: JetCLINativeFailure) -> JetCLINativeOb
     JetCLINativeObject{bytes: [U8]{}, failure: Val(failure)}
 }
 
-// Marks true each name in `wanted` that is a line of `exports` (the
-// runtime's thousands of export names, one per line), comparing bytes in
-// place: no string or map lookup per export line.
-fn jet_cli_runtime_exports_mark(exports: String, wanted: &[String:Bool]) Never! {
-    names :: wanted.keys().to_list()
+// Marks true each name in `wanted` that is a line of `bytes` (the runtime's
+// exports file: thousands of names, one per line, sorted: Request.jet writes
+// them so), comparing bytes in place: a binary search per name, then one
+// walk over every line for the names it missed, so an unsorted file (a pack
+// written before the sort) still answers right.
+fn jet_cli_runtime_exports_mark(bytes: [U8], wanted: &[String:Bool]) Never! {
+    names := [String]{}
     rows := [[U8]]{}
-    loop name in names -> &rows.push(name.bytes())
-    bytes :: exports.bytes()
+    loop name in wanted.keys().to_list() {
+        row :: name.bytes()
+        if {
+            jet_cli_runtime_exports_search(bytes, row) -> wanted[name] = true
+            else -> {
+                &names.push(name.copy())
+                &rows.push(row)
+            }
+        }
+    }
+    if rows.len() == 0 -> return
     start := 0
     loop start < bytes.len() {
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         loop (k, row) in rows {
-            if row.len() != end - start -> next
-            same := true
-            loop at in 0..<row.len() {
-                if row[at] != bytes[start + at] {
-                    same = false
-                    break
-                }
-            }
-            if same -> wanted[names[k]] = true
+            if jet_cli_runtime_exports_compare(bytes, start, end, row) == 0 -> wanted[names[k]] = true
         }
         start = end + 1
+    }
+}
+
+// Whether `row` is a line of the sorted `bytes`. Each probe takes the
+// whole line around the midpoint of the lines left.
+fn jet_cli_runtime_exports_search(bytes: [U8], row: [U8]) -> Bool Never! {
+    low := 0
+    high := bytes.len()
+    loop low < high {
+        start := low + (high - low).div_euclid(2)
+        loop start > low && bytes[start - 1] != (U8{10}) -> start -= 1
+        end := start
+        loop end < high && bytes[end] != (U8{10}) -> end += 1
+        order :: jet_cli_runtime_exports_compare(bytes, start, end, row)
+        if order == 0 -> return true
+        if order < 0 -> low = end + 1 else -> high = start
+    }
+    false
+}
+
+// The byte order of the line bytes[start..<end] against `row`: -1, 0 or 1.
+fn jet_cli_runtime_exports_compare(bytes: [U8], start: Int, end: Int, row: [U8]) -> Int Never! {
+    at := 0
+    loop start + at < end && at < row.len() {
+        if bytes[start + at] != row[at] -> return if bytes[start + at] < row[at] -> -1 else -> 1
+        at += 1
+    }
+    if {
+        start + at < end -> 1
+        at < row.len() -> -1
+        else -> 0
     }
 }
 
