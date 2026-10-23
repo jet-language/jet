@@ -494,9 +494,9 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
     }
     files.create_dir_all(files.join(context.scratch, "tmp")) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "create case temp directory: {err}"))
     if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
-    loop name in plan.free_ports {
-        port :: kit_steps_free_port(context) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-        &state.free_ports.push(KitFreePort{name: name, port: port})
+    if plan.free_ports.len() > 0 {
+        ports :: kit_steps_free_ports(context, plan.free_ports.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        loop index in 0..<plan.free_ports.len() -> &state.free_ports.push(KitFreePort{name: plan.free_ports[index], port: ports[index]})
     }
     loop index in 0..<context.plan.environment.len() {
         context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))

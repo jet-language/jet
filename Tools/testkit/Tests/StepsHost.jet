@@ -82,15 +82,15 @@ use core.sys as sys
     files.remove_all(root) ?? panic("remove boolean scratch")
 }
 
-#Test("named free-port tokens run the real Jet bind-read-exit probe once and reuse the selected value") {
+#Test("named free-port tokens come from one real Jet probe run per case and reuse the selected value") {
     root :: cases_test_root("host-free-ports")
-    cases_test_source(root, "ports", "step: printf '%s\\n%s\\n' {{free-port:app}} {{free-port:app}}\nstdout: lines = 2 # original predicate\ncapture: first = text stdout.line(0)\ncapture: second = text stdout.line(1)\ncap:first: = {{cap:second}}\nstep: printf '%s' {{free-port:app}}\nstdout: = \"{{cap:first}}\"\nstdout: is-u32\nstep: printf '%s' {{free-port:other}}\nstdout: is-u32\n")
+    cases_test_source(root, "ports", "step: printf \"%s\\n%s\\n\" {{free-port:app}} {{free-port:app}}\nstdout: lines = 2 # original predicate\ncapture: first = text stdout.line(0)\ncapture: second = text stdout.line(1)\ncap:first: = {{cap:second}}\nstep: printf \"%s\" {{free-port:app}}\nstdout: = \"{{cap:first}}\"\nstdout: is-u32 # a port\nstep: printf \"%s\" {{free-port:other}}\nstdout: is-u32 # a port\n")
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.jet = sys.get("TESTKIT_JET") ?? panic("TESTKIT_JET must name the pinned real compiler for the free-port self-test")
     context.env.root = files.cwd() ?? panic("free-port probe source root")
     context.env.timeout = 600s
     assert_eq(kit_cases_run(cases_test_entry("ports"), context)[0].verdict.status, "PASS")
-    cases_test_source(root, "ports-wrong", "step: printf '%s' {{free-port:app}}\nstdout: = \"wrong\"\n")
+    cases_test_source(root, "ports-wrong", "step: printf \"%s\" {{free-port:app}}\nstdout: = \"wrong\"\n")
     assert_eq(kit_cases_run(cases_test_entry("ports-wrong"), context)[0].verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove free-port scratch")
 }
