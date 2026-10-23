@@ -21,7 +21,8 @@
 //   GNU_STACK), the program's read-only data, its unwind tables;
 // - code: the program's text and `__jet_bind_main`;
 // - writable: read-only-after-relocation data, GOT, data, bss, commons.
-// The image registers only its own unwind tables: `__jet_bind_main`, the
+// The image registers only its own unwind tables, the first time libgcc's
+// unwinder asks for them (StaticLink.jet link_eh_shims): `__jet_bind_main`, the
 // target of the image's `main` places, registers the program's with
 // libgcc's `__register_frame_info` and tail-calls `main` with its arguments.
 // A program this cannot bind gets errors, and the caller links it in full:

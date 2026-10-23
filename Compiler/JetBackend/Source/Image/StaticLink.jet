@@ -10,15 +10,15 @@
 //    can be satisfied (all archives form one group). COMDAT groups keep the
 //    first copy; weak and common definitions yield to strong ones.
 // 2. Synthesis: when musl's `__libc_start_main` is available the linker adds
-//    the startup object (`_start`, and a `main` thunk that registers the
-//    unwind tables and runs `.init_array` with glibc's (argc, argv, envp)
-//    arguments, which the gnu-target Rust std expects); the Rust allocator
-//    shim (`__rust_alloc` -> `__rdl_alloc`, ...) that rustc otherwise
-//    writes at the final link; glibc's LFS64 names (`fstat64` -> `fstat`,
-//    identical on x86-64); `_dl_find_object` reporting "not found", so
-//    libgcc's unwinder uses the registered tables; and the two glibc names
-//    the gnu-target std's resolver calls that musl lacks (`__res_init`,
-//    `gnu_get_libc_version`).
+//    the startup object (`_start`, and a `main` thunk that hands the unwind
+//    tables to `__jet_eh_startup` and runs `.init_array` with glibc's (argc,
+//    argv, envp) arguments, which the gnu-target Rust std expects); the Rust
+//    allocator shim (`__rust_alloc` -> `__rdl_alloc`, ...) that rustc
+//    otherwise writes at the final link; glibc's LFS64 names (`fstat64` ->
+//    `fstat`, identical on x86-64); `__jet_eh_startup` and `_dl_find_object`,
+//    which register the unwind tables only when an unwinder can ask for
+//    them (link_eh_shims); and the two glibc names the gnu-target std's
+//    resolver calls that musl lacks (`__res_init`, `gnu_get_libc_version`).
 // 3. Garbage collection from `_start`, the init/fini arrays and the unwind
 //    tables' personality references, following relocations; an `.eh_frame`
 //    FDE lives exactly when the function it describes does.
@@ -854,6 +854,16 @@ fn link_synth_rel32(s: &LinkSynth, name: String, kind: Int) Never! {
     link_synth_code(&s, [Int]{0, 0, 0, 0})
 }
 
+// A 32-bit field holding the distance from itself to `name` (data, not an
+// instruction's operand), at the end of the text so far.
+fn link_synth_pcrel_field(s: &LinkSynth, name: String) Never! {
+    &s.rel_at.push(s.text.len())
+    &s.rel_names.push(name)
+    &s.rel_types.push(LINK_R_PC32)
+    &s.rel_addends.push(0)
+    link_synth_code(&s, [Int]{0, 0, 0, 0})
+}
+
 fn link_synth_define(s: &LinkSynth, name: String, section: Int, value: Int) Never! {
     &s.def_names.push(name)
     &s.def_sections.push(section)
@@ -952,11 +962,11 @@ fn link_load_synth(c: &LinkContext, s: LinkSynth, name: String) Never! {
 
 // The startup object for musl: `_start` hands `__jet_link_main` to
 // `__libc_start_main`, which initializes libc and calls it with (argc, argv,
-// envp). `__jet_link_main` registers the unwind tables with libgcc (when
-// `register_frames`), runs every `.init_array` entry with those three
-// arguments (glibc's convention; musl's own init loop sees an empty array),
-// and tail-calls the program's `main`. It also defines `__dso_handle`, which
-// crtbegin.o defines in gcc links.
+// envp). `__jet_link_main` hands the unwind tables to `__jet_eh_startup`
+// (when `register_frames`; link_eh_shims), runs every `.init_array` entry with
+// those three arguments (glibc's convention; musl's own init loop sees an
+// empty array), and tail-calls the program's `main`. It also defines
+// `__dso_handle`, which crtbegin.o defines in gcc links.
 fn link_startup(register_frames: Bool) -> LinkSynth Never! {
     s := link_synth()
     link_synth_function(&s, "_start")
@@ -971,13 +981,13 @@ fn link_startup(register_frames: Bool) -> LinkSynth Never! {
     // push rbx; push r12; push r13; push r14; sub rsp, 8; mov r12d, edi; mov r13, rsi; mov r14, rdx
     link_synth_code(&s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x08, 0x41, 0x89, 0xfc, 0x49, 0x89, 0xf5, 0x49, 0x89, 0xd6})
     if register_frames {
-        // lea rdi, [rip + __EH_FRAME_BEGIN__]; lea rsi, [rip + __jet_eh_object]; call __register_frame_info
+        // lea rdi, [rip + __EH_FRAME_BEGIN__]; lea rsi, [rip + __jet_eh_object]; call __jet_eh_startup
         link_synth_code(&s, [Int]{0x48, 0x8d, 0x3d})
         link_synth_rel32(&s, "__EH_FRAME_BEGIN__", LINK_R_PC32)
         link_synth_code(&s, [Int]{0x48, 0x8d, 0x35})
         link_synth_rel32(&s, "__jet_eh_object", LINK_R_PC32)
         link_synth_code(&s, [Int]{0xe8})
-        link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
+        link_synth_rel32(&s, "__jet_eh_startup", LINK_R_PLT32)
     }
     // lea rbx, [rip + __jet_init_array_start]
     link_synth_code(&s, [Int]{0x48, 0x8d, 0x1d})
@@ -993,16 +1003,20 @@ fn link_startup(register_frames: Bool) -> LinkSynth Never! {
     link_synth_rel32(&s, "main", LINK_R_PLT32)
     link_synth_define(&s, "__dso_handle", 2, 0)
     loop _ in 0..<8 -> &s.data.push(U8{0})
-    // libgcc's `struct object` for the registered tables (at most 8 words).
+    // libgcc's `struct object` for the registered tables (at most 8 words),
+    // then the registration state the lazy `_dl_find_object` keeps
+    // (link_eh_shims): 0 none, 1 registering, 2 registered.
     link_synth_define(&s, "__jet_eh_object", 3, 0)
-    s.bss = 128
+    link_synth_define(&s, "__jet_eh_state", 3, 128)
+    s.bss = 136
     s
 }
 
 // Write the shims for every strong reference still undefined: LFS64 names
-// become aliases; the allocator shim, `_dl_find_object`, `__res_init` and
-// `gnu_get_libc_version` become code.
-// Returns whether anything was added.
+// become aliases; the allocator shim, `__res_init` and
+// `gnu_get_libc_version` become code, and once no other shim is wanted,
+// `__jet_eh_startup` and `_dl_find_object` (link_eh_shims). Returns whether
+// anything was added.
 fn link_shims(c: &LinkContext) -> Bool Never! {
     s := link_synth()
     changed := false
@@ -1029,12 +1043,7 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
             }
             next
         }
-        if name == "_dl_find_object" {
-            // mov eax, -1; ret: no object is found, so libgcc's unwinder
-            // uses the tables `__jet_link_main` registered.
-            link_synth_function(&s, name)
-            link_synth_code(&s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
-        } else if name == "__res_init" {
+        if name == "__res_init" {
             // xor eax, eax; ret: musl's resolver reads resolv.conf on every
             // lookup, so there is no cached state to reload (musl's own
             // `res_init` is the same).
@@ -1055,11 +1064,100 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
             &s.data.push(U8{0})
         }
     }
+    if s.def_names.len() == 0 && !changed -> link_eh_shims(c, &s)
     if s.def_names.len() > 0 {
         link_load_synth(&c, s, "<linker shims>")
         changed = true
     }
     changed
+}
+
+// The unwind shims, written in the round no other shim is wanted, so every
+// member the program pulls in is already in.
+//
+// Registering the unwind tables at startup sorts every FDE of the
+// executable (libgcc's `__register_frame_info` classifies them at once),
+// about a millisecond on every run of a program that never unwinds. So:
+// - With no unwinder pulled in (no `_Unwind_Find_FDE`), nothing can ask for
+//   the tables and `__jet_eh_startup` returns at once.
+// - When libgcc's unwinder asks `_dl_find_object` (glibc's, which musl
+//   lacks) for the tables of a pc it has none registered for, the tables
+//   are registered then: `__jet_eh_startup` returns at once and
+//   `_dl_find_object` registers the startup's tables the first time it is
+//   asked, answering that first question with an `.eh_frame_hdr` without a
+//   search table (`__jet_eh_hdr`), which libgcc searches linearly; once
+//   registered, libgcc finds every pc in them before it asks again.
+// - Otherwise `__jet_eh_startup` registers at startup and `_dl_find_object`
+//   finds nothing.
+fn link_eh_shims(c: LinkContext, s: &LinkSynth) Never! {
+    startup :: link_shim_wanted(c, "__jet_eh_startup")
+    find :: link_shim_wanted(c, "_dl_find_object")
+    unwinder :: link_defined_name(c, "_Unwind_Find_FDE")
+    lazy :: startup && find && unwinder
+    if startup {
+        link_synth_function(&s, "__jet_eh_startup")
+        if lazy || !unwinder {
+            // ret
+            link_synth_code(&s, [Int]{0xc3})
+        } else {
+            // jmp __register_frame_info (rdi: the tables, rsi: the object)
+            link_synth_code(&s, [Int]{0xe9})
+            link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
+        }
+    }
+    if !find -> return
+    link_synth_function(&s, "_dl_find_object")
+    if !lazy {
+        // mov eax, -1; ret: no object is found, so libgcc's unwinder uses the
+        // tables registered at startup.
+        link_synth_code(&s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
+        return
+    }
+    // mov eax, [rip + __jet_eh_state]; cmp eax, 2; je none; test eax, eax; jne header
+    link_synth_code(&s, [Int]{0x8b, 0x05})
+    link_synth_rel32(&s, "__jet_eh_state", LINK_R_PC32)
+    link_synth_code(&s, [Int]{0x83, 0xf8, 0x02, 0x74, 0x5c, 0x85, 0xc0, 0x75, 0x39})
+    // mov ecx, 1; lock cmpxchg [rip + __jet_eh_state], ecx; jne header
+    link_synth_code(&s, [Int]{0xb9, 0x01, 0x00, 0x00, 0x00, 0xf0, 0x0f, 0xb1, 0x0d})
+    link_synth_rel32(&s, "__jet_eh_state", LINK_R_PC32)
+    link_synth_code(&s, [Int]{0x75, 0x2a})
+    // push rsi; push rdi; sub rsp, 8; lea rdi, [rip + __EH_FRAME_BEGIN__]
+    link_synth_code(&s, [Int]{0x56, 0x57, 0x48, 0x83, 0xec, 0x08, 0x48, 0x8d, 0x3d})
+    link_synth_rel32(&s, "__EH_FRAME_BEGIN__", LINK_R_PC32)
+    // lea rsi, [rip + __jet_eh_object]; call __register_frame_info
+    link_synth_code(&s, [Int]{0x48, 0x8d, 0x35})
+    link_synth_rel32(&s, "__jet_eh_object", LINK_R_PC32)
+    link_synth_code(&s, [Int]{0xe8})
+    link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
+    // add rsp, 8; pop rdi; pop rsi; mov eax, 2; xchg [rip + __jet_eh_state], eax
+    link_synth_code(&s, [Int]{0x48, 0x83, 0xc4, 0x08, 0x5f, 0x5e, 0xb8, 0x02, 0x00, 0x00, 0x00, 0x87, 0x05})
+    link_synth_rel32(&s, "__jet_eh_state", LINK_R_PC32)
+    // header: the struct dl_find_object at rsi: flags, map start,
+    // map end, link map 0, eh_frame `__jet_eh_hdr`; return 0.
+    // xor eax, eax; mov [rsi], rax; mov [rsi + 8], rax; mov [rsi + 16], rax; mov [rsi + 24], rax; lea rax, [rip + __jet_eh_hdr]
+    link_synth_code(&s, [Int]{0x31, 0xc0, 0x48, 0x89, 0x06, 0x48, 0x89, 0x46, 0x08, 0x48, 0x89, 0x46, 0x10, 0x48, 0x89, 0x46, 0x18, 0x48, 0x8d, 0x05})
+    link_synth_rel32(&s, "__jet_eh_hdr", LINK_R_PC32)
+    // mov [rsi + 32], rax; xor eax, eax; ret
+    link_synth_code(&s, [Int]{0x48, 0x89, 0x46, 0x20, 0x31, 0xc0, 0xc3})
+    // none: mov eax, -1; ret
+    link_synth_code(&s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
+    // The `.eh_frame_hdr`: version 1, eh_frame_ptr pcrel sdata4, no FDE
+    // count, no table; then the distance to the tables.
+    link_synth_function(&s, "__jet_eh_hdr")
+    link_synth_code(&s, [Int]{0x01, 0x1b, 0xff, 0xff})
+    link_synth_pcrel_field(&s, "__EH_FRAME_BEGIN__")
+}
+
+// Whether `name` is strongly referenced and still undefined: a shim would
+// be written for it this round.
+fn link_shim_wanted(c: LinkContext, name: String) -> Bool Never! {
+    g :: c.g_index.get(name) ?? return false
+    c.g_strong_ref[g] && c.g_alias[g] < 0 && c.g_kind[g] == LINK_G_NONE
+}
+
+fn link_defined_name(c: LinkContext, name: String) -> Bool Never! {
+    g :: c.g_index.get(name) ?? return false
+    link_defined(c, g)
 }
 
 // Symbols the linker defines from the layout when inputs reference them.
