@@ -844,8 +844,7 @@ fn scheduler_start_worker(root: I64, flags: I64) {
     if (handle < I64{0}) {
         sync_mutex_unlock(root)
         alloc_release_valid(record, I64{16}, I64{8})
-        message :: scheduler_msg_start_failed()
-        scheduler_fatal(message)
+        scheduler_start_failed()
         return
     }
     sync_store(record + I64{8}, handle)
@@ -1072,7 +1071,7 @@ fn scheduler_timer_root() -> I64 {
         return previous
     }
     handle :: thread_spawn(rt_scheduler_timer_address(), candidate)
-    if (handle < I64{0}) -> scheduler_fatal(scheduler_msg_start_failed())
+    if (handle < I64{0}) -> scheduler_start_failed()
     // Joinable: jet_rt_scheduler_shutdown joins it.
     sync_store(candidate + I64{40}, handle)
     candidate
@@ -1336,6 +1335,16 @@ fn scheduler_fatal(message: I64) {
     length :: sync_load(message + I64{8})
     if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
     jet_rt_string_drop(message)
+}
+
+// A runtime thread that could not start (pthread_create EAGAIN: RLIMIT_AS,
+// pids limit, memory) stops the process with E3001, also inside a task or
+// root. Native code has no stop edge out of a runtime-internal failure: an
+// in-task stop would return into its caller, which would run on with the error
+// code as a thread handle or a stopped helper's 0 result.
+fn scheduler_start_failed() {
+    message :: scheduler_msg_start_failed()
+    trap_process_stop(I64{0}, sync_load(message), sync_load(message + I64{8}))
 }
 
 fn scheduler_abort_double_panic() {

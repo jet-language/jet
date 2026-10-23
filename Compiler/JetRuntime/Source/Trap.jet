@@ -245,6 +245,20 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
     trap_footer(code)
 }
 
+// trap_simple's report without a file, for the whole process: no task stop
+// and no root capture (Scheduler.jet scheduler_start_failed), exit 70. Served
+// comptime code reports it to the compiler as a panic message.
+fn trap_process_stop(code: I64, message: I64, message_len: I64) {
+    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    trap_defect_prepare()
+    trap_header_bytes(code)
+    trap_write(message, message_len)
+    trap_msg_message_end()
+    trap_context(I64{0}, I64{0}, trap_line(I64{0}), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_footer_bytes(code)
+    trap_defect_exit(I64{70})
+}
+
 #Export(c) fn jet_rt_numeric_stop(file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     trap_simple(I64{1}, file, file_len, line, message, message_len)
 }
