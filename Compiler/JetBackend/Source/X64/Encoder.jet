@@ -219,6 +219,16 @@ fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_modrm_mem(&code, src, base, disp)
 }
 
+// lock inc / lock dec qword [base + disp] (F0 REX.W FF /0, /1): one atomic
+// step of a count word. ZF is set when the result is zero; OF is set when an
+// inc wraps past the largest value.
+fn x64_lock_step(code: &[U8], base: Int, disp: Int, increment: Bool) Never! {
+    x64_byte(&code, 0xf0)
+    x64_rex(&code, true, 0, base)
+    x64_byte(&code, 0xff)
+    x64_modrm_mem(&code, if increment -> 0 else -> 1, base, disp)
+}
+
 // Loads zero-extend into the full register: movzx (REX.W 0F B6/B7 /r) for
 // one and two bytes, mov r32 (8B /r) for four, mov r64 (REX.W 8B /r) for eight.
 fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {

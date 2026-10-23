@@ -83,6 +83,7 @@ use jet_backend.[
     x64_lea_rip,
     x64_load,
     x64_load_indexed,
+    x64_lock_step,
     x64_mov_ri,
     x64_mov_rr,
     x64_movzx_r8,
@@ -121,6 +122,8 @@ enum IRX64ColdKind {
     Stop
     // jet_rt_fixed_shift_stop(direction, count, unsigned, width, path, path length, line).
     ShiftStop
+    // The runtime call of CallRuntime instruction `left`, as written, then back.
+    Call
 }
 
 struct IRX64Cold {
@@ -534,7 +537,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 ir_x64_operand(&e, m, f, al, cold.right, cold.right_imm, X64_RSI)
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: cold.symbol}})
-                ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
+                if cold.dst >= 0 -> ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
                 ir_x64_jump_to(&e, cold.resume)
             }
             .LocatedRoute -> {
@@ -610,6 +613,11 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 target :: ir_x64_stop_target(e, cold, exit)
                 if target != exit -> x64_alu_ri(&e.code, X64Alu.Add, X64_RSP, 16)
                 ir_x64_stop_resume(&e, m, target)
+            }
+            .Call -> {
+                at :: cold.left
+                ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
+                ir_x64_jump_to(&e, cold.resume)
             }
         }
     }
@@ -789,6 +797,51 @@ fn ir_x64_inline_route(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     &e.colds.push(cold)
 }
 
+// jet_int_checked_fixed(value, kind, path, path length, line) of a constant
+// kind (OptRange ir_range_fixed_kind: 0..3 the signed 8..64-bit integers,
+// 4..7 the unsigned ones). An inline value inside the kind's range is its own
+// word, so only a big or out-of-range one takes the call, in a slow path, which
+// stops as before. False when the call is not of that shape.
+fn ir_x64_checked_fixed(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String) -> Bool Never! {
+    dst :: f.dst[at]
+    if f.c[at] != 5 || dst < 0 || ir_x64_slot_class(m, f, dst) != .General -> return false
+    value :: f.args[f.b[at]]
+    kind_slot :: f.args[f.b[at] + 1]
+    if kind_slot < 0 || !al.consts[kind_slot] || ir_x64_slot_class(m, f, value) != .General -> return false
+    kind :: al.values[kind_slot]
+    if kind < 0 || kind > 7 -> return false
+    sites := [Int]{}
+    reg :: ir_x64_use(&e, m, f, al, value, X64_RAX)
+    ir_x64_operand_test(&e, al, value, reg, &sites)
+    if kind == {
+        0 | 1 | 2 | 6 -> {
+            // In range when narrowing to the width and widening back keeps it.
+            x64_mov_rr(&e.code, X64_RDX, reg)
+            ir_x64_narrow(&e, X64_RDX, kind != 6, if kind == 6 -> 32 else -> 8 << kind)
+            x64_alu_rr(&e.code, X64Alu.Cmp, X64_RDX, reg)
+            &sites.push(x64_jcc_rel32(&e.code, X64Cond.NE))
+        }
+        4 | 5 -> {
+            // Unsigned above the bound covers a negative value too.
+            x64_alu_ri(&e.code, X64Alu.Cmp, reg, if kind == 4 -> 255 else -> 65535)
+            &sites.push(x64_jcc_rel32(&e.code, X64Cond.A))
+        }
+        7 -> {
+            x64_test_rr(&e.code, reg, reg)
+            &sites.push(x64_jcc_rel32(&e.code, X64Cond.S))
+        }
+        else -> {}
+    }
+    ir_x64_store(&e, m, f, al, dst, reg)
+    if sites.is_empty() -> return true
+    cold := ir_x64_cold(IRX64ColdKind.Call, sites)
+    cold.resume = e.code.len()
+    cold.symbol = symbol
+    cold.left = at
+    &e.colds.push(cold)
+    true
+}
+
 // jet_rt_block_unique(block) inline (Refcount.jet): the count word 24
 // bytes before the payload is 1. The Bool is fused into a following branch
 // like a comparison's.
@@ -797,6 +850,107 @@ fn ir_x64_block_unique(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     x64_load(&e.code, X64_RCX, X64_RAX, -24)
     x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 1)
     ir_x64_compare_result(&e, m, f, al, at, X64Cond.E)
+}
+
+// jet_rt_block_retain(block) inline (Refcount.jet): one `lock inc` of the
+// count word 24 bytes before the payload, none for an immortal (negative)
+// count. A count that passes the largest value stops as the routine does.
+fn ir_x64_block_retain(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, block: Int) Never! {
+    reg :: ir_x64_use(&e, m, f, al, block, X64_RAX)
+    x64_load(&e.code, X64_RCX, reg, -24)
+    x64_test_rr(&e.code, X64_RCX, X64_RCX)
+    immortal :: x64_jcc_rel32(&e.code, X64Cond.S)
+    x64_lock_step(&e.code, reg, -24, true)
+    overflow :: x64_jcc_rel32(&e.code, X64Cond.O)
+    ir_x64_land(&e, immortal)
+    ir_x64_overflow_trap(&e, overflow)
+}
+
+// jet_rt_block_release(block) inline: true when the caller's reference was
+// the last one. A count of 1 is the caller's alone (no other owner can
+// retain it meanwhile), so it is true without a write; an immortal count is
+// false; any other takes one `lock dec`, true when it reaches zero. The
+// Bool is fused into a following branch like jet_rt_block_unique's.
+fn ir_x64_block_release(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, block: Int) Never! {
+    reg :: ir_x64_use(&e, m, f, al, block, X64_RAX)
+    x64_load(&e.code, X64_RCX, reg, -24)
+    x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 1)
+    // ZF set: true.
+    last :: x64_jcc_rel32(&e.code, X64Cond.E)
+    x64_test_rr(&e.code, X64_RCX, X64_RCX)
+    // A negative count leaves ZF clear: false.
+    immortal :: x64_jcc_rel32(&e.code, X64Cond.S)
+    x64_lock_step(&e.code, reg, -24, false)
+    ir_x64_land(&e, last)
+    ir_x64_land(&e, immortal)
+    ir_x64_compare_result(&e, m, f, al, at, X64Cond.E)
+}
+
+// jet_rt_string_clone(src) inline (Text.jet): a header with a buffer (a
+// nonzero capacity word at +16, so no static text) whose count (the word 8
+// bytes before it) is not immortal gains one owner by one `lock inc`. Any
+// other header calls the routine in a slow path. A count that passes the
+// largest value stops as the routine does.
+fn ir_x64_string_clone(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, src: Int, dst: Int) Never! {
+    sites := [Int]{}
+    reg :: ir_x64_use(&e, m, f, al, src, X64_RAX)
+    x64_load(&e.code, X64_RCX, reg, 16)
+    x64_test_rr(&e.code, X64_RCX, X64_RCX)
+    &sites.push(x64_jcc_rel32(&e.code, X64Cond.E))
+    x64_load(&e.code, X64_RCX, reg, -8)
+    x64_test_rr(&e.code, X64_RCX, X64_RCX)
+    &sites.push(x64_jcc_rel32(&e.code, X64Cond.S))
+    // The clone is the same header: stored before the step, so a stop
+    // after an overflowing one leaves it set as the routine does.
+    ir_x64_store(&e, m, f, al, dst, reg)
+    x64_lock_step(&e.code, reg, -8, true)
+    overflow :: x64_jcc_rel32(&e.code, X64Cond.O)
+    slow := ir_x64_cold(IRX64ColdKind.Route, sites)
+    slow.resume = e.code.len()
+    slow.symbol = "jet_rt_string_clone"
+    slow.left = src
+    slow.dst = dst
+    &e.colds.push(slow)
+    ir_x64_overflow_trap(&e, overflow)
+}
+
+// jet_rt_string_drop(slot) inline: a header with a buffer and a count above
+// 1 loses one owner by one `lock dec`; a null header is left alone. The
+// last owner (a count of 1) and a header without a buffer call the routine,
+// which frees or leaves a static text. A `lock dec` that reaches zero
+// because another owner dropped meanwhile takes the count back to 1 (no
+// other owner is left to see it) and calls the routine too.
+fn ir_x64_string_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, slot: Int) Never! {
+    sites := [Int]{}
+    done := [Int]{}
+    reg :: ir_x64_use(&e, m, f, al, slot, X64_RAX)
+    x64_test_rr(&e.code, reg, reg)
+    &done.push(x64_jcc_rel32(&e.code, X64Cond.E))
+    x64_load(&e.code, X64_RCX, reg, 16)
+    x64_test_rr(&e.code, X64_RCX, X64_RCX)
+    &sites.push(x64_jcc_rel32(&e.code, X64Cond.E))
+    x64_load(&e.code, X64_RCX, reg, -8)
+    x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 1)
+    &sites.push(x64_jcc_rel32(&e.code, X64Cond.LE))
+    x64_lock_step(&e.code, reg, -8, false)
+    &done.push(x64_jcc_rel32(&e.code, X64Cond.NE))
+    x64_lock_step(&e.code, reg, -8, true)
+    &sites.push(x64_jmp_rel32(&e.code))
+    loop site in done -> ir_x64_land(&e, site)
+    slow := ir_x64_cold(IRX64ColdKind.Route, sites)
+    slow.resume = e.code.len()
+    slow.symbol = "jet_rt_string_drop"
+    slow.left = slot
+    &e.colds.push(slow)
+}
+
+// A slow path from `site` that stops with the count overflow
+// (jet_rt_panic_overflow), then comes back.
+fn ir_x64_overflow_trap(e: &IRX64Emitter, site: Int) Never! {
+    trap := ir_x64_cold(IRX64ColdKind.Route, [Int]{site})
+    trap.resume = e.code.len()
+    trap.symbol = "jet_rt_panic_overflow"
+    &e.colds.push(trap)
 }
 
 // Exact Int `value << count` / `value >> count` (Int.jet jet_int_shl/shr):
@@ -1332,9 +1486,7 @@ fn ir_x64_transfer(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloca
             ir_x64_int_route(&e, "jet_rt_int_clone", X64_RAX)
             return ir_x64_store(&e, m, f, al, dst, X64_RAX)
         }
-        if ty.kind == .String {
-            return ir_x64_helper(&e, m, f, al, "jet_rt_string_clone", [IRX64Arg]{IRX64Arg.Slot{slot: src}}, dst)
-        }
+        if ty.kind == .String -> return ir_x64_string_clone(&e, m, f, al, src, dst)
         return ir_x64_fail(&e, f, at, "Copy of {ir_kind_name(ty.kind)} with drop {drop} has no clone route")
     }
     if src == dst -> return
@@ -1356,6 +1508,7 @@ fn ir_x64_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
         reg :: ir_x64_use(&e, m, f, al, slot, X64_RAX)
         return ir_x64_int_route(&e, drop, reg)
     }
+    if ty.kind == .String && drop == "jet_rt_string_drop" -> return ir_x64_string_drop(&e, m, f, al, slot)
     // A drop routine the module builds itself (the ScopeGuard drop) is
     // registered under its symbol.
     if m.function_rows.get(drop) == .Val(id) -> return ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
@@ -1587,6 +1740,9 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             if {
                 leaf && (symbol == "jet_int_owned_to_i64" || symbol == "jet_rt_int_clone") -> ir_x64_inline_route(&e, m, f, al, symbol, f.args[f.b[at]], dst)
                 leaf && symbol == "jet_rt_block_unique" -> ir_x64_block_unique(&e, m, f, al, at, f.args[f.b[at]])
+                leaf && symbol == "jet_rt_block_release" -> ir_x64_block_release(&e, m, f, al, at, f.args[f.b[at]])
+                f.c[at] == 1 && dst < 0 && symbol == "jet_rt_block_retain" -> ir_x64_block_retain(&e, m, f, al, f.args[f.b[at]])
+                symbol == "jet_int_checked_fixed" && ir_x64_checked_fixed(&e, m, f, al, at, symbol) -> {}
                 else -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
             }
         }
