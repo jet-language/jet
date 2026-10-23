@@ -178,11 +178,9 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
             ir_opt_wave_inline(inputs, wave, &report)
             next
         }
-        store :: shared IROptStore{work: ir_opt_wave_take(inputs, wave), done: [[IRFunction]]{}, order: compiler_threads_heaviest_first(wave_weights), next: 0}
-        ir_opt_store_open(store, wave.len())
-        part :: ir_opt_claimers(inputs, store, workers) ?? panic("the IR optimizing threads failed")
-        ir_opt_report_add(&report, part)
-        ir_opt_wave_put(inputs, store, wave)
+        claims :: shared IROptClaims{cells: ir_opt_wave_take(inputs, wave), order: compiler_threads_heaviest_first(wave_weights), next: 0}
+        parts := ir_opt_claimers(inputs, claims, workers) ?? panic("the IR optimizing threads failed")
+        ir_opt_wave_put(inputs, wave, &parts, &report)
     }
     back := ir_opt_take_inputs(inputs)
     view_back := &back.views.pop() ?? panic("the IR optimizer lost the module's type rows")
@@ -423,15 +421,31 @@ fn ir_opt_call_sites(bodies: [[IRFunction]]) -> [Int] Never! {
     sites
 }
 
-// A wave's bodies (`work[k]` the wave's k-th function, empty once claimed),
-// their optimized bodies by the same position, the positions in claim order
-// (compiler_threads_heaviest_first: a heavy body starts while light ones
-// remain to fill the threads' tails), and the next rank to claim.
-struct IROptStore {
-    work: [[IRFunction]]
-    done: [[IRFunction]]
+// A threaded wave's claim state, read-only while its threads run: per
+// position of the wave its body, in a cell of its own (the one thread that
+// claims a position takes the body without contending with the others),
+// the positions in claim order (compiler_threads_heaviest_first: a heavy
+// body starts while light ones remain to fill the threads' tails), and the
+// next rank, which a thread takes with one atomic add.
+struct IROptClaims {
+    cells: [Shared<IROptCell>]
     order: [Int]
-    next: Int
+    next: Atomic<Int>
+}
+
+struct IROptCell {
+    body: [IRFunction]
+}
+
+// A thread's optimized bodies, each with its wave position, and its report.
+struct IROptClaimed {
+    done: [IROptDone]
+    report: IROptReport
+}
+
+struct IROptDone {
+    at: Int
+    body: IRFunction
 }
 
 // A wave on the calling thread: each body out of its row, through its passes, back.
@@ -444,82 +458,69 @@ fn ir_opt_wave_inline(inputs: Shared<IROptInputs>, wave: [Int], report: &IROptRe
     }
 }
 
-// The wave's bodies move out of their rows, in wave order.
-fn ir_opt_wave_take(inputs: Shared<IROptInputs>, wave: [Int]) -> [[IRFunction]] {
+// The wave's bodies move out of their rows into cells, in wave order.
+fn ir_opt_wave_take(inputs: Shared<IROptInputs>, wave: [Int]) -> [Shared<IROptCell>] {
     permit := inputs.guard_edit()
-    work := [[IRFunction]]{}
+    cells := [Shared<IROptCell>]{}
     loop id in wave {
         body := &permit.value.bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
-        &work.push([IRFunction]{^body})
+        &cells.push(shared IROptCell{body: [IRFunction]{^body}})
     }
-    work
+    cells
 }
 
-fn ir_opt_store_open(store: Shared<IROptStore>, count: Int) {
-    permit := store.guard_edit()
-    loop _ in 0..<count -> &permit.value.done.push([IRFunction]{})
-}
-
-// The optimized bodies move back into their rows.
-fn ir_opt_wave_put(inputs: Shared<IROptInputs>, store: Shared<IROptStore>, wave: [Int]) {
-    results := store.guard_edit()
+// The optimized bodies move back into their rows, each by its wave
+// position; the threads' reports add into `report`.
+fn ir_opt_wave_put(inputs: Shared<IROptInputs>, wave: [Int], parts: &[IROptClaimed], report: &IROptReport) {
     permit := inputs.guard_edit()
-    loop (k, id) in wave {
-        body := &results.value.done[k].pop() ?? panic("the IR optimizer lost the body of function {id}")
-        &permit.value.bodies[id].push(^body)
+    loop part in 0..<parts.len() {
+        ir_opt_report_add(&report, parts[part].report)
+        loop parts[part].done.len() > 0 {
+            done := &parts[part].done.pop() ?? { break }
+            &permit.value.bodies[wave[done.at]].push(^done.body)
+        }
     }
 }
 
-// Runs `tasks` optimizing threads, one task each; returns their reports' sum.
-fn ir_opt_claimers(inputs: Shared<IROptInputs>, store: Shared<IROptStore>, tasks: Int) -> IROptReport {
-    if tasks <= 0 -> return ir_opt_report(0)
-    total := ir_opt_report(0)
+// Runs `tasks` optimizing threads, one task each; returns what each optimized.
+fn ir_opt_claimers(inputs: Shared<IROptInputs>, claims: Shared<IROptClaims>, tasks: Int) -> [IROptClaimed] {
+    if tasks <= 0 -> return [IROptClaimed]{}
+    parts := [IROptClaimed]{}
     task.group ir_opt_threads {
-        head :: task ir_opt_claimed(inputs, store)
-        rest :: ir_opt_claimers(inputs, store, tasks - 1)
-        ir_opt_report_add(&total, rest)
-        part :: head.join() ?? ir_opt_stopped(err)
-        ir_opt_report_add(&total, part)
+        head :: task ir_opt_claimed(inputs, claims)
+        parts = ir_opt_claimers(inputs, claims, tasks - 1)
+        part := head.join() ?? ir_opt_stopped(err)
+        &parts.push(^part)
     }
-    total
+    parts
 }
 
 // A stopped optimizing thread: its panic text, re-raised unchanged.
-fn ir_opt_stopped(failure: TaskFailure) -> IROptReport Never! {
+fn ir_opt_stopped(failure: TaskFailure) -> IROptClaimed Never! {
     panic(compiler_threads_failure_text(failure))
 }
 
-// One thread: claims the wave's next body and optimizes it until none is left.
-fn ir_opt_claimed(inputs: Shared<IROptInputs>, store: Shared<IROptStore>) -> IROptReport {
+// One thread: claims the wave's next position and optimizes its body until
+// none is left, keeping each result with its position until the join.
+fn ir_opt_claimed(inputs: Shared<IROptInputs>, claims: Shared<IROptClaims>) -> IROptClaimed {
     reads :: inputs.guard_read()
-    report := ir_opt_report(0)
+    ranks :: claims.guard_read()
+    claimed := IROptClaimed{done: [IROptDone]{}, report: ir_opt_report(0)}
     loop {
-        claimed := ir_opt_claim(store)
-        body := &claimed.body.pop() ?? { break }
-        optimized := ir_opt_function(reads.value.views[0], reads.value.bodies, reads.value.keys, ^body, reads.value.recursive, reads.value.sites, reads.value.options, &report)
-        ir_opt_settle(store, claimed.at, ^optimized)
+        rank :: ranks.value.next.add(1)
+        if rank >= ranks.value.order.len() -> break
+        at :: ranks.value.order[rank]
+        body := ir_opt_cell_take(ranks.value.cells[at])
+        optimized := ir_opt_function(reads.value.views[0], reads.value.bodies, reads.value.keys, ^body, reads.value.recursive, reads.value.sites, reads.value.options, &claimed.report)
+        &claimed.done.push(IROptDone{at: at, body: ^optimized})
     }
-    report
+    claimed
 }
 
-// A claimed position of the wave and its body (empty: nothing left).
-struct IROptClaim {
-    at: Int
-    body: [IRFunction]
-}
-
-fn ir_opt_claim(store: Shared<IROptStore>) -> IROptClaim {
-    permit := store.guard_edit()
-    rank :: permit.value.next
-    if rank >= permit.value.order.len() -> return IROptClaim{at: -1, body: [IRFunction]{}}
-    permit.value.next = rank + 1
-    at :: permit.value.order[rank]
-    IROptClaim{at: at, body: compiler_take_rows<IRFunction>(&permit.value.work[at])}
-}
-
-fn ir_opt_settle(store: Shared<IROptStore>, at: Int, optimized: ^IRFunction) {
-    permit := store.guard_edit()
-    &permit.value.done[at].push(^optimized)
+fn ir_opt_cell_take(cell: Shared<IROptCell>) -> IRFunction {
+    held := cell.guard_edit()
+    body := &held.value.body.pop() ?? panic("the IR optimizer claimed a wave position twice")
+    ^body
 }
 
 fn ir_opt_take_inputs(inputs: Shared<IROptInputs>) -> IROptInputs {

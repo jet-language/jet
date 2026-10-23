@@ -55,8 +55,9 @@ struct IRWaveWorker {
     built: [IRWaveBuilt]
 }
 
-// The next claimable position.
-struct IRWaveQueue { next: Int }
+// The next claimable rank: a claiming part takes a read guard once and
+// claims rank after rank with one atomic add.
+struct IRWaveQueue { next: Atomic<Int> }
 
 // The wave build state: every job in job order; the index of a plain
 // function's job (no type arguments, not a lambda: its key is its checked
@@ -284,12 +285,13 @@ fn ir_wave_stopped(failure: TaskFailure) -> Int Never! {
 fn ir_wave_worker(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, queue: Shared<IRWaveQueue>, part: Int, claims: Bool) -> Int {
     reads :: inputs.guard_read()
     held := slot.guard_edit()
+    ranks :: queue.guard_read()
     pinned :: reads.value.pinned[part].copy()
     pin := 0
     built := 0
     loop claims {
-        claimed :: ir_wave_claim(queue, reads.value.free.len())
-        if claimed < 0 -> break
+        claimed :: ranks.value.next.add(1)
+        if claimed >= reads.value.free.len() -> break
         position :: reads.value.free[claimed]
         loop pin < pinned.len() && pinned[pin] < position {
             ir_wave_build(&held.value, reads.value, part, pinned[pin])
@@ -305,15 +307,6 @@ fn ir_wave_worker(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, queu
         built += 1
     }
     built
-}
-
-// The next claimable position's index in `free`, or -1 when none is left.
-fn ir_wave_claim(queue: Shared<IRWaveQueue>, count: Int) -> Int {
-    permit := queue.guard_edit()
-    rank :: permit.value.next
-    if rank >= count -> return -1
-    permit.value.next = rank + 1
-    rank
 }
 
 fn ir_wave_build(worker: &IRWaveWorker, inputs: IRWaveInputs, part: Int, position: Int) Never! {

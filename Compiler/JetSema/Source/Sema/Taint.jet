@@ -1573,9 +1573,10 @@ struct SemaTaintShared {
     order: [Int]
 }
 
-// The next unclaimed rank of the walk.
+// The next unclaimed rank of the walk, taken with one atomic add under a
+// read guard each thread holds for its run.
 struct SemaTaintQueue {
-    next: Int
+    next: Atomic<Int>
 }
 
 // One walked module's reports.
@@ -1617,8 +1618,9 @@ fn sema_taint_walk_claimed(shared_state: Shared<SemaTaintShared>, queue: Shared<
     inputs :: shared_state.guard_read()
     state := SemaTaintFlowState{catalog: inputs.value.catalogs[0].copy(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, existing_diagnostics: inputs.value.existing[0].copy()}
     claimed := [SemaTaintWalked]{}
+    ranks :: queue.guard_read()
     loop {
-        rank :: sema_taint_claim_rank(queue)
+        rank :: ranks.value.next.add(1)
         if rank >= inputs.value.order.len() -> break
         module_index :: inputs.value.order[rank]
         found := [Diagnostic]{}
@@ -1627,13 +1629,6 @@ fn sema_taint_walk_claimed(shared_state: Shared<SemaTaintShared>, queue: Shared<
         &claimed.push(SemaTaintWalked{module_index: module_index, found: ^found})
     }
     claimed
-}
-
-fn sema_taint_claim_rank(queue: Shared<SemaTaintQueue>) -> Int {
-    permit :: queue.guard_edit()
-    rank :: permit.value.next
-    permit.value.next = rank + 1
-    rank
 }
 
 fn sema_taint_has_diagnostic(diagnostics: [Diagnostic], candidate: Diagnostic) -> Bool Never! {

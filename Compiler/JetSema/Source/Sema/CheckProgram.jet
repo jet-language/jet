@@ -3756,8 +3756,9 @@ fn sema_pass_facts_claimers(shared_state: Shared<SemaPassFactsShared>, queue: Sh
 fn sema_pass_facts_claimed(shared_state: Shared<SemaPassFactsShared>, queue: Shared<SemaFinalizeCoreQueue>, jobs: Int) -> [SemaPassFact] Never! {
     inputs :: shared_state.guard_read()
     claimed := [SemaPassFact]{}
+    ranks :: queue.guard_read()
     loop {
-        rank :: sema_finalize_core_claim(queue)
+        rank :: sema_finalize_core_claim(ranks.value)
         if rank >= jobs -> break
         job :: jobs - 1 - rank
         fact := SemaPassFact{job: job, facts: sema_pass_facts_new()}
@@ -4058,9 +4059,9 @@ struct SemaBodyPlan {
     module_indexes: [Int]{[Int]{}}
 }
 
-// The next unclaimed rank of a parallel body pass.
+// The next unclaimed rank of a parallel body pass, taken with one atomic add.
 struct SemaBodyQueue {
-    next: Int
+    next: Atomic<Int>
 }
 
 // One claimed job: its position in the plan's job list, or -1 when every job
@@ -4222,9 +4223,11 @@ fn sema_check_prepare_method_body(job: SemaBodyJob, module_index: Int, memory_pl
 // packet publication are unchanged.
 fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: &SemaBodyPart, plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>, module_index: Int) -> Int {
     wanted :: shared SemaHostHookWanted{wanted: false}
+    jobs :: plan.guard_read()
+    ranks :: queue.guard_read()
     checked_count := 0
     loop {
-        claim :: sema_check_body_claim(plan, queue)
+        claim :: sema_check_body_claim(jobs.value, ranks.value)
         if claim.position < 0 -> break
         checked_count += sema_check_body_claimed(environment, program, memory_plan, &part, claim, module_index, wanted)
     }
@@ -4240,10 +4243,12 @@ fn sema_check_body_wave_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaB
     inputs :: shared.guard_read()
     permit := slot.guard_edit()
     wanted :: shared SemaHostHookWanted{wanted: false}
+    jobs :: plan.guard_read()
+    ranks :: queue.guard_read()
     checked_count := 0
     current := -1
     loop {
-        claim :: sema_check_body_claim(plan, queue)
+        claim :: sema_check_body_claim(jobs.value, ranks.value)
         if claim.position < 0 -> break
         if claim.wave_module != current {
             current = claim.wave_module
@@ -4305,23 +4310,16 @@ fn sema_check_body_claimed(environment: SemaScopeEnvironment, program: SemaProgr
     0
 }
 
-// Claims the next rank of `queue` and reads its job from `plan`; position -1
-// once every job is claimed.
-fn sema_check_body_claim(plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>) -> SemaBodyClaim {
-    rank :: sema_check_body_claim_rank(queue)
-    inputs :: plan.guard_read()
-    if rank >= inputs.value.order.len() -> return SemaBodyClaim{position: -1, job: SemaBodyJob.TopLevel{item_index: -1}, replay: false, observe: false, wave_module: -1, module_index: -1}
-    position :: inputs.value.order[rank]
-    wave_module :: if inputs.value.modules.len() > position -> inputs.value.modules[position] else -> -1
-    module_index :: if wave_module >= 0 -> inputs.value.module_indexes[wave_module] else -> -1
-    SemaBodyClaim{position: position, job: inputs.value.jobs[position], replay: inputs.value.replay.len() > position && inputs.value.replay[position], observe: inputs.value.observe, wave_module: wave_module, module_index: module_index}
-}
-
-fn sema_check_body_claim_rank(queue: Shared<SemaBodyQueue>) -> Int {
-    permit :: queue.guard_edit()
-    rank :: permit.value.next
-    permit.value.next = rank + 1
-    rank
+// Claims the next rank of `queue` (one atomic add) and reads its job from
+// `plan`; position -1 once every job is claimed. A thread holds read guards
+// on both for its whole run, so claiming takes no lock.
+fn sema_check_body_claim(plan: SemaBodyPlan, queue: SemaBodyQueue) -> SemaBodyClaim {
+    rank :: queue.next.add(1)
+    if rank >= plan.order.len() -> return SemaBodyClaim{position: -1, job: SemaBodyJob.TopLevel{item_index: -1}, replay: false, observe: false, wave_module: -1, module_index: -1}
+    position :: plan.order[rank]
+    wave_module :: if plan.modules.len() > position -> plan.modules[position] else -> -1
+    module_index :: if wave_module >= 0 -> plan.module_indexes[wave_module] else -> -1
+    SemaBodyClaim{position: position, job: plan.jobs[position], replay: plan.replay.len() > position && plan.replay[position], observe: plan.observe, wave_module: wave_module, module_index: module_index}
 }
 
 // The span of the top-level function item `item_index`, when it is one.
@@ -5287,9 +5285,9 @@ struct SemaNameShared {
     bounds: [Int]
 }
 
-// The next unclaimed part of the name collection.
+// The next unclaimed part of the name collection, taken with one atomic add.
 struct SemaNameQueue {
-    next: Int
+    next: Atomic<Int>
 }
 
 // One collected part: its number and its facts.
@@ -5337,20 +5335,14 @@ fn sema_name_part_builders(shared_state: Shared<SemaNameShared>, queue: Shared<S
 fn sema_name_parts_claimed(shared_state: Shared<SemaNameShared>, queue: Shared<SemaNameQueue>) -> [SemaNamePart] {
     inputs :: shared_state.guard_read()
     claimed := [SemaNamePart]{}
+    ranks :: queue.guard_read()
     loop {
-        part :: sema_name_claim_part(queue)
+        part :: ranks.value.next.add(1)
         if part >= inputs.value.bounds.len() - 1 -> break
         // Passed straight through: a local binding of a guarded row would copy it.
         &claimed.push(SemaNamePart{part: part, facts: sema_name_part_facts(inputs.value.graphs[0], inputs.value.modules, inputs.value.owner_names[0], inputs.value.symbol_indexes[0], inputs.value.bounds[part], inputs.value.bounds[part + 1])})
     }
     claimed
-}
-
-fn sema_name_claim_part(queue: Shared<SemaNameQueue>) -> Int {
-    permit :: queue.guard_edit()
-    part :: permit.value.next
-    permit.value.next = part + 1
-    part
 }
 
 // The structure facts the registration graph alone proves: one resolved
@@ -6066,12 +6058,13 @@ struct SemaPrecheckShared {
 }
 
 // A precheck wave's jobs (sema_comptime_precheck_wave) in claim order:
-// `order[rank]` is the job claimed at `rank`, `next` the next unclaimed rank.
+// `order[rank]` is the job claimed at `rank`, `next` the next unclaimed rank,
+// taken with one atomic add under a read guard each thread holds for its run.
 struct SemaPrecheckPlan {
     positions: [Int]
     modules: [Int]
     order: [Int]
-    next: Int
+    next: Atomic<Int>
 }
 
 // One claimed precheck job: its source position and entered wave module;
@@ -6196,12 +6189,13 @@ fn sema_comptime_precheck_claimers(shared_state: Shared<SemaPrecheckShared>, pla
 // previous job's; host callbacks are withheld.
 fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>) -> [SemaPrecheckDone] {
     inputs :: shared_state.guard_read()
+    jobs :: plan.guard_read()
     wanted :: shared SemaHostHookWanted{wanted: false}
     probe := sema_comptime_probe_init(None)
     current := -1
     claimed := [SemaPrecheckDone]{}
     loop {
-        claim :: sema_comptime_precheck_claim(plan)
+        claim :: sema_comptime_precheck_claim(jobs.value)
         if claim.position < 0 -> break
         if claim.wave_module != current {
             current = claim.wave_module
@@ -6219,13 +6213,11 @@ fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, plan
     claimed
 }
 
-fn sema_comptime_precheck_claim(plan: Shared<SemaPrecheckPlan>) -> SemaPrecheckClaim {
-    permit :: plan.guard_edit()
-    rank :: permit.value.next
-    if rank >= permit.value.order.len() -> return SemaPrecheckClaim{position: -1, wave_module: -1}
-    permit.value.next = rank + 1
-    job :: permit.value.order[rank]
-    SemaPrecheckClaim{position: permit.value.positions[job], wave_module: permit.value.modules[job]}
+fn sema_comptime_precheck_claim(plan: SemaPrecheckPlan) -> SemaPrecheckClaim {
+    rank :: plan.next.add(1)
+    if rank >= plan.order.len() -> return SemaPrecheckClaim{position: -1, wave_module: -1}
+    job :: plan.order[rank]
+    SemaPrecheckClaim{position: plan.positions[job], wave_module: plan.modules[job]}
 }
 
 // The constants `references` name that have no compile-time value yet. A
@@ -6872,10 +6864,11 @@ struct SemaDeclarationInputs {
 }
 
 // The module positions in claim order: `order[rank]` is the position claimed
-// at `rank`, `next` the next unclaimed rank.
+// at `rank`, `next` the next unclaimed rank, taken with one atomic add under
+// a read guard each thread holds for its run.
 struct SemaDeclarationPlan {
     order: [Int]
-    next: Int
+    next: Atomic<Int>
 }
 
 // Runs claiming threads `from..<workers`, one task each, and moves every
@@ -6899,8 +6892,9 @@ fn sema_check_declaration_claimed(shared_state: Shared<SemaCheckShared>, inputs:
     tables :: shared_state.guard_read()
     rows :: inputs.guard_read()
     claimed := [SemaDeclarationCheck]{}
+    ranks :: plan.guard_read()
     loop {
-        position :: sema_check_declaration_claim(plan)
+        position :: sema_check_declaration_claim(ranks.value)
         if position < 0 -> break
         // Passed straight through: a local binding of a guarded row would copy it.
         &claimed.push(sema_check_declaration_module(tables.value.environments[0], tables.value.programs[0], rows.value.modules[position], position, rows.value.values, rows.value.foreign))
@@ -6908,12 +6902,10 @@ fn sema_check_declaration_claimed(shared_state: Shared<SemaCheckShared>, inputs:
     claimed
 }
 
-fn sema_check_declaration_claim(plan: Shared<SemaDeclarationPlan>) -> Int {
-    permit :: plan.guard_edit()
-    rank :: permit.value.next
-    if rank >= permit.value.order.len() -> return -1
-    permit.value.next = rank + 1
-    permit.value.order[rank]
+fn sema_check_declaration_claim(plan: SemaDeclarationPlan) -> Int {
+    rank :: plan.next.add(1)
+    if rank >= plan.order.len() -> return -1
+    plan.order[rank]
 }
 
 // The rows sema_comptime_modules_with_values adds for the values at `from`
@@ -8393,9 +8385,10 @@ struct SemaFinalizeCoreShared {
     exact_int: [Bool]
 }
 
-// The next unclaimed job.
+// The next unclaimed job, taken with one atomic add under a read guard each
+// thread holds for its run.
 struct SemaFinalizeCoreQueue {
-    next: Int
+    next: Atomic<Int>
 }
 
 // One job's rows, walked by one thread, or the module's assembled usage when
@@ -8440,8 +8433,9 @@ fn sema_finalize_core_claimers(shared_state: Shared<SemaFinalizeCoreShared>, que
 fn sema_finalize_core_claimed(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaFinalizeCoreCollected] {
     inputs :: shared_state.guard_read()
     claimed := [SemaFinalizeCoreCollected]{}
+    ranks :: queue.guard_read()
     loop {
-        job :: sema_finalize_core_claim(queue)
+        job :: sema_finalize_core_claim(ranks.value)
         if job >= inputs.value.jobs.len() -> break
         module_index :: inputs.value.jobs[job].module_index
         collected := sema_core_collected_empty()
@@ -8456,11 +8450,8 @@ fn sema_finalize_core_claimed(shared_state: Shared<SemaFinalizeCoreShared>, queu
     claimed
 }
 
-fn sema_finalize_core_claim(queue: Shared<SemaFinalizeCoreQueue>) -> Int {
-    permit :: queue.guard_edit()
-    index :: permit.value.next
-    permit.value.next = index + 1
-    index
+fn sema_finalize_core_claim(queue: SemaFinalizeCoreQueue) -> Int {
+    queue.next.add(1)
 }
 
 // The finalization's read-only checks before the effect pass: each reads
@@ -8607,8 +8598,9 @@ fn sema_finalize_side_claimers(shared_state: Shared<SemaFinalizeSideShared>, que
 fn sema_finalize_side_claimed(shared_state: Shared<SemaFinalizeSideShared>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaFinalizeSide] {
     inputs :: shared_state.guard_read()
     claimed := [SemaFinalizeSide]{}
+    ranks :: queue.guard_read()
     loop {
-        rank :: sema_finalize_core_claim(queue)
+        rank :: sema_finalize_core_claim(ranks.value)
         if rank >= SEMA_FINALIZE_SIDE_JOBS -> break
         // Passed straight through: a local binding of a guarded row would copy it.
         &claimed.push(sema_finalize_side_run(SEMA_FINALIZE_SIDE_JOBS - 1 - rank, inputs.value.graphs[0], inputs.value.modules))

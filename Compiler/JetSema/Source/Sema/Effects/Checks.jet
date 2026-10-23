@@ -2539,9 +2539,10 @@ struct SemaEffectCollectShared {
     any_unsafe: Bool
 }
 
-// The next unclaimed part of the collection.
+// The next unclaimed part of the collection, taken with one atomic add under
+// a read guard each thread holds for its run.
 struct SemaEffectCollectQueue {
-    next: Int
+    next: Atomic<Int>
 }
 
 // One function's reports, not yet located.
@@ -2616,8 +2617,9 @@ fn sema_effect_collect_claimers(shared_state: Shared<SemaEffectCollectShared>, b
 fn sema_effect_collect_claimed(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
     inputs :: shared_state.guard_read()
     claimed := [SemaEffectCollectedPart]{}
+    ranks :: queue.guard_read()
     loop {
-        part :: sema_effect_collect_claim(queue)
+        part :: ranks.value.next.add(1)
         if part >= bounds.len() - 1 -> break
         collected := [SemaEffectCollected]{}
         loop unit in bounds[part]..<bounds[part + 1] {
@@ -2641,13 +2643,6 @@ fn sema_effect_collect_claimed(shared_state: Shared<SemaEffectCollectShared>, bo
         &claimed.push(SemaEffectCollectedPart{part: part, collected: ^collected})
     }
     claimed
-}
-
-fn sema_effect_collect_claim(queue: Shared<SemaEffectCollectQueue>) -> Int {
-    permit :: queue.guard_edit()
-    index :: permit.value.next
-    permit.value.next = index + 1
-    index
 }
 
 // The module's Core publication obligations (facts with a shared lifetime).

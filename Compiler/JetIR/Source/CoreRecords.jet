@@ -208,14 +208,9 @@ fn ir_comptime_item_function(request: SemaComptimeItemRequest, module_name: Stri
     ir_comptime_item_shell(request.module_identity, module_name, "{request.module_identity}::__comptime_item::{request.key}", request.source_file, request.span, result_type)
 }
 
-// The next unclaimed part of a dynamically scheduled lowering.
+// The next unclaimed part of a dynamically scheduled lowering: a claiming
+// thread takes a read guard once and claims part after part with one atomic
+// add.
 struct IRPartQueue {
-    next: Int
-}
-
-fn ir_lower_claim(queue: Shared<IRPartQueue>) -> Int {
-    permit :: queue.guard_edit()
-    index :: permit.value.next
-    permit.value.next = index + 1
-    index
+    next: Atomic<Int>
 }
