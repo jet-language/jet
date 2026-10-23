@@ -13,8 +13,11 @@
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
-// (32..4096). Slab layout: [next][prev][free][live][head-cell][arena]
-// followed by padding to max(64, class-size), then intrusive free blocks.
+// (32..4096). Slab layout: [next][prev][free][live][head-cell][arena][carve]
+// followed by padding to max(64, class-size), then the blocks. A block that
+// was never handed out is not on the free list: `carve` is the next such
+// block (zero once none is left), so a page is first touched when one of its
+// blocks is first taken. Returned blocks go on the intrusive free list.
 // A live block stores [slab][block-start] immediately before its aligned payload.
 // Large/over-aligned mappings instead store [mapping-base][mapping-length].
 // A block allocated with align >= 8 also carries one reference-count word
@@ -23,8 +26,9 @@
 // owner can share it (Refcount.jet jet_rt_block_retain/release/unique) no
 // matter which runtime route or lowering site allocated it. Byte buffers
 // (align < 8, text data) keep the two-word header and have no count.
-// Only slabs with free blocks are linked. An attached thread allocates and
-// frees small blocks through its own cache first (TCB @320, Thread.jet):
+// Only slabs with a block to give (free or still to carve) are linked. An
+// attached thread allocates and frees small blocks through its own cache
+// first (TCB @320, Thread.jet):
 // eight [head][count] rows, one per class, of blocks threaded through their
 // first two words as [next][slab]. The cache needs no atomic: only its owner
 // touches it. It refills with up to 32 blocks of one slab under the arena
@@ -284,18 +288,10 @@ fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
     slab :: alloc_map_try(I64{65536})
     if (slab == I64{0}) { return I64{0} }
     first :: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
-    end :: wrapping(slab + I64{65536})
-    block := first
-    free := I64{0}
-    #Unsafe("the fresh 64KiB mapping holds every aligned free-block link; the heap lock excludes all list readers") {
-        loop wrapping(block + slot) <= end {
-            os_store_i64(block, free)
-            free = block
-            block = wrapping(block + slot)
-        }
-        os_store_i64(wrapping(slab + I64{16}), free)
+    #Unsafe("the fresh zeroed 64KiB mapping's header words; the heap lock excludes all list readers") {
         os_store_i64(wrapping(slab + I64{32}), head)
         os_store_i64(wrapping(slab + I64{40}), root)
+        if (wrapping(first + slot) <= wrapping(slab + I64{65536})) { os_store_i64(wrapping(slab + I64{48}), first) }
     }
     alloc_link(slab, head)
     slab
@@ -313,7 +309,7 @@ ALLOC_RETAINED_EMPTY_SLABS :: I64{8}
 // grows with them; a retained-empty slab leaves the class's retained count
 // (a fresh slab was never counted); an emptied slab is unlinked.
 fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64 {
-    #Unsafe("the held arena lock protects the class list, the slab's free links and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them") {
+    #Unsafe("the held arena lock protects the class list, the slab's free links, carve word and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the slab before any caller sees them") {
         slab := os_load_i64(head)
         fresh := false
         if (slab == I64{0}) {
@@ -322,11 +318,20 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         }
         if (slab == I64{0}) { return I64{0} }
         free := os_load_i64(wrapping(slab + I64{16}))
+        carve := os_load_i64(wrapping(slab + I64{48}))
+        end :: wrapping(slab + I64{65536})
         list := os_load_i64(row)
         taken := I64{0}
-        loop free != (I64{0}) && taken < limit {
-            block :: free
-            free = os_load_i64(block)
+        loop taken < limit {
+            block := free
+            if (block != I64{0}) {
+                free = os_load_i64(block)
+            } else {
+                if (carve == I64{0}) -> break
+                block = carve
+                carve = wrapping(carve + slot)
+                if (wrapping(carve + slot) > end) -> carve = I64{0}
+            }
             os_store_i64(block, list)
             os_store_i64(wrapping(block + I64{8}), slab)
             list = block
@@ -335,6 +340,7 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         os_store_i64(row, list)
         os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) + taken))
         os_store_i64(wrapping(slab + I64{16}), free)
+        os_store_i64(wrapping(slab + I64{48}), carve)
         live :: os_load_i64(wrapping(slab + I64{24}))
         if (live == I64{0} && !fresh) {
             retained :: wrapping(head + I64{64})
@@ -343,17 +349,18 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         os_store_i64(wrapping(slab + I64{24}), wrapping(live + taken))
         total :: wrapping(head + I64{128})
         os_store_i64(total, wrapping(os_load_i64(total) + taken))
-        if (free == I64{0}) { alloc_unlink(slab) }
+        if (free == I64{0} && carve == I64{0}) { alloc_unlink(slab) }
         return taken
     }
 }
 
 // Return one block to its slab. Caller holds the slab's arena lock. The slab
-// is linked again when its free list was empty; a slab whose last block
+// is linked again when it had no block left to give (an empty free list and
+// nothing left to carve); a slab whose last block
 // returns stays linked as one of the class's retained empty slabs
 // (ALLOC_RETAINED_EMPTY_SLABS) or is unmapped.
 fn alloc_slab_return(slab: I64, block: I64) {
-    #Unsafe("the held arena lock protects the slab's free links, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
+    #Unsafe("the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
         free :: os_load_i64(wrapping(slab + I64{16}))
         live :: wrapping(os_load_i64(wrapping(slab + I64{24})) - I64{1})
         os_store_i64(block, free)
@@ -362,7 +369,7 @@ fn alloc_slab_return(slab: I64, block: I64) {
         head :: os_load_i64(wrapping(slab + I64{32}))
         total :: wrapping(head + I64{128})
         os_store_i64(total, wrapping(os_load_i64(total) - I64{1}))
-        if (free == I64{0}) { alloc_link(slab, head) }
+        if (free == I64{0} && os_load_i64(wrapping(slab + I64{48})) == I64{0}) { alloc_link(slab, head) }
         if (live == I64{0}) {
             retained :: wrapping(head + I64{64})
             count :: os_load_i64(retained)
