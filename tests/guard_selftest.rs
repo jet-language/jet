@@ -13,8 +13,6 @@
 //! with the guard's stderr line — they do not "pass" in the normal sense.
 
 mod common;
-#[path = "unsafe_ratchet.rs"]
-mod unsafe_ratchet;
 
 #[test]
 fn guards_stay_quiet_on_a_healthy_run() {
@@ -41,31 +39,6 @@ fn test_path_guard_rejects_system_temp() {
         &std::env::temp_dir().join("jet-test-path-guard"),
         "test scratch",
     );
-}
-
-#[test]
-fn unsafe_region_ratchet_trips_on_seeded_growth() {
-    unsafe_ratchet::ratchet_trips_on_seeded_growth();
-}
-
-#[test]
-fn unsafe_region_ratchet_allows_shrink() {
-    unsafe_ratchet::ratchet_allows_shrink();
-}
-
-#[test]
-fn generated_ffi_does_not_move_unsafe_baseline() {
-    unsafe_ratchet::generated_ffi_does_not_move_baseline();
-}
-
-#[test]
-fn corelib_wrapper_needs_unsafe_or_proof() {
-    unsafe_ratchet::corelib_wrapper_needs_unsafe_or_proof();
-}
-
-#[test]
-fn corelib_wrapper_with_brace_defaults_is_still_seen() {
-    unsafe_ratchet::corelib_wrapper_with_brace_defaults_is_still_seen();
 }
 
 #[test]

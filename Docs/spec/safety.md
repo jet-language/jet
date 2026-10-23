@@ -5,7 +5,7 @@ expert escape. It is for Jet users, library authors, and reviewers. The
 executable spelling lives in the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/);
 sema checks the gate and its obligations in
 [`UnsafeObligations.jet`](../../Compiler/JetSema/Source/Sema/UnsafeObligations.jet).
-The focused [`unsafe_ratchet` tests](../../tests/unsafe_ratchet.rs), the
+The focused [`unsafe_ratchet` cases](../../tests/cases/guard_selftest/), the
 [`golden` safety checks](../../tests/golden.rs), and the
 [`ratchet checker`](../../Tools/agent/check-unsafe-ratchet.mjs) provide the
 repository proof; gated examples live under
