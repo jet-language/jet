@@ -504,3 +504,14 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
     assert_eq(result.diagnostics.len(), 0)
     assert_eq(result.tokens[4].kind, 49)
 }
+
+// Every radix's limit: 2^63 - 1 is the last literal kept, 2^63 the first
+// dropped, in octal and binary as in decimal and hex above.
+#Test("integer_payload_overflow_is_zero_in_octal_and_binary") {
+    result :: lexer_test_raw("0o777777777777777777777 0o1000000000000000000000 0b111111111111111111111111111111111111111111111111111111111111111 0b1000000000000000000000000000000000000000000000000000000000000000")
+    assert_eq(lexer_test_literal(result, result.tokens[0]).integer ?? -1, 9223372036854775807)
+    assert_eq(lexer_test_literal(result, result.tokens[1]).integer ?? -1, 0)
+    assert_eq(lexer_test_literal(result, result.tokens[2]).integer ?? -1, 9223372036854775807)
+    assert_eq(lexer_test_literal(result, result.tokens[3]).integer ?? -1, 0)
+    assert_eq(result.diagnostics.len(), 0)
+}

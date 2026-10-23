@@ -100,31 +100,40 @@ fn parse_integer_literal(text: String) -> Int? {
     clean :: strip_underscores(text)
     raw := clean.bytes()
     if raw.len() == 0 -> return None
+    // value * radix + digit <= I64 max (2^63 - 1) exactly when value < limit,
+    // or value == limit and digit <= rest, with limit = max /% radix and rest
+    // its remainder. Spelled out per radix: max itself is past the runtime's
+    // inline Int range, so computing them per literal costs a big Int
+    // division; every limit below is inline.
     radix := 10
+    limit := 922337203685477580
+    rest := 7
     i := 0
     if raw.len() > 1 && Int.from_u8(raw[0]) == 48 {
         marker :: Int.from_u8(raw[1])
         if marker == {
             120 | 88 -> {
                 radix = 16
+                limit = 576460752303423487
+                rest = 15
                 i = 2
             }
             111 | 79 -> {
                 radix = 8
+                limit = 1152921504606846975
+                rest = 7
                 i = 2
             }
             98 | 66 -> {
                 radix = 2
+                limit = 4611686018427387903
+                rest = 1
                 i = 2
             }
             else -> {}
         }
     }
     if i >= raw.len() -> return None
-    // value * radix + digit <= max exactly when value < limit, or value ==
-    // limit and digit <= rest: one exact division per literal, not per digit.
-    limit :: 9223372036854775807 /% radix
-    rest :: 9223372036854775807 - limit * radix
     value := 0
     loop i < raw.len() {
         digit :: digit_value(Int.from_u8(raw[i]))

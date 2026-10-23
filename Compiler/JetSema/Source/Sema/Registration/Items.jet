@@ -146,17 +146,24 @@ fn sema_registration_compiler_owned_enum_provenance() -> String Never! {
     "compiler_owned_enum"
 }
 
+// `kilo_meter` -> `KiloMeter`: the `_` separators dropped and the first byte
+// of each piece upper-cased when it is `a`..`z`, in one pass over the bytes.
 fn sema_registration_unit_type_name(name: String) -> String Never! {
-    output := ""
-    loop piece in name.split("_") {
-        if piece == "" -> next
-        bytes := piece.bytes()
-        if bytes.len() == 0 -> next
-        code :: Int.from_u8(bytes[0])
-        if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
-        output = "{output}{String.from_bytes(bytes) ?? piece}"
+    output := [U8]{}
+    piece_start := true
+    loop byte in name.bytes() {
+        if byte == (U8{95}) {
+            piece_start = true
+            next
+        }
+        if {
+            piece_start && byte >= (U8{97}) && byte <= (U8{122}) -> &output.push(U8{Int.from_u8(byte) - 32})
+            else -> &output.push(byte)
+        }
+        piece_start = false
     }
-    if output == "" -> name else -> output
+    if output.is_empty() -> return name.copy()
+    String.from_bytes(output) ?? name.copy()
 }
 
 fn sema_registration_unit_leaf_name(ty: Type) -> String? {
@@ -3459,11 +3466,19 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // takes no catalog families.
     prepared_inputs := ^inputs
     sema_registration_retain_original_error_module(&prepared_inputs, &diagnostics)
-    units_catalog :: sema_units_catalog(&diagnostics)
-    units_names :: sema_units_catalog_names(units_catalog)
+    units_outline :: sema_units_catalog_outline()
+    units_names :: sema_units_catalog_names(units_outline)
     units_mentions :: sema_units_scan_mentions(&prepared_inputs, canonical_effect_module_identity, units_names.wanted, threads)
+    // The catalog is parsed at the first input that mentions a unit; an input
+    // that mentions none takes no family.
+    units_catalog := [UnitFamilyDef]{}
+    units_parsed := false
     loop index in 0..<prepared_inputs.len() {
-        if !sema_units_scanned(prepared_inputs, index, canonical_effect_module_identity) -> next
+        if !sema_units_scanned(prepared_inputs, index, canonical_effect_module_identity) || !sema_units_mentioned(units_outline, units_names, units_mentions[index]) -> next
+        if !units_parsed {
+            units_catalog = sema_units_catalog(&diagnostics)
+            units_parsed = true
+        }
         sema_units_inject(&prepared_inputs[index], units_catalog, units_names, units_mentions[index])
     }
     sema_units_resolve(&prepared_inputs, edges, &diagnostics)

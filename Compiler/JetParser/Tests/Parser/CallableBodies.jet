@@ -1,8 +1,9 @@
 // Rust: crates/jet-parser/src/Parser/mod.rs:2382
 use jet_parser.[parse_generated_source]
 use jet_foundation.[UnitFamilyDef]
-// The standard unit catalog as the compiler embeds it (JetSema's generated prelude source).
-use jet_sema.[SEMA_PRELUDE_UNITS_SOURCE]
+// The standard unit catalog as the compiler embeds it (JetSema's generated
+// prelude source) and the outline JetSema reads before it parses it.
+use jet_sema.[SEMA_PRELUDE_UNITS_SOURCE, sema_units_catalog_outline]
 
 #Test("lambda_callable_interface_parses_only_parameters_and_effects") {
     parsed :: parser_test_program(`fn run() {
@@ -105,6 +106,22 @@ fn run() {
         }
     }
     assert(degree && dalton && mmhg && square && cubic)
+}
+
+// JetSema scans sources for unit mentions with the outline's names and parses
+// the catalog only when one is found, so the outline must name exactly the
+// parsed families and members, in order.
+#Test("standard_units_outline_matches_the_parsed_catalog") {
+    parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
+    families := [UnitFamilyDef]{}
+    loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
+    outline :: sema_units_catalog_outline()
+    assert_eq(outline.len(), families.len())
+    loop (index, family) in families {
+        assert_eq(outline[index].family, family.family)
+        assert_eq(outline[index].members.len(), family.members.len())
+        loop (member_index, member) in family.members -> assert_eq(outline[index].members[member_index], member.name)
+    }
 }
 
 fn parser_test_statement_guard_tree(depth: Int) -> String Never! {
