@@ -384,22 +384,12 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     }
     if trace_sink == .Val(sink) -> sink.end("native.rust_foreign", if helper == None -> 0 else -> 1)
     rust_helper :: if helper == .Val(artifact) -> Val(jet_cli_rust_foreign_archive(artifact)) else -> None
-    // The builder reads every checked module's declarations, in module order.
-    type_defs := [TTypeDef]{}
-    impls := [TImplDef]{}
-    constants := [TConstantDef]{}
-    foreign_rows := [SemaCheckedForeignFunction]{}
-    loop index in 0..<checked.modules.len() {
-        compiler_transfer_rows<TTypeDef>(&type_defs, &checked.modules[index].declarations.type_defs)
-        compiler_transfer_rows<TImplDef>(&impls, &checked.modules[index].declarations.impls)
-        compiler_transfer_rows<TConstantDef>(&constants, &checked.modules[index].declarations.constants)
-        compiler_transfer_rows<SemaCheckedForeignFunction>(&foreign_rows, &checked.modules[index].foreign_functions)
-    }
+    declarations := jet_cli_checked_declarations(&checked)
     // The program's C closure defines its foreign functions' symbols.
     closure_symbols := [String:Bool]{}
-    loop row in foreign_rows -> closure_symbols[row.symbol.copy()] = true
+    loop row in declarations.foreign -> closure_symbols[row.symbol.copy()] = true
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, plan) else -> ir_build_program(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, checked.entry_key ?? "", result.compiler_threads)
+    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", result.compiler_threads)
     function_count :: built.program.functions.len()
     if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
     rows := [String]{}
@@ -506,6 +496,29 @@ fn jet_cli_ir_trap(function: &IRFunction) Never! {
     function.code_line = [Int]{0}
     function.args = [Int]{}
     function.open = [Int]{}
+}
+
+// The checked modules' declarations the IR builder reads, in module order,
+// moved out of `checked`.
+struct JetCLICheckedDeclarations {
+    type_defs: [TTypeDef]
+    impls: [TImplDef]
+    constants: [TConstantDef]
+    foreign: [SemaCheckedForeignFunction]
+}
+
+fn jet_cli_checked_declarations(checked: &JetDriverLoweringInputs) -> JetCLICheckedDeclarations Never! {
+    type_defs := [TTypeDef]{}
+    impls := [TImplDef]{}
+    constants := [TConstantDef]{}
+    foreign := [SemaCheckedForeignFunction]{}
+    loop index in 0..<checked.modules.len() {
+        compiler_transfer_rows<TTypeDef>(&type_defs, &checked.modules[index].declarations.type_defs)
+        compiler_transfer_rows<TImplDef>(&impls, &checked.modules[index].declarations.impls)
+        compiler_transfer_rows<TConstantDef>(&constants, &checked.modules[index].declarations.constants)
+        compiler_transfer_rows<SemaCheckedForeignFunction>(&foreign, &checked.modules[index].foreign_functions)
+    }
+    JetCLICheckedDeclarations{type_defs: ^type_defs, impls: ^impls, constants: ^constants, foreign: ^foreign}
 }
 
 // `jet build`'s and `jet run`'s report of the native route, at the command's

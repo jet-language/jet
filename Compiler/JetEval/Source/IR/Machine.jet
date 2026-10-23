@@ -342,6 +342,10 @@ fn jet_eval_ir_invoke(m: IRModule, s: &JetEvalIRState, id: Int, args: [Int], res
     }
     jet_eval_ir_prepare(m, &s, id)
     f :: m.functions[id]
+    if f.asm != None {
+        jet_eval_ir_problem(&s, "{f.name} is an inline asm leaf; compile-time code does not run machine code")
+        return None
+    }
     if args.len() != f.param_count {
         jet_eval_ir_problem(&s, "{f.name} takes {f.param_count} arguments, the call passes {args.len()}")
         return None

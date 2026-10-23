@@ -833,6 +833,32 @@ fn ir_lazy_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     row :: ir_value_type(&m, p, element_ty) ?? return ir_fail(&b, span, "type {ir_type_name(element_ty)}")
     source :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || source < 0 -> return
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, body)
+}
+
+// `loop line in reader.lines()` / `loop line in io.stdin().lines()` (Lower
+// Iter.jet lower_line_cursor_init): the runtime line source wraps the
+// FileReader or StdinHandle as an `Iter<String>`. A fresh handle is moved
+// into it (read lazily); a kept one is borrowed, and the runtime drains it at
+// init (IterSources.jet iter_line_source). The Iter is then walked as any
+// other.
+fn ir_lines_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, file: Bool, body: [TStmt], span: Span) Never! {
+    iter_ty :: Type.Apply{name: "Iter", args: [Type]{Type.String}}
+    iter_row :: ir_value_type(&m, p, iter_ty) ?? return ir_fail(&b, span, "type {ir_type_name(iter_ty)}")
+    row :: ir_string_row(&m)
+    handle :: ir_expr(&m, p, &b, collection)
+    if ir_failed(b) || handle < 0 -> return
+    meta :: ir_lazy_meta(&m, p, &b, Type.String, span)
+    if ir_failed(b) -> return
+    moved :: ir_lazy_moved(&m, &b, handle)
+    export :: if file -> "jet_rt_native_iter_file_lines" else -> "jet_rt_native_iter_stdin_lines"
+    source :: ir_runtime(&m, &b, export, [Int]{handle, moved, meta}, iter_row)
+    ir_release(&m, &b, handle)
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, body)
+}
+
+// The cursor walk of the Iter in `source`, whose items have type row `row`.
+fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: Int, row: Int, body: [TStmt]) Never! {
     pointer_row :: ir_pointer_row(&m)
     word_row :: ir_word_row(&m)
     int_row :: ir_type_row(&m, Type.Int) ?? 0

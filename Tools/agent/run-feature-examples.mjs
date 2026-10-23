@@ -9,7 +9,7 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -106,6 +106,25 @@ function readExpected(stem) {
     stderrOut: existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : null,
     emit,
   };
+}
+
+// The `jet run` argv of an example. A `<stem>.case` whose only step is
+// `step: jet run [FLAGS...] <file>` (testkit Golden.jet runs that step from
+// the example's directory) runs the example with those flags; without one,
+// or for any other case, the example runs as `jet run <example>`.
+export function runArgs(entry, caseText) {
+  const fallback = ["run", entry.shown];
+  if (caseText === null) return fallback;
+  const steps = caseText.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("step:"));
+  if (steps.length !== 1) return fallback;
+  const words = steps[0].slice("step:".length).trim().split(/\s+/u);
+  if (words.length < 3 || words[0] !== "jet" || words[1] !== "run" || words.at(-1) !== basename(entry.path)) return fallback;
+  return ["run", ...words.slice(2, -1), entry.shown];
+}
+
+function readCase(stem) {
+  const path = join(EXPECTED, `${stem}.case`);
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
 // The verdict of one `jet emit --<tier>` against its golden, or null when it matches.
@@ -357,7 +376,7 @@ async function main() {
         scratch,
         timeoutMs: options.timeoutSec * 1000,
       };
-      const run = await runJet(["run", entry.shown], runOptions);
+      const run = await runJet(runArgs(entry, readCase(entry.stem)), runOptions);
       const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
       if (result.status !== "passed") return result;
       for (const tier of EMIT_TIERS) {

@@ -1,0 +1,15 @@
+// Application authority, written grant: a leading package block declares the
+// complete row under `authority.holds`. A written row replaces the beginner
+// default, so it lists IO too, and the program runs with exactly these rights.
+package {
+    name: "authority_package_grant"
+    authority: { holds: { allow: [Env, IO, Time] } }
+}
+
+use core.sys as sys
+use core.time as time
+
+fn run() {
+    print("HOME set: {sys.get("HOME") != None}")
+    print("clock runs: {time.instant().elapsed_millis() >= 0}")
+}

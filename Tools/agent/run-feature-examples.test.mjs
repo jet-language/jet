@@ -6,6 +6,7 @@ import {
   collectFeatureExamples,
   nativeRunIsWebTarget,
   parseArgs,
+  runArgs,
   warningOnlyStderr,
   withoutWarningDiagnostics,
 } from "./run-feature-examples.mjs";
@@ -83,4 +84,15 @@ test("web-targeted sources are skipped for native execution", () => {
   const entry = collectFeatureExamples().find((candidate) => candidate.stem === "web/web_wasm_map");
   assert.ok(entry);
   assert.equal(nativeRunIsWebTarget(entry), true);
+});
+
+test("a single `jet run` case step supplies the run flags", () => {
+  const entry = { stem: "effects/authority_allow_flag", shown: "Examples/features/effects/authority_allow_flag.jet", path: "/repo/Examples/features/effects/authority_allow_flag.jet" };
+  const shown = entry.shown;
+  assert.deepEqual(runArgs(entry, null), ["run", shown]);
+  assert.deepEqual(runArgs(entry, "step: jet run --allow=Env,Time authority_allow_flag.jet\n"), ["run", "--allow=Env,Time", shown]);
+  assert.deepEqual(runArgs(entry, "normalize: argv0\n"), ["run", shown]);
+  assert.deepEqual(runArgs(entry, "step: built alpha beta\n"), ["run", shown]);
+  assert.deepEqual(runArgs(entry, "step: jet run --allow=Env other.jet\n"), ["run", shown]);
+  assert.deepEqual(runArgs(entry, "step: build\nstep: jet run -A authority_allow_flag.jet\n"), ["run", shown]);
 });

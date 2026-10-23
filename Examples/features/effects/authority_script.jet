@@ -1,0 +1,13 @@
+#!/usr/bin/env jet
+// Application authority, script mode: a file whose first line is a `#!/...`
+// launch line is a script. It runs as `jet run -A` runs a program, with the
+// invoking user's rights, so it needs no package block and never stops with
+// E1803. This one reads an environment variable (Env) and the clock (Time)
+// with no grant written anywhere.
+use core.sys as sys
+use core.time as time
+
+fn run() {
+    print("HOME set: {sys.get("HOME") != None}")
+    print("clock runs: {time.instant().elapsed_millis() >= 0}")
+}

@@ -54,11 +54,12 @@ fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
 }
 
 // The size of the callee of the Call at `at` when it may be inlined there,
-// else -1.
+// else -1. An asm leaf's code is its template, never IR to inline.
 fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id :: caller.a[at]
     if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] -> return -1
     callee :: bodies[callee_id][0]
+    if callee.asm != None -> return -1
     if caller.c[at] != callee.param_count -> return -1
     if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) -> return -1
     // A parameter becomes the call's argument slot: same type rows only.

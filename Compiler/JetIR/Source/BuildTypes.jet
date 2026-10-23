@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TExpr, TField, TFunc, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, type_carrier_identity, type_name, type_union_member_tag]
-use jet_backend.[LOWER_GENERATED_RECORDS, LOWER_RECORD_SCHEMAS, LOWER_WORD_RECORDS, LowerRecordSchema, LowerRuntimeHandle, lower_handle_field, lower_native_runtime_carrier, lower_native_type, lower_record_variant_position, lower_runtime_handle, lower_runtime_route, runtime_abi_atom]
+use jet_backend.[LOWER_GENERATED_RECORDS, LOWER_RECORD_SCHEMAS, LOWER_WORD_RECORDS, LowerRecordSchema, LowerRuntimeHandle, lower_handle_field, lower_native_runtime_carrier, lower_native_type, lower_record_variant_position, lower_runtime_handle, lower_runtime_route, lower_wide_word, runtime_abi_atom]
 use jet_codegen.[JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS, JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS, JET_CODEGEN_COMPILER_OWNED_ENUMS, JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS, JET_CODEGEN_RANGE_RECORD, JetCodegenCompilerOwnedPayload, jet_codegen_compiler_owned_enum_payload, jet_codegen_compiler_owned_generic_params, jet_codegen_compiler_owned_record_fields]
 
 // A rendered type's identity: its declaration key when it names one (every
@@ -2608,9 +2608,12 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if operation == .CheckedIntToFixed(_, _, _, _) {
         // A sized literal that fits is the fixed word itself (Lower
-        // lower_fixed_literal_word): no exact Int is built, nothing runs.
+        // lower_fixed_literal_word): no exact Int is built, nothing runs. A
+        // U64 above I64 range is its bit pattern. This is also what keeps
+        // the runtime's own kernels (jet_int_checked_fixed), written with
+        // sized literals, from calling themselves.
         if ir_int_literal(receiver) == .Val(value) {
-            if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, value)
+            if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, lower_wide_word(value))
         }
     }
     value :: ir_expr(&m, p, &b, receiver)
@@ -2640,6 +2643,7 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             return result
         }
         .FloatToInt(_, _, _, _, _) -> return ir_float_to_int(&m, p, &b, value, ty, span)
+        .FloatNarrow(_) -> return ir_float_narrow(&m, p, &b, value, ty, span)
         .TryFrom(_, _, _) -> {
             result :: ir_try_from(&m, p, &b, value, ty, span)
             ir_release(&m, &b, value)
@@ -2877,11 +2881,25 @@ fn ir_checked_widen(m: &IRModule, b: &IRBuilder, value: Int, target: Int, line: 
     result
 }
 
-// The value of an integer literal expression (`5`, `-5`).
+// The value of an integer literal expression: `5`, a literal sema folded
+// (CtLit; one beyond I64 range keeps its decimal), and negations of those.
 fn ir_int_literal(expression: TExpr) -> Int? Never! {
-    if expression.kind == .IntLit(value, _) -> return Val(value)
-    if expression.kind == .Unary(op, operand) {
-        if op == .Neg && operand.kind == .IntLit(value, _) -> return Val(0 - value)
+    if expression.kind == {
+        .IntLit(value, _) -> return Val(value)
+        .CtLit(constant) -> {
+            if constant == .Int(number) -> return Val(number)
+            if constant == .BigInt(decimal) {
+                number :: Int.parse(decimal) ?? return None
+                return Val(number)
+            }
+        }
+        .Unary(op, operand) -> {
+            if op == .Neg {
+                number :: ir_int_literal(operand) ?? return None
+                return Val(0 - number)
+            }
+        }
+        else -> {}
     }
     None
 }
@@ -2889,7 +2907,6 @@ fn ir_int_literal(expression: TExpr) -> Int? Never! {
 // Whether `value` is in the range of the fixed-width row `row`.
 fn ir_fixed_fits(row: IRType, value: Int) -> Bool Never! {
     if row.kind != .Word || row.bits > 64 -> return false
-    if row.bits == 64 -> return row.signed || value >= 0
     lowest :: if row.signed -> 0 - (1 << (row.bits - 1)) else -> 0
     highest :: if row.signed -> (1 << (row.bits - 1)) - 1 else -> (1 << row.bits) - 1
     value >= lowest && value <= highest

@@ -225,14 +225,14 @@ fn jet_cli_executable_authority(result: JetDriverCompileResult, inputs: JetDrive
 // `policy`, before this invocation's rows.
 fn jet_cli_policy_authority(required: [String], authority_policy: JetDriverAuthorityPolicy?) -> JetCLIAuthority Never! {
     authority := JetCLIAuthority{required: jet_cli_sorted_set(required), granted: jet_cli_sorted_set(JET_CLI_AMBIENT_BASIC_EFFECTS), denied: [String]{}, authority: JET_CLI_APPLICATION_DEFAULT}
-    policy :: authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}
+    policy :: authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
     if policy.manifest_path != None {
         if policy.allow == None && policy.deny == None {
             authority.authority = JET_CLI_PACKAGE_DEFAULT
         } else {
             authority.granted = jet_cli_policy_effects(policy.allow ?? [String]{})
             authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
-            authority.authority = "package.jet authority.holds"
+            authority.authority = if policy.inline_package -> "inline Package authority.holds" else -> "package.jet authority.holds"
         }
     }
     authority
@@ -277,6 +277,12 @@ fn jet_cli_denied_required(authority: JetCLIAuthority) -> [String] Never! {
 
 fn jet_cli_is_application_default(authority: JetCLIAuthority) -> Bool Never! {
     authority.authority.starts_with(JET_CLI_APPLICATION_DEFAULT)
+}
+
+// A program with no package.jet: the default, or a file's leading
+// `package { … }` block that writes `authority.holds`.
+fn jet_cli_is_manifest_less(authority: JetCLIAuthority) -> Bool Never! {
+    jet_cli_is_application_default(authority) || authority.authority.starts_with("inline Package")
 }
 
 fn jet_cli_is_beginner_floor(authority: JetCLIAuthority) -> Bool Never! {
@@ -360,11 +366,17 @@ fn jet_cli_policy_why(authority: JetCLIAuthority) -> String Never! {
     "This program {phrase}, and {jet_cli_policy_owner(authority)} {verdict}."
 }
 
-// Authority.rs `policy_fix`.
+// Authority.rs `policy_fix`. A program with no package.jet edits its leading
+// `package { … }` block, and the row it writes replaces the floor or the
+// written row, so it names every required effect (spec "Application
+// authority"). `jet fix --all` inserts a missing block only.
 fn jet_cli_policy_fix(authority: JetCLIAuthority) -> String Never! {
     undecided :: jet_cli_undecided(authority)
     if undecided.len() > 0 && jet_cli_is_application_default(authority) {
         return "declare the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
+    }
+    if undecided.len() > 0 && jet_cli_is_manifest_less(authority) {
+        return "write the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in this file's leading `package {{ … }}` block; otherwise approve the exact operation once in an interactive terminal"
     }
     step := ""
     if {
@@ -386,7 +398,7 @@ fn jet_cli_policy_facts(authority: JetCLIAuthority) -> String Never! {
 
 // E1803 when the policy denies or leaves undecided a required right
 // (Authority.rs `policy_refusal`; EffectBudget.rs
-// `application_policy_diagnostic`). A file with no package manifest leads its
+// `application_policy_diagnostic`). A program with no package.jet leads its
 // Fix with the exact `--allow` invocation of `command` and its `-A` form.
 fn jet_cli_authority_refusal(authority: JetCLIAuthority, file: String, command: String) -> Diagnostic? Never! {
     denied :: jet_cli_denied_required(authority)
@@ -394,7 +406,7 @@ fn jet_cli_authority_refusal(authority: JetCLIAuthority, file: String, command: 
     if denied.len() == 0 && undecided.len() == 0 -> return None
     what :: if denied.len() == 0 -> "application authority is undecided for `{undecided.join(", ")}`" else -> "application authority denies `{denied.join(", ")}`"
     diagnostic := diagnostic_from_registry("E1803", None, what, jet_cli_policy_why(authority), jet_cli_policy_fix(authority))
-    if denied.len() == 0 && jet_cli_is_application_default(authority) {
+    if denied.len() == 0 && jet_cli_is_manifest_less(authority) {
         fix :: diagnostic.fix
         rest :: if fix.len() == 0 -> "" else -> "{jet_cli_ascii_lower(fix.slice(0..<1))}{fix.slice(1..<fix.len())}"
         diagnostic.fix = "run `jet {command} --allow={undecided.join(",")} {file}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {rest}"

@@ -14,6 +14,8 @@ use jet_foundation.[
     CompilerTraceSink,
     CORE_SOURCE_OWNED_ROWS,
     MIRArtifactBuildMode,
+    compiler_take_rows,
+    compiler_transfer_rows,
     foundation_json_quote,
 ]
 use jet_driver.[
@@ -39,6 +41,7 @@ use jet_driver.[
     jet_driver_compile_mir,
     jet_driver_compile_keep_going,
     jet_driver_lowering_inputs,
+    jet_driver_c_symbol,
     jet_driver_compile_escaped_failure,
     jet_driver_shared_build_inputs,
     jet_driver_shared_build_http_inputs,
@@ -48,7 +51,8 @@ use jet_eval.[
     JetEvalConfig,
     jet_eval_host_config,
 ]
-use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runtime_pack]
+use jet_backend.[x64_link_runtime_pack]
+use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[DepSpec, PackageFacts, pkg_manifest_parse, pkg_to_manifest]
 
 // The production CLI and bootstrap observer share the driver's all-phases
@@ -115,26 +119,50 @@ fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
     "cannot append to the compiler failure census `{report}`: {problem}"
 }
 
-// Packaging uses the ordinary hosted source loader and checked NativeLibrary
-// MIR. The private environment seam is shared with the bootstrap observer;
-// neither Tests.rs factories nor emitted Rust enter object/pack production.
-fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> JetDriverCompileResult {
+// Packaging uses the ordinary hosted source loader: the checked
+// NativeLibrary program (the compile stopped before lowering, without an
+// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1
+// and written as `{prefix}.o`, its export list and ABI receipt. The private
+// environment seam is shared with the bootstrap observer; neither Tests.rs
+// factories nor emitted Rust enter object/pack production.
+fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
+    owned := ^front
+    result := ^owned.compile
     if !result.complete || result.internal_problem != None -> return result
-    program :: result.mir ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked MIR")
+    checked := ^owned.inputs ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked inputs")
+    if checked.entry_key != None -> return jet_driver_compile_escaped_failure("runtime feed requires a checked NativeLibrary artifact")
     lifecycle_path :: cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text :: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
-    library :: x64_runtime_library(program, lifecycle_text.split("\n").to_list())
-    if library.object.errors.len() > 0 {
-        cli_files.write("{prefix}.issues", library.object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
-        return jet_driver_compile_escaped_failure("runtime library lowering failed; see {prefix}.issues")
+    rows :: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
+    declarations := jet_cli_checked_declarations(&checked)
+    library := ir_build_library(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
+    issues := compiler_take_rows<String>(&library.errors)
+    loop failure in library.failures -> &issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    if issues.len() == 0 {
+        // The memory term is read now: the front end before this holds most of it.
+        threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+        _ := ir_optimize_module(&library.program, 1, threads)
+        compiled := ir_x64_compile_module(^library.program, threads)
+        object := ir_x64_library_object(^compiled, library.exports)
+        if object.errors.len() == 0 {
+            cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
+            symbols :: loop row in library.exports -> row.symbol
+            cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
+            cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
+            return jet_cli_runtime_pack(^result, prefix, ^object.bytes)
+        }
+        compiler_transfer_rows<String>(&issues, &object.errors)
     }
-    cli_files.write_bytes("{prefix}.o", library.object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
-    symbols :: loop row in library.exports -> row.symbol
-    cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
-    cli_files.write("{prefix}.abi.json", x64_runtime_export_abi_json(library.export_abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
+    cli_files.write("{prefix}.issues", issues.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
+    jet_driver_compile_escaped_failure("runtime library lowering failed; see {prefix}.issues")
+}
+
+// JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
+// with the platform inputs into the Rust-free runtime pack.
+fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object: ^[U8]) -> JetDriverCompileResult {
     if cli_sys.get("JET_FRONT_RUNTIME_PACK_OUTPUT") == .Val(pack_path) {
         names := [String]{"{prefix}.o"}
-        bytes := [[U8]]{library.object.bytes}
+        bytes := [[U8]]{^object}
         loop path in (cli_sys.get("JET_FRONT_RUNTIME_PLATFORM_INPUTS") ?? "").split("\n").to_list() {
             if path.trim() == "" -> next
             input :: cli_files.read_bytes(path) ?? return jet_driver_compile_escaped_failure("cannot read runtime platform input `{path}`: {err}")
@@ -1054,8 +1082,7 @@ fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, emit_rust: Bool, target: 
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
-            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None, trace_sink)
-            if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(^selected, trace_sink), prefix, compiler_threads) else -> jet_cli_compile_request(^selected, emit_rust, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.

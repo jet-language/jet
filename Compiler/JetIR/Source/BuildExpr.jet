@@ -10,6 +10,7 @@ fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: TFunc)
     b.line = function.line
     if function.generic_params.len() > 0 && m.subst_types.len() == 0 -> return ir_fail(&b, function.source_span, "generic function without type arguments")
     if function.foreign != None -> return ir_fail(&b, function.source_span, "foreign function")
+    if p.intrinsics.get(function.key) != None -> return ir_fail(&b, function.source_span, "runtime intrinsic {function.name} is only called, never a function value")
     b.failure = function.failure_carrier
     if function.kind == {
         .TopLevel -> {}
@@ -429,7 +430,10 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
             // (MIRLoopSourceKind.Chars); the walk of the checked `s.chars()`
             // list visits the same Chars in the same order.
             chars :: method_kind == (Val(TForInMethod.Chars)) && ir_untag(collection.ty) == .List(_)
-            if (method_kind != None && !chars) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
+            file_lines :: method_kind == (Val(TForInMethod.LinesFile))
+            lines :: file_lines || method_kind == (Val(TForInMethod.LinesStdin))
+            if (method_kind != None && !chars && !lines) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
+            if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, collection, file_lines, body, span)
             if ir_iter_element(ir_subst(m, collection.ty)) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
         }
@@ -589,12 +593,20 @@ fn ir_task_group(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limit
     ir_scope_close(&m, &b)
 }
 
-// `task.all(tasks)` (codegen jet_codegen_lower_task_group_value, Lower
-// Tasks.jet:188 lower_task_group): the runtime takes the owned List of Task
-// handles (leaving an empty header) and joins them into the Result box's
-// List payload, failing fast with a TaskFailure; a named tuple of Tasks
-// joins into the tuple of their results (Lower lower_task_tuple_all).
-fn ir_task_all(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, tasks: TExpr, span: Span) -> Int Never! {
+// `task.all` / `task.any` / `task.race` over tasks (codegen
+// jet_codegen_lower_task_group_value, Lower Tasks.jet:188 lower_task_group;
+// `kind` 0 all, 1 any, 2 race as lower_task_kind): the runtime takes the
+// owned List of Task handles (leaving an empty header). `all` joins them
+// into the Result box's List payload, failing fast with a TaskFailure;
+// `any` and `race` store the winner's result and cancel and drain the rest.
+// A named tuple of Tasks joins into the tuple of their results (Lower
+// lower_task_tuple_all); only `all` has a carrier for it.
+fn ir_task_group_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, tasks: TExpr, kind: Int, span: Span) -> Int Never! {
+    operation :: if {
+        kind == 0 -> "task.all"
+        kind == 1 -> "task.any"
+        else -> "task.race"
+    }
     result_ty :: ir_subst(m, ty)
     ok_ty := Type.Int
     err_ty := Type.Int
@@ -602,9 +614,10 @@ fn ir_task_all(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, tasks: TExpr
         ok_ty = success
         err_ty = failure
     } else {
-        return ir_fail_slot(&b, span, "task.all result {ir_type_name(ty)}")
+        return ir_fail_slot(&b, span, "{operation} result {ir_type_name(ty)}")
     }
     tasks_ty :: ir_untag(ir_subst(m, tasks.ty))
+    if kind != 0 && tasks_ty == .Tuple(_) -> return ir_fail_slot(&b, span, "heterogeneous {operation} has no single success carrier")
     value :: ir_expr(&m, p, &b, tasks)
     if ir_failed(b) || value < 0 -> return -1
     if tasks_ty == .Tuple(fields) {
@@ -637,16 +650,16 @@ fn ir_task_all(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, tasks: TExpr
     if tasks_ty == .List(inner) {
         element = inner
     } else {
-        return ir_fail_slot(&b, span, "task.all over {ir_type_name(tasks.ty)}")
+        return ir_fail_slot(&b, span, "{operation} over {ir_type_name(tasks.ty)}")
     }
-    body :: ir_task_element(element) ?? return ir_fail_slot(&b, span, "task.all over task bodies {ir_type_name(element)}")
+    body :: ir_task_element(element) ?? return ir_fail_slot(&b, span, "{operation} over task bodies {ir_type_name(element)}")
     body_meta :: ir_lazy_meta(&m, p, &b, body, span)
     if body_meta < 0 -> return -1
     ok_meta :: ir_lazy_meta(&m, p, &b, ok_ty, span)
     if ok_meta < 0 -> return -1
-    kind :: ir_word_const(&m, &b, 0)
+    group_kind :: ir_word_const(&m, &b, kind)
     zero :: ir_word_const(&m, &b, 0)
-    boxed :: ir_task_outcome(&m, p, &b, "jet_rt_native_task_group", [Int]{kind, zero, value, zero, body_meta, zero, zero, ok_meta}, result_ty, err_ty, span)
+    boxed :: ir_task_outcome(&m, p, &b, "jet_rt_native_task_group", [Int]{group_kind, zero, value, zero, body_meta, zero, zero, ok_meta}, result_ty, err_ty, span)
     ir_release(&m, &b, value)
     boxed
 }
@@ -1338,7 +1351,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .NumericBinaryMethod(receiver, operation, argument) -> return ir_numeric_euclid(&m, p, &b, expression.ty, receiver, operation, argument, span)
         .HandleMethod(receiver, operation, args) -> return ir_handle_method(&m, p, &b, expression.ty, receiver, operation, args, span)
         .CoreClosureCall(kind) -> return ir_core_closure_call(&m, p, &b, expression.ty, kind, span)
-        .TaskGroupAll(tasks) -> return ir_task_all(&m, p, &b, expression.ty, tasks, span)
+        .TaskGroupAll(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 0, span)
+        .TaskGroupAny(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 1, span)
+        .TaskGroupRace(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 2, span)
         .TraitBox(value, target) -> return ir_trait_box(&m, p, &b, value, target, span)
         else -> return ir_fail_slot(&b, span, "expression {ir_expr_kind_name(expression.kind)}")
     }
@@ -1998,6 +2013,7 @@ fn ir_print(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, span: Span)
 // cells back into their variables after the call. The result has the
 // callee's executable return type.
 fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [TCallArg], span: Span) -> Int Never! {
+    if p.intrinsics.get(key) == .Val(intrinsic) -> return ir_intrinsic_call(&m, p, &b, intrinsic, args, span)
     if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(&m, p, &b, foreign, args, span)
     row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "call of a function outside the checked program: {key}")
     callee :: ir_function_id(&m, p, key, type_args) ?? return ir_fail_slot(&b, span, "call of {key}")
@@ -3309,7 +3325,7 @@ fn ir_fallback_route(m: &IRModule, p: IRProgram, b: &IRBuilder, fallback: TOrFal
             if ir_failed(b) -> return
             left :: ir_word_const(&m, &b, 0)
             right :: ir_word_const(&m, &b, 0)
-            ir_stop(&m, p, &b, 2, text, left, right, location)
+            ir_stop(&m, p, &b, 2, text, left, right, ir_report_location(p, location))
         }
         .Break -> ir_loop_jump(&m, p, &b, None, true, span)
         .Continue -> ir_loop_jump(&m, p, &b, None, false, span)
@@ -4181,7 +4197,29 @@ fn ir_comptime_name(value: TComptimeValue) -> String Never! {
 // locals), which does not return. The 88-byte descriptor holds the path,
 // line, function, source line, column, caret and the rendered context text.
 
+// A checked stop location with its report source (Rust capture_panic_loc):
+// sema locates the stop by file, line and 1-based byte column; the line's
+// text, trailing whitespace trimmed, and its character column come from the
+// checked source this program holds.
+fn ir_report_location(p: IRProgram, location: TPanicLoc) -> TPanicLoc Never! {
+    // copy: the report's location is the caller's own; the checked expression keeps its location.
+    located := location.copy()
+    if location.source_line != "" || location.line < 1 -> return located
+    text :: ir_source_line_text(p, location.file, location.line) ?? return located
+    bytes :: text.bytes()
+    column := 1
+    at := 0
+    loop at + 1 < location.column && at < bytes.len() {
+        if bytes[at] < (U8{128}) || bytes[at] >= (U8{192}) -> column += 1
+        at += 1
+    }
+    located.source_line = text.trim_end()
+    located.column = column
+    located
+}
+
 fn ir_require_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: TRequireKind, location: TPanicLoc, always_stops: Bool, span: Span) -> Int Never! {
+    report :: ir_report_location(p, location)
     if kind == {
         .Require(test, message) -> {
             condition :: ir_expr(&m, p, &b, test)
@@ -4204,7 +4242,7 @@ fn ir_require_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: TRequireKind
             }
             if ir_failed(b) -> return -1
             null :: ir_word_const(&m, &b, 0)
-            ir_stop(&m, p, &b, 0, text, null, null, location)
+            ir_stop(&m, p, &b, 0, text, null, null, report)
             if !always_stops -> ir_end(&b.f, b.line)
         }
         .RequireEq(left, right) -> {
@@ -4224,7 +4262,7 @@ fn ir_require_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: TRequireKind
             right_text :: ir_render(&m, p, &b, right.ty, right_slot, IRRender.Debug, span)
             if ir_failed(b) -> return -1
             code :: ir_word_const(&m, &b, 0)
-            ir_stop(&m, p, &b, 1, code, left_text, right_text, location)
+            ir_stop(&m, p, &b, 1, code, left_text, right_text, report)
             if !always_stops -> ir_end(&b.f, b.line)
         }
         .Panic(message) -> {
@@ -4233,7 +4271,7 @@ fn ir_require_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: TRequireKind
             text :: ir_render(&m, p, &b, message.ty, slot, IRRender.Display, span)
             if ir_failed(b) -> return -1
             null :: ir_word_const(&m, &b, 0)
-            ir_stop(&m, p, &b, 2, text, null, null, location)
+            ir_stop(&m, p, &b, 2, text, null, null, report)
         }
     }
     -1

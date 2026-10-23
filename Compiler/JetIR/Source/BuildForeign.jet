@@ -1,7 +1,9 @@
 // Calls of checked foreign functions (Lower CForeign.jet lower_c_import_call):
 // a direct C function is called by its checked symbol, which the program's C
-// closure defines (an `#FFI(c)` body's `jet_inline_jet_ffi_<name>` wrapper).
+// closure defines (an `#FFI(c)` body's `jet_inline_jet_ffi_<name>` wrapper);
+// an `#FFI(asm)` function is a leaf whose code is its assembled template.
 
+use jet_backend.[x64_assemble_template]
 use jet_foundation.[AccessConvention, Span, TCallArg]
 use jet_sema.[SemaCheckedForeignFunction]
 
@@ -19,6 +21,7 @@ fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction]) Never
 // packed NUL-terminated copy freed after the call; the C result converts
 // back.
 fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
+    if foreign.language == "asm" -> return ir_asm_call(&m, p, &b, foreign, args, span)
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
         return ir_fail_slot(&b, span, "foreign import requires a checked direct C scalar signature")
     }
@@ -94,4 +97,109 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
     }
     loop value in values -> ir_release(&m, &b, value)
     dst
+}
+
+// A call of the `#FFI(asm)` function `foreign`: a call of its leaf
+// (ir_asm_leaf) on machine words. An exact Int crosses as its I64
+// (jet_int_owned_to_i64) and an Int result converts back
+// (jet_int_owned_from_i64), as for a C function.
+fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "inline asm argument count differs from its checked signature")
+    word_row :: ir_word_row(&m)
+    rows := [Int]{}
+    leaf_params := [Int]{}
+    loop param in foreign.params {
+        row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
+        if m.types[row].kind == {
+            .Int -> &leaf_params.push(word_row)
+            .Word | .Pointer -> &leaf_params.push(row)
+            else -> return ir_fail_slot(&b, span, "inline asm: parameter {param.name} is not a machine word")
+        }
+        if param.convention == AccessConvention.Write -> return ir_fail_slot(&b, span, "inline asm: write parameters are unsupported")
+        &rows.push(row)
+    }
+    result_row := -1
+    leaf_result := -1
+    if foreign.return_type == .Val(ty) {
+        if !ir_unit_type(ty) {
+            result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            if m.types[result_row].kind == {
+                .Int -> leaf_result = word_row
+                .Word | .Pointer -> leaf_result = result_row
+                else -> return ir_fail_slot(&b, span, "inline asm: result is not a machine word")
+            }
+        }
+    }
+    problem :: ir_asm_leaf(&m, p, foreign, leaf_params, leaf_result)
+    if problem != "" -> return ir_fail_slot(&b, span, problem)
+    leaf :: m.function_rows.get("{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(&b, span, "inline asm leaf of {foreign.name} was not built")
+    values := [Int]{}
+    lowered := [Int]{}
+    loop (index, arg) in args {
+        if arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "inline asm has a mismatched access convention")
+        value :: ir_value_as(&m, p, &b, arg.value, rows[index], span)
+        if ir_failed(b) -> return -1
+        if value < 0 -> return ir_fail_slot(&b, span, "Unit inline asm argument")
+        &values.push(value)
+        if m.types[rows[index]].kind == .Int -> &lowered.push(ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)) else -> &lowered.push(value)
+    }
+    raw :: if leaf_result >= 0 -> ir_temp(&m, &b, leaf_result) else -> -1
+    start :: ir_args(&b.f, lowered)
+    ir_emit(&b.f, IROp.Call, raw, leaf, start, lowered.len(), b.line)
+    dst := raw
+    if result_row >= 0 && m.types[result_row].kind == .Int -> dst = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
+    loop value in values -> ir_release(&m, &b, value)
+    dst
+}
+
+// Builds the leaf function of the `#FFI(asm)` function `foreign` once per
+// module, keyed "<function key>#asm": `params` and `result` (-1: none) its
+// Word rows, its code the template (the first triple-quoted body within the
+// checked span) assembled for its parameter names. Returns the problem
+// when the template is missing or does not assemble, else "".
+fn ir_asm_leaf(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
+    key :: "{foreign.symbol_id.key}#asm"
+    if m.function_rows.get(key) != None -> return ""
+    source :: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"
+    names :: loop param in foreign.params -> param.name
+    assembled :: x64_assemble_template(source, names, result >= 0)
+    if assembled.error == .Val(reason) -> return reason
+    line :: ir_source_line_of(p, foreign.source_file, foreign.span.start) ?? 0
+    bytes := [U8]{}
+    loop byte in "{foreign.module_name}.{foreign.name}".bytes() {
+        alphanumeric :: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        &bytes.push(if alphanumeric -> byte else -> U8{95})
+    }
+    symbol :: String.from_bytes(bytes) ?? foreign.name.copy()
+    f := ir_function_new(foreign.name, key, "{symbol}__asm", foreign.source_file, line)
+    loop (index, param) in foreign.params -> _ := ir_slot(&f, params[index], IRSlotKind.Param, ir_intern_name(&m, param.name), line)
+    f.result = result
+    f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result})
+    id :: m.functions.len()
+    &m.functions.push(^f)
+    m.function_rows[key] = id
+    ""
+}
+
+// The template of an `#FFI(asm)` function: the first triple-quoted body
+// within its checked span (Lower InlineAsm.jet lower_asm_source).
+fn ir_asm_source(p: IRProgram, foreign: SemaCheckedForeignFunction) -> String? Never! {
+    row :: p.source_rows.get(foreign.source_file) ?? return None
+    start :: foreign.span.start
+    end :: foreign.span.end
+    if start < 0 || end < start || end > p.source_bytes[row].len() -> return None
+    open := -1
+    at := start
+    loop at + 2 < end {
+        if p.source_bytes[row][at] == (U8{34}) && p.source_bytes[row][at + 1] == (U8{34}) && p.source_bytes[row][at + 2] == (U8{34}) {
+            if open < 0 {
+                open = at + 3
+                at += 3
+                next
+            }
+            return Val(String.from_bytes(p.source_bytes[row].slice(open, at)) ?? return None)
+        }
+        at += 1
+    }
+    None
 }

@@ -6665,59 +6665,6 @@ fn sema_comptime_layer_name(layer: MIRRuntimeLayer) -> String Never! {
     "Std"
 }
 
-fn sema_comptime_policy_deny_diagnostic(package_identity: String, denied: [String], span: Span) -> Diagnostic {
-    denied_names := denied.join(", ")
-    sema_error("E0712", span, "package `{package_identity}` reaches effects denied by `authority.holds.deny`: `{denied_names}`", "denied effects remain prohibited across every reachable call edge", "remove the denied effect or update the package authority policy")
-}
-
-// Rust `program_effects` / EffectBudget `entry_reachable_keys`
-// package authority judges the effects reachable from
-// the selected application entry, not every loaded declaration. A function
-// that entry never calls (a bootstrap host hook, an unused helper) is not
-// application provenance, so its row is not checked against
-// `authority.holds`. The entry is a selected Output, else the entry module's
-// `run`, else its `build(b: Build)`; with none, nothing is checked.
-fn sema_authority_entry_reach(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [String:Bool] {
-    edges := [String:[String]]{}
-    loop module_result in modules {
-        loop function in module_result.functions -> edges[function.key] = function.effects.call_edges
-    }
-    pending := sema_authority_entry_roots(graph, edges)
-    reach := [String:Bool]{}
-    loop pending.len() > 0 {
-        key :: &pending.pop() ?? break
-        if reach.get(key) != None -> next
-        callees :: edges.get(key) ?? next
-        reach[key] = true
-        loop callee in callees -> &pending.push(callee)
-    }
-    reach
-}
-
-// Rust `entry_candidates`.
-fn sema_authority_entry_roots(graph: SemaRegistrationGraph, edges: [String:[String]]) -> [String] {
-    loop module_row_index in 0..<graph.modules.len() {
-        loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
-            output :: graph.modules[module_row_index].constants[constant_index].declaration.resolved_output ?? next
-            if !output.selected -> next
-            if output.module_id < 0 || output.module_id >= graph.modules.len() -> return [String]{}
-            loop function_index in 0..<graph.modules[output.module_id].functions.len() {
-                if graph.modules[output.module_id].functions[function_index].declaration.name == output.semantic_name && edges.get(graph.modules[output.module_id].functions[function_index].symbol.id.key) != None -> return [String]{graph.modules[output.module_id].functions[function_index].symbol.id.key}
-            }
-            return [String]{}
-        }
-    }
-    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return [String]{}
-    build := [String]{}
-    loop function_index in 0..<graph.modules[entry_index].functions.len() {
-        key :: graph.modules[entry_index].functions[function_index].symbol.id.key
-        if edges.get(key) == None -> next
-        if graph.modules[entry_index].functions[function_index].declaration.name == "run" -> return [String]{key}
-        if graph.modules[entry_index].functions[function_index].declaration.name == "build" && graph.modules[entry_index].functions[function_index].declaration.params.len() == 1 && graph.modules[entry_index].functions[function_index].declaration.params[0].ty == (Type.Named{name: "Build"}) -> build = [String]{key}
-    }
-    build
-}
-
 fn sema_comptime_runtime_ceiling_diagnostic(package_identity: String, actual: MIRRuntimeLayer, ceiling: MIRRuntimeLayer, span: Span?) -> Diagnostic {
     actual_name := sema_comptime_layer_name(actual)
     ceiling_name := sema_comptime_layer_name(ceiling)
@@ -7569,7 +7516,6 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         complete = false
     }
 
-    if !sema_finalize_authority(final_graph, modules, stage.package_policies, &diagnostics) -> complete = false
     // Tag dataflow over every checked body (the Rust reference's
     // `check_fact_tags_and_states`): a tagged value reaching a denied
     // destination is reported, whatever else the bundle reported.
@@ -7703,112 +7649,6 @@ SEMA_CORE_MIN_BYTES_PER_THREAD :: 65536
 // Jobs per admitted thread, claimed dynamically.
 SEMA_CORE_JOBS_PER_THREAD :: 8
 
-// Whether any package policy constrains authority: only then does
-// sema_finalize_authority emit anything, so only then is the entry reach
-// (sema_authority_entry_reach, a walk of every function's call edges) built.
-fn sema_finalize_authority_constrained(policies: [SemaRegistrationPackagePolicy]) -> Bool Never! {
-    loop policy in policies {
-        if policy.authority_allow != None || policy.authority_deny != None -> return true
-    }
-    false
-}
-
-// When a function's row holds every effect because some call it reaches
-// has no known body (an unresolved or dynamically selected callee), the
-// call chain from the function to the one making that call, by name; empty
-// when the row is not maximal.
-fn sema_authority_maximal_chain(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rows: [String:[Int]], start: String) -> [String] {
-    parents := [String:String]{}
-    seen := [String:Bool]{}
-    queue := [String]{start}
-    seen[start] = true
-    cursor := 0
-    loop cursor < queue.len() {
-        key :: queue[cursor]
-        cursor += 1
-        row :: rows.get(key) ?? next
-        effects :: modules[row[0]].functions[row[1]].effects
-        if effects.maximal {
-            own := true
-            loop edge in effects.call_edges {
-                edge_row :: rows.get(edge) ?? next
-                if modules[edge_row[0]].functions[edge_row[1]].effects.maximal -> own = false
-            }
-            if own {
-                chain := [String]{}
-                at := key
-                loop {
-                    at_row :: rows.get(at) ?? break
-                    &chain.push(modules[at_row[0]].functions[at_row[1]].name)
-                    at = parents.get(at) ?? break
-                }
-                &chain.reverse()
-                // The call that made the row maximal, as `file:line`.
-                if effects.maximal_span == .Val(site) && sema_registration_module_index(graph, modules[row[0]].module_identity) == .Val(graph_module) {
-                    segments :: graph.modules[graph_module].source_segments
-                    location :: sema_source_location_at(segments, site)
-                    line :: sema_source_line_at(segments, site)
-                    detail :: if effects.maximal_detail == "" -> "" else -> ": {effects.maximal_detail}"
-                    if location == .Val(found) && line == .Val(number) -> &chain.push("unknown callee at {found.source_path}:{number}{detail}")
-                }
-                return chain
-            }
-        }
-        loop edge in effects.call_edges {
-            if seen.get(edge) != None -> next
-            seen[edge] = true
-            parents[edge] = key
-            &queue.push(edge)
-        }
-    }
-    [String]{}
-}
-
-// Rust `program_effects` each checked function the
-// entry reaches is judged against its package's `authority.holds` policy,
-// module by module (registered modules only), function by function. Returns
-// false when a check failed.
-fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], diagnostics: &[Diagnostic]) -> Bool {
-    if !sema_finalize_authority_constrained(policies) -> return true
-    complete := true
-    authority_reach :: sema_authority_entry_reach(graph, modules)
-    // Function key -> (module, function) row, for naming where an unknown
-    // callee forced every effect into a function's row.
-    function_rows := [String:[Int]]{}
-    loop row_module in 0..<modules.len() {
-        loop row_function in 0..<modules[row_module].functions.len() -> function_rows[modules[row_module].functions[row_function].key] = [Int]{row_module, row_function}
-    }
-    loop module_index in 0..<modules.len() {
-        if sema_registration_module_index(graph, modules[module_index].module_identity) == None -> next
-        policy :: sema_comptime_policy_for_package(policies, modules[module_index].package_identity) ?? next
-        // The policy's allow and deny lists are parsed once per module, not
-        // per function.
-        allowed :: sema_effect_scope_bounds(policy.authority_allow ?? [String]{})
-        prohibited :: sema_effect_authority_prohibited(policy.authority_deny ?? [String]{})
-        loop function_index in 0..<modules[module_index].functions.len() {
-            if authority_reach.get(modules[module_index].functions[function_index].key) == None -> next
-            reported :: diagnostics.len()
-            if policy.authority_allow != None {
-                if !sema_effect_check_scope_bounds("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) {
-                    complete = false
-                    chain :: sema_authority_maximal_chain(graph, modules, function_rows, modules[module_index].functions[function_index].key)
-                    if chain.len() > 0 && diagnostics.len() > reported -> diagnostics[diagnostics.len() - 1].call_chain = chain
-                }
-            }
-            if policy.authority_deny != None {
-                covered :: sema_effect_covered(modules[module_index].functions[function_index].effects.solved, prohibited)
-                if covered.len() > 0 {
-                    &diagnostics.push(sema_comptime_policy_deny_diagnostic(modules[module_index].package_identity, covered, modules[module_index].functions[function_index].source_span))
-                    complete = false
-                }
-            }
-            // The function may live in any file of its package: each report carries
-            // its own module's source location.
-            if diagnostics.len() > reported && sema_registration_module_index(graph, modules[module_index].module_identity) == .Val(graph_module) -> sema_attach_diagnostic_source_locations(&diagnostics, reported, graph.modules[graph_module].source_segments)
-        }
-    }
-    complete
-}
 
 // The Core usage of every registered module, in module order, on up to
 // `threads` compiler threads. The walk of a module's items is the

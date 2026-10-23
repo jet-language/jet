@@ -666,6 +666,7 @@ fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment,
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     checked_condition :: condition ?? return SemaDirectSpecialCheck{handled: true, value: None}
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
+    location.locals = sema_expression_panic_locals(scopes, call.name_span)
     stop := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: checked_condition, msg: message}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
@@ -693,6 +694,7 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
+    location.locals = sema_expression_panic_locals(scopes, call.name_span)
     stop := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }

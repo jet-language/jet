@@ -123,6 +123,9 @@ struct IRProgram {
     source_rows: [String:Int]
     // The checked foreign functions a call may name, by function key.
     foreign: [String:SemaCheckedForeignFunction]
+    // A runtime library's intrinsics by function key (BuildLibrary.jet):
+    // a call of one is its machine operation, never a call.
+    intrinsics: [String:IRRuntimeIntrinsic]
 }
 
 // The checked source files (`path` -> text) as rows of bytes and line
@@ -297,7 +300,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImp
         }
     }
     trait_methods :: ir_trait_methods(owned, type_rows, types, impl_slots, impl_traits)
-    p := IRProgram{functions: ^owned, rows: rows, types: ^types, type_rows: type_rows, constants: constants, render_impls: render_impls, close_methods: close_methods, trait_methods: trait_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}}
+    p := IRProgram{functions: ^owned, rows: rows, types: ^types, type_rows: type_rows, constants: constants, render_impls: render_impls, close_methods: close_methods, trait_methods: trait_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
     ir_source_index(&p, ^sources)
     p
 }

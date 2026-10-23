@@ -1432,7 +1432,59 @@ fn ir_x64_import(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
 }
 
 fn ir_x64_compile_function(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
+    if m.functions[row].asm == .Val(leaf) -> return ir_x64_asm_function(m.functions[row], leaf, row)
     ir_x64_compile_body(m, m.functions[row], tables, row)
+}
+
+// An `#FFI(asm)` leaf (IRFunction.asm): the template's bytes in the
+// ordinary frame (the old selector's InlineAsm). Every argument (the
+// seventh from the caller's stack) is pushed in order before the template's
+// registers pop, so no binding overwrites an argument not yet read. The
+// template's registers are all caller-saved and it leaves rsp balanced.
+fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64FunctionResult Never! {
+    code := [U8]{}
+    cfi := [U8]{}
+    x64_push(&code, X64_RBP)
+    dwarf_cfa_advance(&cfi, 0, code.len())
+    dwarf_cfa_def_cfa_offset(&cfi, 16)
+    dwarf_cfa_offset(&cfi, x64_dwarf_register(X64_RBP), 2)
+    cfa_at :: code.len()
+    x64_mov_rr(&code, X64_RBP, X64_RSP)
+    dwarf_cfa_advance(&cfi, cfa_at, code.len())
+    dwarf_cfa_def_cfa_register(&cfi, x64_dwarf_register(X64_RBP))
+    body :: code.len()
+    loop index in 0..<leaf.regs.len() {
+        if index < IR_X64_ARGUMENT_REGISTERS.len() {
+            x64_push(&code, IR_X64_ARGUMENT_REGISTERS[index])
+        } else {
+            x64_load(&code, X64_RAX, X64_RBP, 16 + 8 * (index - IR_X64_ARGUMENT_REGISTERS.len()))
+            x64_push(&code, X64_RAX)
+        }
+    }
+    operand := leaf.regs.len() - 1
+    loop operand >= 0 {
+        x64_pop(&code, leaf.regs[operand])
+        operand -= 1
+    }
+    loop byte in leaf.code -> &code.push(byte)
+    if leaf.result > 0 -> x64_mov_rr(&code, X64_RAX, leaf.result)
+    x64_pop(&code, X64_RBP)
+    ret_at :: code.len()
+    x64_ret(&code)
+    dwarf_cfa_advance(&cfi, body, ret_at)
+    dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
+    lines := [X64LineRow]{}
+    if f.line > 0 {
+        &lines.push(X64LineRow{at: 0, line: f.line})
+        &lines.push(X64LineRow{at: body, line: f.line})
+    }
+    name :: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
+    IRX64FunctionResult{
+        function: X64CompiledFunction{id: LIRFunctionID{value: row}, name: name, code: ^code, relocs: [X64Reloc]{}},
+        debug: X64FunctionDebug{lines: ^lines, body: body, cfi: ^cfi, ranges: [X64VariableRange]{}},
+        variables: [LIRDebugVariable]{},
+        errors: [String]{},
+    }
 }
 
 // Function row `row` (`f`, borrowed from `m`).

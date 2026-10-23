@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Package checked Jet runtime MIR as one object, then resolve permitted C
-// platform dependencies with Jet's own linker. Never invoke a Rust compiler.
+// Build the checked Jet runtime as IR into one object, then resolve permitted
+// C platform dependencies with Jet's own linker. Never invoke a Rust compiler.
 import { nativeCCompiler } from './native-c-compiler.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -51,7 +51,9 @@ function jetFiles(directory) {
 const manifest = 'Compiler/JetRuntime/sources.list';
 const sources = readFileSync(join(repo, manifest), 'utf8').split('\n').map(row => row.trim()).filter(row => row && !row.startsWith('#'));
 const source = inventory([manifest, 'Compiler/JetRuntime/package.jet', ...sources]);
-const backend = inventory(jetFiles('Compiler/JetBackend/Source'));
+// The runtime object's producer: the IR builder/optimizer/selector and the
+// x86-64 encoder, object writer and linker it uses.
+const backend = inventory([...jetFiles('Compiler/JetIR/Source'), ...jetFiles('Compiler/JetBackend/Source')]);
 const lifecycle = inventory(['Compiler/JetRuntime/lifecycle.list']);
 const platformInputs = platform.map(path => ({ path, sha256: sha256(readFileSync(path)), language: 'C', role: 'platform' }));
 const compilerSha256 = sha256(readFileSync(jet));
@@ -102,10 +104,10 @@ try {
     factory = invokeStageZeroFactory({ recordFile: factoryRecord, repo, sourceRoot: library, entry: 'unit.jet', work: join(out, 'factory'), policy });
   } else {
     // A native compiler: the runtime-library seam in the hosted source loader
-    // (Request.jet jet_cli_compile_for_target) under `jet doc` (checked MIR,
-    // no lowering of the unit itself; its pages land in the temporary work
-    // directory). Native `jet check` aborts before compiling in every native
-    // compiler so far, and `doc --check` exits 1 on undocumented public items.
+    // (Request.jet jet_cli_compile_prepared) under `jet doc` (the checked
+    // program stopped before lowering, then built as IR; its pages land in the
+    // temporary work directory). `doc --check` exits 1 on undocumented public
+    // items.
     const run = spawnSync(jet, ['doc', join(library, 'unit.jet')], {
       cwd: library, stdio: 'inherit',
       env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, ...policy },

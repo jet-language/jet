@@ -159,7 +159,10 @@ enum IRSlotKind { Param Local Temp }
 // One function's arena. Slots 0..<param_count are the parameters in order.
 // `slot_name` is an interned name (-1 for a temporary); `slot_line` the
 // source line a variable is declared on (0 none); `line[i]` the source line
-// of instruction i (0 none). `result` is a type row, -1 for none.
+// of instruction i (0 none). `result` is a type row, -1 for none. `asm` is
+// an `#FFI(asm)` leaf's assembled template (BuildForeign.jet ir_asm_call):
+// such a function has Word parameters, no instructions, and its machine
+// code is the template's (X64Select.jet ir_x64_asm_function).
 struct IRFunction {
     name: String
     key: String
@@ -181,6 +184,15 @@ struct IRFunction {
     args: [Int]
     // Open structured-control instructions while building (indexes into `op`).
     open: [Int]
+    asm: IRAsmLeaf?
+}
+
+// An assembled `#FFI(asm)` template: its bytes, the register operand i is
+// bound to (`regs[i]`), and the register holding its result (-1 for none).
+struct IRAsmLeaf {
+    code: [U8]
+    regs: [Int]
+    result: Int
 }
 
 // A word of a static object (IRModule.data_relocs) that holds an address:
@@ -331,7 +343,7 @@ fn ir_function_new(name: String, key: String, symbol: String, source_file: Strin
         param_count: 0, result: -1,
         slot_type: [Int]{}, slot_kind: [IRSlotKind]{}, slot_name: [Int]{}, slot_line: [Int]{},
         op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, code_line: [Int]{}, args: [Int]{},
-        open: [Int]{},
+        open: [Int]{}, asm: None,
     }
 }
 
@@ -465,6 +477,11 @@ fn ir_op_name(op: IROp) -> String Never! {
 // through `m`, so the text is the function's content.
 fn ir_function_text(m: IRModule, f: IRFunction) -> String Never! {
     lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={f.result}"}
+    if f.asm == .Val(leaf) {
+        code :: loop byte in leaf.code -> "{byte}"
+        regs :: loop register in leaf.regs -> "{register}"
+        &lines.push("  asm regs=[{regs.join(",")}] result={leaf.result} code=[{code.join(",")}]")
+    }
     loop slot in 0..<f.slot_type.len() {
         name :: if f.slot_name[slot] >= 0 -> m.names[f.slot_name[slot]] else -> "_"
         kind :: if f.slot_kind[slot] == {

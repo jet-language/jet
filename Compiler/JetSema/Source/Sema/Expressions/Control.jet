@@ -48,9 +48,12 @@ use jet_foundation.[
     type_name,
 ]
 
-// The source location of a panic at `span`, naming the function being checked:
-// `scopes.location_function` on a compiler thread, which never writes the
-// shared environment, else the environment's `function_name`.
+// The source location of a panic at `span` (Rust capture_panic_loc), naming the
+// function being checked: `scopes.location_function` on a compiler thread,
+// which never writes the shared environment, else the environment's
+// `function_name`. `column` is the 1-based byte column of the span's start
+// and `caret` the span's byte length; the backend, which holds the source
+// text, supplies the report's source line and character column.
 fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> TPanicLoc Never! {
     file := environment.source_file
     line := 0
@@ -61,7 +64,7 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: Se
             local :: span.start - segment.generated.start
             if segment.line_starts.len() == 0 {
                 line = 1
-                column = local
+                column = local + 1
                 break
             }
             low := 0
@@ -72,11 +75,51 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: Se
             }
             line_index :: if low > 0 -> low - 1 else -> 0
             line = line_index + 1
-            column = local - segment.line_starts[line_index]
+            column = local - segment.line_starts[line_index] + 1
         }
     }
     function :: scopes.location_function ?? environment.function_name
-    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: function, locals: [TPanicLocal]{}}
+    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: span.end - span.start, function: function, locals: [TPanicLocal]{}}
+}
+
+// The `assert`/`assert_eq` report's safe locals (Rust safe_locals_snapshot):
+// the visible Int, Float and Bool locals and parameters of the body being
+// checked, sorted by name. A lambda body's locals end at its own frame;
+// compiler-generated `__` names are not the program's locals.
+fn sema_expression_panic_locals(scopes: SemaScopeTable, span: Span) -> [TPanicLocal] Never! {
+    chain := [Int:Bool]{}
+    frame := scopes.current
+    loop frame > 0 && scopes.frames[frame].parent >= 0 {
+        chain[frame] = true
+        if scopes.frames[frame].owner.starts_with("lambda@") -> break
+        frame = scopes.frames[frame].parent
+    }
+    seen := [String:Bool]{}
+    names := [String]{}
+    rows := [String:Int]{}
+    index := scopes.bindings.len() - 1
+    loop index >= 0 {
+        row :: index
+        index -= 1
+        binding :: scopes.bindings[row]
+        if chain.get(binding.frame) == None || binding.symbol.span.start > span.start -> next
+        name :: binding.symbol.name
+        if name == "_" || name.starts_with("__") || seen.get(name) != None -> next
+        seen[name] = true
+        if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> next
+        ty :: binding.symbol.ty ?? { next }
+        if ty != Type.Int && ty != Type.Float && ty != Type.Bool -> next
+        &names.push(name)
+        rows[name] = row
+    }
+    &names.sort()
+    locals := [TPanicLocal]{}
+    loop name in names {
+        row :: rows.get(name) ?? { next }
+        symbol :: scopes.bindings[row].symbol
+        &locals.push(TPanicLocal{display_name: name, local: tir_symbol_local(name, symbol.span, symbol.id)})
+    }
+    locals
 }
 
 fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {

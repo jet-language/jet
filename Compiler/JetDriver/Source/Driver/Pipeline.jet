@@ -1251,7 +1251,7 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
 
 fn jet_driver_authority_policy(load: JetDriverLoadResult) -> JetDriverAuthorityPolicy? {
     loop package in load.packages {
-        if package.identity == load.package_identity -> return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, allow: package.authority_allow, deny: package.authority_deny})
+        if package.identity == load.package_identity -> return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, inline_package: package.inline_package, allow: package.authority_allow, deny: package.authority_deny})
     }
     None
 }
@@ -5667,9 +5667,10 @@ struct JetDriverCheckedProjectionCapture {
 // and keep-going traps; the checked modules (declarations, names) beside
 // them; the checked source files' text by path (the first file of a path);
 // the entry module; the key of the executable entry
-// (jet_driver_resolve_entry_key), None for a program without one. A Test
-// compile has no entry: it carries the tests and Check Outputs its harness
-// runs (jet_driver_test_plan) instead.
+// (jet_driver_resolve_entry_key), None for a program without one; the entry
+// module's `#Export(c)` rows (jet_driver_c_export_rows), the exports of a
+// library. A Test compile has no entry: it carries the tests and Check
+// Outputs its harness runs (jet_driver_test_plan) instead.
 struct JetDriverLoweringInputs {
     functions: [TFunc]
     modules: [SemaGraphModuleResult]
@@ -5678,6 +5679,7 @@ struct JetDriverLoweringInputs {
     entry_key: String?
     tests: [TTestFact]{[TTestFact]{}}
     output_checks: [TOutputCheckFact]{[TOutputCheckFact]{}}
+    c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}}
 }
 
 struct JetDriverLoweringInputsResult {
@@ -6556,7 +6558,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks, c_exports: c_export_rows.copy()})
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
         result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
         result.foreign_link = foreign_link

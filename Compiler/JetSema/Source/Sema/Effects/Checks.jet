@@ -184,7 +184,6 @@ struct SemaEffectNode {
     call_edges: [String]
     maximal: Bool
     maximal_span: Span?
-    maximal_detail: String{""}
     declared: [String]
     prohibited: [String]
     has_declared_row: Bool
@@ -957,7 +956,6 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: [String:Int], 
     if callee_key == "" && !row_known {
         nodes[node_index].maximal = true
         nodes[node_index].maximal_span = Val(fact.span)
-        nodes[node_index].maximal_detail = "a call with no resolved callee"
         sema_effect_record_memory_open(&nodes, node_index, fact.span, "foreign or dynamically selected function body")
     }
     // A callee with no body in this program has no effects: only its declared
@@ -1164,7 +1162,6 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_by_key: [St
         else -> {
             nodes[node_index].maximal = true
             nodes[node_index].maximal_span = Val(expression.span)
-            nodes[node_index].maximal_detail = "a call with no call-site fact"
             sema_effect_record_memory_open(&nodes, node_index, expression.span, "foreign or dynamically selected function body")
         }
     }
@@ -1241,7 +1238,6 @@ fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffec
             if unresolved {
                 nodes[node_index].maximal = true
                 nodes[node_index].maximal_span = Val(fact.span)
-                nodes[node_index].maximal_detail = "`{trait_name}::{method.name}` has an implementer with no resolved method"
             }
             true
         }
@@ -1750,7 +1746,7 @@ fn sema_effect_secret_reach(nodes: [SemaEffectNode], node_by_key: [String:Int]) 
 }
 
 fn sema_effect_tfacts(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, maximal_detail: node.maximal_detail}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span}
 }
 
 fn sema_effect_secret_diagnostic(node: SemaEffectNode) -> Diagnostic {

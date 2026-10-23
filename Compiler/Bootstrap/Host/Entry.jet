@@ -58,10 +58,13 @@ fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResul
 }
 
 // The library-object feed shares the CLI's complete runtime producer: checked
-// NativeLibrary exports, lifecycle, ABI receipt and optional Rust-free pack.
+// NativeLibrary exports built as IR, lifecycle, ABI receipt and optional
+// Rust-free pack.
 fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
-    result := jet_bootstrap_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
-    jet_cli_runtime_library(^result, prefix) ?? jet_driver_compile_escaped_failure("the runtime library producer failed outside every compile stage")
+    // copy: a three-field row; the request moves into the compiler below.
+    compiler_threads :: request.compiler_threads.copy()
+    front := jet_cli_lowering_inputs(^request, None)
+    jet_cli_runtime_library(^front, prefix, compiler_threads) ?? jet_driver_compile_escaped_failure("the runtime library producer failed outside every compile stage")
 }
 
 // The native feed is `jet build`'s own native route (Host.jet
