@@ -340,8 +340,13 @@ fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {
 }
 
 fn jet_ring_prelude_closure_layer(roots: [String]) -> RuntimeLayer Never! {
+    jet_ring_closure_rows_layer(jet_ring_classify_prelude_closure(roots))
+}
+
+// The highest layer among classified closure rows.
+fn jet_ring_closure_rows_layer(rows: [JetRingLayerFact]) -> RuntimeLayer Never! {
     layer := RuntimeLayer.Core
-    loop row in jet_ring_classify_prelude_closure(roots) {
+    loop row in rows {
         if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
     }
     layer

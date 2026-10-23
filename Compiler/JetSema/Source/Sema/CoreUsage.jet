@@ -31,7 +31,8 @@ use jet_foundation.[
     core_type_modules,
     expr_optional_method_call_as_call,
     expr_span,
-    jet_ring_prelude_closure_keys,
+    jet_ring_classify_prelude_closure,
+    jet_ring_closure_rows_layer,
     jet_ring_prelude_closure_layer,
     boundary_head_owner_module,
     symbol_id,
@@ -437,7 +438,10 @@ fn sema_core_has_source_package(module_name: String) -> Bool Never! {
     module_name == "core.archive"
 }
 
-fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
+// The closure's runtime layer lands in `layer`, from the same classification:
+// the closure is closed under the dependency edges, so it classifies to the
+// rows its roots do.
+fn sema_expand_core_reachable_closure(roots: [String], layer: &RuntimeLayer) -> [String] Never! {
     used := [String]{}
     loop root in roots -> sema_core_string_add(&used, root)
     direct := [String]{}
@@ -457,8 +461,9 @@ fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
         if helper != "" -> sema_core_string_add(&used, "__core_intrinsic::{intrinsic}::{helper}")
     }
     // Foundation owns dependency edges and keeps this expansion idempotent.
-    closure := jet_ring_prelude_closure_keys(used)
-    loop key in closure -> sema_core_string_add(&used, key)
+    rows :: jet_ring_classify_prelude_closure(used)
+    loop row in rows -> sema_core_string_add(&used, row.key)
+    layer = jet_ring_closure_rows_layer(rows)
     used
 }
 
@@ -1274,8 +1279,8 @@ fn sema_core_module_usage_assemble(registration_module: SemaRegistrationModule, 
     sema_core_generated_direct_item_roots(registration_module.program.items, &collected.used, &collected.spans)
     sema_core_collected_append(&collected, items)
     sema_core_collect_stmts(registration_module.program.script_body, context.imports, context.registered, &collected.used, &collected.spans, &collected.callbacks)
-    closure := sema_expand_core_reachable_closure(collected.used)
-    layer := jet_ring_prelude_closure_layer(closure)
+    layer := RuntimeLayer.Core
+    closure := sema_expand_core_reachable_closure(collected.used, &layer)
     SemaCoreModuleUsageResult{
         module_identity: registration_module.module_identity,
         used_core: closure,
