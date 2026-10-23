@@ -143,8 +143,9 @@ struct LinkContext {
     // A section's RELA section when it is not the header right after it.
     rela: [Int:Int]
     discarded: [Int:Bool]
-    // Global symbol of each global-binding file symbol.
-    sym_global: [Int:Int]
+    // Global symbol of each file symbol, by its index across the loaded
+    // files (obj_first_symbol); -1 for a local one.
+    sym_global: [Int]
     // Global symbols by name.
     g_index: [String:Int]
     g_name: [String]
@@ -214,7 +215,7 @@ fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
         bufs: ^bufs, archives: [LinkArchive]{}, archive_buffer: [Int]{}, lookup: [String:Int]{}, pulled: [Int:Bool]{},
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
         obj_symtab: [Int]{}, obj_strtab: [Int]{}, obj_shndx: [Int]{}, obj_count: [Int]{}, obj_first_global: [Int]{},
-        obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int:Int]{}, roots: [Int]{},
+        obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int]{}, roots: [Int]{},
         g_index: [String:Int]{}, g_name: [String]{}, g_kind: [Int]{}, g_section: [Int]{}, g_value: [Int]{}, g_size: [Int]{},
         g_obj: [Int]{}, g_weak_def: [Bool]{}, g_strong_ref: [Bool]{}, g_alias: [Int]{}, g_addr: [Int]{},
         g_common_size: [Int]{}, g_common_align: [Int]{}, comdats: [String:Bool]{}, pending: [Int]{}, pending_head: 0,
@@ -467,7 +468,9 @@ fn link_sym_shndx(c: LinkContext, obj: Int, k: Int) -> Int Never! {
 
 fn link_global_of(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     if k < c.obj_first_global[obj] -> return -1
-    c.sym_global.get(c.obj_first_symbol[obj] + k) ?? -1
+    index :: c.obj_first_symbol[obj] + k
+    if index >= c.sym_global.len() -> return -1
+    c.sym_global[index]
 }
 
 // The section a relocation target resolves to, or -1.
@@ -596,6 +599,7 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
     &c.obj_first_section.push(first)
     &c.obj_first_symbol.push(first_symbol)
     &c.obj_sym_count.push(sym_count)
+    loop _ in 0..<sym_count -> &c.sym_global.push(-1)
     // COMDAT groups: a group whose signature was already loaded discards its
     // member sections; their symbols then read as undefined references.
     loop k in groups {
@@ -621,7 +625,7 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
         section :: link_sym_shndx(c, obj, k)
         symbol_name :: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, at))
         g :: link_intern(&c, symbol_name)
-        &c.sym_global.add(first_symbol + k, g).drop("file symbols are unique")
+        c.sym_global[first_symbol + k] = g
         weak :: bind == 2
         value :: link_u64(c.bufs, b, at + 8)
         symbol_size :: link_u64(c.bufs, b, at + 16)
