@@ -922,3 +922,41 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
     }
     return if (int_negative(value)) -> -result else -> result
 }
+
+// Core/InlineRange.rs jet_inline_range_from_int through the C adapter: the
+// borrowed exact Int checked against the inline refinement Int(lo..hi), the
+// carrier unchanged. An Int past I64 is outside every such interval, so it
+// takes the same Err text rather than the seed's narrowing message.
+#Export(c) fn jet_inline_range_from_int(value: I64, lo: I64, hi: I64, output: I64, error: I64) -> I64 {
+    low :: host_native_int(lo)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    high :: host_native_int(hi)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    inside := false
+    raw := value
+    if int_inline(value) {
+        inside = raw >= low && raw <= high
+    } else {
+        bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        if int_fits(value, bound) {
+            raw = int_word(value)
+            inside = raw >= low && raw <= high
+        }
+    }
+    if inside {
+        int_store(output, jet_int_owned_from_i64(raw))
+        return I64{1}
+    }
+    message :: rt_text_builder_with_capacity(I64{64})
+    jet_rt_string_builder_push(message, rt_static_text("value is outside Int("))
+    low_text :: jet_rt_i64_to_string(low)
+    jet_rt_string_builder_push(message, low_text)
+    jet_rt_string_drop(low_text)
+    jet_rt_string_builder_push(message, rt_static_text(".."))
+    high_text :: jet_rt_i64_to_string(high)
+    jet_rt_string_builder_push(message, high_text)
+    jet_rt_string_drop(high_text)
+    jet_rt_string_builder_push(message, rt_static_text(")"))
+    int_store(error, message)
+    I64{0}
+}

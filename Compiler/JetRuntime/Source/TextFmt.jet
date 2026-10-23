@@ -197,3 +197,30 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
     }
     body
 }
+
+// Fmt.rs jet_fmt_grouped: jet_fmt_decimal with its whole digits grouped by
+// commas in threes (comma_decimal); the sign and the fraction are kept.
+#Export(c) fn jet_fmt_grouped(value: Float, precision: I64) -> I64 {
+    plain :: jet_fmt_decimal(value, precision)
+    data :: rt_text_data(plain)
+    length :: rt_text_len(plain)
+    start :: if (length > I64{0} && rt_text_byte(data) == I64{45}) -> I64{1} else -> I64{0}
+    digits_end := start
+    loop digits_end < length {
+        byte :: rt_text_byte(data + digits_end)
+        if (byte < I64{48} || byte > I64{57}) { break }
+        digits_end += I64{1}
+    }
+    if (digits_end - start <= I64{3}) -> return plain
+    grouped :: rt_text_builder_with_capacity(length + (digits_end - start) / I64{3})
+    rt_text_append(grouped, data, start)
+    at := start
+    loop at < digits_end {
+        if (at > start && (digits_end - at) % I64{3} == I64{0}) -> rt_text_push_scalar(grouped, I64{44})
+        rt_text_push_scalar(grouped, rt_text_byte(data + at))
+        at += I64{1}
+    }
+    rt_text_append(grouped, data + digits_end, length - digits_end)
+    jet_rt_string_drop(plain)
+    grouped
+}

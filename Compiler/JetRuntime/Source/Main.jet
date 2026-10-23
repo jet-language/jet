@@ -39,6 +39,19 @@ main_root_control := I64{0}
 
 fn main_process_end() { main_process_ending = I64{1} }
 
+// Core.rs JET_PERF_BITS: core.perf's raw fidelity word, zero until written
+// (Core/Perf reads zero as the default). A loaded-image host's next entry
+// starts from zero again, as a fresh process would.
+main_perf_bits := I64{0}
+
+#Export(c) fn jet_perf_read_bits() -> I64 { jet_int_owned_from_i64(main_perf_bits) }
+
+#Export(c) fn jet_perf_write_bits(bits: I64) {
+    word :: host_native_int(bits)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    main_perf_bits = word
+}
+
 // The program entry returning, before its drops (JetIR ir_emit_return). A
 // task still in flight keeps the heap reclaimed: it may run long after.
 #Export(c) fn jet_rt_process_entry_return() {
@@ -168,6 +181,7 @@ fn main_exit_cleanup() -> I64 {
     // ending process dropped nothing, so its live Secrets are scrubbed here.
     if (main_process_ending != I64{0}) -> secret_scrub()
     main_process_ending = I64{0}
+    main_perf_bits = I64{0}
     sync_store(main_exit_root, I64{0})
     // CAbi.rs:182: normal entry returns zero, not the entry's unused register.
     I64{0}
