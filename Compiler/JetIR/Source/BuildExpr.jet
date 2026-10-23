@@ -1390,16 +1390,15 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .DynLen(site, location) -> return ir_dyn_len(&m, p, &b, ty, receiver, site, location, span)
     if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
-    // Encoding a Dyn is the Dyn itself (codegen jet_codegen_lower_serde_encode).
-    if operation == .SerdeEncode && (ir_nominal_name(ir_untag(ir_subst(m, receiver.ty))) ?? "") == "Dyn" -> return ir_expr(&m, p, &b, receiver)
+    if operation == .SerdeEncode -> return ir_serde_encode(&m, p, &b, ty, receiver, span)
     dedicated :: if operation == {
-        .SerdeEncode | .Hardware(_) | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
+        .Hardware(_) | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
         .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
-        // ir_dyn_method lowered key lookups, path writes, remove, decode and
-        // the scalar, Field and At reads on the canonical Dyn; another
-        // receiver of them, and the index, keys and operator forms, have no
-        // route here.
+        // ir_dyn_method lowered key lookups, indexing, keys, path writes,
+        // remove, decode and the scalar, Field and At reads on the canonical
+        // Dyn; another receiver of them, and the operator forms (the runtime
+        // has no jet_dyn_binary / jet_dyn_compare), have no route here.
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> true
@@ -1912,8 +1911,7 @@ fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TStrPart], span:
                     .Fixed(digits) | .Grouped(digits) -> digits
                     else -> 0
                 }
-                if kernel != "" {
-                    if ir_untag(ir_subst(m, value.ty)) != .Float -> return ir_fail_slot(&b, span, "interpolation format {format} of {ir_type_name(value.ty)}")
+                if kernel != "" && ir_untag(ir_subst(m, value.ty)) == .Float {
                     slot :: ir_expr(&m, p, &b, value)
                     if ir_failed(b) -> return -1
                     digits :: ir_word_const(&m, &b, precision)
@@ -1924,11 +1922,15 @@ fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TStrPart], span:
                     ir_release(&m, &b, slot)
                     next
                 }
-                debug :: if format == {
-                    .Display -> false
-                    .Debug -> true
-                    else -> { return ir_fail_slot(&b, span, "interpolation format {format}") }
+                // Every other selector is its Core/Text/Fmt.jet helper.
+                if format != .Display && format != .Debug {
+                    text :: ir_string_format(&m, p, &b, value, format, span)
+                    if ir_failed(b) || text < 0 -> return -1
+                    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+                    ir_release(&m, &b, text)
+                    next
                 }
+                debug :: format == .Debug
                 slot :: ir_expr(&m, p, &b, value)
                 if ir_failed(b) -> return -1
                 text :: ir_render(&m, p, &b, value.ty, slot, if debug -> IRRender.Debug else -> IRRender.Display, span)
