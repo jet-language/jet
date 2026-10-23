@@ -64,7 +64,11 @@ const hostPlatform = process.platform === "linux" ? "linux" :
 if (platform !== hostPlatform) fail("report platform does not match the host: " + platform + " (host=" + hostPlatform + ")");
 reportDir = path.isAbsolute(reportDir) ? reportDir : path.join(root, reportDir);
 
-const jetBin = path.resolve(process.env.JET_COMPILED_WORKLOAD_JET_BIN || path.join(root, "target", "debug", process.platform === "win32" ? "jet.exe" : "jet"));
+// The Jet compiler under measurement: JET_COMPILED_WORKLOAD_JET_BIN, then JET
+// (the admitted native compiler), then `jet` on PATH.
+const configuredJet = process.env.JET_COMPILED_WORKLOAD_JET_BIN || process.env.JET;
+const jetBin = path.resolve(configuredJet || resolveExecutable(process.platform === "win32" ? "jet.exe" : "jet")
+  || fail("no Jet compiler: set JET_COMPILED_WORKLOAD_JET_BIN or JET, or put jet on PATH"));
 const exeSuffix = process.platform === "win32" ? ".exe" : "";
 const scratchRoot = process.env.JET_COMPILED_WORKLOAD_SCRATCH || path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const scratchPath = path.resolve(scratchRoot);
