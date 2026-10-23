@@ -1,0 +1,12 @@
+# tests/services_runtime.rs::workflow_sleep_cancellation_is_recorded at tests/services_runtime.rs:1180; hand-port
+# Claim: cancelling a sleeping workflow prints cancelled, and the next pass records history start@v1|sleep:10000000000|sleep-cancelled (tests/services_runtime.rs:1184-1191)
+# Fixture migrated: worker passed as ^worker and receivers marked & (seed E0209/E0224)
+# Fixture migrated: the Rust testing.temp_dir path is kept; the default run and interpreter lanes are folded into the one jet run step
+# Not ported: the JIT and interpreter lanes (tests/services_runtime.rs:1193-1215)
+fixture: workflow_sleep_cancellation_is_recorded.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/services_runtime.rs:1184-1191
+stdout: = workflow_sleep_cancellation_is_recorded.out # tests/services_runtime.rs:1184-1191

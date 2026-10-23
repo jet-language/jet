@@ -1,0 +1,23 @@
+
+use core.files as files
+
+fn run() {
+    root :: "fixture"
+    bytes_path :: " {files.join(root, "bytes.bin")} "
+    empty_path :: files.join(root, "empty.bin")
+    bytes :: files.read_bytes(bytes_path.trim()) ?? panic("read bytes")
+    loop byte in bytes {
+        print(byte)
+    }
+    print(bytes.len())
+    empty :: files.read_bytes(empty_path) ?? panic("read empty bytes")
+    loop byte in empty {
+        print(byte)
+    }
+    print(empty.len())
+    missing_path :: " {files.join(root, "missing.bin")} "
+    print(files.read_bytes(missing_path.trim()) == .Err(_))
+    loop value in [7, 13] {
+        print(value)
+    }
+}

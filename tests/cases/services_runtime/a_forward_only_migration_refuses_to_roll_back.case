@@ -1,0 +1,17 @@
+# tests/services_runtime.rs::a_forward_only_migration_refuses_to_roll_back at tests/services_runtime.rs:2118; hand-port
+# Claim: the receipt names migration=forward_only (tests/services_runtime.rs:2127-2129)
+# Claim: a forward-only migration offers rollback_available=false (tests/services_runtime.rs:2130-2133)
+# Fixture migrated: worker passed as ^rollback_worker and receiver marked & (seed E0209/E0224)
+# Fixture migrated: the policy arrives through JET_SERVICE_ROLLBACK_POLICY step env; the store is fixture-relative cluster.log
+fixture: a_forward_only_migration_refuses_to_roll_back.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # tests/services_runtime.rs:2122
+step: built
+env: JET_SERVICE_ROLLBACK_STORE=cluster.log
+env: JET_SERVICE_ROLLBACK_POLICY=forward_only
+exit: 0 # tests/services_runtime.rs:2124-2133
+stdout: ~ "migration=forward_only" # tests/services_runtime.rs:2124-2133
+stdout: ~ "rollback_available=false" # tests/services_runtime.rs:2124-2133

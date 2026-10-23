@@ -1,0 +1,11 @@
+# tests/pure.rs::store_rollback_invalid_gen at tests/pure.rs:724; hand-port
+# Claim: rolling back to a non-existent generation fails (tests/pure.rs:727-728)
+# Fixture migrated: profile commands are not in the seed jet binary; the Rust Store API maps to jet profile, which the seed rejects
+# Not ported: jet::Store::rollback_to Rust API (tests/pure.rs:727): replaced by jet profile rollback dev 9999
+fixture: store_rollback_invalid_gen.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet profile rollback dev 9999 --no-color
+exit: 2 # tests/pure.rs:727-728
+stderr: !~ "panicked" # tests/pure.rs:727-728

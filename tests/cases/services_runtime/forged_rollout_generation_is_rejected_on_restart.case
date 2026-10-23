@@ -1,0 +1,21 @@
+# tests/services_runtime.rs::forged_rollout_generation_is_rejected_on_restart at tests/services_runtime.rs:612; hand-port
+# Claim: a write phase followed by a journal rewrite to generation 99 makes the recover phase exit nonzero (tests/services_runtime.rs:616-636)
+# Fixture migrated: worker passed as ^rollout_worker and receiver marked & (seed E0209/E0224)
+# Fixture migrated: the journal rewrite is a sh -c sed over the .rollout file (the Rust replace of generation:2/upgrade_to:2/worker_generation:2/directory_generation:2 becomes one sed with $-anchored patterns)
+fixture: forged_rollout_generation_is_rejected_on_restart.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # tests/services_runtime.rs:616
+step: built
+env: JET_SERVICE_AUTH_STORE=rollout-forged.log
+env: JET_SERVICE_AUTH_PHASE=write
+exit: 0 # tests/services_runtime.rs:618-621
+stdout: = "handoff:2\n" # tests/services_runtime.rs:618-621
+step: sh {work}/step-3.sh
+exit: 0 # tests/services_runtime.rs:623-631 journal forge
+step: built
+env: JET_SERVICE_AUTH_STORE=rollout-forged.log
+env: JET_SERVICE_AUTH_PHASE=recover
+exit: 1 # tests/services_runtime.rs:633-636 expects failure

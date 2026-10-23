@@ -1,0 +1,13 @@
+# tests/services_runtime.rs::workflow_wait_methods_replay_their_history at tests/services_runtime.rs:1104; hand-port
+# Claim: the first pass records start@v1|sleep:0|activity:charge:charge-1|all:charge-1 (tests/services_runtime.rs:1110-1113)
+# Claim: a second workflow_start pass replays the same history without sleeping or redelivering (tests/services_runtime.rs:1112-1113)
+# Fixture migrated: worker passed as ^worker and receiver marked & (seed E0209/E0224)
+# Fixture migrated: the Rust testing.temp_dir path is kept; the default multi-file run and interpreter lanes are folded into the one jet run step
+# Not ported: the separate JIT and interpreter lanes (tests/services_runtime.rs:1115-1135)
+fixture: workflow_wait_methods_replay_their_history.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/services_runtime.rs:1108-1113
+stdout: = workflow_wait_methods_replay_their_history.out # tests/services_runtime.rs:1108-1113

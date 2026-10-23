@@ -1,0 +1,14 @@
+# tests/ownership.rs::read_and_take_of_one_name_in_one_call_is_e0204 at tests/ownership.rs:2692; hand-port
+# Claim: pair(t, ^t) is rejected with E0204 (tests/ownership.rs:2693-2708)
+# Claim: pair(t, t) is rejected with E0204 (tests/ownership.rs:2693-2708)
+# Fixture migrated: the Rust loop over two call spellings becomes two fixture dirs a/ and b/
+fixture: read_and_take_of_one_name_in_one_call_is_e0204.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check a/main.jet
+exit: 1 # tests/ownership.rs:2704-2708 pair(t, ^t)
+stderr: ~ "E0204" # tests/ownership.rs:2704-2708 pair(t, ^t)
+step: jet check b/main.jet
+exit: 1 # tests/ownership.rs:2704-2708 pair(t, t)
+stderr: ~ "E0204" # tests/ownership.rs:2704-2708 pair(t, t)

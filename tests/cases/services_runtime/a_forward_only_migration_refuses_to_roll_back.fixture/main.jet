@@ -1,0 +1,30 @@
+use core.sys as env
+use core.service as services
+
+fn rollback_worker() {}
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_ROLLBACK_STORE") ?? panic("store")
+    policy :: env.get("JET_SERVICE_ROLLBACK_POLICY") ?? panic("policy")
+    tree := services.tree("cluster")
+    store :: services.state_store(store_path) ?? panic("state store")
+    &tree.set_state_event_log(^store, "cluster-events", 1, ^policy) ?? panic("state")
+    endpoint :: &tree.worker("api", ^rollback_worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("start")
+    &tree.append_event("before-upgrade") ?? panic("append")
+    &tree.directory_register("api", endpoint.copy()) ?? panic("register")
+    &tree.drain_worker(endpoint) ?? panic("drain")
+    &tree.handoff_generation() ?? panic("handoff")
+    receipt :: tree.upgrade_receipt() ?? panic("receipt")
+    print("receipt:{receipt}")
+    &tree.append_event("after-upgrade") ?? panic("append after")
+    rolled :: tree.rollback_generation()
+    if rolled == {
+        .Ok(generation) -> {
+            events :: tree.replay_events()
+            print("rolled:{generation}:{events}")
+        }
+        .Err(_) -> { print("rolled:refused") }
+    }
+    &tree.stop() ?? panic("stop")
+}

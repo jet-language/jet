@@ -1,0 +1,12 @@
+# tests/pure.rs::transitive_range_bound_is_e3401 at tests/pure.rs:435; hand-port
+# Claim: a range-bound call reached transitively from run is E3401 (tests/pure.rs:518)
+# Claim: why-line names run, helper and impure_bound (tests/pure.rs:520-524)
+# Not ported: check_pure_program_root Rust call with hand-built FuncSig map (tests/pure.rs:451-517): replaced by the jet eval --pure walk from run
+fixture: transitive_range_bound_is_e3401.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet eval --pure main.jet
+exit: 1 # tests/pure.rs:518-524
+stderr: ~ "E3401" # tests/pure.rs:518-524
+stderr: ~ "run → helper → impure_bound" # tests/pure.rs:518-524

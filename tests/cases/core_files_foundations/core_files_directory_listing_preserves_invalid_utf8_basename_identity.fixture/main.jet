@@ -1,0 +1,27 @@
+
+use core.files as files
+
+fn verify_names() {
+    directory :: files.open_directory("names")
+    entries :: directory.list()
+    assert(entries.len() == 2)
+    first :: entries[0]
+    second :: entries[1]
+    assert(first.raw_name == [U8]{97, 128})
+    assert(second.raw_name == [U8]{97, 255})
+    assert(!first.name_is_unicode && !second.name_is_unicode)
+    assert(first.name == "a�" && second.name == "a�")
+    assert(first.path == second.path)
+    assert(first.raw_name != second.raw_name)
+    assert(!first.is_dir && !second.is_dir)
+    assert(directory.list().len() == 2)
+}
+
+#Test("non-Unicode native basenames retain distinct raw identities") {
+    verify_names()
+}
+
+fn run() {
+    verify_names()
+    print("distinct raw identities, equal display names: true")
+}

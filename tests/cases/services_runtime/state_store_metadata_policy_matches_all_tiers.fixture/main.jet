@@ -1,0 +1,23 @@
+use core.service as service
+fn policy_reason(error: ServiceError) -> String Never! {
+    if error == .Policy(reason) -> return reason
+    panic("expected policy refusal")
+}
+fn run() {
+    service.state_store("./state") ?? panic("existing file")
+    print("file")
+    service.state_store("./absent/store") ?? panic("absent file")
+    print("absent")
+    if service.state_store(".") == {
+        .Err(error) -> print(policy_reason(error) == "service state store is not a regular file; repair or replace the state store before retrying")
+        .Ok(_) -> panic("directory accepted as state store")
+    }
+    if service.state_store("./state/child") == {
+        .Err(error) -> {
+            reason :: policy_reason(error)
+            print(reason.starts_with("cannot inspect service state store: "))
+            print(reason.ends_with("; repair or replace the state store before retrying"))
+        }
+        .Ok(_) -> panic("non-directory path component accepted")
+    }
+}

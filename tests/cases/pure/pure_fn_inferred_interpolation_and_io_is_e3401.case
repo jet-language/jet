@@ -1,0 +1,10 @@
+# tests/pure.rs::pure_fn_inferred_interpolation_and_io_is_e3401 at tests/pure.rs:97; hand-port
+# Claim: ambient IO reached through a `-[]>` caller is rejected with E3401 (tests/pure.rs:106-108)
+# Not ported: exact diagnostics.len() == 1 (tests/pure.rs:107): jet check output is not countable with the step vocabulary; code presence asserted
+fixture: pure_fn_inferred_interpolation_and_io_is_e3401.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/pure.rs:106-108 expect_err + code E3401
+stderr: ~ "E3401" # tests/pure.rs:106-108 expect_err + code E3401

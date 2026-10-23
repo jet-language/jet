@@ -1,0 +1,12 @@
+# tests/pure.rs::transitive_chain_3_levels at tests/pure.rs:333; hand-port
+# Claim: 3-level transitive impurity from run is E3401 (tests/pure.rs:417-418)
+# Claim: why-line shows run, a, b and the → separator (tests/pure.rs:420-430)
+# Not ported: check_pure_program_root Rust call with hand-built FuncSig map (tests/pure.rs:348-415): replaced by the jet eval --pure walk from run, which is the CLI surface of the same check
+fixture: transitive_chain_3_levels.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet eval --pure main.jet
+exit: 1 # tests/pure.rs:417-430
+stderr: ~ "E3401" # tests/pure.rs:417-430
+stderr: ~ "run → a → b" # tests/pure.rs:417-430

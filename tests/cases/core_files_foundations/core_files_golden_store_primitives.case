@@ -1,0 +1,14 @@
+# tests/core_files_foundations.rs::core_files_golden_store_primitives at tests/core_files_foundations.rs:195; hand-port
+# Claim: example io/files_store_primitives.jet default run stdout equals expected/io/files_store_primitives.out (tests/core_files_foundations.rs:185)
+# Claim: example io/files_store_primitives.jet --release run stdout equals the same golden (tests/core_files_foundations.rs:185, tir_support 378-414)
+# Fixture migrated: line 73: `reader ::` -> `reader :=` (E0202); line 74: `line :: reader.read_line()` -> `line :: &reader.read_line()` (E0224: method writes receiver, needs & mark)
+fixture: core_files_golden_store_primitives.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run files_store_primitives.jet
+exit: 0 # tests/core_files_foundations.rs:195 default run equals golden
+stdout: = core_files_golden_store_primitives-1.out # tests/core_files_foundations.rs:195 default run equals golden
+step: jet run --release files_store_primitives.jet
+exit: 0 # tests/core_files_foundations.rs:195 release run equals golden
+stdout: = core_files_golden_store_primitives-2.out # tests/core_files_foundations.rs:195 release run equals golden

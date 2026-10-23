@@ -1,0 +1,15 @@
+# tests/services_runtime.rs::state_store_metadata_policy_matches_all_tiers at tests/services_runtime.rs:2429; hand-port
+# Claim: service.state_store accepts an existing regular file and prints file (tests/services_runtime.rs:2441-2442)
+# Claim: service.state_store accepts an absent path and prints absent (tests/services_runtime.rs:2443-2444)
+# Claim: a directory is refused with the not-a-regular-file policy reason (tests/services_runtime.rs:2445-2448)
+# Claim: a non-directory path component is refused with a cannot-inspect reason that ends with the repair suffix (tests/services_runtime.rs:2449-2456)
+# Fixture migrated: the Rust absolute scratch root (__ROOT__) becomes fixture-relative ./state, ./absent/store, ., ./state/child
+# Fixture migrated: the inline package { authority: ... } grant line is dropped; package tir supplies the grant (FS.Read, IO, Mem.Alloc)
+# Not ported: tir_support::assert_tiers_agree runs AOT and interpreter; replaced by the default jet run step
+fixture: state_store_metadata_policy_matches_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/services_runtime.rs:2459 expected "file absent true true true "
+stdout: = state_store_metadata_policy_matches_all_tiers.out # tests/services_runtime.rs:2459 expected "file absent true true true "

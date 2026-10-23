@@ -1,0 +1,28 @@
+use core.sys as env
+use core.service as services
+use core.time as time
+
+fn worker() {}
+
+fn run() {
+    store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := services.runtime(store, retention: retention)
+    tree := services.tree("cancel-restart")
+    endpoint :: &tree.worker("worker", ^worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("start")
+    if phase == "send" {
+        accepted :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("send")
+        cancelled :: accepted.cancel() ?? panic("cancel")
+        state :: cancelled.status() ?? panic("cancel status")
+        print("send:{state.show()}")
+    } else {
+        recovered :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("recover")
+        state :: recovered.status() ?? panic("recover status")
+        history :: recovered.events() ?? panic("recover events")
+        print("recover:{state.show()}:{history.len()}")
+        &tree.handoff_generation() ?? panic("handoff")
+        print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+    }
+}

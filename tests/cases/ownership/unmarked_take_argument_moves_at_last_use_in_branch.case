@@ -1,0 +1,10 @@
+# tests/ownership.rs::unmarked_take_argument_moves_at_last_use_in_branch at tests/ownership.rs:2831; hand-port
+# Claim: jet check exits 0 for a last use inside an if with no later read (tests/ownership.rs:2846)
+# Fixture migrated: none: source is the verbatim Rust raw string
+fixture: unmarked_take_argument_moves_at_last_use_in_branch.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/ownership.rs:2846
+stderr: !~ "E0209" # tests/ownership.rs:2846

@@ -2771,7 +2771,7 @@ one statement step; several steps commit under `#Transact`; expert guards and
 so it crosses a task boundary with no `take`. (`Shared<T>`'s *type* predates
 this stage as inert signature
 plumbing over a plain `Arc<T>` — never actually constructible, see
-`tests/ownership.rs`'s pre-existing param-signature tests; S6 gives it a real
+`tests/cases/ownership/`'s pre-existing param-signature tests; S6 gives it a real
 constructor and upgrades the representation to `Arc<RwLock<T>>`.) `Pool<T>`/
 `Id<T>` (D-POOLID-API1=A) is a generational arena: `Pool<T>.new()` constructs;
 `.add(val)` inserts and returns an `Id<T>` (plain, `Copy`, comparable —
@@ -7535,7 +7535,7 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
   holds the registry rows plus the `derive T.Name { … }` providers a build can
   see, and it answers both "may this name be written?" and "did you mean?". The
   separate `known_derive_names` set is deleted.
-- `tests/cases/marker_declarations/` is the drift guard: the real Jet parser reads
+- `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads
   both files and must agree with the registry on every row, and no Rust file may
   build a marker row or keep a copy of the effect roots.
 

@@ -1,0 +1,25 @@
+# tests/core_files_foundations.rs::core_files_directory_listing_preserves_invalid_utf8_basename_identity at tests/core_files_foundations.rs:126; hand-port
+# Claim: directory listing of a dir holding raw names a\xff and a\x80 yields exactly 2 entries (tests/core_files_foundations.rs:143)
+# Claim: raw_name bytes are [97,128] and [97,255] (tests/core_files_foundations.rs:146-147)
+# Claim: neither name is_unicode; both display names are "a\u{FFFD}" (tests/core_files_foundations.rs:148-149)
+# Claim: paths equal, raw names differ, neither is a dir, listing is stable at 2 (tests/core_files_foundations.rs:150-153)
+# Claim: run() prints the claim line (tests/core_files_foundations.rs:162,168)
+# Claim: Jet #Test claims pass with 1 passed, 0 failed in default and release (tests/core_files_foundations.rs:178, check_jet_claims 203-224)
+# Fixture migrated: raw names created by sh step: printf writes bytes 0xff and 0x80 as names in "names/" (replaces std::fs::write with OsStr::from_bytes)
+# Fixture migrated: fixture root -> relative "names"
+# Fixture migrated: package.jet: exact manifest of the Rust claims file (FS.Read, IO, Mem.Alloc)
+fixture: core_files_directory_listing_preserves_invalid_utf8_basename_identity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # tests/core_files_foundations.rs:131-134 two native non-Unicode basenames
+step: jet run main.jet
+exit: 0 # tests/core_files_foundations.rs:161-162 verify_names and print line
+stdout: = "distinct raw identities, equal display names: true\n" # tests/core_files_foundations.rs:161-162 verify_names and print line
+step: jet test --show-default --capture=all --serial --fresh main.jet
+exit: 0 # tests/core_files_foundations.rs:207-222 default claims run
+stdout: ~ "1 passed, 0 failed" # tests/core_files_foundations.rs:207-222 default claims run
+step: jet test --show-default --capture=all --serial --fresh --release main.jet
+exit: 0 # tests/core_files_foundations.rs:208-222 release claims run
+stdout: ~ "1 passed, 0 failed" # tests/core_files_foundations.rs:208-222 release claims run
