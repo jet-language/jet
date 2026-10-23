@@ -125,17 +125,23 @@ fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int,
 }
 
 // Whether the Loop at `opener` (End at `end`) can make the buffer of
-// `header` shared again.
+// `header` shared again. What a dead end in it reads (ir_opt_dead_end: a
+// failure's cleanup) never reaches its next iteration.
 fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, bodies: [[IRFunction]], root: [Int], header: Int, opener: Int, end: Int) -> Bool Never! {
     count :: f.slot_type.len()
     // The slots holding the buffer pointer loaded from the header.
     buffer := [Int]{}
     reads := [Int]{}
-    loop at in (opener + 1)..<end {
-        op :: f.op[at]
-        if op == .Load && f.a[at] >= 0 && root[f.a[at]] == header && f.b[at] == 16 && f.dst[at] >= 0 -> &buffer.push(f.dst[at])
+    loop k in (opener + 1)..<end {
+        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == header && f.b[k] == 16 && f.dst[k] >= 0 -> &buffer.push(f.dst[k])
     }
-    loop at in (opener + 1)..<end {
+    at := opener + 1
+    loop at < end {
+        exit :: ir_opt_dead_end(f, at)
+        if exit > at {
+            at = exit
+            next
+        }
         op :: f.op[at]
         unique :: ir_opt_unique_header(f, bodies, root, at) == header
         ir_x64_reads_into(f, at, &reads)
@@ -155,8 +161,22 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, bodies: [[IRFunc
         }
         written :: ir_x64_write(f, at)
         if written >= 0 && written < count && root[written] == header -> return true
+        at += 1
     }
     false
+}
+
+// The End of the If at `at` when its then-part, with no Else, never comes
+// back: it ends in Return or Unreachable and branches nowhere (a stop's or
+// panic's cleanup); else -1.
+fn ir_opt_dead_end(f: IRFunction, at: Int) -> Int Never! {
+    if f.op[at] != .If || f.b[at] >= 0 -> return -1
+    end :: f.c[at]
+    if end <= at + 1 || (f.op[end - 1] != .Return && f.op[end - 1] != .Unreachable) -> return -1
+    loop k in (at + 1)..<end {
+        if f.op[k] == .Br || f.op[k] == .BrIf -> return -1
+    }
+    end
 }
 
 // Whether the header Store at `at` keeps its buffer the header's own: a
