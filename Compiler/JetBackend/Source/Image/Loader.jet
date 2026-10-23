@@ -372,9 +372,10 @@ fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
 // maps its file. A bound executable's image part comes from the pack file
 // itself, mapped copy-on-write: only the pages the program touches are
 // read in, and only the ones it (or the patching here) writes are copied.
-// Only the program part is copied in. When the pack file is gone or no
-// longer the one `exe.image` was read from, the file's bytes are put
-// together and loaded as x64_image_load loads them; an image part read
+// Only the program part is copied in; a kept program's file
+// (x64_executable_file) has none and is mapped whole. When the pack file is
+// gone or no longer the one `exe.image` was read from, the file's bytes are
+// put together and loaded as x64_image_load loads them; an image part read
 // without its loaded segments (x64_image_file_read) can't be, and the load
 // fails.
 fn x64_executable_load(exe: X64Executable) -> X64LoadedImage {
@@ -401,7 +402,10 @@ fn x64_executable_load(exe: X64Executable) -> X64LoadedImage {
     loop (k, at) in exe.patch_at {
         loop (j, byte) in exe.patch_bytes[k] { if at + j < 64 -> header[at + j] = byte }
     }
-    plan :: loader_segments(header, exe.tail, exe.tail_at, exe.tail_at + exe.tail.len())
+    // A bound executable's program headers lie in its program part; a kept
+    // program's file (x64_executable_file) is all image part, its program
+    // headers in its first page.
+    plan :: if exe.tail.len() == 0 -> loader_segments(header, exe.image, 0, exe.image_end) else -> loader_segments(header, exe.tail, exe.tail_at, exe.tail_at + exe.tail.len())
     failure := plan.failure
     if failure == "" -> failure = loader_reserve(plan)
     if failure != "" {
@@ -409,8 +413,12 @@ fn x64_executable_load(exe: X64Executable) -> X64LoadedImage {
         return loader_failed(failure)
     }
     image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: exe.tail_at + exe.tail.len(), failure: ""}
-    memfd :: loader_memfd()
-    failure = if memfd < 0 -> "memfd_create failed (errno {-memfd})" else -> loader_fill(memfd, exe.tail)
+    // A kept program's file has no program part to copy in.
+    memfd := -1
+    if exe.tail.len() > 0 {
+        memfd = loader_memfd()
+        failure = if memfd < 0 -> "memfd_create failed (errno {-memfd})" else -> loader_fill(memfd, exe.tail)
+    }
     loop segment in plan.segments {
         if failure != "" -> break
         failure = if {
@@ -576,6 +584,25 @@ fn x64_image_file_read(path: String) -> X64ImageFile {
     loader_image_file_whole(path)
 }
 
+// The executable kept in the file `path` (a script's program, JetCli
+// ScriptCache.jet) in the bound form whose image part is the whole file, so
+// x64_executable_load maps it from that file copy-on-write instead of
+// copying it in: only its first page (the ELF and program headers) is read
+// here. A file whose program headers don't lie in its first page, or that
+// changed during the read, is read whole. None when it can't be read.
+fn x64_executable_file(path: String) -> X64Executable? {
+    before :: loader_file_stamp(path)
+    if before.len() == 0 -> return None
+    size :: before[2]
+    head :: loader_files.read_at(path, 0, OS_PAGE_SIZE) ?? return None
+    if loader_segments(head, head, 0, size).failure != "" || !loader_same_stamp(before, loader_file_stamp(path)) {
+        whole :: loader_files.read_bytes(path) ?? return None
+        return Val(x64_executable_whole(^whole))
+    }
+    gap_at :: head.len()
+    Val(X64Executable{image: head, image_path: path, image_stamp: before, image_end: size, image_gap_at: gap_at, image_gap: size - gap_at, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: size, tail: [U8]{}})
+}
+
 // Read the runtime image file `path` whole.
 fn loader_image_file_whole(path: String) -> X64ImageFile {
     before :: loader_file_stamp(path)
@@ -599,6 +626,42 @@ fn x64_executable_complete(exe: &X64Executable) -> String {
     exe.image = ^whole.bytes
     exe.image_gap_at = 0
     exe.image_gap = 0
+    ""
+}
+
+// Write the file of `exe` to `path` (a new file); "" or why not. An image
+// part bound from the runtime image file is copied from that file by the
+// kernel, not read in, while the file still has the identity it had then.
+// The patches and the zeros after the image part go over the copy, then the
+// program part and debug tail. The file is the bytes x64_executable_bytes
+// gives. A runtime image file that would run on past the end of the program
+// part (nothing here truncates) is written from memory.
+fn x64_executable_write(exe: X64Executable, path: String) -> String {
+    if exe.image_end == 0 {
+        loader_files.write_bytes(path, exe.tail) ?? return "{err}"
+        return ""
+    }
+    if exe.image_stamp.len() == 0 || exe.image_stamp[2] > exe.tail_at + exe.tail.len() {
+        // copy: the caller's executable stays whole to run.
+        whole := exe.copy()
+        complete :: x64_executable_complete(&whole)
+        if complete != "" -> return complete
+        loader_files.write_bytes(path, x64_executable_bytes(^whole)) ?? return "{err}"
+        return ""
+    }
+    changed :: "the runtime image {exe.image_path} changed while jet ran"
+    if !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) -> return changed
+    loader_files.copy(exe.image_path, path) ?? return "{err}"
+    // A pack file is replaced whole, never rewritten in place: the same
+    // identity after the copy means the copy has that file's bytes.
+    if !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) -> return changed
+    loop (k, at) in exe.patch_at -> loader_files.write_at(path, at, exe.patch_bytes[k]) ?? return "{err}"
+    // The image file's bytes past its loaded segments read as zeros up to
+    // the program part; the program part overwrites the rest.
+    zeros := [U8]{}
+    link_pad_to(&zeros, exe.tail_at - exe.image_end, 0)
+    if zeros.len() > 0 -> loader_files.write_at(path, exe.image_end, zeros) ?? return "{err}"
+    if exe.tail.len() > 0 -> loader_files.write_at(path, exe.tail_at, exe.tail) ?? return "{err}"
     ""
 }
 

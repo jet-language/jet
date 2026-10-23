@@ -554,7 +554,12 @@ fn civil_clamp(value: Int, low: Int, high: Int) -> Int Never! {
     if value > high -> return high
     value
 }
-fn civil_i64(value: Int) -> Int Never! { civil_clamp(value, time_int_min(), time_int_max()) }
+// Int64 saturation. The Int64 bounds are boxed Ints, so a value well inside
+// them (every timestamp near now) returns without comparing against them.
+fn civil_i64(value: Int) -> Int Never! {
+    if value > -1000000000000000000 && value < 1000000000000000000 -> return value
+    civil_clamp(value, time_int_min(), time_int_max())
+}
 fn civil_mod(value: Int, divisor: Int) -> Int Never! {
     remainder :: value %% divisor
     if remainder < 0 -> return remainder + divisor
@@ -803,6 +808,7 @@ fn civil_timestamp(seconds: Int, nanos: Int, leap: Bool) -> DateTime Never! {
     DateTime{secs: civil_i64(seconds + civil_floor(nanos, 1000000000)), nanos: civil_mod(nanos, 1000000000), leap_second: leap}
 }
 fn civil_leap_epoch(seconds: Int) -> Bool Never! {
+    if seconds < 78796800 || seconds > 1483228800 -> return false
     epochs :: [Int]{78796800, 94694400, 126230400, 157766400, 189302400, 220924800, 252460800, 283996800, 315532800, 362793600, 394329600, 425865600, 489024000, 567993600, 631152000, 662688000, 709948800, 741484800, 773020800, 820454400, 867715200, 915148800, 1136073600, 1230768000, 1341100800, 1435708800, 1483228800}
     epochs.contains(seconds)
 }
@@ -820,6 +826,10 @@ fn civil_utc(date: LocalDate, value: LocalTime) -> Int Never! {
     civil_i64(base + value.hour_value * 3600 + value.minute_value * 60 + value.second_value)
 }
 fn civil_checked_epoch(value: Int, unit: String) -> Int RangeError! {
+    // Whole seconds strictly inside ±9223372036 put `value` inside Int64
+    // without comparing it against the boxed bounds.
+    seconds :: value /% 1000000000
+    if seconds > -9223372036 && seconds < 9223372036 -> return Ok(value)
     if value < time_int_min() || value > time_int_max() -> return Err(RangeError{reason: "E2704: Unix epoch {unit} do not fit in Int"})
     Ok(value)
 }

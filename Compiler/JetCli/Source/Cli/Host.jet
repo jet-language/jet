@@ -16,6 +16,7 @@ use jet_backend.[
     x64_executable_complete,
     x64_executable_load,
     x64_executable_whole,
+    x64_executable_write,
     x64_file_exec,
     x64_image_exec,
     x64_image_file_read,
@@ -495,15 +496,8 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
 
 // Write the linked executable `executable` as the file `path`.
 fn jet_cli_native_write(path: String, executable: X64Executable) -[FS]> JetCLINativeFailure? Never! {
-    if executable.image_end == 0 {
-        cli_files.write_bytes(path, executable.tail) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
-    } else {
-        // copy: the parts stay with the caller, which may still map them.
-        whole := executable.copy()
-        failure :: x64_executable_complete(&whole)
-        if failure != "" -> return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {failure}"})
-        cli_files.write_bytes(path, x64_executable_bytes(^whole)) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
-    }
+    failure :: x64_executable_write(executable, path)
+    if failure != "" -> return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {failure}"})
     cli_files.set_mode(path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {path} executable: {err}"})
     None
 }
@@ -1095,9 +1089,9 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
 }
 
 fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    // A traced or verbose run reports its compile, so only a plain script run
-    // may reuse a kept program.
-    if jet_cli_is_script(source) && !verbose && trace_sink == None -> return jet_cli_compile_script(file, source, color, release, threads, program_args, invocation)
+    // A traced or verbose run reports its compile, so only a plain run may
+    // reuse a kept program.
+    if !verbose && trace_sink == None -> return jet_cli_compile_kept(file, source, color, release, threads, program_args, invocation)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled := jet_cli_compile_executable_file(file, color, threads, release, trace_sink)
     if ^compiled == {
@@ -1108,22 +1102,19 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     output
 }
 
-// `jet run` of a script: run the program kept for exactly these inputs, or
+// A plain `jet run`: run the program kept for exactly these inputs, or
 // compile it, keep it, and run it (ScriptCache.jet).
-fn jet_cli_compile_script(file: String, source: String, color: Bool, release: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput {
+fn jet_cli_compile_kept(file: String, source: String, color: Bool, release: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     held :: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
-    toolchain :: jet_cli_script_toolchain(release)
-    if held == .Held(snapshot) {
-        if toolchain == .Val(inputs) {
-            if jet_cli_script_kept_run(inputs, snapshot, file, source, color, release, program_args, invocation) == .Val(ran) -> return ran
-        }
+    keep :: if held == .Held(snapshot) -> jet_cli_script_keeper(release, snapshot) else -> None
+    if keep == .Val(kept) {
+        if jet_cli_script_kept_run(kept, file, source, color, release, program_args, invocation) == .Val(ran) -> return ran
     }
     prepared :: if ^held == {
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program)
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
     }
-    keep :: jet_cli_script_keeper(toolchain, release)
     compiled := jet_cli_compile_executable(^prepared, release, jet_cli_script_input_log(keep), None)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
@@ -1133,7 +1124,7 @@ fn jet_cli_compile_script(file: String, source: String, color: Bool, release: Bo
     output
 }
 
-// Build a compiled script as `jet run` does, keep the program under `keep`
+// Build a compiled `jet run` file, keep the program under `keep`
 // (ScriptCache.jet), then run it.
 fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetDriverVerbOutput {
     // The kept program's authority is the compile's own.
@@ -1141,17 +1132,13 @@ fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, relea
     built := jet_cli_run_build(file, source, color, release, false, invocation, result, ^inputs, snapshot)
     if ^built == {
         .Failed(failure) -> failure
-        .Image(executable, path) -> jet_cli_script_launch(keep, snapshot, authority, executable, file, path, program_args, release, invocation, color)
+        .Image(executable, path) -> jet_cli_script_launch(keep, authority, executable, file, path, program_args, release, invocation, color)
     }
 }
 
-fn jet_cli_script_launch(keep: JetCLIScriptKeep?, snapshot: JetDriverAuthorizedSourceSnapshot, authority: JetCLIAuthority, executable: X64Executable, file: String, binary: String, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput {
-    if keep == .Val(kept) {
-        // copy: the kept file holds the whole program; the parts stay to run it.
-        whole := executable.copy()
-        // A pack that changed since the bind leaves the program unkept; it still runs.
-        if x64_executable_complete(&whole) == "" -> jet_cli_script_keep(kept, snapshot, x64_executable_bytes(^whole), authority)
-    }
+fn jet_cli_script_launch(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, executable: X64Executable, file: String, binary: String, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput {
+    // A pack that changed since the bind leaves the program unkept; it still runs.
+    if keep == .Val(kept) -> jet_cli_script_keep(kept, executable, authority)
     jet_cli_launch(executable, file, binary, false, program_args, release, invocation, false, color)
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {

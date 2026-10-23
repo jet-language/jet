@@ -584,13 +584,17 @@ starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
 `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
 
 A script is a standalone program wherever it lives: its source snapshot is the
-script alone, and the source walk of a package leaves every script out. A
-script's run keeps its built program in the user cache directory
+script alone, and the source walk of a package leaves every script out.
+
+`jet run` keeps the program it built in the user cache directory
 (`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
-[`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)), keyed by
-the compiler identity, the Core and runtime file identities, the profile, and
-the script's source; a rerun with the same key runs the kept program without
-compiling. A compile that read a comptime input file keeps nothing, and a
+[`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)). This
+applies to scripts and to any other file. There is one program per entry file,
+compiler identity and profile. Its record names the toolchain it was built
+with (the compiler, runtime pack and Core source file identities) and a hash
+of its source snapshot. A rerun with the same toolchain and sources runs the
+kept program without compiling. Any change compiles again and replaces the
+kept program. A compile that read a comptime input file keeps nothing, and a
 `--verbose` or traced run always compiles.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
