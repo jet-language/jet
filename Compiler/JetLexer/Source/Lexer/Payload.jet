@@ -154,6 +154,7 @@ fn parse_float_literal(text: String) -> Float? {
 fn escape_value(value: Int) -> Int Never! {
     if value == {
         110 -> 10
+        114 -> 13
         116 -> 9
         34 -> 34
         92 -> 92
@@ -626,7 +627,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 escaped < 0 -> {
                     escape_text :: bytes_text(source, cursor + 1, escape_end)
                     what := "`\\{escape_text}` isn't an escape Jet knows"
-                    why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
+                    why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
                     add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
                 }
                 else -> {
@@ -821,7 +822,7 @@ fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> S
     if escaped < 0 {
         escape_text :: bytes_text(raw, 2, escape_end)
         what := "`\\{escape_text}` isn't an escape Jet knows"
-        why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
+        why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\r`, `\\t`, `\\'`, `\\\\`"
         add_diagnostic(&diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
     }
     if byte_at(raw, escape_end) != 39 {
