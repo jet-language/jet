@@ -732,6 +732,9 @@ fn ir_lazy_closure_receiver(receiver_ty: Type, operation: TClosureOp) -> Bool Ne
 // never freed, so the adapter gets no release helper.
 fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
     receiver_ty :: ir_subst(m, receiver.ty)
+    if ir_iter_element(receiver_ty) != None {
+        if operation == .Any || operation == .All || operation == .Position -> return ir_lazy_search(&m, p, &b, ty, receiver, operation, args, span)
+    }
     route :: jet_codegen_closure_route(operation, receiver_ty)
     symbol :: route.symbol
     scans :: symbol == "jet_iter_scan"
@@ -797,6 +800,74 @@ fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
     out :: ir_runtime(&m, &b, runtime, call_args, result_row)
     ir_lazy_consumed(&m, &b, source)
     out
+}
+
+// `iter.any(f)` / `iter.all(f)` / `iter.position(f)` (Lower Combinators.jet
+// lower_closure_search_iter): each item is pulled (jet_rt_native_iter_next),
+// lent to the predicate and its Option box dropped; the first decision ends
+// the pulls, so no later item reaches an upstream adapter callback. A fresh
+// Iter is dropped afterwards; a held one stays its owner's.
+fn ir_lazy_search(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
+    element_ty :: ir_iter_element(ir_subst(m, receiver.ty)) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver.ty)}")
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "Iter {ir_closure_op_name(operation)} has no single checked callback")
+    position :: operation == .Position
+    all :: operation == .All
+    result_ty :: ir_subst(m, ty)
+    result_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
+    row :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
+    slot_ty :: Type.Option{inner: element_ty}
+    slot_row :: ir_value_type(&m, p, slot_ty) ?? return ir_type_fail(&b, span, slot_ty)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    source :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || source < 0 -> return -1
+    callback :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || callback < 0 -> return -1
+    zero :: ir_word_const(&m, &b, 0)
+    one :: ir_word_const(&m, &b, 1)
+    index :: ir_word_const(&m, &b, 0)
+    // Position: the matching index, -1 while none; any/all: the decision.
+    decided :: if position -> ir_word_const(&m, &b, -1) else -> ir_temp(&m, &b, bool_row)
+    if !position -> ir_emit(&b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    pulled :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{source}, slot_row)
+    more :: ir_bool_op(&m, &b, IROp.Ne, pulled, zero)
+    ir_exit_unless(&m, &b, more, exit)
+    item :: ir_load_at(&m, &b, pulled, 0, row)
+    keep :: ir_call_closure(&m, &b, callback, [Int]{item}, bool_row)
+    ir_release(&m, &b, pulled)
+    stop := keep
+    if all {
+        no :: ir_int_constant(&m, &b, bool_row, 0)
+        stop = ir_bool_op(&m, &b, IROp.Eq, keep, no)
+    }
+    ir_open_if(&b.f, stop, b.line)
+    if position {
+        ir_emit(&b.f, IROp.Copy, decided, index, -1, -1, b.line)
+    } else {
+        ir_emit(&b.f, IROp.Const, decided, if all -> 0 else -> 1, -1, -1, b.line)
+    }
+    ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, source)
+    if !position -> return decided
+    // Some(index) is a box holding the exact Int; None is null.
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    found :: ir_bool_op(&m, &b, IROp.Ge, decided, zero)
+    ir_open_if(&b.f, found, b.line)
+    exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{decided}, int_row)
+    int_size :: ir_type_size(&m, p, Type.Int)
+    boxed :: ir_box_alloc(&m, &b, int_size, result_row)
+    ir_store_at(&m, p, &b, boxed, 0, exact)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result
 }
 
 // ---------------------------------------------------------------------------
