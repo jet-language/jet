@@ -1,9 +1,11 @@
 // The runtime routes the IR calls (CallRuntime, Close), with the runtime's
 // semantics (Compiler/JetRuntime/Source): Text.jet, Display.jet, Int.jet,
-// Alloc.jet, Collections.jet, Host.jet and Trap.jet. Host String methods are
+// IntParse.jet, Err.jet, CompilerNeededMath.jet, Alloc.jet, Collections.jet,
+// Host.jet and Trap.jet. Host String methods are
 // the same runtime routes compiled into this binary, so they agree byte for
 // byte. A comptime stop reports the diagnostic the MIR evaluator reports for
 // the same stop.
+use core.math as math
 use jet_foundation.[TComptimeValue, foundation_debug_quoted]
 use jet_ir.[IRModule, IROp]
 
@@ -184,10 +186,82 @@ fn jet_eval_ir_runtime(m: IRModule, s: &JetEvalIRState, symbol: String, args: [I
             path :: jet_eval_ir_text(&s, args[1]) ?? return None
             return jet_eval_ir_comptime_input(m, &s, builtin, path, result_ty)
         }
+        "jet_rt_string_compare" -> {
+            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
+            left :: jet_eval_ir_text(&s, args[0]) ?? return None
+            right :: jet_eval_ir_text(&s, args[1]) ?? return None
+            return Val(jet_eval_ir_text_order(left, right))
+        }
+        "jet_string_after" | "jet_string_before" -> {
+            // Text.jet rt_text_after/rt_text_before: the text past (before) the
+            // first `needle`; the whole text after (before) a missing one.
+            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
+            text :: jet_eval_ir_text(&s, args[0]) ?? return None
+            needle :: jet_eval_ir_text(&s, args[1]) ?? return None
+            part :: if symbol == "jet_string_after" -> text.after(needle) else -> text.before(needle)
+            return Val(jet_eval_ir_text_new(&s, part))
+        }
+        "jet_int_parse" -> {
+            // IntParse.jet's Result ABI: (text, ok slot, err slot) -> 1 with the
+            // Int in the ok slot, or 0 with the error text in the err slot.
+            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
+            text :: jet_eval_ir_text(&s, args[0]) ?? return None
+            if jet_eval_ir_parse_int(text) == .Val(value) {
+                word :: jet_eval_ir_int_word(&s, value)
+                if !jet_eval_ir_write(&s, args[1], 8, word) -> return None
+                return Val(1)
+            }
+            message :: jet_eval_ir_text_new(&s, "cannot parse `{text}` as an integer")
+            if !jet_eval_ir_write(&s, args[2], 8, message) -> return None
+            return Val(0)
+        }
+        "jet_std_math_floor" -> {
+            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            return Val(jet_eval_ir_float_word(math.floor(jet_eval_ir_float(args[0]))))
+        }
+        "jet_std_math_is_finite" -> {
+            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
+            return Val(jet_eval_ir_bool(math.is_finite(jet_eval_ir_float(args[0]))))
+        }
+        "jet_rt_record_new_jet_err" -> {
+            // Err.jet err_new_take over a zeroed 88-byte Err (ErrLayout.jet): the
+            // message at 0, the code text (the word its option box holds; 0 for
+            // none) at 8 and the taken cause at 16. Texts are immutable words
+            // here, so the runtime's clones are the same words.
+            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
+            code :: if args[1] == 0 -> 0 else -> jet_eval_ir_read(&s, args[1], 8) ?? return None
+            record :: jet_eval_ir_alloc(&s, 88)
+            if !jet_eval_ir_write(&s, record, 8, args[0]) || !jet_eval_ir_write(&s, record + 8, 8, code) || !jet_eval_ir_write(&s, record + 16, 8, args[2]) -> return None
+            return Val(record)
+        }
+        // JourneyTLS.jet clears the thread's recorded hops; the machine records
+        // none, so there is nothing to clear.
+        "jet_journey_reset" -> return Val(0)
         else -> {}
     }
     jet_eval_ir_unsupported(&s, "IR runtime route `{symbol}`")
     None
+}
+
+// IntParse.jet numeric_int_parse at radix 10: Unicode white space trimmed,
+// one optional sign, then one or more ASCII digits; the exact value.
+fn jet_eval_ir_parse_int(text: String) -> Int? Never! {
+    bytes :: text.trim().bytes()
+    at := 0
+    negative := false
+    if bytes.len() > 0 && (bytes[0] == U8{43} || bytes[0] == U8{45}) {
+        negative = bytes[0] == U8{45}
+        at = 1
+    }
+    if at == bytes.len() -> return None
+    value := 0
+    loop at < bytes.len() {
+        digit :: Int.from_u8(bytes[at]) - 48
+        if digit < 0 || digit > 9 -> return None
+        value = value * 10 + digit
+        at += 1
+    }
+    Val(if negative -> 0 - value else -> value)
 }
 
 fn jet_eval_ir_route_shape(s: &JetEvalIRState, symbol: String) -> Int? Never! {

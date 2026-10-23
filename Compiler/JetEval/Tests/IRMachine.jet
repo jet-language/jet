@@ -51,10 +51,12 @@ fn ir_machine_sum(m: &IRModule) -> IRFunction Never! {
     exit :: ir_open(&f, IROp.Block, 2)
     head :: ir_open(&f, IROp.Loop, 2)
     ir_emit(&f, IROp.Ge, done, i, n, -1, 2)
-    ir_emit(&f, IROp.BrIf, -1, done, ir_depth(f, exit), -1, 2)
+    exit_depth :: ir_depth(f, exit)
+    ir_emit(&f, IROp.BrIf, -1, done, exit_depth, -1, 2)
     ir_emit(&f, IROp.Add, total, total, i, IR_OVERFLOW_TRAP, 3)
     ir_emit(&f, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 3)
-    ir_emit(&f, IROp.Br, -1, ir_depth(f, head), -1, -1, 3)
+    head_depth :: ir_depth(f, head)
+    ir_emit(&f, IROp.Br, -1, head_depth, -1, -1, 3)
     ir_end(&f, 3)
     ir_end(&f, 3)
     ir_emit(&f, IROp.Return, -1, total, -1, -1, 4)
@@ -64,7 +66,8 @@ fn ir_machine_sum(m: &IRModule) -> IRFunction Never! {
 #Test("ir_machine_control_and_calls") {
     m := ir_module_new()
     int :: ir_machine_int_row(&m)
-    &m.functions.push(ir_machine_sum(&m))
+    sum :: ir_machine_sum(&m)
+    &m.functions.push(sum)
     run := ir_function_new("run", "run", "run", "ir.jet", 5)
     run.result = int
     ten :: ir_slot(&run, int, IRSlotKind.Temp, -1, 5)
@@ -97,8 +100,9 @@ fn ir_machine_sum(m: &IRModule) -> IRFunction Never! {
     &m.functions.push(run)
     m.entry = 0
     result :: ir_machine_run(^m)
+    // Outside 64 bits, so it reads back as a BigInt decimal (jet_eval_ir_data).
     expected :: 4611686018427387903 * 4611686018427387903
-    ir_machine_require(result.value == (Val(TComptimeValue.Int{value: expected})), "a big product spills exactly, got {result.value}")
+    ir_machine_require(result.value == (Val(TComptimeValue.BigInt{decimal: "{expected}"})), "a big product spills exactly, got {result.value}")
 }
 
 #Test("ir_machine_fixed_width") {
@@ -171,5 +175,75 @@ fn ir_machine_sum(m: &IRModule) -> IRFunction Never! {
     m.entry = 0
     result :: ir_machine_run(^m)
     expected :: TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.String{value: "hello, world"}, TComptimeValue.String{value: "HELLO, WORLD"}}}
-    ir_machine_require(result.value == Val(expected), "a List of two texts reads back, got {result.value} {result.internal_problem}")
+    ir_machine_require(result.value == Val((expected)), "a List of two texts reads back, got {result.value} {result.internal_problem}")
+}
+
+// The text and Int parse routes: after/before, the byte order of texts and
+// jet_int_parse's Result slots (an exact big value and a refused text).
+#Test("ir_machine_parse_and_compare") {
+    m := ir_module_new()
+    int :: ir_machine_int_row(&m)
+    text :: ir_machine_string_row(&m)
+    word :: ir_machine_word_row(&m)
+    run := ir_function_new("run", "run", "run", "ir.jet", 1)
+    run.result = int
+    number :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    junk :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    pair :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    sep :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    a :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    b :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    v :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    key :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    after :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    before :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
+    out :: ir_slot(&run, word, IRSlotKind.Temp, -1, 1)
+    good :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    bad :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    parsed :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    order :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    same_after :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    same_before :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    total :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    ir_emit(&run, IROp.ConstText, number, ir_intern_text(&m, "  -123456789012345678901 "), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, junk, ir_intern_text(&m, "x1"), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, pair, ir_intern_text(&m, "key=v"), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, sep, ir_intern_text(&m, "="), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, a, ir_intern_text(&m, "a"), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, b, ir_intern_text(&m, "b"), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, v, ir_intern_text(&m, "v"), -1, -1, 1)
+    ir_emit(&run, IROp.ConstText, key, ir_intern_text(&m, "key"), -1, -1, 1)
+    ir_emit(&run, IROp.StackAddress, out, 8, 8, -1, 1)
+    parse :: ir_intern_name(&m, "jet_int_parse")
+    compare :: ir_intern_name(&m, "jet_rt_string_compare")
+    after_route :: ir_intern_name(&m, "jet_string_after")
+    before_route :: ir_intern_name(&m, "jet_string_before")
+    good_args :: ir_args(&run, [Int]{number, out, out})
+    ir_emit(&run, IROp.CallRuntime, good, parse, good_args, 3, 1)
+    ir_emit(&run, IROp.Load, parsed, out, 0, -1, 1)
+    bad_args :: ir_args(&run, [Int]{junk, out, out})
+    ir_emit(&run, IROp.CallRuntime, bad, parse, bad_args, 3, 1)
+    order_args :: ir_args(&run, [Int]{b, a})
+    ir_emit(&run, IROp.CallRuntime, order, compare, order_args, 2, 1)
+    split_args :: ir_args(&run, [Int]{pair, sep})
+    ir_emit(&run, IROp.CallRuntime, after, after_route, split_args, 2, 1)
+    split_again :: ir_args(&run, [Int]{pair, sep})
+    ir_emit(&run, IROp.CallRuntime, before, before_route, split_again, 2, 1)
+    after_args :: ir_args(&run, [Int]{after, v})
+    ir_emit(&run, IROp.CallRuntime, same_after, compare, after_args, 2, 1)
+    before_args :: ir_args(&run, [Int]{before, key})
+    ir_emit(&run, IROp.CallRuntime, same_before, compare, before_args, 2, 1)
+    // parsed + good + bad + order + same_after + same_before
+    ir_emit(&run, IROp.Add, total, parsed, good, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Add, total, total, bad, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Add, total, total, order, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Add, total, total, same_after, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Add, total, total, same_before, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Return, -1, total, -1, -1, 1)
+    &m.functions.push(run)
+    m.entry = 0
+    result :: ir_machine_run(^m)
+    // Outside 64 bits, so it reads back as a BigInt decimal (jet_eval_ir_data).
+    expected :: 0 - 123456789012 * 1000000000 - 345678901 + 2
+    ir_machine_require(result.value == (Val(TComptimeValue.BigInt{decimal: "{expected}"})), "parse, order, after and before, got {result.value} {result.internal_problem} {result.error}")
 }
