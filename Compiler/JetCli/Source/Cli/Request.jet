@@ -54,7 +54,7 @@ use jet_eval.[
     jet_eval_native_session,
 ]
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
-use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
+use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[DepSpec, PackageFacts, pkg_manifest_parse, pkg_to_manifest]
 
 // The production CLI's compile, under the driver's all-phases collector when
@@ -138,7 +138,7 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     if issues.len() == 0 {
         // The memory term is read now: the front end before this holds most of it.
         threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-        _ := ir_optimize_module(&library.program, 1, threads)
+        _ := ir_optimize_module(&library.program, ir_opt_options(1), threads)
         compiled := ir_x64_compile_module(^library.program, threads)
         object := ir_x64_library_object(^compiled, library.exports)
         if object.errors.len() == 0 {

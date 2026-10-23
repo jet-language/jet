@@ -12,7 +12,7 @@
 // <outdir>; its runtime pack (jet-runtime/<key>/jet_runtime.pack.o) is the
 // one the IR objects link with.
 use jet_ir.[
-    IRClass, IRFunction, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
+    IRClass, IRFunction, IRModule, IROp, IROptOptions, IRSlotKind, IRType, IRTypeKind, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
     ir_args, ir_else, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_new, ir_open, ir_open_if, ir_slot,
     ir_optimize_module, ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
 ]
@@ -958,11 +958,11 @@ fn xp_level_failed(failure: String) -> XPLevelRun {
     XPLevelRun{code: -1, output: "", errors: "", failure: failure, before: 0, after: 0, object_bytes: 0}
 }
 
-// `m` optimized at `level`, selected, linked with the runtime pack as `exe`
-// and run in `out`.
+// `m` optimized at `level` (its SSA forms verified), selected, linked with
+// the runtime pack as `exe` and run in `out`.
 fn xp_level(m: IRModule, level: Int, pack: [U8], pack_path: String, exe: String, out: String) -> XPLevelRun {
     optimized := m.copy()
-    report :: ir_optimize_module(&optimized, level, compiler_threads_single())
+    report :: ir_optimize_module(&optimized, IROptOptions{level: level, disabled: [String]{}, verify: true, stress: false, dump: ""}, compiler_threads_single())
     compiled := ir_x64_compile_module(^optimized, compiler_threads_single())
     object :: ir_x64_object(^compiled)
     if object.errors.len() > 0 -> return xp_level_failed(object.errors.join("; "))

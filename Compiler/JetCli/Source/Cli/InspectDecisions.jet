@@ -4,7 +4,7 @@
 // build and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
 use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, canonical_pass_boundary_gaps]
-use jet_ir.[IROptReport, ir_build_program, ir_optimize_module, ir_opt_report_text]
+use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_optimize_module, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
 struct JetCLIDecisions {
@@ -14,14 +14,21 @@ struct JetCLIDecisions {
     unbuilt: [String]
 }
 
+// The optimizer's options at `level`, with the environment's pass knobs:
+// JET_OPT_DISABLE (pass names to skip), JET_OPT_SSA_VERIFY,
+// JET_OPT_SSA_STRESS and JET_OPT_DUMP (Opt.jet IROptOptions).
+fn jet_cli_opt_options(level: Int) -> IROptOptions {
+    ir_opt_options_from(level, decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
+}
+
 // Builds `inputs` into one IR module from its entry and optimizes it at `level`.
-fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, level: Int, threads: CompilerThreads) -> JetCLIDecisions Never! {
+fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, level: Int, threads: CompilerThreads) -> JetCLIDecisions {
     checked := ^inputs
     declarations := jet_driver_checked_declarations(&checked)
     built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
-    report :: ir_optimize_module(&built.program, level, threads)
+    report :: ir_optimize_module(&built.program, jet_cli_opt_options(level), threads)
     JetCLIDecisions{report: report, unbuilt: ^unbuilt}
 }
 

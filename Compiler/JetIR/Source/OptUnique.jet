@@ -1,0 +1,170 @@
+// Uniqueness hoisting (O2), before inlining: a call making a local list's
+// counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
+// out of every Loop that cannot make the buffer shared again, to just
+// before the outermost such Loop. Inside such a Loop the buffer stays the
+// list's own once it was made so, so every later call there was a no-op;
+// done once before the Loop, the call may copy a buffer that the Loop then
+// never writes, which nothing can observe.
+//
+// The list is a frame header: storage (StackAddress) written once, or a
+// slot moved from it once, whose buffer is stored before the Loop in a
+// region around it (so the header holds a list wherever the Loop starts).
+// A Loop can make its buffer shared again when it reads the header other
+// than by a Load, another such call or a store keeping the buffer its own
+// (of the length or capacity, or of a buffer fresh from jet_rt_alloc, as
+// a growth does), or hands the buffer pointer loaded from it to a call
+// (but the growth's jet_rt_mem_move, jet_rt_block_release and
+// jet_rt_free), a store or a move.
+
+fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, bodies: [[IRFunction]]) -> Int Never! {
+    count :: f.slot_type.len()
+    facts :: ir_opt_facts(f)
+    // The header each slot names (-1: none).
+    root := [Int]{}
+    loop _ in 0..<count -> &root.push(-1)
+    loop at in 0..<f.op.len() {
+        dst :: f.dst[at]
+        if dst < f.param_count || dst >= count || facts.defs[dst] != 1 -> next
+        if f.op[at] == .StackAddress {
+            root[dst] = dst
+        } else if f.op[at] == .Move && f.a[at] >= 0 && root[f.a[at]] >= 0 {
+            root[dst] = root[f.a[at]]
+        }
+    }
+    // Each instruction's innermost Loop, each Loop's enclosing one and End.
+    inner := [Int]{}
+    outer := [Int]{}
+    ends := [Int]{}
+    open := [Int]{}
+    loops := [Int]{}
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        &outer.push(-1)
+        &ends.push(-1)
+        if op == .End || op == .Else {
+            opener :: &open.pop() ?? panic("ir_opt_hoist_unique: End without an open construct")
+            if f.op[opener] == .Loop {
+                _ := &loops.pop()
+                ends[opener] = at
+            }
+        }
+        &inner.push(if loops.len() > 0 -> loops[loops.len() - 1] else -> -1)
+        if op == .Block || op == .Loop || op == .If || op == .Else {
+            &open.push(at)
+            if op == .Loop {
+                outer[at] = if loops.len() > 0 -> loops[loops.len() - 1] else -> -1
+                &loops.push(at)
+            }
+        }
+    }
+    // The calls, and where each goes (-1: stays).
+    target := [Int]{}
+    loop _ in 0..<f.op.len() -> &target.push(-1)
+    moved := 0
+    loop at in 0..<f.op.len() {
+        header :: ir_opt_unique_header(f, bodies, root, at)
+        if header < 0 -> next
+        slot :: f.args[f.b[at]]
+        place := -1
+        candidate := inner[at]
+        loop candidate >= 0 && facts.def_at[slot] < candidate && ir_opt_header_ready(f, facts, root, header, candidate) && !ir_opt_reshares(m, f, facts, bodies, root, header, candidate, ends[candidate]) {
+            place = candidate
+            candidate = outer[candidate]
+        }
+        if place < 0 -> next
+        target[at] = place
+        moved += 1
+    }
+    if moved == 0 -> return 0
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Loop {
+            // The calls hoisted here, once per header.
+            done := [Int]{}
+            loop k in 0..<f.op.len() {
+                if target[k] != at -> next
+                header :: root[f.args[f.b[k]]]
+                if done.contains(header) -> next
+                &done.push(header)
+                ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+            }
+        }
+        if target[at] >= 0 -> next
+        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+    }
+    f.op = ^code.op
+    f.dst = ^code.dst
+    f.a = ^code.a
+    f.b = ^code.b
+    f.c = ^code.c
+    f.code_line = ^code.line
+    ir_opt_compact(&f)
+    moved
+}
+
+// The header instruction `at` makes unique when it calls a `#unique<..>`
+// helper on a frame header, else -1.
+fn ir_opt_unique_header(f: IRFunction, bodies: [[IRFunction]], root: [Int], at: Int) -> Int Never! {
+    if f.op[at] != .Call || f.c[at] != 1 || f.dst[at] >= 0 -> return -1
+    callee :: f.a[at]
+    if callee < 0 || callee >= bodies.len() || bodies[callee].len() == 0 -> return -1
+    if !bodies[callee][0].key.starts_with("#unique<") -> return -1
+    slot :: f.args[f.b[at]]
+    if slot < 0 || slot >= root.len() -> return -1
+    root[slot]
+}
+
+// Whether the buffer of `header` is stored before the Loop at `opener`, in
+// a region around it.
+fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
+    loop at in 0..<opener {
+        if f.op[at] != .Store || f.b[at] != 16 || f.a[at] < 0 || root[f.a[at]] != header -> next
+        if ir_opt_encloses(facts, facts.region[at], facts.region[opener]) -> return true
+    }
+    false
+}
+
+// Whether the Loop at `opener` (End at `end`) can make the buffer of
+// `header` shared again.
+fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, bodies: [[IRFunction]], root: [Int], header: Int, opener: Int, end: Int) -> Bool Never! {
+    count :: f.slot_type.len()
+    // The slots holding the buffer pointer loaded from the header.
+    buffer := [Int]{}
+    reads := [Int]{}
+    loop at in (opener + 1)..<end {
+        op :: f.op[at]
+        if op == .Load && f.a[at] >= 0 && root[f.a[at]] == header && f.b[at] == 16 && f.dst[at] >= 0 -> &buffer.push(f.dst[at])
+    }
+    loop at in (opener + 1)..<end {
+        op :: f.op[at]
+        unique :: ir_opt_unique_header(f, bodies, root, at) == header
+        ir_x64_reads_into(f, at, &reads)
+        loop slot in reads {
+            if slot < 0 || slot >= count -> next
+            if root[slot] == header {
+                if op == .Load && f.a[at] == slot -> next
+                if unique -> next
+                if op == .Store && f.a[at] == slot && f.c[at] != slot && ir_opt_header_store_keeps(m, f, facts, at) -> next
+                return true
+            }
+            if buffer.contains(slot) {
+                if ir_opt_calls_route(m, f, at, "jet_rt_mem_move") || ir_opt_calls_route(m, f, at, "jet_rt_block_release") || ir_opt_calls_route(m, f, at, "jet_rt_free") -> next
+                if op == .Call || op == .CallRuntime || op == .CallIndirect || op == .Move || op == .Copy -> return true
+                if op == .Store && f.c[at] == slot -> return true
+            }
+        }
+        written :: ir_x64_write(f, at)
+        if written >= 0 && written < count && root[written] == header -> return true
+    }
+    false
+}
+
+// Whether the header Store at `at` keeps its buffer the header's own: a
+// length or capacity, or a buffer fresh from jet_rt_alloc (a growth).
+fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> Bool Never! {
+    if f.b[at] == 0 || f.b[at] == 8 -> return true
+    if f.b[at] != 16 -> return false
+    value :: f.c[at]
+    if value < f.param_count || facts.defs[value] != 1 -> return false
+    ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
+}
