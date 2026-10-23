@@ -2676,7 +2676,7 @@ pub fn build_setting_key(path: &str) -> Option<&str> {
 }
 
 /// The one authority for the non-code registration rows.
-pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.jet");
+pub const FACT_SOURCE: &str = include_str!("../../../Compiler/Prelude/Facts.jet");
 
 /// D-VERDICT-LOOP1=D: the reviewed coverage floor. The registry owns this
 /// source baseline; reports and `jet inspect build --coverage` project it
@@ -2721,7 +2721,7 @@ pub fn validate_diagnostic_coverage(
 /// D-REPORT-HOME1=A: the compile-time row source. Explain and terminal
 /// renderers project this table; generated website pages are projections too,
 /// never another authority.
-pub const DIAGNOSTIC_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Diagnostics.jet");
+pub const DIAGNOSTIC_SOURCE: &str = include_str!("../../../Compiler/Prelude/Diagnostics.jet");
 
 static FACT_DECLARATIONS: LazyLock<Vec<FactDeclaration>> = LazyLock::new(read_fact_declarations);
 static DIAGNOSTIC_ROWS: LazyLock<Vec<DiagnosticRow>> = LazyLock::new(read_diagnostic_rows);

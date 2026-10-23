@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 /// declarations. Parse the checked-in source through the normal lexer/parser
 /// instead of maintaining a second line-oriented provider language.
 pub const DERIVE_SOURCE: &str =
-    include_str!("../../../../jet-codegen/src/Prelude/Derives.jet");
+    include_str!("../../../../../Compiler/Prelude/Derives.jet");
 
 static BUILTIN_DERIVE_PROVIDERS: LazyLock<Vec<crate::AST::DeriveDef>> =
     LazyLock::new(parse_builtin_derive_source);

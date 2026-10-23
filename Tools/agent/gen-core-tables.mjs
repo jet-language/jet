@@ -25,10 +25,10 @@ import {
 import { CORE_RECORD_ROWS_PATH, generatedCoreRecordRows } from "./core-record-rows.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const EFFECT_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Effects.jet";
+const EFFECT_SOURCE_PATH = "Compiler/Prelude/Effects.jet";
 const EFFECTS_PATH = "crates/jet-foundation/src/Effects.rs";
 const BUILD_EFFECTS_PATH = "crates/jet-foundation/src/BuildEffects.rs";
-const CORE_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 // D-ONE-OPERATIONS1=A: the collection operation rows are authored once in
 // Jet; the Core reference tables are their projection.
 const OPERATIONS_SOURCE_PATH = "Compiler/JetFoundation/Source/Collections.jet";
@@ -165,7 +165,7 @@ function generatedEffects(source, facts) {
     EFFECT_BEGIN,
     `// Source: ${EFFECT_SOURCE_PATH}`,
     `// Source SHA-256: ${hash}`,
-    'pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");',
+    'pub const EFFECT_SOURCE: &str = include_str!("../../../Compiler/Prelude/Effects.jet");',
     "use std::sync::LazyLock;",
     "",
     "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",

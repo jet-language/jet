@@ -46,14 +46,14 @@ fn s6_ratchet_concat(first: String, second: String) -> String {
 }
 
 fn s6_ratchet_producer(path: String, line: String) -> Bool {
-    if path == "crates/jet-codegen/src/Prelude/Markers.jet" {
+    if path == "Compiler/Prelude/Markers.jet" {
         return line.trim_start().starts_with("marker ") &&
             (line.contains(s6_ratchet_concat("marker Abil", "ities")) || line.contains(s6_ratchet_concat("marker Cap", "s")))
     }
     if path == "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs" {
         return line.trim_start().starts_with("\"Abil") || line.trim_start().starts_with("\"Cap")
     }
-    if path == "crates/jet-codegen/src/Prelude/Diagnostics.jet" {
+    if path == "Compiler/Prelude/Diagnostics.jet" {
         return line.starts_with("diagnostic\tE0077\t") && line.contains(s6_ratchet_concat("#", "Grant"))
     }
     if path == "crates/jet-parser/src/Parser/Statements/control.rs" -> return line.contains(s6_ratchet_concat("the `#", "Grant` scope marker is retired"))

@@ -235,7 +235,7 @@ fn run() {
 }
 "#;
     assert!(
-        include_str!("../crates/jet-codegen/src/Prelude/Units.jet")
+        include_str!("../Compiler/Prelude/Units.jet")
             .contains("poundforce(scale: 44482216152605/10000000000000)"),
         "the standard unit declaration lost the exact defined pound-force ratio"
     );

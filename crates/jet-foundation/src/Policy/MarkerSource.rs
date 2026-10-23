@@ -17,7 +17,7 @@ use super::{
 };
 
 /// The one authority for the marker vocabulary.
-pub const MARKER_SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Markers.jet");
+pub const MARKER_SOURCE: &str = include_str!("../../../../Compiler/Prelude/Markers.jet");
 
 /// Read every `marker` declaration in `MARKER_SOURCE`.
 ///

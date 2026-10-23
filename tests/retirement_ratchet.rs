@@ -292,7 +292,7 @@ fn failure_surface_files() -> Vec<PathBuf> {
 fn failure_surface_allowlisted(path: &str) -> bool {
     is_authority_history(path)
         || is_authority_diagnostic_fixture(path)
-        || path == "crates/jet-codegen/src/Prelude/Diagnostics.jet"
+        || path == "Compiler/Prelude/Diagnostics.jet"
         // These two files contain source snippets whose only purpose is to
         // exercise retired-form recovery diagnostics and formatter fixes.
         || path == "crates/jet-parser/src/Parser/mod.rs"
@@ -784,7 +784,7 @@ fn is_authority_diagnostic_fixture(path: &str) -> bool {
 }
 
 fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
-    if path == "crates/jet-codegen/src/Prelude/Markers.jet" {
+    if path == "Compiler/Prelude/Markers.jet" {
         return line.trim_start().starts_with("marker ")
             && (line.contains(concat!("marker ", "Abil", "ities"))
                 || line.contains(concat!("marker ", "Cap", "s")));
@@ -793,7 +793,7 @@ fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
         return line.trim_start().starts_with(concat!("\"", "Abil"))
             || line.trim_start().starts_with(concat!("\"", "Cap"));
     }
-    if path == "crates/jet-codegen/src/Prelude/Diagnostics.jet" {
+    if path == "Compiler/Prelude/Diagnostics.jet" {
         return line.starts_with("diagnostic\tE0077\t") && line.contains(concat!("#", "Grant"));
     }
     if path == "crates/jet-parser/src/Parser/Statements/control.rs" {
@@ -1254,7 +1254,7 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 // The generated diagnostic catalog quotes the retired form in
                 // E1317's teaching text. It is evidence about the retirement,
                 // not package source written in the retired order.
-                if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet") {
+                if path.ends_with("Compiler/Prelude/Diagnostics.jet") {
                     continue;
                 }
                 let Some(text) = read(&path) else { continue };
@@ -1286,7 +1286,7 @@ fn tally(row: &Retirement) -> (usize, usize) {
             let mut retired = 0;
             let mut canonical = 0;
             for path in content_files() {
-                if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet")
+                if path.ends_with("Compiler/Prelude/Diagnostics.jet")
                     || path.ends_with("crates/jet-foundation/src/Syntax/retirements.rs")
                     || path.ends_with("crates/jet-parser/src/Parser/Statements/control.rs")
                     || path.ends_with("crates/jet-parser/src/Parser/mod.rs")
@@ -1488,7 +1488,7 @@ fn tally(row: &Retirement) -> (usize, usize) {
                     continue;
                 }
                 // The E0392 registry row names the retired form it refuses.
-                if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet") {
+                if path.ends_with("Compiler/Prelude/Diagnostics.jet") {
                     continue;
                 }
                 let Some(text) = read(&path) else { continue };

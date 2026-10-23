@@ -54,7 +54,7 @@ const CAPABILITY_PATHS = Object.freeze({
   ],
   core: [
     "crates/jet-foundation/src/CoreModuleExports.rs",
-    "crates/jet-codegen/src/Prelude/Core.jet",
+    "Compiler/Prelude/Core.jet",
     "crates/jet-foundation/src/Syntax/core_calls.rs",
     "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs",
     "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs",
@@ -68,7 +68,7 @@ const CAPABILITY_PATHS = Object.freeze({
   ],
   build: [
     "crates/jet-foundation/src/BuildEffects.rs",
-    "crates/jet-codegen/src/Prelude/Effects.jet",
+    "Compiler/Prelude/Effects.jet",
     "crates/jet-pkg-model/src/Package/Blocks.rs",
   ],
   package: [

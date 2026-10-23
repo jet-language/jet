@@ -6,7 +6,7 @@ This reference is for Jet application authors who need the standard modules for
 files, data, networking, security, command-line programs, and system
 integration. The executable declarations live in [`Core/`](../../../Core/);
 the Prelude registry lists exports and module paths in
-[`Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet), and the
+[`Core.jet`](../../../Compiler/Prelude/Core.jet), and the
 [`Examples/`](../../../Examples/) and [`tests/`](../../../tests/) directories
 exercise the contracts. The Rust-hosted compiler remains the reference
 execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
@@ -1824,7 +1824,7 @@ process checks in
 and tests such as
 [`tests/corelib_parts/system.rs`](../../../tests/corelib_parts/system.rs).
 The export registry is
-[`Prelude/Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet); the
+[`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
 data example used later is
 [`data_analysis.jet`](../../../Examples/features/tooling/data_analysis.jet).
 
@@ -4441,7 +4441,7 @@ targets; arbitrary function values or string-selected jobs are not admitted.
 
 ## `core` — built Core modules
 
-The canonical module registry is [`Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet),
+The canonical module registry is [`Core.jet`](../../../Compiler/Prelude/Core.jet),
 and the loader's exported list is [`CoreModuleExports.rs`](../../../crates/jet-foundation/src/CoreModuleExports.rs).
 The list below is the source-facing module inventory. A module may be a
 namespace-only provider boundary; its presence in the registry does not imply

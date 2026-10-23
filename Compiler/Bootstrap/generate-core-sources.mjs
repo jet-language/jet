@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Generate Foundation's shared source-ownership rows and the CLI's effect
 // text from the Core declaration sources: every public Core source module
-// (`source_module` rows of crates/jet-codegen/src/Prelude/Core.jet), then the
+// (`source_module` rows of Compiler/Prelude/Core.jet), then the
 // compiler-private parts (the rows of
-// crates/jet-codegen/src/Prelude/CoreSourceParts.tsv), then the runtime units
+// Compiler/Prelude/CoreSourceParts.tsv), then the runtime units
 // (Core/*/Runtime/**/*.jet), and the canonical effect source
-// (crates/jet-codegen/src/Prelude/Effects.jet). The rows carry no body text:
+// (Compiler/Prelude/Effects.jet). The rows carry no body text:
 // the CLI reads `<toolchain root>/<path>` at run time, so a Core edit needs no
 // regeneration unless the row set changes.
 // usage: node Compiler/Bootstrap/generate-core-sources.mjs [--check]
@@ -17,10 +17,10 @@ import { coreRuntimeParts, coreSourceFacts } from "../../Tools/agent/check-core-
 
 const bootstrapDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(bootstrapDir, "../..");
-const corePath = "crates/jet-codegen/src/Prelude/Core.jet";
-const partsPath = "crates/jet-codegen/src/Prelude/CoreSourceParts.tsv";
+const corePath = "Compiler/Prelude/Core.jet";
+const partsPath = "Compiler/Prelude/CoreSourceParts.tsv";
 const runtimePath = "Core/*/Runtime/**/*.jet";
-const effectSourceDisplay = "crates/jet-codegen/src/Prelude/Effects.jet";
+const effectSourceDisplay = "Compiler/Prelude/Effects.jet";
 const outputPath = resolve(repoRoot, "Compiler/JetCli/Source/Cli/CoreSources.jet");
 const ownershipPath = resolve(repoRoot, "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet");
 

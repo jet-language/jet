@@ -12,7 +12,7 @@ const INTERNAL_PREFIX: &str = "__jet_prelude_";
 
 pub(crate) const ERROR_PRELUDE_MODULE_PATH: &str = "Prelude/Errors.jet";
 pub(crate) const ERROR_PRELUDE_SOURCE_PATH: &str = "jet:canonical-prelude/Prelude/Errors.jet";
-const ERROR_PRELUDE_SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
+const ERROR_PRELUDE_SOURCE: &str = include_str!("../../../../Compiler/Prelude/Errors.jet");
 
 /// Original canonical nominal declarations and conversions share one parse.
 /// Registration retains these source rows and their declared private defaults.

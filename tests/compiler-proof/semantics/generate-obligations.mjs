@@ -12,7 +12,7 @@ import { readLedger } from "../../../Tools/agent/lexical-ledger.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const OUTPUT = resolve(ROOT, "tests/compiler-proof/obligations.json");
 const TIR_PATH = "crates/jet-codegen/src/Codegen/TIR/mod.rs";
-const CORE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+const CORE_PATH = "Compiler/Prelude/Core.jet";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax.rs";
 const SYNTAX_SPEC_PATH = "Docs/spec/syntax-decisions.md";
 const MIR_PATH = "crates/jet-foundation/src/MIR.rs";

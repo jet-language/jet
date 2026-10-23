@@ -12,6 +12,7 @@ mod BuildIdentity;
 // Core module bodies are embedded from `Core/` (jet-sema's CoreSources), so
 // every identity that covers the embedded Core closure names `Core` itself.
 const STDLIB_SOURCES: &[&str] = &[
+    "Compiler/Prelude",
     "Core",
     "crates/jet-foundation",
     "crates/jet-codegen/src/Prelude",

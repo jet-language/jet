@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::CtValue;
 
-pub const SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/core/prelude.jet");
+pub const SOURCE: &str = include_str!("../../../Compiler/Prelude/core/prelude.jet");
 
 /// The only epoch in which the current readable prelude is introduced.
 ///

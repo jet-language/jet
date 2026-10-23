@@ -3,7 +3,7 @@
 This specification is for Core API authors and reviewers. It defines the
 naming, failure, ownership, effects, allocation, diagnostics, and evidence
 rules for a public function, method, or type. The executable surface lives in
-[`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet) and the Jet source
+[`Core.jet`](../../Compiler/Prelude/Core.jet) and the Jet source
 under [`Core/`](../../Core/); accepted syntax and compiler-owned names live in
 [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs). The
 [Core surface ledger test](../../tests/core_surface_ledger.rs) and its

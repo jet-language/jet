@@ -1337,7 +1337,7 @@ mod dimension_tests {
 
     #[test]
     fn standard_units_source_parses_with_unique_members_and_provenance() {
-        let source = include_str!("../../../../jet-codegen/src/Prelude/Units.jet");
+        let source = include_str!("../../../../../Compiler/Prelude/Units.jet");
         let (tokens, diagnostics) = Lexer::lex_generated(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = Parser::parse(&tokens).expect("standard units must parse");

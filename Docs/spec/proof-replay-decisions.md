@@ -7,7 +7,7 @@ spellings and receipt boundaries are in [`Source/CmdProve.rs`](../../Source/CmdP
 [`Source/ProveReplay.rs`](../../Source/ProveReplay.rs), and
 [`Source/ProveSolver.rs`](../../Source/ProveSolver.rs); exercised command
 contracts are in [`tests/prove.rs`](../../tests/prove.rs), and diagnostic copy
-is in [`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet).
+is in [`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet).
 Use the [Jet vocabulary](vocabulary.md) for domain terms.
 
 Each section states a rule, the reason for it, and its consequence. Decision

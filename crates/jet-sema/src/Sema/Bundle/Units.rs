@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 /// Load the standard dimension catalog from ordinary Jet source. Local names
 /// shadow Prelude members; physical dimension behavior remains explicit opt-in.
 pub(super) fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-    const SOURCE: &str = include_str!("../../../../jet-codegen/src/Prelude/Units.jet");
+    const SOURCE: &str = include_str!("../../../../../Compiler/Prelude/Units.jet");
     let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
     let mut prelude = match crate::Parser::parse(&tokens) {
         Ok(program) => program

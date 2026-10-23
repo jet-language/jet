@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {parseCoreSource} from './check-core-surface-ledger.mjs';
 
-const source = readFileSync(new URL('../../crates/jet-codegen/src/Prelude/Core.jet', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../../Compiler/Prelude/Core.jet', import.meta.url), 'utf8');
 function typeIn(facts, module, name) {
     return facts.modules.find(row => row.module === module).types.find(row => row.name === name);
 }

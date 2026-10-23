@@ -7516,13 +7516,13 @@ target.
 
 The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
-- `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
+- `Compiler/Prelude/Markers.jet` holds one `marker Name(params…)`
   declaration per rule, in the ratified D-META-FORM1=A / D-MARKER-SITES1=B
   form, with D-DECL-META1=A's `$` metadata sigil. A plain parameter
   is an argument the use site writes; a `$`-marked parameter is a fact about
   the rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
   `$scopes`, `$companion`, `$retired`.
-- `crates/jet-codegen/src/Prelude/Effects.jet` holds one `effect Name`
+- `Compiler/Prelude/Effects.jet` holds one `effect Name`
   declaration per effect root.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
   hold the vocabulary; both are read from those two files.

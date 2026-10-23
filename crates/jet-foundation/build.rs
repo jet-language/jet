@@ -53,12 +53,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build/MirImageCodec.rs");
     mir_image_codec::generate(&manifest_dir, &out_dir);
 
-    const EFFECT_SOURCE: &str = "../jet-codegen/src/Prelude/Effects.jet";
-    const CORE_SOURCE: &str = "../jet-codegen/src/Prelude/Core.jet";
+    const EFFECT_SOURCE: &str = "../../Compiler/Prelude/Effects.jet";
+    const CORE_SOURCE: &str = "../../Compiler/Prelude/Core.jet";
     // External build-script data is declared through the same include closure
     // as Rust source inputs, before Cargo installs its read-only sandbox.
-    const EFFECT_BYTES: &[u8] = include_bytes!("../jet-codegen/src/Prelude/Effects.jet");
-    const CORE_BYTES: &[u8] = include_bytes!("../jet-codegen/src/Prelude/Core.jet");
+    const EFFECT_BYTES: &[u8] = include_bytes!("../../Compiler/Prelude/Effects.jet");
+    const CORE_BYTES: &[u8] = include_bytes!("../../Compiler/Prelude/Core.jet");
     let effect_hash = source_sha256::sha256_hex(EFFECT_BYTES);
     let core_hash = source_sha256::sha256_hex(CORE_BYTES);
     for path in [EFFECT_SOURCE, CORE_SOURCE] {

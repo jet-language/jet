@@ -25,13 +25,14 @@ import {
 import { buildLedger } from "../../../Tools/agent/check-core-surface-ledger.mjs";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-export const CORE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+export const CORE_PATH = "Compiler/Prelude/Core.jet";
 export const CORE_RS_PATH = "crates/jet-codegen/src/Prelude/Core.rs";
 export const LEDGER_PATH = "Tools/agent/check-core-surface-ledger.mjs";
 export const OBLIGATIONS_PATH = "tests/compiler-proof/obligations.json";
 export const MANIFEST_PATH = "tests/compiler-proof/toolchain/manifest.json";
 export const RUNNER_PATH = "Tools/agent/jet-env";
 export const IMPLEMENTATION_ROOTS = Object.freeze([
+  "Compiler/Prelude",
   "crates/jet-codegen/src/Prelude",
   "crates/jet-foundation/src",
   "crates/jet-rt/src",

@@ -175,7 +175,7 @@ fn derive_source_reentry() {
     let comptime = read("crates/jet-comptime/src/Comptime/mod.rs");
     let tir_eval = read("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs");
     let dispatch = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
-    let diagnostics = read("crates/jet-codegen/src/Prelude/Diagnostics.jet");
+    let diagnostics = read("Compiler/Prelude/Diagnostics.jet");
     let reflection = read("Examples/features/reflection/reflect-value.jet");
     assert!(
         parser.contains("fn derive_body_items")

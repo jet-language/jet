@@ -13,8 +13,8 @@ is [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs), and
 surface and ledger agree. The parser and semantic checker are the executable
 language rules; the reference implementation is in
 [`crates/jet-parser`](../../crates/jet-parser/) and
-[`crates/jet-sema`](../../crates/jet-sema/). The Prelude is under
-[`crates/jet-codegen/src/Prelude`](../../crates/jet-codegen/src/Prelude/) and
+[`crates/jet-sema`](../../crates/jet-sema/). The Prelude's Jet declarations are
+under [`Compiler/Prelude`](../../Compiler/Prelude/) and
 the core library under [`Core/`](../../Core/). The Rust-hosted compiler is the
 reference implementation while the compiler is ported to Jet; this document
 states the contract, not where it is implemented.
@@ -1534,7 +1534,7 @@ default `jet run`, and interpreter execution.
 This section defines effect inference, authority, and the checked tooling that
 exposes those facts. It is for authors of functions and packages, and for tools
 that consume checked programs. Executable truth lives in the [effect
-table](../../crates/jet-codegen/src/Prelude/Effects.jet), [syntax
+table](../../Compiler/Prelude/Effects.jet), [syntax
 tables](../../crates/jet-foundation/src/Syntax/), [sema effect
 checker](../../crates/jet-sema/src/Sema/Effects.rs), [inspect
 projections](../../Source/CmdExpand.rs), and [expand

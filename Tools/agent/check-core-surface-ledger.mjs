@@ -43,7 +43,7 @@ const TOWER_PATH = (function () {
 })();
 const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs";
 const CORE_CALLS_PATH = "crates/jet-foundation/src/Syntax/core_calls.rs";
-const CORE_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 const ENCODING_TYPES_PATH = "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs";
 const TIR_CORE_CALLS_PATH = "crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs";
 const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet";
@@ -68,7 +68,7 @@ const NET_TEXT_TIME_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/net_text_tim
 const CORE_TYPES_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
 const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
 const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
-const MARKERS_PATH = "crates/jet-codegen/src/Prelude/Markers.jet";
+const MARKERS_PATH = "Compiler/Prelude/Markers.jet";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
 const CORE_API_LAWS_PATH = "Docs/spec/stdlib-api-laws.md";
 const SYNTAX_REFERENCE_PATH = "Docs/spec/reference/syntax-surface.jet";

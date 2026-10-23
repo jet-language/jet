@@ -5,9 +5,9 @@
 //! adapters for rows that have not yet crossed the deferred dispatcher census.
 
 // BEGIN GENERATED EFFECT DECLARATIONS
-// Source: crates/jet-codegen/src/Prelude/Effects.jet
+// Source: Compiler/Prelude/Effects.jet
 // Source SHA-256: cb7a9b9ef6c7be8620deacda9eb20c0411f81a39f432c8a01a94f9427414bc2f
-pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
+pub const EFFECT_SOURCE: &str = include_str!("../../../Compiler/Prelude/Effects.jet");
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

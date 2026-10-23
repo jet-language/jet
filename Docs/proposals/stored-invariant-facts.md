@@ -36,7 +36,7 @@ provides the per-binding `Facts<P>` stores and owns branch and loop joins.
 `KnowledgeVector`, path composition, identity projection, and erasure.
 `crates/jet-sema/src/Sema/State.rs` keeps typestate in `StateTable` metadata and
 the `FlowFacts::states` row. `crates/jet-foundation/src/Registry.rs` reads the
-registered rows from `crates/jet-codegen/src/Prelude/Facts.jet` and supplies
+registered rows from `Compiler/Prelude/Facts.jet` and supplies
 their reflection shape. The proposal adds no second store to any of them.
 
 ## What exists

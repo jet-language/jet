@@ -13,7 +13,7 @@ authoritative; this reference replaces a generic in-skill checklist.
   `Tools/agent/jet-env jet self devtools grammars`. Do not treat that command
   as runtime or tier evidence.
 - For diagnostics caused by syntax, use the canonical row in
-  `crates/jet-codegen/src/Prelude/Diagnostics.jet`, matching UI snapshot, and
+  `Compiler/Prelude/Diagnostics.jet`, matching UI snapshot, and
   `Docs/spec/diagnostics.md`; preserve registered code and What/Why/Fix meaning.
 - For an example, read `Docs/spec/contributing/examples.md` and
   `Examples/README.md`, exercise the exact example path after a fresh binary,

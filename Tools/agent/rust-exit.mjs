@@ -11,7 +11,7 @@ import { parseCoreSource } from "./check-core-surface-ledger.mjs";
 
 export const REGISTRY = "Tools/agent/rust-leaves.tsv";
 export const RATCHET = "Tools/agent/rust-exit-ratchet.json";
-export const CORE = "crates/jet-codegen/src/Prelude/Core.jet";
+export const CORE = "Compiler/Prelude/Core.jet";
 export const HEADER = "row\trust_fn\tfile:line\tremoval_condition\trecorded_by\tscope\tdispatch_sha256";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const cliCrates = new Set(["jet-devserver", "jet-repl", "jet-debug", "jet-net", "jet-canvas", "jetos", "jet-unicode"]);

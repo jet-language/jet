@@ -316,7 +316,7 @@ Read this file first, then load only what the task needs:
 |---|---|
 | Dispatch, waves, worktrees, receipts, recovery, or card closure | `.agents/skills/orchestration/SKILL.md` |
 | Compiler or language semantics | The relevant code, examples, and tests; `Docs/spec/syntax-decisions.md` for decision rationale |
-| Diagnostics or snapshots | `crates/jet-codegen/src/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/spec/diagnostics.md` |
+| Diagnostics or snapshots | `Compiler/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/spec/diagnostics.md` |
 | Examples or golden paths | `Docs/spec/contributing/examples.md` and `Examples/README.md` |
 | Tower cards, questions, tags, or board operations | `Docs/spec/contributing/issue-tracker.md`, `Docs/spec/contributing/triage-labels.md`, and `Tools/tower/skills/tower/SKILL.md` |
 | Domain vocabulary or decisions | `Docs/spec/vocabulary.md`, `Docs/spec/syntax-decisions.md`, and `Docs/spec/contributing/domain.md` |

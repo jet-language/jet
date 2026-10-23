@@ -7,7 +7,7 @@ source and the complete diff; blessing is not a way to hide a red behavior.
 ## Diagnostic source and snapshot
 
 - Keep the row in
-  `crates/jet-codegen/src/Prelude/Diagnostics.jet`; the registry and consumers
+  `Compiler/Prelude/Diagnostics.jet`; the registry and consumers
   project that row. Use `Docs/spec/diagnostics.md` for the What/Why/Fix,
   structured-fix, coverage, and cross-tier contract.
 - Keep the matching fixture and snapshot under `tests/ui/` or `tests/ui_lint/`.

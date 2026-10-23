@@ -3,7 +3,7 @@
 Use this record when implementing, reviewing, or documenting Jet's encoding
 contracts. It defines the shared `Dyn` and bounded reader/writer model,
 then the selected wire formats and decoder policies. Executable names and
-carriers are registered in [`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet)
+carriers are registered in [`Core.jet`](../../Compiler/Prelude/Core.jet)
 and sourced from [`Core/Encoding`](../../Core/Encoding/Encoding.jet); the
 shared Prelude ABI is in
 [`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
@@ -1268,7 +1268,7 @@ E0956 and E0953 are tier failures, not accepted parity results.
 
 
 Static migration diagnostics `L2001` and `E2002` for `cbor.encode` use
-[`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet), the
+[`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet), the
 diagnostic registry, snapshots in
 [`tests/ui/cbor_encode_deprecated`](../../tests/ui/cbor_encode_deprecated/) and
 [`tests/ui/cbor_encode_removed`](../../tests/ui/cbor_encode_removed/), and

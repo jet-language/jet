@@ -4,7 +4,7 @@ This specification is for Core maintainers, provider authors, and reviewers. It
 defines where Core owns semantics, where a host may provide a typed leaf, how
 capabilities and effects are exposed, and what evidence makes an export
 complete. The declaration registry is
-[`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet); Jet source bodies
+[`Core.jet`](../../Compiler/Prelude/Core.jet); Jet source bodies
 are under [`Core/`](../../Core/). Generated call and module views are derived
 from those inputs by the [Core table generator](../../Tools/agent/gen-core-tables.mjs).
 The [surface ledger](../../tests/core_surface_ledger.rs) checks selected

@@ -40,7 +40,7 @@ Stable identities are part of the surface. Diagnostic codes, command names, and 
 | --- | --- |
 | Syntax and lexical space | `crates/jet-foundation/src/Syntax.rs` and `Syntax/` |
 | Concepts and semantics | Sema, the embedded Prelude, `Examples/`, and ratified decisions |
-| Diagnostics | `crates/jet-codegen/src/Prelude/Diagnostics.jet` |
+| Diagnostics | `Compiler/Prelude/Diagnostics.jet` |
 | Core API | `Core/` |
 | CLI and tooling surface | `crates/jet-cli/src/CLI.rs` (`COMMANDS`), flags, output formats, and manifest keys |
 

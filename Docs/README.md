@@ -46,7 +46,7 @@ strategic guidance document.
 | Keywords, sigils, and names | [Syntax registry](../crates/jet-foundation/src/Syntax.rs) and [examples](../Examples/features/) |
 | Language checks | The semantic checker ([`crates/jet-sema/`](../crates/jet-sema/src/)) and [tests](../tests/) |
 | Core APIs and runtime meaning | [Core library sources](../Core/) and the [Prelude](../crates/jet-codegen/src/Prelude/) |
-| Diagnostic text | [Diagnostic registry](../crates/jet-codegen/src/Prelude/Diagnostics.jet), [UI snapshots](../tests/ui/), and `jet explain <CODE>` |
+| Diagnostic text | [Diagnostic registry](../Compiler/Prelude/Diagnostics.jet), [UI snapshots](../tests/ui/), and `jet explain <CODE>` |
 | Commands and flags | `jet help` and the [CLI implementation](../crates/jet-cli/src/) |
 
 The Rust-hosted compiler is the production and reference implementation; the

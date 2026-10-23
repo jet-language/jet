@@ -198,5 +198,5 @@ or its inputs failed, while the latter means the `jet` invocation was wrong.
 - The banner is `manifest::version_banner`; release status is
   `manifest::current_release_status` in `crates/jet-pkg-model/src/Manifest.rs`.
 - E2001, E2002, and L2001 are registered in
-  `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the Foundation
+  `Compiler/Prelude/Diagnostics.jet` and the Foundation
   diagnostic registry, with release snapshots under `tests/release/`.

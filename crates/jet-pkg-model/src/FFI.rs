@@ -7390,7 +7390,7 @@ mod tests {
         for relative in [
             "Compiler/JetFoundation/Source/Registry/PreludeEffects.jet",
             "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
-            "crates/jet-codegen/src/Prelude/Core.jet",
+            "Compiler/Prelude/Core.jet",
         ] {
             assert!(sources.inputs.contains(&sources.root.join(relative)),
                 "canonical Foundation include closure omitted {relative}");

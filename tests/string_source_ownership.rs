@@ -9,7 +9,7 @@ fn string_source_part_is_not_a_public_core_module() {
     assert!(source.contains("fn len(receiver: String) -> Int"));
     assert!(!source.contains("pub fn"));
 
-    let public_core = include_str!("../crates/jet-codegen/src/Prelude/Core.jet");
+    let public_core = include_str!("../Compiler/Prelude/Core.jet");
     assert!(!public_core.contains("core.text.string"));
 
     let public_exports = include_str!("../crates/jet-foundation/src/CoreModuleExports.rs");

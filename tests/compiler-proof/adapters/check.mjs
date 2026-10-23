@@ -45,7 +45,7 @@ const CHECK_SCHEMA = "jet.adapters-contract-check.v1";
 const CONTRACT_PATH = "tests/compiler-proof/adapters/contract.json";
 const WITNESSES_PATH = "tests/compiler-proof/adapters/witnesses.json";
 const OBLIGATIONS_PATH = "tests/compiler-proof/obligations.json";
-const CORE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+const CORE_PATH = "Compiler/Prelude/Core.jet";
 const CAPABILITY_MANIFEST_PATH = ".jet/hardening-manifest.json";
 const PROOF_MANIFEST_PATH = "tests/compiler-proof/toolchain/manifest.json";
 const RUNNER_PATH = "Tools/agent/jet-env";
@@ -129,6 +129,7 @@ const REQUIRED_FOREIGN_IDS = Object.freeze([
   "foreign.physical-environment",
 ]);
 const SOURCE_ROOTS = Object.freeze([
+  "Compiler/Prelude",
   "crates/jet-codegen/src/Prelude",
   "crates/jet-foundation/src",
   "crates/jet-jit/src",

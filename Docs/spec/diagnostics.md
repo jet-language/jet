@@ -3,13 +3,13 @@
 This page is the contract for user-facing diagnostics and their projections. It
 covers registry ownership, terminal/LSP/machine rendering, the no-OS E3301
 contract, and the checks for changing a diagnostic. The canonical source is
-`crates/jet-codegen/src/Prelude/Diagnostics.jet`; executable checks include
+`Compiler/Prelude/Diagnostics.jet`; executable checks include
 `tests/cross.rs`, `tests/ui/`, and `tests/diagnostics_coverage.rs`.
 
 ## One registry, many projections
 
 Each row in
-[`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet) owns
+[`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet) owns
 its stable code, stage, severity, timing, What/Why/Fix templates, named holes,
 and structured-fix metadata. Preserve the code and its meaning when changing a
 row. The Foundation embeds this source as `Registry::DIAGNOSTIC_SOURCE` and
@@ -155,7 +155,7 @@ More: jet-lang.dev/e/E3301
 `tests/cross.rs` compiles the same `fs.read` fixture with
 `compile_no_os`, checks E3301 and the `no-OS` wording, and compares the
 byte-exact rendered output. The registry row is E3301 in
-`crates/jet-codegen/src/Prelude/Diagnostics.jet`; the no-OS compilation path is
+`Compiler/Prelude/Diagnostics.jet`; the no-OS compilation path is
 `Source/lib.rs::compile_no_os`. Hosted and no-OS behavior therefore share the
 same diagnostic renderer while the target rule remains explicit.
 

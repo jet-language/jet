@@ -7,7 +7,7 @@ checking the source-backed examples. The executable boundary is implemented by
 [`Source/CmdCompile.rs`](../../../Source/CmdCompile.rs) and
 [`crates/jet-foundation/src/WebPartition.rs`](../../../crates/jet-foundation/src/WebPartition.rs);
 web diagnostics are registered in
-[`crates/jet-codegen/src/Prelude/Diagnostics.jet`](../../../crates/jet-codegen/src/Prelude/Diagnostics.jet).
+[`Compiler/Prelude/Diagnostics.jet`](../../../Compiler/Prelude/Diagnostics.jet).
 
 The ratified decisions are D-WEBBACKEND1, D-WASM1, D-JSBIND1, D-WEBKIND1, and
 D-DOMGEN1. Per-function partition pins use `#Target(JS)` and `#Target(Wasm)`;
