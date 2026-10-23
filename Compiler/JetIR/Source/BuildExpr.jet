@@ -3657,6 +3657,11 @@ fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TExpr, 
 // captures from 24. The code takes the box as its hidden first parameter. A
 // capture the body writes is held by address: its variable becomes a frame
 // cell from the closure's creation on.
+//
+// The lambda's function is keyed by its enclosing function, its own source
+// span and its occurrence there: the merge shares functions by key, and the
+// branches of a `task.all` share one call span, so a key from the call span
+// would hand every branch the first branch's body.
 
 fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: TLambda, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -3690,8 +3695,11 @@ fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: TLambd
         }
     }
     id :: m.functions.len()
-    lambda_key :: "{b.f.key}#lambda@{span.start}"
-    &m.functions.push(ir_function_new("{b.f.name}.lambda@{span.start}", lambda_key, "{b.f.symbol}__lambda_{ir_key_hash(lambda_key)}", b.f.source_file, b.line))
+    base_key :: "{b.f.key}#lambda@{lambda.source_span.start}..{lambda.source_span.end}"
+    occurrence :: b.lambdas.get(base_key) ?? 0
+    b.lambdas[base_key] = occurrence + 1
+    lambda_key :: if occurrence == 0 -> base_key else -> "{base_key}#{occurrence}"
+    &m.functions.push(ir_function_new("{b.f.name}.lambda@{lambda.source_span.start}", lambda_key, "{b.f.symbol}__lambda_{ir_key_hash(lambda_key)}", b.f.source_file, b.line))
     &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)

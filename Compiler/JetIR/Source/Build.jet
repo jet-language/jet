@@ -84,6 +84,8 @@ struct IRBuilder {
     // The variable slot an explicit move (`^x`) just read (-1: none): that
     // read moves even where a plain read of the variable would share.
     moving: Int{-1}
+    // The closures this body created so far, by key base (ir_lambda).
+    lambdas: [String:Int]
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
@@ -603,7 +605,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}, lambdas: [String:Int]{}}
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
