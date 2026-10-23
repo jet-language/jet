@@ -20,6 +20,8 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         .DynSetPath(keys, site, location) -> return Val(ir_dyn_set_path(&m, p, &b, dyn_row, receiver, keys, site, location, args, span))
         .DynRemove -> return Val(ir_dyn_remove(&m, p, &b, ty, dyn_row, receiver, args, span))
         .DynDecode(target) -> return Val(ir_dyn_decode(&m, p, &b, receiver, target, args, span))
+        .DynIndexKey(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_key", true, site, location, args, span))
+        .DynIndexAt(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
         else -> {}
     }
     // The encoding.dyn routes (codegen jet_codegen_data_handle_route and
@@ -32,6 +34,7 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         .DynText | .JSONText -> (symbol: "jet_dyn_text", arity: 0, mask: [Bool]{true})
         .DynBool | .JSONBool -> (symbol: "jet_dyn_bool", arity: 0, mask: [Bool]{true})
         .DynFloat | .JSONFloat -> (symbol: "jet_dyn_float", arity: 0, mask: [Bool]{true})
+        .DynKeys -> (symbol: "jet_dyn_keys", arity: 0, mask: [Bool]{true})
         else -> { return None }
     }
     if args.len() != route.arity -> return Val(ir_fail_slot(&b, span, "handle method {route.symbol} with {args.len()} arguments"))
@@ -45,6 +48,35 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         &operands.push(slot)
     }
     Val(ir_route(&m, p, &b, route.symbol, operands, route.mask, ty, span))
+}
+
+// `tree[key]` / `tree[index]` (codegen jet_codegen_lower_dyn_operation): the
+// jet_dyn_index_key / jet_dyn_index_at route gives Ok(a new owner of the
+// entry) or Err(its stop detail), and an Err stops at the index's location.
+fn ir_dyn_index(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [TExpr], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn index with {args.len()} arguments")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    tree :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || tree < 0 -> return -1
+    index :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || index < 0 -> return -1
+    string_row :: ir_string_row(&m)
+    site :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, site, ir_intern_text(&m, site_text), -1, -1, b.line)
+    result_ty :: Type.Result{ok: ir_subst(m, ty), err: Type.String}
+    outcome :: ir_route(&m, p, &b, symbol, [Int]{tree, index, site}, [Bool]{true, keyed, true}, result_ty, span)
+    if ir_failed(b) || outcome < 0 -> return -1
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    failed :: ir_temp(&m, &b, bool_row)
+    ok :: ir_result_is_ok(&m, &b, outcome)
+    ir_emit(&b.f, IROp.Not, failed, ok, -1, -1, b.line)
+    ir_open_if(&b.f, failed, b.line)
+    message :: ir_load_at(&m, &b, outcome, 8, string_row)
+    null :: ir_word_const(&m, &b, 0)
+    ir_stop(&m, p, &b, 2, message, null, null, location)
+    ir_end(&b.f, b.line)
+    if ir_failed(b) -> return -1
+    ir_box_take(&m, p, &b, outcome, 8, row)
 }
 
 // `tree.get(key)` / `tree.has(key)` (JetRuntime Dyn.jet jet_dyn_get_key,
@@ -224,26 +256,62 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
 fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, target: Type, args: [TExpr], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
     concrete :: ir_subst(m, target)
+    key :: ir_codec_impl(p, concrete, "Decode", "decode")
+    if key == "" -> return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
+    tree_arg :: TCallArg{value: receiver, template_items: [], borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    ir_call(&m, p, &b, key, [Type]{}, -1, [IRWriteBack]{}, [TCallArg]{tree_arg}, span)
+}
+
+// `value.encode()` into a Dyn (codegen jet_codegen_lower_serde_encode): a
+// Dyn is itself, a type with its own Encode implementation calls it, and an
+// Int, fixed-width integer, Float, Bool or String value is boxed as its Dyn
+// variant (jet_codegen_data_encode_variant). The builtin, container and
+// typed codec routes have no lowering here.
+fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+    concrete :: ir_subst(m, receiver.ty)
+    if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
+    key :: ir_codec_impl(p, concrete, "Encode", "encode")
+    if key != "" {
+        self_slot :: ir_expr(&m, p, &b, receiver)
+        if ir_failed(b) || self_slot < 0 -> return -1
+        return ir_call(&m, p, &b, key, [Type]{}, self_slot, [IRWriteBack]{}, [TCallArg]{}, span)
+    }
+    variant :: if ir_untag(concrete) == {
+        .Int | .IntN(_, _) -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .String -> "Text"
+        else -> ""
+    }
+    if variant == "" || ir_dyn_def(p, ir_subst(m, ty)) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
+    slot :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || slot < 0 -> return -1
+    payload := slot
+    if ir_untag(concrete) == .IntN(_, _) {
+        int_row :: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
+        payload = ir_numeric_cast(&m, p, &b, slot, int_row, span)
+        if ir_failed(b) -> return -1
+    }
+    ir_dyn_box(&m, p, &b, ty, variant, payload, span)
+}
+
+// The key of `concrete`'s own `codec` implementation method (`Decode|decode`,
+// `Encode|encode`), or "" when it has none.
+fn ir_codec_impl(p: IRProgram, concrete: Type, codec: String, method: String) -> String Never! {
     identity :: ir_trait_identity(p, concrete)
-    candidates :: p.trait_methods.get("Decode|decode") ?? [Int]{}
-    key := ""
+    candidates :: p.trait_methods.get("{codec}|{method}") ?? [Int]{}
     loop row in candidates {
         if p.rows.get(p.functions[row].key) != (Val(row)) -> next
         owner := Type?{None}
         if p.functions[row].kind == {
             .Method(_, owner_type) -> owner = Val(owner_type.copy())
             .TraitMethod(_, _, owner_type, trait_name, _) -> {
-                if ir_short_name(trait_name.key) == "Decode" -> owner = Val(owner_type.copy())
+                if ir_short_name(trait_name.key) == codec -> owner = Val(owner_type.copy())
             }
             .TopLevel -> {}
         }
         implementer :: owner ?? next
-        if ir_trait_identity(p, implementer) == identity {
-            key = p.functions[row].key.copy()
-            break
-        }
+        if ir_trait_identity(p, implementer) == identity -> return p.functions[row].key.copy()
     }
-    if key == "" -> return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
-    tree_arg :: TCallArg{value: receiver, template_items: [], borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    ir_call(&m, p, &b, key, [Type]{}, -1, [IRWriteBack]{}, [TCallArg]{tree_arg}, span)
+    ""
 }
