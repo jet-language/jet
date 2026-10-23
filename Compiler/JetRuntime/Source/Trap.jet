@@ -358,21 +358,8 @@ fn trap_native_index_range_root() {
         return
     }
     comptime_serve_stop(I64{3}, len, native, I64{0}, I64{0})
-    // Outcome.rs:2463-2466 supplies the one list-index reason. Reuse the
-    // existing decimal formatter, including I64.MIN; publication copies it.
-    message :: jet_rt_string_builder_new()
-    scratch :: alloc_required_valid(I64{24}, I64{8})
-    rt_text_push_word(message, I64{8391166443842267252}, I64{8})
-    rt_text_push_word(message, I64{139374716960}, I64{5})
-    coll_render_i64(message, scratch, len)
-    rt_text_push_word(message, I64{2318354821879720224}, I64{8})
-    rt_text_push_word(message, I64{8388362703413997427}, I64{8})
-    rt_text_push_word(message, I64{544108393}, I64{4})
-    coll_render_i64(message, scratch, native)
-    rt_text_push_word(message, I64{8369779874393449504}, I64{8})
-    rt_text_push_word(message, I64{128039039558944}, I64{6})
+    message :: trap_list_bounds_reason(len, native)
     published :: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1})
-    alloc_release_valid(scratch, I64{24}, I64{8})
     jet_rt_string_drop(message)
     if published -> return
     trap_header(I64{1})
@@ -382,6 +369,33 @@ fn trap_native_index_range_root() {
     trap_number(native)
     trap_msg_list_end()
     trap_footer(I64{1})
+}
+
+// Outcome.rs:2463-2466 supplies the one list-index reason, as an owned
+// String. Reuse the existing decimal formatter, including I64.MIN.
+fn trap_list_bounds_reason(len: I64, index: I64) -> I64 {
+    message :: jet_rt_string_builder_new()
+    scratch :: alloc_required_valid(I64{24}, I64{8})
+    rt_text_push_word(message, I64{8391166443842267252}, I64{8})
+    rt_text_push_word(message, I64{139374716960}, I64{5})
+    coll_render_i64(message, scratch, len)
+    rt_text_push_word(message, I64{2318354821879720224}, I64{8})
+    rt_text_push_word(message, I64{8388362703413997427}, I64{8})
+    rt_text_push_word(message, I64{544108393}, I64{4})
+    coll_render_i64(message, scratch, index)
+    rt_text_push_word(message, I64{8369779874393449504}, I64{8})
+    rt_text_push_word(message, I64{128039039558944}, I64{6})
+    alloc_release_valid(scratch, I64{24}, I64{8})
+    message
+}
+
+// The list-index stop of compiled code (Core.rs jet_runtime_stop): the IR's
+// native word index, reported at the indexing file and line.
+#Export(c) fn jet_rt_list_bounds_stop(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
+    comptime_serve_stop(I64{3}, len, index, I64{0}, I64{0})
+    message :: trap_list_bounds_reason(len, index)
+    trap_simple(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
 }
 
 // CAbi.rs:91-98: an uncaught host payload is a defect, not an E3001 stop.

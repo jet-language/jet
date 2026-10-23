@@ -52,7 +52,8 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
 
 // `tree[key]` / `tree[index]` (codegen jet_codegen_lower_dyn_operation): the
 // jet_dyn_index_key / jet_dyn_index_at route gives Ok(a new owner of the
-// entry) or Err(its stop detail), and an Err stops at the index's location.
+// entry) or Err(its stop detail), and an Err stops at the index's line, its
+// source quoted with the caret at the line start (DynRuntime.rs).
 fn ir_dyn_index(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn index with {args.len()} arguments")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -73,7 +74,10 @@ fn ir_dyn_index(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
     ir_open_if(&b.f, failed, b.line)
     message :: ir_load_at(&m, &b, outcome, 8, string_row)
     null :: ir_word_const(&m, &b, 0)
-    ir_stop(&m, p, &b, 2, message, null, null, location)
+    at := location.copy()
+    at.column = 0
+    at.caret = 0
+    ir_stop(&m, p, &b, 2, message, null, null, ir_report_location(p, at))
     ir_end(&b.f, b.line)
     if ir_failed(b) -> return -1
     ir_box_take(&m, p, &b, outcome, 8, row)

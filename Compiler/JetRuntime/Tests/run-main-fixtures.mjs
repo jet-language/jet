@@ -27,7 +27,7 @@ if (mode === 'link') {
 } else {
   // Byte goldens derive from the reference entry/atexit ordering and the
   // registered E3013 wire fragments (ObserveMessages/Channel.text(0)).
-  const parked = (label, site) => `Stop [E3013]: Parked tasks remain at process exit: {\n  ${label} (spawn site ${site})\n    state: blocked\n    wait target: channel receive}\n Why: The scheduler reached process exit while one or more tasks were blocked on a wait target.\n Fix: Join each task or make its wait reachable before process exit.\nMore: jet-lang.dev/e/E3013\n`;
+  const parked = (label, site) => `Stop [E3013]: Parked tasks remain at process exit: \n  ${label} (spawn site ${site})\n    state: blocked\n    wait target: channel receive\n Why: The scheduler reached process exit while one or more tasks were blocked on a wait target.\n Fix: Join each task or make its wait reachable before process exit.\nMore: jet-lang.dev/e/E3013\n`;
   const numeric = "Stop [E3010]: `divided by zero`\n  --> <core.prelude>:0\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n";
   const normal = 'entryexit2exit1', restart = parked('restart-child',41);
   const cases = [

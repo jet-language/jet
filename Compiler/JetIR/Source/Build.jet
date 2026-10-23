@@ -2072,7 +2072,7 @@ fn ir_native_index(m: &IRModule, b: &IRBuilder, position: Int, span: Span) -> In
 }
 
 // The address of element `index` of the list at `list`, after the bounds
-// check (jet_rt_panic_list_bounds(length, index)).
+// check (ir_list_bounds_stop).
 fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, index: Int, row: Int, span: Span) -> Int Never! {
     position :: ir_expr(&m, p, &b, index)
     if ir_failed(b) || position < 0 -> return -1
@@ -2087,8 +2087,7 @@ fn ir_checked_address(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row: 
     length :: ir_load_word(&m, &b, list, 0)
     bad :: ir_index_order(&m, &b, IROp.Ge, native, length)
     ir_open_if(&b.f, bad, b.line)
-    _ :: ir_runtime(&m, &b, "jet_rt_panic_list_bounds", [Int]{length, native}, -1)
-    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_list_bounds_stop(&m, &b, length, native)
     ir_end(&b.f, b.line)
     data :: ir_load_word(&m, &b, list, 16)
     stride :: ir_list_stride(m, row)

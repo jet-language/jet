@@ -5,7 +5,7 @@
 // helper functions built once per Map type (map.find, map.set, map.get,
 // map.remove, map.insert), as Lower's glue helpers are.
 
-use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, type_carrier_identity]
+use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, TPanicLoc, TPanicLocal, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
 fn ir_map_entry_type(ty: Type) -> Type? Never! {
@@ -315,8 +315,15 @@ fn ir_map_set(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key
     b.fresh[owned_value] = false
 }
 
+// A runtime index stop at the builder's current line (Core.rs
+// jet_index_map_ref): the line's source quoted, its caret at the line start.
+fn ir_line_report(p: IRProgram, b: IRBuilder) -> TPanicLoc Never! {
+    ir_report_location(p, TPanicLoc{file: b.f.source_file.copy(), source_line: "", line: b.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}})
+}
+
 // The address of the value stored under `key` in the map at `map`; a
-// missing key stops (Lower lower_map_value_address: Core.rs jet_index_map_ref).
+// missing key stops at the current line with the key's debug text (Lower
+// lower_map_value_address: Core.rs jet_index_map_ref).
 fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int) -> Int Never! {
     shape :: ir_map_shape(&m, p, row) ?? return -1
     word_row :: ir_word_row(&m)
@@ -324,9 +331,19 @@ fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map
     none :: ir_word_const(&m, &b, 0)
     absent :: ir_bool_op(&m, &b, IROp.Lt, found, none)
     ir_open_if(&b.f, absent, b.line)
-    message :: ir_static_text(&m, &b, "the map has no entry for this key")
-    _ :: ir_runtime(&m, &b, "jet_rt_panic_message", message, -1)
-    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    pointer_row :: ir_pointer_row(&m)
+    builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
+    b.fresh[builder] = false
+    ir_push_static(&m, &b, builder, "the map has no entry for key ")
+    key_ty :: m.types[shape.key.ty].ty.copy()
+    text :: ir_render(&m, p, &b, key_ty, key, IRRender.Debug, Span{start: 0, end: 0})
+    if ir_failed(b) -> return -1
+    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+    string_row :: ir_string_row(&m)
+    message :: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    null :: ir_word_const(&m, &b, 0)
+    report :: ir_line_report(p, b)
+    ir_stop(&m, p, &b, 2, message, null, null, report)
     ir_end(&b.f, b.line)
     entries :: ir_load_word(&m, &b, map, 16)
     entry :: ir_element_address(&m, &b, entries, found, shape.stride)

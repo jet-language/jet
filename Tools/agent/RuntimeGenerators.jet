@@ -284,13 +284,6 @@ fn after_hole(text: String) -> String Never! {
     if at < 0 -> "" else -> byte_tail(text, at + byte_len("{{msg}}"))
 }
 
-// The same split applied to a template as written. The observe report has
-// always split the escaped `{{msg}}` this way, so its head keeps the hole's
-// opening brace and its tail the closing one.
-fn raw_before_hole(text: String) -> String Never! { before_hole(text) }
-
-fn raw_after_hole(text: String) -> String Never! { after_hole(text) }
-
 // The runtime's fixed message tables: scheduler, observe, test-reporter and
 // services literals, each written as words so the runtime unit never needs an
 // implicit String or Int carrier to produce them.
@@ -394,8 +387,8 @@ fn observe_literals(what: String, why: String, fix: String) -> [MessageLiteral] 
         MessageLiteral{name: "unknown", text: "unknown"},
         MessageLiteral{name: "omitted_head", text: "\n  ... "},
         MessageLiteral{name: "omitted_tail", text: " more parked task(s) omitted by the report limit ..."},
-        MessageLiteral{name: "report_head", text: "Stop [E3013]: {raw_before_hole(what)}"},
-        MessageLiteral{name: "report_tail", text: "{raw_after_hole(what)}\n Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/E3013\n"},
+        MessageLiteral{name: "report_head", text: "Stop [E3013]: {before_hole(what)}"},
+        MessageLiteral{name: "report_tail", text: "{after_hole(what)}\n Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/E3013\n"},
         MessageLiteral{name: "live_begin", text: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\""},
         MessageLiteral{name: "live_source", text: "\",\"source_id\":\""},
         MessageLiteral{name: "live_build", text: "\",\"build_id\":\""},
@@ -463,7 +456,7 @@ fn observe_literals(what: String, why: String, fix: String) -> [MessageLiteral] 
 }
 
 fn render_observe_messages(registry: String) -> String GeneratorError! {
-    what :: registry_field_raw(registry, "E3013", "what") ?? return Err(err)
+    what :: registry_field(registry, "E3013", "what") ?? return Err(err)
     why :: registry_field_raw(registry, "E3013", "why") ?? return Err(err)
     fix :: registry_field_raw(registry, "E3013", "fix") ?? return Err(err)
     source := "{GENERATED_BY}; direct E4 builder fragments.\n"

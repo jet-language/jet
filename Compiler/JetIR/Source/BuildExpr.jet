@@ -1363,9 +1363,23 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .CoreCall(record, args, _, type_args, widen_to_vec, _) -> return ir_core_call(&m, p, &b, expression_ty, record, args, type_args, widen_to_vec, span)
         .NumericMethod(receiver, operation) -> return ir_numeric_method(&m, p, &b, expression_ty, receiver, operation, span)
         .Never(reason) -> {
-            // codegen jet_codegen_lower_never: Lower stops through jet_rt_unreachable.
-            message :: ir_static_text(&m, &b, reason)
-            _ :: ir_runtime(&m, &b, "jet_rt_unreachable", message, -1)
+            if reason == "todo" {
+                // A reached `#Todo` goal (Trap.jet jet_todo_stop): the E3011
+                // stop at its file and line, naming the type it stands for.
+                string_row :: ir_string_row(&m)
+                source :: b.f.source_file.copy()
+                site :: b.line
+                file :: ir_temp(&m, &b, string_row)
+                ir_emit(&b.f, IROp.ConstText, file, ir_intern_text(&m, source), -1, -1, site)
+                line :: ir_word_const(&m, &b, ir_source_line_of(p, source, span.start) ?? site)
+                expected :: ir_temp(&m, &b, string_row)
+                ir_emit(&b.f, IROp.ConstText, expected, ir_intern_text(&m, ir_type_name(expression_ty)), -1, -1, site)
+                _ :: ir_runtime(&m, &b, "jet_todo_stop", [Int]{file, line, expected}, -1)
+            } else {
+                // codegen jet_codegen_lower_never: Lower stops through jet_rt_unreachable.
+                message :: ir_static_text(&m, &b, reason)
+                _ :: ir_runtime(&m, &b, "jet_rt_unreachable", message, -1)
+            }
             ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
             return ir_unreachable_value(&m, p, &b, expression_ty)
         }
@@ -3174,8 +3188,9 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
     if ir_failed(b) -> return
     if slot < 0 -> return ir_fail(&b, span, "return of a value without a slot")
     returned_node :: ir_body_node(p, b, returned)
-    if returned_node.kind == .Err(_) {
-        ir_journey_origin(&m, p, &b, returned_node.span)
+    if returned_node.kind == .Err(error) {
+        reraise :: ir_core_reraise(p, b, error)
+        ir_journey_origin(&m, p, &b, reraise, returned_node.span)
         if ir_failed(b) -> return
     }
     owned :: ir_own(&m, p, &b, slot)
@@ -3279,8 +3294,15 @@ fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line
 }
 
 // A returned `Err(...)` at `span` starts the journey (codegen
-// jet_codegen_lower_journey_origin) at the span's line.
-fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) Never! {
+// jet_codegen_lower_journey_origin) at the span's line. Core library code
+// handing on an error it was given (`reraise`, ir_core_reraise) is not
+// where the failure starts: it only drops a journey an earlier, handled
+// failure left, and the failure joins the journey at the program's `?`.
+fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, reraise: Bool, span: Span) Never! {
+    if reraise {
+        _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
+        return
+    }
     file :: b.f.source_file.copy()
     name :: b.f.name.copy()
     line :: ir_source_line_of(p, file, span.start) ?? 1
@@ -3291,14 +3313,16 @@ fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) Neve
 
 // The hop of the failure edge at `site`: a failure that starts here drops
 // the journey an earlier, handled failure left; then the site joins the
-// journey, or, for a `?(note)` whose error is the default `Err`, becomes a
-// context frame of `error` (codegen jet_codegen_lower_try_context). Returns
-// the error the edge hands on: `error`, or the framed copy that replaces
-// it.
+// journey (never in Core library code, whose `?` the program's own `?`
+// stands for), or, for a `?(note)` whose error is the default `Err`,
+// becomes a context frame of `error` (codegen jet_codegen_lower_try_context).
+// Returns the error the edge hands on: `error`, or the framed copy that
+// replaces it.
 fn ir_journey_hop(m: &IRModule, p: IRProgram, b: &IRBuilder, site: IRTrySite, error: Int, framed: Bool, span: Span) -> Int Never! {
     if site.fresh {
         _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
     }
+    if !framed && ir_core_function(b) -> return error
     values := ir_journey_site(&m, p, &b, site.file, site.line, site.function, span)
     if ir_failed(b) -> return -1
     note := -1
@@ -3325,6 +3349,24 @@ fn ir_journey_hop(m: &IRModule, p: IRProgram, b: &IRBuilder, site: IRTrySite, er
     _ :: ir_runtime(&m, &b, "jet_journey_frame_text", values, -1)
     ir_release(&m, &b, note)
     error
+}
+
+// Whether the function being built is Core library code (a `<corelib>/`
+// key or source).
+fn ir_core_function(b: IRBuilder) -> Bool Never! {
+    b.f.key.starts_with("<corelib>/") || b.f.source_file.starts_with("<corelib>/")
+}
+
+// Whether `Err(error)` in the function being built is Core library code
+// handing on an error it was given: a Core function returning a local (`??
+// return Err(err)`), not an error value it builds (`Err(CryptoError.Length)`).
+fn ir_core_reraise(p: IRProgram, b: IRBuilder, error: Int) -> Bool Never! {
+    if !ir_core_function(b) -> return false
+    if ir_body_node(p, b, error).kind == {
+        .Local(_) -> true
+        .Move(value) -> ir_body_node(p, b, value).kind == .Local(_)
+        else -> false
+    }
 }
 
 // The failure edge of `?`: an impossible failure is unreachable; a Result

@@ -38,13 +38,22 @@ fn ir_list_push(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, 
 }
 
 // The List bounds stop for `index` outside 0..<length (0...length when
-// `inclusive`): jet_rt_panic_list_bounds(length, index).
+// `inclusive`).
 fn ir_list_bounds(m: &IRModule, b: &IRBuilder, index: Int, length: Int, inclusive: Bool) Never! {
     bad :: ir_index_order(&m, &b, if inclusive -> IROp.Gt else -> IROp.Ge, index, length)
     ir_open_if(&b.f, bad, b.line)
-    _ :: ir_runtime(&m, &b, "jet_rt_panic_list_bounds", [Int]{length, index}, -1)
-    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_list_bounds_stop(&m, &b, length, index)
     ir_end(&b.f, b.line)
+}
+
+// The List bounds stop itself, reported at the builder's current line:
+// jet_rt_list_bounds_stop(length, native index, path, path length, line).
+fn ir_list_bounds_stop(m: &IRModule, b: &IRBuilder, length: Int, index: Int) Never! {
+    args := [Int]{length, index}
+    site :: b.line
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    _ :: ir_runtime(&m, &b, "jet_rt_list_bounds_stop", args, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
 // A new Option box holding the element at `address`: moved out of the

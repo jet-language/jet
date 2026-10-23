@@ -1238,9 +1238,16 @@ fn ir_render_impl_call(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row
     returned :: ir_executable_return(function) ?? return -1
     result_row :: ir_value_type(&m, p, returned) ?? return -1
     dst :: ir_fresh_temp(&m, &b, result_row)
-    start :: ir_args(&b.f, [Int]{slot})
+    // A `^self` implementation (`fn debug(^self)`) owns its receiver: it gets
+    // a copy of a value the caller keeps rendering and using, or the
+    // temporary itself, which the caller then no longer drops.
+    receiver := slot
+    moved :: ir_receiver_access(function.kind) == "move" && ir_has_drop(m, b, slot)
+    if moved && !b.fresh[slot] -> receiver = ir_copy_value(&m, p, &b, slot, Span{start: 0, end: 0})
+    start :: ir_args(&b.f, [Int]{receiver})
     at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 1, b.line)
     &b.deferred.push(IRDeferredCall{at: at, key: function.key, args: owner_args})
+    if moved -> b.fresh[receiver] = false
     ir_stop_check(&m, &b)
     string_row :: ir_string_row(&m)
     text :: ir_adapt(&m, p, &b, dst, string_row, Span{start: 0, end: 0})
