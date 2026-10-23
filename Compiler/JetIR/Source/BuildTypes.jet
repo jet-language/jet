@@ -248,9 +248,10 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
     // A generic declaration lays out per instance, its parameters bound to
     // the instance's arguments (Lower Mono.jet lower_subst_definition); an
     // instance of a Core or runtime-carried generic is one of Lower's own
-    // carriers, not its declared fields.
+    // carriers, not its declared fields, unless Core source owns the
+    // declaration (DataStream<T>, DataLoader<T>: its Jet fields on every tier).
     if definition.generic_params.len() != args.len() -> return None
-    if args.len() > 0 && (definition.key.starts_with("<corelib>/") || lower_runtime_handle(name) != None) -> return None
+    if args.len() > 0 && !core_source_owns_type(definition.key) && (definition.key.starts_with("<corelib>/") || lower_runtime_handle(name) != None) -> return None
     identity :: ir_instance_identity(definition.key, args)
     if definition.kind == {
         .Enum(variants, _) -> {
@@ -1397,11 +1398,13 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
 
 // `left <=> right` (Lower lower_three_way): the Less/Equal/Greater variant
 // of Ordering. Exact Ints and fixed-width words compare as their `<` and
-// `==` do; Strings by the sign of jet_rt_string_compare.
+// `==` do; Strings by the sign of jet_rt_string_compare; any other ordered
+// value (a runtime handle such as Decimal, a tuple, a Comparable record) by
+// the sign ir_order_sign gives.
 fn ir_three_way(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     kind :: ir_kind_of(m, b, left)
     left_ty :: m.types[b.f.slot_type[left]].ty
-    if kind != .Int && kind != .Word && kind != .Char && kind != .String -> return ir_fail_slot(&b, span, "operator <=> on {ir_type_name(left_ty)}")
+    if kind == .Float || kind == .Float32 || kind == .Unit -> return ir_fail_slot(&b, span, "operator <=> on {ir_type_name(left_ty)}")
     ordering :: ir_type_def(p, "Ordering") ?? return ir_fail_slot(&b, span, "`<=>` result Ordering has no definition")
     result_row :: ir_value_type(&m, p, Type.Named{name: "Ordering"}) ?? return ir_fail_slot(&b, span, "layout of Ordering")
     less :: ir_variant_index(p, ordering, "Less") ?? return ir_fail_slot(&b, span, "Ordering has no Less variant")
@@ -1412,6 +1415,10 @@ fn ir_three_way(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int
     if kind == .String {
         word :: ir_word_row(&m)
         a = ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word)
+        c = ir_word_const(&m, &b, 0)
+    } else if kind != .Int && kind != .Word && kind != .Char {
+        a = ir_order_sign(&m, p, &b, left, right, span)
+        if ir_failed(b) -> return -1
         c = ir_word_const(&m, &b, 0)
     }
     dst :: ir_temp(&m, &b, result_row)
@@ -1641,9 +1648,9 @@ fn ir_order_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMembe
 }
 
 // A runtime handle orders by the shared runtime's law (Lower
-// lower_runtime_order): a Duration by its exact nanoseconds, any other
-// runtime type through its `compare_value` route (Ordering Less 0, Equal 1,
-// Greater 2).
+// lower_runtime_order): a Duration by its exact nanoseconds, a Decimal
+// through jet_decimal_compare, any other runtime type through its
+// `compare_value` route (both: Ordering Less 0, Equal 1, Greater 2).
 fn ir_order_handle(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
     if ty == .Apply(_, args) {
         if args.len() > 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
@@ -1660,7 +1667,8 @@ fn ir_order_handle(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, left: In
         zero :: ir_word_const(&m, &b, 0)
         return ir_order_step(&m, &b, order, zero, sign, decided)
     }
-    route :: lower_runtime_route("{handle.runtime}::compare_value") ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    symbol :: if handle.runtime == "JetDecimal" -> "jet_decimal_compare" else -> "{handle.runtime}::compare_value"
+    route :: lower_runtime_route(symbol) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
     word_row :: ir_word_row(&m)
     order :: ir_runtime(&m, &b, route.export, [Int]{left, right}, word_row)
     equal :: ir_word_const(&m, &b, 1)
