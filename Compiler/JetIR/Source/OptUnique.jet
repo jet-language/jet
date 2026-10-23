@@ -16,7 +16,7 @@
 // (but the growth's jet_rt_mem_move, jet_rt_block_release and
 // jet_rt_free), a store or a move.
 
-fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, bodies: [[IRFunction]]) -> Int Never! {
+fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String]) -> Int Never! {
     count :: f.slot_type.len()
     facts :: ir_opt_facts(f)
     // The header each slot names (-1: none).
@@ -62,12 +62,12 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, bodies: [[IRFunction]]) -> I
     loop _ in 0..<f.op.len() -> &target.push(-1)
     moved := 0
     loop at in 0..<f.op.len() {
-        header :: ir_opt_unique_header(f, bodies, root, at)
+        header :: ir_opt_unique_header(f, keys, root, at)
         if header < 0 -> next
         slot :: f.args[f.b[at]]
         place := -1
         candidate := inner[at]
-        loop candidate >= 0 && facts.def_at[slot] < candidate && ir_opt_header_ready(f, facts, root, header, candidate) && !ir_opt_reshares(m, f, facts, bodies, root, header, candidate, ends[candidate]) {
+        loop candidate >= 0 && facts.def_at[slot] < candidate && ir_opt_header_ready(f, facts, root, header, candidate) && !ir_opt_reshares(m, f, facts, keys, root, header, candidate, ends[candidate]) {
             place = candidate
             candidate = outer[candidate]
         }
@@ -104,11 +104,10 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, bodies: [[IRFunction]]) -> I
 
 // The header instruction `at` makes unique when it calls a `#unique<..>`
 // helper on a frame header, else -1.
-fn ir_opt_unique_header(f: IRFunction, bodies: [[IRFunction]], root: [Int], at: Int) -> Int Never! {
+fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> Int Never! {
     if f.op[at] != .Call || f.c[at] != 1 || f.dst[at] >= 0 -> return -1
     callee :: f.a[at]
-    if callee < 0 || callee >= bodies.len() || bodies[callee].len() == 0 -> return -1
-    if !bodies[callee][0].key.starts_with("#unique<") -> return -1
+    if callee < 0 || callee >= keys.len() || !keys[callee].starts_with("#unique<") -> return -1
     slot :: f.args[f.b[at]]
     if slot < 0 || slot >= root.len() -> return -1
     root[slot]
@@ -127,7 +126,7 @@ fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int,
 // Whether the Loop at `opener` (End at `end`) can make the buffer of
 // `header` shared again. What a dead end in it reads (ir_opt_dead_end: a
 // failure's cleanup) never reaches its next iteration.
-fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, bodies: [[IRFunction]], root: [Int], header: Int, opener: Int, end: Int) -> Bool Never! {
+fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], header: Int, opener: Int, end: Int) -> Bool Never! {
     count :: f.slot_type.len()
     // The slots holding the buffer pointer loaded from the header.
     buffer := [Int]{}
@@ -143,7 +142,7 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, bodies: [[IRFunc
             next
         }
         op :: f.op[at]
-        unique :: ir_opt_unique_header(f, bodies, root, at) == header
+        unique :: ir_opt_unique_header(f, keys, root, at) == header
         ir_x64_reads_into(f, at, &reads)
         loop slot in reads {
             if slot < 0 || slot >= count -> next

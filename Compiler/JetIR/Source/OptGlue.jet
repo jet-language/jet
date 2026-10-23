@@ -8,19 +8,18 @@
 // Call of a glue left in place is a Drop again, which scalar replacement
 // lends storage to (OptScalar.jet).
 
-fn ir_opt_glue_calls(f: &IRFunction, m: IRModule) Never! {
-    glue :: f.name == "drop" && f.source_file == ""
+// `glue` is ir_opt_glue_table's: per type row, its glue function or -1.
+fn ir_opt_glue_calls(f: &IRFunction, glue: [Int]) Never! {
+    in_glue :: f.name == "drop" && f.source_file == ""
     // Open Loops around `at` (an End's `a` is its opener).
     loops := 0
     loop at in 0..<f.op.len() {
         op :: f.op[at]
         if op == .Loop -> loops += 1
         if op == .End && f.a[at] >= 0 && f.op[f.a[at]] == .Loop -> loops -= 1
-        if op != .Drop || f.a[at] < 0 || (!glue && loops == 0) -> next
+        if op != .Drop || f.a[at] < 0 || (!in_glue && loops == 0) -> next
         slot :: f.a[at]
-        ty :: m.types[f.slot_type[slot]]
-        if ty.kind == .Int || ty.drop == "" -> next
-        id :: m.function_rows.get(ty.drop) ?? -1
+        id :: glue[f.slot_type[slot]]
         if id < 0 -> next
         start :: f.args.len()
         &f.args.push(slot)
@@ -32,13 +31,13 @@ fn ir_opt_glue_calls(f: &IRFunction, m: IRModule) Never! {
     }
 }
 
-fn ir_opt_glue_drops(f: &IRFunction, m: IRModule, bodies: [[IRFunction]]) Never! {
+fn ir_opt_glue_drops(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     loop at in 0..<f.op.len() {
         if f.op[at] != .Call || f.dst[at] >= 0 || f.c[at] != 1 -> next
         callee :: f.a[at]
-        if callee < 0 || callee >= bodies.len() || bodies[callee].len() == 0 -> next
+        if callee < 0 || callee >= keys.len() -> next
         slot :: f.args[f.b[at]]
-        if slot < 0 || m.types[f.slot_type[slot]].drop != bodies[callee][0].key -> next
+        if slot < 0 || m.types[f.slot_type[slot]].drop != keys[callee] -> next
         f.op[at] = .Drop
         f.a[at] = slot
         f.b[at] = -1

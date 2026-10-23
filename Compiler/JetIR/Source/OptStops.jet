@@ -14,7 +14,7 @@
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
 
-fn ir_opt_stops_after_calls(f: &IRFunction, m: IRModule, bodies: [[IRFunction]]) Never! {
+fn ir_opt_stops_after_calls(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     count :: f.op.len()
     // A moved call's poll (-1: none), and the call whose drops follow each End.
     poll_of := [Int]{}
@@ -28,7 +28,7 @@ fn ir_opt_stops_after_calls(f: &IRFunction, m: IRModule, bodies: [[IRFunction]])
         if f.op[site] != .Call -> next
         k := site + 1
         loop k < count && f.op[k] == .Drop && ir_opt_stops_plain(m, f, f.a[k]) -> k += 1
-        if k == site + 1 || !ir_opt_stops_poll(f, bodies, k) -> next
+        if k == site + 1 || !ir_opt_stops_poll(f, keys, k) -> next
         if ir_opt_dead_end(f, k + 1) < 0 -> next
         poll_of[site] = k
         after[f.c[k + 1]] = site
@@ -67,10 +67,10 @@ fn ir_opt_stops_plain(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
 }
 
 // Whether `at` is `stopped := poll()` followed by `if stopped` with no Else.
-fn ir_opt_stops_poll(f: IRFunction, bodies: [[IRFunction]], at: Int) -> Bool Never! {
+fn ir_opt_stops_poll(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
     if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
     callee :: f.a[at]
-    if callee < 0 || callee >= bodies.len() || bodies[callee].len() == 0 || bodies[callee][0].key != IR_STOP_POLL_KEY -> return false
+    if callee < 0 || callee >= keys.len() || keys[callee] != IR_STOP_POLL_KEY -> return false
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
