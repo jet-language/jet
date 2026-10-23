@@ -12,6 +12,7 @@ use jet_foundation.[
     ExternFn,
     Field,
     Func,
+    NameTable,
     SinkClass,
     Span,
     Stmt,
@@ -26,6 +27,10 @@ use jet_foundation.[
     diagnostic_with_edit,
     expr_optional_method_call_as_call,
     expr_span,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
     sema_effect_covers,
 ]
 
@@ -83,11 +88,42 @@ struct SemaTaintCatalog {
     known_sources: [String]
     // Lookup slots kept beside the rows: the first row of each key wins, as
     // the ordered scans over every callable and field did.
-    callable_slots: [String:Int]
-    callable_name_slots: [String:Int]
-    field_slots: [String:Int]
-    field_name_slots: [String:Int]
-    known_source_slots: [String:Bool]
+    callable_slots: SemaTaintSlots
+    callable_name_slots: SemaTaintSlots
+    field_slots: SemaTaintSlots
+    field_name_slots: SemaTaintSlots
+    known_source_slots: SemaTaintSlots
+}
+
+// The first row of each key: `keys` interns the key (an open-addressing
+// hash, so a whole-graph catalog filled in module order never shifts a
+// sorted entry list) and `rows[id]` is the row of that id (-1: none yet;
+// id 0, the empty key, starts with none).
+struct SemaTaintSlots {
+    keys: NameTable
+    rows: [Int]
+}
+
+fn sema_taint_slots() -> SemaTaintSlots Never! {
+    SemaTaintSlots{keys: name_table(), rows: [Int]{-1}}
+}
+
+// Records `row` for `key` unless the key has a row; whether it was new.
+fn sema_taint_slot_add(slots: &SemaTaintSlots, key: String, row: Int) -> Bool Never! {
+    id :: name_index(name_intern(&slots.keys, key))
+    if id < slots.rows.len() {
+        if slots.rows[id] >= 0 -> return false
+        slots.rows[id] = row
+        return true
+    }
+    &slots.rows.push(row)
+    true
+}
+
+fn sema_taint_slot(slots: SemaTaintSlots, key: String) -> Int? Never! {
+    name :: name_find(slots.keys, key) ?? return None
+    row :: slots.rows[name_index(name)]
+    if row < 0 -> None else -> Val(row)
 }
 
 struct SemaTaintImportAlias {
@@ -287,7 +323,7 @@ fn sema_taint_add_builtin_tags(catalog: &SemaTaintCatalog) Never! {
 }
 
 fn sema_taint_catalog_init() -> SemaTaintCatalog Never! {
-    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: [String:Int]{}, callable_name_slots: [String:Int]{}, field_slots: [String:Int]{}, field_name_slots: [String:Int]{}, known_source_slots: [String:Bool]{}}
+    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), known_source_slots: sema_taint_slots()}
     sema_taint_add_builtin_tags(&catalog)
     catalog
 }
@@ -358,7 +394,7 @@ fn sema_taint_known_destination(destination: String) -> Bool Never! {
 }
 
 fn sema_taint_known_source(source: String, catalog: SemaTaintCatalog) -> Bool Never! {
-    sema_effect_parse_name(source) != None || catalog.known_source_slots.get(source) != None
+    sema_effect_parse_name(source) != None || sema_taint_slot(catalog.known_source_slots, source) != None
 }
 
 fn sema_taint_push_invalid_path(diagnostics: &[Diagnostic], name: String, span: Span, destination: Bool, catalog: SemaTaintCatalog) {
@@ -422,9 +458,7 @@ fn sema_taint_callable_key(module_identity: String, owner: String, name: String)
 }
 
 fn sema_taint_add_known_source(catalog: &SemaTaintCatalog, source: String) Never! {
-    if catalog.known_source_slots.get(source) != None -> return
-    catalog.known_source_slots[source] = true
-    &catalog.known_sources.push(source)
+    if sema_taint_slot_add(&catalog.known_source_slots, source, catalog.known_sources.len()) -> &catalog.known_sources.push(source)
 }
 
 fn sema_taint_add_source_path(catalog: &SemaTaintCatalog, module_alias: String, owner: String, name: String) Never! {
@@ -437,9 +471,9 @@ fn sema_taint_add_source_path(catalog: &SemaTaintCatalog, module_alias: String, 
 fn sema_taint_index_callable(catalog: &SemaTaintCatalog, module_identity: String, owner: String, name: String) Never! {
     slot :: catalog.callables.len() - 1
     exact :: "{module_identity}|{owner}|{name}"
-    if catalog.callable_slots.get(exact) == None -> catalog.callable_slots[exact] = slot
+    _ :: sema_taint_slot_add(&catalog.callable_slots, exact, slot)
     loose :: "{owner}|{name}"
-    if catalog.callable_name_slots.get(loose) == None -> catalog.callable_name_slots[loose] = slot
+    _ :: sema_taint_slot_add(&catalog.callable_name_slots, loose, slot)
 }
 
 fn sema_taint_add_callable(catalog: &SemaTaintCatalog, module_identity: String, module_alias: String, owner: String, function: Func) Never! {
@@ -472,9 +506,9 @@ fn sema_taint_add_field(catalog: &SemaTaintCatalog, module_identity: String, own
     &catalog.fields.push(SemaTaintFieldFact{module_identity: module_identity, owner_type: owner, field: field.name, tags: sema_taint_type_tags(field.ty), type_name: sema_taint_type_name(field.ty), span: field.ty_span})
     slot :: catalog.fields.len() - 1
     exact :: "{module_identity}|{owner}|{field.name}"
-    if catalog.field_slots.get(exact) == None -> catalog.field_slots[exact] = slot
+    _ :: sema_taint_slot_add(&catalog.field_slots, exact, slot)
     loose :: "{owner}|{field.name}"
-    if catalog.field_name_slots.get(loose) == None -> catalog.field_name_slots[loose] = slot
+    _ :: sema_taint_slot_add(&catalog.field_name_slots, loose, slot)
 }
 fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
     loop module_row_index in 0..<graph.modules.len() {
@@ -536,12 +570,12 @@ fn sema_taint_find_tag(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, 
 }
 
 fn sema_taint_find_callable(catalog: SemaTaintCatalog, module_identity: String, owner: String, name: String) -> SemaTaintCallableFact? {
-    exact :: catalog.callable_slots.get("{module_identity}|{owner}|{name}")
+    exact :: sema_taint_slot(catalog.callable_slots, "{module_identity}|{owner}|{name}")
     if exact == .Val(slot) {
         callable := catalog.callables[slot]
         return Val(callable)
     }
-    loose :: catalog.callable_name_slots.get("{owner}|{name}") ?? return None
+    loose :: sema_taint_slot(catalog.callable_name_slots, "{owner}|{name}") ?? return None
     callable := catalog.callables[loose]
     Val(callable)
 }
@@ -549,8 +583,8 @@ fn sema_taint_find_callable(catalog: SemaTaintCatalog, module_identity: String, 
 // A field of `owner` declared in `module_identity` (or with no declaring
 // module), else the first field of that name on any `owner`.
 fn sema_taint_find_field(catalog: SemaTaintCatalog, module_identity: String, owner: String, field: String) -> SemaTaintFieldFact? {
-    local :: catalog.field_slots.get("{module_identity}|{owner}|{field}")
-    unowned :: catalog.field_slots.get("|{owner}|{field}")
+    local :: sema_taint_slot(catalog.field_slots, "{module_identity}|{owner}|{field}")
+    unowned :: sema_taint_slot(catalog.field_slots, "|{owner}|{field}")
     first := local
     if unowned == .Val(unowned_slot) {
         if local == .Val(local_slot) {
@@ -563,7 +597,7 @@ fn sema_taint_find_field(catalog: SemaTaintCatalog, module_identity: String, own
         fact := catalog.fields[slot]
         return Val(fact)
     }
-    loose :: catalog.field_name_slots.get("{owner}|{field}") ?? return None
+    loose :: sema_taint_slot(catalog.field_name_slots, "{owner}|{field}") ?? return None
     fact := catalog.fields[loose]
     Val(fact)
 }
