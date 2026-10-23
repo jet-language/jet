@@ -1,7 +1,8 @@
 // Optimization levels over the slot IR: IR in, IR out, between the builder
 // and x86-64 selection. Level 0 (`jet run`, `jet dev`, compile-time code)
 // leaves the module as built; level 1 (`jet build`) inlines small direct
-// callees bottom-up over the call graph and simplifies every function;
+// callees bottom-up over the call graph (drop glue too, `glue`) and
+// simplifies every function;
 // level 2 (`--release`) first hoists calls making a list's buffer its own
 // out of Loops (`unique`), and after Simplify adds scalar replacement of
 // frame aggregates (also of ones whose address is only lent out,
@@ -24,7 +25,7 @@
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_transfer_rows]
 
 // What the optimizer runs: the level, the passes `disabled` names (to
-// bisect a difference to one pass: "unique", "once", "scalar", "promote", "range", "ssa", "stops"), whether every SSA
+// bisect a difference to one pass: "unique", "once", "scalar", "promote", "range", "ssa", "stops", "glue"), whether every SSA
 // form is verified (`verify`), whether every SSA value leaves SSA in a
 // fresh slot (`stress`, which exercises the moves out of SSA), and the
 // name of the functions whose IR before and after the passes the report
@@ -141,7 +142,11 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     }
     functions := [IRFunction]{}
     compiler_transfer_rows<IRFunction>(&functions, &m.functions)
-    loop id in 0..<functions.len() -> ir_opt_direct_calls(&functions[id], &report)
+    glue :: ir_opt_enabled(options, "glue")
+    loop id in 0..<functions.len() {
+        ir_opt_direct_calls(&functions[id], &report)
+        if glue -> ir_opt_glue_calls(&functions[id], m)
+    }
     order := ir_opt_bottom_up(functions)
     waves :: ir_opt_waves(functions, order)
     weights := [Int]{}
@@ -206,7 +211,8 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 }
 
 // One function's passes: at level 2 uniqueness hoisting, then inlining its
-// callees' final bodies (`bodies`), then Simplify, at level 2 scalar
+// callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
+// a glue call left is a Drop again), then Simplify, at level 2 scalar
 // replacement, Simplify again and the SSA round trip, and last the stop
 // points after their calls.
 fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursive: [Bool], sites: [Int], options: IROptOptions, report: &IROptReport) -> IRFunction Never! {
@@ -214,6 +220,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursiv
     body := ^f
     if level >= 2 && ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_hoist_unique(m, &body, bodies)
     out := ir_opt_inline_build(m, bodies, body, recursive, sites, level >= 2 && ir_opt_enabled(options, "once"), level, &report) ?? ^body
+    if ir_opt_enabled(options, "glue") -> ir_opt_glue_drops(&out, m, bodies)
     ir_opt_simplify(m, &out, &report)
     if level >= 2 {
         if ir_opt_enabled(options, "scalar") {
