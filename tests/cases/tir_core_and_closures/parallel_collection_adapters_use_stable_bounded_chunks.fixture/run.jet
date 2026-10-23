@@ -1,0 +1,33 @@
+fn double(n: Int) -> Int { return n * 2 }
+fn one() -> Int { return 1 }
+fn add_item(acc: Int, n: Int) -> Int { return acc + n }
+fn merge_decimal(left: Int, right: Int) -> Int { return left * 10000 + right }
+fn run() {
+values :: [Int]{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129 }
+offset :: 1
+mapped :: values.para_map((n: Int) -> n * 2 + offset)
+named :: values.para_map(double)
+kept :: values.para_filter((n: Int) -> n % 32 == 0)
+split :: values.para_partition((n: Int) -> n % 32 == 0)
+fixed :: [Int#4]{ 1, 2, 3, 4 }
+fixed_split :: fixed.para_partition((n: Int) -> n % 2 == 0)
+empty :: [Int]{}
+// Internal tree-shape probe: intentionally non-associative; public code must use an identity and associative merge.
+folded :: values.para_fold(
+() -> 1,
+(acc: Int, n: Int) -> acc + n,
+(left: Int, right: Int) -> left * 10000 + right
+)
+named_fold :: values.para_fold(one, add_item, merge_decimal)
+print("{mapped.len()}|{mapped.first()}|{mapped.last()}")
+print(named.last())
+print(kept)
+print(split.true_)
+print("{split.false_.len()}|{split.false_.first()}|{split.false_.last()}")
+print(fixed.para_map((n: Int) -> n + 1))
+print(fixed_split.false_)
+print(fixed_split.true_)
+print(empty.para_fold(() -> 7, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right))
+print(folded)
+print(named_fold)
+}

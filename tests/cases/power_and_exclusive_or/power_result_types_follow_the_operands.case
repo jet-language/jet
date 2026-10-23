@@ -1,0 +1,18 @@
+# tests/power_and_exclusive_or.rs::power_result_types_follow_the_operands at tests/power_and_exclusive_or.rs:68; hand-port
+# accepts() is `jet check` exit 0; a nonempty diagnostic_codes() is `jet check` exit 1.
+fixture: power_result_types_follow_the_operands.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check int_pow/main.jet
+exit: 0 # tests/power_and_exclusive_or.rs:70 a whole base and non-negative whole exponent stay exact
+step: jet check neg_pow_fraction/main.jet
+exit: 0 # tests/power_and_exclusive_or.rs:75 a written negative exponent gives an exact Fraction
+step: jet check neg_pow_float/main.jet
+exit: 1 # tests/power_and_exclusive_or.rs:79 a written negative exponent must not infer an approximate Float
+step: jet check neg_pow_int/main.jet
+exit: 1 # tests/power_and_exclusive_or.rs:87 a negative exponent must not infer a whole number
+step: jet check float_operand/main.jet
+exit: 0 # tests/power_and_exclusive_or.rs:97 an explicit Float head makes the power a Float
+step: jet check float_operand_int/main.jet
+exit: 1 # tests/power_and_exclusive_or.rs:101 a Float operand must not infer a whole number

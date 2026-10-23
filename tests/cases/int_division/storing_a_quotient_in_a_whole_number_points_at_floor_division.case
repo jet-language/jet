@@ -1,0 +1,18 @@
+# tests/int_division.rs::storing_a_quotient_in_a_whole_number_points_at_floor_division at tests/int_division.rs:64; hand-port
+# The three sources are the original loop items (compound assignment, plain assignment, struct field).
+fixture: storing_a_quotient_in_a_whole_number_points_at_floor_division.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check intdiv_1/main.jet
+exit: 1
+stderr: ~ "E0108" # tests/int_division.rs:80 a quotient stored in a whole number is a type error
+stderr: ~ "Use `/%` to divide and round down" # tests/int_division.rs:84 the fix names floor division
+step: jet check intdiv_2/main.jet
+exit: 1
+stderr: ~ "E0108" # tests/int_division.rs:80 a quotient stored in a whole number is a type error
+stderr: ~ "Use `/%` to divide and round down" # tests/int_division.rs:84 the fix names floor division
+step: jet check intdiv_3/main.jet
+exit: 1
+stderr: ~ "E0108" # tests/int_division.rs:80 a quotient stored in a whole number is a type error
+stderr: ~ "Use `/%` to divide and round down" # tests/int_division.rs:84 the fix names floor division

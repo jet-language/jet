@@ -1,0 +1,14 @@
+use core.files as files
+use core.files as fs
+fn write_file(path: String, text: String) -> Int {
+    w := files.create(path.copy()) ?? return 0
+    _r :: w.write_line(text)
+    _f :: w.flush()
+    return 1
+}
+fn run() {
+    done :: write_file("{work}/jet_tir_handle.txt", "hello handle")
+    print(done)
+    contents :: fs.read("{work}/jet_tir_handle.txt") ?? "<none>"
+    print(contents)
+}

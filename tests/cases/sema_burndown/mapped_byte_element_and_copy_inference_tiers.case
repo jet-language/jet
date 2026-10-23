@@ -1,0 +1,16 @@
+# tests/sema_burndown.rs::mapped_byte_element_and_copy_inference_tiers at tests/sema_burndown.rs:42; hand-port
+fixture: mapped_byte_element_and_copy_inference_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+write: run.jet mapped_byte_element_and_copy_inference_tiers.run.jet
+step default: jet run run.jet
+exit: 0
+stdout: = "109\n109\nmapped\n" # tests/sema_burndown.rs:58 tir_support::assert_tiers_agree
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "109\n109\nmapped\n" # tests/sema_burndown.rs:58 tir_support::assert_tiers_agree
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

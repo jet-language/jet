@@ -1,0 +1,8 @@
+
+fn lower(value: String) -> String { value.copy() }
+fn run() {
+    handlers :: [String:fn(String) -> String]{"lower": lower}
+    nested :: [[String:fn(String) -> String]]{^handlers}
+    handler :: nested[0].get("lower").or_err("missing handler")
+    _ :: handler("HI")
+}
