@@ -2498,6 +2498,11 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     }
     settled :: memory_complete && checked.complete && owner_generic_complete && waiting.len() == 0
     complete :: settled && !sema_has_error_since(diagnostics, 0)
+    // A body that reads a constant not staged yet is checked again once that
+    // constant lands; what this check reports past the unstaged read (a name
+    // bound from its value, an obligation its callees' rows would settle) is
+    // a consequence of the wait, never a finding.
+    if waiting.len() > 0 -> diagnostics = [Diagnostic]{}
     published := SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,

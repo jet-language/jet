@@ -831,7 +831,9 @@ fn jet_driver_comptime_function_closure(
             }
         }
     }
-    if !sema_comptime_failure_closure_settle(graph, failure_closure, &diagnostics) -> complete = false
+    // A waiting closure is checked again once its dependencies land; its rows
+    // are not all checked yet, so its obligations settle then.
+    if waiting.len() == 0 && !sema_comptime_failure_closure_settle(graph, failure_closure, &diagnostics) -> complete = false
     JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons, dependencies: dependencies, pure: pure}
 }
 
