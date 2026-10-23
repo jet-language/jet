@@ -408,6 +408,8 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TEx
     if operation == .ListTryWithCapacity -> return ir_list_try_with_capacity(&m, p, &b, ty, args, span)
     if operation == .ViewNew(line) -> return ir_view_new(&m, p, &b, ty, receiver, args, line, span)
     if operation == .OptionZip(_) -> return ir_option_zip(&m, p, &b, ty, receiver, args, span)
+    if operation == .Zip(mode, fields, flatten, input_count, fill_mode, field_types) -> return ir_zip(&m, p, &b, ty, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types, span)
+    if operation == .Unzip -> return ir_unzip(&m, p, &b, ty, receiver, span)
     // A write through the receiver reaches it as a write place: each List or
     // Map on a path through an element (`&rows[0].cells.push(x)`) is made its
     // own first, so the write never lands in a buffer another holder shares.
@@ -545,7 +547,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TEx
 // jet_codegen_builtin_route_plan, Lower lower_route_call).
 fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, operands: [Int], span: Span) -> Int Never! {
     if operation == {
-        .Zip(_, _, _, _, _, _) | .Unzip | .ListMinMax | .Indexed | .MapToList | .IterSplit | .ToString
+        .ListMinMax | .Indexed | .MapToList | .IterSplit | .ToString
         | .RemoveList(_, _) | .AtomicMethod(_) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
         else -> {}
     }
@@ -691,6 +693,25 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             element_size :: m.types[element].size
             boxed :: ir_box_alloc(&m, &b, element_size, result_row)
             ir_store_at(&m, p, &b, boxed, 0, walk.item)
+            ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+            ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+            return result
+        }
+        // position(f): Some(the first accepted index) in a box holding the
+        // exact Int, else None (Lower lower_closure_search).
+        .Position -> {
+            int_row :: ir_type_row(&m, Type.Int) ?? 0
+            result :: ir_fresh_temp(&m, &b, result_row)
+            ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+            walk :: ir_walk_open(&m, &b, list, element)
+            test :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, bool_row)
+            ir_open_if(&b.f, test, b.line)
+            exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{walk.index}, int_row)
+            int_size :: ir_type_size(&m, p, Type.Int)
+            boxed :: ir_box_alloc(&m, &b, int_size, result_row)
+            ir_store_at(&m, p, &b, boxed, 0, exact)
             ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
             ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
             ir_end(&b.f, b.line)
@@ -1471,6 +1492,22 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     if name == "std::collections::BinaryHeap::new" {
         subst_ty :: ir_subst(m, result)
         return Val(ir_priority_queue_new(&m, p, &b, inputs, subst_ty, span))
+    }
+    if name == "std::collections::HashSet::new" || name == "std::collections::BTreeSet::new" {
+        subst_ty :: ir_subst(m, result)
+        return Val(ir_set_new(&m, p, &b, inputs, subst_ty, span))
+    }
+    // `a.equal(b)` (core.compare eq, Lower lower_core_equal): the values'
+    // structural equality, both borrowed.
+    if name == "jet_eq" {
+        if inputs.len() != 2 || inputs[0] < 0 || inputs[1] < 0 -> return Val(ir_fail_slot(&b, span, "equal with {inputs.len()} arguments"))
+        left_row :: b.f.slot_type[inputs[0]]
+        other :: ir_adapt(&m, p, &b, inputs[1], left_row, span)
+        if ir_failed(b) -> return Val(-1)
+        same :: ir_equal(&m, p, &b, inputs[0], other, span)
+        if other != inputs[1] -> ir_release(&m, &b, other)
+        loop slot in inputs -> ir_release(&m, &b, slot)
+        return Val(same)
     }
     if name == "jet_map_from_keys_kernel" || name == "jet_map_from_keys_int" || name == "jet_map_from_keys_composite" {
         if inputs.len() != 2 || inputs[0] < 0 || inputs[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map.from_keys with {inputs.len()} arguments"))

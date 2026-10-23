@@ -174,6 +174,43 @@ fn ir_set_list(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set
     out
 }
 
+// `rank.first()` / `rank.last()` (Lower set.first / set.last): a copy of the
+// least (greatest) key in an Option box, None when the Rank is empty.
+fn ir_set_end(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    length :: ir_load_word(&m, &b, set, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+    ir_open_if(&b.f, present, b.line)
+    data :: ir_load_word(&m, &b, set, 16)
+    index := zero
+    if last {
+        one :: ir_word_const(&m, &b, 1)
+        word_row :: ir_word_row(&m)
+        index = ir_temp(&m, &b, word_row)
+        ir_emit(&b.f, IROp.Sub, index, length, one, IR_OVERFLOW_WRAP, b.line)
+    }
+    entry :: ir_element_address(&m, &b, data, index, shape.stride)
+    key :: ir_load_at(&m, &b, entry, shape.key.offset, shape.key.ty)
+    size :: m.types[shape.key.ty].size
+    boxed :: ir_box_alloc(&m, &b, size, result_row)
+    ir_store_at(&m, p, &b, boxed, 0, key)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// `Set.new()` / `Rank.new()` (the Prelude std::collections::HashSet::new /
+// BTreeSet::new route, Lower lower_set_new): an empty header.
+fn ir_set_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    if inputs.len() != 0 -> return ir_fail_slot(&b, span, "Set.new with {inputs.len()} arguments")
+    set_row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    if ir_set_shape(&m, p, set_row) == None -> return ir_fail_slot(&b, span, "Set construction of {ir_type_name(result)}")
+    ir_list_empty(&m, &b, set_row)
+}
+
 // `Set.from(source)` / `source.to_set()` (Lower lower_set_from, Sets.jet:72):
 // each element inserted in order, later duplicates dropped. A fresh List
 // gives its elements up; any other's are copied. An Iter is drained into a
@@ -213,6 +250,8 @@ fn ir_set_symbol(symbol: String) -> String Never! {
         "jet_sorted_set_to_list" -> "jet_set_to_list"
         "jet_sorted_set_len" -> "jet_set_len"
         "jet_sorted_set_is_empty" -> "jet_set_is_empty"
+        "jet_sorted_set_first" -> "jet_set_first"
+        "jet_sorted_set_last" -> "jet_set_last"
         "jet_sorted_set_insert" -> "jet_set_insert"
         "jet_sorted_set_remove" -> "jet_set_remove"
         "std::collections::BTreeSet::contains" -> "jet_set_has"
@@ -240,6 +279,11 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         length :: ir_load_word(&m, &b, subject, 0)
         zero :: ir_word_const(&m, &b, 0)
         return Val(ir_bool_op(&m, &b, IROp.Eq, length, zero))
+    }
+    if route == "jet_sorted_set_first" || route == "jet_sorted_set_last" {
+        if operands.len() != 1 -> return None
+        result_ty :: ir_subst(m, ty)
+        return Val(ir_set_end(&m, p, &b, result_ty, shape, subject, route == "jet_sorted_set_last", span))
     }
     if symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
         if operands.len() != 1 -> return None

@@ -471,6 +471,17 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         ir_release(&m, &b, other)
         return Val(target)
     }
+    if symbol == "jet_map_first_key" || symbol == "jet_map_min_value_kernel" || symbol == "jet_map_max_value_kernel" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        result_ty :: ir_subst(m, ty)
+        return Val(ir_map_pick(&m, p, &b, result_ty, shape, subject, symbol, span))
+    }
+    if symbol == "jet_map_merge_with" {
+        if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return Val(ir_fail_slot(&b, span, "Map merge_with with {operands.len() - 1} arguments"))
+        other :: ir_adapt(&m, p, &b, operands[1], row, span)
+        if ir_failed(b) -> return Val(-1)
+        return Val(ir_map_merge_with(&m, p, &b, shape, row, subject, other, operands[2], span))
+    }
     keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
     if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_add_new" -> return None
     if operands.len() < 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "map builtin {symbol} without a key"))
@@ -542,6 +553,82 @@ fn ir_map_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     if meta < 0 -> return -1
     moved :: ir_lazy_moved(&m, &b, items)
     ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, result_row)
+}
+
+// `map.first_key()` / `map.min_value()` / `map.max_value()` (Lower
+// lower_map_method_query): a copy of the chosen key or value in an Option
+// box, None when the map is empty. min keeps the first least value, max the
+// last greatest (Iterator::min / max).
+fn ir_map_pick(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, symbol: String, span: Span) -> Int Never! {
+    keyed :: symbol == "jet_map_first_key"
+    member :: if keyed -> shape.key else -> shape.value
+    kind :: ir_map_key_kind(m, member.ty)
+    if !keyed && kind == "" -> return ir_fail_slot(&b, span, "Map {symbol} of {ir_type_name(shape.value_ty)} values")
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    pointer_row :: ir_pointer_row(&m)
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    length :: ir_load_word(&m, &b, map, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+    ir_open_if(&b.f, present, b.line)
+    data :: ir_load_word(&m, &b, map, 16)
+    chosen :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Copy, chosen, data, -1, -1, b.line)
+    if !keyed {
+        walk :: ir_walk_open(&m, &b, map, shape.entry)
+        entry :: ir_element_address(&m, &b, data, walk.index, shape.stride)
+        candidate :: ir_load_at(&m, &b, entry, member.offset, member.ty)
+        incumbent :: ir_load_at(&m, &b, chosen, member.offset, member.ty)
+        order :: ir_map_order(&m, p, &b, kind, candidate, incumbent)
+        // min replaces on candidate < incumbent; max unless candidate < incumbent.
+        replace := order.less
+        if symbol == "jet_map_max_value_kernel" {
+            no :: ir_word_const(&m, &b, 0)
+            replace = ir_bool_op(&m, &b, IROp.Eq, order.less, no)
+        }
+        ir_open_if(&b.f, replace, b.line)
+        ir_emit(&b.f, IROp.Copy, chosen, entry, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, walk)
+    }
+    item :: ir_load_at(&m, &b, chosen, member.offset, member.ty)
+    size :: m.types[member.ty].size
+    boxed :: ir_box_alloc(&m, &b, size, result_row)
+    ir_store_at(&m, p, &b, boxed, 0, item)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// `map.merge_with(other, conflict)` (Lower lower_map_method_more): a copy of
+// the receiver with each entry of `other`, in key order, set as a copy; a key
+// both hold gets `conflict(key, left value, right value)`, the callback
+// borrowing its arguments, and the left value it replaces ends.
+fn ir_map_merge_with(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, row: Int, subject: Int, other: Int, callback: Int, span: Span) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    target :: ir_copy_value(&m, p, &b, subject, span)
+    // The copy shares the receiver's buffer until it is the target's own.
+    ir_make_unique(&m, p, &b, target)
+    walk :: ir_walk_open(&m, &b, other, shape.entry)
+    key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
+    value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
+    found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{target, key}, word_row)
+    zero :: ir_word_const(&m, &b, 0)
+    shared :: ir_bool_op(&m, &b, IROp.Ge, found, zero)
+    ir_open_if(&b.f, shared, b.line)
+    data :: ir_load_word(&m, &b, target, 16)
+    entry :: ir_element_address(&m, &b, data, found, shape.stride)
+    left :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+    merged :: ir_call_closure(&m, &b, callback, [Int]{key, left, value}, shape.value.ty)
+    if left >= 0 && ir_has_drop(m, b, left) -> ir_emit(&b.f, IROp.Drop, -1, left, -1, -1, b.line)
+    ir_store_at(&m, p, &b, entry, shape.value.offset, merged)
+    ir_else(&b.f, b.line)
+    ir_map_set(&m, p, &b, row, target, key, value)
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+    ir_release(&m, &b, other)
+    target
 }
 
 // `map.top_n(n)` (Lower lower_map_entry_list, list.rank_entries): the
