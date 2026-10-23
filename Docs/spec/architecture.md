@@ -1816,10 +1816,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
   kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
   missing sibling all map to Jet-owned E1402.
-- **E2E harness (C4 technical):** `crates/jetpack-bin/tests/compiler_extension_e2e.rs`
+- **E2E harness (C4 technical):** `Jetpack/CLI/Tests/CompilerExtensionHost.jet`
   loads real `compiler-extension-v1` component fixtures under
-  `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
-  `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
+  `tests/fixtures/compiler_extension/` through the compiled compiler-extension
+  host. Proves one custom-lint finding
   round-trip, fail-closed crash / malformed / incompatible / fuel-exhaust /
   WASI-random-import guests, wall-clock epoch `timeout_ms` interrupt, and
   byte-identical re-analyze of a pure guest (Jet-owned `E:` wires; no rustc

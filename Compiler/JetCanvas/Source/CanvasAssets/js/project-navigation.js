@@ -1727,7 +1727,7 @@
     debugSessionInfo = {
       id: persisted.session_id,
       state: "running",
-      tier: persisted.tier || "jet-dev-interpreter",
+      tier: persisted.tier || "native-recorded",
       source_id: persisted.source_id || currentCanvasSourceId(),
       revision: persisted.revision || latestDoc.revision
     };

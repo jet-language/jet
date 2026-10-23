@@ -1,0 +1,29 @@
+// Ownable controlled Input component over canonical core.ui UiNode.
+use core.ui as ui
+
+struct Input {
+    value: String
+    placeholder: String
+}
+
+fn input(placeholder: String) -> Input { return Input{value: "", placeholder: placeholder.copy()} }
+
+fn type_char(i: Input, ch: String) -> Input {
+    return Input{value: "{i.value}{ch}", placeholder: i.placeholder.copy()}
+}
+
+fn to_view(i: Input) -> UiNode {
+    shown := i.value.copy()
+    if i.value == "" -> shown = i.placeholder.copy()
+    return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())
+}
+
+fn run() {
+    i := input("type here…")
+    backend := ui.null_backend()
+    backend.paint(to_view(i))
+    print("[type here…]")
+    i = type_char(type_char(i, "h"), "i")
+    backend.paint(to_view(i))
+    print("[{i.value}]")
+}

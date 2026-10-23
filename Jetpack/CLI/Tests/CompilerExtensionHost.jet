@@ -1,16 +1,16 @@
-// Claims ported from crates/jetpack-bin/tests/compiler_extension_e2e.rs
-// (Tower #549 C4/C5): the real compiler-extension WASM guests under
-// crates/jet-pkg-model/fixtures/compiler_extension/ run through the compiled
+// Compiler-extension host claims (Tower #549 C4/C5): the real
+// compiler-extension WASM guests under tests/fixtures/compiler_extension/
+// run through the compiled
 // host and prove the analyze -> validate -> stage -> accept round trip, that
 // crash / malformed / incompatible / fuel-exhaust / timeout / WASI-random
 // guests fail closed without a rustc leak or auto-commit, and that a pure
 // guest is byte-identical across re-analyze.
 
 // A fixture guest, resolved from the test driver's working directory (the
-// repository root, Rust `CARGO_MANIFEST_DIR/..`).
+// repository root).
 fn cli_test_extension_fixture(name: String) -[FS, Env]> String {
     root :: files.cwd() ?? panic("the test driver has a working directory")
-    files.join(root, "crates/jet-pkg-model/fixtures/compiler_extension/{name}")
+    files.join(root, "tests/fixtures/compiler_extension/{name}")
 }
 
 // One guest slot and the host limits it loads under.
