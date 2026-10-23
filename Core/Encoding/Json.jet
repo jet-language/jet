@@ -5,7 +5,7 @@
 // become `Dyn.Int` (exact `Int`, not binary64), fractions become
 // `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
 // applies the historical lenient coercion walk and emits an audit line for
-// each coercion. Typed `decode<T>` keeps its existing compiler lowering.
+// each coercion. Typed `decode<T>` runs `__decode_typed`.
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
@@ -716,6 +716,22 @@ fn __parse_typed(text: String) -> Dyn EncodingError! {
     &parser.skip_ws() ?? return Err(parser.err("failed while scanning JSON whitespace"))
     if !parser.eof() -> return Err(parser.err("unexpected trailing data after the JSON value"))
     Ok(value)
+}
+
+// Typed `json.decode<T>(text)`: the checker forwards the typed call here
+// (JetSema Calls/Core.jet). The tree keeps number lexemes for the target's
+// Decode, and a parse failure is one root FieldError naming the line. The
+// parameter is not spelled `T`: explicit-argument inference binds by name, so
+// a generic caller's `decode<[T]>` would read as `T := [T]`.
+fn __decode_typed<Target: Decode>(text: String) -> Target [FieldError]! {
+    tree :: __parse_typed(text) ?? return Err(typed_parse_error(err))
+    value :: tree.decode<Target>() ?? return Err(err)
+    Ok(value)
+}
+
+fn typed_parse_error(error: EncodingError) -> [FieldError] Never! {
+    line :: error.line ?? 0
+    [FieldError]{FieldError{path: "", reason: "invalid JSON (line {line}): {error.reason}"}}
 }
 
 

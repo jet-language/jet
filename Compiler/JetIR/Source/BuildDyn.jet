@@ -4,7 +4,8 @@
 // scalar reads and Field/At cross the encoding.dyn routes, whose Dyn operand
 // ir_route converts to a runtime tree for the call; a path write or a remove
 // lends the receiver place's Dyn to the runtime and stores the rebuilt tree
-// back; `decode<T>()` calls T's Decode implementation.
+// back; `decode<T>()` calls T's Decode implementation, a container's Core
+// decode helper or the runtime's scalar Decode adapter.
 
 use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, tir_generated_local, tir_user_local, StmtKind]
 
@@ -18,7 +19,7 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         .DynHas -> return Val(ir_dyn_key_lookup(&m, p, &b, ty, dyn_row, receiver, args, true, span))
         .DynSetPath(keys, site, location) -> return Val(ir_dyn_set_path(&m, p, &b, dyn_row, receiver, keys, site, location, args, span))
         .DynRemove -> return Val(ir_dyn_remove(&m, p, &b, ty, dyn_row, receiver, args, span))
-        .DynDecode(target) -> return Val(ir_dyn_decode(&m, p, &b, receiver, target, args, span))
+        .DynDecode(target) -> return Val(ir_dyn_decode(&m, p, &b, ty, receiver, target, args, span))
         .DynIndexKey(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_key", true, site, location, args, span))
         .DynIndexAt(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
         else -> {}
@@ -260,16 +261,89 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
     removed
 }
 
-// `tree.decode<T>()` (codegen jet_codegen_lower_dyn_decode): T's own Decode
-// implementation, called with the tree. The builtin codec and typed codec
-// targets cross jet_codec_decode routes this builder has no lowering for.
-fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
+// `tree.decode<T>()` (Lower Codecs.jet lower_codec_decode_into): T's own
+// Decode implementation, called with the tree; a container or Dyn target's
+// Core/Encoding/Encoding.jet decode helper (ir_codec_decode_helper); else the
+// runtime's canonical scalar adapter jet_rt_codec_decode_<scalar>, which
+// borrows the tree.
+fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
     concrete :: ir_subst(m, target)
-    key :: ir_codec_impl(p, concrete, "Decode", "decode")
-    if key == "" -> return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
-    tree_arg :: BodyCallArg{value: receiver, template_items: [], borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    ir_call(&m, p, &b, key, [Type]{}, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
+    tree_arg :: ir_codec_arg(receiver)
+    if ir_codec_impl(p, concrete, "Decode", "decode") == .Val(found) -> return ir_call(&m, p, &b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
+    if ir_codec_decode_helper(p, concrete) == .Val(helper) {
+        helper_key :: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
+        return ir_call(&m, p, &b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
+    }
+    scalar :: ir_codec_scalar(concrete) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
+    tree :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || tree < 0 -> return -1
+    result_ty :: ir_subst(m, ty)
+    ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, result_ty, span)
+}
+
+// `FieldError.under(segment, inner)` (Lower Codecs.jet lower_codec_under):
+// Core/Encoding/Encoding.jet __decode_under frames every error of the inner
+// Result under `segment` and passes a success through.
+fn ir_decode_under(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
+    success :: if ir_untag(ir_subst(m, ty)) == {
+        .Result(ok, _) -> ok.copy()
+        else -> { return ir_fail_slot(&b, span, "FieldError.under as {ir_type_name(ty)}") }
+    }
+    key :: ir_codec_decode_key(p, "__decode_under") ?? return ir_fail_slot(&b, span, "FieldError.under: Core/Encoding/Encoding.jet __decode_under is outside the checked program")
+    args :: [BodyCallArg]{ir_codec_arg(segment), ir_codec_arg(inner)}
+    ir_call(&m, p, &b, key, [Type]{success}, -1, [IRWriteBack]{}, args, span)
+}
+
+// A plain positional call argument for a by-name Core codec helper.
+fn ir_codec_arg(value: Int) -> BodyCallArg Never! {
+    BodyCallArg{value: value, template_items: [], borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+}
+
+// The Core decode helper for a target with no Decode implementation of its
+// own (Lower lower_helper_codec_decode), and its type arguments: a List
+// (a byte List also takes Bytes and base64 Text), an Option, a String-keyed
+// Map and Dyn itself.
+fn ir_codec_decode_helper(p: IRProgram, target: Type) -> (name: String, type_args: [Type])? Never! {
+    if ir_dyn_def(p, target) != None -> return Val((name: "__decode_dyn", type_args: [Type]{}))
+    if ir_untag(target) == {
+        .List(element) -> {
+            if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) -> return Val((name: "__decode_bytes", type_args: [Type]{}))
+            Val((name: "__decode_list", type_args: [Type]{element.copy()}))
+        }
+        .Option(inner) -> Val((name: "__decode_option", type_args: [Type]{inner.copy()}))
+        .Map(key, _, value) -> {
+            if ir_untag(key) != Type.String -> return None
+            Val((name: "__decode_map", type_args: [Type]{value.copy()}))
+        }
+        else -> None
+    }
+}
+
+// The checked key of the Core decode helper `name`, or None when the program
+// does not hold it (CoreReach.jet ir_codec_decode_source).
+fn ir_codec_decode_key(p: IRProgram, name: String) -> String? Never! {
+    loop (index, function) in p.functions {
+        if function.name == name && ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) && p.rows.get(function.key) == (Val(index)) -> return Val(function.key.copy())
+    }
+    None
+}
+
+// The runtime scalar Decode adapter's suffix for `target` (Lower
+// lower_codec_scalar), or None for a non-scalar target.
+fn ir_codec_scalar(target: Type) -> String? Never! {
+    if ir_untag(target) == {
+        .Int -> Val("int")
+        .Bool -> Val("bool")
+        .Float -> Val("float")
+        .String -> Val("string")
+        .Char -> Val("char")
+        .IntN(signed, bits) -> {
+            if bits != 8 && bits != 16 && bits != 32 && bits != 64 -> return None
+            Val("{if signed -> "i" else -> "u"}{bits}")
+        }
+        else -> None
+    }
 }
 
 // `value.encode()` into a Dyn (codegen jet_codegen_lower_serde_encode): a
@@ -282,11 +356,10 @@ fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, targe
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     concrete :: ir_subst(m, ir_ty(p, b, receiver))
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
-    key :: ir_codec_impl(p, concrete, "Encode", "encode")
-    if key != "" {
+    if ir_codec_impl(p, concrete, "Encode", "encode") == .Val(found) {
         self_slot :: ir_expr(&m, p, &b, receiver)
         if ir_failed(b) || self_slot < 0 -> return -1
-        return ir_call(&m, p, &b, key, [Type]{}, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
+        return ir_call(&m, p, &b, found.key, found.args, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
     }
     if ir_dyn_def(p, ir_subst(m, ty)) != None {
         receiver_node :: ir_body_node(p, b, receiver)
@@ -352,10 +425,14 @@ fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
     ir_dyn_box(&m, p, &b, ty, "Array", output, span)
 }
 
-// The key of `concrete`'s own `codec` implementation method (`Decode|decode`,
-// `Encode|encode`), or "" when it has none.
-fn ir_codec_impl(p: IRProgram, concrete: Type, codec: String, method: String) -> String Never! {
+// `concrete`'s own `codec` implementation method (`Decode|decode`,
+// `Encode|encode`) and the owner arguments its instance binds (`[Int]` for a
+// derived `Wrap<T>` at `Wrap<Int>`), or None when it has none. A generic
+// owner matches any instance of its declaration; any other owner matches
+// only its own type.
+fn ir_codec_impl(p: IRProgram, concrete: Type, codec: String, method: String) -> (key: String, args: [Type])? Never! {
     identity :: ir_trait_identity(p, concrete)
+    declaration :: ir_render_type_key(p.type_rows, p.types, concrete)
     candidates :: p.trait_methods.get("{codec}|{method}") ?? [Int]{}
     loop row in candidates {
         if p.rows.get(p.functions[row].key) != (Val(row)) -> next
@@ -368,7 +445,13 @@ fn ir_codec_impl(p: IRProgram, concrete: Type, codec: String, method: String) ->
             .TopLevel -> {}
         }
         implementer :: owner ?? next
-        if ir_trait_identity(p, implementer) == identity -> return p.functions[row].key.copy()
+        if ir_owner_binders(p, p.functions[row]).len() == 0 {
+            if ir_trait_identity(p, implementer) == identity -> return Val((key: p.functions[row].key.copy(), args: [Type]{}))
+            next
+        }
+        if ir_render_type_key(p.type_rows, p.types, implementer) != declaration -> next
+        args :: ir_owner_args(p, p.functions[row], concrete) ?? next
+        return Val((key: p.functions[row].key.copy(), args: args))
     }
-    ""
+    None
 }

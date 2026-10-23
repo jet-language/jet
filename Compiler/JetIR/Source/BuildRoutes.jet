@@ -3039,23 +3039,14 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     } else {
         return ir_fail_slot(&b, span, "runtime route {export} Result result as {result}")
     }
-    list :: ok == .List(_) || err == .List(_)
-    out :: ir_out_slot(&m, &b, if list -> 2 else -> 1)
+    // Each side writes its out words from `out` (ir_route_carrier_slots): a
+    // List its data then length, an Option its tag then payload words.
+    ok_words :: if ok == .Unit -> 0 else -> ir_route_carrier_slots(ok)
+    err_words :: if err == .Unit -> 0 else -> ir_route_carrier_slots(err)
+    out :: ir_out_slot(&m, &b, if ok_words > err_words -> ok_words else if err_words > 0 -> err_words else -> 1)
     call_args := args
-    if ok != .Unit {
-        &call_args.push(out)
-        if ok == .List(_) {
-            tail :: ir_address_at(&m, &b, out, 8)
-            &call_args.push(tail)
-        }
-    }
-    if err != .Unit {
-        &call_args.push(out)
-        if err == .List(_) {
-            tail :: ir_address_at(&m, &b, out, 8)
-            &call_args.push(tail)
-        }
-    }
+    loop index in 0..<ok_words -> &call_args.push(if index == 0 -> out else -> ir_address_at(&m, &b, out, 8 * index))
+    loop index in 0..<err_words -> &call_args.push(if index == 0 -> out else -> ir_address_at(&m, &b, out, 8 * index))
     word_row :: ir_word_row(&m)
     selector :: ir_runtime(&m, &b, export, call_args, word_row)
     boxed :: ir_result_box(&m, p, &b, result, true, -1)

@@ -55,6 +55,8 @@ module binary
 
 module ini
 
+use core.encoding.base64 as base64
+
 /// Handle-free streaming events. Number is public; writers reject it as Unsupported.
 enum DataEvent {
     Null
@@ -237,6 +239,115 @@ fn hex_to_bytes(text: String) -> [U8] HexError! {
         i = i + 2
     }
     Ok(out)
+}
+
+// Typed `tree.decode<T>()` of a container T with no Decode implementation of
+// its own (Rust EncodingTraits.rs:457-535), and `FieldError.under`. JetIR
+// calls these by name (BuildDyn.jet ir_dyn_decode, ir_decode_under); scalars
+// cross the runtime's canonical jet_rt_codec_decode_* adapters instead. The
+// generic parameter is not spelled `T` (see json.__decode_typed).
+
+// `FieldError.under(segment, inner)`: every error of `inner` framed under
+// `segment`; a success passes through.
+fn __decode_under<Item>(segment: String, inner: Item [FieldError]!) -> Item [FieldError]! {
+    value :: inner ?? return Err(loop error in err -> decode_under(segment, error))
+    Ok(value)
+}
+
+// A List: each Array item decodes in order; a failing item's errors are
+// framed under `[index]` and every failure fails the List.
+fn __decode_list<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
+    if tree == {
+        .Array(items) -> {
+            values := [Item]{}
+            failures := [FieldError]{}
+            loop (index, item) in items {
+                if item.decode<Item>() == {
+                    .Ok(value) -> &values.push(value)
+                    .Err(errors) -> loop error in errors -> &failures.push(decode_under("[{index}]", error))
+                }
+            }
+            if failures.len() > 0 -> return Err(failures)
+            Ok(values)
+        }
+        else -> Err(decode_expected("a list", tree))
+    }
+}
+
+// A byte List ([U8], EncodingTraits.rs:457-478) also takes Dyn.Bytes as is
+// and Text as strict padded standard base64.
+fn __decode_bytes(tree: Dyn) -> [U8] [FieldError]! {
+    if tree == {
+        .Bytes(bytes) -> Ok(bytes.copy())
+        .Text(text) -> {
+            bytes :: base64.decode(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
+            Ok(bytes)
+        }
+        else -> __decode_list<U8>(tree)
+    }
+}
+
+// An Option (EncodingTraits.rs:494-501): Null is None; any other value is
+// Some of its decode, whose errors pass through unframed.
+fn __decode_option<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
+    if tree == {
+        .Null -> Ok(None)
+        else -> {
+            value :: tree.decode<Item>() ?? return Err(err)
+            Ok(Val(value))
+        }
+    }
+}
+
+// A String-keyed Map (EncodingTraits.rs:502-535): each Object entry decodes in
+// entry order (a repeated key keeps the later value); an entry's errors are
+// framed under its key and every failure fails the Map.
+fn __decode_map<Item: Decode>(tree: Dyn) -> [String: Item] [FieldError]! {
+    if tree == {
+        .Object(entries) -> {
+            values := [String: Item]{}
+            failures := [FieldError]{}
+            loop entry in entries {
+                if entry.value.decode<Item>() == {
+                    .Ok(value) -> values[entry.key] = value
+                    .Err(errors) -> loop error in errors -> &failures.push(decode_under(entry.key, error))
+                }
+            }
+            if failures.len() > 0 -> return Err(failures)
+            Ok(values)
+        }
+        else -> Err(decode_expected("an object", tree))
+    }
+}
+
+// A Dyn target decodes as its own copy (EncodingTraits.rs:491-493).
+fn __decode_dyn(tree: Dyn) -> Dyn [FieldError]! {
+    Ok(tree.copy())
+}
+
+// `error` framed under the path `segment` (FieldError.rs:18-26): an empty
+// child path is the segment, an indexed child path joins without a dot.
+fn decode_under(segment: String, error: FieldError) -> FieldError Never! {
+    path :: if error.path == "" -> segment.copy() else if error.path.starts_with("[") -> "{segment}{error.path}" else -> "{segment}.{error.path}"
+    FieldError{path: path, reason: error.reason.copy()}
+}
+
+// The one root failure "expected {expected}, found {kind}", with the
+// DynKind.rs dyn_kind vocabulary.
+fn decode_expected(expected: String, tree: Dyn) -> [FieldError] Never! {
+    kind :: if tree == {
+        .Null -> "null"
+        .Bool(_) -> "Bool"
+        .Int(_) -> "Int"
+        .Float(_) -> "Float"
+        .Number(_) -> "number"
+        .Text(_) -> "Text"
+        .Bytes(_) -> "Bytes"
+        .DateTime(_) -> "DateTime"
+        .Array(_) -> "a list"
+        .Object(_) -> "an object"
+    }
+    [FieldError]{FieldError{path: "", reason: "expected {expected}, found {kind}"}}
 }
 
 /// 32-bit wrap used by hashes and CBOR integer codecs. Jet `Int` is exact; mask

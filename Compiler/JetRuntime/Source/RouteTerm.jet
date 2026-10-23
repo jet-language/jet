@@ -28,28 +28,36 @@ fn term_read_byte(byte: I64, retry: Bool) -> I64 {
     }
 }
 
-// Term.rs:300 stdin().read_line: bytes through the first LF (kept) or end of
-// input; (eof, line, None), or (false, "", Some(io::Error Display)). Invalid
-// UTF-8 is std's InvalidData "stream did not contain valid UTF-8".
-#Export(c) fn jet_terminal8_line(eof: I64, line: I64, error_tag: I64, error: I64) {
-    value :: jet_rt_string_builder_new()
+// Term.rs:300 / StdinReader.rs:54 stdin().read_line: appends the bytes
+// through the first LF (kept) or end of input to `value`; 0, or the errno
+// that stopped the read.
+fn term_read_line(value: I64) -> I64 {
     byte :: jet_rt_alloc(I64{8}, I64{8})
     failure := I64{0}
-    count := I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
         got :: term_read_byte(byte, true)
         if (got == I64{0}) -> break
         if (got < I64{0}) {
-            failure = host_errno_cause(-got)
+            failure = -got
             break
         }
         rt_text_append(value, byte, I64{1})
-        count += I64{1}
         if (rt_text_byte(byte) == I64{10}) -> break
     }
     sync_mutex_unlock(terminal_input_root)
     jet_rt_free(byte, I64{8}, I64{8})
+    failure
+}
+
+// Term.rs:300 stdin().read_line: (eof, line, None), or (false, "",
+// Some(io::Error Display)). Invalid UTF-8 is std's InvalidData "stream did
+// not contain valid UTF-8".
+#Export(c) fn jet_terminal8_line(eof: I64, line: I64, error_tag: I64, error: I64) {
+    value :: jet_rt_string_builder_new()
+    code :: term_read_line(value)
+    count :: rt_text_len(value)
+    failure := if (code == I64{0}) -> I64{0} else -> host_errno_cause(code)
     if (failure == I64{0}) {
         invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
         if (invalid != I64{0}) {
@@ -70,6 +78,32 @@ fn term_read_byte(byte: I64, retry: Bool) -> I64 {
             os_store_i64(error_tag, I64{0})
         }
     }
+}
+
+// StdinReader.rs:54 core.term.__stdin_line: Ok(None) at end of input,
+// Ok(Some(line)) with its LF kept, or jet_std::io_error_at(Read, "stdin"):
+// errno through its IOError arm, invalid UTF-8 (InvalidData) as Other.
+#Export(c) fn jet_stdin_line_raw(some: I64, line: I64, error: I64) -> I64 {
+    value :: jet_rt_string_builder_new()
+    code :: term_read_line(value)
+    if (code != I64{0}) {
+        jet_rt_string_drop(value)
+        return compiler_fs_errno(HOST_IO_OP_READ, rt_static_text("stdin"), code, error)
+    }
+    invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    if (invalid != I64{0}) {
+        jet_rt_string_drop(invalid)
+        jet_rt_string_drop(value)
+        return compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_static_text("stdin"), I64{0}, jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8")), error)
+    }
+    if (rt_text_len(value) == I64{0}) {
+        jet_rt_string_drop(value)
+        rt_text_store(some, I64{0})
+        return I64{1}
+    }
+    rt_text_store(some, I64{1})
+    rt_text_store(line, value)
+    I64{1}
 }
 
 // IoLineStream.rs:86: one-byte reads until the trailing window equals the

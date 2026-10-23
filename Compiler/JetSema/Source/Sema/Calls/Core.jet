@@ -596,9 +596,13 @@ fn sema_call_try_core_math_float_class(module_name: String, member: String, type
 }
 
 // Width selection is the existing checked mathematical normalization; it is
-// separate from source forwarding and never widens F32 values.
-fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
+// separate from source forwarding and never widens F32 values. A typed
+// `json.decode<T>` runs its typed source (Json.jet `__decode_typed`).
+fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr], type_args: [Type]) -> CoreCallRecord Never! {
     normalized := record
+    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.encoding.json" && record.member == "decode" && type_args.len() != 0 {
+        normalized.source_target = Val("__decode_typed")
+    }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
         normalized.source_target = Val("__{record.member}_f32")
     }
@@ -650,11 +654,8 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
-    normalized :: sema_call_core_normalized_source_record(record, args)
-    // A typed `json.decode<T>` is the registered codec row (Rust core_call.rs
-    // keeps it off the source forward); only the untyped form runs the source.
-    typed_json_decode :: record.module_name == "core.encoding.json" && record.member == "decode" && type_args.len() != 0
-    if !typed_json_decode && core_call_source_member(normalized) == .Val(member) {
+    normalized :: sema_call_core_normalized_source_record(record, args, type_args)
+    if core_call_source_member(normalized) == .Val(member) {
         source_module := record.module_name
         source_member := member
         if member.starts_with("core.") {

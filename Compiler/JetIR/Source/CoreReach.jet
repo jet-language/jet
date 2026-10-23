@@ -65,6 +65,22 @@ fn ir_string_format_source(module_identity: String, source_file: String, kind: T
     module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(kind)
 }
 
+// The Core/Encoding/Encoding.jet decode helpers Dyn decode and
+// `FieldError.under` call by name (BuildDyn.jet ir_dyn_decode,
+// ir_decode_under).
+fn ir_codec_decode_helpers() -> [String] Never! {
+    [String]{"__decode_list", "__decode_bytes", "__decode_option", "__decode_map", "__decode_dyn", "__decode_under"}
+}
+
+// Whether a function with these header fields is one of those helpers.
+fn ir_codec_decode_source(module_identity: String, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
+    if !module_identity.starts_with("<corelib>/") || !ir_core_source_path(source_file, "Core/Encoding/Encoding.jet") || !ir_core_reach_is_top_level(kind) -> return false
+    loop helper in ir_codec_decode_helpers() {
+        if helper == name -> return true
+    }
+    false
+}
+
 fn ir_precise_source_family(name: String, owner: String, prefix: String) -> Bool Never! {
     if !name.starts_with(prefix) -> return false
     helper :: ir_precise_source_helper(owner, name.slice(prefix.len(), name.len())) ?? return false
@@ -97,12 +113,36 @@ fn ir_core_reach_lambda_keys(tree: BodyTree, value: BodyLambda, functions: [FnBo
     }
 }
 
+// The Core method `loop line in handle.lines()` reads each line with (Rust
+// CollectionIoSources.rs jet_std_file_reader_read_line /
+// jet_std_io_stdin_read_line): the Core `read_line` whose owner is the
+// handle's type, FileReader or StdinHandle; "" when the program holds none.
+fn ir_line_reader_key(functions: [FnBody], handle: Type) -> String Never! {
+    owner :: ir_line_reader_owner(handle)
+    if owner == "" -> return ""
+    loop function in functions {
+        if function.name != "read_line" || !function.module_identity.starts_with("<corelib>/") -> next
+        if function.kind == .Method(_, owner_type) {
+            if ir_line_reader_owner(owner_type) == owner -> return function.key.copy()
+        }
+    }
+    ""
+}
+
+// The unqualified nominal name of `ty`, or "".
+fn ir_line_reader_owner(ty: Type) -> String Never! {
+    name :: ir_nominal_name(ir_untag(ty)) ?? return ""
+    parts :: name.split("::").to_list()
+    parts[parts.len() - 1].copy()
+}
+
 // Implicit process loops have no keyed NodeKind.Call. Resolve the authored Core
 // helper from the checked function inventory, then retain its dependencies
 // with the ordinary reachability walk. Both streams share cursor mechanics.
+// A file or stdin line loop roots its handle's line reader the same way.
 fn ir_core_reach_one_stmt_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String]) Never! {
         if tree.stmts[statement] == {
-            .ForIn(_, _, _, _, collection, _, method, _, _, _, body, _) -> {
+            .ForIn(_, _, _, source, collection, _, method, _, _, _, body, _) -> {
                 if method == .Val(kind) && kind == .LinesProcessStream {
                     // Each nominal arm owns its binder; boolean alternatives
                     // do not introduce one shared value into their result.
@@ -116,6 +156,7 @@ fn ir_core_reach_one_stmt_keys(tree: BodyTree, statement: Int, functions: [FnBod
                         if member != "" && helper.name == member && core_identity_in_module(helper.module_identity, "core.process") -> ir_core_reach_add(&keys, helper.key)
                     }
                 }
+                if method == .Val(kind) && (kind == .LinesFile || kind == .LinesStdin) -> ir_core_reach_add(&keys, ir_line_reader_key(functions, body_type(tree, source)))
                 ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
             .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
@@ -155,7 +196,7 @@ fn ir_core_reach_stmt_keys(tree: BodyTree, statements: [Int], functions: [FnBody
 
 // The function keys one checked expression names directly. Children are
 // walked by the caller.
-fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody], keys: &[String], fmt_keys: [String:String]) Never! {
+fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody], keys: &[String], source_keys: [String:String]) Never! {
     if body_node(tree, expression).kind == {
         .Call(callee, _, args) -> {
             ir_core_reach_add(&keys, callee.key)
@@ -191,11 +232,20 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
             loop part in parts {
                 if part == .Interpolation(value, format) {
                     member :: ir_string_format_member(body_type(tree, value), format) ?? next
-                    key :: fmt_keys.get(member) ?? next
+                    key :: source_keys.get(member) ?? next
                     ir_core_reach_add(&keys, key)
                 }
             }
         }
+        // `tree.decode<T>()` of a container and `FieldError.under` call their
+        // Core decode helper by name; a helper's own `decode<Item>` reaches
+        // the others, so a decode site roots them all.
+        .HandleMethod(_, operation, _) -> {
+            if operation == .DynDecode(_) {
+                loop name in ir_codec_decode_helpers() -> ir_core_reach_add(&keys, source_keys.get(name) ?? "")
+            }
+        }
+        .DecodeUnder(_, _) -> ir_core_reach_add(&keys, source_keys.get("__decode_under") ?? "")
         .InlineBlock(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
         .Lambda(value) -> ir_core_reach_lambda_keys(tree, value, functions, &keys)
         .IfExpr(_, then_body, _, else_body, _) | .ResultHandler(_, _, then_body, _, _, else_body, _, _) -> {
@@ -209,28 +259,28 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
 
 // Every function key one checked function body names, including its
 // parameter defaults, which call sites lower from the callee.
-fn ir_core_reach_function_keys(function: FnBody, functions: [FnBody], fmt_keys: [String:String]) -> [String] Never! {
+fn ir_core_reach_function_keys(function: FnBody, functions: [FnBody], source_keys: [String:String]) -> [String] Never! {
     keys := [String]{}
     ir_core_reach_stmt_keys(function.tree, function.body, functions, &keys)
     loop parameter in function.params {
-        if parameter.default == Val(value) -> ir_core_reach_tree_keys(function.tree, value, functions, &keys, fmt_keys)
+        if parameter.default == Val(value) -> ir_core_reach_tree_keys(function.tree, value, functions, &keys, source_keys)
     }
-    loop statement in function.body -> ir_core_reach_statement_keys(function.tree, statement, functions, &keys, fmt_keys)
+    loop statement in function.body -> ir_core_reach_statement_keys(function.tree, statement, functions, &keys, source_keys)
     keys
 }
 
 // One statement's subtrees. Its own function so the visitor closure lends the
 // `keys` write parameter: the stage-0 Rust tier then lends `functions` and
-// `fmt_keys` to the closure instead of copying them per statement.
-fn ir_core_reach_statement_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String], fmt_keys: [String:String]) Never! {
-    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_core_reach_tree_keys(tree, child, functions, &keys, fmt_keys))
+// `source_keys` to the closure instead of copying them per statement.
+fn ir_core_reach_statement_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String], source_keys: [String:String]) Never! {
+    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_core_reach_tree_keys(tree, child, functions, &keys, source_keys))
 }
 
 // The keys one checked expression and every expression below it name, read
 // in place (body_each_expr_child).
-fn ir_core_reach_tree_keys(tree: BodyTree, expression: Int, functions: [FnBody], keys: &[String], fmt_keys: [String:String]) Never! {
-    ir_core_reach_expr_keys(tree, expression, functions, &keys, fmt_keys)
-    body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> ir_core_reach_tree_keys(tree, child, functions, &keys, fmt_keys))
+fn ir_core_reach_tree_keys(tree: BodyTree, expression: Int, functions: [FnBody], keys: &[String], source_keys: [String:String]) Never! {
+    ir_core_reach_expr_keys(tree, expression, functions, &keys, source_keys)
+    body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> ir_core_reach_tree_keys(tree, child, functions, &keys, source_keys))
 }
 
 // The `Core/Math/Math.jet` helper one checked expression lowers to by name
@@ -343,14 +393,16 @@ fn ir_reachable_core_rows(functions: &[FnBody], candidates: ^[Bool], core_module
     reachable := [Bool]{}
     roots := [Int]{}
     weights := [Int]{}
-    fmt_keys := [String:String]{}
+    // The Core source helpers a lowering calls by name, with no keyed call:
+    // Fmt.jet selector helpers and Encoding.jet decode helpers.
+    source_keys := [String:String]{}
     loop (index, function) in functions {
         if !candidates[index] {
             &reachable.push(false)
             next
         }
         _ := &by_key.add(function.key, index)
-        if ir_string_format_source(function.module_identity, function.source_file, function.kind) -> fmt_keys[function.name] = function.key
+        if ir_string_format_source(function.module_identity, function.source_file, function.kind) || ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
         rooted :: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_precise_source_target(function)
         &reachable.push(rooted)
         if rooted {
@@ -358,7 +410,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], candidates: ^[Bool], core_module
             &weights.push(function.source_span.end - function.source_span.start)
         }
     }
-    slot :: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(&functions)}, by_key: [[String:Int]]{^by_key}, fmt_keys: [[String:String]]{^fmt_keys}, roots: ^roots}
+    slot :: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(&functions)}, by_key: [[String:Int]]{^by_key}, source_keys: [[String:String]]{^source_keys}, roots: ^roots}
     pending := [Int]{}
     loop target in ir_core_reach_root_targets(slot, weights, threads) {
         if !reachable[target] {
@@ -371,7 +423,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], candidates: ^[Bool], core_module
         caller :: &pending.pop() ?? { break }
         found := [Int]{}
         // Passed straight through: a local binding of the guarded rows would copy them.
-        ir_core_reach_row_targets(permit.value.functions[0], permit.value.by_key[0], permit.value.fmt_keys[0], caller, &found)
+        ir_core_reach_row_targets(permit.value.functions[0], permit.value.by_key[0], permit.value.source_keys[0], caller, &found)
         loop target in found {
             if !reachable[target] {
                 reachable[target] = true
@@ -385,12 +437,12 @@ fn ir_reachable_core_rows(functions: &[FnBody], candidates: ^[Bool], core_module
 }
 
 // What every reachability thread reads: the checked functions, their rows by
-// key and the format helpers' keys, each the one row of its list, and the
-// rooted rows.
+// key and the by-name source helpers' keys, each the one row of its list, and
+// the rooted rows.
 struct IRReachShared {
     functions: [[FnBody]]
     by_key: [[String:Int]]
-    fmt_keys: [[String:String]]
+    source_keys: [[String:String]]
     roots: [Int]
 }
 
@@ -458,15 +510,15 @@ fn ir_core_reach_part_targets(slot: Shared<IRReachShared>, first: Int, last: Int
     targets := [Int]{}
     loop position in first..<last {
         // Passed straight through: a local binding of the guarded rows would copy them.
-        ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.by_key[0], inputs.value.fmt_keys[0], inputs.value.roots[position], &targets)
+        ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.by_key[0], inputs.value.source_keys[0], inputs.value.roots[position], &targets)
     }
     targets
 }
 
 // The rows checked function row `row` names (resolved by key, or by its
 // generic declaration's key), appended to `targets`.
-fn ir_core_reach_row_targets(functions: [FnBody], by_key: [String:Int], fmt_keys: [String:String], row: Int, targets: &[Int]) Never! {
-    loop key in ir_core_reach_function_keys(functions[row], functions, fmt_keys) {
+fn ir_core_reach_row_targets(functions: [FnBody], by_key: [String:Int], source_keys: [String:String], row: Int, targets: &[Int]) Never! {
+    loop key in ir_core_reach_function_keys(functions[row], functions, source_keys) {
         target :: by_key.get(key) ?? by_key.get(ir_core_reach_template_key(key)) ?? next
         &targets.push(target)
     }

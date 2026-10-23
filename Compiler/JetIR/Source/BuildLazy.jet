@@ -6,7 +6,7 @@
 // type (lazy.clone, lazy.drop, lazy.equal, lazy.show, lazy.compare,
 // lazy.callback), as Lower's lazy glue helpers are.
 
-use jet_foundation.[AccessConvention, Span, Type, TClosureOp, TLocal, TypeTupleField, type_carrier_identity]
+use jet_foundation.[AccessConvention, BodyCallArg, Span, Type, TClosureOp, TLocal, TypeTupleField, type_carrier_identity]
 
 // The C export of an Iter route symbol: `jet_iter_take` is
 // jet_rt_native_iter_take (LazyIter.jet:352 lower_lazy_runtime_symbol).
@@ -161,6 +161,10 @@ fn ir_lazy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: T
         ir_lazy_show_body(&m, p, &a, ty, IRRender.Debug, span)
     } else if role == "release" {
         ir_task_release_body(&m, &a)
+    } else if role == "line_next" {
+        ir_line_next_body(&m, p, &a, ty, span)
+    } else if role == "line_release" {
+        ir_line_release_body(&m, p, &a, ty, span)
     } else if role == "compare" {
         ir_lazy_compare_body(&m, p, &a, ty, span)
     } else {
@@ -933,23 +937,111 @@ fn ir_lazy_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
 
 // `loop line in reader.lines()` / `loop line in io.stdin().lines()` (Lower
 // Iter.jet lower_line_cursor_init): the runtime line source wraps the
-// FileReader or StdinHandle as an `Iter<String>`. A fresh handle is moved
-// into it (read lazily); a kept one is borrowed, and the runtime drains it at
-// init (IterSources.jet iter_line_source). The Iter is then walked as any
-// other.
+// FileReader or StdinHandle as an `Iter<String>` through a borrowed adapter32
+// (IterSources.jet): the handle, lazy.line_next, lazy.line_release and no
+// clone. A fresh handle is moved into it (read lazily); a kept one is
+// borrowed, and the runtime drains it at init (iter_line_source). The Iter
+// is then walked as any other.
 fn ir_lines_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, file: Bool, body: [Int], span: Span) Never! {
     iter_ty :: Type.Apply{name: "Iter", args: [Type]{Type.String}}
     iter_row :: ir_value_type(&m, p, iter_ty) ?? return ir_fail(&b, span, "type {ir_type_name(iter_ty)}")
     row :: ir_string_row(&m)
+    handle_ty :: ir_subst(m, ir_ty(p, b, ir_lazy_place(p, b, collection)))
+    next_helper :: ir_lazy_helper(&m, p, &b, "line_next", handle_ty, span)
+    if next_helper < 0 -> return
+    release_helper :: ir_lazy_helper(&m, p, &b, "line_release", handle_ty, span)
+    if release_helper < 0 -> return
     handle :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || handle < 0 -> return
     meta :: ir_lazy_meta(&m, p, &b, Type.String, span)
     if ir_failed(b) -> return
     moved :: ir_lazy_moved(&m, &b, handle)
+    pointer_row :: ir_pointer_row(&m)
+    adapter :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, adapter, 32, 8, -1, b.line)
+    ir_emit(&b.f, IROp.Store, -1, adapter, 0, handle, b.line)
+    next_address :: ir_lazy_address(&m, &b, next_helper)
+    release_address :: ir_lazy_address(&m, &b, release_helper)
+    no_clone :: ir_word_const(&m, &b, 0)
+    ir_emit(&b.f, IROp.Store, -1, adapter, 8, next_address, b.line)
+    ir_emit(&b.f, IROp.Store, -1, adapter, 16, release_address, b.line)
+    ir_emit(&b.f, IROp.Store, -1, adapter, 24, no_clone, b.line)
     export :: if file -> "jet_rt_native_iter_file_lines" else -> "jet_rt_native_iter_stdin_lines"
-    source :: ir_runtime(&m, &b, export, [Int]{handle, moved, meta}, iter_row)
+    source :: ir_runtime(&m, &b, export, [Int]{adapter, moved, meta}, iter_row)
     ir_release(&m, &b, handle)
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, body)
+}
+
+// lazy.line_next(payload, output) -> 0 at end, 1 with the moved line in
+// `output`, -1 stopped: one call of the handle's Core line reader
+// (ir_line_reader_key). A read error panics with its display at
+// <core.prelude>:0, as CollectionIoSources.rs's jet_panic does; a panic a
+// task publishes returns, and the source stops.
+fn ir_line_next_body(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    handle_row :: ir_value_type(&m, p, handle_ty) ?? return ir_fail(&a, span, "type {ir_type_name(handle_ty)}")
+    payload :: ir_new_slot(&a, handle_row, IRSlotKind.Param, ir_intern_name(&m, "payload"))
+    output :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "output"))
+    key :: ir_line_reader_key(p.functions, handle_ty)
+    row :: p.rows.get(key) ?? return ir_fail(&a, span, "line reader of {ir_type_name(handle_ty)}")
+    access :: ir_receiver_access(p.functions[row].kind)
+    receiver := payload
+    if access == "write" {
+        receiver = ir_temp(&m, &a, pointer_row)
+        ir_emit(&a.f, IROp.StackAddress, receiver, 8, 8, -1, a.line)
+        ir_emit(&a.f, IROp.Store, -1, receiver, 0, payload, a.line)
+    } else if access != "read" {
+        return ir_fail(&a, span, "line reader receiver {access}")
+    }
+    result :: ir_call(&m, p, &a, key, [Type]{}, receiver, [IRWriteBack]{}, [BodyCallArg]{}, span)
+    if ir_failed(a) || result < 0 -> return
+    result_ty :: m.types[a.f.slot_type[result]].ty
+    line_ty := Type.String
+    error_ty := Type.String
+    if ir_untag(result_ty) == .Result(ok, err) {
+        line_ty = ok
+        error_ty = err
+    } else {
+        return ir_fail(&a, span, "line reader result {ir_type_name(result_ty)}")
+    }
+    option_row :: ir_value_type(&m, p, line_ty) ?? return ir_fail(&a, span, "type {ir_type_name(line_ty)}")
+    error_row :: ir_value_type(&m, p, error_ty) ?? return ir_fail(&a, span, "type {ir_type_name(error_ty)}")
+    ok :: ir_result_is_ok(&m, &a, result)
+    ir_open_if(&a.f, ok, a.line)
+    option :: ir_box_take(&m, p, &a, result, 8, option_row)
+    present :: ir_option_is_some(&m, &a, option)
+    ir_open_if(&a.f, present, a.line)
+    string_row :: ir_string_row(&m)
+    line :: ir_box_take(&m, p, &a, option, 0, string_row)
+    ir_store_at(&m, p, &a, output, 0, line)
+    a.fresh[line] = false
+    moved :: ir_word_const(&m, &a, 1)
+    ir_emit(&a.f, IROp.Return, -1, moved, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    eof :: ir_word_const(&m, &a, 0)
+    ir_emit(&a.f, IROp.Return, -1, eof, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    error :: ir_box_take(&m, p, &a, result, 8, error_row)
+    text :: ir_render(&m, p, &a, error_ty, error, IRRender.Display, span)
+    if ir_failed(a) || text < 0 -> return
+    data :: ir_load_word(&m, &a, text, 0)
+    length :: ir_load_word(&m, &a, text, 8)
+    _ :: ir_runtime(&m, &a, "jet_rt_panic_message", [Int]{data, length}, -1)
+    if text != error -> ir_release(&m, &a, text)
+    ir_release(&m, &a, error)
+    stopped :: ir_word_const(&m, &a, -1)
+    ir_emit(&a.f, IROp.Return, -1, stopped, -1, -1, a.line)
+}
+
+// lazy.line_release(payload): drops the handle an owned line source holds,
+// once, when the Iter is dropped (IterSources.jet release16).
+fn ir_line_release_body(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, span: Span) Never! {
+    handle_row :: ir_value_type(&m, p, handle_ty) ?? return ir_fail(&a, span, "type {ir_type_name(handle_ty)}")
+    payload :: ir_new_slot(&a, handle_row, IRSlotKind.Param, ir_intern_name(&m, "payload"))
+    if ir_has_drop(m, a, payload) -> ir_emit(&a.f, IROp.Drop, -1, payload, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
 // The cursor walk of the Iter in `source`, whose items have type row `row`.

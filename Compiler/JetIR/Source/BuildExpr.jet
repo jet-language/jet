@@ -1359,6 +1359,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .OverflowOpt(prefix, operation, line, lhs, rhs) -> return ir_overflow_opt(&m, p, &b, expression_ty, prefix, operation, line, lhs, rhs, span)
         .NumericBinaryMethod(receiver, operation, argument) -> return ir_numeric_euclid(&m, p, &b, expression_ty, receiver, operation, argument, span)
         .HandleMethod(receiver, operation, args) -> return ir_handle_method(&m, p, &b, expression_ty, receiver, operation, args, span)
+        .DecodeUnder(segment, inner) -> return ir_decode_under(&m, p, &b, expression_ty, segment, inner, span)
         .CoreClosureCall(kind) -> return ir_core_closure_call(&m, p, &b, expression_ty, kind, span)
         .SelectWait(table, nonblocking) -> return ir_select_wait(&m, p, &b, expression_ty, table, nonblocking, span)
         .OptionLift2(function, left, right) -> return ir_option_lift2(&m, p, &b, expression_ty, function, left, right, span)
@@ -2028,12 +2029,15 @@ fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], sp
 }
 
 // `print(value)`: its shown text to stdout with a line end and a flush
-// (Lower semantic Print: jet_term_write_stdout_line(text, flush 1)).
+// (Lower semantic Print: jet_term_write_stdout_line(text, flush 1)). A value
+// whose type selects a Display implementation prints that rendering (Rust
+// lower_print_value: an explicit Display before the Printable show).
 fn ir_print(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
     slot :: ir_expr(&m, p, &b, value)
     if ir_failed(b) -> return
-    text :: ir_render(&m, p, &b, value_ty, slot, IRRender.Show, span)
+    mode :: if ir_render_has_display(m, p, b, slot) -> IRRender.Display else -> IRRender.Show
+    text :: ir_render(&m, p, &b, value_ty, slot, mode, span)
     if ir_failed(b) -> return
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     flush :: ir_temp(&m, &b, bool_row)
@@ -3767,11 +3771,12 @@ fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, ac
         if ir_failed(b) || place < 0 -> return place
         if ir_kind_of(m, b, place) == .Aggregate -> return place
         // An Option or enum box is written through its payload in place
-        // (`if &x == .Variant(payload) -> ... &payload`); a call's write
-        // argument goes through ir_place_address instead.
+        // (`if &x == .Variant(payload) -> ... &payload`), and a runtime
+        // handle through the value behind it (a HandleMut route operand);
+        // a call's write argument goes through ir_place_address instead.
         if ir_kind_of(m, b, place) == .Pointer {
             place_row :: b.f.slot_type[place]
-            if ir_is_option(value_ty) || ir_enum_def(m, p, place_row) != None -> return place
+            if ir_is_option(value_ty) || ir_enum_def(m, p, place_row) != None || ir_is_handle(m, place_row) -> return place
         }
     }
     ir_fail_slot(&b, span, "borrow {access} of {ir_type_name(value_ty)}")

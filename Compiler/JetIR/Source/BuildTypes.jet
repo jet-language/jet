@@ -820,20 +820,52 @@ fn ir_record_in_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, row: I
     }
 }
 
-// The runtime record handle for the borrowed native struct record of type
-// `ty` at `value` (Lower Records.jet lower_helper_record_out): the runtime's
-// constructor takes the members in the schema's field order, a nested record
-// as a handle of its own (which the constructor takes). The caller drops the
-// handle after the call. -1 after a failure.
+// The runtime record handle for the borrowed native record of type `ty` at
+// `value` (Lower Records.jet lower_helper_record_out): a struct's runtime
+// constructor takes the members in the schema's field order; a payload
+// enum's variant constructor (`jet_rt_record_new_<R>_<Variant>`) takes its
+// payload members in declaration order. A nested record crosses as a handle
+// of its own (which the constructor takes). The caller drops the handle
+// after the call. -1 after a failure.
 fn ir_record_out(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     unknown :: "runtime record {ir_type_name(ty)}"
     record :: ir_record_runtime(&m, p, ty) ?? return ir_fail_slot(&b, span, unknown)
     schema :: ir_record_schema_row(record) ?? return ir_fail_slot(&b, span, unknown)
     name :: ir_nominal_name(ir_untag(ty)) ?? return ir_fail_slot(&b, span, unknown)
     definition :: ir_type_def(p, name) ?? return ir_fail_slot(&b, span, unknown)
-    is_struct :: p.types[definition].kind == .Struct(_, _)
-    if !is_struct -> return ir_fail_slot(&b, span, "runtime record of the enum {ir_type_name(ty)} as an argument")
+    atom :: runtime_abi_atom(record.runtime)
     unsupported :: "record {ir_type_name(ty)} has a member no runtime export carries"
+    pointer_row :: ir_pointer_row(&m)
+    if p.types[definition].kind == .Enum(variants, _) {
+        payloads := [[IRMember]]{}
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition, [Type]{}, index) ?? return ir_fail_slot(&b, span, unsupported)
+            loop member in members {
+                if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail_slot(&b, span, unsupported)
+            }
+            &payloads.push(members)
+        }
+        made :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Const, made, 0, -1, -1, b.line)
+        selector :: ir_load_word(&m, &b, value, 0)
+        loop (index, variant) in variants {
+            expected :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
+            ir_open_if(&b.f, selected, b.line)
+            args := [Int]{}
+            loop member in payloads[index] {
+                arg :: ir_record_member_arg(&m, p, &b, value, member, span)
+                if arg < 0 -> return -1
+                &args.push(arg)
+            }
+            handle :: ir_runtime(&m, &b, "jet_rt_record_new_{atom}_{runtime_abi_atom(variant.name)}", args, pointer_row)
+            ir_emit(&b.f, IROp.Copy, made, handle, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+        return made
+    }
+    is_struct :: p.types[definition].kind == .Struct(_, _)
+    if !is_struct -> return ir_fail_slot(&b, span, unknown)
     members :: ir_struct_members(&m, p, definition, [Type]{}) ?? return ir_fail_slot(&b, span, unsupported)
     loop member in members {
         if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail_slot(&b, span, unsupported)
@@ -849,9 +881,21 @@ fn ir_record_out(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int
             &args.push(arg)
         }
     }
-    pointer_row :: ir_pointer_row(&m)
-    made :: ir_runtime(&m, &b, "jet_rt_record_new_{runtime_abi_atom(record.runtime)}", args, pointer_row)
-    made
+    ir_runtime(&m, &b, "jet_rt_record_new_{atom}", args, pointer_row)
+}
+
+// The text of the borrowed native record `slot` of type `ty` from its
+// runtime type's own rendering (Lower Records.jet lower_record_render), or
+// -1 when `ty` is not a record its runtime type renders in `mode`.
+fn ir_record_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
+    record :: ir_record_runtime(&m, p, ty) ?? return -1
+    symbol :: ir_render_handle_symbol(p, ty, mode) ?? return -1
+    handle :: ir_record_out(&m, p, &b, ty, slot, span)
+    if handle < 0 -> return -1
+    string_row :: ir_string_row(&m)
+    text :: ir_runtime(&m, &b, symbol, [Int]{handle}, string_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}", [Int]{handle}, -1)
+    text
 }
 
 // The constructor argument for `member` of the record at `base` (Lower
@@ -1132,19 +1176,29 @@ fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IR
     ir_render_impl_call(&m, p, &b, slot, row, trait_short)
 }
 
+// Whether a Display implementation is selected for `slot`'s type.
+fn ir_render_has_display(m: IRModule, p: IRProgram, b: IRBuilder, slot: Int) -> Bool Never! {
+    if slot < 0 || p.render_impls.len() == 0 -> return false
+    p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") != None
+}
+
 // The owned String the user Debug implementation makes of `slot`, -1 when
-// its type has none (codegen jet_codegen_direct_render_function: a trait
-// method `debug` of Debug with a receiver convention whose owner is the
-// value's nominal type).
+// its type has none (codegen jet_codegen_direct_render_function: a method
+// `debug` of Debug with a receiver convention whose owner is the value's
+// nominal type, checked as a TraitMethod or, when Debug does not resolve in
+// the implementing module, as the owner's plain Method).
 fn ir_render_debug_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
     candidates :: p.trait_methods.get("Debug|debug") ?? return -1
     receiver_ty :: m.types[b.f.slot_type[slot]].ty
     if ir_nominal_name(ir_untag(receiver_ty)) == None -> return -1
     key :: ir_render_type_key(p.type_rows, p.types, receiver_ty)
     loop row in candidates {
-        if p.functions[row].kind == .TraitMethod(_, convention, owner_type, _, _) {
-            if convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key -> return ir_render_impl_call(&m, p, &b, slot, row, "Debug")
+        matched :: if p.functions[row].kind == {
+            .TraitMethod(_, convention, owner_type, _, _) -> convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key
+            .Method(convention, owner_type) -> convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key
+            .TopLevel -> false
         }
+        if matched -> return ir_render_impl_call(&m, p, &b, slot, row, "Debug")
     }
     -1
 }
@@ -1210,6 +1264,15 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
     if selected >= 0 {
         _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, selected}, -1)
         ir_release(&m, &b, selected)
+        return
+    }
+    // A Core record renders through its runtime type's own JetDisplay /
+    // JetShow / JetDebug, as generated Rust does (Lower lower_render_value).
+    rendered :: ir_record_render(&m, p, &b, ty, slot, mode, span)
+    if ir_failed(b) -> return
+    if rendered >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, rendered}, -1)
+        ir_release(&m, &b, rendered)
         return
     }
     if kind == .String && member {
@@ -1324,6 +1387,9 @@ fn ir_render_nominal(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, sl
     if ir_enum_def(m, p, b.f.slot_type[slot]) == .Val(row) {
         if p.types[row].kind == .Enum(variants, methods) {
             if ir_render_hook(methods) -> return ir_fail(&b, span, "enum with a show hook")
+            // A union value renders as the member it holds (D-UNIONTYPE1),
+            // as that member renders on its own: never wrapped in its tag.
+            held :: ir_untag(ty) == .Union(_)
             discriminant :: ir_enum_tag_of(&m, &b, slot)
             opened := 0
             loop (index, variant) in variants {
@@ -1337,10 +1403,14 @@ fn ir_render_nominal(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, sl
                 if variant.payload == {
                     .Unit -> ir_push_static(&m, &b, builder, ir_render_name(variant.name))
                     .Single(_) -> {
-                        ir_push_static(&m, &b, builder, "{ir_render_name(variant.name)}(")
                         value :: ir_member_value(&m, &b, slot, members[0])
-                        ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
-                        ir_push_static(&m, &b, builder, ")")
+                        if held {
+                            if value < 0 -> ir_push_static(&m, &b, builder, "()") else -> ir_render_push(&m, p, &b, builder, value, mode, false, span)
+                        } else {
+                            ir_push_static(&m, &b, builder, "{ir_render_name(variant.name)}(")
+                            ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+                            ir_push_static(&m, &b, builder, ")")
+                        }
                     }
                     .Named(_) -> ir_render_record(&m, p, &b, builder, slot, variant.name, members, mode, span)
                 }

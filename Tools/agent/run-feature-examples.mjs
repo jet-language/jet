@@ -108,22 +108,35 @@ function readExpected(stem) {
   };
 }
 
-// The `jet run` argv of an example. A `<stem>.case` whose only step is
-// `step: jet run [FLAGS...] <file>` (testkit Golden.jet runs that step from
-// the example's directory) runs the example with those flags; without one,
-// or for any other case, the example runs as `jet run <example>`.
+// The `jet run` argv of an example, as testkit Golden.jet's direct tier runs
+// its `<stem>.case`. A case whose only run step is `step: jet run [FLAGS...]
+// <file>` runs the example with those flags; one whose only run step (after
+// any `step: build`) is `step: built [ARGS...]` runs it as `jet run <example>
+// -- ARGS...`. Without a case, or for any other case, the example runs as
+// `jet run <example>`.
 export function runArgs(entry, caseText) {
   const fallback = ["run", entry.shown];
   if (caseText === null) return fallback;
-  const steps = caseText.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("step:"));
+  const steps = caseText.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("step:"))
+    .map((line) => line.slice("step:".length).trim().split(/\s+/u))
+    .filter((words) => !(words.length === 1 && words[0] === "build"));
   if (steps.length !== 1) return fallback;
-  const words = steps[0].slice("step:".length).trim().split(/\s+/u);
+  const words = steps[0];
+  if (words[0] === "built") return words.length > 1 ? ["run", entry.shown, "--", ...words.slice(1)] : fallback;
   if (words.length < 3 || words[0] !== "jet" || words[1] !== "run" || words.at(-1) !== basename(entry.path)) return fallback;
   return ["run", ...words.slice(2, -1), entry.shown];
 }
 
 function readCase(stem) {
   const path = join(EXPECTED, `${stem}.case`);
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
+}
+
+// The example's interactive input: `<stem>.stdin` under expected/, which
+// testkit Golden.jet pipes to the example's last step. Without one the run
+// reads an empty, closed stdin.
+function readStdin(stem) {
+  const path = join(EXPECTED, `${stem}.stdin`);
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
@@ -260,8 +273,12 @@ function runJet(args, options) {
         TMP: options.scratch,
         TEMP: options.scratch,
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin == null ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (options.stdin != null) {
+      child.stdin.on("error", () => {});
+      child.stdin.end(options.stdin);
+    }
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -375,13 +392,14 @@ async function main() {
         store: join(scratch, "store", String(slot)),
         scratch,
         timeoutMs: options.timeoutSec * 1000,
+        stdin: readStdin(entry.stem),
       };
       const run = await runJet(runArgs(entry, readCase(entry.stem)), runOptions);
       const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
       if (result.status !== "passed") return result;
       for (const tier of EMIT_TIERS) {
         if (expected.emit[tier] === null) continue;
-        const emitted = await runJet(["emit", `--${tier}`, entry.shown], runOptions);
+        const emitted = await runJet(["emit", `--${tier}`, entry.shown], { ...runOptions, stdin: null });
         const verdict = classifyEmit(tier, emitted, expected.emit[tier]);
         if (verdict) return { stem: entry.stem, shown: entry.shown, ...verdict, stderr: emitted.stderr, stdout: emitted.stdout };
       }

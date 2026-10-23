@@ -1018,6 +1018,35 @@ impl Decimal {
     fn ceil(self) -> Decimal Never! { __decimal_ceil(self) }
     fn to_string(self) -> String Never! { __decimal_to_string(self) }
 }
+// Decimal crosses Dyn exactly: it encodes as its scale-keeping text and
+// decodes from a number token or an Int (Rust EncodingTraits.rs JetDecimal).
+impl Decimal.Encode {
+    fn encode(self) -> Dyn { Dyn.Text(__decimal_to_string(self)) }
+}
+impl Decimal.Decode {
+    fn decode(tree: Dyn) -> Decimal [FieldError]! {
+        if tree == {
+            .Number(lexeme) -> __decimal_decoded(lexeme)
+            .Int(value) -> __decimal_decoded("{value}")
+            .Null -> __decimal_rejected("null")
+            .Bool(_) -> __decimal_rejected("Bool")
+            .Float(_) -> __decimal_rejected("Float")
+            .Text(_) -> __decimal_rejected("Text")
+            .Bytes(_) -> __decimal_rejected("Bytes")
+            .DateTime(_) -> __decimal_rejected("DateTime")
+            .Array(_) -> __decimal_rejected("a list")
+            .Object(_) -> __decimal_rejected("an object")
+        }
+    }
+}
+fn __decimal_decoded(text: String) -> Decimal [FieldError]! {
+    value :: __decimal_parse(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected Decimal: invalid Decimal string"}})
+    Ok(value)
+}
+// The decode failure for a Dyn value of `kind` (DynKind.rs dyn_kind vocabulary).
+fn __decimal_rejected(kind: String) -> Decimal [FieldError]! {
+    Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {kind}"}})
+}
 impl Decimal.Add {
     fn add(self, rhs: Decimal) -> Decimal Never! { __decimal_add(self, rhs) }
 }
@@ -1135,8 +1164,13 @@ fn __decimal_signed(value: Decimal) -> Int Never! {
     if value.negative -> -value.magnitude else -> value.magnitude.copy()
 }
 fn __decimal_from_str(text: String) -> Decimal Never! {
+    __decimal_parse(text) ?? panic("invalid Decimal string")
+}
+// The exact Decimal a decimal spelling (sign, digits with one optional point,
+// optional exponent) names, or None for any other text.
+fn __decimal_parse(text: String) -> Decimal? Never! {
     bytes :: text.trim().bytes()
-    if bytes.len() == 0 -> panic("invalid Decimal string")
+    if bytes.len() == 0 -> return None
     index := 0
     negative := false
     if bytes[0] == (U8{45}) || bytes[0] == (U8{43}) {
@@ -1150,18 +1184,18 @@ fn __decimal_from_str(text: String) -> Decimal Never! {
     loop index < bytes.len() && bytes[index] != (U8{101}) && bytes[index] != (U8{69}) {
         byte :: bytes[index]
         if byte == (U8{46}) {
-            if point -> panic("invalid Decimal string")
+            if point -> return None
             point = true
         } else {
-            if byte < (U8{48}) || byte > (U8{57}) -> panic("invalid Decimal string")
+            if byte < (U8{48}) || byte > (U8{57}) -> return None
             raw_digits = raw_digits + 1
-            if raw_digits > 1000000 -> panic("invalid Decimal string")
+            if raw_digits > 1000000 -> return None
             magnitude = magnitude * 10 + Int{byte} - 48
             if point -> fractional = fractional + 1
         }
         index = index + 1
     }
-    if raw_digits == 0 -> panic("invalid Decimal string")
+    if raw_digits == 0 -> return None
     exponent := 0
     if index < bytes.len() {
         index = index + 1
@@ -1173,21 +1207,21 @@ fn __decimal_from_str(text: String) -> Decimal Never! {
         exponent_start :: index
         loop index < bytes.len() {
             byte :: bytes[index]
-            if byte < (U8{48}) || byte > (U8{57}) -> panic("invalid Decimal string")
+            if byte < (U8{48}) || byte > (U8{57}) -> return None
             exponent = exponent * 10 + Int{byte} - 48
-            if exponent > 1000000 -> panic("invalid Decimal string")
+            if exponent > 1000000 -> return None
             index = index + 1
         }
-        if index == exponent_start -> panic("invalid Decimal string")
+        if index == exponent_start -> return None
         if exponent_negative -> exponent = -exponent
     }
     places := fractional - exponent
     if places < 0 {
-        if raw_digits - places > 1000000 -> panic("invalid Decimal string")
+        if raw_digits - places > 1000000 -> return None
         magnitude = magnitude * exact_power(10, -places)
         places = 0
     }
-    Decimal{negative: negative && magnitude != 0, magnitude: magnitude, scale: places}
+    Val(Decimal{negative: negative && magnitude != 0, magnitude: magnitude, scale: places})
 }
 fn __decimal_add(left: Decimal, right: Decimal) -> Decimal Never! {
     places :: max(left.scale, right.scale)
