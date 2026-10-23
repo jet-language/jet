@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape at tests/dev_parts/routine.rs:2653; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run zstd_compress.jet
+exit: any # original compares the tiers, then asserts stdout
+stdout: = zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape.1.out
+step: jet build zstd_compress.jet
+exit: 0
+step aot: built
+exit: == dev
+stdout: == dev
+stderr: == dev

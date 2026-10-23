@@ -1,0 +1,26 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:artifacts_closed}/session?token=CLOSED_ARTIFACT_SECRET", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.close() ?? panic("page close")
+    loop attempt in [1] {
+        page.screenshot() ?? next
+        print("unexpected screenshot")
+    }
+    loop attempt in [1] {
+        page.pdf() ?? next
+        print("unexpected pdf")
+    }
+    loop attempt in [1] {
+        page.clear_cookies() ?? next
+        print("unexpected cookies")
+    }
+    print("caught")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}

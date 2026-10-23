@@ -1,0 +1,25 @@
+# tests/browser_bidi.rs::native_bidi_artifacts_reject_hostile_inputs_without_wire at tests/browser_bidi.rs:2088; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_artifacts_reject_hostile_inputs_without_wire.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_artifacts_hostile.jet native_bidi_artifacts_reject_hostile_inputs_without_wire.fixture/run.template
+step: jet build browser_bidi_artifacts_hostile.jet
+exit: 0
+session artifacts_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:artifacts_hostile} artifacts_hostile.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_artifacts_reject_hostile_inputs_without_wire.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close artifacts_hostile
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: !~ "storage." # original predicate: no method equals or starts with it
+stdout: !~ "input." # original predicate: no method equals or starts with it
+stdout: !~ "browser.setDownloadBehavior" # original predicate: no method equals or starts with it
+stdout: !~ "browsingContext.captureScreenshot" # original predicate: no method equals or starts with it
+stdout: !~ "browsingContext.print" # original predicate: no method equals or starts with it
+stdout: !~ "script.callFunction" # original predicate: no method equals or starts with it

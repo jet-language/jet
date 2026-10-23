@@ -1,0 +1,18 @@
+# tests/dev_parts/routine.rs::fixed_width_signed_remainder_overflow_traps_across_tiers at tests/dev_parts/routine.rs:4403; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: fixed_width_signed_remainder_overflow_traps_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check fixed_width_remainder_trap.jet
+exit: 0
+step dev: jet run fixed_width_remainder_trap.jet
+exit: 0
+stdout: = fixed_width_signed_remainder_overflow_traps_across_tiers.1.out
+stderr: empty
+step: jet build fixed_width_remainder_trap.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = fixed_width_signed_remainder_overflow_traps_across_tiers.1.out
+stderr: empty

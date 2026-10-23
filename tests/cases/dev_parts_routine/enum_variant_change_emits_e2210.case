@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::enum_variant_change_emits_e2210 at tests/dev_parts/routine.rs:5650; hand-port (the Rust crate API jet::Sema::HotSwap::type_stable_decision is carried by a `jet dev --swap` session on the same edit)
+fixture: enum_variant_change_emits_e2210.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+session app line: jet dev hot.jet --swap
+recv app line until = "1" within 30s
+write: hot.jet enum_variant_change_emits_e2210.fixture/new.template
+sleep: 10s
+signal app: KILL
+close app
+exit: any # original status unasserted: the session is killed after the verdict
+stderr: ~ "E2210" # original predicate: decision.requires_restart() and e2210(reason).code == "E2210"
+stderr: ~ "enum `E`" # original predicate: diagnostic.what.contains(..)

@@ -1,0 +1,11 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:deadline}/session", profile, timeout) ?? panic("connect")
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    outcome :: bidi.send("session.status", "{{}}") ?? "caught"
+    print(outcome)
+}

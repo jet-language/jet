@@ -1,0 +1,20 @@
+# tests/browser_bidi.rs::native_bidi_cleanup_retries_failures_and_drops_last_owners_once at tests/browser_bidi.rs:749; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_cleanup_retries_failures_and_drops_last_owners_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_lifecycle.jet native_bidi_cleanup_retries_failures_and_drops_last_owners_once.fixture/run.template
+step: jet build browser_bidi_lifecycle.jet
+exit: 0
+session lifecycle raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:lifecycle} lifecycle.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: empty # original assert_eq!(stdout, "")
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close lifecycle
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_cleanup_retries_failures_and_drops_last_owners_once.1.out # original assert_eq!(server.join().unwrap(), [..])

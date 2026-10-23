@@ -1,0 +1,31 @@
+# tests/browser_bidi.rs::native_bidi_browser_surface_hostile_matrix at tests/browser_bidi.rs:3092; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_browser_surface_hostile_matrix.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_hostile_matrix.jet native_bidi_browser_surface_hostile_matrix.fixture/run.template
+step: jet build browser_bidi_hostile_matrix.jet
+exit: 0
+session no_cdp raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-no-cdp {free-port:no_cdp}
+session matrix_wire raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:matrix_wire} matrix_wire.json
+session matrix_closed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:matrix_closed} matrix_closed.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_browser_surface_hostile_matrix.1.out
+stdout: !~ "MATRIX_HOSTILE_SECRET" # original predicate: !stdout.contains
+stderr: !~ "MATRIX_HOSTILE_SECRET" # original predicate: !stderr.contains
+stdout: !~ "MATRIX_CLOSED_SECRET" # original predicate: !stdout.contains
+stderr: !~ "MATRIX_CLOSED_SECRET" # original predicate: !stderr.contains
+stdout: !~ "SECRET STACK" # original predicate: !stdout.contains
+stderr: !~ "SECRET STACK" # original predicate: !stderr.contains
+close no_cdp
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close matrix_wire
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_browser_surface_hostile_matrix.2.out # original assert_eq!(server.join().unwrap(), [..])
+close matrix_closed
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_browser_surface_hostile_matrix.3.out # original assert_eq!(server.join().unwrap(), [..])

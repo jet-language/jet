@@ -1,0 +1,43 @@
+struct Holder { values: [Int] }
+fn run() {
+    values := [1, 2, 3, 4]
+    first :: &values[0]
+    print("between root")
+    last :: &values[3]
+    first = 8
+    last = 9
+    print("root: {first},{last}")
+
+    adjacent := Holder{ values: [10, 11, 12, 13] }
+    adjacent_first :: &adjacent.values[0..1]
+    adjacent_last :: &adjacent.values[2..3]
+    adjacent_first[0] = 18
+    adjacent_last[0] = 19
+    print("nested adjacent: {adjacent_first[0]},{adjacent_last[0]}")
+
+    interleaved := Holder{ values: [20, 21, 22, 23] }
+    interleaved_first :: &interleaved.values[0..1]
+    print("between nested")
+    interleaved_last :: &interleaved.values[2..3]
+    interleaved_first[0] = 28
+    interleaved_last[0] = 29
+    print("nested interleaved: {interleaved_first[0]},{interleaved_last[0]}")
+
+    reused := [30, 31]
+    reused_first :: &reused[0]
+    reused_bridge :: &reused[1]
+    print("reuse first: {reused_first}")
+    reused_again :: &reused[0]
+    reused_bridge = 38
+    reused_again = 39
+    print("reuse final: {reused_again},{reused_bridge}")
+
+    replaced := [40, 41]
+    before_replace :: &replaced[0]
+    print("before replace: {before_replace}")
+    replaced = [42, 43]
+    after_replace :: &replaced[1]
+    #DebugOnly { print("unrelated debug") }
+    after_replace = 49
+    print("after replace: {after_replace}")
+}

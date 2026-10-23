@@ -1,0 +1,17 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:privacy_lifecycle}/session", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+    print("hash:{context.user_hash().len()}")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+    receipt :: session.receipt()
+    print("done:{receipt.cleaned()}:{receipt.redacted()}:{receipt.isolated()}")
+}

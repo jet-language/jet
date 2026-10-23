@@ -1,0 +1,18 @@
+fn run() {
+    attempts := 0
+    retry :: loop {
+        attempts += 1
+        found :: loop value in [1] {
+            if attempts == 2 { break value }
+        } ?? next(retry)
+        print(found)
+        break(retry)
+    }
+    stop :: loop {
+        ignored :: loop value in [1] {
+            if value == 2 { break value }
+        } ?? break(stop)
+        print(ignored)
+    }
+    print("done")
+}

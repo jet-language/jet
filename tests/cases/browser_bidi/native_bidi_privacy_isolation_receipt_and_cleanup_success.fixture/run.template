@@ -1,0 +1,39 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:privacy}/session?token=PRIVACY_SUCCESS_SECRET", profile, timeout) ?? panic("connect")
+
+    privacy :: session.privacy()
+    print("privacy:{privacy.isolated_profiles()}:{privacy.redact_receipts()}:{privacy.shared_profiles()}")
+
+    left :: session.context() ?? panic("left")
+    right :: session.context() ?? panic("right")
+    print("isolated:{left.isolated()}:{right.isolated()}")
+    left_hash :: left.user_hash()
+    right_hash :: right.user_hash()
+    distinct :: left_hash != right_hash
+    print("hashes:{distinct}:{left_hash.len()}:{right_hash.len()}")
+
+    page_left :: left.page() ?? panic("page left")
+    page_right :: right.page() ?? panic("page right")
+    page_left.set_cookie("session", "SECRET_COOKIE", "https://example.test") ?? panic("set")
+    left_cookie :: page_left.cookie("session") ?? panic("left cookie")
+    right_absent :: page_right.cookie("session") ?? "absent"
+    print("cookies:{left_cookie == "SECRET_COOKIE"}:{right_absent == "absent"}")
+
+    page_left.close() ?? panic("close left page")
+    page_right.close() ?? panic("close right page")
+    left.close() ?? panic("close left")
+    right.close() ?? panic("close right")
+    session.close() ?? panic("close session")
+
+    receipt :: session.receipt()
+    redacted :: receipt.redacted()
+    no_secret :: receipt.summary().contains("PRIVACY_SUCCESS_SECRET") == false
+    no_cookie :: receipt.summary().contains("SECRET_COOKIE") == false
+    no_endpoint :: receipt.summary().contains("ws://") == false
+    print("receipt:{redacted}:{receipt.isolated()}:{receipt.cleaned()}:{no_secret}:{no_cookie}:{no_endpoint}")
+}

@@ -1,0 +1,62 @@
+# tests/dev_parts/routine.rs::value_position_enum_patterns_match_all_execution_tiers at tests/dev_parts/routine.rs:5201; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag; the default dev tier and `jet run` are one step)
+fixture: value_position_enum_patterns_match_all_execution_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+copy: {root}/Examples/features/tooling/branch_dispatch_bench.jet dispatch/branch_dispatch_bench.jet
+step dev_dispatch: jet run branch_dispatch_bench.jet
+cwd: dispatch
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/branch_dispatch_bench.out
+stderr: empty
+step: jet build branch_dispatch_bench.jet
+cwd: dispatch
+exit: 0
+step aot_dispatch: built
+cwd: dispatch
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/branch_dispatch_bench.out
+stderr: empty
+copy: {root}/Examples/features/types/enum_dot.jet dot/enum_dot.jet
+step dev_dot: jet run enum_dot.jet
+cwd: dot
+exit: 0
+stdout: = ../../../Examples/features/expected/types/enum_dot.out
+stderr: empty
+step: jet build enum_dot.jet
+cwd: dot
+exit: 0
+step aot_dot: built
+cwd: dot
+exit: 0
+stdout: = ../../../Examples/features/expected/types/enum_dot.out
+stderr: empty
+copy: {root}/Examples/features/types/enum_dot_patterns.jet patterns/enum_dot_patterns.jet
+step dev_patterns: jet run enum_dot_patterns.jet
+cwd: patterns
+exit: 0
+stdout: = ../../../Examples/features/expected/types/enum_dot_patterns.out
+stderr: empty
+step: jet build enum_dot_patterns.jet
+cwd: patterns
+exit: 0
+step aot_patterns: built
+cwd: patterns
+exit: 0
+stdout: = ../../../Examples/features/expected/types/enum_dot_patterns.out
+stderr: empty
+copy: {root}/Examples/features/types/enums.jet enums/enums.jet
+step dev_enums: jet run enums.jet
+cwd: enums
+exit: 0
+stdout: = ../../../Examples/features/expected/types/enums.out
+stderr: empty
+step: jet build enums.jet
+cwd: enums
+exit: 0
+step aot_enums: built
+cwd: enums
+exit: 0
+stdout: = ../../../Examples/features/expected/types/enums.out
+stderr: empty

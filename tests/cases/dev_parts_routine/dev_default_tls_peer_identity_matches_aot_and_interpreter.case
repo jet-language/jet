@@ -1,0 +1,32 @@
+# tests/dev_parts/routine.rs::dev_default_tls_peer_identity_matches_aot_and_interpreter at tests/dev_parts/routine.rs:1448; hand-port (a {free-port} per tier replaces the probe listener; the forced-interpreter server round is carried by the `jet run` round)
+fixture: dev_default_tls_peer_identity_matches_aot_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:openssl
+step: openssl req -new -newkey rsa:2048 -nodes -subj /CN=localhost -keyout server.key.pem -out server.csr.pem
+exit: 0
+step: openssl x509 -req -days 1 -CAcreateserial -CAserial ca.srl -CA {root}/tests/fixtures/tls/localhost.cert.pem -CAkey {root}/tests/fixtures/tls/localhost.key.pem -extfile server.ext -in server.csr.pem -out server.cert.pem
+exit: 0
+session aottls raw: openssl s_server -quiet -www -tls1_3 -accept {free-port:aot} -cert server.cert.pem -key server.key.pem -cert_chain {root}/tests/fixtures/tls/localhost.cert.pem
+sleep: 500ms
+write: tls_peer_identity.jet dev_default_tls_peer_identity_matches_aot_and_interpreter.fixture/aot.template
+step: jet build tls_peer_identity.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ^= "localhost\nTLS13_" # original predicate: line 1 == "localhost", line 2 starts_with("TLS13_")
+stdout: ~ "\nTLS13\ntls-response-ok\n" # original predicate: lines 3 and 4 are "TLS13" and "tls-response-ok"
+stdout: lines = 4 # original predicate: aot_lines.next() == None after four lines
+signal aottls: KILL
+close aottls
+session devtls raw: openssl s_server -quiet -www -tls1_3 -accept {free-port:dev} -cert server.cert.pem -key server.key.pem -cert_chain {root}/tests/fixtures/tls/localhost.cert.pem
+sleep: 500ms
+write: tls_peer_identity.jet dev_default_tls_peer_identity_matches_aot_and_interpreter.fixture/dev.template
+step dev: jet run tls_peer_identity.jet
+exit: 0
+stdout: == aot
+stderr: == aot
+signal devtls: KILL
+close devtls

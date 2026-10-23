@@ -1,0 +1,20 @@
+# tests/dev_parts/routine.rs::stdin_filter_default_dev_reports_jit_gap at tests/dev_parts/routine.rs:7; hand-port
+fixture: stdin_filter_default_dev_reports_jit_gap.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+copy: {root}/Examples/features/io/stdin_filter.jet stdin_filter.jet
+step: jet build stdin_filter.jet
+exit: 0
+step aot: built
+stdin: stdin_filter_default_dev_reports_jit_gap.fixture/input.stdin
+exit: any # original compiled_binary_output_with_stdin asserts only the trimmed stdout
+stdout.trim: = stdin_filter_default_dev_reports_jit_gap.1.out # original compares the trimmed stdout
+step check: jet check stdin_filter.jet
+exit: any # original assert_default_run_or_named_boundary accepts a run or a named dev boundary
+stderr: !~ "E2211" # original predicate: problems never name the retired E2211
+when exit != 0: stderr: ~any "E2202" "E0952" "E0956" "E0953" "E3410" "E3411" "E3412" "E1265" "E0102" "E0857" "E0107" "E0501" "E0308" "E0504" "E0302" "E0505" "E0915" "E0311" "E1004" # original predicate: is_named_dev_boundary (some diagnostic carries a BOUNDARY_CODES code)
+step run: jet run stdin_filter.jet
+stdin: null
+exit: any # original predicate: RunOutcome::Ran passes whatever the program exits

@@ -1,0 +1,19 @@
+# tests/browser_bidi.rs::native_bidi_command_deadline_does_not_reset_on_continuous_events at tests/browser_bidi.rs:1152; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_command_deadline_does_not_reset_on_continuous_events.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_deadline.jet native_bidi_command_deadline_does_not_reset_on_continuous_events.fixture/run.template
+step: jet build browser_bidi_deadline.jet
+exit: 0
+session deadline raw: node {root}/tests/fixtures/browser_bidi_mock.mjs continuous-events {free-port:deadline}
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_command_deadline_does_not_reset_on_continuous_events.1.out
+stderr: !~ "network.tick" # original predicate: !stderr.contains
+close deadline
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_command_deadline_does_not_reset_on_continuous_events.2.out # original assert_eq!(server.join().unwrap(), [..])

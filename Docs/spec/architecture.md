@@ -1220,7 +1220,7 @@ hidden behind `jet dev`.
 Browser automation coverage includes provision, lifecycle, locators, network,
 artifacts, checked CDP, and privacy, with examples under
 `Examples/features/net/browser_*.jet` and hostile proofs in
-`tests/browser_bidi.rs` / `tests/browser_lock.rs`. Live browser binaries remain
+`tests/cases/browser_bidi/` / `tests/cases/browser_lock/`. Live browser binaries remain
 host-supplied; the product path always speaks BiDi over the existing WebSocket
 transport.
 

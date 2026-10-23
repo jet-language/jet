@@ -1,0 +1,20 @@
+# tests/dev_parts/routine.rs::io_style_raw_nonunicode_no_color_uses_presence_semantics at tests/dev_parts/routine.rs:3605; hand-port (the original hooked a probe into the generated Rust main and set NO_COLOR to the single byte 0xff; a case env value is UTF-8 text, so the case sets NO_COLOR present and empty, and holds `jet run` and AOT to the original end-to-end line)
+fixture: io_style_raw_nonunicode_no_color_uses_presence_semantics.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run raw_no_color.jet
+env: NO_COLOR=""
+unset: FORCE_COLOR
+exit: 0
+stdout: = "plain\n"
+stderr: empty
+step: jet build raw_no_color.jet
+exit: 0
+step aot: built
+env: NO_COLOR=""
+unset: FORCE_COLOR
+exit: 0
+stdout: = "plain\n"
+stderr: empty

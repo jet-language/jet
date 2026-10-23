@@ -1,0 +1,34 @@
+# tests/browser_bidi.rs::native_bidi_artifacts_storage_files_screenshots_and_pdf at tests/browser_bidi.rs:1991; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_artifacts_storage_files_screenshots_and_pdf.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_artifacts.jet native_bidi_artifacts_storage_files_screenshots_and_pdf.fixture/run.template
+step: jet build browser_bidi_artifacts.jet
+exit: 0
+session artifacts raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:artifacts} artifacts.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: ~ "true\n" # original predicate: stdout.contains
+stdout: ~ "browsingContext.downloadWillBegin\n" # original predicate: stdout.contains
+stdout: ~ "dl-1\n" # original predicate: stdout.contains
+stdout: ~ "artifacts:ok\n" # original predicate: stdout.contains
+stdout: !~ "ARTIFACT_SECRET" # original predicate: !stdout.contains
+stdout: !~ "SECRET_REPORT" # original predicate: !stdout.contains
+stderr: !~ "ARTIFACT_SECRET" # original predicate: !stderr.contains
+stderr: !~ "SECRET_REPORT" # original predicate: !stderr.contains
+close artifacts
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: has-line "browser.setDownloadBehavior" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "storage.setCookie" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "storage.getCookies" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "storage.deleteCookies" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "script.callFunction" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "input.setFiles" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "browsingContext.captureScreenshot" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "browsingContext.print" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "session.subscribe" # original predicate: methods.iter().any(|m| m == ..)
+stdout: $= "session.end\n" # original predicate: methods.last() == Some(..)

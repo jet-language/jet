@@ -1,0 +1,31 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:lifecycle}/session?token=LIFECYCLE_SECRET", profile, timeout) ?? panic("connect")
+
+    retry_context :: session.context() ?? panic("retry context")
+    retry_page :: retry_context.page() ?? panic("retry page")
+    retry_locator :: retry_page.get_by_role("button", "Save")
+    loop attempt in [1, 2] {
+        retry_page.close() ?? next
+    }
+    loop attempt in [1] {
+        retry_locator.click() ?? next
+        print("unexpected click")
+    }
+    loop attempt in [1, 2] {
+        retry_context.close() ?? next
+    }
+
+    local_context :: session.context() ?? panic("local context")
+    local_page :: local_context.page() ?? panic("local page")
+    local_context.close() ?? panic("local context close")
+    local_page.close() ?? panic("local page close")
+
+    drop_context :: session.context() ?? panic("drop context")
+    drop_page :: drop_context.page() ?? panic("drop page")
+    session.close() ?? return
+}

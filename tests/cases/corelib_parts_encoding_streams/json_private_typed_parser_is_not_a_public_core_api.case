@@ -1,0 +1,10 @@
+# tests/corelib_parts/encoding_streams.rs::json_private_typed_parser_is_not_a_public_core_api at tests/corelib_parts/encoding_streams.rs:87; hand-port (the Rust crate API bypassed the reserved-name lexical gate to reach E0605; `jet check` stops at that gate (E0067) first)
+fixture: json_private_typed_parser_is_not_a_public_core_api.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check private_json_parser.jet
+exit: nonzero
+stderr: ~ "__parse_typed" # original predicate: a diagnostic names __parse_typed
+stderr: ~ "Error [" # original predicate: the call is rejected (the original code E0605 sits behind the lexical gate E0067)

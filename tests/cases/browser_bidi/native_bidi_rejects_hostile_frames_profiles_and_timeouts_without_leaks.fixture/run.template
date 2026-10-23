@@ -1,0 +1,63 @@
+
+use core.web.browser as browser
+
+fn connect_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
+    session.close() ?? return "close-error"
+    return "unexpected-success"
+}
+
+fn profile_outcome() -> String {
+    profile :: browser.profile("rolling") ?? return "caught"
+    return "unexpected-success"
+}
+
+fn timeout_outcome() -> String {
+    timeout :: browser.timeout(0) ?? return "caught"
+    return "unexpected-success"
+}
+
+fn cdp_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    cdp :: session.protocol("cdp") ?? return "caught"
+    return "unexpected-success"
+}
+
+fn valid_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
+    session.close() ?? return "close-error"
+    return "connected"
+}
+
+fn closed_protocol_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.close() ?? return "close-error"
+    loop attempt in [1] {
+        session.protocol("bidi") ?? next
+        return "unexpected-open"
+    }
+    return "closed"
+}
+
+fn run() {
+    print(connect_outcome("ws://127.0.0.1:{free-port:malformed}/session?token=HOSTILE_SECRET"))
+    print(connect_outcome("ws://127.0.0.1:{free-port:mismatched}/session?token=HOSTILE_SECRET"))
+    print(connect_outcome("ws://127.0.0.1:{free-port:protocol}/session?token=HOSTILE_SECRET"))
+    print(connect_outcome("ws://127.0.0.1:{free-port:timeout}/session?token=HOSTILE_SECRET"))
+    print(profile_outcome())
+    print(timeout_outcome())
+    print(cdp_outcome("ws://127.0.0.1:{free-port:no_cdp}/session?token=HOSTILE_SECRET"))
+    print(connect_outcome("ws://127.0.0.1:{free-port:invalid_number}/session"))
+    print(connect_outcome("ws://127.0.0.1:{free-port:not_ready}/session"))
+    print(valid_outcome("ws://127.0.0.1:{free-port:surrogate}/session"))
+    print(closed_protocol_outcome("ws://127.0.0.1:{free-port:closed_protocol}/session"))
+    print(connect_outcome("ws://127.0.0.1:{free-port:malformed_session}/session"))
+}

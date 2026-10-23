@@ -1,0 +1,32 @@
+# tests/browser_bidi.rs::native_bidi_network_events_inspection_and_interception at tests/browser_bidi.rs:1633; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_network_events_inspection_and_interception.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_network.jet native_bidi_network_events_inspection_and_interception.fixture/run.template
+step: jet build browser_bidi_network.jet
+exit: 0
+session network raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:network} network.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: ~ "network.beforeRequestSent\n" # original predicate: stdout.contains
+stdout: ~ "req-secret-1\n" # original predicate: stdout.contains
+stdout: ~ "GET\n" # original predicate: stdout.contains
+stdout: ~ "true\n" # original predicate: stdout.contains
+stdout: ~ "network:ok\n" # original predicate: stdout.contains
+stdout: !~ "TOP_SECRET" # original predicate: !stdout.contains
+stdout: !~ "NETWORK_SECRET" # original predicate: !stdout.contains
+stderr: !~ "TOP_SECRET" # original predicate: !stderr.contains
+stderr: !~ "NETWORK_SECRET" # original predicate: !stderr.contains
+close network
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: has-line "session.subscribe" # original predicate: methods.iter().any(|m| m == ..)
+stdout: count "network.addIntercept" = 2 # original predicate: methods.iter().filter(|m| *m == ..).count() == 2
+stdout: has-line "network.continueRequest" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "{methods:?}" # original predicate: methods.iter().any(|m| m == ..)
+stdout: has-line "{methods:?}" # original predicate: methods.iter().any(|m| m == ..)
+stdout: count "network.removeIntercept" = 2 # original predicate: methods.iter().filter(|m| *m == ..).count() == 2
+stdout: $= "session.end\n" # original predicate: methods.last() == Some(..)

@@ -1,0 +1,51 @@
+
+derive T.Access {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn make(value: ^@param) -> @name<@param> {
+        return @name<@param>{ value: value }
+    }
+    fn marker() -> Int { 17 }
+    fn get_value(self) -> @param { self.value.copy() }
+    fn type_name(self) -> String { T.$name }
+}
+
+derive T.NumericAccess {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn replace(&self, value: ^@param) -> @param {
+        self.value = value
+        return self.value.copy()
+    }
+    fn plus(self, rhs: @param) -> @param { self.value + rhs }
+    fn equal_to(self, rhs: @param) -> Bool { self.value == rhs }
+}
+
+#Access
+struct Box<T: Printable> { value: T }
+#Access
+struct StaticOnly<T: Printable> { value: T }
+struct Wrapper<U: Printable> { boxed: Box<U> }
+#NumericAccess
+struct NumericBox<T: [Printable, Add, Equatable]> { value: T }
+
+fn run() {
+    number := Box<Int>.make(7)
+    decimal := Box<Float>{ value: 2.5 }
+    flag := Box<Bool>{ value: true }
+    letter := Box<Char>{ value: 'J' }
+    text := Box<String>.make("jet")
+    numeric := NumericBox<Float>{ value: 1.5 }
+    print(number.get_value())
+    print(decimal.get_value())
+    print(flag.get_value())
+    print(letter.get_value())
+    print(text.get_value())
+    print(text.get_value())
+    print(number.type_name())
+    print(&numeric.replace(4.5))
+    print(numeric.plus(0.5))
+    print(numeric.equal_to(4.5))
+    print(StaticOnly<Int>.marker())
+    print(StaticOnly<String>.marker())
+}

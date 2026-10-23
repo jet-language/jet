@@ -1820,7 +1820,7 @@ redact the rejected value.
 authors who launch or supervise child processes. Its executable contract is
 defined by [`Core/Process/Process.jet`](../../../Core/Process/Process.jet) and
 tests such as
-[`tests/corelib_parts/system.rs`](../../../tests/corelib_parts/system.rs).
+[`tests/cases/corelib/process_wait_observes_inherited_deadline.case`](../../../tests/cases/corelib/process_wait_observes_inherited_deadline.case).
 The export registry is
 [`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
 data example used later is

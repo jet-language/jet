@@ -1,0 +1,23 @@
+# tests/browser_bidi.rs::native_bidi_semantic_locators_actions_and_waits at tests/browser_bidi.rs:1417; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_semantic_locators_actions_and_waits.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_locators.jet native_bidi_semantic_locators_actions_and_waits.fixture/run.template
+step: jet build browser_bidi_locators.jet
+exit: 0
+session locators raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:locators} locators.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_semantic_locators_actions_and_waits.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close locators
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: count "browsingContext.locateNodes" >= 11 # original predicate: methods.iter().filter(|m| *m == ..).count() >= 11
+stdout: has-line "script.callFunction" # original predicate: methods.iter().any(|m| m == ..)
+stdout: count "input.performActions" >= 3 # original predicate: methods.iter().filter(|m| *m == ..).count() >= 3
+stdout: $= "session.end\n" # original predicate: methods.last() == Some(..)

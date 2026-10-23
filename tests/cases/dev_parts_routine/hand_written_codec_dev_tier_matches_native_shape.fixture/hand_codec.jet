@@ -1,0 +1,27 @@
+
+use core.encoding.json as json
+
+struct Email { addr: String }
+
+impl Email.Encode {
+    fn encode(self) -> Dyn {
+        m :: [String:Dyn]{ "email": Dyn.Text(~self.addr) }
+        return Dyn.Object(m)
+    }
+}
+
+impl Email.Decode {
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        f := &tree.field("email") ?? Dyn.Text("")
+        s := f.text() ?? ""
+        return Ok(Email{addr: s})
+    }
+}
+
+fn run() {
+    e := Email{addr: "a@b.com"}
+    s := json.to_string(e) ?? panic("JSON encode")
+    print(s)
+    back := json.decode<Email>(s) ?? panic("decode failed")
+    print(back.addr)
+}

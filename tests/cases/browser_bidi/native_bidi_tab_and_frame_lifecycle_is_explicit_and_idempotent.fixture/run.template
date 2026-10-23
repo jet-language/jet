@@ -1,0 +1,24 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:tab_frame}/session?token=TAB_FRAME_SECRET", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+
+    tab_one :: context.tab() ?? panic("tab one")
+    tab_two :: context.page() ?? panic("tab two")
+    main :: tab_one.main_frame() ?? panic("main")
+    frames :: tab_one.frames() ?? panic("frames")
+    print("frames:{frames.len()}")
+
+    child :: frames[1]
+    child.close() ?? panic("child close")
+    child.close() ?? panic("child close idempotent")
+
+    tab_two.close() ?? panic("tab two close")
+    main.close() ?? panic("main close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}

@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::nested_ordinary_module_generic_instance_matches_resident_jit_and_aot at tests/dev_parts/routine.rs:3184; hand-port
+fixture: nested_ordinary_module_generic_instance_matches_resident_jit_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step jit: jet run nested_ordinary_generic_module.jet
+exit: any # original asserts stdout, then tier equality
+stdout: = nested_ordinary_module_generic_instance_matches_resident_jit_and_aot.1.out
+step: jet build nested_ordinary_generic_module.jet
+exit: 0
+step aot: built
+exit: == jit
+stdout: == jit
+stderr: == jit

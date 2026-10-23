@@ -1,0 +1,20 @@
+# tests/browser_bidi.rs::native_bidi_frames_on_closed_page_fail_without_get_tree at tests/browser_bidi.rs:886; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_frames_on_closed_page_fail_without_get_tree.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_closed_frames.jet native_bidi_frames_on_closed_page_fail_without_get_tree.fixture/run.template
+step: jet build browser_bidi_closed_frames.jet
+exit: 0
+session closed_frames raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:closed_frames} closed_frames.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_frames_on_closed_page_fail_without_get_tree.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close closed_frames
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_frames_on_closed_page_fail_without_get_tree.2.out # original assert_eq!(server.join().unwrap(), [..])

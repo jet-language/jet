@@ -1,0 +1,30 @@
+# tests/dev_parts/routine.rs::physical_quantities_run_in_resident_jit_without_fallback at tests/dev_parts/routine.rs:2730; hand-port (the E3002 trail names the fixture as `jet run` was given it (relative to its package directory) instead of an absolute temp path)
+fixture: physical_quantities_run_in_resident_jit_without_fallback.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step quantity: jet run jet_jit_no_fallback_physical_quantity.jet
+cwd: quantity
+exit: any # original asserts only stdout
+stdout: = physical_quantities_run_in_resident_jit_without_fallback.1.out
+step inexact: jet run jet_jit_no_fallback_physical_quantity_inexact.jet
+cwd: inexact
+exit: 1
+stdout: empty
+stderr: = physical_quantities_run_in_resident_jit_without_fallback.2.out
+step edge: jet run jet_jit_no_fallback_physical_quantity_exact_rational_edge.jet
+cwd: edge
+exit: 1
+stdout: empty
+stderr: = physical_quantities_run_in_resident_jit_without_fallback.3.out
+step edges: jet run jet_jit_no_fallback_physical_quantity_rational_edges.jet
+cwd: edges
+exit: 0
+stdout: = physical_quantities_run_in_resident_jit_without_fallback.4.out
+stderr: empty
+step overflow: jet run jet_jit_no_fallback_physical_quantity_rounded_overflow.jet
+cwd: overflow
+exit: 1
+stdout: empty
+stderr: = physical_quantities_run_in_resident_jit_without_fallback.5.out

@@ -1,0 +1,17 @@
+# tests/dev_parts/routine.rs::place_windows_matches_resident_jit_and_aot_without_fallback at tests/dev_parts/routine.rs:4168; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: place_windows_matches_resident_jit_and_aot_without_fallback.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+copy: {root}/Examples/features/memory/place_windows.jet place_windows.jet
+step dev: jet run place_windows.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/memory/place_windows.out
+stderr: empty
+step: jet build place_windows.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = ../../../Examples/features/expected/memory/place_windows.out
+stderr: empty

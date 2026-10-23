@@ -1,0 +1,14 @@
+# tests/dev_parts/routine.rs::body_only_edit_is_type_stable at tests/dev_parts/routine.rs:5581; hand-port (the Rust crate API jet::Sema::HotSwap::type_stable_decision is carried by a `jet dev --swap` session on the same edit)
+fixture: body_only_edit_is_type_stable.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+session app line: jet dev hot.jet --swap
+recv app line until = "1" within 30s
+write: hot.jet body_only_edit_is_type_stable.fixture/new.template
+recv app line until = "3" within 30s
+signal app: KILL
+close app
+exit: any # original status unasserted: the session is killed after the verdict
+stderr: !~ "E2210" # original predicate: decision.is_compatible() (swap path)

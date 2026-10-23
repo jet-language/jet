@@ -1,0 +1,26 @@
+# tests/corelib_parts/system.rs::json_decode_preserves_scalar_strings at tests/corelib_parts/system.rs:440; hand-port (the have_rustc skip is gone with the Rust backend: the case always runs)
+fixture: json_decode_preserves_scalar_strings.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build json_coerce_a.jet
+exit: 0
+step json_coerce_a: built
+exit: 0
+stdout: = json_decode_preserves_scalar_strings.1.out
+stderr: !~ "json coerce" # original predicate: !stderr.contains("json coerce")
+
+step: jet build json_coerce_b.jet
+exit: 0
+step json_coerce_b: built
+exit: 0
+stdout: = json_decode_preserves_scalar_strings.1.out
+stderr: !~ "json coerce" # original predicate: !stderr.contains("json coerce")
+
+step: jet build json_coerce_c.jet
+exit: 0
+step json_coerce_c: built
+exit: 0
+stdout: = json_decode_preserves_scalar_strings.2.out
+stderr: !~ "json coerce" # original predicate: !stderr.contains("json coerce")

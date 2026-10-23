@@ -1,0 +1,13 @@
+
+struct Slot { value: Int }
+fn rollback(cell: Shared<Slot>) {
+    #Transact(tx) {
+        cell.value = 9
+        return
+    }
+}
+fn run() {
+    cell :: shared Slot{value: 1}
+    rollback(cell)
+    print(cell.value)
+}

@@ -1,0 +1,11 @@
+
+module outer<T>(n: Int) {
+    module plain {
+        module inner<U> { fn total(value: U) -> Int { return n } }
+        module closed :: inner<T>
+        fn result(value: T) -> Int { return closed.total(value) }
+    }
+    fn result(value: T) -> Int { return plain.result(value) }
+}
+module selected :: outer<Int>(6)
+fn run() { print(selected.result(1)) }

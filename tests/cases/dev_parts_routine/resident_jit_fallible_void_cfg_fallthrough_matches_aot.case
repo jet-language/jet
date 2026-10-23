@@ -1,0 +1,58 @@
+# tests/dev_parts/routine.rs::resident_jit_fallible_void_cfg_fallthrough_matches_aot at tests/dev_parts/routine.rs:3355; hand-port
+fixture: resident_jit_fallible_void_cfg_fallthrough_matches_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev_one_arm_fallthrough: jet run jet_jit_one_arm_fallthrough.jet
+cwd: one_arm_fallthrough
+exit: 0
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.1.out
+stderr: empty
+step: jet build jet_jit_one_arm_fallthrough.jet
+cwd: one_arm_fallthrough
+exit: 0
+step aot_one_arm_fallthrough: built
+cwd: one_arm_fallthrough
+exit: 0
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.1.out
+stderr: empty
+step dev_nested_fallthrough: jet run jet_jit_nested_fallthrough.jet
+cwd: nested_fallthrough
+exit: 0
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.2.out
+stderr: empty
+step: jet build jet_jit_nested_fallthrough.jet
+cwd: nested_fallthrough
+exit: 0
+step aot_nested_fallthrough: built
+cwd: nested_fallthrough
+exit: 0
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.2.out
+stderr: empty
+step dev_neither_arm_terminates: jet run jet_jit_neither_arm_terminates.jet
+cwd: neither_arm_terminates
+exit: 0
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.3.out
+stderr: empty
+step: jet build jet_jit_neither_arm_terminates.jet
+cwd: neither_arm_terminates
+exit: 0
+step aot_neither_arm_terminates: built
+cwd: neither_arm_terminates
+exit: 0
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.3.out
+stderr: empty
+step dev_both_arms_terminate: jet run jet_jit_both_arms_terminate.jet
+cwd: both_arms_terminate
+exit: 1
+stdout: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.4.out
+stderr: = resident_jit_fallible_void_cfg_fallthrough_matches_aot.5.out
+step: jet build jet_jit_both_arms_terminate.jet
+cwd: both_arms_terminate
+exit: 0
+step aot_both_arms_terminate: built
+cwd: both_arms_terminate
+exit: == dev_both_arms_terminate
+stdout: == dev_both_arms_terminate
+stderr: == dev_both_arms_terminate

@@ -1,0 +1,18 @@
+# tests/dev_parts/routine.rs::numeric_singleton_splits_match_resident_jit_and_aot_without_fallback at tests/dev_parts/routine.rs:4699; hand-port
+fixture: numeric_singleton_splits_match_resident_jit_and_aot_without_fallback.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check numeric_singleton_splits.jet
+exit: 0
+step dev: jet run numeric_singleton_splits.jet
+exit: 0
+stdout: = numeric_singleton_splits_match_resident_jit_and_aot_without_fallback.1.out
+stderr: empty
+step: jet build numeric_singleton_splits.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = numeric_singleton_splits_match_resident_jit_and_aot_without_fallback.1.out
+stderr: empty

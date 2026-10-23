@@ -1,0 +1,30 @@
+
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn keep_file_reader(value: ^json.JSONReader) -> json.JSONReader { value }
+
+fn run() {
+    text := json.reader("null")
+    _ :: &text.next() ?? panic("text event")
+    print("text event")
+
+    duplicates := json.reader_allow_duplicates("{{\"x\":1,\"x\":2}}")
+    loop _ in 0..<6 {
+        _ :: &duplicates.next() ?? panic("duplicate event")
+    }
+    print("duplicate events")
+
+    records := jsonl.reader("null\ntrue\n")
+    first :: &records.next() ?? panic("first record")
+    print(json.canonical(first) ?? panic("canonical first"))
+    second :: &records.next() ?? panic("second record")
+    print(json.canonical(second) ?? panic("canonical second"))
+
+    input :: files.open("value.json") ?? panic("open")
+    file :: json.reader(^input) ?? panic("file reader")
+    kept := keep_file_reader(^file)
+    _ :: &kept.next() ?? panic("file event")
+    print("file event")
+}

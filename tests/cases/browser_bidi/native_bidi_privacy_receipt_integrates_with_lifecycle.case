@@ -1,0 +1,18 @@
+# tests/browser_bidi.rs::native_bidi_privacy_receipt_integrates_with_lifecycle at tests/browser_bidi.rs:2860; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_privacy_receipt_integrates_with_lifecycle.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_privacy_lifecycle.jet native_bidi_privacy_receipt_integrates_with_lifecycle.fixture/run.template
+step: jet build browser_bidi_privacy_lifecycle.jet
+exit: 0
+session privacy_lifecycle raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_lifecycle} privacy_lifecycle.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_privacy_receipt_integrates_with_lifecycle.1.out
+close privacy_lifecycle
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_privacy_receipt_integrates_with_lifecycle.2.out # original assert_eq!(server.join().unwrap(), [..])

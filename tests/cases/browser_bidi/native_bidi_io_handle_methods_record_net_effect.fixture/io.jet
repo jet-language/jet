@@ -1,0 +1,32 @@
+
+use core.web.browser as browser
+
+fn connect() -[FS]> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
+fn context(session: Browser) -[FS]> Unit { session.context() ?? return }
+fn subscribe(session: Browser) -[FS]> Unit { session.subscribe("log.entryAdded") ?? return }
+fn next(session: Browser, timeout: BrowserTimeout) -[FS]> Unit { &session.next_event(timeout) ?? return }
+fn add_intercept(session: Browser) -[FS]> Unit { session.add_intercept("beforeRequestSent") ?? return }
+fn add_intercept_url(session: Browser) -[FS]> Unit {
+    session.add_intercept_url("beforeRequestSent", "https://example.test/*") ?? return
+}
+fn continue_request(session: Browser) -[FS]> Unit { session.continue_request("req-1") ?? return }
+fn fail_request(session: Browser) -[FS]> Unit { session.fail_request("req-1") ?? return }
+fn fulfill_request(session: Browser) -[FS]> Unit {
+    session.fulfill_request("req-1", 200, "blocked") ?? return
+}
+fn protocol(session: Browser) -[FS]> Unit { session.protocol("bidi") ?? return }
+fn close(session: Browser) -[FS]> Unit { session.close() ?? return }
+fn page(context: BrowserContext) -[FS]> Unit { context.page() ?? return }
+fn tab(context: BrowserContext) -[FS]> Unit { context.tab() ?? return }
+fn goto(page: BrowserPage) -[FS]> Unit { page.goto("https://example.test") ?? return }
+fn frames(page: BrowserPage) -[FS]> Unit { page.frames() ?? return }
+fn frame_close(frame: BrowserFrame) -[FS]> Unit { frame.close() ?? return }
+fn wait(locator: BrowserLocator, timeout: BrowserTimeout) -[FS]> Unit { locator.wait(timeout) ?? return }
+fn wait_gone(locator: BrowserLocator, timeout: BrowserTimeout) -[FS]> Unit { locator.wait_gone(timeout) ?? return }
+fn click(locator: BrowserLocator) -[FS]> Unit { locator.click() ?? return }
+fn hover(locator: BrowserLocator) -[FS]> Unit { locator.hover() ?? return }
+fn fill(locator: BrowserLocator) -[FS]> Unit { locator.fill("value") ?? return }
+fn press(locator: BrowserLocator) -[FS]> Unit { locator.press("Enter") ?? return }
+fn remove(intercept: BrowserIntercept) -[FS]> Unit { intercept.remove() ?? return }
+fn send(protocol: BrowserProtocol) -[FS]> Unit { protocol.send("session.status", "{{}}") ?? return }
+fn run() {}

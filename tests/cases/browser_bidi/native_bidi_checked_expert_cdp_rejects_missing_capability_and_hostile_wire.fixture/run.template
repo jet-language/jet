@@ -1,0 +1,25 @@
+
+use core.web.browser as browser
+
+fn missing_cdp(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    print("abilities:{session.abilities().cdp()}")
+    cdp :: session.protocol("cdp") ?? return "caught-capability"
+    return "unexpected-open"
+}
+
+fn hostile_cdp(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    cdp :: session.protocol("cdp") ?? return "unexpected-protocol"
+    cdp.send("Runtime.evaluate", "{{\"expression\":\"1\"}}") ?? return "caught-wire"
+    return "unexpected-success"
+}
+
+fn run() {
+    print(missing_cdp("ws://127.0.0.1:{free-port:no_cdp}/session?token=HOSTILE_SECRET"))
+    print(hostile_cdp("ws://127.0.0.1:{free-port:cdp_hostile}/session?token=CDP_HOSTILE_SECRET"))
+}
