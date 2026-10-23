@@ -112,18 +112,21 @@ fn sha256_bytes(data: View<U8>) -> [U8] Never! {
     output
 }
 
-fn sha256_hex_digit(value: Int) -> String Never! {
-    if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
-    else -> String.from_bytes([U8{87 + value}]) ?? "0"
+// The lowercase hex digit of `value` (0..15).
+fn sha256_hex_digit(value: Int) -> U8 Never! {
+    if value < 10 -> U8{48 + value} else -> U8{87 + value}
 }
 
+// Lowercase hex of `bytes`: the digits are gathered as bytes and made a
+// String once.
 fn sha256_hex_bytes(bytes: [U8]) -> String Never! {
-    output := ""
+    digits := List<U8>.try_with_capacity(bytes.len() * 2) ?? panic("hex digit allocation failed")
     loop byte in bytes {
         value :: Int.from_u8(byte)
-        output = "{output}{sha256_hex_digit(((value >> 4)).bit_and(15))}{sha256_hex_digit((value).bit_and(15))}"
+        &digits.push(sha256_hex_digit(((value >> 4)).bit_and(15)))
+        &digits.push(sha256_hex_digit((value).bit_and(15)))
     }
-    output
+    String.from_bytes(digits) ?? panic("hex digits are ASCII")
 }
 
 fn sha256_hex(value: String) -> String Never! {
