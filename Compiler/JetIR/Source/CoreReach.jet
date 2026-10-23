@@ -403,7 +403,8 @@ fn ir_reachable_core_rows(functions: &[FnBody], candidates: ^[Bool], core_module
         }
         _ := &by_key.add(function.key, index)
         if ir_string_format_source(function.module_identity, function.source_file, function.kind) || ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
-        rooted :: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_precise_source_target(function)
+        // A startup function runs before the entry (ir_entry_function), read or not.
+        rooted :: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_precise_source_target(function) || function.name.starts_with(IR_STARTUP_FUNCTION_PREFIX)
         &reachable.push(rooted)
         if rooted {
             &roots.push(index)

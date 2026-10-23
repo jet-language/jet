@@ -353,11 +353,10 @@ file execution body; `jet run`, `jet dev`, and `jet test` use that same entry
 law. At file scope, `name :: value` and `name := value` are module globals
 visible to every function in the file; the mutable form is writable and is
 initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
-instruction 2026-09-28) amends the immutable form: its initializer is literal
-data (scalars, text, struct, enum-case, list, and map literals, nested), folded
-once by the compile-time evaluator and read as an ordinary copy on every tier;
-calls, operators, and name reads are E0622. Computed
-work belongs inside `fn run`. Loose top-level statements are E0621, and an
+instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23) amends the
+immutable form: its initializer is any expression, computed once in dependency
+order before `fn run` and read as an ordinary copy on every tier (spec "Values,
+expressions, and calls"). Loose top-level statements are E0621, and an
 imported file with loose statements is E0620. Notebook and REPL adapters may
 construct an explicit `fn run` for their submitted fragment. `fn dev`,
 `fn build`, and `#Test` declarations remain legal beside module globals.

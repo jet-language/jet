@@ -1,0 +1,33 @@
+package {
+    name: "startup_constants"
+    authority: { holds: { allow: [Env, IO] } }
+}
+
+// A `NAME :: expr` constant whose value is not literal data is tried at
+// build time. A pure value folds into the program like a literal. A value
+// that reads the outside world (here an environment variable) is never
+// read by the build: the program computes it once at startup, before
+// `fn run`, and every read sees that one value.
+use core.sys as env
+
+fn squares(count: Int) -> [Int] {
+    values := [Int]{}
+    loop index in 1..<(count + 1) -> &values.push(index * index)
+    values
+}
+
+// Pure: folded at build time.
+SQUARES :: squares(4)
+TOTAL :: SQUARES[0] + SQUARES[1] + SQUARES[2] + SQUARES[3]
+
+// Reads the environment: computed at startup.
+MODE :: env.get("JET_STARTUP_EXAMPLE_MODE") ?? "default"
+// Reads a startup constant, so it is computed at startup too.
+BANNER :: "mode {MODE}, total {TOTAL}"
+
+fn run() {
+    print(SQUARES)
+    print(TOTAL)
+    print(MODE)
+    print(BANNER)
+}

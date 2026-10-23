@@ -140,6 +140,29 @@ fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TCo
     address
 }
 
+// The address of the cell of a constant computed at startup
+// (TConstantDef.init): a zeroed static object holding a state word (0: not
+// computed, 1: computing, 2: computed) and, from byte 8, the value of type
+// row `row` the constant's startup function returned, which the cell owns
+// for the life of the process.
+fn ir_startup_cell(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: Int) -> Int Never! {
+    memo :: "startup:{definition.key}"
+    object := m.constant_rows.get(memo) ?? -1
+    if object < 0 {
+        object = m.data.len()
+        cell := [U8]{}
+        loop _ in 0..<(8 + ir_align8(m.types[row].size)) -> &cell.push(U8{0})
+        &m.data.push(^cell)
+        // No address words; the entry marks a word-aligned static object.
+        m.data_relocs[object] = [IRDataReloc]{}
+        m.constant_rows[memo] = object
+    }
+    pointer :: ir_pointer_row(&m)
+    address :: ir_temp(&m, &b, pointer)
+    ir_emit(&b.f, IROp.DataAddress, address, object, -1, -1, b.line)
+    address
+}
+
 // Lays `value` of `ty` (type row `row`) at `offset` of local object
 // `object` the way memory holds a value of that row: an aggregate's bytes in
 // place, any other value's word. false when it cannot be frozen.

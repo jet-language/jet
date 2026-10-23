@@ -241,13 +241,16 @@ an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
 
 At ordinary file scope, `name :: value` declares an immutable module global and
-`name := value` declares a mutable module global. A mutable global's initializer
-is a tier-stable scalar literal; an immutable global's initializer is literal
-data (numbers, text, struct, enum-case, list, and map literals, nested freely),
-which the compile-time evaluator folds once, and every read is an ordinary
-copy (D-MODULE-VALUE1). Both are visible to functions in the file; only the
-mutable form may be assigned after initialization. Calls, operators, and name
-reads in an initializer are E0622; computation belongs in an explicit function.
+`name := value` declares a mutable module global. A mutable or `#Persist`
+global's initializer is a tier-stable scalar literal; any other initializer is
+E0622. An immutable global's initializer is any expression, computed once in
+dependency order before `fn run`, and every read is an ordinary copy
+(D-MODULE-VALUE1). An initializer that stops stops the program before `fn run`
+with its normal report, the same way on every tier. Compile-time code reads an
+immutable global only when the build can compute it, which needs a pure
+evaluation that succeeds (E0627). Only an explicit `comptime { … }` reads build
+inputs. Both globals are visible to functions in the file; only the mutable
+form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); the inner value must still
 be literal data, not a call or arithmetic expression.

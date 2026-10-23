@@ -37,6 +37,8 @@ use jet_sema.[
     sema_check_comptime_function,
     check_pure_program_root,
     sema_check_comptime_item,
+    sema_comptime_call_facts_pure,
+    SemaCallSiteFact,
     sema_collect_comptime_declarations,
     sema_checked_shape_defaults,
     sema_comptime_append_checked_function_to_module,
@@ -664,6 +666,10 @@ struct JetDriverComptimeFunctionClosure {
     complete: Bool
     // Each incomplete reachable function's recorded causes, keyed by function.
     incomplete_reasons: [String]{[String]{}}
+    // Every constant a reachable function names, and whether every call
+    // site of the reachable functions is pure (sema_comptime_call_facts_pure).
+    dependencies: [String]{[String]{}}
+    pure: Bool{true}
 }
 
 struct JetDriverComptimeWaitRow {
@@ -734,6 +740,8 @@ fn jet_driver_comptime_function_closure(
     values: [SemaComptimeItemValue],
     checked_functions: &[SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
+    // A soft item's closure also records its purity and its functions' constants.
+    soft: Bool,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeFunctionClosure {
     graph_option :: program.registration_graph
@@ -758,6 +766,8 @@ fn jet_driver_comptime_function_closure(
     waiting := [String]{}
     complete := true
     incomplete_reasons := [String]{}
+    dependencies := [String]{}
+    pure := true
     cursor := 0
     loop cursor < queue.len() {
         current := queue[cursor]
@@ -770,6 +780,10 @@ fn jet_driver_comptime_function_closure(
         if reused_row < 0 && memory_plan.len() == 0 -> &memory_plan.push(sema_function_memory_plan_from_graph(graph))
         checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, &environment, program, &probe, available, memory_plan[0], values, current.module_identity, current.function_key)
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(&waiting, dependency)
+        if soft {
+            loop dependency in checked.dependencies -> jet_driver_comptime_wait_add(&dependencies, dependency)
+            if pure && !sema_comptime_call_facts_pure(graph, checked.call_facts) -> pure = false
+        }
         if {
             !checked.complete || jet_driver_has_errors(checked.diagnostics) -> {
                 loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
@@ -811,7 +825,7 @@ fn jet_driver_comptime_function_closure(
             }
         }
     }
-    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons}
+    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons, dependencies: dependencies, pure: pure}
 }
 
 // The run's comptime staging: `program` holds (its one row, once `staged`:
@@ -864,6 +878,11 @@ struct JetDriverComptimeFlush {
     stop: JetDriverComptimeRunResult?
     // Whether a value landed or a checked-text item passed.
     progressed: Bool
+    // Soft items whose evaluation could not complete (the IR builder refused
+    // their code, evaluation trapped, failed or ran out of budget): each is
+    // computed at startup instead (jet_driver_comptime_demote), reporting
+    // nothing here.
+    demoted: [SemaComptimeItemSource]{[SemaComptimeItemSource]{}}
 }
 
 // Work counters of one comptime run (#4601 scaling gate), written to the
@@ -1077,6 +1096,108 @@ fn jet_driver_comptime_item_value(source: SemaComptimeItemSource, value: TCompti
     }
 }
 
+// Always-try `::` (#4276): an immutable `NAME :: expr` whose value is not
+// literal data is a soft item. It folds while building when its evaluation is
+// pure and completes; otherwise it is computed at startup, before `run`.
+// Effects never fold: an item whose own or closure call sites are impure
+// (sema_comptime_call_facts_pure) is computed at startup without being tried.
+// Only compile-time failures move an item to startup (a check that fails
+// under compile-time execution, an IR build the evaluator refuses, a trap,
+// a failure, a spent budget); the startup check then reports every real
+// error exactly once.
+
+// Whether the call sites `call_facts` keep an evaluation pure, read from the
+// run's graph in place.
+fn jet_driver_comptime_pure(program: SemaProgramTables, call_facts: [SemaCallSiteFact]) -> Bool Never! {
+    graph_option :: program.registration_graph
+    graph :: graph_option ?? return false
+    sema_comptime_call_facts_pure(graph, call_facts)
+}
+
+// The first of `dependencies` that is computed at startup, or None.
+fn jet_driver_comptime_startup_read(dependencies: [String], startup: [String:String]) -> String? Never! {
+    loop key in dependencies {
+        if startup.get(key) != None -> return Val(key)
+    }
+    None
+}
+
+// A compile-time item (not soft: an explicit `comptime {}`, a marker
+// argument, a field default, ...) reads a constant computed at startup.
+fn jet_driver_comptime_startup_read_error(program: SemaProgramTables, source: SemaComptimeItemSource, key: String, startup: [String:String]) -> Diagnostic {
+    name :: startup.get(key) ?? key
+    jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0627", source.span, "this compile-time code reads `{name}`, which is only known at startup", "`{name}` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `fn run`; compile-time code runs while building, before that value exists", "compute the value at runtime instead, or make `{name}` foldable: a pure expression that evaluates without failing")
+}
+
+// Computes soft item `source` at startup: checks it again as the code that
+// runs before `run` (outside compile-time execution) and lands a startup
+// value carrying its startup function (jet_driver_comptime_startup_function).
+// That check's errors are the item's real ones and are reported once (the
+// compile-time attempt's were withdrawn); its warnings only when the
+// compile-time attempt's were not `reported` already. False when it
+// reported an error or did not complete.
+fn jet_driver_comptime_demote(
+    environment: &SemaScopeEnvironment,
+    program: &SemaProgramTables,
+    probe: &SemaScopeProbe,
+    available: SemaComptimeAvailableConstants,
+    source: SemaComptimeItemSource,
+    reported: Bool,
+    values: &[SemaComptimeItemValue],
+    startup: &[String:String],
+    diagnostics: &[Diagnostic],
+) -> Bool {
+    runtime := source.copy()
+    runtime.soft = false
+    runtime.startup = true
+    checked := sema_check_comptime_item(&environment, &program, &probe, available, runtime)
+    loop diagnostic in checked.diagnostics {
+        if reported && diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        &diagnostics.push(jet_driver_attach_program_source_location(diagnostic, program, source.module_identity))
+    }
+    if jet_driver_has_errors(checked.diagnostics) -> return false
+    request :: checked.request ?? {
+        &diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0003", source.span, "the startup check of `{source.name}` returned no typed expression", "a constant computed at startup runs its checked expression before `run`", "retain the startup check's request"))
+        return false
+    }
+    if !checked.complete || checked.waiting_dependencies.len() > 0 {
+        &diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0003", source.span, "the startup check of `{source.name}` did not complete", "a constant computed at startup runs its checked expression before `run`", "complete the startup check, which reads only constants that already have values"))
+        return false
+    }
+    ty :: request.expected_type ?? body_type(request.expression.tree, request.expression.root)
+    &values.push(SemaComptimeItemValue{
+        module_identity: source.module_identity,
+        key: source.key,
+        destination_key: source.destination_key,
+        kind: source.kind,
+        value: TComptimeValue.Unit,
+        ty: ty,
+        startup: true,
+        init: Val(jet_driver_comptime_startup_function(request)),
+    })
+    startup[source.key] = source.name
+    true
+}
+
+// Demotes each of `sources` (jet_driver_comptime_demote), whose
+// compile-time checks were reported; false when one reported an error.
+fn jet_driver_comptime_demote_all(
+    environment: &SemaScopeEnvironment,
+    program: &SemaProgramTables,
+    probe: &SemaScopeProbe,
+    available: SemaComptimeAvailableConstants,
+    sources: [SemaComptimeItemSource],
+    values: &[SemaComptimeItemValue],
+    startup: &[String:String],
+    diagnostics: &[Diagnostic],
+) -> Bool {
+    demoted := true
+    loop source in sources {
+        if !jet_driver_comptime_demote(&environment, &program, &probe, available, source, true, &values, &startup, &diagnostics) -> demoted = false
+    }
+    demoted
+}
+
 // Whether a check that ran while `keys` (a batch's source keys) were still
 // held back may differ from the check the run makes one item at a time,
 // after the batch's values landed: it waits on a batch key, or it is
@@ -1278,6 +1399,7 @@ fn jet_driver_comptime_flush(
             loop index in start..<batch.entries.len() {
                 single := jet_driver_comptime_flush(request, jet_driver_comptime_batch_single(batch, index), &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
                 if single.progressed -> flushed.progressed = true
+                loop demoted in single.demoted -> &flushed.demoted.push(demoted)
                 if single.stop == .Val(stopped) {
                     flushed.stop = Val(stopped)
                     return flushed
@@ -1286,6 +1408,17 @@ fn jet_driver_comptime_flush(
             return flushed
         }
         head :: batch.entries[start].request
+        // A soft item the IR builder refuses is computed at startup; the
+        // batch's later literals still land.
+        if batch.entries[start].source.soft {
+            &flushed.demoted.push(batch.entries[start].source)
+            loop index in start + 1..<batch.entries.len() {
+                plain :: batch.entries[index].plain ?? next
+                &values.push(jet_driver_comptime_item_value(batch.entries[index].source, plain, body_type(batch.entries[index].request.expression.tree, batch.entries[index].request.expression.root)))
+                flushed.progressed = true
+            }
+            return flushed
+        }
         &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0956", head.span, "the comptime evaluator can't build this item's code yet: {built.build_failures.join("; ")}", "compile-time code runs as the IR the backend builds, and the IR builder refused part of this item's checked closure", "keep the computation at runtime until the IR builder supports it"))
         flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
         return flushed
@@ -1319,6 +1452,14 @@ fn jet_driver_comptime_flush(
                 field_name :: &name_parts.pop() ?? source.name
                 &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2414", source.span, "`{field_name}`'s `{{…}}` default must be a compile-time constant", "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime", "use a literal or a `comptime`-evaluable expression — e.g. `port: Int{{8080}}` or `ports: [Int]{{[80, 443]}}`"))
             }
+            next
+        }
+        // A soft item whose evaluation traps, fails or runs out of budget is
+        // computed at startup instead, where the same failure is the
+        // program's own (a trap panics before `run`).
+        failed_value :: if eval_result.value == .Val(evaluated_value) -> evaluated_value == .Failed(_) else -> false
+        if source.soft && eval_result.internal_problem == None && (eval_result.error != None || failed_value) {
+            &flushed.demoted.push(source)
             next
         }
         if eval_result.error != None || eval_result.internal_problem != None {
@@ -1410,6 +1551,28 @@ fn jet_driver_merge_checked_text_functions(graph: &SemaGraphResult, functions: [
         loop request in checked.calls -> &graph.comptime_requests.push(request)
     }
     true
+}
+
+// Adds the startup function of every constant computed at startup
+// (SemaComptimeItemValue.init) to its module's checked functions, as a
+// function sema injected, and returns their keys in value order.
+fn jet_driver_add_startup_functions(graph: &SemaGraphResult, values: [SemaComptimeItemValue]) -> [String] Never! {
+    keys := [String]{}
+    module_rows := [String:Int]{}
+    loop (index, graph_module) in graph.modules {
+        if module_rows.get(graph_module.module_identity) == None -> module_rows[graph_module.module_identity] = index
+    }
+    seen := [String:Bool]{}
+    loop value in values {
+        init :: value.init ?? next
+        if seen.get(init.key) != None -> next
+        module_index :: module_rows.get(value.module_identity) ?? next
+        seen[init.key] = true
+        &keys.push(init.key)
+        &graph.modules[module_index].injected_function_keys.push(init.key)
+        &graph.modules[module_index].functions.push(init.copy())
+    }
+    keys
 }
 
 // The bundle's name facts built over the graph's checked modules on the
@@ -1546,6 +1709,22 @@ fn jet_driver_comptime_run(
     // Constants' AST values, which staged values never change, read in place.
     available := jet_driver_comptime_program_available(programs[0], values)
     run_index := jet_driver_comptime_run_index(checked_functions)
+    // The constants computed at startup (jet_driver_comptime_demote), by
+    // key, with their names: compile-time code never reads them (E0627),
+    // and a soft item that reads one is computed at startup too.
+    startup := [String:String]{}
+    loop value in values {
+        if value.startup {
+            parts :: value.key.split(":").to_list()
+            startup[value.key] = if parts.len() > 0 -> parts[parts.len() - 1] else -> value.key
+        }
+    }
+    // A soft item whose startup check reported errors does not stop the
+    // run: the other items still check, so every real error is reported
+    // once, and the run fails at its end. `stop_mark` is where the reports
+    // after the last such failure start.
+    soft_failed := false
+    stop_mark := 0
     // Checked functions whose checked-text calls were already queued; the
     // run's checked functions only grow, so each is scanned once.
     scanned_functions := 0
@@ -1627,10 +1806,14 @@ fn jet_driver_comptime_run(
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
                     flushed := jet_driver_comptime_flush(request, batch, &values, checked_functions, &trace, programs[0], &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
-                    if flushed.progressed -> made_progress = true
+                    if flushed.progressed || flushed.demoted.len() > 0 -> made_progress = true
                     if flushed.stop == .Val(stopped) {
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
+                    }
+                    if !jet_driver_comptime_demote_all(&environments[0], &programs[0], &probe, available, flushed.demoted, &values, &startup, &diagnostics) {
+                        soft_failed = true
+                        stop_mark = diagnostics.len()
                     }
                     if values.len() > resolved_count {
                         if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail, request.trace_sink) {
@@ -1645,16 +1828,21 @@ fn jet_driver_comptime_run(
                     }
                 }
                 item_diagnostic_start := diagnostics.len()
-                // A comptime item's checker reports against its own module's
-                // source, so each carries that module's location.
-                loop diagnostic in checked_item.diagnostics -> &diagnostics.push(jet_driver_attach_program_source_location(diagnostic, programs[0], source.module_identity))
-                // JET_KEEP_GOING: an item whose own check reported an error is
-                // dropped (its value never lands) and the run goes on.
-                if keep_going {
-                    if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
-                } else if jet_driver_has_errors(diagnostics) {
-                    sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
-                    return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                // A soft item's compile-time reports are withdrawn: when its
+                // compile-time check fails it is computed at startup, whose
+                // check reports its real errors (jet_driver_comptime_demote).
+                if !source.soft {
+                    // A comptime item's checker reports against its own module's
+                    // source, so each carries that module's location.
+                    loop diagnostic in checked_item.diagnostics -> &diagnostics.push(jet_driver_attach_program_source_location(diagnostic, programs[0], source.module_identity))
+                    // JET_KEEP_GOING: an item whose own check reported an error is
+                    // dropped (its value never lands) and the run goes on.
+                    if keep_going {
+                        if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
+                    } else if jet_driver_has_errors_since(diagnostics, stop_mark) {
+                        sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                        return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                    }
                 }
                 if checked_item.waiting_dependencies.len() > 0 {
                     if checked_item.diagnostics.len() == 0 {
@@ -1672,13 +1860,38 @@ fn jet_driver_comptime_run(
                     &next_pending.push(source)
                     next
                 }
+                startup_read :: jet_driver_comptime_startup_read(checked_item.dependencies, startup)
+                if source.soft {
+                    // A soft item that reads a startup constant, fails its
+                    // compile-time check, or calls anything impure is
+                    // computed at startup, untried.
+                    soft_request :: checked_item.request
+                    impure :: if soft_request == .Val(soft_checked) -> !jet_driver_comptime_pure(programs[0], soft_checked.call_facts) || jet_driver_comptime_input_expression(soft_checked.expression) else -> true
+                    if startup_read != None || !checked_item.complete || jet_driver_has_errors(checked_item.diagnostics) || impure {
+                        if !jet_driver_comptime_demote(&environments[0], &programs[0], &probe, available, source, false, &values, &startup, &diagnostics) {
+                            soft_failed = true
+                            stop_mark = diagnostics.len()
+                            next
+                        }
+                        made_progress = true
+                        next
+                    }
+                    // Its compile-time check passed: its warnings are its own.
+                    loop diagnostic in checked_item.diagnostics -> &diagnostics.push(jet_driver_attach_program_source_location(diagnostic, programs[0], source.module_identity))
+                }
+                if startup_read == .Val(read_key) {
+                    &diagnostics.push(jet_driver_comptime_startup_read_error(programs[0], source, read_key, startup))
+                    if keep_going -> next
+                    sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                    return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                }
                 if !checked_item.complete && keep_going {
                     &diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` did not check to a complete typed value", "JET_KEEP_GOING drops the item and runs the rest", "see the item's other reports"))
                     next
                 }
                 if !checked_item.complete {
                     result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                    if !jet_driver_has_errors(diagnostics) {
+                    if !jet_driver_has_errors_since(diagnostics, stop_mark) {
                         result.internal_problem = Val("comptime item checking did not return a complete typed value or dependency wait set")
                     }
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -1726,8 +1939,9 @@ fn jet_driver_comptime_run(
                     }
                 }
                 checked_mark := checked_functions.len()
+                closure_diagnostic_start :: diagnostics.len()
                 if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
-                closure := jet_driver_comptime_function_closure(&environments[0], programs[0], &probe, available, &run_index, &memory_plan, values, &checked_functions, comptime_request, &diagnostics)
+                closure := jet_driver_comptime_function_closure(&environments[0], programs[0], &probe, available, &run_index, &memory_plan, values, &checked_functions, comptime_request, source.soft || startup.len() > 0, &diagnostics)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len())
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
                     loop diagnostics.len() > item_diagnostic_start {
@@ -1736,17 +1950,47 @@ fn jet_driver_comptime_run(
                     jet_driver_comptime_forget_functions(&checked_functions, &run_index, checked_mark)
                     flushed := jet_driver_comptime_flush(request, batch, &values, checked_functions, &trace, programs[0], &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
-                    if flushed.progressed -> made_progress = true
+                    if flushed.progressed || flushed.demoted.len() > 0 -> made_progress = true
                     if flushed.stop == .Val(stopped) {
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
+                    if !jet_driver_comptime_demote_all(&environments[0], &programs[0], &probe, available, flushed.demoted, &values, &startup, &diagnostics) {
+                        soft_failed = true
+                        stop_mark = diagnostics.len()
+                    }
                     retry = true
                     next
                 }
+                closure_read :: jet_driver_comptime_startup_read(closure.dependencies, startup)
+                if source.soft {
+                    closure_failed :: jet_driver_has_errors_since(diagnostics, closure_diagnostic_start) || (!closure.complete && closure.waiting_dependencies.len() == 0)
+                    // The closure's reports are withdrawn: a failed closure
+                    // moves the item to startup, and a waiting one reports
+                    // again at its next check.
+                    if closure_failed || closure.waiting_dependencies.len() > 0 {
+                        loop diagnostics.len() > closure_diagnostic_start {
+                            _ := &diagnostics.pop()
+                        }
+                    }
+                    if closure.waiting_dependencies.len() == 0 && (closure_failed || !closure.pure || closure_read != None) {
+                        if !jet_driver_comptime_demote(&environments[0], &programs[0], &probe, available, source, true, &values, &startup, &diagnostics) {
+                            soft_failed = true
+                            stop_mark = diagnostics.len()
+                            next
+                        }
+                        made_progress = true
+                        next
+                    }
+                } else if closure.waiting_dependencies.len() == 0 && closure_read == .Val(read_key) {
+                    &diagnostics.push(jet_driver_comptime_startup_read_error(programs[0], source, read_key, startup))
+                    if keep_going -> next
+                    sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                    return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                }
                 if keep_going {
                     if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
-                } else if jet_driver_has_errors(diagnostics) {
+                } else if jet_driver_has_errors_since(diagnostics, stop_mark) {
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
@@ -1756,7 +2000,7 @@ fn jet_driver_comptime_run(
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 {
                     result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                    if !jet_driver_has_errors(diagnostics) {
+                    if !jet_driver_has_errors_since(diagnostics, stop_mark) {
                         problem := "comptime function checking did not return a complete body or dependency wait set"
                         loop reason in closure.incomplete_reasons -> problem = "{problem}\n  {reason}"
                         result.internal_problem = Val(problem)
@@ -1799,32 +2043,50 @@ fn jet_driver_comptime_run(
                 if batch.entries.len() > 0 {
                     flushed := jet_driver_comptime_flush(request, batch, &values, checked_functions, &trace, programs[0], &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
-                    if flushed.progressed -> made_progress = true
+                    if flushed.progressed || flushed.demoted.len() > 0 -> made_progress = true
                     if flushed.stop == .Val(stopped) {
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
+                    }
+                    if !jet_driver_comptime_demote_all(&environments[0], &programs[0], &probe, available, flushed.demoted, &values, &startup, &diagnostics) {
+                        soft_failed = true
+                        stop_mark = diagnostics.len()
                     }
                 }
                 alone := jet_driver_comptime_batch_new()
                 jet_driver_comptime_batch_add(&alone, source, comptime_request, &closure.functions, None)
                 flushed := jet_driver_comptime_flush(request, alone, &values, checked_functions, &trace, programs[0], &staging, &counters, &diagnostics)
-                if flushed.progressed -> made_progress = true
+                if flushed.progressed || flushed.demoted.len() > 0 -> made_progress = true
                 if flushed.stop == .Val(stopped) {
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return stopped
+                }
+                if !jet_driver_comptime_demote_all(&environments[0], &programs[0], &probe, available, flushed.demoted, &values, &startup, &diagnostics) {
+                    soft_failed = true
+                    stop_mark = diagnostics.len()
                 }
             }
         }
         if batch.entries.len() > 0 {
             flushed := jet_driver_comptime_flush(request, batch, &values, checked_functions, &trace, programs[0], &staging, &counters, &diagnostics)
             batch = jet_driver_comptime_batch_new()
-            if flushed.progressed -> made_progress = true
+            if flushed.progressed || flushed.demoted.len() > 0 -> made_progress = true
             if flushed.stop == .Val(stopped) {
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return stopped
             }
+            if !jet_driver_comptime_demote_all(&environments[0], &programs[0], &probe, available, flushed.demoted, &values, &startup, &diagnostics) {
+                soft_failed = true
+                stop_mark = diagnostics.len()
+            }
         }
         if next_pending.len() > 0 && !made_progress {
+            // What waits on a constant whose startup check failed waits
+            // for good; that check's reports are the run's.
+            if soft_failed {
+                sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+            }
             cycle := jet_driver_comptime_dependency_cycle(wait_rows)
             if {
                 cycle != None -> {
@@ -1855,6 +2117,10 @@ fn jet_driver_comptime_run(
             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
             return jet_driver_comptime_lost_graph(values, checked_functions, trace)
         }
+    }
+    if soft_failed && !keep_going {
+        sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+        return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
     }
     finished := jet_driver_comptime_run_result(values, checked_functions, trace, true, false)
     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -3682,6 +3948,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     // The merge was the staged closures' last reader.
     comptime_functions = [SemaComptimeFunctionResult]{}
+    // The startup functions of the constants computed at startup join
+    // their modules' checked functions (lowered like any other).
+    startup_keys :: jet_driver_add_startup_functions(&checked_graph, comptime_values)
     if checked_projection {
         resolved_registration := sema_comptime_graph_with_values(^registration_graph, comptime_values)
         schema_ingress :: capture.schema_ingress ?? return jet_driver_compile_internal_result(load, trace, "the retained checked projection lost its actual schema input")
@@ -3865,7 +4134,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
     if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
     entry_effects := [String]{}
-    if entry_key == .Val(key) -> entry_effects = jet_driver_required_effects(sema_functions, key)
+    if entry_key == .Val(key) -> entry_effects = jet_driver_required_effects(sema_functions, key, startup_keys)
     foreign_link :: jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
     if capture.stop_before_lowering {
         sources := [String:String]{}
@@ -3886,13 +4155,17 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 // call edges. The maximal row an open-world call (an unannotated function
 // value, an extern) seeds into `solved` is a ceiling fact (E0743), not a
 // required right, so it never widens the authority the application must hold.
-fn jet_driver_required_effects(functions: [FnBody], entry_key: String) -> [String] Never! {
+fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_keys: [String]) -> [String] Never! {
     by_key := [String:Int]{}
     loop (index, function) in functions {
         if by_key.get(function.key) == None -> by_key[function.key] = index
     }
     pending := [Int]{}
     if by_key.get(entry_key) == .Val(entry) -> &pending.push(entry)
+    // The program computes its startup constants before the entry runs.
+    loop key in startup_keys {
+        if by_key.get(key) == .Val(init) -> &pending.push(init)
+    }
     seen := [Int:Bool]{}
     required := [String]{}
     loop pending.len() > 0 {

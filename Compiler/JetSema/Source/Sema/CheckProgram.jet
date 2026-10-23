@@ -319,6 +319,13 @@ struct SemaComptimeItemSource {
     // A FieldDefault of a struct that bakes its defaults (Codable, Decode,
     // Encode, CLI): Rust CheckerMarkers reports E2414 when it cannot evaluate.
     baked_default: Bool{false}
+    // An immutable `NAME :: expr` whose value is not literal data: it folds
+    // while building when its evaluation is pure and succeeds, and is
+    // computed at startup otherwise (jet_driver_comptime_demote).
+    soft: Bool{false}
+    // The startup check of a soft item: checked as code that runs at
+    // startup, outside compile-time execution.
+    startup: Bool{false}
 }
 
 struct SemaComptimeItemRequest {
@@ -337,6 +344,8 @@ struct SemaComptimeItemRequest {
     calls: [SemaComptimeRequest]
     hardware_use: TargetHardwareUse
     reachable_function_keys: [String]
+    // The item expression's own call sites (a soft item's purity reads them).
+    call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
 }
 
 struct SemaComptimeItemValue {
@@ -346,6 +355,10 @@ struct SemaComptimeItemValue {
     kind: SemaComptimeItemKind
     value: TComptimeValue
     ty: Type
+    // A soft item computed at startup: `value` is Unit and `init` is the
+    // function that computes the value before `run`.
+    startup: Bool{false}
+    init: FnBody?{None}
 }
 
 fn sema_comptime_body_value_from_item(value: SemaComptimeItemValue) -> SemaComptimeBodyValue Never! {
@@ -6133,6 +6146,42 @@ fn sema_comptime_reachable_function_keys(graph: SemaRegistrationGraph, call_fact
     }
     keys
 }
+
+// Whether the call sites `call_facts` keep an evaluation pure: no call reaches
+// a foreign body, names an effect outside `Panic` and `Mem` in its row
+// (files, network, processes, environment, clock, randomness, stdin, host or
+// comptime IO authority), or calls a body this program lacks without a row
+// (an unknown callee is maximal). A callee with a body is read through its
+// own call sites (the item's checked closure). Effects never fold: a soft
+// item whose evaluation is not pure is computed at startup without being
+// tried (jet_driver_comptime_demote).
+fn sema_comptime_call_facts_pure(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> Bool Never! {
+    loop fact in call_facts {
+        if fact.foreign_effect_root != None -> return false
+        if fact.facts.effect_bound == .Val(row) {
+            loop entry in row {
+                if !sema_comptime_effect_pure(entry.name) -> return false
+            }
+            next
+        }
+        callee :: fact.callee ?? return false
+        callable :: graph.callable_rows.get(callee.key) ?? return false
+        if callable == .Foreign(_, _) -> return false
+    }
+    true
+}
+
+// Whether effect row entry `name` names no outside-world effect: an
+// exclusion (`!X`), `Panic`, or a `Mem` right.
+fn sema_comptime_effect_pure(name: String) -> Bool Never! {
+    if name.starts_with("!") -> return true
+    dotted :: name.split(".").to_list()
+    head :: if dotted.len() > 0 -> dotted[0] else -> name
+    parts :: head.split("(").to_list()
+    root :: if parts.len() > 0 -> parts[0].trim() else -> head
+    root == "Panic" || root == "Mem"
+}
+
 fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource Never! {
     SemaComptimeItemSource{
         module_identity: evaluation.module_identity,
@@ -6337,9 +6386,10 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
-        // Registration reports a non-literal module binding
-        // (E0622); it is never evaluated.
-        if !sema_checked_module_value_evaluates(constant.declaration) -> next
+        // Registration reports a mutable or `#Persist` binding whose value is
+        // not a literal (E0622); it is never evaluated.
+        soft :: sema_checked_module_value_soft(constant.declaration)
+        if !soft && !sema_checked_module_value_evaluates(constant.declaration) -> next
         expression := constant.declaration.value
         // Rust `module_scalar_const_type`: a bare decimal literal binding is a
         // Float constant, not the expression default Decimal.
@@ -6347,6 +6397,10 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
         if expected == None && constant.declaration.value == .Float(_, _, _, _, _) -> expected = Val(Type.Float)
         if expected == None -> expected = constant.ty
         sema_comptime_add_source(&sources, graph, source_module.module_identity, constant.symbol.id.key, constant.symbol.id.key, constant.declaration.name, SemaComptimeItemKind.Constant, expression, expected)
+        if soft && sources.items.len() > 0 {
+            last :: sources.items.len() - 1
+            if sources.items[last].key == constant.symbol.id.key -> sources.items[last].soft = true
+        }
     }
     loop item in source_module.program.items -> sema_comptime_add_module_item_sources(&sources, graph, source_module, item)
     items := ^sources.items
@@ -6803,7 +6857,9 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
         diagnostics := probe.diagnostics.copy()
         if !probe.applied -> return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
         mark :: sema_scope_mark(&probe.table)
-        probe.table.comptime_execution_depth = 1
+        // A startup check reads the expression as the code that computes the
+        // value before `run`, not as compile-time execution.
+        probe.table.comptime_execution_depth = if source.startup -> 0 else -> 1
         // S57: `NAME :: expr` fails the build when evaluation cannot complete.
         // The build edge carries the implicit `!Err` rail of `fn run()`
         // so a fallible call here propagates to the build.
@@ -6812,6 +6868,10 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
         context.host_hooks = probe.host_hooks
         state := sema_ownership_state_init()
         tail_store := sema_statement_tail_store_init()
+        // A soft item's checks run inside its own owner frame, so its
+        // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
+        // records only under an owner) and its purity can be read.
+        if source.soft || source.startup -> _ := sema_scope_enter(&probe.table, &state, "{source.key}#init")
         checked := sema_check_expression(source.expression, source.expected_type, environment, program, &probe.table, &state, &tail_store, &context, &diagnostics)
         sema_scope_rollback(&probe.table, mark)
         dependencies := sema_comptime_dependencies_from_references(resolved_graph, context.name_references, [SemaComptimeItemValue]{})
@@ -6845,6 +6905,7 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
             calls: context.comptime_requests,
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             reachable_function_keys: sema_comptime_reachable_function_keys(resolved_graph, context.call_facts),
+            call_facts: if source.soft || source.startup -> context.call_facts else -> [SemaCallSiteFact]{},
         }
         return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
     }

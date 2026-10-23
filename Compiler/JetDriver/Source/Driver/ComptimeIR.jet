@@ -4,9 +4,9 @@
 // rows, declared once per run), compiled and loaded once into the session's
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
-use jet_foundation.[FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility]
-use jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
-use jet_ir.[IRProgram, ir_comptime_item_function, ir_program_declared]
+use jet_foundation.[FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTargetApplicability, TTypeDef, TVisibility]
+use jet_sema.[SemaComptimeItemRequest, SemaComptimeItemValue, SemaGraphModuleResult]
+use jet_ir.[IRProgram, IR_STARTUP_FUNCTION_PREFIX, ir_comptime_item_function, ir_program_declared]
 use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
 
 // The declared IR program (ir_program_declared) over the type, impl and
@@ -48,6 +48,9 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
         value :: values[index]
+        // A startup value has no build-time value; no evaluation reads it
+        // (a reader of it is computed at startup too: jet_driver_comptime_demote).
+        if value.startup -> next
         &landed.push(jet_driver_comptime_value_row(value, value.key))
         if value.destination_key != value.key -> &landed.push(jet_driver_comptime_value_row(value, value.destination_key))
     }
@@ -81,4 +84,42 @@ fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeV
     if built.items[0] < 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder did not build the invocation's entry function")}
     program := jet_eval_native_load(^built, config)
     JetDriverInvocationRun{result: Val(jet_eval_native_run(&program, 0, args, config, span)), problem: None}
+}
+
+// The startup function of a soft item computed at startup (`request` is its
+// startup check, jet_driver_comptime_demote): a zero-parameter function of
+// the item's module that returns the item's expression. The program runs it
+// once, before `run` (ir_entry_function), and a read of the constant before
+// that waits for it (ir_constant). Its effects are its call sites' rows and
+// callees, so the application's required authority covers what startup
+// reads (jet_driver_required_effects).
+fn jet_driver_comptime_startup_function(request: SemaComptimeItemRequest) -> FnBody Never! {
+    init := ir_comptime_item_function(request, request.module_identity)
+    parts :: request.key.split(":").to_list()
+    init.name = "{IR_STARTUP_FUNCTION_PREFIX}{if parts.len() > 0 -> parts[parts.len() - 1] else -> request.key}"
+    init.key = "{request.module_identity}::__startup::{request.key}"
+    init.target_applicability = TTargetApplicability{rust_aot: true, interpreter: true, web: true}
+    init.tree = request.expression.tree.copy()
+    &init.tree.stmts.push(StmtKind.Return{value: Val(request.expression.root), span: request.span})
+    init.body = [Int]{init.tree.stmts.len() - 1}
+    loop fact in request.call_facts {
+        if fact.foreign_effect_root == .Val(root) -> jet_driver_comptime_add_name(&init.effects.direct, root)
+        if fact.callee == .Val(callee) {
+            jet_driver_comptime_add_name(&init.effects.call_edges, callee.key)
+            next
+        }
+        if fact.facts.effect_bound == .Val(row) {
+            loop entry in row {
+                if !entry.name.starts_with("!") -> jet_driver_comptime_add_name(&init.effects.direct, entry.name)
+            }
+        }
+    }
+    init
+}
+
+fn jet_driver_comptime_add_name(names: &[String], name: String) Never! {
+    loop previous in names {
+        if previous == name -> return
+    }
+    &names.push(name)
 }

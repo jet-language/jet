@@ -122,6 +122,10 @@ struct IRProgram {
     type_rows: [String:Int]
     // Checked constants by key (ConstRef / CtLit values).
     constants: [String:TConstantDef]
+    // The keys of the constants computed at startup (TConstantDef.init),
+    // in declaration order: the entry computes each before the program
+    // runs (ir_entry_function).
+    startup: [String]
     // A selected Display (`display`), Printable (`show`) or user Comparable
     // (`compare`) implementation method by "<trait>|<rendered type key>"
     // (Lower Display.jet render rows, Maps.jet lower_order_user_impl).
@@ -262,7 +266,9 @@ fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TIm
 // signatures name, and the host target's trait implementations.
 fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_defs: ^[TConstantDef], functions: [FnBody]) -> IRProgram Never! {
     constants := [String:TConstantDef]{}
+    startup := [String]{}
     loop definition in ^constant_defs {
+        if definition.init != None && constants.get(definition.key) == None -> &startup.push(definition.key.copy())
         if constants.get(definition.key) == None -> constants[definition.key] = definition
         // A ConstRef names `constant:<module>::<name>`.
         qualified :: "constant:{definition.module_identity}::{definition.name}"
@@ -314,7 +320,7 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
         if method == "" -> next
         &impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: [String:Int]{}, types: ^types, type_rows: type_rows, constants: constants, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: [String:Int]{}, types: ^types, type_rows: type_rows, constants: constants, startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -743,9 +749,15 @@ fn ir_build_roots_in(program: ^IRProgram, root_keys: [String], threads: Compiler
     ir_build_waves_kept(^p, ^roots, false, threads)
 }
 
-// The function the executable starts: `entry` itself when it takes nothing
-// and returns nothing, otherwise a generated `entry` function that calls it
-// and handles its failure carrier as Lower's entry helper does
+// The name prefix of a constant's startup function (TConstantDef.init):
+// the function the program runs to compute the constant at startup.
+IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
+
+// The function the executable starts: `entry` itself when it takes nothing,
+// returns nothing and the program computes no constant at startup,
+// otherwise a generated `entry` function. It first computes every constant
+// computed at startup (p.startup, through ir_startup_guard), then calls
+// `entry` and handles its failure carrier as Lower's entry helper does
 // (Lower/Entry.jet lower_entry_function): an `Err` ends the process with the
 // error's report and exit status 1 (the default `Err` through
 // jet_rt_entry_error_exit_err, any other error through its Printable text
@@ -753,8 +765,8 @@ fn ir_build_roots_in(program: ^IRProgram, root_keys: [String], threads: Compiler
 // success drops the result and returns.
 fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row :: m.functions[entry].result
-    if row < 0 || m.functions[entry].param_count > 0 -> return entry
-    ty :: m.types[row].ty.copy()
+    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0) -> return entry
+    ty :: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key :: "{m.functions[entry].key}#entry"
     id :: m.functions.len()
     &m.functions.push(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", m.functions[entry].source_file, m.functions[entry].line))
@@ -762,7 +774,17 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[entry].line
     span :: Span{start: 0, end: 0}
-    result :: ir_fresh_temp(&m, &b, row)
+    loop constant_key in p.startup {
+        definition :: p.constants.get(constant_key) ?? next
+        guard :: ir_startup_guard(&m, p, definition)
+        if guard < 0 {
+            ir_fail(&b, span, "the startup function of constant {definition.name}")
+            next
+        }
+        guard_operands :: ir_args(&b.f, [Int]{})
+        ir_emit(&b.f, IROp.Call, -1, guard, guard_operands, 0, b.line)
+    }
+    result :: if row >= 0 -> ir_fresh_temp(&m, &b, row) else -> -1
     operands :: ir_args(&b.f, [Int]{})
     ir_emit(&b.f, IROp.Call, result, entry, operands, 0, b.line)
     ir_stop_check(&m, &b)
@@ -801,7 +823,7 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
         }
         else -> {}
     }
-    ir_release(&m, &b, result)
+    if result >= 0 -> ir_release(&m, &b, result)
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
     if b.error != "" {
         &failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: m.functions[entry].source_file, span: b.error_span})

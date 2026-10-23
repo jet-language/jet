@@ -281,4 +281,8 @@ struct TConstantDef {
     is_comptime: Bool
     is_storage: Bool
     value: TComptimeValue
+    // A constant computed at startup: the key of the function that computes
+    // it (its `value` is then Unit). The program initializes every such
+    // constant before `run`, and a read waits for its own on first use.
+    init: String?{None}
 }
