@@ -1055,6 +1055,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .Binary(op, overflow, line, lhs, rhs) -> {
             if line > 0 -> b.line = line
             if op == .And || op == .Or -> return ir_short_circuit(&m, p, &b, op == .And, lhs, rhs)
+            if op == .Eq || op == .Ne {
+                if ir_tag_order_test(&m, p, &b, op == .Ne, lhs, rhs) == .Val(tested) -> return tested
+            }
             left :: ir_expr(&m, p, &b, lhs)
             right :: ir_expr(&m, p, &b, rhs)
             if ir_failed(b) -> return -1
@@ -2064,7 +2067,6 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
     if p.intrinsics.get(key) == .Val(intrinsic) -> return ir_intrinsic_call(&m, p, &b, intrinsic, args, span)
     if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(&m, p, &b, foreign, args, span)
     row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "call of a function outside the checked program: {key}")
-    callee :: ir_function_id(&m, p, key, type_args) ?? return ir_fail_slot(&b, span, "call of {key}")
     params :: p.functions[row].params
     // The callee's parameter and return types in concrete terms.
     names :: if type_args.len() > 0 -> ir_generic_names(p, p.functions[row]) else -> [String]{}
@@ -2107,6 +2109,17 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
         &slots.push(if params[index].convention == .Move -> ir_own(&m, p, &b, slot) else -> slot)
         &moves.push(params[index].convention == .Move)
     }
+    // #5473: a derived `equal`/`compare` of a payload-free enum compares the
+    // discriminant words in place; the callee is not built.
+    if slots.len() == 2 && type_args.len() == 0 {
+        role :: ir_tag_method(m, p, row, b.f.slot_type[slots[0]], b.f.slot_type[slots[1]])
+        if role != "" {
+            value :: ir_tag_method_value(&m, p, &b, role, slots[0], slots[1], span)
+            loop slot in slots -> ir_release(&m, &b, slot)
+            return value
+        }
+    }
+    callee :: ir_function_id(&m, p, key, type_args) ?? return ir_fail_slot(&b, span, "call of {key}")
     dst := -1
     written_return :: ir_executable_return(p.functions[row]) ?? Type.Named{name: "Unit"}
     returned :: if names.len() > 0 -> ir_subst_in(names, concrete, written_return) else -> written_return
@@ -2126,6 +2139,98 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
     }
     ir_stop_check(&m, &b)
     dst
+}
+
+// #5473: a derived `equal` or `compare` (the Prelude Equatable/Comparable
+// derive) of a payload-free enum is a test of the two discriminant words.
+// The derive orders variants by declaration index, and that index is the
+// word. Only the derive makes a compiler-generated method of these names (a
+// policy wrapper is a top-level function). Function `row` is called with
+// values of rows `left` and `right`; the result is "equal", "compare", or ""
+// when the call stays a call.
+fn ir_tag_method(m: IRModule, p: IRProgram, row: Int, left: Int, right: Int) -> String Never! {
+    function :: p.functions[row]
+    if !function.synthetic || function.generic_params.len() > 0 || left != right || function.kind == .TopLevel -> return ""
+    if function.name != "equal" && function.name != "compare" -> return ""
+    if m.types[left].kind != .Word || ir_untag(m.types[left].ty) == .Union(_) || ir_enum_def(m, p, left) == None -> return ""
+    returned :: ir_executable_return(function) ?? return ""
+    ordered := false
+    if returned == .Named(name) -> ordered = ir_short_name(name) == "Ordering"
+    if (function.name == "equal" && returned != Type.Bool) || (function.name == "compare" && !ordered) -> return ""
+    function.name.copy()
+}
+
+// The value of tag method `role` on discriminant words `left` and `right`:
+// equality, or the Ordering variant of their order.
+fn ir_tag_method_value(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, left: Int, right: Int, span: Span) -> Int Never! {
+    if role == "equal" -> return ir_bool_op(&m, &b, IROp.Eq, left, right)
+    ordering :: ir_type_def(p, "Ordering") ?? return ir_fail_slot(&b, span, "Comparable result Ordering has no definition")
+    less :: ir_variant_index(p, ordering, "Less") ?? return ir_fail_slot(&b, span, "Ordering has no Less variant")
+    equal :: ir_variant_index(p, ordering, "Equal") ?? return ir_fail_slot(&b, span, "Ordering has no Equal variant")
+    greater :: ir_variant_index(p, ordering, "Greater") ?? return ir_fail_slot(&b, span, "Ordering has no Greater variant")
+    result_row :: ir_value_type(&m, p, Type.Named{name: "Ordering"}) ?? return ir_fail_slot(&b, span, "layout of Ordering")
+    order :: ir_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, order, equal, -1, -1, b.line)
+    below :: ir_bool_op(&m, &b, IROp.Lt, left, right)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Const, order, less, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    above :: ir_bool_op(&m, &b, IROp.Gt, left, right)
+    ir_open_if(&b.f, above, b.line)
+    ir_emit(&b.f, IROp.Const, order, greater, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    order
+}
+
+// `a <op> b` that sema wrote as `a.compare(b) == .V` or `!= .V` (an operator
+// over a Comparable type), where `compare` is a tag method: one comparison of
+// the discriminant words, with no Ordering built. None when the shape differs.
+fn ir_tag_order_test(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, lhs: Int, rhs: Int) -> Int? Never! {
+    variant := ""
+    if ir_body_node(p, b, rhs).kind == .EnumLit(enum_type, name, _) {
+        if ir_short_name(enum_type) == "Ordering" -> variant = name
+    }
+    if variant == "" -> return None
+    left_expr := -1
+    right_expr := -1
+    key := ""
+    if ir_body_node(p, b, lhs).kind == {
+        .MethodCall(receiver, method, type_args, args) -> {
+            if args.len() != 1 || type_args.len() > 0 -> return None
+            receiver_ty :: ir_ty(p, b, receiver)
+            if ir_trait_receiver(m, p, receiver_ty, method) -> return None
+            key = ir_method_key(m, p, receiver_ty, method)
+            left_expr = receiver
+            right_expr = args[0].value
+        }
+        .Call(callee, type_args, args) -> {
+            if args.len() != 2 || type_args.len() > 0 -> return None
+            key = callee.key
+            left_expr = args[0].value
+            right_expr = args[1].value
+        }
+        else -> return None
+    }
+    row :: p.rows.get(key) ?? return None
+    left_row :: ir_value_type(&m, p, ir_ty(p, b, left_expr)) ?? return None
+    right_row :: ir_value_type(&m, p, ir_ty(p, b, right_expr)) ?? return None
+    if ir_tag_method(m, p, row, left_row, right_row) != "compare" -> return None
+    ordering :: ir_type_def(p, "Ordering") ?? return None
+    index :: ir_variant_index(p, ordering, variant) ?? return None
+    less :: ir_variant_index(p, ordering, "Less") ?? return None
+    greater :: ir_variant_index(p, ordering, "Greater") ?? return None
+    relation :: if {
+        index == less -> if negate -> IROp.Ge else -> IROp.Lt
+        index == greater -> if negate -> IROp.Le else -> IROp.Gt
+        else -> if negate -> IROp.Ne else -> IROp.Eq
+    }
+    left :: ir_expr(&m, p, &b, left_expr)
+    right :: ir_expr(&m, p, &b, right_expr)
+    if ir_failed(b) -> return Val(-1)
+    result :: ir_bool_op(&m, &b, relation, left, right)
+    ir_release(&m, &b, left)
+    ir_release(&m, &b, right)
+    Val(result)
 }
 
 // A precise numeric builtin (`Fraction`/`Decimal`/`Complex` arithmetic and
