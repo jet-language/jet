@@ -3606,6 +3606,12 @@ fn sema_check_item_kind_label(item: Item) -> String Never! {
 fn sema_check_pass_environment(graph: ^SemaRegistrationGraph, checked_types: [TTypeDef], body_values: ^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
     fixed_length_write_params := sema_fixed_length_write_params_in_graph(graph)
     tables := sema_program_tables_init(Val(^graph), checked_types)
+    sema_check_pass_environment_from(^tables, ^fixed_length_write_params, ^body_values)
+}
+
+// The pass environment over `tables`, whose graph `fixed_length_write_params`
+// was computed from.
+fn sema_check_pass_environment_from(tables: ^SemaProgramTables, fixed_length_write_params: ^[String], body_values: ^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
     environment := sema_scope_environment_init("", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.registration_graph = ^tables.registration_graph
     environment.checked_types = ^tables.checked_types
@@ -3619,6 +3625,122 @@ fn sema_check_pass_environment(graph: ^SemaRegistrationGraph, checked_types: [TT
     environment.fixed_length_write_params = ^fixed_length_write_params
     environment.comptime_body_publication = ^body_values
     ^environment
+}
+
+// The graph facts a body pass reads besides the graph and checked types. Each
+// reads only the graph, so a large program computes them side by side on
+// compiler threads (sema_pass_facts). Jobs are numbered lightest first;
+// threads claim them heaviest first. The first SEMA_PASS_FACT_TABLES jobs are
+// the ones a pass environment needs (the declaration pass's); a body pass
+// needs all SEMA_PASS_FACT_JOBS.
+SEMA_PASS_FACT_BOXED_EDGES :: 0
+SEMA_PASS_FACT_COPY :: 1
+SEMA_PASS_FACT_FIXED_LENGTH :: 2
+SEMA_PASS_FACT_MEMORY_PLAN :: 3
+SEMA_PASS_FACT_TABLES :: 3
+SEMA_PASS_FACT_JOBS :: 4
+
+struct SemaPassFacts {
+    memory_plan: SemaFunctionMemoryPlan
+    fixed_length_write_params: [String]
+    boxed_edges: [String:[String]]
+    copy_facts: SemaCopyFactsTable
+}
+
+// One computed fact: job `job`'s field of `facts` is filled.
+struct SemaPassFact {
+    job: Int
+    facts: SemaPassFacts
+}
+
+// What every pass-fact thread reads: the graph, the one row of its list.
+struct SemaPassFactsShared {
+    graphs: [SemaRegistrationGraph?]
+}
+
+fn sema_pass_facts_new() -> SemaPassFacts Never! {
+    SemaPassFacts{memory_plan: sema_function_memory_plan_new(), fixed_length_write_params: [String]{}, boxed_edges: [String:[String]]{}, copy_facts: sema_copy_facts_table_empty()}
+}
+
+// Fills the fields of jobs 0..<`jobs` of `facts` from `graph`, on threads
+// when the program is large enough, and returns the graph. Each fact is the
+// same as computed serially, for any thread count.
+fn sema_pass_facts(graph: ^SemaRegistrationGraph, threads: CompilerThreads, jobs: Int, facts: &SemaPassFacts) -> SemaRegistrationGraph? Never! {
+    workers :: compiler_threads_admit(threads, jobs, graph.modules.len(), SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD, 0, 0)
+    owned := SemaRegistrationGraph?{Val(^graph)}
+    if workers <= 1 {
+        loop job in 0..<jobs -> sema_pass_fact_run(job, owned, &facts)
+        return owned
+    }
+    shared_state :: shared SemaPassFactsShared{graphs: [SemaRegistrationGraph?]{}}
+    sema_pass_facts_fill(shared_state, ^owned)
+    queue :: shared SemaFinalizeCoreQueue{next: 0}
+    sema_pass_facts_claimers(shared_state, queue, jobs, 0, workers, &facts)
+    sema_pass_facts_take(shared_state)
+}
+
+// Computes job `job`'s fact of `graph` into its field of `facts`.
+fn sema_pass_fact_run(job: Int, graph: SemaRegistrationGraph?, facts: &SemaPassFacts) Never! {
+    registered :: graph ?? return
+    if {
+        job == SEMA_PASS_FACT_BOXED_EDGES -> { facts.boxed_edges = sema_scope_environment_boxed_edges(graph) }
+        job == SEMA_PASS_FACT_COPY -> { facts.copy_facts = sema_copy_facts_table(graph) }
+        job == SEMA_PASS_FACT_FIXED_LENGTH -> { facts.fixed_length_write_params = sema_fixed_length_write_params_in_graph(registered) }
+        else -> { facts.memory_plan = sema_function_memory_plan_from_graph(registered) }
+    }
+}
+
+// Moves a thread's computed fact into its field of `facts`.
+fn sema_pass_fact_join(fact: ^SemaPassFact, facts: &SemaPassFacts) Never! {
+    owned := ^fact
+    if {
+        owned.job == SEMA_PASS_FACT_BOXED_EDGES -> { facts.boxed_edges = ^owned.facts.boxed_edges }
+        owned.job == SEMA_PASS_FACT_COPY -> { facts.copy_facts = ^owned.facts.copy_facts }
+        owned.job == SEMA_PASS_FACT_FIXED_LENGTH -> { facts.fixed_length_write_params = ^owned.facts.fixed_length_write_params }
+        else -> { facts.memory_plan = ^owned.facts.memory_plan }
+    }
+}
+
+fn sema_pass_facts_fill(shared_state: Shared<SemaPassFactsShared>, graph: ^SemaRegistrationGraph?) Never! {
+    permit :: shared_state.guard_edit()
+    &permit.value.graphs.push(^graph)
+}
+
+fn sema_pass_facts_take(shared_state: Shared<SemaPassFactsShared>) -> SemaRegistrationGraph? Never! {
+    permit :: shared_state.guard_edit()
+    &permit.value.graphs.pop() ?? panic("the pass graph left the pass facts' shared state")
+}
+
+// Runs pass-fact threads `from..<workers`, one task each, over jobs
+// 0..<`jobs`, and joins every fact a thread computed into `facts`.
+fn sema_pass_facts_claimers(shared_state: Shared<SemaPassFactsShared>, queue: Shared<SemaFinalizeCoreQueue>, jobs: Int, from: Int, workers: Int, facts: &SemaPassFacts) Never! {
+    if from >= workers -> return
+    task.group sema_pass_facts_threads {
+        head :: task sema_pass_facts_claimed(shared_state, queue, jobs)
+        sema_pass_facts_claimers(shared_state, queue, jobs, from + 1, workers, &facts)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            sema_pass_fact_join(^done, &facts)
+        }
+    }
+}
+
+// One thread: computes the facts of jobs 0..<`jobs` it claims, heaviest
+// (last job) first.
+fn sema_pass_facts_claimed(shared_state: Shared<SemaPassFactsShared>, queue: Shared<SemaFinalizeCoreQueue>, jobs: Int) -> [SemaPassFact] Never! {
+    inputs :: shared_state.guard_read()
+    claimed := [SemaPassFact]{}
+    loop {
+        rank :: sema_finalize_core_claim(queue)
+        if rank >= jobs -> break
+        job :: jobs - 1 - rank
+        fact := SemaPassFact{job: job, facts: sema_pass_facts_new()}
+        // Passed straight through: a local binding of a guarded row would copy it.
+        sema_pass_fact_run(job, inputs.value.graphs[0], &fact.facts)
+        &claimed.push(^fact)
+    }
+    claimed
 }
 
 // (Rust `check_module_bodies`): resolve callable view
@@ -6472,7 +6594,10 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     module_count :: graph.modules.len()
     modules := [SemaGraphModuleResult]{}
     body_values := sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
-    initial_environment := sema_check_pass_environment(^graph, [TTypeDef]{}, ^body_values)
+    facts := sema_pass_facts_new()
+    owned := sema_pass_facts(^graph, threads, SEMA_PASS_FACT_TABLES, &facts)
+    tables := sema_program_tables_with(^owned, [TTypeDef]{}, ^facts.boxed_edges, ^facts.copy_facts)
+    initial_environment := sema_check_pass_environment_from(^tables, ^facts.fixed_length_write_params, ^body_values)
     initial_program := SemaProgramTables{
         registration_graph: ^initial_environment.registration_graph,
         checked_types: ^initial_environment.checked_types,
@@ -7228,11 +7353,14 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     // filled, and a derive wave (sema_derive_waves) only the derived methods
     // demanded, into the modules' existing results.
     codec_wave :: graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0
-    memory_plan := sema_function_memory_plan_from_graph(graph)
+    facts := sema_pass_facts_new()
+    owned := sema_pass_facts(^graph, threads, SEMA_PASS_FACT_JOBS, &facts)
+    memory_plan := ^facts.memory_plan
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
     body_values := sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
-    environment := sema_check_pass_environment(^graph, checked_types, ^body_values)
+    tables := sema_program_tables_with(^owned, checked_types, ^facts.boxed_edges, ^facts.copy_facts)
+    environment := sema_check_pass_environment_from(^tables, ^facts.fixed_length_write_params, ^body_values)
     program := SemaProgramTables{
         registration_graph: ^environment.registration_graph,
         checked_types: ^environment.checked_types,

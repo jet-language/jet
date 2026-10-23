@@ -748,6 +748,14 @@ struct SemaProgramTables {
 }
 
 fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
+    boxed_edges := sema_scope_environment_boxed_edges(graph)
+    copy_facts := sema_copy_facts_table(graph)
+    sema_program_tables_with(^graph, checked_types, ^boxed_edges, ^copy_facts)
+}
+
+// The tables over `graph` whose boxed edges and copy facts were already
+// computed from it (sema_scope_environment_boxed_edges, sema_copy_facts_table).
+fn sema_program_tables_with(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: ^[String:[String]], copy_facts: ^SemaCopyFactsTable) -> SemaProgramTables Never! {
     rows := [String:Int]{}
     name_slots := [String:Int]{}
     name_rows := [[Int]]{}
@@ -761,8 +769,6 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
             &name_rows.push([Int]{index})
         }
     }
-    boxed_edges := sema_scope_environment_boxed_edges(graph)
-    copy_facts := sema_copy_facts_table(graph)
     SemaProgramTables{
         registration_graph: graph,
         checked_types: checked_types,
