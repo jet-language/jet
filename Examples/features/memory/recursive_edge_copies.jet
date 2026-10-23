@@ -1,7 +1,8 @@
 // A copy is its own value, also through a recursive field. `Node.meta` leads
-// back to `Node` (a Meta holds child Nodes), so Jet keeps it out of line. A
-// write through it into one copy never shows in another copy. Each case
-// edits a copy and prints the original, then the copy.
+// back to `Node` (a Meta holds child Nodes), so Jet keeps it out of line; so
+// is `Meta.detail` (a Detail holds Nodes too). A write through such a field
+// into one copy never shows in another copy. Each case edits a copy and
+// prints the original, then the copy.
 
 struct Node {
     name: String
@@ -13,6 +14,21 @@ struct Meta {
     count: Int
     tags: [String]
     children: [Node]
+    detail: Detail
+}
+
+struct Detail {
+    label: String
+    seen: [Node]
+}
+
+enum Slot {
+    Empty
+    Held(node: Node)
+}
+
+fn leaf(name: String) -> Node {
+    Node{name: name, meta: Meta{note: name, count: 0, tags: [String]{}, children: [Node]{}, detail: Detail{label: name, seen: [Node]{}}}}
 }
 
 fn renamed(node: Node, note: String) -> Node {
@@ -25,8 +41,19 @@ fn add_tag(node: &Node, text: String) {
     &node.meta.tags.push(text)
 }
 
+fn set_note(node: &Node, note: String) {
+    node.meta.note = note
+}
+
+fn held_note(slot: Slot) -> String {
+    if slot == {
+        .Held(node) -> node.meta.note
+        .Empty -> "empty"
+    }
+}
+
 fn run() {
-    original := Node{name: "root", meta: Meta{note: "first", count: 1, tags: [String]{"a"}, children: [Node]{}}}
+    original := Node{name: "root", meta: Meta{note: "first", count: 1, tags: [String]{"a"}, children: [Node]{}, detail: Detail{label: "plain", seen: [Node]{}}}}
 
     second := original
     second.meta.note = "second"
@@ -40,11 +67,42 @@ fn run() {
     print("write param: {original.meta.tags.len()} / {tagged.meta.tags.len()}")
 
     grown := original
-    &grown.meta.children.push(Node{name: "leaf", meta: Meta{note: "leaf", count: 0, tags: [String]{}, children: [Node]{}}})
+    &grown.meta.children.push(leaf("leaf"))
     grown.meta.children[0].meta.note = "leaf edited"
     print("nested: {original.meta.children.len()} / {grown.meta.children.len()} {grown.meta.children[0].meta.note}")
 
     counted := original
     counted.meta.count += 5
     print("compound: {original.meta.count} / {counted.meta.count}")
+
+    // A field of a field, both out of line.
+    deep := original
+    deep.meta.detail.label = "deep"
+    print("field of field: {original.meta.detail.label} / {deep.meta.detail.label}")
+
+    // A field written inside a function through its write parameter.
+    noted := original
+    set_note(&noted, "param field")
+    print("param field: {original.meta.note} / {noted.meta.note}")
+
+    // A Map value's field.
+    book :: [String:Node]{"k": original}
+    entry := book
+    entry["k"].meta.note = "mapped"
+    print("map value: {book["k"].meta.note} / {entry["k"].meta.note}")
+
+    // An enum payload's field, through a write window.
+    slot :: Slot.Held{node: original}
+    edited := slot
+    if &edited == {
+        .Held(node) -> node.meta.note = "held"
+        .Empty -> {}
+    }
+    print("payload: {held_note(slot)} / {held_note(edited)}")
+
+    // A tuple element's field.
+    pair :: (node: original, rank: 1)
+    moved := pair
+    moved.node.meta.note = "tupled"
+    print("tuple: {pair.node.meta.note} / {moved.node.meta.note}")
 }
