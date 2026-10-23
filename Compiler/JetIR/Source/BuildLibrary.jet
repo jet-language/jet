@@ -277,7 +277,7 @@ fn ir_lifecycle_rows(lines: [String], lifecycle: &[String:IRLifecycle]) -> Strin
     ""
 }
 
-// The C primitive `ty` is (mir_c_primitive): "Int", "Float", "Bool",
+// The C primitive `ty` is: "Int", "Float", "Bool",
 // "Text", "F32" or a fixed-width "I<n>"/"U<n>"; None when it is none.
 fn ir_c_primitive(ty: Type) -> String? Never! {
     if ir_untag(ty) == {
@@ -308,7 +308,7 @@ fn ir_infallible(function: TFunc) -> Bool Never! {
     }
 }
 
-// Whether the value an export publishes exists (mir_c_export_result): the
+// Whether the value an export publishes exists: the
 // success value of a Result carrier or the plain return; an Optional or
 // diverging carrier has no C result.
 fn ir_c_export_has_result(function: TFunc) -> Bool Never! {
@@ -333,7 +333,7 @@ fn ir_c_export_result(function: TFunc) -> Type? Never! {
     Val(ty)
 }
 
-// The C export law (mir_c_export_signature): a monomorphic top-level
+// The C export law: a monomorphic top-level
 // function whose every parameter and published result is one C primitive.
 fn ir_c_export_law(function: TFunc) -> Bool Never! {
     if !ir_top_level(function) || function.generic_params.len() != 0 -> return false

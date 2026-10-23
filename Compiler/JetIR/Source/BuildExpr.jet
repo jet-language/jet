@@ -413,8 +413,8 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         .EnumMatch(subject, arms, else_body, _, span) -> ir_match(&m, p, &b, subject, arms, else_body, span)
         .RangeSwitch(subject, arms, else_body, span) -> ir_range_switch(&m, p, &b, subject, arms, else_body, span)
         .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, _, _, body, span) -> {
-            // `loop c in s.chars()`: codegen streams the scalars
-            // (MIRLoopSourceKind.Chars); the walk of the checked `s.chars()`
+            // `loop c in s.chars()`: the loop streams the scalars
+            // (TForInMethod.Chars); the walk of the checked `s.chars()`
             // list visits the same Chars in the same order.
             chars :: method_kind == (Val(TForInMethod.Chars)) && ir_untag(ir_ty(p, b, collection)) == .List(_)
             file_lines :: method_kind == (Val(TForInMethod.LinesFile))

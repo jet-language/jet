@@ -1,6 +1,6 @@
-// Backend-neutral lowering from checked semantic types to canonical MIR types.
-// This is the only Type -> MirType projection used by Jet codegen; semantic
-// identity and ABI facts are retained instead of reconstructed by an emitter.
+// Backend-neutral lowering from checked semantic types to canonical IR types.
+// This is the only Type -> IR type projection; semantic identity and ABI facts
+// are retained instead of reconstructed by an emitter.
 use jet_foundation.[
     Type,
     TypeTupleField,
@@ -304,8 +304,7 @@ struct IRCompilerOwnedEnum {
 // Compiler-owned runtime enums (`ProcessStreamMode`, `IOError`, `Key`, ...)
 // are checked values with no Jet declaration. Each joins every program as one
 // row under its bare canonical key, so an enum literal, a variant pattern and
-// the backends name the same MIR type as in Rust.
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_ENUMS
+// the backends name the same IR type as the Rust runtime does.
 IR_COMPILER_OWNED_ENUMS :: prep { [IRCompilerOwnedEnum]{
     {name: "Overflow", variants: [String]{"Block", "DropNewest", "DropOldest"}},
     {name: "FailurePolicy", variants: [String]{"StopFirst", "Collect", "Log", "Ignore"}},
