@@ -74,8 +74,7 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
 // packaged runtime directory whose `native.key` is `<key>`; that directory
 // is the one `jet build` finds beside `jet`. A program with a C closure links
 // its sibling jet_runtime_jet.o plus the closure, exactly as `jet build` does.
-// Without JET_RUNTIME_PACK the feed still writes `{prefix}.o` (IR build and
-// selection discovery), then refuses to link.
+// Without JET_RUNTIME_PACK the feed refuses to link.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
 // Under JET_KEEP_GOING the feed runs whenever the front end produced its
 // checked inputs, even with census rows: each IR build, selection, object and
@@ -103,7 +102,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
     if !keep_going && (!result.complete || result.internal_problem != None) -> return result
     inputs := ^front.inputs ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without its checked functions")
     census := [String]{}
-    native :: jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level("build", false), runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
+    native :: jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level("build", false), runtime_dir, "{prefix}.exe", keep_going, &census)
     failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
         .Build(rows) -> { cli_files.write("{prefix}.issues", rows.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native IR build findings") }

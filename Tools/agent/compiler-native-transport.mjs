@@ -98,14 +98,13 @@ export function stageNativeToolchain({ jet, runtimePack, runtimeDir = dirname(di
 export function runNativeProgram({ jet, file, root = dirname(file), prefix, env = process.env, execute, timeout }) {
     if (!existsSync(join(root, 'package.jet'))) writeFileSync(join(root, 'package.jet'), nativeTransportPackage);
     const built = join(root, '.jet/build', basename(file, '.jet'));
-    for (const suffix of ['', '.o']) rmSync(built + suffix, { force: true });
-    for (const suffix of ['.exe', '.o', '.issues', '.pack-issues', '.lir']) rmSync(prefix + suffix, { force: true });
+    rmSync(built, { force: true });
+    for (const suffix of ['.exe', '.issues', '.pack-issues', '.lir']) rmSync(prefix + suffix, { force: true });
     const run = command(jet, ['build', resolve(file)], { prefix, cwd: root, env: nativeTransportEnvironment(env), execute, timeout });
     const problem = nativeCommandProblem(run);
     if (problem) return { run, problem };
-    if (!existsSync(built) || !existsSync(built + '.o')) return { run, problem: { verdict: 'no-mir', detail: 'native build did not emit fresh executable and object' } };
+    if (!existsSync(built)) return { run, problem: { verdict: 'no-mir', detail: 'native build did not emit a fresh executable' } };
     copyFileSync(built, prefix + '.exe'); chmodSync(prefix + '.exe', 0o755);
-    copyFileSync(built + '.o', prefix + '.o');
     return { run, problem: null, binary: prefix + '.exe' };
 }
 

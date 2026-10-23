@@ -42,14 +42,14 @@ test('library uses check FILE and rejects completion without fresh artifacts', (
     assert.deepEqual(receipt.args, ['check', file]); assert.equal(receipt.status, 0);
 });
 
-test('program build completion without executable and object is not a native feed', (t) => {
+test('program build completion without an executable is not a native feed', (t) => {
     const root = temporary(t), file = join(root, 'unit.jet'), prefix = join(root, 'case');
     writeFileSync(file, 'fn run() {}\n'); writeFileSync(prefix + '.exe', 'stale executable');
     const result = runNativeProgram({ jet: '/pinned/jet', file, root, prefix, execute(command, args, options) {
         assert.deepEqual(args, ['build', file]); assert.equal(options.cwd, root);
         return completionOnly(command, args, options);
     } });
-    assert.match(result.problem.detail, /fresh executable and object/);
+    assert.match(result.problem.detail, /a fresh executable/);
     assert.equal(existsSync(prefix + '.exe'), false);
 });
 

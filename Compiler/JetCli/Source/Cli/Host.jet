@@ -354,7 +354,7 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // ir_build_tests instead of the program's entry) and the bootstrap native
 // feed (Compiler/Bootstrap/Host/Entry.jet): build
 // the slot IR of every checked function the entry reaches (Compiler/JetIR),
-// select x86-64 for it, write `object_path`, realize the program's C closure
+// select x86-64 for it into an in-memory object, realize the program's C closure
 // (c@path archives, #FFI(c) inline bodies, a Rust foreign helper's archive,
 // the musl platform), then use the in-process linker to bind the packaged
 // runtime of `runtime_dir` into a static x86-64 executable at
@@ -372,7 +372,7 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // `ir.build`, `ir.opt` (level > 0), `ir.x64` (on the threads the compile
 // admits), `ir.object`, `native.foreign` (the C closure) and `native.link`.
 // A span a failure returns from stays open.
-fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     if harness == None && checked.entry_key == None -> return Val(JetCLINativeFailure.NoEntry)
@@ -456,14 +456,14 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
         .Err(error) -> foreign_error = error.message
     }
     if trace_sink == .Val(sink) -> sink.end("native.foreign", if foreign == .Val(found) -> found.names.len() else -> 0)
-    cli_files.write_bytes(object_path, object.bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {object_path}: {err}"})
     closure :: foreign ?? return Val(JetCLINativeFailure.Foreign{message: foreign_error})
     runtime_file :: if closure.platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
     runtime_path :: "{runtime_dir}/{key}/{runtime_file}"
     runtime :: cli_files.read_bytes(runtime_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"})
     // Input names appear only in link diagnostics; the image is a function of
-    // the bytes and their order. The object and runtime move in, uncopied.
-    names := [String]{object_path, runtime_path}
+    // the bytes and their order. The object and runtime move in, uncopied; the
+    // object never touches the disk.
+    names := [String]{"{executable_path} (program object)", runtime_path}
     bytes := [[U8]]{^object.bytes, ^runtime}
     loop name in closure.names -> &names.push(name)
     loop input in closure.bytes -> &bytes.push(input)
@@ -533,7 +533,7 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: Je
     fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
     keep_going :: jet_cli_keep_going_enabled()
     census := [String]{}
-    native :: jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), "{binary}.o", binary, keep_going, &census)
+    native :: jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), binary, keep_going, &census)
     if census.len() > 0 {
         problem :: jet_cli_keep_going_append(census)
         if problem != "" -> return jet_cli_ice(problem)
@@ -813,8 +813,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     // The harness's build, object and link are one traced span.
     if result.trace_sink == .Val(sink) -> sink.begin("native.build", "", -1, -1)
     census := [String]{}
-    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), "{binary}.o", binary, false, &census)
-    cli_files.remove("{binary}.o").drop("the harness object is one-shot")
+    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), binary, false, &census)
     if native == .Val(failure) -> return jet_cli_test_native_failure(file, failure, color)
     if result.trace_sink == .Val(sink) -> sink.end("native.build", -1)
     spec := cli_process.cmd([String]{binary})

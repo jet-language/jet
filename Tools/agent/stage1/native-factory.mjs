@@ -144,7 +144,7 @@ export function invokeStageZeroFactory(options) {
 }
 export function observeStageZeroNativeLowering(options) {
   if (Object.keys(options.policy).length !== 1 || !options.policy.JET_FRONT_NATIVE_OUTPUT) throw Error('discovery accepts only an unlinked native output prefix');
-  // Entry.native emits its checked LIR/object before the absent pack stops
-  // linking. This observation can NEVER qualify the whole factory or a CLI.
+  // Entry.native builds the checked program's IR before the absent pack
+  // stops it. This observation can NEVER qualify the whole factory or a CLI.
   return { ...runFactoryProtocol(options, false), admitted: false, link: 'BLOCKED: runtime pack deliberately absent during parallel discovery' };
 }
