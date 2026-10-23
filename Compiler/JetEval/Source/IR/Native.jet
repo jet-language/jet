@@ -83,9 +83,24 @@ JET_EVAL_NATIVE_PREFIX :: "__jet_comptime_"
 // runs compile-time code (every effect refused), `runtime` fn build and
 // fn dev (standard output admitted).
 struct JetEvalNativeSession {
-    image: [U8]
+    image: Shared<JetEvalNativeImage>
     sealed: Shared<JetEvalNativeChild>
     runtime: Shared<JetEvalNativeChild>
+}
+
+// The runtime image file, read when a batch first needs it, so a compile
+// without compile-time code never reads it: `bytes` once read, `read` once
+// tried (`bytes` stays None when the file can't be read).
+struct JetEvalNativeImage {
+    file: String
+    reader: JetEvalNativeImageReader
+    read: Bool
+    bytes: [U8]?
+}
+
+// The host's read of the runtime image file; `None` when it can't be read.
+trait JetEvalNativeImageReader {
+    fn read(self, file: String) -[FS.Read]> [U8]?
 }
 
 // One child: the entry program bound to the image (`stub`, bound once) and
@@ -149,8 +164,33 @@ struct JetEvalIRState {
     host_values: [TComptimeValue]{[TComptimeValue]{}}
 }
 
-fn jet_eval_native_session(image: [U8]) -> Shared<JetEvalNativeSession> Never! {
+fn jet_eval_native_session(file: String, reader: JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
+    image :: shared JetEvalNativeImage{file: file, reader: reader, read: false, bytes: None}
     shared JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}
+}
+
+// Reads the runtime image file on the first call.
+fn jet_eval_native_image_read(image: &JetEvalNativeImage) Never! {
+    if image.read -> return
+    image.read = true
+    image.bytes = image.reader.read(image.file)
+}
+
+// A copy of the session's runtime image, read on the first call; None when
+// the file can't be read. The image cell serializes the read, so build
+// threads sharing the session read the file once.
+fn jet_eval_native_image(session: JetEvalNativeSession) -> [U8]? Never! {
+    permit := session.image.guard_edit()
+    jet_eval_native_image_read(&permit.value)
+    if permit.value.bytes == .Val(bytes) -> return Val(bytes.copy())
+    None
+}
+
+// Whether the session's runtime image can be read (reading it on first use).
+fn jet_eval_native_image_present(session: JetEvalNativeSession) -> Bool Never! {
+    permit := session.image.guard_edit()
+    jet_eval_native_image_read(&permit.value)
+    permit.value.bytes != None
 }
 
 fn jet_eval_native_child_new() -> Shared<JetEvalNativeChild> Never! {
@@ -161,9 +201,10 @@ fn jet_eval_native_child_new() -> Shared<JetEvalNativeChild> Never! {
 // Children.
 
 // Starts the child of `c` unless one runs: the entry program is bound to
-// `image` once, then each spawn runs it with effects refused (unless
-// `stdout`, the runtime child's standard output). False with `c.failure`.
-fn jet_eval_native_start(c: &JetEvalNativeChild, image: [U8], stdout: Bool) -> Bool {
+// the session's image once, then each spawn runs it with effects refused
+// (unless `stdout`, the runtime child's standard output). False with
+// `c.failure`.
+fn jet_eval_native_start(c: &JetEvalNativeChild, session: JetEvalNativeSession, stdout: Bool) -> Bool {
     if c.child.pid > 0 -> return true
     if c.stub.len() == 0 {
         compiled := ir_x64_object(ir_x64_compile_module(jet_eval_native_entry_module(), compiler_threads_single()))
@@ -171,7 +212,10 @@ fn jet_eval_native_start(c: &JetEvalNativeChild, image: [U8], stdout: Bool) -> B
             c.failure = "the comptime entry program doesn't compile: {compiled.errors.join("; ")}"
             return false
         }
-        runtime := image.copy()
+        runtime := jet_eval_native_image(session) ?? {
+            c.failure = "the runtime image (jet_runtime.image) can't be read"
+            return false
+        }
         bound := x64_link_with_runtime_image("jet-comptime", ^compiled.bytes, ^runtime)
         if bound.errors.len() > 0 {
             c.failure = "the comptime entry program doesn't bind to the runtime image: {bound.errors.join("; ")}"
@@ -285,9 +329,15 @@ fn jet_eval_native_load(built: ^JetEvalIRComptime, config: JetEvalConfig) -> Jet
         return program
     }
     session :: session_cell.guard_read()
+    if !jet_eval_native_image_present(session.value) {
+        program.failure = "no runtime image"
+        program.missing = true
+        program.entries = ^entries
+        return program
+    }
     cell :: if config.runtime_execution -> session.value.runtime.copy() else -> session.value.sealed.copy()
     permit := cell.guard_edit()
-    if !jet_eval_native_start(&permit.value, session.value.image, config.runtime_execution) {
+    if !jet_eval_native_start(&permit.value, session.value, config.runtime_execution) {
         program.failure = permit.value.failure.copy()
         program.entries = ^entries
         return program
@@ -314,7 +364,12 @@ fn jet_eval_native_load(built: ^JetEvalIRComptime, config: JetEvalConfig) -> Jet
         program.entries = ^entries
         return program
     }
-    runtime := session.value.image.copy()
+    runtime := jet_eval_native_image(session.value) ?? {
+        program.failure = "no runtime image"
+        program.missing = true
+        program.entries = ^entries
+        return program
+    }
     bound := x64_link_with_runtime_image_at("jet-comptime", ^compiled.bytes, ^runtime, permit.value.base)
     if bound.errors.len() > 0 {
         program.failure = "the batch doesn't bind to the runtime image: {bound.errors.join("; ")}"
@@ -471,7 +526,7 @@ fn jet_eval_native_run(program: &JetEvalNativeProgram, item: Int, args: [TCompti
     cell :: if program.runtime_execution -> session.value.runtime.copy() else -> session.value.sealed.copy()
     permit := cell.guard_edit()
     if permit.value.child.pid <= 0 || permit.value.generation != program.generation {
-        if !jet_eval_native_start(&permit.value, session.value.image, program.runtime_execution) {
+        if !jet_eval_native_start(&permit.value, session.value, program.runtime_execution) {
             jet_eval_ir_problem(&s, permit.value.failure)
             return jet_eval_ir_result(s, None)
         }

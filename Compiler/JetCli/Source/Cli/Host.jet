@@ -587,6 +587,33 @@ fn jet_cli_native_object_failure(failure: JetCLINativeFailure) -> JetCLINativeOb
     JetCLINativeObject{bytes: [U8]{}, failure: Val(failure)}
 }
 
+// Marks true each name in `wanted` that is a line of `exports` (the
+// runtime's thousands of export names, one per line), comparing bytes in
+// place: no string or map lookup per export line.
+fn jet_cli_runtime_exports_mark(exports: String, wanted: &[String:Bool]) Never! {
+    names :: wanted.keys().to_list()
+    rows := [[U8]]{}
+    loop name in names -> &rows.push(name.bytes())
+    bytes :: exports.bytes()
+    start := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+        loop (k, row) in rows {
+            if row.len() != end - start -> next
+            same := true
+            loop at in 0..<row.len() {
+                if row[at] != bytes[start + at] {
+                    same = false
+                    break
+                }
+            }
+            if same -> wanted[names[k]] = true
+        }
+        start = end + 1
+    }
+}
+
 // `ir.build`, `ir.opt`, `ir.x64` and `ir.object` of jet_cli_native_executable.
 fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String], file: String) -[FS, Env]> JetCLINativeObject Never! {
     trace_sink :: result.trace_sink
@@ -626,11 +653,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
             if op == .CallRuntime && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None && exported.get(built.program.names[built.program.functions[index].a[at]]) == None -> exported[built.program.names[built.program.functions[index].a[at]].copy()] = false
         }
     }
-    if exported.len() > 0 {
-        loop line in runtime.exports.split("\n") {
-            if exported.get(line) != None -> exported[line] = true
-        }
-    }
+    if exported.len() > 0 -> jet_cli_runtime_exports_mark(runtime.exports, &exported)
     loop index in 0..<built.program.functions.len() {
         missing := String?{None}
         loop (at, op) in built.program.functions[index].op {

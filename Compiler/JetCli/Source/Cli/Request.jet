@@ -49,6 +49,7 @@ use jet_driver.[
 ]
 use jet_eval.[
     JetEvalConfig,
+    JetEvalNativeImageReader,
     JetEvalNativeSession,
     jet_eval_default_config,
     jet_eval_native_session,
@@ -775,13 +776,23 @@ fn jet_cli_eval_config() -> JetEvalConfig Never! {
     config
 }
 
-// The compile's native children over the runtime image beside the pack;
-// None when this toolchain has none.
+// The compile's native children over the runtime image beside the pack,
+// read only when compile-time code first runs; None when this toolchain
+// has none.
 fn jet_cli_native_session() -> Shared<JetEvalNativeSession>? Never! {
     runtime_dir :: jet_cli_runtime_dir()
     key :: jet_cli_runtime_key(runtime_dir) ?? return None
-    bytes :: cli_files.read_bytes("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}") ?? return None
-    Val(jet_eval_native_session(bytes))
+    Val(jet_eval_native_session("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
+}
+
+// The CLI's read of the runtime image for jet_eval_native_session.
+struct JetCLINativeImageReader {}
+
+impl JetCLINativeImageReader.JetEvalNativeImageReader {
+    fn read(self, file: String) -[FS.Read]> [U8]? {
+        bytes :: cli_files.read_bytes(file) ?? return None
+        Val(bytes)
+    }
 }
 
 // The CLI's raw build-input transport for checked `fn build` input services:

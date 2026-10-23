@@ -700,21 +700,27 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     jet_scheduler_native_propagate()
 }
 
-// Scheduler152: mutex0 FIFOhead8/tail16 workSeq24 compensationSeq32 live40
+// Scheduler168: mutex0 FIFOhead8/tail16 workSeq24 compensationSeq32 live40
 // waits48 compensationThreads56 peak64 reserve72 completionLo80/Hi88
-// nextTask96 timerRoot104 workerCount112 parked120 threads128 finished136
-// stop144. threads/finished are word lists (scheduler_words) of Worker16
-// records {argument0 handle8}, changed only under the mutex. Every pool
-// thread stays joinable so jet_rt_scheduler_shutdown can join it; a
-// compensation worker that retires itself moves its record to finished, and
-// the next worker start (or shutdown) joins it.
+// nextTask96 timerRoot104 poolSize112 idle120 threads128 finished136
+// stop144 started152 woken160. threads/finished are word lists
+// (scheduler_words) of Worker16 records {argument0 handle8}, changed only
+// under the mutex. Every pool thread stays joinable so
+// jet_rt_scheduler_shutdown can join it; a compensation worker that retires
+// itself moves its record to finished, and the next worker start (or
+// shutdown) joins it. The pool's poolSize ordinary workers start one at a
+// time, on demand: a submit starts one only when no idle worker is left to
+// wake (idle - woken), so a process that submits a few jobs starts a few
+// threads, not the whole pool. idle counts ordinary workers waiting on
+// workSeq; woken counts the wakes a submit sent them that no worker has
+// taken yet; started counts the ordinary workers started.
 scheduler_root := I64{0}
 
 // runtime-init: 3
 #Export(c) fn jet_rt_scheduler_init() {
     if (scheduler_root != I64{0}) -> return
-    scheduler_root = alloc_required_valid(I64{152}, I64{8})
-    thread_zero(scheduler_root, I64{152})
+    scheduler_root = alloc_required_valid(I64{168}, I64{8})
+    thread_zero(scheduler_root, I64{168})
 }
 
 // The initialized root without starting the pool. Only scheduler_submit (via
@@ -852,6 +858,8 @@ fn scheduler_start_worker(root: I64, flags: I64) {
     sync_mutex_unlock(root)
 }
 
+// Settles the pool size on first use; workers start on demand
+// (scheduler_submit).
 fn scheduler_get() -> I64 {
     root :: scheduler_root
     // .init_array owns the root; first use owns only pool initialization.
@@ -860,13 +868,6 @@ fn scheduler_get() -> I64 {
         (sync_cas(root + I64{112}, I64{0}, I64{-1}) == I64{0}) -> {
             count :: scheduler_worker_count()
             jet_rt_observe_pool(count, I64{0})
-            at := I64{0}
-            // Unsigned usize values above i64::MAX cannot be serviced on Linux;
-            // attempt worker creation just as Rust does, failing at pthread_create.
-            loop at != count {
-                scheduler_start_worker(root, I64{0})
-                at = wrapping(at + I64{1})
-            }
             _ := sync_swap(root + I64{112}, count)
             sync_wake(root + I64{112}, I64{2147483647})
         }
@@ -878,6 +879,9 @@ fn scheduler_get() -> I64 {
 }
 
 // Job32B: next0 code8 arg16 blocking24. code0 is a native Task callback.
+// The job wakes an idle worker, else starts one more while fewer than the
+// pool size run. Unsigned pool sizes above i64::MAX are attempted just as
+// Rust does, failing at pthread_create.
 fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     root :: scheduler_get()
     job :: alloc_required_valid(I64{32}, I64{8})
@@ -890,9 +894,21 @@ fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     if (tail == I64{0}) -> sync_store(root + I64{8}, job) else -> sync_store(tail, job)
     sync_store(root + I64{16}, job)
     jet_rt_observe_pool(I64{-1}, I64{1})
-    sync_cond_notify_one(root + I64{24})
+    start := false
+    if {
+        sync_load(root + I64{120}) > sync_load(root + I64{160}) -> {
+            sync_store(root + I64{160}, sync_load(root + I64{160}) + I64{1})
+            sync_cond_notify_one(root + I64{24})
+        }
+        sync_load(root + I64{152}) != sync_load(root + I64{112}) -> {
+            sync_store(root + I64{152}, wrapping(sync_load(root + I64{152}) + I64{1}))
+            start = true
+        }
+        else -> {}
+    }
     sync_cond_notify_one(root + I64{32})
     sync_mutex_unlock(root)
+    if start -> scheduler_start_worker(root, I64{0})
 }
 
 fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
@@ -934,7 +950,14 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
         }
         job :: scheduler_pop(root, !reserve)
         if (job == I64{0}) {
-            if compensation -> _ := sync_cond_wait(root + I64{32}, root, sync_deadline(I64{2000000})) else -> _ := sync_cond_wait(root + I64{24}, root, I64{-1})
+            if compensation {
+                _ := sync_cond_wait(root + I64{32}, root, sync_deadline(I64{2000000}))
+            } else {
+                sync_store(root + I64{120}, sync_load(root + I64{120}) + I64{1})
+                _ := sync_cond_wait(root + I64{24}, root, I64{-1})
+                sync_store(root + I64{120}, sync_load(root + I64{120}) - I64{1})
+                if (sync_load(root + I64{160}) > I64{0}) -> sync_store(root + I64{160}, sync_load(root + I64{160}) - I64{1})
+            }
             sync_mutex_unlock(root)
             next
         }
@@ -1196,7 +1219,10 @@ fn scheduler_timer_shutdown(root: I64) -> I64 {
     sync_mutex_lock(root)
     sync_store(root + I64{56}, I64{0})
     sync_store(root + I64{72}, I64{0})
+    sync_store(root + I64{120}, I64{0})
     sync_store(root + I64{144}, I64{0})
+    sync_store(root + I64{152}, I64{0})
+    sync_store(root + I64{160}, I64{0})
     _ := sync_swap(root + I64{112}, I64{0})
     sync_mutex_unlock(root)
     jet_rt_observe_pool(I64{0}, I64{0})
