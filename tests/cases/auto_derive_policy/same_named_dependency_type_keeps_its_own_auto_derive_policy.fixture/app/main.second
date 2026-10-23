@@ -1,0 +1,42 @@
+
+use dep as vendor
+use open_dep as library
+use core.encoding.json as json
+
+struct Token { value: Int }
+struct LocalEnvelope { token: Token }
+struct DependencyEnvelope { token: vendor.Token }
+struct ImportedEnvelope { badge: library.Badge }
+struct MapEnvelope { values: [String:Int] }
+struct UnionEnvelope { value: Int | String }
+
+fn run() {
+    token :: Token{ value: 7 }
+    print(token)
+    print("{token:Debug}")
+    print(token == Token{ value: 7 })
+
+    badge :: library.Badge{ value: 9 }
+    print(badge)
+    print("{badge:Debug}")
+    print(badge == library.Badge{ value: 9 })
+
+    envelope :: ImportedEnvelope{ badge: library.Badge{ value: 9 } }
+    print(envelope)
+    print("{envelope:Debug}")
+    print(envelope == ImportedEnvelope{ badge: library.Badge{ value: 9 } })
+    print(envelope < ImportedEnvelope{ badge: library.Badge{ value: 10 } })
+    wire :: json.to_string(envelope) ?? panic("JSON encode")
+    print(wire)
+    decoded :: json.decode<ImportedEnvelope>(wire) ?? panic("decode")
+    print(decoded == envelope)
+
+    map :: MapEnvelope{ values: [String:Int]{ "one": 1 } }
+    print(map)
+    print("{map:Debug}")
+
+    union :: UnionEnvelope{ value: 3 }
+    print(union)
+    print("{union:Debug}")
+    print(union == UnionEnvelope{ value: 3 })
+}

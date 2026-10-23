@@ -1,0 +1,34 @@
+
+#!Printable
+struct NoPrint { value: Int }
+struct OuterNoPrint { inner: NoPrint }
+
+#!Debug
+struct NoDebug { value: Int }
+struct OuterNoDebug { inner: NoDebug }
+
+#!Equatable
+struct NoEquality { value: Int }
+struct OuterNoEquality { inner: NoEquality }
+
+struct OuterReader { reader: FileReader }
+
+#[!Printable, !Debug, !Equatable]
+struct Hidden<T> { value: T }
+struct OuterHidden { value: Hidden<Int> }
+
+fn reject_opaque_core(reader: FileReader) {
+    print(reader)
+    print("{reader:Debug}")
+}
+
+fn reject_outer_reader(value: OuterReader) {
+    print(value)
+}
+
+fn run() {
+    print(OuterNoPrint{ inner: NoPrint{ value: 1 } })
+    print("{OuterNoDebug{ inner: NoDebug{ value: 2 } }:Debug}")
+    print(OuterNoEquality{ inner: NoEquality{ value: 3 } } == OuterNoEquality{ inner: NoEquality{ value: 3 } })
+    print(OuterHidden{ value: Hidden{ value: 4 } })
+}

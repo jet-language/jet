@@ -59,6 +59,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     paths
 }
 
+// Rust: tests/workspace.rs:17
 #Test("empty members list") {
     plan :: envmodel_test_eval("module workspace {{\n    members: []\n}}\n")
     assert_eq(plan.members.len(), 0)
@@ -73,6 +74,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     assert_eq(patches.patches, [String]{"patches/foo.patch"})
 }
 
+// Rust: tests/workspace.rs:25
 #Test("explicit string list") {
     tmp :: envmodel_test_workspace_dir("explicit-list")
     envmodel_test_write_package(tmp, "packages/hello", "name: \"hello\"\n")
@@ -246,6 +248,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     files.remove_all(nonregular) ?? panic("scratch cleanup")
 }
 
+// Rust: tests/workspace.rs:306
 #Test("committed workspace example evaluates clean") {
     // I5: a workspace.jet with find() discovers package members.
     dir :: envmodel_test_workspace_dir("ws-example")

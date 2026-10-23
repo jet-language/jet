@@ -1,0 +1,32 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+
+    network :: process.cmd(["bash", "-c", "if printf escaped > /dev/tcp/127.0.0.1/9 2>/dev/null; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
+    if network.plan() == {
+        .Ok(_) -> {
+            if network.run_checked() == {
+                .Ok(_) -> print("network-blocked")
+                .Err(_) -> print("network-escaped")
+            }
+        }
+        .Err(_) -> print("unsupported")
+    }
+
+    descendants :: process.cmd(["sh", "-c", "(sleep 1; printf child-leaked) & exit 0"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .cwd("/tmp")
+        .under(policy)
+    if descendants.plan() == {
+        .Ok(_) -> {
+            receipt :: descendants.run() ?? panic("descendant receipt")
+            print(receipt.success)
+            print(receipt.descendants)
+            print(receipt.output == "")
+        }
+        .Err(_) -> print("unsupported")
+    }
+}

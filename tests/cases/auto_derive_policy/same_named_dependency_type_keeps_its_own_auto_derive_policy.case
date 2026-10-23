@@ -1,0 +1,21 @@
+# tests/auto_derive_policy.rs::same_named_dependency_type_keeps_its_own_auto_derive_policy at tests/auto_derive_policy.rs:848; hand-port
+# TraitRegistry selections have no CLI projection; this keeps the error count, the clean check and the run output.
+fixture: same_named_dependency_type_keeps_its_own_auto_derive_policy.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check app/main.jet
+exit: any # the original counts error diagnostics
+stderr: count "[E0112]" = 1 # tests/auto_derive_policy.rs:914 exactly one E0112
+copy: app/main.second app/main.jet
+step: jet check app/main.jet
+exit: 0 # tests/auto_derive_policy.rs:1027 no errors
+step: jet build app/main.jet
+exit: 0
+step aot: built
+exit: 0 # tests/auto_derive_policy.rs:1048
+stdout: = same_named_dependency_type_keeps_its_own_auto_derive_policy.out # tests/auto_derive_policy.rs:1049 AOT
+step: jet run app/main.jet
+exit: 0
+stdout: = same_named_dependency_type_keeps_its_own_auto_derive_policy.out # tests/auto_derive_policy.rs:1056 default JIT

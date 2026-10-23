@@ -1,0 +1,17 @@
+# tests/arena.rs::alloc_and_use_compiles_and_runs at tests/arena.rs:92; hand-port
+# The original's two example tier checks (memory/arena, memory/try_allocation) are the golden suite's Examples/features entries.
+fixture: alloc_and_use_compiles_and_runs.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check run.jet
+exit: 0 # tests/arena.rs:109 error_codes(src) is empty
+step: jet run run.jet
+exit: 0
+stdout: = alloc_and_use_compiles_and_runs.out # tests/arena.rs:113 interpreter tier
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = alloc_and_use_compiles_and_runs.out # tests/arena.rs:112 build_and_run

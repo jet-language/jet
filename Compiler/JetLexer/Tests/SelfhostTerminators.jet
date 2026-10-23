@@ -1,0 +1,46 @@
+// Jet-pass halves of tests/selfhost_terminators.rs: the programs those tests
+// compiled from these sources, asserted on the same printed values.
+use jet_foundation.[name_count, name_find, name_intern, name_table, name_text]
+use jet_lexer.[lex_payload, terminator_events_scanned, token_decoded, token_shift_spans]
+
+// Rust: tests/selfhost_terminators.rs:368
+#Test("terminator pass golden events") {
+    assert_eq(terminator_events_scanned("x".bytes(), false), [Int]{1, 1, 1})
+    assert_eq(terminator_events_scanned("x\n-y".bytes(), false), [Int]{1, 3, 4})
+    assert_eq(terminator_events_scanned("x // c\ny".bytes(), false), [Int]{1, 2, 1, 1, 3, 8})
+    assert_eq(terminator_events_scanned("x\n!y".bytes(), false), [Int]{1, 1, 1, 1, 3, 4})
+    // "f()\n{}"
+    assert_eq(terminator_events_scanned([U8]{102, 40, 41, 10, 123, 125}, false), [Int]{2, 3, 4})
+    assert_eq(terminator_events_scanned("x\n.Key && ready\n-> 1".bytes(), false), [Int]{1, 5, 15, 1, 7, 20})
+    assert_eq(terminator_events_scanned("x\n.Key && ready -> 1".bytes(), false), [Int]{1, 1, 1, 1, 7, 20})
+    // "x\n.member(1) {}"
+    assert_eq(terminator_events_scanned([U8]{120, 10, 46, 109, 101, 109, 98, 101, 114, 40, 49, 41, 32, 123, 125}, false), [Int]{1, 1, 1})
+}
+
+// Rust: tests/selfhost_terminators.rs:577
+#Test("lexer interns repeated names and relocates literal tables") {
+    result := lex_payload(`alpha alpha "{alpha}"`.bytes(), false)
+    assert_eq(result.tokens[0].decoded.id == result.tokens[1].decoded.id, true)
+    literal :: result.tokens[2].literal
+    nested :: result.tables.literals[literal].string_parts[0].tokens[0]
+    assert_eq(result.tokens[0].decoded.id == nested.decoded.id, true)
+    before :: nested.span.start
+    token_shift_spans(&result.tokens[2], 100, &result.tables.literals)
+    assert_eq(result.tables.literals[literal].string_parts[0].tokens[0].span.start == before + 100, true)
+    assert_eq(token_decoded(result.tables, result.tables.literals[literal].string_parts[0].tokens[0]), "alpha")
+    assert_eq(result.tokens[2].span.start, 112)
+}
+
+// Rust: tests/selfhost_terminators.rs:601
+#Test("name table preserves first seen ids across growth") {
+    table := name_table()
+    first :: name_intern(&table, "μ_name")
+    loop index in 0..<600 -> _ := name_intern(&table, "name{index}")
+    again :: name_intern(&table, "μ_name")
+    assert_eq(first.id == again.id, true)
+    assert_eq(name_count(table), 602)
+    assert_eq(name_text(table, first), "μ_name")
+    found :: name_find(table, "name599") ?? panic("name599 interned")
+    assert_eq(name_text(table, found), "name599")
+    assert_eq(name_find(table, "absent") == None, true)
+}

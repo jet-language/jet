@@ -1,0 +1,14 @@
+# tests/auto_derive_policy.rs::rejected_auto_traits_fail_in_sema_before_codegen at tests/auto_derive_policy.rs:683; hand-port
+# The original also counted at least six E0112 rows and read TraitRegistry sets; neither has a case predicate, so this keeps the codes and the JIT refusal.
+fixture: rejected_auto_traits_fail_in_sema_before_codegen.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check main.jet
+exit: any # the original asserts diagnostics, not an exit status
+stderr: ~ "[E0112]" # tests/auto_derive_policy.rs:723 E0112 rows
+stderr: ~ "[E0312]" # tests/auto_derive_policy.rs:731 E0312
+step: jet run main.jet
+exit: any # the original asserts RunOutcome::Problems
+stderr: ~ "[E0112]" # tests/auto_derive_policy.rs:760 JIT does not bypass sema

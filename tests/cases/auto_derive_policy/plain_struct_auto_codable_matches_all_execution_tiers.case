@@ -1,0 +1,14 @@
+# tests/auto_derive_policy.rs::plain_struct_auto_codable_matches_all_execution_tiers at tests/auto_derive_policy.rs:357; hand-port
+fixture: plain_struct_auto_codable_matches_all_execution_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0 # tests/auto_derive_policy.rs:371
+stdout: = plain_struct_auto_codable_matches_all_execution_tiers.out # tests/auto_derive_policy.rs:372 AOT
+step: jet run main.jet
+exit: 0
+stdout: = plain_struct_auto_codable_matches_all_execution_tiers.out # tests/auto_derive_policy.rs:380 default JIT
