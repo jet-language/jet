@@ -1224,14 +1224,12 @@ fn jet_codegen_builtin_tuple_callback(builder: &JetCodegenBuilder, program: JetC
         name := "zip_{index}"
         parameter_symbol := jet_codegen_builtin_callback_symbol(builder, program, span, "tuple-{key}", name)
         local := tir_symbol_local(name, span, parameter_symbol)
-        value := TExpr{ty: params[index], kind: TExprKind.Local{local: local}, span: span, integer_bounds: None, cost: None}
+        value := TExpr{ty: params[index], kind: TExprKind.Local{local: local}, span: span}
         if indexed && index == 0 {
             value = TExpr{
                 ty: fields[index].ty,
                 kind: TExprKind.NumericMethod{receiver: value, operation: TNumericOp.CastAs{dst_rust: "i64"}},
                 span: span,
-                integer_bounds: None,
-                cost: None,
             }
         }
         &row_values.push(value)
@@ -1243,8 +1241,6 @@ fn jet_codegen_builtin_tuple_callback(builder: &JetCodegenBuilder, program: JetC
         ty: row_type,
         kind: TExprKind.Tuple{values: row_values},
         span: span,
-        integer_bounds: None,
-        cost: None,
     }
     jet_codegen_builtin_synthetic_lambda(&builder, program, span, source_params, source_symbols, params, row_type, TLambdaBody.Expr{value: body}, "builtin_tuple_{key}_{span.start}")
 }
@@ -1336,10 +1332,10 @@ fn jet_codegen_builtin_zip_callback(builder: &JetCodegenBuilder, program: JetCod
     source_params := [String]{"zip_0", "zip_1"}
     source_symbols := [SymbolID]{}
     loop name in source_params -> &source_symbols.push(jet_codegen_builtin_callback_symbol(builder, program, span, "zip-{key}", name))
-    left := TExpr{ty: left_type, kind: TExprKind.Local{local: tir_symbol_local("zip_0", span, source_symbols[0])}, span: span, integer_bounds: None, cost: None}
+    left := TExpr{ty: left_type, kind: TExprKind.Local{local: tir_symbol_local("zip_0", span, source_symbols[0])}, span: span}
     if column == 1 {
-        right := TExpr{ty: field_types[column], kind: TExprKind.Local{local: tir_symbol_local("zip_1", span, source_symbols[1])}, span: span, integer_bounds: None, cost: None}
-        body := TExpr{ty: row_type, kind: TExprKind.Tuple{values: [TExpr]{left, right}}, span: span, integer_bounds: None, cost: None}
+        right := TExpr{ty: field_types[column], kind: TExprKind.Local{local: tir_symbol_local("zip_1", span, source_symbols[1])}, span: span}
+        body := TExpr{ty: row_type, kind: TExprKind.Tuple{values: [TExpr]{left, right}}, span: span}
         return jet_codegen_builtin_synthetic_lambda(&builder, program, span, source_params, source_symbols, params, row_type, TLambdaBody.Expr{value: body}, "builtin_zip_{key}_{span.start}")
     }
     binds := [TDestructureBinding]{}
@@ -1349,11 +1345,11 @@ fn jet_codegen_builtin_zip_callback(builder: &JetCodegenBuilder, program: JetCod
         name := "zip_{key}_field_{index}"
         local := tir_generated_local(name, span)
         &binds.push(TDestructureBinding{local: local, field: fields[index]})
-        &row_values.push(TExpr{ty: field_types[index], kind: TExprKind.Local{local: local}, span: span, integer_bounds: None, cost: None})
+        &row_values.push(TExpr{ty: field_types[index], kind: TExprKind.Local{local: local}, span: span})
         index += 1
     }
-    &row_values.push(TExpr{ty: field_types[column], kind: TExprKind.Local{local: tir_symbol_local("zip_1", span, source_symbols[1])}, span: span, integer_bounds: None, cost: None})
-    body := TExpr{ty: row_type, kind: TExprKind.Tuple{values: row_values}, span: span, integer_bounds: None, cost: None}
+    &row_values.push(TExpr{ty: field_types[column], kind: TExprKind.Local{local: tir_symbol_local("zip_1", span, source_symbols[1])}, span: span})
+    body := TExpr{ty: row_type, kind: TExprKind.Tuple{values: row_values}, span: span}
     temporary := tir_generated_local("zip_{key}_left", span)
     destructure := TStmt.TupleDestructure{temp: temporary, init: left, move_fields: true, binds: binds, span: span}
     returned := TStmt.Return{value: Val(body), span: span}
@@ -1363,8 +1359,8 @@ fn jet_codegen_builtin_zip_callback(builder: &JetCodegenBuilder, program: JetCod
 fn jet_codegen_builtin_zip_fill_callback(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, key: String, element: Type, target: Type) -> MIRValueID {
     name := "zip_0"
     parameter_symbol := jet_codegen_builtin_callback_symbol(builder, program, span, "zip-fill-{key}", name)
-    local := TExpr{ty: element, kind: TExprKind.Local{local: tir_symbol_local(name, span, parameter_symbol)}, span: span, integer_bounds: None, cost: None}
-    body := TExpr{ty: target, kind: TExprKind.Present{value: local}, span: span, integer_bounds: None, cost: None}
+    local := TExpr{ty: element, kind: TExprKind.Local{local: tir_symbol_local(name, span, parameter_symbol)}, span: span}
+    body := TExpr{ty: target, kind: TExprKind.Present{value: local}, span: span}
     jet_codegen_builtin_synthetic_lambda(&builder, program, span, [String]{name}, [SymbolID]{parameter_symbol}, [Type]{element}, target, TLambdaBody.Expr{value: body}, "builtin_zip_fill_{key}_{span.start}")
 }
 

@@ -149,12 +149,6 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys:
                 loop item in argument.template_items -> jet_codegen_core_reach_add(&keys, item.key)
             }
         }
-        .ModuleCall(target, _, _, _, args) -> {
-            jet_codegen_core_reach_add(&keys, target.key)
-            loop argument in args {
-                loop item in argument.template_items -> jet_codegen_core_reach_add(&keys, item.key)
-            }
-        }
         .MethodCall(_, method, _, args) -> {
             jet_codegen_core_reach_add(&keys, method.symbol.key)
             loop argument in args {
@@ -189,7 +183,7 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys:
             }
         }
         .InlineBlock(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
-        .Lambda(value) | .LambdaValue(value) -> jet_codegen_core_reach_lambda_keys(value, functions, &keys)
+        .Lambda(value) -> jet_codegen_core_reach_lambda_keys(value, functions, &keys)
         .IfExpr(_, then_body, _, else_body, _) | .ResultHandler(_, _, then_body, _, _, else_body, _, _) -> {
             jet_codegen_core_reach_stmt_keys(then_body, functions, &keys)
             jet_codegen_core_reach_stmt_keys(else_body, functions, &keys)
@@ -363,9 +357,9 @@ fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core
 }
 
 #Test("A comptime closure finds the precise helper a nested literal lowers to") {
-    spelling :: TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "9007199254740992.0"}}}, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
-    decimal :: TExpr{ty: Type.Named{name: "Decimal"}, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
-    converted :: TExpr{ty: Type.Float, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "to_float", args: [TExpr]{decimal}}, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
+    spelling :: TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "9007199254740992.0"}}}, span: Span{start: 0, end: 1}}
+    decimal :: TExpr{ty: Type.Named{name: "Decimal"}, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span: Span{start: 0, end: 1}}
+    converted :: TExpr{ty: Type.Float, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "to_float", args: [TExpr]{decimal}}, span: Span{start: 0, end: 1}}
     names :: jet_codegen_precise_helper_names([TExpr]{converted}, [TStmt]{})
     assert_eq(names.len(), 2)
     assert(names.contains("__decimal_to_float"))

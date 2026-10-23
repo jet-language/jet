@@ -72,11 +72,11 @@ fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, program: J
         lowered[index].fn_coercion = None
         lowered[index].widen_fixed_to_list = false
         owned_slot :: !source_argument.borrow && !source_argument.mut_borrow
-        // A resource take always moves. A route that takes its owned
-        // operand (`shared value`) also takes a checked move or a fresh
-        // value by Move: passed as a Read, the native lowering would clone
-        // the whole value into the cell and drop the original.
-        if owned_slot && (source_argument.value.kind == .ResourceTake(_) || (takes_owned && jet_codegen_static_prelude_owned_operand(source_argument.value))) {
+        // A route that takes its owned operand (`shared value`) takes a
+        // checked move or a fresh value by Move: passed as a Read, the native
+        // lowering would clone the whole value into the cell and drop the
+        // original.
+        if owned_slot && takes_owned && jet_codegen_static_prelude_owned_operand(source_argument.value) {
             lowered[index].access = MIRAccess.Move
             lowered[index].owned_last_use = true
         }

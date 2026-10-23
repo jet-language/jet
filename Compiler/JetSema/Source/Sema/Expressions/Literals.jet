@@ -26,6 +26,7 @@ use jet_foundation.[
     measure_expression,
     measure_literal_value,
     symbol_id,
+    tir_expr_known_bounds,
     type_identity_equal,
     type_name,
     type_tuple_fields_canonical,
@@ -766,7 +767,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                 &diagnostics.push(sema_error("E0965", expr_span(index), "a fixed-list length is not a checked integer measure", "fixed indexing needs a concrete list length", "use a literal fixed-list length"))
                 return None
             }
-            if checked_index.integer_bounds == {
+            if tir_expr_known_bounds(checked_index) == {
                 .Val(bounds) -> {
                     if bounds.lo < 0 || bounds.hi >= length {
                         &diagnostics.push(sema_error("E0965", expr_span(index), "the index is outside this fixed-size list", "valid indexes run from 0 through {length - 1}", "use an index inside the fixed-list bounds"))

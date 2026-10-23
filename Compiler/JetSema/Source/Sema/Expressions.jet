@@ -44,6 +44,7 @@ use jet_foundation.[
     TPatternPosition,
     TStrFormat,
     TStrPart,
+    TTypedGoal,
     TUnaryOp,
     TUnitFormat,
     TUnitRounding,
@@ -66,8 +67,8 @@ use jet_foundation.[
     dimension_multiply,
     expr_source_start,
     expr_span,
-    integer_bounds_exact,
     symbol_id,
+    tir_expr_literal_integer,
     tir_symbol_local,
     type_identity_equal,
     type_name,
@@ -86,7 +87,7 @@ use jet_foundation.[
 // around their checked children, and copying it copied the whole subtree.
 fn sema_tir_node(ty: Type, kind: ^TExprKind, span: Span) -> TExpr Never! {
     // copy: node types are shared with the caller's checked children and context.
-    TExpr{ty: ty.copy(), kind: ^kind, span: span, integer_bounds: None, cost: None}
+    TExpr{ty: ty.copy(), kind: ^kind, span: span}
 }
 
 // The read form, for a caller that keeps reading its kind.
@@ -303,12 +304,8 @@ fn sema_expr_numeric_host_kind(ty: Type) -> Int? {
 fn sema_expr_integer_literal_value(value: TExpr) -> Int? {
     if value.kind == {
         .IntLit(number, width) -> if width == None -> return Val(number)
-        // A literal beyond i64 keeps its exact value in its bounds.
-        .CtLit(constant) -> {
-            if constant == .BigInt(_) && value.integer_bounds == .Val(bounds) {
-                if bounds.lo == bounds.hi -> return Val(bounds.lo)
-            }
-        }
+        // A literal beyond i64 is a BigInt constant with its exact decimal.
+        .CtLit(_) -> return tir_expr_literal_integer(value)
         .Unary(operator, operand) -> {
             if operator == TUnaryOp.Neg {
                 inner :: sema_expr_integer_literal_value(operand) ?? return None
@@ -325,7 +322,7 @@ fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: In
     destination := sema_expr_numeric_base(target)
     if type_identity_equal(value.ty, target) -> return Val(value)
     if type_identity_equal(source, destination) {
-        return Val(TExpr{ty: target, kind: value.kind, span: span, integer_bounds: value.integer_bounds, cost: value.cost})
+        return Val(TExpr{ty: target, kind: value.kind, span: span})
     }
     operation := TNumericOp?{None}
     if destination == Type.Float || destination == Type.Float32 {
@@ -352,7 +349,7 @@ fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: In
             }
         }
     }
-    TExpr{ty: target, kind: TExprKind.NumericMethod{receiver: value, operation: operation ?? TNumericOp.CastAs{dst_rust: ""}}, span: span, integer_bounds: None, cost: None}
+    TExpr{ty: target, kind: TExprKind.NumericMethod{receiver: value, operation: operation ?? TNumericOp.CastAs{dst_rust: ""}}, span: span}
 }
 
 fn sema_expr_numeric_literal_conversion(value: TExpr, target: Type, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -2052,16 +2049,15 @@ fn sema_expr_written_negative_integer(value: Expr) -> Bool Never! {
 // Jet's exact Int carrier is wider than Rust's CtValue.Int and TIR IntLit.
 fn sema_expr_unbounded_integer_literal(value: Int, span: Span) -> TExpr Never! {
     kind :: if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 -> TExprKind.IntLit{value: value, width: None} else -> TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "{value}"}}
-    TExpr{ty: Type.Int, kind: kind, span: span, integer_bounds: Val(integer_bounds_exact(value)), cost: None}
+    TExpr{ty: Type.Int, kind: kind, span: span}
 }
 
 // A literal outside the i64 range keeps its exact value as a
 // BigInt constant (Rust TIR `CtLit(BigInt)`); a fixed-width one crosses the
 // checked Int-to-fixed conversion, as in Rust's lowering.
 fn sema_expr_int_literal_tir(value: Int, ty: Type, width: TIntegerWidth?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
-    bounds :: integer_bounds_exact(value)
     if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 {
-        return Val(TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: width}, span: span, integer_bounds: Val(bounds), cost: None})
+        return Val(TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: width}, span: span})
     }
     big :: sema_expr_unbounded_integer_literal(value, span)
     if width == None -> return Val(big)
@@ -2144,7 +2140,7 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
         else -> {}
     }
     operand :: sema_expr_int_literal_tir(value, ty, tir_width, span, environment, program) ?? return None
-    bounded :: TExpr{ty: ty, kind: TExprKind.Unary{op: TUnaryOp.Neg, operand: operand}, span: span, integer_bounds: Val(integer_bounds_exact(negated)), cost: None}
+    bounded :: TExpr{ty: ty, kind: TExprKind.Unary{op: TUnaryOp.Neg, operand: operand}, span: span}
     sema_expr_expected(bounded, expected, environment, program, &diagnostics)
 }
 
@@ -3532,7 +3528,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
         local := tir_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id)
         local.mutable = scopes.bindings[index].mutable
         local.integer_bounds = scopes.bindings[index].integer_bounds
-        value :: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span, integer_bounds: scopes.bindings[index].integer_bounds, cost: None}
+        value :: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span}
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
@@ -3569,7 +3565,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
                 }
                 if context.arithmetic_policy == .Val(policy) {
                     line :: sema_source_line_at(environment.source_segments, span) ?? return None
-                    zero :: TExpr{ty: value.ty, kind: TExprKind.IntLit{value: 0, width: Val(TIntegerWidth{signed: true, bits: bits})}, span: span, integer_bounds: Val(integer_bounds_exact(0)), cost: None}
+                    zero :: TExpr{ty: value.ty, kind: TExprKind.IntLit{value: 0, width: Val(TIntegerWidth{signed: true, bits: bits})}, span: span}
                     negated :: sema_expr_arithmetic_policy_value(policy, ArithmeticOperation.Neg, value.ty, span, line, zero, value)
                     return sema_expr_expected_owned(^negated, expected, environment, program, &diagnostics)
                 }
@@ -3811,7 +3807,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     }
     if op == BinOp.And || op == BinOp.Or {
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
-        value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span, integer_bounds: None, cost: None}
+        value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span}
         if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
@@ -4004,7 +4000,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if (op == BinOp.Shl || op == BinOp.Shr) && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
     // Built and kept in place (sema_tir_expr and sema_expr_expected copy
     // their borrowed value, and with it both operand trees, at every level).
-    value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span, integer_bounds: None, cost: None}
+    value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span}
     if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
@@ -4153,13 +4149,12 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
 }
 
 // Rust CheckerInfer/expr.rs: an unconstrained goal continues as Int, but
-// its goal card still says "(unknown)". Consumers read this checked TIR
-// metadata, never infer a type from the source spelling.
-fn sema_expression_todo(expected: Type?, span: Span) -> TExpr? Never! {
+// its goal row's card still says "(unknown)". Consumers read the function's
+// checked goal rows, never infer a type from the source spelling.
+fn sema_expression_todo(expected: Type?, span: Span, goals: &[TTypedGoal]) -> TExpr? Never! {
     card :: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
-    value := sema_tir_node(expected ?? Type.Int, TExprKind.Never{reason: "todo"}, span)
-    value.goal_expected_type = Val(card)
-    Val(value)
+    &goals.push(TTypedGoal{span: span, expected: card})
+    Val(sema_tir_node(expected ?? Type.Int, TExprKind.Never{reason: "todo"}, span))
 }
 
 // One expression level. Every recursive check passes through this frame, so
@@ -4217,7 +4212,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
         .ComptimeName(name, span, value) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, &scopes, &state, &context, &diagnostics)
         .Paren(value, span) -> {
             checked :: sema_check_expression(value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-            return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span, integer_bounds: checked.integer_bounds, cost: checked.cost})
+            return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
         }
         .Unary(op, operand, span) -> sema_expr_check_unary(op, operand, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Binary(op, left, right, span) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4270,7 +4265,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             &diagnostics.push(sema_error("E2510", span, "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
             None
         }
-        .Todo(span, _) -> sema_expression_todo(expected, span)
+        .Todo(span, _) -> sema_expression_todo(expected, span, &context.typed_goals)
         .NoElse(span) -> Val(sema_tir_node(expected ?? Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span))
         .RawOf(value, span) -> {
             forbidden := context.unsafe_depth == 0
@@ -4299,7 +4294,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
 
 fn sema_expr_check_paren(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked :: sema_check_expression(value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    Val(TExpr{ty: checked.ty, kind: checked.kind, span: span, integer_bounds: checked.integer_bounds, cost: checked.cost})
+    Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
 }
 
 fn sema_expr_check_call_expr(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

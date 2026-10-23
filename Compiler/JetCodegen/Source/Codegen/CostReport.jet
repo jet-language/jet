@@ -1,5 +1,5 @@
 // Read-only projection of frozen typed evidence. No adapter text is inspected.
-use jet_foundation.[Span, TExpr, TStmt, TFunc, TLambda, TIfCond, TPattern, TPatternShape, TCostKind, TCostState, TCoreClosureKind, tir_cost_fact, tir_stmt_cost_fact]
+use jet_foundation.[Span, TExpr, TStmt, TFunc, TLambda, TIfCond, TPattern, TPatternShape, TCostKind, TCostState, TCoreClosureKind, tir_cost_fact]
 
 struct TCostSite {
     function: String
@@ -80,7 +80,7 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             jet_codegen_cost_stmts(body, function, depth, &sites)
             return
         }
-        .Lambda(lambda) | .LambdaValue(lambda) -> {
+        .Lambda(lambda) -> {
             jet_codegen_cost_lambda(lambda, function, depth, &sites)
             return
         }
@@ -149,18 +149,16 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         .StrLit(parts) -> loop part in parts {
             if part == .Interpolation(child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
         }
-        .Call(_, _, args) | .AllocNew(_, args) | .StaticCall(_, _, _, _, args)
-        | .ModuleCall(_, _, _, _, args) -> loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
-        .ExternCall(_, _, args) -> loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
+        .Call(_, _, args) | .AllocNew(_, args) | .StaticCall(_, _, _, _, args) -> loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
         .IndirectCall(callee, _, args, _) | .MethodCall(callee, _, _, args) -> {
             jet_codegen_cost_expr(callee, function, depth, &sites)
             loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
         }
-        .DistinctCtor(_, child, _) | .RangeCheckedCtor(_, child, _) | .DistinctConvert(_, child, _, _, _)
-        | .TraitBox(child, _) | .Print(child) | .Close(child) | .Move(child) | .ResourceNew(child)
+        .DistinctCtor(_, child, _) | .DistinctConvert(_, child, _, _, _)
+        | .TraitBox(child, _) | .Print(child) | .Close(child) | .Move(child)
         | .Unary(_, child) | .Field(child, _) | .Present(child) | .Ok(child) | .Err(child)
         | .DistinctRaw(child) | .Borrow(child, _) | .RawOf(child) | .Deref(child) | .PtrFromAddr(child, _)
-        | .LayoutLiteral(child) | .LayoutLit(child) | .SharedGuardValue(child, _) | .SharedGuardMap(child, _, _)
+        | .LayoutLiteral(child) | .SharedGuardValue(child, _) | .SharedGuardMap(child, _, _)
         | .SharedGuardSplit(child, _, _, _) | .ConditionNotify(child, _) | .MathSwizzleRead(_, child, _)
         | .Clone(child, _) | .ExplicitCopy(child) | .MaterializeView(child) | .HostBorrowCallback(child, _)
         | .NumericMethod(child, _) | .TaskGroupAll(child) | .TaskGroupRace(child) | .TaskGroupAny(child)
@@ -184,10 +182,9 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             .Panic(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
         }
         .MathBuiltin(_, _, children) | .PreciseBuiltin(_, _, children) | .CompareChain(children, _, _)
-        | .Tuple(children) | .List(children, _) | .ListLit(children) | .ColumnarListLit(_, children)
+        | .Tuple(children) | .List(children, _) | .ListLit(children)
         | .CoreCall(_, children, _, _, _, _, _) -> loop child in children -> jet_codegen_cost_expr(child, function, depth, &sites)
         .StructLit(fields, _) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
-        .TupleLit(_, fields) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
         .Map(entries) | .MapLit(entries) -> loop entry in entries {
             jet_codegen_cost_expr(entry.key, function, depth, &sites)
             jet_codegen_cost_expr(entry.value, function, depth, &sites)
@@ -197,18 +194,17 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             .Named(fields) -> loop field in fields -> jet_codegen_cost_expr(field.value.value, function, depth, &sites)
             .Unit -> {}
         }
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> {
+        .RawAddressOf(place) -> {
             if place == .Expr(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
         }
         .Binary(_, _, _, left, right) | .LayoutCompare(_, left, right) | .NumericBinaryMethod(left, _, right)
-        | .OverflowOpt(_, _, _, _, left, right) | .Index(left, right, _, _, _, _) | .IndexRead(left, right, _, _, _)
-        | .ColumnarGather(left, right, _) | .ColumnarColumnRead(left, right, _, _, _, _)
-        | .PoolSlot(left, right, _, _, _, _) | .IndexHook(_, left, right, _) | .MathLaneIndex(_, left, right, _)
+        | .OverflowOpt(_, _, _, _, left, right) | .Index(left, right, _, _, _, _)
+        | .PoolSlot(left, right, _, _, _, _) | .MathLaneIndex(_, left, right, _)
         | .Range(left, right, _) | .SelectRecv(left, right) -> {
             jet_codegen_cost_expr(left, function, depth, &sites)
             jet_codegen_cost_expr(right, function, depth, &sites)
         }
-        .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _) -> {
             jet_codegen_cost_expr(base, function, depth, &sites)
             jet_codegen_cost_expr(start, function, depth, &sites)
             jet_codegen_cost_expr(end, function, depth, &sites)
@@ -292,18 +288,6 @@ fn jet_codegen_cost_stmts(body: [TStmt], function: String, depth: Int, sites: &[
 fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: &[TCostSite]) {
     if statement == {
         .ExprStmt(value, _) -> jet_codegen_cost_expr(value, function, depth, &sites, true)
-        .IndexAssign(_, base, index, _, value, span) -> {
-            if tir_stmt_cost_fact(statement) == .Val(fact) -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: fact.kind, state: fact.state})
-            jet_codegen_cost_expr(base, function, depth, &sites)
-            jet_codegen_cost_expr(index, function, depth, &sites)
-            jet_codegen_cost_expr(value, function, depth, &sites)
-        }
-        .IndexFieldAssign(value, span) -> {
-            if tir_stmt_cost_fact(statement) == .Val(fact) -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: fact.kind, state: fact.state})
-            jet_codegen_cost_expr(value.base, function, depth, &sites)
-            jet_codegen_cost_expr(value.index, function, depth, &sites)
-            jet_codegen_cost_expr(value.value, function, depth, &sites)
-        }
         .Loop(_, body, _) -> jet_codegen_cost_stmts(body, function, depth + 1, &sites)
         .While(_, condition, body, _) -> {
             jet_codegen_cost_expr(condition, function, depth + 1, &sites)
@@ -411,17 +395,8 @@ fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: 
             if place == .Expr(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
             jet_codegen_cost_expr(child, function, depth, &sites)
         }
-        .Return(child, _) | .SplitViews(child, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
+        .Return(child, _) -> {
             if child == .Val(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
-        }
-        .IndexHookAssign(_, base, index, child, _) -> {
-            jet_codegen_cost_expr(base, function, depth, &sites)
-            jet_codegen_cost_expr(index, function, depth, &sites)
-            jet_codegen_cost_expr(child, function, depth, &sites)
-        }
-        .MathSwizzleAssign(base, _, _, child, _) -> {
-            jet_codegen_cost_expr(base, function, depth, &sites)
-            jet_codegen_cost_expr(child, function, depth, &sites)
         }
         else -> {}
     }

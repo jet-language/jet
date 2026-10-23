@@ -194,7 +194,6 @@ fn sema_place_borrow_census_stmt(statement: TStmt, census: &SemaPlaceBorrowCensu
             _ := &census.names.add(root, true)
             sema_place_borrow_census_stmt(nested, &census)
         }
-        .SplitViews(_, root, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> _ := &census.names.add(root, true)
         .Reactive(executable, _) -> return sema_place_borrow_census_lambda(executable, &census)
         .If(condition, then_body, else_body, _, _) -> {
             sema_place_borrow_census_cond(condition, &census)
@@ -294,11 +293,10 @@ fn sema_place_borrow_census_expr(value: TExpr, census: &SemaPlaceBorrowCensus) N
             }
         }
         .Drop(dropped) | .Close(dropped) -> sema_place_borrow_note_place(&census, dropped)
-        .ResourceTake(local) -> sema_place_borrow_note_local(&census, local)
         .Borrow(place, access) -> {
             if access != AccessConvention.Read -> sema_place_borrow_note_place(&census, place)
         }
-        .Lambda(lambda) | .LambdaValue(lambda) -> return sema_place_borrow_census_lambda(lambda, &census)
+        .Lambda(lambda) -> return sema_place_borrow_census_lambda(lambda, &census)
         // Any other closure carrier: a name it reads is captured.
         .SharedGuardWait(_, _, _) | .CoreClosureCall(_) | .FnValue(_) -> return sema_place_borrow_census_names(value, &census)
         .InlineBlock(body) -> return sema_place_borrow_census_list(body, &census)
@@ -339,7 +337,7 @@ fn sema_place_borrow_census_names(value: TExpr, census: &SemaPlaceBorrowCensus) 
             _ := &census.names.add(local.name, true)
             return
         }
-        .Lambda(lambda) | .LambdaValue(lambda) -> {
+        .Lambda(lambda) -> {
             loop capture in lambda.captures -> _ := &census.names.add(capture.source, true)
         }
         else -> {}

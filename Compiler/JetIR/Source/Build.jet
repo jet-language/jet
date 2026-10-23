@@ -61,9 +61,6 @@ struct IRBuilder {
     // Pattern bindings of the condition being built, bound when its If opens.
     pending: [IRPending]
     line: Int
-    // The line of the last statement line marker (0: none yet), the line a
-    // returned `Err(...)` starts its journey at (ir_journey_origin).
-    marked: Int
     error: String
     error_span: Span
     // The function's executable return (None: Unit), its failure carrier, and
@@ -606,7 +603,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, marked: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {

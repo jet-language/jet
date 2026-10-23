@@ -1383,10 +1383,10 @@ fn sema_stmt_for_in_tir_local_is(local: TLocal, key: String) -> Bool Never! {
 fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool Never! {
     if value.kind == {
         .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> {
+        .RawAddressOf(place) -> {
             if place == .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
         }
-        .Lambda(lambda) | .LambdaValue(lambda) -> {
+        .Lambda(lambda) -> {
             loop capture in lambda.captures {
                 if sema_stmt_for_in_tir_local_is(capture.local, key) -> return true
             }
@@ -1558,19 +1558,14 @@ fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool Never! {
 fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String) -> Bool Never! {
     if value.ty == (Type.Named{name: "Never"}) -> return false
     if value.kind == {
-        .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Unreachable(_) -> return false
+        .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> return false
         .OrFallback(_, fallback, _) -> {
             if fallback == {
                 .Value(_) -> {}
                 else -> return false
             }
         }
-        .AddressOf(place, access, _) -> {
-            if access != AccessConvention.Read && place == .Local(local) {
-                if sema_stmt_for_in_tir_local_is(local, key) -> return false
-            }
-        }
-        .Lambda(lambda) | .LambdaValue(lambda) -> {
+        .Lambda(lambda) -> {
             loop capture in lambda.captures {
                 if sema_stmt_for_in_tir_local_is(capture.local, key) -> return false
             }
@@ -3410,7 +3405,7 @@ fn sema_stmt_check_range_conversion(init: Expr, head: String, expected: Type?, e
     value :: sema_check_expression_carrier(init, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
         if init == .MethodCall(_, method, _, _, _, args) -> &diagnostics.push(sema_range_runtime_conversion(head, method, expr_span(args[0].expr)))
-        return Val(TExpr{ty: success, kind: value.kind, span: value.span, integer_bounds: None, cost: None})
+        return Val(TExpr{ty: success, kind: value.kind, span: value.span})
     }
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
@@ -3930,7 +3925,7 @@ fn sema_stmt_tir_statement_children_touch_shared(statement: TStmt) -> Bool Never
 
 fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool Never! {
     if value.kind == {
-        .Lambda(_) | .LambdaValue(_) -> return false
+        .Lambda(_) -> return false
         .InlineBlock(body) -> return sema_stmt_tir_statements_touch_shared(body)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
             if sema_stmt_tir_condition_touches_shared(condition) -> return true

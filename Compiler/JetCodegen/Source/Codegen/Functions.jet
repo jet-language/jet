@@ -3829,7 +3829,7 @@ fn jet_codegen_lower_keep_going_trap(slot: Shared<JetCodegenProgramSlot>, positi
     // unchanged in the shared program slot that every other lowering worker reads.
     trapped := inputs.value.programs[0].function_index.rows[position].copy()
     &failures.push(JetCodegenLoweringFailure{name: trapped.name, key: trapped.key, source_file: trapped.source_file, span: trapped.source_span, message: message})
-    stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: "keep-going trap: lowering this function stopped: {message}"}, span: trapped.source_span, integer_bounds: None, cost: None}
+    stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: "keep-going trap: lowering this function stopped: {message}"}, span: trapped.source_span}
     trapped.body = [TStmt]{TStmt.ExprStmt{value: stop, span: trapped.source_span}}
     builder := jet_codegen_new_builder(trapped, inputs.value.programs[0])
     jet_codegen_lower_function(&builder, inputs.value.programs[0], trapped, trapped.body, None, None)

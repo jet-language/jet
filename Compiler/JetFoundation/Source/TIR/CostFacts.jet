@@ -63,22 +63,48 @@ fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerB
     }
 }
 
+// The exact value an integer literal node spells. A literal beyond i64 is a
+// BigInt constant.
+fn tir_expr_literal_integer(expression: TExpr) -> Int? Never! {
+    if expression.kind == {
+        .IntLit(value, _) -> return Val(value)
+        .CtLit(value) -> {
+            if value == .BigInt(decimal) -> return Val(Int.parse(decimal) ?? return None)
+        }
+        else -> {}
+    }
+    None
+}
+
+// The bounds a node states by itself: an integer literal, a negated literal
+// (a fixed-width operand crosses the checked Int-to-fixed conversion), or a
+// local, which carries its binding's bounds. No other node states bounds.
+fn tir_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
+    if expression.kind == {
+        .Local(local) -> return local.integer_bounds
+        .Unary(op, operand) -> {
+            if op != TUnaryOp.Neg -> return None
+            literal := tir_expr_literal_integer(operand)
+            if operand.kind == .NumericMethod(receiver, operation) {
+                if operation == .CheckedIntToFixed(_, _, _, _) -> literal = tir_expr_literal_integer(receiver)
+            }
+            number :: literal ?? return None
+            return Val(integer_bounds_exact(-number))
+        }
+        else -> {}
+    }
+    value :: tir_expr_literal_integer(expression) ?? return None
+    Val(integer_bounds_exact(value))
+}
+
 fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
-    if expression.integer_bounds != None -> return expression.integer_bounds
+    known :: tir_expr_known_bounds(expression)
+    if known != None -> return known
     bounds := TIntegerBounds?{None}
     if expression.kind == {
-        .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value))
         .CtLit(value) -> {
-            if value == {
-                .Int(number) -> bounds = Val(integer_bounds_exact(number))
-                .BigInt(decimal) -> {
-                    number :: Int.parse(decimal) ?? return tir_cost_type_bounds(expression.ty)
-                    bounds = tir_cost_bounded(number, number)
-                }
-                else -> {}
-            }
+            if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
         }
-        .Local(local) -> bounds = local.integer_bounds
         .NumericMethod(receiver, operation) -> {
             if operation == {
                 .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi})
@@ -117,7 +143,6 @@ fn tir_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
 }
 
 fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
-    if expression.cost != None -> return expression.cost
     if expression.kind == {
         .MaterializeView(_) -> return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder})
         .BuiltinMethod(receiver, operation, _) -> {
@@ -141,9 +166,6 @@ fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
                 return Val(TCostFact{kind: TCostKind.ExactIntSpill, state: state})
             }
         }
-        .IndexRead(base, _, is_map, uninit, _) -> {
-            if !is_map && !uninit && (base.ty == .List(_) || base.ty == .FixedList(_, _)) -> return Val(TCostFact{kind: TCostKind.RepresentationFallback, state: TCostState.SemanticRemainder})
-        }
         .Index(base, _, kind, _, _, _) -> {
             if kind == TIndexKind.List && base.ty == .List(_) -> return Val(TCostFact{kind: TCostKind.RepresentationFallback, state: TCostState.SemanticRemainder})
         }
@@ -157,9 +179,7 @@ fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
     construction :: if expression.kind == {
         .Absent | .Present(_) | .Ok(_) | .Err(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _)
         | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _)
-        | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) | .CoreCall(_, _, _, _, _, _, _)
-        | .ModuleCall(_, _, _, _, _) | .ExternCall(_, _, _) | .HostCall(_)
-        | .RangeCheckedCtor(_, _, _) | .DecodeUnder(_, _) | .OptionLift2(_, _, _)
+        | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) | .CoreCall(_, _, _, _, _, _, _) | .HostCall(_) | .DecodeUnder(_, _) | .OptionLift2(_, _, _)
         | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) -> true
         .DistinctConvert(_, _, _, _, fallible) -> fallible
         .UnitConvert(_, _, _, _, _, fallible, _, _, _) -> fallible
@@ -204,11 +224,3 @@ fn tir_cost_fix(kind: TCostKind) -> String Never! {
     }
 }
 
-fn tir_stmt_cost_fact(statement: TStmt) -> TCostFact? Never! {
-    map_edit :: if statement == {
-        .IndexAssign(_, _, _, is_map, _, _) -> is_map
-        .IndexFieldAssign(value, _) -> value.is_map
-        else -> false
-    }
-    if map_edit -> Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder}) else -> None
-}

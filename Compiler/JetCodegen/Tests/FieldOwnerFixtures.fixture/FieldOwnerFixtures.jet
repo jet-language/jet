@@ -79,9 +79,9 @@ fn fc_embedded_integer_constants() {
         checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, program, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
         fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
-        fc_require(checked.integer_bounds == (Val(integer_bounds_exact(number))), "embedded exact bounds")
+        fc_require(tir_expr_known_bounds(checked) == (Val(integer_bounds_exact(number))), "embedded exact bounds")
         prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment, program) ?? panic("prepared integer was not checked")
-        fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
+        fc_require(prepared.kind == expected && tir_expr_known_bounds(prepared) == tir_expr_known_bounds(checked), "prepared exact integer uses BigInt")
         if checked.kind == .CtLit(value) {
             lowered :: jet_codegen_lower_comptime_value(value, jet_codegen_nominal_index([SemaGraphModuleResult]{}), "", [String]{}) ?? panic("exact integer was not lowered")
             fc_require(lowered == (MIRConstant.BigInt{decimal: decimal}), "native MIR keeps exact decimal")

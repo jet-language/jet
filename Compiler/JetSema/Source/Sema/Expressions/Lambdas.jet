@@ -1146,7 +1146,6 @@ fn sema_expression_lambda_collect_tir_expr(value: TExpr, frame: Int, scopes: &Se
             sema_expression_lambda_collect_tir_expr(call, frame, &scopes, &keys)
         }
         .Lambda(lambda) -> sema_expression_lambda_collect_tir_lambda(lambda, frame, &scopes, &keys)
-        .LambdaValue(lambda) -> sema_expression_lambda_collect_tir_lambda(lambda, frame, &scopes, &keys)
         .InlineBlock(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
         .Binary(_, _, _, left, right) -> {
             sema_expression_lambda_collect_tir_expr(left, frame, &scopes, &keys)
@@ -1181,8 +1180,8 @@ fn sema_expression_lambda_collect_tir_expr(value: TExpr, frame: Int, scopes: &Se
             sema_expression_lambda_collect_tir_optional_expr(note, frame, &scopes, &keys)
         }
         .Borrow(place, _) -> sema_expression_lambda_collect_tir_expr(place, frame, &scopes, &keys)
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> sema_expression_lambda_collect_tir_place(place, frame, &scopes, &keys)
-        .PtrFromAddr(address, _) | .LayoutLiteral(address) | .LayoutLit(address) -> sema_expression_lambda_collect_tir_expr(address, frame, &scopes, &keys)
+        .RawAddressOf(place) -> sema_expression_lambda_collect_tir_place(place, frame, &scopes, &keys)
+        .PtrFromAddr(address, _) | .LayoutLiteral(address) -> sema_expression_lambda_collect_tir_expr(address, frame, &scopes, &keys)
         .LayoutCompare(_, left, right) -> {
             sema_expression_lambda_collect_tir_expr(left, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_expr(right, frame, &scopes, &keys)
@@ -1227,8 +1226,6 @@ fn sema_expression_lambda_collect_tir_expr(value: TExpr, frame: Int, scopes: &Se
             sema_expression_lambda_collect_tir_optional_expr(after_value, frame, &scopes, &keys)
         }
         .FnValue(kind) -> sema_expression_lambda_collect_tir_fn_value(kind, frame, &scopes, &keys)
-        .ModuleCall(_, _, _, _, args) -> loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
-        .ExternCall(_, _, args) -> loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
         else -> {}
     }
 }
@@ -1397,6 +1394,8 @@ fn sema_expression_lambda_merge_context_facts(source: &SemaCheckContext, target:
         &target.copy_events.push(source.copy_events[index])
         index += 1
     }
+    // A snapshot starts with no goal rows, so every row it holds is this lambda's.
+    loop goal_index in 0..<source.typed_goals.len() -> &target.typed_goals.push(source.typed_goals[goal_index])
 }
 
 fn sema_expression_lambda_type_is_result(ty: Type) -> Bool Never! {

@@ -4176,7 +4176,6 @@ fn jet_driver_comptime_reach_stmt(reach: &JetDriverComptimeReach, statement: TSt
             jet_driver_comptime_reach_expr(&reach, init)
         }
         .ExprStmt(value, _) -> jet_driver_comptime_reach_expr(&reach, value)
-        .LineMarker(_) | .SourceSpan(_) -> {}
         else -> reach.everything = true
     }
 }
@@ -5448,7 +5447,7 @@ fn jet_driver_keep_going_skip_set(skip: [String]) -> [String:Bool] Never! {
 // owner and identity are unchanged, so every caller still lowers.
 fn jet_driver_keep_going_tir_trap(function: TFunc, reason: String) -> TFunc Never! {
     trapped := function
-    stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: reason}, span: function.source_span, integer_bounds: None, cost: None}
+    stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: reason}, span: function.source_span}
     trapped.body = [TStmt]{TStmt.ExprStmt{value: stop, span: function.source_span}}
     trapped
 }

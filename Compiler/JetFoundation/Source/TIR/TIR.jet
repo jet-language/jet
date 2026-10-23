@@ -383,10 +383,6 @@ enum TStmt {
     Match(subject: TExpr, arms: [TMatchArm], exhaustive: Bool, span: Span)
     EnumMatch(scrutinee: TExpr, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span)
     RangeSwitch(subject: TExpr, arms: [TRangeArm], else_body: [TStmt], span: Span)
-    IndexAssign(uninit: Bool, base: TExpr, index: TExpr, is_map: Bool, value: TExpr, span: Span)
-    IndexFieldAssign(value: TIndexFieldAssign, span: Span)
-    IndexHookAssign(type_name: String, base: TExpr, index: TExpr, value: TExpr, span: Span)
-    MathSwizzleAssign(base: TExpr, type_name: String, lanes: [Int], value: TExpr, span: Span)
     ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span)
     Inline(body: [TStmt], span: Span)
     DebugOnly(body: [TStmt], span: Span)
@@ -404,11 +400,6 @@ enum TStmt {
     ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span)
     Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
     GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
-    SplitViews(owner: TExpr?, root: String, len: String, source: String, source_start: Int, before: String, split_tail: String, segment: String, after: String, name: String, start: Int, end: Int, single: Bool, write: Bool, elem_ty: Type?, line: Int, span: Span)
-    Erased(construct: String, span: Span, reason: TErasureReason)
-    InvariantViolation(construct: String, span: Span)
-    LineMarker(line: Int)
-    SourceSpan(span: Span)
 }
 
 struct TRangeArm {
@@ -420,18 +411,6 @@ struct TRangeArm {
 struct TMixedArm {
     condition: TExpr
     body: [TStmt]
-}
-
-struct TIndexFieldAssign {
-    base: TExpr
-    index: TExpr
-    is_map: Bool
-    index_proven: Bool
-    field: String
-    field_ty: Type
-    op: TBinaryOp?
-    value: TExpr
-    line: Int
 }
 
 struct TContextGuard {
@@ -532,7 +511,6 @@ enum TExprKind {
     Local(local: TLocal)
     Unit
     InlineBlock(body: [TStmt])
-    DefaultLit
     Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
@@ -541,7 +519,6 @@ enum TExprKind {
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
     DistinctCtor(owner: SymbolID, argument: TExpr, base: Type)
-    RangeCheckedCtor(owner: SymbolID, argument: TExpr, failure: TFailureCarrier)
     DistinctConvert(owner: SymbolID, argument: TExpr, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
     TraitBox(value: TExpr, target: Type)
     UnitConvert(destination: SymbolID, argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
@@ -551,8 +528,6 @@ enum TExprKind {
     Drop(value: TExpr)
     Close(value: TExpr)
     Move(value: TExpr)
-    ResourceNew(value: TExpr)
-    ResourceTake(local: TLocal)
     AmbientInput(prompt: TExpr?)
     RequireStop(kind: TRequireKind, location: TPanicLoc, always_stops: Bool)
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
@@ -571,7 +546,6 @@ enum TExprKind {
     TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
     Lambda(value: TLambda)
     Borrow(place: TExpr, access: AccessConvention)
-    AddressOf(place: TPlace, access: AccessConvention, lifetime: TAddressLifetime)
     RawAddressOf(place: TPlace)
     Deref(value: TExpr)
     PtrFromAddr(address: TExpr, element: Type)
@@ -590,15 +564,8 @@ enum TExprKind {
     DBValueLit(variant: String, arg: TExpr?, clone_arg: Bool)
     ListLit(values: [TExpr])
     ListSpread(parts: [TListSpreadPart])
-    ColumnarListLit(columns_type: String, elements: [TExpr])
-    ColumnarGather(base: TExpr, index: TExpr, line: Int)
-    ColumnarColumnRead(base: TExpr, index: TExpr, owner: String, field: String, column: Int, line: Int)
-    TupleLit(struct_name: String, fields: [TNamedExpr])
-    IndexRead(base: TExpr, index: TExpr, is_map: Bool, uninit_fixed: Bool, line: Int)
-    SliceOwned(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, line: Int)
     MapLit(entries: [TMapEntry])
     PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
-    IndexHook(type_name: String, base: TExpr, index: TExpr, line: Int)
     MathLaneIndex(lane_type: String, base: TExpr, index: TExpr, line: Int)
     MathSwizzleRead(type_name: String, receiver: TExpr, lanes: [Int])
     // #4318: `fact` is the sema decision behind the copy; MIR keeps it on Copy.
@@ -611,10 +578,7 @@ enum TExprKind {
     IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
     ResultHandler(subject: TExpr, ok_pattern: TPattern, ok_body: [TStmt], ok_value: TExpr, err_pattern: TPattern, err_body: [TStmt], err_value: TExpr, terminal: TExpr)
     RawOf(value: TExpr)
-    Todo(line: Int)
     InvariantViolation(construct: String, span: Span)
-    LayoutLit(value: TExpr)
-    Unreachable(line: Int)
     DistinctRaw(value: TExpr)
     Present(value: TExpr)
     Absent
@@ -623,7 +587,6 @@ enum TExprKind {
     OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: TLocal?)
     OptField(base: TExpr, member: String, flatten: Bool)
     OptMethodCall(base: TExpr, binding: TLocal, call: TExpr, flatten: Bool)
-    LambdaValue(value: TLambda)
     PatternMatches(subject: TExpr, pattern: TPattern)
     OptionLift2(function: TExpr, left: TExpr, right: TExpr)
     ClosureMethod(receiver: TExpr, operation: TClosureOp, args: [TExpr])
@@ -641,8 +604,6 @@ enum TExprKind {
     SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
     SelectWait(builder: TExpr, nonblocking: Bool)
     FnValue(kind: TFnValueKind)
-    ModuleCall(target: TFunctionRef, form: TModuleCallForm, target_return: Type?, type_args: [Type], args: [TCallArg])
-    ExternCall(symbol: String, c_abi: Bool, args: [TExternArg])
     Never(reason: String)
 }
 
@@ -650,11 +611,6 @@ struct TExpr {
     ty: Type
     kind: TExprKind
     span: Span
-    integer_bounds: TIntegerBounds?
-    cost: TCostFact?
-    // The checked goal card, kept apart from the fallback type used to
-    // continue checking an unconstrained `todo`.
-    goal_expected_type: String?{None}
 }
 
 struct TIntegerWidth {
@@ -672,21 +628,10 @@ struct TMapEntry {
     key: TExpr
     value: TExpr
 }
-struct TNamedExpr {
-    name: String
-    value: TExpr
-}
 
 enum TListSpreadPart {
     Element(value: TExpr)
     Spread(value: TExpr)
-}
-
-enum TErasureReason {
-    CompileTimeOnly
-    Disabled
-    ExpandedBeforeLowering
-    SemanticIndexOnly
 }
 
 enum TBranchClass {
@@ -724,16 +669,6 @@ enum TPreludeArg {
 enum TStaticOwner {
     User(name: String)
     Prelude(rooted: Bool, path: String, generics: [TPreludeArg])
-}
-
-enum TModuleCallForm {
-    Qualified(rust_module: String, rust_function: String)
-    InlineMangled(mangled: String)
-}
-
-struct TExternArg {
-    value: TExpr
-    mut_borrow: Bool
 }
 
 enum TOrFallback {
@@ -1935,6 +1870,14 @@ struct TOriginProjection {
     value: TComptimeValue
 }
 
+// A `todo` goal checked in a function body: its source and the card naming
+// the expected type, which is kept apart from the fallback type used to keep
+// checking an unconstrained `todo`.
+struct TTypedGoal {
+    span: Span
+    expected: String
+}
+
 struct TFunc {
     name: String
     module_name: String
@@ -1976,6 +1919,7 @@ struct TFunc {
     body: [TStmt]
     kind: TFuncKind
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
 }
 
 struct TParameter {
@@ -2048,16 +1992,16 @@ struct TFactChannel {
 fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
     facts := TFactChannel{ty: Val(expression.ty), integer_bounds: tir_cost_integer_bounds(expression), exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: tir_cost_fact(expression)}
     facts.exclusivity = if expression.kind == {
-        .Borrow(_, access) | .AddressOf(_, access, _) -> if {
+        .Borrow(_, access) -> if {
             access == AccessConvention.Write -> TFactExclusivity.Exclusive
             access == AccessConvention.Move -> TFactExclusivity.Move
             else -> TFactExclusivity.Shared
         }
-        .Move(_) | .ResourceTake(_) -> TFactExclusivity.Move
+        .Move(_) -> TFactExclusivity.Move
         else -> TFactExclusivity.Unknown
     }
     facts.purity = if expression.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .DefaultLit | .Uninit | .CtLit(_) | .ConstRef(_) -> TFactPurity.Pure
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) -> TFactPurity.Pure
         else -> TFactPurity.Unknown
     }
     facts.comptime_value = if expression.kind == {
@@ -2073,7 +2017,7 @@ fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel Never! {
         argument.mut_borrow -> TFactExclusivity.Exclusive
         argument.borrow -> TFactExclusivity.Shared
         else -> if argument.value.kind == {
-            .Move(_) | .ResourceTake(_) -> TFactExclusivity.Move
+            .Move(_) -> TFactExclusivity.Move
             else -> TFactExclusivity.Unknown
         }
     }
@@ -2090,11 +2034,9 @@ fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
         .ConstRef(_) -> return TAddressLifetime.Static
         .Field(receiver, _) -> return tir_expr_address_lifetime(receiver)
         .Index(base, _, _, _, _, _) -> return tir_expr_address_lifetime(base)
-        .IndexRead(base, _, _, _, _) -> return tir_expr_address_lifetime(base)
-        .Slice(base, _, _, _, _) | .SliceOwned(base, _, _, _, _) -> return tir_expr_address_lifetime(base)
+        .Slice(base, _, _, _, _) -> return tir_expr_address_lifetime(base)
         .PoolSlot(_, _, _, _, _, _) -> return TAddressLifetime.Heap
         .Borrow(_, _) -> return TAddressLifetime.Borrowed
-        .AddressOf(_, _, lifetime) -> return lifetime
         .RawAddressOf(_) | .RawOf(_) | .Deref(_) | .PtrFromAddr(_, _) -> return TAddressLifetime.Foreign
         .DistinctCtor(_, argument, _) | .DistinctRaw(argument) -> return tir_expr_address_lifetime(argument)
         else -> {}
@@ -2300,25 +2242,6 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
             }
             tir_each_stmt_list_child(else_body, visit)
         }
-        .IndexAssign(_, base, index, _, value, _) -> {
-            visit(base)
-            visit(index)
-            visit(value)
-        }
-        .IndexFieldAssign(value, _) -> {
-            visit(value.base)
-            visit(value.index)
-            visit(value.value)
-        }
-        .IndexHookAssign(_, base, index, value, _) -> {
-            visit(base)
-            visit(index)
-            visit(value)
-        }
-        .MathSwizzleAssign(base, _, _, value, _) -> {
-            visit(base)
-            visit(value)
-        }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
             visit(source)
             visit(collection)
@@ -2355,9 +2278,6 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
         .GCEdit(_, _, _, _, index_temp, edited, _) -> {
             if index_temp == Val(nested) -> visit(nested)
             tir_each_stmt_child(edited, visit)
-        }
-        .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
-            if owner == Val(nested) -> visit(nested)
         }
         else -> {}
     }
@@ -2501,13 +2421,13 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(receiver)
             loop argument in args -> visit(argument.value)
         }
-        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> visit(argument)
+        .DistinctCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> visit(argument)
         .UnitConvert(_, argument, _, _, rounding, _, _, _, _) -> {
             visit(argument)
             if rounding == Val(rounding_value) -> visit(rounding_value.digits)
         }
         .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> visit(value)
-        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> visit(value)
+        .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> visit(value)
         .AmbientInput(prompt) -> {
             if prompt == Val(prompt_value) -> visit(prompt_value)
         }
@@ -2520,11 +2440,11 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         .Unary(_, operand) -> visit(operand)
         .StructLit(fields, _) -> loop field in fields -> visit(field.value)
         .Field(receiver, _) -> visit(receiver)
-        .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
+        .Index(base, index, _, _, _, _) -> {
             visit(base)
             visit(index)
         }
-        .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _) -> {
             visit(base)
             visit(start)
             visit(end)
@@ -2552,10 +2472,10 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(inner)
             if note == Val(note_value) -> visit(note_value)
         }
-        .Lambda(value) | .LambdaValue(value) -> tir_each_lambda_child(value, visit)
+        .Lambda(value) -> tir_each_lambda_child(value, visit)
         .Borrow(place, _) -> visit(place)
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> tir_each_place_child(place, visit)
-        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> visit(value)
+        .RawAddressOf(place) -> tir_each_place_child(place, visit)
+        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) -> visit(value)
         .LayoutCompare(_, lhs, rhs) -> {
             visit(lhs)
             visit(rhs)
@@ -2577,17 +2497,11 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         .AllocNew(_, args) -> loop argument in args -> visit(argument.value)
         .ListLit(values) -> loop value in values -> visit(value)
         .ListSpread(parts) -> tir_each_list_spread_child(parts, visit)
-        .ColumnarListLit(_, elements) -> loop value in elements -> visit(value)
-        .ColumnarGather(base, index, _) | .ColumnarColumnRead(base, index, _, _, _, _) -> {
-            visit(base)
-            visit(index)
-        }
-        .TupleLit(_, fields) -> loop field in fields -> visit(field.value)
         .PoolSlot(pool, id, _, _, _, _) -> {
             visit(pool)
             visit(id)
         }
-        .IndexHook(_, base, index, _) | .MathLaneIndex(_, base, index, _) -> {
+        .MathLaneIndex(_, base, index, _) -> {
             visit(base)
             visit(index)
         }
@@ -2668,8 +2582,6 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         }
         .SelectWait(builder, _) -> visit(builder)
         .FnValue(kind) -> tir_each_fn_value_child(kind, visit)
-        .ModuleCall(_, _, _, _, args) -> loop argument in args -> visit(argument.value)
-        .ExternCall(_, _, args) -> loop argument in args -> visit(argument.value)
         else -> {}
     }
 }

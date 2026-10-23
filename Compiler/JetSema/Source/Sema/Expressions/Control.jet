@@ -43,6 +43,7 @@ use jet_foundation.[
     expr_span,
     failure_contract_of_function,
     symbol_id,
+    tir_expr_known_bounds,
     tir_symbol_local,
     type_identity_equal,
     type_name,
@@ -1505,12 +1506,13 @@ fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: E
         .Borrow(_, access) -> access == AccessConvention.Write
         else -> false
     }
-    _ := sema_scope_declare_local(&scopes, symbol, window, if window -> AccessConvention.Write else -> AccessConvention.Read, init.integer_bounds, false)
+    bounds :: tir_expr_known_bounds(init)
+    _ := sema_scope_declare_local(&scopes, symbol, window, if window -> AccessConvention.Write else -> AccessConvention.Read, bounds, false)
     sema_ownership_declare_binding(&state, symbol, false)
     _ := sema_ownership_record_pattern_views(&state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, scopes)
     local := tir_symbol_local(name, subject_span, id)
     local.generated = true
-    local.integer_bounds = init.integer_bounds
+    local.integer_bounds = bounds
     Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span})
 }
 

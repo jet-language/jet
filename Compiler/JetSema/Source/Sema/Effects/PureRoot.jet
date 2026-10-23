@@ -52,12 +52,10 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions
                         break
                     }
                 }
-                if expression.kind == .ExternCall(_, _, _) -> denied = true
             }
             if denied {
                 call :: if expression.kind == {
                     .Print(_) -> "print"
-                    .ExternCall(symbol, _, _) -> sema_effect_symbol_leaf(symbol)
                     else -> sema_effect_call_api(expression)
                 }
                 return Val(sema_pure_root_diagnostic(root, call, path, expression.span))

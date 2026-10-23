@@ -26,6 +26,7 @@ use jet_foundation.[
     TComptimeValue,
     TExpr,
     TOriginProjection,
+    TTypedGoal,
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
@@ -615,6 +616,8 @@ struct SemaCheckContext {
     // driver's internal-problem report (I2), never the user's diagnostics.
     incomplete_reasons: [String]{[String]{}}
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
+    // The body's `todo` goals, with the card naming each one's expected type.
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
@@ -1027,6 +1030,7 @@ struct SemaCheckContextMark {
     failure_union_edges: Int
     incomplete_reasons: Int
     origin_facts: Int
+    typed_goals: Int
     saved: SemaCheckContext
 }
 
@@ -1058,6 +1062,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
         failure_union_edges: context.failure_union_edges.len(),
         incomplete_reasons: context.incomplete_reasons.len(),
         origin_facts: context.origin_facts.len(),
+        typed_goals: context.typed_goals.len(),
         saved: SemaCheckContext{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -1152,6 +1157,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := &context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
+    loop context.typed_goals.len() > mark.typed_goals -> _ := &context.typed_goals.pop()
     loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := &context.noelse_chain_starts.pop()
     loop context.failure_edges.len() > mark.failure_edges -> _ := &context.failure_edges.pop()
     loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()

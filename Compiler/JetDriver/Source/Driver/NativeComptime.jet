@@ -123,7 +123,7 @@ fn jet_driver_native_value(value: X64NativeValue, host: JetDriverExecutionHost) 
         loop (index, capture) in lambda.captures {
             if capture.source != value.attributes[index + 2] -> return None
             detached :: jet_driver_native_value(value.children[index], host) ?? return None
-            init :: TExpr{ty: capture.ty, kind: TExprKind.CtLit{value: detached}, span: capture.local.span, integer_bounds: None, cost: None}
+            init :: TExpr{ty: capture.ty, kind: TExprKind.CtLit{value: detached}, span: capture.local.span}
             &body.push(TStmt.Let{local: capture.local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: capture.local.span})
         }
         if lambda.executable == {

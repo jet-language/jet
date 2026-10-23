@@ -106,7 +106,7 @@ fn ir_mutable_captures(body: [TStmt]) -> [String] Never! {
 }
 
 fn ir_collect_mutable_captures(expression: TExpr, names: &[String]) Never! {
-    if expression.kind == .Lambda(lambda) | .LambdaValue(lambda) {
+    if expression.kind == .Lambda(lambda) {
         loop name in lambda.capture_facts.mutable {
             if !names.contains(name) -> &names.push(name)
         }
@@ -184,7 +184,6 @@ fn ir_stmts_leave(body: [TStmt]) -> Bool Never! {
     index := body.len() - 1
     loop index >= 0 {
         if body[index] == {
-            .LineMarker(_) | .SourceSpan(_) -> index -= 1
             .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return true
             .ExprStmt(value, _) -> return ir_never_type(value.ty)
             else -> return false
@@ -197,11 +196,6 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
     // An explicit move is taken by the statement that reads it.
     b.moving = -1
     if statement == {
-        .LineMarker(line) -> {
-            b.line = line
-            b.marked = line
-        }
-        .SourceSpan(_) -> {}
         .Let(local, let_ty, init, _, _, span) -> {
             // `name := &place` binds an alias of the place, never a copy (codegen
             // Statements.jet TStmt.Let alias_place): a write borrow's edits reach
@@ -418,13 +412,6 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         .Match(subject, arms, _, span) -> ir_match(&m, p, &b, subject, arms, None, span)
         .EnumMatch(subject, arms, else_body, _, span) -> ir_match(&m, p, &b, subject, arms, else_body, span)
         .RangeSwitch(subject, arms, else_body, span) -> ir_range_switch(&m, p, &b, subject, arms, else_body, span)
-        .IndexAssign(uninit, base, index, is_map, value, span) -> {
-            if is_map -> return ir_map_index_assign(&m, p, &b, base, index, None, value, span)
-            ir_list_index_assign(&m, p, &b, base, index, None, value, uninit, span)
-        }
-        .IndexFieldAssign(_, span) -> ir_fail(&b, span, "statement IndexFieldAssign")
-        .IndexHookAssign(_, _, _, _, span) -> ir_fail(&b, span, "statement IndexHookAssign")
-        .MathSwizzleAssign(_, _, _, _, span) -> ir_fail(&b, span, "statement MathSwizzleAssign")
         .ForIn(label, variable, variable_two, _, collection, step, method_kind, columnar, _, _, body, span) -> {
             // `loop c in s.chars()`: codegen streams the scalars
             // (MIRLoopSourceKind.Chars); the walk of the checked `s.chars()`
@@ -464,9 +451,6 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         }
         .Transact(handle, snapshots, stm, body, span) -> ir_transact(&m, p, &b, handle, snapshots, stm, body, span)
         .GCEdit(_, _, _, _, _, _, span) -> ir_fail(&b, span, "statement GCEdit")
-        .SplitViews(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, span) -> ir_fail(&b, span, "statement SplitViews")
-        .Erased(_, _, _) -> {}
-        .InvariantViolation(construct, span) -> ir_fail(&b, span, "checked invariant violation: {construct}")
     }
 }
 
@@ -577,7 +561,7 @@ fn ir_task_group(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limit
     symbol := "jet_rt_native_task_group_new"
     if limit == .Val(count) {
         operation :: TNumericOp.CheckedIntToFixed{host_kind: 3, dst_rust: "i64", dst_spelling: "I64", line: b.line}
-        converted :: TExpr{ty: Type.IntN{signed: true, bits: 64}, kind: TExprKind.NumericMethod{receiver: count, operation: operation}, span: count.span, integer_bounds: None, cost: None}
+        converted :: TExpr{ty: Type.IntN{signed: true, bits: 64}, kind: TExprKind.NumericMethod{receiver: count, operation: operation}, span: count.span}
         value :: ir_expr(&m, p, &b, converted)
         if ir_failed(b) || value < 0 -> return
         &args.push(value)
@@ -792,11 +776,6 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: TExpr, op: 
         if kind == .Map -> return ir_map_index_assign(&m, p, &b, base, index, op, value, span)
         if kind != .List && kind != .FixedListProof -> return ir_fail(&b, span, "assignment to an index of kind {kind}")
         return ir_list_index_assign(&m, p, &b, base, index, op, value, false, span)
-    }
-    if place.kind == .IndexRead(base, index, is_map, uninit, line) {
-        if is_map -> return ir_map_index_assign(&m, p, &b, base, index, op, value, span)
-        if line > 0 -> b.line = line
-        return ir_list_index_assign(&m, p, &b, base, index, op, value, uninit && op == None, span)
     }
     if place.kind == .Local(local) {
         if local.persist_key == .Val(key) -> return ir_storage_assign(&m, p, &b, key, op, value, span)
@@ -1281,11 +1260,6 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             if coercion == .Val(target) -> return ir_list_literal(&m, p, &b, expression.ty, ir_trait_boxes(values, target), span)
             return ir_list_literal(&m, p, &b, expression.ty, values, span)
         }
-        .IndexRead(base, index, is_map, _, line) -> {
-            if is_map -> return ir_map_index(&m, p, &b, base, index, span)
-            if line > 0 -> b.line = line
-            return ir_list_index(&m, p, &b, base, index, span)
-        }
         .BuiltinMethod(receiver, operation, args) -> return ir_builtin(&m, p, &b, expression.ty, receiver, operation, args, span)
         .RequireStop(kind, location, always_stops) -> return ir_require_stop(&m, p, &b, kind, location, always_stops, span)
         .ClosureMethod(receiver, operation, args) -> return ir_closure_method(&m, p, &b, expression.ty, receiver, operation, args, span)
@@ -1294,7 +1268,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             if kind != .List && kind != .FixedListProof -> return ir_fail_slot(&b, span, "index of kind {kind}")
             return ir_list_index(&m, p, &b, base, index, span)
         }
-        .Lambda(value) | .LambdaValue(value) -> return ir_lambda(&m, p, &b, expression.ty, value, span)
+        .Lambda(value) -> return ir_lambda(&m, p, &b, expression.ty, value, span)
         .IndirectCall(callee, type_args, args, signature) -> {
             if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic indirect call")
             return ir_indirect_call(&m, p, &b, callee, args, signature, span)
@@ -1302,15 +1276,6 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .Tuple(values) -> {
             names := [String]{}
             loop index in 0..<values.len() -> &names.push("{index}")
-            return ir_tuple_literal(&m, p, &b, expression.ty, names, values, span)
-        }
-        .TupleLit(_, fields) -> {
-            names := [String]{}
-            values := [TExpr]{}
-            loop field in fields {
-                &names.push(field.name)
-                &values.push(field.value)
-            }
             return ir_tuple_literal(&m, p, &b, expression.ty, names, values, span)
         }
         .CoreCall(record, args, _, type_args, widen_to_vec, _, _) -> return ir_core_call(&m, p, &b, expression.ty, record, args, type_args, widen_to_vec, span)
@@ -1333,11 +1298,6 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             ir_drop_bindings(&m, &b, bound)
             ir_truncate_bindings(&b, bound)
             return test
-        }
-        .Unreachable(line) -> {
-            if line > 0 -> b.line = line
-            ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
-            return ir_unreachable_value(&m, p, &b, expression.ty)
         }
         .StaticCall(owner, owner_type, method, type_args, args) -> return ir_static_call(&m, p, &b, expression.ty, owner, owner_type, method, type_args, args, span)
         .Map(entries) | .MapLit(entries) -> return ir_map_literal(&m, p, &b, expression.ty, entries, span)
@@ -2848,9 +2808,9 @@ fn ir_json_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, variant:
             // A value spelled through another name of the Dyn declaration
             // is that Dyn (codegen encodes it, which is the value itself).
             if ir_untag(entry.key.ty) != Type.String || ir_dyn_def(p, entry.value.ty) == None -> return ir_fail_slot(&b, span, "Dyn.Object entry {ir_type_name(entry.key.ty)}: {ir_type_name(entry.value.ty)}")
-            &pairs.push(TExpr{ty: pair_ty, kind: TExprKind.Tuple{values: [TExpr]{entry.key, entry.value}}, span: span, integer_bounds: None, cost: None})
+            &pairs.push(TExpr{ty: pair_ty, kind: TExprKind.Tuple{values: [TExpr]{entry.key, entry.value}}, span: span})
         }
-        value = TExpr{ty: Type.List{element: pair_ty}, kind: TExprKind.ListLit{values: pairs}, span: span, integer_bounds: None, cost: None}
+        value = TExpr{ty: Type.List{element: pair_ty}, kind: TExprKind.ListLit{values: pairs}, span: span}
     }
     if variant == "Object" && ir_untag(value.ty) == .Map(_, _, _) -> return ir_dyn_object_encode(&m, p, &b, ty, value, span)
     if variant == "Object" && !(ir_untag(value.ty) == .List(_)) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
@@ -2884,13 +2844,13 @@ fn ir_dyn_object_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
     &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
     key_local :: tir_user_local("encode_key_{output}", span)
     item_local :: tir_user_local("encode_value_{output}", span)
-    key_expr :: TExpr{ty: Type.String, kind: TExprKind.Local{local: key_local}, span: span, integer_bounds: None, cost: None}
-    item_expr :: TExpr{ty: element, kind: TExprKind.Local{local: item_local}, span: span, integer_bounds: None, cost: None}
-    encoded :: TExpr{ty: ty, kind: TExprKind.HandleMethod{receiver: item_expr, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span: span, integer_bounds: None, cost: None}
-    pair :: TExpr{ty: pair_ty, kind: TExprKind.Tuple{values: [TExpr]{key_expr, encoded}}, span: span, integer_bounds: None, cost: None}
-    output_expr :: TExpr{ty: output_ty, kind: TExprKind.Local{local: output_local}, span: span, integer_bounds: None, cost: None}
-    push :: TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [TExpr]{pair}}, span: span, integer_bounds: None, cost: None}
-    source_expr :: TExpr{ty: value.ty, kind: TExprKind.Local{local: source_local}, span: span, integer_bounds: None, cost: None}
+    key_expr :: TExpr{ty: Type.String, kind: TExprKind.Local{local: key_local}, span: span}
+    item_expr :: TExpr{ty: element, kind: TExprKind.Local{local: item_local}, span: span}
+    encoded :: TExpr{ty: ty, kind: TExprKind.HandleMethod{receiver: item_expr, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span: span}
+    pair :: TExpr{ty: pair_ty, kind: TExprKind.Tuple{values: [TExpr]{key_expr, encoded}}, span: span}
+    output_expr :: TExpr{ty: output_ty, kind: TExprKind.Local{local: output_local}, span: span}
+    push :: TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [TExpr]{pair}}, span: span}
+    source_expr :: TExpr{ty: value.ty, kind: TExprKind.Local{local: source_local}, span: span}
     walk :: TStmt.ForIn{label: None, variable: key_local, variable_two: Val(item_local), source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [TStmt]{TStmt.ExprStmt{value: push, span: span}}, span: span}
     ir_stmt(&m, p, &b, walk)
     ir_scope_close(&m, &b)
@@ -3066,13 +3026,11 @@ fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line
 }
 
 // A returned `Err(...)` at `span` starts the journey (codegen
-// jet_codegen_lower_journey_origin): its line is the last statement line
-// marker's, else the span's.
+// jet_codegen_lower_journey_origin) at the span's line.
 fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) Never! {
     file :: b.f.source_file.copy()
     name :: b.f.name.copy()
-    line := b.marked
-    if line < 1 -> line = ir_source_line_of(p, file, span.start) ?? 1
+    line :: ir_source_line_of(p, file, span.start) ?? 1
     values :: ir_journey_site(&m, p, &b, file, line, name, span)
     if ir_failed(b) -> return
     _ :: ir_runtime(&m, &b, "jet_journey_origin", values, -1)
@@ -3523,7 +3481,7 @@ fn ir_slice(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: TExpr, st
             // A declared view's subrange reborrows its owner.
             args :: if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}
             view_type :: Type.Apply{name: "View", args: [Type]{view_args[0]}}
-            view :: TExpr{ty: view_type, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: location.line}, args: args}, span: span, integer_bounds: None, cost: None}
+            view :: TExpr{ty: view_type, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: location.line}, args: args}, span: span}
             return ir_expr(&m, p, &b, view)
         }
     }
