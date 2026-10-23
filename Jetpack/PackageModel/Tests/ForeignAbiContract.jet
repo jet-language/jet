@@ -1,0 +1,23 @@
+// Claims ported from tests/ffi_rust.rs: every conformance language reads the
+// one typed scalar contract and the canonical descriptor stamp.
+use jet_pkg_model.[
+    FOREIGN_ABI_CONTRACT_VERSION, FOREIGN_DESCRIPTOR_SCHEMA, ForeignLanguage, ForeignSafety,
+    ForeignScalar, pkg_binder_descriptor,
+]
+
+// Rust: tests/ffi_rust.rs:123
+#Test("c rust python and javascript share the typed scalar contract") {
+    languages :: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Rust, ForeignLanguage.Py, ForeignLanguage.JS}
+    loop language in languages {
+        descriptor :: pkg_binder_descriptor(language) ?? panic("conformance language descriptor")
+        contract :: descriptor.contract
+        assert_eq(contract.version, FOREIGN_ABI_CONTRACT_VERSION)
+        assert(contract.integer == ForeignScalar.Int)
+        assert(contract.floating == ForeignScalar.Float)
+        assert(contract.boolean == ForeignScalar.Bool)
+        assert(contract.character == ForeignScalar.Char)
+        assert(contract.string == ForeignScalar.String)
+        assert(contract.safety == ForeignSafety.GeneratedWrapper)
+        assert(descriptor.stamp().starts_with(FOREIGN_DESCRIPTOR_SCHEMA))
+    }
+}

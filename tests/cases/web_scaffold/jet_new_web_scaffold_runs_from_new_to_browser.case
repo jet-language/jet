@@ -1,0 +1,50 @@
+# tests/web_scaffold.rs::jet_new_web_scaffold_runs_from_new_to_browser at tests/web_scaffold.rs:173; hand-port
+# jet new --template web writes a browser scaffold that builds for the web target, passes its test, and is served by
+# jet dev as a page that loads ./app.js as a module. The Rust rustc availability guard is dropped (the Jet CLI needs no
+# rustc). The manifest Browser grant is read from package.jet text instead of the Rust PackageFacts parser.
+# get.mjs is the Rust http_get helper as a node script.
+fixture: jet_new_web_scaffold_runs_from_new_to_browser.fixture
+requires: tool:node
+env: NO_COLOR=1
+step: jet new web_app --template web
+exit: 0
+file: web_app/run.jet ~ "#Target(Web)" # tests/web_scaffold.rs:193
+file: web_app/run.jet ~ "reactive.signal" # tests/web_scaffold.rs:194
+file: web_app/run.jet ~ "ui.button" # tests/web_scaffold.rs:195
+file: web_app/run.jet ~ "jet dev" # tests/web_scaffold.rs:196-198
+file: web_app/run.jet ~ "jet test" # tests/web_scaffold.rs:196-198
+file: web_app/run.jet ~ "jet build --target web" # tests/web_scaffold.rs:196-198
+file: web_app/run.html absent # tests/web_scaffold.rs:199-202 the generated default page is used
+file: web_app/package.jet ~ "Browser" # tests/web_scaffold.rs:216-219 the authority grants Browser
+step build: jet build --target web
+cwd: {work}/web_app
+exit: 0
+stdout: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170 web scaffold build has no scaffold drift diagnostic
+stderr: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170
+stdout: !~ "E2937" # tests/web_scaffold.rs:157-170 web scaffold build has no scaffold drift diagnostic
+stderr: !~ "E2937" # tests/web_scaffold.rs:157-170
+stdout: !~ "ICE" # tests/web_scaffold.rs:157-170 web scaffold build has no scaffold drift diagnostic
+stderr: !~ "ICE" # tests/web_scaffold.rs:157-170
+file: web_app/.jet/build/index.html is-file # tests/web_scaffold.rs:232
+step test: jet test
+cwd: {work}/web_app
+exit: 0
+stdout: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170 web scaffold test has no scaffold drift diagnostic
+stderr: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170
+stdout: !~ "E2937" # tests/web_scaffold.rs:157-170 web scaffold test has no scaffold drift diagnostic
+stderr: !~ "E2937" # tests/web_scaffold.rs:157-170
+stdout: !~ "ICE" # tests/web_scaffold.rs:157-170 web scaffold test has no scaffold drift diagnostic
+stderr: !~ "ICE" # tests/web_scaffold.rs:157-170
+spawn dev: jet dev --port={free-port:web}
+cwd: {work}/web_app
+stdout: null
+stderr: null
+poll ready: node get.mjs {free-port:web} /__jet_dev_version until exit: 0 timeout 30s every 100ms # tests/web_scaffold.rs:56-68 wait_for_server
+step page: node get.mjs {free-port:web} /
+exit: 0 # tests/web_scaffold.rs:261-262 the page is served
+stdout: ~ "type=\"module\"" # tests/web_scaffold.rs:263-267 the page loads its Web module
+stdout: ~ "src=\"./app.js\"" # tests/web_scaffold.rs:263-267
+stdout: !~ "jet_main" # tests/web_scaffold.rs:268-271 the page does not know an export name
+signal dev: KILL
+wait: dev
+exit: any # the Rust KillOnDrop guard ignores the wait status

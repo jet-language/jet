@@ -1,0 +1,53 @@
+# tests/web_scaffold.rs::jet_new_native_scaffold_builds_for_explicit_web_target at tests/web_scaffold.rs:275; hand-port
+# The ui scaffold runs natively, then builds for an explicit web target into index.html, app.js and app.wasm; jet dev
+# serves the page and the generated app renders its greeting into a DOM. The Rust rustc availability guard is dropped.
+# The authority grants are read from package.jet text instead of the Rust PackageFacts parser (EFFECT_LEAF_EXEC_ARGS is
+# Exec.Args). web_dom_harness.mjs is the Rust WEB_DOM_HARNESS byte for byte; get.mjs is the Rust http_get helper.
+fixture: jet_new_native_scaffold_builds_for_explicit_web_target.fixture
+requires: tool:node
+env: NO_COLOR=1
+step: jet new demo --template ui
+exit: 0
+file: demo/package.jet ~ "Exec.Args" # tests/web_scaffold.rs:308-314 a new project holds the Exec.Args leaf
+file: demo/package.jet ~ "Browser" # tests/web_scaffold.rs:308-314 and the Browser leaf
+step native: jet run
+cwd: {work}/demo
+exit: 0
+stdout: = "hello, world\n" # tests/web_scaffold.rs:325-329
+stdout: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170 native scaffold run has no scaffold drift diagnostic
+stderr: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170
+stdout: !~ "E2937" # tests/web_scaffold.rs:157-170 native scaffold run has no scaffold drift diagnostic
+stderr: !~ "E2937" # tests/web_scaffold.rs:157-170
+stdout: !~ "ICE" # tests/web_scaffold.rs:157-170 native scaffold run has no scaffold drift diagnostic
+stderr: !~ "ICE" # tests/web_scaffold.rs:157-170
+step build: jet build --target web
+cwd: {work}/demo
+exit: 0
+stdout: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170 native scaffold Web build has no scaffold drift diagnostic
+stderr: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170
+stdout: !~ "E2937" # tests/web_scaffold.rs:157-170 native scaffold Web build has no scaffold drift diagnostic
+stderr: !~ "E2937" # tests/web_scaffold.rs:157-170
+stdout: !~ "ICE" # tests/web_scaffold.rs:157-170 native scaffold Web build has no scaffold drift diagnostic
+stderr: !~ "ICE" # tests/web_scaffold.rs:157-170
+file: demo/.jet/build/index.html is-file # tests/web_scaffold.rs:343-348
+file: demo/.jet/build/app.js is-file
+file: demo/.jet/build/app.wasm is-file
+spawn dev: jet dev --port={free-port:web}
+cwd: {work}/demo
+stdout: null
+stderr: null
+poll ready: node get.mjs {free-port:web} /__jet_dev_version until exit: 0 timeout 30s every 100ms # tests/web_scaffold.rs:56-68 wait_for_server
+step page: node get.mjs {free-port:web} /
+exit: 0 # tests/web_scaffold.rs:366-367 the page is served
+signal dev: KILL
+wait: dev
+exit: any # the Rust KillOnDrop guard ignores the wait status
+step dom: sh -c "cp web_dom_harness.mjs demo/.jet/build/ && cd demo/.jet/build && node web_dom_harness.mjs"
+exit: 0 # tests/web_scaffold.rs:136-150 the generated Web app renders the greeting
+stdout: ~ "hello, world" # tests/web_scaffold.rs:136-150 the rendered greeting
+stdout: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170 Web DOM harness has no scaffold drift diagnostic
+stderr: !~ "E-WEB-TIR-UNSUPPORTED" # tests/web_scaffold.rs:157-170
+stdout: !~ "E2937" # tests/web_scaffold.rs:157-170 Web DOM harness has no scaffold drift diagnostic
+stderr: !~ "E2937" # tests/web_scaffold.rs:157-170
+stdout: !~ "ICE" # tests/web_scaffold.rs:157-170 Web DOM harness has no scaffold drift diagnostic
+stderr: !~ "ICE" # tests/web_scaffold.rs:157-170
