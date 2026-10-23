@@ -418,6 +418,66 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     rt_text_store(errno, jet_int_owned_from_i64(code))
 }
 
+// A path's StatFacts128 and BirthTime24 from one statx instead of stat/lstat
+// then statx: 1 when written, -1 with errno written when the path can't be
+// stat'd, 0 when statx is missing or leaves out a basic fact (the caller
+// asks stat/lstat and statx apart).
+fn fs_statx_facts(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) -> I64 {
+    buffer :: jet_rt_alloc(I64{256}, I64{8})
+    name :: fd_c_path(path)
+    result := I64{0}
+    #Unsafe("the terminated borrowed path and the 256-byte statx buffer are live for the syscall") {
+        // statx(AT_FDCWD, name, follow ? 0 : AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS | STATX_BTIME, buffer)
+        result = os_syscall_i64(I64{332}, I64{-100}, name, if follow -> I64{0} else -> I64{256}, I64{4095}, buffer, I64{0})
+    }
+    fd_c_path_drop(name, path)
+    low :: I64{4294967295}
+    mask :: rt_text_word(buffer).bit_and(low)
+    if (result == I64{-38} || (result == I64{0} && mask.bit_and(I64{2047}) != I64{2047})) {
+        jet_rt_free(buffer, I64{256}, I64{8})
+        return I64{0}
+    }
+    if (result < I64{0}) {
+        jet_rt_free(buffer, I64{256}, I64{8})
+        _ := fd_error(result, errno)
+        return I64{-1}
+    }
+    // struct statx: mask u32 0, blksize u32 4, nlink u32 16, uid u32 20,
+    // gid u32 24, mode u16 28, ino 32, size 40, blocks 48, atime 64, btime
+    // 80, ctime 96, mtime 112 (seconds, then u32 nanoseconds), rdev
+    // major/minor u32 128/132, dev major/minor u32 136/140.
+    rt_text_store(facts, fs_statx_device(rt_text_word(buffer + I64{136})))
+    rt_text_store(facts + I64{8}, rt_text_word(buffer + I64{32}))
+    rt_text_store(facts + I64{16}, (rt_text_word(buffer + I64{24}) >> I64{32}).bit_and(I64{65535}))
+    rt_text_store(facts + I64{24}, rt_text_word(buffer + I64{16}).bit_and(low))
+    rt_text_store(facts + I64{32}, (rt_text_word(buffer + I64{16}) >> I64{32}).bit_and(low))
+    rt_text_store(facts + I64{40}, rt_text_word(buffer + I64{24}).bit_and(low))
+    rt_text_store(facts + I64{48}, fs_statx_device(rt_text_word(buffer + I64{128})))
+    rt_text_store(facts + I64{56}, rt_text_word(buffer + I64{40}))
+    rt_text_store(facts + I64{64}, rt_text_word(buffer + I64{64}))
+    rt_text_store(facts + I64{72}, rt_text_word(buffer + I64{72}).bit_and(low))
+    rt_text_store(facts + I64{80}, rt_text_word(buffer + I64{112}))
+    rt_text_store(facts + I64{88}, rt_text_word(buffer + I64{120}).bit_and(low))
+    rt_text_store(facts + I64{96}, rt_text_word(buffer + I64{96}))
+    rt_text_store(facts + I64{104}, rt_text_word(buffer + I64{104}).bit_and(low))
+    rt_text_store(facts + I64{112}, rt_text_word(buffer + I64{48}))
+    rt_text_store(facts + I64{120}, (rt_text_word(buffer) >> I64{32}).bit_and(low))
+    rt_text_store(birth, if (mask.bit_and(I64{2048}) != I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(birth + I64{8}, rt_text_word(buffer + I64{80}))
+    rt_text_store(birth + I64{16}, rt_text_word(buffer + I64{88}).bit_and(low))
+    _ := fd_error(I64{0}, errno)
+    jet_rt_free(buffer, I64{256}, I64{8})
+    I64{1}
+}
+
+// The st_dev encoding (glibc makedev) of statx's major (low word) and
+// minor (high word) pair.
+fn fs_statx_device(pair: I64) -> I64 {
+    major :: pair.bit_and(I64{4294967295})
+    minor :: (pair >> I64{32}).bit_and(I64{4294967295})
+    (major.bit_and(I64{4095}) << I64{8}).bit_or(minor.bit_and(I64{255})).bit_or(major.bit_and(I64{-4096}) << I64{32}).bit_or(minor.bit_and(I64{-256}) << I64{12})
+}
+
 // jet_fs_stat_at facts: a path (negative key, follow chooses stat/lstat),
 // the held directory itself (empty name), or an entry opened
 // O_PATH|O_NOFOLLOW|O_CLOEXEC without read access. Scratch184 lends
@@ -428,12 +488,14 @@ fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64)
     errno :: scratch + I64{152}
     if (key < I64{0}) {
         if !compiler_fs_path(name, HOST_IO_OP_READ, error) -> return false
-        jet_fs_stat_raw(name, follow, facts, errno)
+        statx :: fs_statx_facts(name, follow, facts, birth, errno)
+        if (statx > I64{0}) -> return true
+        if (statx == I64{0}) -> jet_fs_stat_raw(name, follow, facts, errno)
         if (rt_text_word(errno) != I64{0}) {
             _ := compiler_fs_errno(HOST_IO_OP_READ, name, rt_text_word(errno + I64{8}), error)
             return false
         }
-        jet_fs_created_raw(name, follow, birth, errno)
+        if (statx == I64{0}) -> jet_fs_created_raw(name, follow, birth, errno)
         return true
     }
     if (rt_text_len(name) == I64{0}) {
