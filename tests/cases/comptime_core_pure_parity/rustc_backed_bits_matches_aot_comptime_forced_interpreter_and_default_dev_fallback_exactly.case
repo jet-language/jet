@@ -1,0 +1,16 @@
+# tests/comptime_core_pure_parity.rs::rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly: the original's literal expectations; Jet does not meet them yet (ref build failed, Tools/testkit/known-failing.tsv).
+fixture: rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly/input
+step: jet run o1/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1265 test_port::aot_comptime
+stdout: = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\ntrue|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\n" # tests/comptime_core_pure_parity.rs:1265 test_port::aot_comptime
+step: jet run --interpret o1/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1265 test_port::aot_comptime
+stdout: = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\ntrue|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\n" # tests/comptime_core_pure_parity.rs:1265 test_port::aot_comptime
+step: jet run o2/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1269 test_port::dev_tiers
+stdout: = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\ntrue|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\n" # tests/comptime_core_pure_parity.rs:1269 test_port::dev_tiers
+stderr: = "" # tests/comptime_core_pure_parity.rs:1269 test_port::dev_tiers
+step: jet run --interpret o2/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1269 test_port::dev_tiers
+stdout: = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\ntrue|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]\n" # tests/comptime_core_pure_parity.rs:1269 test_port::dev_tiers
+stderr: = "" # tests/comptime_core_pure_parity.rs:1269 test_port::dev_tiers

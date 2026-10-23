@@ -1,0 +1,22 @@
+use core.testing as testing
+use core.time as time
+fn testing_fake_clock_view() -> String {
+    clock := testing.fake_clock(42)
+    canonical := Clock.new(42)
+    initial :: clock.now()
+    ticked :: &clock.tick(8)
+    after_tick :: clock.now()
+    advanced :: &clock.advance(100)
+    after_advance :: clock.now()
+    duration :: Duration.milliseconds(25) ?? panic("duration")
+    waited :: clock.wait(duration)
+    canonical_ticked :: &canonical.tick(8)
+    return "{initial}|{ticked}|{after_tick}|{advanced}|{after_advance}|{waited}|{clock.now()}|{canonical_ticked}|{canonical.now()}"
+}
+EXPECTED :: prep { testing_fake_clock_view() }
+
+fn run() {
+    actual :: testing_fake_clock_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

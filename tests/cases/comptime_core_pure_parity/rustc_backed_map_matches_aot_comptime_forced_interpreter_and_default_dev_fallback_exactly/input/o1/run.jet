@@ -1,0 +1,36 @@
+fn add_map(values: &[String:Int], key: String, value: Int) -> Int {
+    return values.add(key, value) ?? -1
+}
+fn counted_map(hits: &Int) -> [String:Int] {
+    hits += 1
+    return ["a": 1]
+}
+fn map_view() -> String {
+    values := [String:Int]{ "b": 2, "a": 1 }
+    empty_before :: values.is_empty()
+    fresh_c :: values.add("c", 3) ?? -1
+    displaced_b :: add_map(&values, "b", 20)
+    added_d :: &values.add_new("d", 4)
+    duplicate_a :: &values.add_new("a", 99)
+    seen := [String]{}
+    values.each((key, value) -> {
+        assert((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
+        &seen.push(key)
+    })
+    keys :: values.keys().to_list()
+    entries :: values.values().to_list()
+    got_a :: values.get("a") ?? -1
+    has_a :: values.has_key("a")
+    has_z :: values.has_key("z")
+    removed_c :: values.remove("c") ?? -1
+    length :: values.len()
+    &values.clear()
+    return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
+}
+EXPECTED :: prep { map_view() }
+
+fn run() {
+    actual :: map_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

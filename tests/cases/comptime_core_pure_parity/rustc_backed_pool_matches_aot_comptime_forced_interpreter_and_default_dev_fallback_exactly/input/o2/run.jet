@@ -1,0 +1,20 @@
+fn pool_view() -> String {
+    pool := Pool<String>.new()
+    first :: pool.add("first")
+    second :: pool.add("second")
+    initial :: pool.ids()
+    removed :: pool.remove(first) ?? "missing"
+    stale_remove :: pool.remove(first) ?? "stale"
+    replacement :: pool.add("third")
+    live :: pool.ids()
+    replacement_value :: pool.remove(replacement) ?? "missing"
+    second_value :: pool.remove(second) ?? "missing"
+    return "{removed}|{stale_remove}|{initial.len()}|{initial[0] == first}|{initial[1] == second}|{replacement == first}|{live.len()}|{live[0] == replacement}|{live[1] == second}|{replacement_value}|{second_value}|{pool.ids().len()}"
+}
+EXPECTED :: prep { pool_view() }
+
+fn run() {
+    actual :: pool_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

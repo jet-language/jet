@@ -1,0 +1,13 @@
+fn measurement_math() -> String {
+    a :: measurement(3.0, uncertainty: 4.0)
+    b :: measurement(0.0, uncertainty: 3.0)
+    q :: measurement(8.0, uncertainty: 0.0) / measurement(2.0, uncertainty: 0.0)
+    return "{(a + b).value()}|{(a + b).uncertainty()}|{(a - b).value()}|{(a - b).uncertainty()}|{(a * b).value()}|{(a * b).uncertainty()}|{q.value()}|{q.uncertainty()}"
+}
+EXPECTED :: prep { measurement_math() }
+
+fn run() {
+    actual :: measurement_math()
+    print("{EXPECTED}")
+    print("{actual}")
+}

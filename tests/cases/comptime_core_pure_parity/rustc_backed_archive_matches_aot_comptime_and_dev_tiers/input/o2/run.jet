@@ -1,0 +1,20 @@
+use core.archive as archive
+fn archive_view() -> String {
+    bytes :: [U8]{ 72, 101, 108, 108, 111 }
+    zipped :: archive.create("hello.txt", bytes) ?? [U8]{}
+    empty :: [U8]{}
+    tarred := archive.tar_add(empty, "hello.txt", bytes) ?? [U8]{}
+    tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116]) ?? [U8]{}
+    zip_bytes :: archive.zip_decompress(zipped) ?? [U8]{}
+    tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt") ?? [U8]{}
+    names_json :: archive.tar_names_json(tarred) ?? ""
+    missing :: archive.tar_get(tarred, "missing") ?? [U8]{}
+    return "{zip_bytes}|{tar_bytes}|{names_json}|{missing.len()}"
+}
+EXPECTED :: prep { archive_view() }
+
+fn run() {
+    actual :: archive_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

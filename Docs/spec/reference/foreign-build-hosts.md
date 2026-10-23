@@ -5,7 +5,7 @@ owned by CMake, Make, Gradle, Bazel, or MSBuild. This page is for build-system
 maintainers integrating a Jet package; it describes the executable contract
 implemented by the shared runner in
 [`Tools/foreign-build-hosts/jet-library.sh`](../../../Tools/foreign-build-hosts/jet-library.sh)
-and exercised by [`tests/foreign_build_hosts.rs`](../../../tests/foreign_build_hosts.rs).
+and exercised by [`tests/guards/foreign_build_hosts.jet`](../../../tests/guards/foreign_build_hosts.jet).
 
 ## The shared runner
 
@@ -183,7 +183,7 @@ A foreign build should treat these states distinctly:
    a bad Jet build.
 
 The acceptance matrix in
-[`tests/foreign_build_hosts.rs`](../../../tests/foreign_build_hosts.rs) checks
+[`tests/guards/foreign_build_hosts.jet`](../../../tests/guards/foreign_build_hosts.jet) checks
 CMake, Gradle, Bazel, and MSBuild terms, the `--locked` invocation, receipt and
 stamp publication, `jet-library-set-v1`, `lifecycle.cpp`, and
 `CMAKE_TOOLCHAIN_FILE`. It is the executable cross-adapter contract; this page

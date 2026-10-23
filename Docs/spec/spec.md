@@ -2855,7 +2855,7 @@ records its identity.
 The identity includes the descriptor, source and worker bytes, runtime,
 native toolchain, and typed function list. The source fixture is
 [`Examples/interop/python`](../../Examples/interop/python); the generated
-surface and effect spelling are asserted in [`tests/ffi_python.rs`](../../tests/ffi_python.rs). (D-FFI-PY1)
+surface and effect spelling are asserted in [`tests/cases/ffi_python`](../../tests/cases/ffi_python/). (D-FFI-PY1)
 
 ### JavaScript and TypeScript
 
@@ -3380,7 +3380,7 @@ Canvas session attached to the live Jet identity consume that validated source;
 a source-call match alone is not a runtime observation. The observation writer
 bounds event history and does not include channel values, task locals,
 environment, or credentials. The executable event example is covered by
-[`tests/canvas.rs`](../../tests/canvas.rs) and the public API by
+[`Compiler/JetLSP/Tests/Integration`](../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`) and the public API by
 [`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 
 ## Terminal direct input

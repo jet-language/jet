@@ -1,0 +1,19 @@
+
+fn length(text: String) -> Int { text.len() }
+fn forward(text: String) -> Int { length(text) }
+fn owned(text: String) -> String { text.copy() }
+fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
+fn inspect<T>(_value: T) -> Int { 7 }
+fn generic_forward(text: String) -> Int { inspect(text) }
+fn run() {
+    text := "  hello  "
+    view :: text.trim()
+    print(forward(view))
+    print(owned(view))
+    print(apply(length, view))
+    reader :: (value: String) -> (length(value) + text.len())
+    print(apply(reader, view))
+    print(generic_forward(view))
+    print(inspect(text))
+    print(inspect("literal"))
+}

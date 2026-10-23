@@ -1,0 +1,14 @@
+
+struct Resource { name: String, payload: String }
+impl Resource.Close {
+    fn close(^self) { print("close {self.name} {self.payload}") }
+}
+fn make() -> Resource { Resource{name: "call", payload: "intact"} }
+fn ordered(early: Bool) {
+    Resource{name: call_name, ..} :: make()
+    Resource{name: literal_name, ..} :: Resource{name: "literal", payload: "intact"}
+    print("names {call_name} {literal_name}")
+    if early -> return
+    print("normal")
+}
+fn run() { ordered(false); ordered(true) }

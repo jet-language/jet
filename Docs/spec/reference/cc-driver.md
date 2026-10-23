@@ -5,7 +5,7 @@ Make, CMake, and other build-host authors that need a C-family compiler slot.
 The `jet` front door forwards `cc` and `c++` to Jetpack in
 [`CommandOutput.jet`](../../../Compiler/JetCli/Source/Cli/CommandOutput.jet);
 the driver implementation is in [`Jetpack/CLI/Source/CcDriver`](../../../Jetpack/CLI/Source/CcDriver/),
-and the focused fixtures are in [`tests/cc_driver_hosts.rs`](../../../tests/cc_driver_hosts.rs).
+and the focused fixtures are in [`tests/guards/cc_driver_hosts.jet`](../../../tests/guards/cc_driver_hosts.jet).
 
 `jet-cc` is the installed alias for `jet cc`; `jet-cxx` and `jet-c++` are
 aliases for `jet c++`. The aliases are real binaries, not shell wrappers. They

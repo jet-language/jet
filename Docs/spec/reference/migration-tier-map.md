@@ -6,7 +6,7 @@ conversion and a checked binder overlay. The executable importer dispatch is in
 [`Import.jet`](../../../Compiler/JetCli/Source/Cli/Import.jet), binder capability facts
 are in [`Jetpack/PackageModel/Source/Foreign/Bridge`](../../../Jetpack/PackageModel/Source/Foreign/Bridge/),
 and source-import behavior is exercised by
-[`tests/source_import.rs`](../../../tests/source_import.rs).
+[`tests/cases/source_import`](../../../tests/cases/source_import/).
 
 The map is ratified by `D-ADOPT-TIER1=A`; every source conversion follows
 `D-MIGRATE-SRC1=A`. It is a product boundary, not a promise to translate an

@@ -1,0 +1,38 @@
+fn set_view() -> String {
+    values := Set.from([3, 1, 2, 3])
+    initial := values.to_list()
+    &initial.sort()
+    initial_len :: values.len()
+    initial_empty :: values.is_empty()
+    had_two :: values.has(2)
+    added_four :: values.add(4)
+    duplicate_two :: values.add(2)
+    values.remove(2)
+    has_two :: values.has(2)
+    current := values.to_list()
+    &current.sort()
+    other := Set.from([5, 4, 0])
+    combined_values :: values.union(other)
+    combined := combined_values.to_list()
+    &combined.sort()
+    after_union := values.to_list()
+    &after_union.sort()
+    words := Set.from(["z", "a", "m", "a"])
+    word_list := words.to_list()
+    &word_list.sort()
+    additional := Set.from([9, 7])
+    additional_added :: additional.add(8)
+    additional_list := additional.to_list()
+    &additional_list.sort()
+    &values.clear()
+    cleared_list := values.to_list()
+    &cleared_list.sort()
+    return "{initial}|{initial_len}|{initial_empty}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{word_list}|{additional_added}|{additional_list}|{values.is_empty()}|{values.len()}|{cleared_list}"
+}
+EXPECTED :: prep { set_view() }
+
+fn run() {
+    actual :: set_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

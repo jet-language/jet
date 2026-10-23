@@ -1,0 +1,19 @@
+use core.ui as ui
+fn ui_value_view() -> String {
+    point :: ui.point(1.5, -2.0)
+    size :: ui.size(80.0, 24.0)
+    rect :: ui.rect(1.0, 2.0, 3.0, 4.0)
+    constraint :: ui.constraint(0.0, 1.0, 80.0, 24.0)
+    plain :: ui.node("plain", 5.0, 2.0)
+    role :: ui.node_role("save", 8.0, 1.0, ui.aria_role_button())
+    colored :: ui.node_color("blue", 4.0, 1.0, "#0000ff")
+    row :: ui.box([ui.text("hi"), ui.button("Save")])
+    return "{point.x}:{point.y}|{size.width}:{size.height}|{rect.width}:{rect.height}|{constraint.min_height}:{constraint.max_width}|{plain.label}:{plain.width}:{plain.height}|{role.label}:{role.width}|{colored.label}:{colored.width}|{row.width}:{row.height}"
+}
+EXPECTED :: prep { ui_value_view() }
+
+fn run() {
+    actual :: ui_value_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

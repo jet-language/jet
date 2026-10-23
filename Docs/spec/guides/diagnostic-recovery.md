@@ -4,7 +4,7 @@ This guide is for a Jet user whose project no longer checks or resolves its
 entry. Each exercise uses the real CLI and keeps one source of truth:
 `run.jet`, the diagnostic registry in
 [`Docs/spec/diagnostics.md`](../diagnostics.md), and the recovery cases in
-[`tests/onboarding_recovery.rs`](../../../tests/onboarding_recovery.rs). Start
+[`tests/cases/onboarding_recovery`](../../../tests/cases/onboarding_recovery/). Start
 after one successful `jet run` from the
 [first-hour guide](first-hour.md).
 

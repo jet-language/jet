@@ -1,0 +1,24 @@
+fn bytes_view() -> String {
+    buffer := Bytes.new()
+    empty_before :: buffer.is_empty()
+    buffer.write_u8(18)
+    buffer.write_u16_le(13398)
+    buffer.write_u16_be(30874)
+    buffer.write_u32_le(16909060)
+    buffer.write_u32_be(84281096)
+    buffer.write_u64_le(72623859790382856)
+    buffer.write_u64_be(1230066625199609624)
+    buffer.write_bytes([9, 10])
+    length :: buffer.len()
+    bytes :: buffer.to_bytes()
+    &buffer.clear()
+    from := Bytes.from([255, 0])
+    return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
+}
+EXPECTED :: prep { bytes_view() }
+
+fn run() {
+    actual :: bytes_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

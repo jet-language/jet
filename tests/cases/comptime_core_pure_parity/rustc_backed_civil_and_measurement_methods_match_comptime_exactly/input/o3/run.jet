@@ -1,0 +1,15 @@
+use core.time as date
+use core.time as datetime
+fn civil_dev_view() -> String {
+    d :: date.parse("2024-02-29") ?? panic("date")
+    other :: date.new(2024, 2, 1)
+    dt :: datetime.from_timestamp(-1)
+    return "{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate("month").to_string()}|{d.format("EEE yyyy-DDD")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format("yyyy-MM-dd HH:mm:ss")}|{dt.truncate("minute").to_timestamp()}|{dt.round("minute").to_timestamp()}"
+}
+EXPECTED :: prep { civil_dev_view() }
+
+fn run() {
+    actual :: civil_dev_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

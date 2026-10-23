@@ -1,0 +1,15 @@
+
+use core.data as data
+use core.data.[DataErrorKind]
+
+fn run() {
+    if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+        .Ok(_) -> panic("rolling mean accepted a non-finite value")
+        .Err(error) -> {
+            if error.kind != DataErrorKind.NonFinite -> panic("wrong rolling mean error kind")
+            if error.operation != "rolling_mean" -> panic("wrong rolling mean operation")
+            if error.index != Val(1) -> panic("wrong rolling mean error index")
+        }
+    }
+    print("rolling error policy: ok")
+}

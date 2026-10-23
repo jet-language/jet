@@ -1,0 +1,28 @@
+fn add_bit(values: &Bits, bit: Int) -> Bool {
+    return values.add(bit)
+}
+fn bits_view() -> String {
+    bits := Bits.new()
+    empty_before :: bits.is_empty()
+    negative_added :: bits.add(-1)
+    added_four :: bits.add(4)
+    added_one :: bits.add(1)
+    duplicate_four :: bits.add(4)
+    param_added :: add_bit(&bits, 9)
+    before_remove :: bits.to_list()
+    count_before :: bits.count()
+    len_before :: bits.len()
+    has_four :: bits.has(4)
+    bits.remove(4)
+    bits.remove(-1)
+    after_remove :: bits.to_list()
+    &bits.clear()
+    return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
+}
+EXPECTED :: prep { bits_view() }
+
+fn run() {
+    actual :: bits_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

@@ -51,4 +51,4 @@ signing inputs, not private signing authority.
 The trust-root procedure is
 [`Docs/spec/packaging/trust-root.md`](../../../spec/packaging/trust-root.md),
 and the publication checks are exercised by
-[`tests/jetpack_trust_root.rs`](../../../../tests/jetpack_trust_root.rs).
+[`PkgIntegrationTrustRoot.jet`](../../../../Jetpack/TrustRoot/Tests/PkgIntegrationTrustRoot.jet).

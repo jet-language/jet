@@ -10,7 +10,7 @@ read-only fact view. The enum names are checked against the AST definitions in
 [`Patterns.jet`](../../../Compiler/JetFoundation/Source/AST/Patterns.jet), and
 [`Types.jet`](../../../Compiler/JetFoundation/Source/Types/Types.jet). The Canvas
 projection and transaction tests live in
-[`tests/canvas.rs`](../../../tests/canvas.rs); the wire contract is
+[`Compiler/JetLSP/Tests/Integration`](../../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`); the wire contract is
 [`canvas-protocol.md`](canvas-protocol.md). Terms such as stream follow the
 [Jet vocabulary](../vocabulary.md).
 

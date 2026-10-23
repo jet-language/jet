@@ -1,0 +1,16 @@
+# tests/comptime_core_pure_parity.rs::rustc_backed_archive_matches_aot_comptime_and_dev_tiers: the original's literal expectations; Jet does not meet them yet (ref build failed, Tools/testkit/known-failing.tsv).
+fixture: rustc_backed_archive_matches_aot_comptime_and_dev_tiers/input
+step: jet run o1/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1609 test_port::aot_comptime
+stdout: = "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n" # tests/comptime_core_pure_parity.rs:1609 test_port::aot_comptime
+step: jet run --interpret o1/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1609 test_port::aot_comptime
+stdout: = "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n" # tests/comptime_core_pure_parity.rs:1609 test_port::aot_comptime
+step: jet run o2/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1613 test_port::dev_tiers
+stdout: = "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n" # tests/comptime_core_pure_parity.rs:1613 test_port::dev_tiers
+stderr: = "" # tests/comptime_core_pure_parity.rs:1613 test_port::dev_tiers
+step: jet run --interpret o2/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1613 test_port::dev_tiers
+stdout: = "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0\n" # tests/comptime_core_pure_parity.rs:1613 test_port::dev_tiers
+stderr: = "" # tests/comptime_core_pure_parity.rs:1613 test_port::dev_tiers

@@ -1,0 +1,16 @@
+# tests/comptime_core_pure_parity.rs::rustc_backed_scalar_marker_retains_barrier_prelude_across_tiers: the original's literal expectations; Jet does not meet them yet (ref build failed, Tools/testkit/known-failing.tsv).
+fixture: rustc_backed_scalar_marker_retains_barrier_prelude_across_tiers/input
+step: jet run o1/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1485 test_port::aot_comptime
+stdout: = "8.0\n8.0\n" # tests/comptime_core_pure_parity.rs:1485 test_port::aot_comptime
+step: jet run --interpret o1/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1485 test_port::aot_comptime
+stdout: = "8.0\n8.0\n" # tests/comptime_core_pure_parity.rs:1485 test_port::aot_comptime
+step: jet run o2/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1489 test_port::dev_tiers
+stdout: = "8.0\n8.0\n" # tests/comptime_core_pure_parity.rs:1489 test_port::dev_tiers
+stderr: = "" # tests/comptime_core_pure_parity.rs:1489 test_port::dev_tiers
+step: jet run --interpret o2/run.jet
+exit: 0 # tests/comptime_core_pure_parity.rs:1489 test_port::dev_tiers
+stdout: = "8.0\n8.0\n" # tests/comptime_core_pure_parity.rs:1489 test_port::dev_tiers
+stderr: = "" # tests/comptime_core_pure_parity.rs:1489 test_port::dev_tiers

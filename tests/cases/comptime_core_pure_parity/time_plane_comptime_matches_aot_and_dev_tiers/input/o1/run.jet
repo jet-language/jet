@@ -1,0 +1,16 @@
+use core.time as time
+fn time_plane_view() -> String {
+    wait :: 500ms
+    origin :: time.instant()
+    point :: origin + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}|{speed}"
+}
+EXPECTED :: prep { time_plane_view() }
+
+fn run() {
+    actual :: time_plane_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

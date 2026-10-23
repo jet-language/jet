@@ -1,0 +1,30 @@
+use core.testing as testing
+struct ClockHolder { clock: Clock }
+fn drive(clock: &Clock) -> String {
+    ticked :: &clock.tick(1)
+    advanced :: &clock.advance(10)
+    duration :: Duration.milliseconds(2) ?? panic("duration")
+    waited :: clock.wait(duration)
+    return "{ticked}|{advanced}|{waited}|{clock.now()}"
+}
+fn counted_clock(hits: &Int) -> Clock {
+    hits += 1
+    return testing.fake_clock(7)
+}
+fn testing_fake_clock_writeback_view() -> String {
+    clock := testing.fake_clock(5)
+    borrowed :: drive(&clock)
+    holder := ClockHolder{ clock: testing.fake_clock(5) }
+    field_tick :: &holder.clock.tick(2)
+    field_now :: holder.clock.now()
+    receiver_hits := 0
+    counted_now :: counted_clock(&receiver_hits).now()
+    return "{borrowed}|{clock.now()};{field_tick}|{field_now}|{counted_now}|{receiver_hits}"
+}
+EXPECTED :: prep { testing_fake_clock_writeback_view() }
+
+fn run() {
+    actual :: testing_fake_clock_writeback_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

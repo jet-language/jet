@@ -1,0 +1,25 @@
+fn queue_view() -> String {
+    queue := Queue.new()
+    empty_before :: queue.is_empty()
+    missing_front :: queue.peek_front() ?? -1
+    missing_back :: queue.peek_back() ?? -1
+    &queue.push_back(2)
+    &queue.push_front(1)
+    &queue.push_back(3)
+    length :: queue.len()
+    front :: queue.peek_front() ?? -1
+    back :: queue.peek_back() ?? -1
+    popped_front :: &queue.pop_front() ?? -1
+    popped_back :: &queue.pop_back() ?? -1
+    remaining :: queue.peek_front() ?? -1
+    &queue.clear()
+    empty_pop :: &queue.pop_front() ?? -1
+    return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{queue.is_empty()}|{queue.len()}|{empty_pop}"
+}
+EXPECTED :: prep { queue_view() }
+
+fn run() {
+    actual :: queue_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

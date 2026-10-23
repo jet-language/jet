@@ -1,0 +1,30 @@
+use core.math.random as random
+fn rng_view() -> String {
+    rng := random.rng(99)
+    items := ["a", "b", "c", "d"]
+    weights := [1.0, 2.0, 3.0, 4.0]
+    deck := [1, 2, 3, 4, 5]
+    int_draw :: rng.int(1, 100)
+    float_draw :: rng.float()
+    range_draw :: rng.float_range(-2.0, 2.0)
+    coin :: rng.bool()
+    chance :: rng.bool(0.25)
+    normal :: rng.normal(1.0, 2.0)
+    exponential :: rng.exponential(1.5)
+    bytes :: rng.bytes(4)
+    picked :: rng.pick(items) ?? "none"
+    weighted :: rng.weighted_pick(items, weights) ?? "none"
+    sample :: rng.sample(items, 2)
+    rng.shuffle(&deck)
+    child := rng.split()
+    child_draw :: child.int(1, 100)
+    after_split :: rng.int(1, 100)
+    return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
+}
+EXPECTED :: prep { rng_view() }
+
+fn run() {
+    actual :: rng_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}
