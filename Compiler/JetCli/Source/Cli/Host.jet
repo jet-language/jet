@@ -9,6 +9,7 @@ use core.time as cli_time
 use jet_backend.[
     LINK_BASE,
     LINK_RUN_BASE,
+    LINK_RUN_LOW_BASE,
     X64Executable,
     X64Launch,
     x64_bind_runtime_image,
@@ -417,8 +418,8 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // runtime's bytes once the object is built) and `native.link`.
 // A span a failure returns from stays open. An image for LINK_RUN_BASE whose
 // C closure can't link there (absolute 32-bit relocations in non-PIC C) is
-// linked at LINK_BASE instead: the loader then can't map it into jet and
-// `jet run` runs the file (Image/Loader.jet). `file` is the entry path the
+// linked at LINK_RUN_LOW_BASE instead, below 2 GiB, where the loader still
+// maps it into jet (Image/Loader.jet). `file` is the entry path the
 // command named (jet_cli_debug_directory). `hot`: the functions to lay out
 // first (ir_x64_hot_order; jet_cli_hot_text).
 fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
@@ -481,11 +482,11 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     loop name in closure.names -> &names.push(name)
     loop input in closure.bytes -> &bytes.push(input)
     input_count :: names.len()
-    // copy: only a C closure can refuse LINK_RUN_BASE, and the retry needs the inputs again.
+    // copy: only a C closure can refuse LINK_RUN_BASE, and the retry at LINK_RUN_LOW_BASE needs the inputs again.
     retry :: if base != LINK_BASE && closure.names.len() > 0 -> Val(bytes.copy()) else -> None
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     image := x64_link_executable(names, ^bytes, base)
-    if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, ^inputs_again, LINK_BASE)
+    if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, ^inputs_again, LINK_RUN_LOW_BASE)
     if trace_sink == .Val(sink) {
         sink.end("native.link", input_count)
         sink.progress("counters.native.link.bytes", image.bytes.len(), -1)
