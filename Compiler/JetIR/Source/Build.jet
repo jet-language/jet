@@ -79,8 +79,13 @@ struct IRBuilder {
     // Calls emitted where the program is only read (display impls): their
     // callee ids are resolved when the function is done.
     deferred: [IRDeferredCall]
-    // The variables that close their values when their scopes end (BuildOwn.jet).
+    // The variables that close their values when their scopes end, the
+    // values read out of such a value, and the parts moved out of one
+    // (BuildOwn.jet).
     closes: [IRClose]
+    places: [IRPlace]
+    moved: [IRMovedPart]
+    part_closes: [IRPartClose]
     // The open `#Transact` blocks (innermost last) an early exit unwinds.
     transactions: [IRTxFrame]
     // The open contract scopes (innermost last) whose `post` clauses a
@@ -938,7 +943,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}, lambdas: [String:Int]{}}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, places: [IRPlace]{}, moved: [IRMovedPart]{}, part_closes: [IRPartClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}, lambdas: [String:Int]{}}
 }
 
 // The first id of the nodes a builder makes itself (ir_node), far below the
@@ -1008,15 +1013,18 @@ fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
             b.f.a[call.at] = callee
         }
     }
+    ir_resolve_part_closes(&m, p, &b)
 }
 
 // A payload binding a condition introduces: `slot` (named `name`) receives
 // the payload at byte `offset` of the carrier box `subject` once the test holds.
+// `selector`: the variant (or Result side) the payload belongs to, -1 for a
+// struct member or an Option's payload (BuildOwn.jet IRPartStep).
 // `boxed`: the member at `offset` is a recursive edge's wrapper box holding the payload.
 // `loaded`: an or-pattern already loaded `slot` in its matching alternative.
 // `window`: the subject is a write window (`if &place == ...`), so the name
 // binds the payload's storage and an assignment to it lands in the box.
-struct IRPending { name: String, slot: Int, subject: Int, offset: Int, boxed: Bool{false}, loaded: Bool{false}, window: Bool{false} }
+struct IRPending { name: String, slot: Int, subject: Int, offset: Int, selector: Int{-1}, boxed: Bool{false}, loaded: Bool{false}, window: Bool{false} }
 
 // Opens the If of a condition and binds its pending payloads in it.
 fn ir_open_condition(m: &IRModule, p: IRProgram, b: &IRBuilder, test: Int) Never! {
@@ -1044,6 +1052,7 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
             next
         }
         if !row.loaded -> ir_pending_load(&m, &b, row, row.slot)
+        ir_close_note(&m, p, &b, row.slot, row.subject, IRPartStep{selector: row.selector, offset: row.offset})
         &b.bindings.push(IRBinding{name: row.name, slot: row.slot, carrier: if row.boxed -> -1 else -> row.subject})
     }
 }
@@ -1056,7 +1065,7 @@ fn ir_pending_windows(p: IRProgram, b: &IRBuilder, subject: Int, from: Int) Neve
     if !write -> return
     loop index in from..<b.pending.len() {
         row :: b.pending[index]
-        b.pending[index] = IRPending{name: row.name.copy(), slot: row.slot, subject: row.subject, offset: row.offset, boxed: row.boxed, loaded: row.loaded, window: true}
+        b.pending[index] = IRPending{name: row.name.copy(), slot: row.slot, subject: row.subject, offset: row.offset, selector: row.selector, boxed: row.boxed, loaded: row.loaded, window: true}
     }
 }
 
@@ -1098,13 +1107,16 @@ fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
 }
 
 // Drops the owned variables among bindings[mark..], latest first; a
-// variable that still owns a value that closes closes it first.
+// variable that still owns a value that closes closes it first. The
+// variables a `defer close` closes close before all of them, the latest
+// defer first (ir_close_deferred).
 fn ir_drop_bindings(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
+    ir_close_deferred(&b, mark)
     index := b.bindings.len() - 1
     loop index >= mark {
         binding :: b.bindings[index]
         index -= 1
-        if binding.indirect < 0 -> ir_close_now(&b, binding.slot)
+        if binding.indirect < 0 && !ir_close_is_deferred(b, binding.slot) -> ir_close_now(&b, binding.slot)
         if !binding.owned -> next
         ir_drop_binding(&m, &b, binding)
     }

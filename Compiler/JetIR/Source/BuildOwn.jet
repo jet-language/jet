@@ -649,9 +649,39 @@ fn ir_copy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Ne
 }
 
 // A variable whose value closes when its scope ends: `glue` closes the value
-// in `slot` while the Bool slot `armed` holds; a move out of the variable
-// clears `armed`.
-struct IRClose { slot: Int, armed: Int, glue: Int }
+// in `slot` (only its members when `members_only`, the receiver of the
+// type's own Close method) while the Word slot `armed` is nonzero; a move
+// out of the variable clears it. Bit k >= 1 of `armed` is set once the part
+// of the value whose IRMovedPart.bit is k moved out: the scope then closes
+// only the rest (ir_close_partial). `flag`: the Bool type row. `deferred`:
+// a `defer close` names the variable, so it closes before the scope's other
+// closes (ir_close_deferred).
+struct IRClose { slot: Int, armed: Int, glue: Int, members_only: Bool, flag: Int, deferred: Bool{false} }
+
+// One step from a value to a part it holds: the member at byte `offset` of
+// the enum variant (or Result side: 1 Ok, 0 Err) `selector`; -1 for a
+// struct or tuple member and an Option's payload.
+struct IRPartStep { selector: Int, offset: Int }
+
+// The value in `slot` was read out of the value in `parent` by `step`, and
+// something in it closes (ir_close_note).
+struct IRPlace { slot: Int, parent: Int, step: IRPartStep }
+
+// The closing variable in `root` and the path from its value to a part.
+struct IRPlacePath { root: Int, path: [IRPartStep] }
+
+// The part at `path` of the value of the closing variable in `root`: bit
+// `bit` of the variable's `armed` word is set once it moved out.
+struct IRMovedPart { root: Int, path: [IRPartStep], bit: Int }
+
+// The Call at instruction `at` to the partial close of the closing variable
+// in `root`: its callee is built once every part that moves out of the
+// variable is known (ir_resolve_part_closes).
+struct IRPartClose { at: Int, root: Int }
+
+// The most parts of one variable's value that can move out: the bits of its
+// `armed` word above bit 0 that stay an inline Int.
+IR_CLOSE_PARTS :: 61
 
 // The selected Close method (a p.functions row) of type row `row`, -1 for none.
 fn ir_close_method(m: IRModule, p: IRProgram, row: Int) -> Int Never! {
@@ -760,7 +790,7 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
             ir_emit(&a.f, IROp.Call, -1, callee, start, 1, a.line)
         }
     } else {
-        ir_close_parts(&m, p, &a, row, value, span)
+        ir_close_parts(&m, p, &a, row, value, [IRMovedPart]{}, 0, -1, span)
     }
     if a.error != "" {
         ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
@@ -775,8 +805,10 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
     id
 }
 
-// Closes each part of the value in `value` (type row `row`) that closes.
-fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) Never! {
+// Closes each part of the value in `value` (type row `row`) that closes. A
+// part some of `parts` (moved parts whose paths pass this value, at `depth`)
+// lie under closes only what is left of it, by the bits of `armed`.
+fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
     kind :: m.types[row].kind
     ty :: ir_untag(m.types[row].ty)
     if kind == .Aggregate {
@@ -806,7 +838,7 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
             glue :: ir_close_glue(&m, p, &b, member.ty, false, span)
             if glue < 0 -> next
             item :: ir_member_value(&m, &b, value, member)
-            ir_close_call(&b, glue, item)
+            ir_close_member(&m, p, &b, glue, member.ty, item, ir_parts_under(parts, depth, IRPartStep{selector: -1, offset: member.offset}), depth, armed, span)
         }
         return
     }
@@ -818,7 +850,7 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
         some :: ir_option_is_some(&m, &b, value)
         ir_open_if(&b.f, some, b.line)
         payload :: ir_load_at(&m, &b, value, 0, inner_row)
-        ir_close_call(&b, glue, payload)
+        ir_close_member(&m, p, &b, glue, inner_row, payload, ir_parts_under(parts, depth, IRPartStep{selector: -1, offset: 0}), depth, armed, span)
         ir_end(&b.f, b.line)
         return
     }
@@ -832,12 +864,12 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
         ir_open_if(&b.f, is_ok, b.line)
         if ok_glue >= 0 {
             ok_value :: ir_load_at(&m, &b, value, 8, ok_row)
-            ir_close_call(&b, ok_glue, ok_value)
+            ir_close_member(&m, p, &b, ok_glue, ok_row, ok_value, ir_parts_under(parts, depth, IRPartStep{selector: 1, offset: 8}), depth, armed, span)
         }
         ir_else(&b.f, b.line)
         if err_glue >= 0 {
             err_value :: ir_load_at(&m, &b, value, 8, err_row)
-            ir_close_call(&b, err_glue, err_value)
+            ir_close_member(&m, p, &b, err_glue, err_row, err_value, ir_parts_under(parts, depth, IRPartStep{selector: 0, offset: 8}), depth, armed, span)
         }
         ir_end(&b.f, b.line)
         return
@@ -863,10 +895,131 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
             loop (at, member) in members {
                 if glues[at] < 0 -> next
                 item :: ir_member_value(&m, &b, value, member)
-                ir_close_call(&b, glues[at], item)
+                ir_close_member(&m, p, &b, glues[at], member.ty, item, ir_parts_under(parts, depth, IRPartStep{selector: index, offset: member.offset}), depth, armed, span)
             }
             ir_end(&b.f, b.line)
         }
+    }
+}
+
+// Closes the part `item` (type row `row`, closed whole by `glue`) of a
+// value at `depth`: only what is left of it when `parts` lie under it.
+fn ir_close_member(m: &IRModule, p: IRProgram, b: &IRBuilder, glue: Int, row: Int, item: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
+    if parts.len() == 0 -> return ir_close_call(&b, glue, item)
+    ir_close_partial(&m, p, &b, row, item, armed, parts, depth + 1, false, span)
+}
+
+// The parts among `parts` under `step` from a value at `depth`.
+fn ir_parts_under(parts: [IRMovedPart], depth: Int, step: IRPartStep) -> [IRMovedPart] Never! {
+    under := [IRMovedPart]{}
+    loop part in parts {
+        if part.path.len() > depth && ir_step_same(part.path[depth], step) -> &under.push(part.copy())
+    }
+    under
+}
+
+fn ir_step_same(a: IRPartStep, b: IRPartStep) -> Bool Never! {
+    a.selector == b.selector && a.offset == b.offset
+}
+
+// The `armed` bit of a moved part's bit number.
+fn ir_part_bit(bit: Int) -> Int Never! {
+    value := 1
+    loop _ in 0..<bit -> value = value * 2
+    value
+}
+
+// Closes what is left of the value in `value` (type row `row`, at `depth`
+// of its variable's value) whose `parts` may have moved out, by the bits of
+// `armed`: nothing when the value itself moved; the whole value (only its
+// members when `members_only`) when no part under it did; else each part
+// in turn (Lower lower_partial_drop_node).
+fn ir_close_partial(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, armed: Int, parts: [IRMovedPart], depth: Int, members_only: Bool, span: Span) Never! {
+    // The bits are distinct, so their sums are their unions.
+    exact := 0
+    below := 0
+    loop part in parts {
+        if part.path.len() == depth {
+            exact += ir_part_bit(part.bit)
+        } else {
+            below += ir_part_bit(part.bit)
+        }
+    }
+    zero :: ir_word_const(&m, &b, 0)
+    if exact != 0 {
+        mask :: ir_word_const(&m, &b, exact)
+        moved :: ir_word_op(&m, &b, IROp.BitAnd, armed, mask)
+        intact :: ir_bool_op(&m, &b, IROp.Eq, moved, zero)
+        ir_open_if(&b.f, intact, b.line)
+    }
+    glue :: ir_close_glue(&m, p, &b, row, members_only, span)
+    if below == 0 {
+        if glue >= 0 -> ir_close_call(&b, glue, value)
+    } else {
+        mask :: ir_word_const(&m, &b, below)
+        moved :: ir_word_op(&m, &b, IROp.BitAnd, armed, mask)
+        untouched :: ir_bool_op(&m, &b, IROp.Eq, moved, zero)
+        ir_open_if(&b.f, untouched, b.line)
+        if glue >= 0 -> ir_close_call(&b, glue, value)
+        ir_else(&b.f, b.line)
+        ir_close_parts(&m, p, &b, row, value, parts, depth, armed, span)
+        ir_end(&b.f, b.line)
+    }
+    if exact != 0 -> ir_end(&b.f, b.line)
+}
+
+// The IR function closing what is left of a value of type row `row` once
+// some of `parts` moved out of it: (value, armed) with its variable's
+// `armed` word (IRClose), only its members when `members_only`.
+fn ir_part_close_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_only: Bool, parts: [IRMovedPart]) -> Int Never! {
+    span :: Span{start: 0, end: 0}
+    key := "#close.parts<{ir_row_key(m, row)}|{members_only}"
+    loop part in parts {
+        key = "{key}|{part.bit}"
+        loop step in part.path -> key = "{key}:{step.selector}/{step.offset}"
+    }
+    key = "{key}>"
+    known :: m.close_glue.get(key) ?? -3
+    if known == -2 {
+        message :: m.helper_errors.get(key) ?? panic("a failed partial close lost its message")
+        ir_fail(&b, span, message)
+        return -1
+    }
+    if known != -3 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_function_new("close", key, "jet_ir_close_{ir_key_hash(key)}", "", 0))
+    m.function_rows[key] = id
+    m.close_glue[key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    value :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
+    armed :: ir_new_slot(&a, ir_word_row(&m), IRSlotKind.Param, ir_intern_name(&m, "armed"))
+    ir_close_partial(&m, p, &a, row, value, armed, parts, 0, members_only, span)
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        m.close_glue[key] = -2
+        m.helper_errors[key] = a.error.copy()
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
+}
+
+// Builds the partial close each IRPartClose calls, now that every part
+// moved out of its variable is known.
+fn ir_resolve_part_closes(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    loop index in 0..<b.part_closes.len() {
+        call :: b.part_closes[index]
+        close :: b.closes[ir_close_index(b, call.root)]
+        parts := [IRMovedPart]{}
+        loop part in b.moved {
+            if part.root == call.root -> &parts.push(part.copy())
+        }
+        row :: b.f.slot_type[call.root]
+        callee :: ir_part_close_helper(&m, p, &b, row, close.members_only, parts)
+        b.f.a[call.at] = callee
     }
 }
 
@@ -882,33 +1035,127 @@ fn ir_close_arm(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, members_on
     row :: b.f.slot_type[slot]
     glue :: ir_close_glue(&m, p, &b, row, members_only, span)
     if glue < 0 -> return
-    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
-    armed :: ir_new_slot(&b, bool_row, IRSlotKind.Local, -1)
+    armed :: ir_new_slot(&b, ir_word_row(&m), IRSlotKind.Local, -1)
     ir_emit(&b.f, IROp.Const, armed, 1, -1, -1, b.line)
-    &b.closes.push(IRClose{slot: slot, armed: armed, glue: glue})
+    flag :: ir_type_row(&m, Type.Bool) ?? 0
+    &b.closes.push(IRClose{slot: slot, armed: armed, glue: glue, members_only: members_only, flag: flag})
+}
+
+// `slot` holds the part `step` of the value in `parent`. When that value is
+// (part of) a closing variable's value and something in the part closes,
+// a move out of `slot` moves the part out of the variable (ir_close_disarm).
+fn ir_close_note(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, parent: Int, step: IRPartStep) Never! {
+    if slot < 0 || parent < 0 || b.closes.len() == 0 -> return
+    if !ir_closes(b, parent) && ir_place_index(b, parent) < 0 -> return
+    row :: b.f.slot_type[slot]
+    if ir_close_glue(&m, p, &b, row, false, Span{start: 0, end: 0}) < 0 -> return
+    &b.places.push(IRPlace{slot: slot, parent: parent, step: step})
+}
+
+// The latest b.places row of `slot`, -1 for none.
+fn ir_place_index(b: IRBuilder, slot: Int) -> Int Never! {
+    index := b.places.len() - 1
+    loop index >= 0 {
+        if b.places[index].slot == slot -> return index
+        index -= 1
+    }
+    -1
+}
+
+// The closing variable whose value the value in `slot` was read out of, and
+// the path to it (root -1: none).
+fn ir_place_path(b: IRBuilder, slot: Int) -> IRPlacePath Never! {
+    steps := [IRPartStep]{}
+    at := slot
+    loop !ir_closes(b, at) {
+        index :: ir_place_index(b, at)
+        if index < 0 || steps.len() > b.places.len() -> return IRPlacePath{root: -1, path: [IRPartStep]{}}
+        &steps.push(b.places[index].step)
+        at = b.places[index].parent
+    }
+    path := [IRPartStep]{}
+    index := steps.len() - 1
+    loop index >= 0 {
+        &path.push(steps[index])
+        index -= 1
+    }
+    IRPlacePath{root: at, path: path}
+}
+
+fn ir_path_same(a: [IRPartStep], b: [IRPartStep]) -> Bool Never! {
+    a.len() == b.len() && ir_path_starts(a, b)
+}
+
+// Whether `path` begins with the steps of `prefix`.
+fn ir_path_starts(path: [IRPartStep], prefix: [IRPartStep]) -> Bool Never! {
+    if prefix.len() > path.len() -> return false
+    loop index in 0..<prefix.len() {
+        if !ir_step_same(path[index], prefix[index]) -> return false
+    }
+    true
+}
+
+// The bit of the part at `path` of the closing variable `root`'s value,
+// given one when it is the first move out of that part; -1 past
+// IR_CLOSE_PARTS.
+fn ir_moved_bit(b: &IRBuilder, root: Int, path: [IRPartStep]) -> Int Never! {
+    count := 0
+    loop part in b.moved {
+        if part.root != root -> next
+        count += 1
+        if ir_path_same(part.path, path) -> return part.bit
+    }
+    if count >= IR_CLOSE_PARTS {
+        ir_fail(&b, Span{start: 0, end: 0}, "more than {IR_CLOSE_PARTS} parts moved out of one closing variable")
+        return -1
+    }
+    &b.moved.push(IRMovedPart{root: root, path: path.copy(), bit: count + 1})
+    count + 1
+}
+
+// The latest b.closes row of the variable in `slot`, -1 for none.
+fn ir_close_index(b: IRBuilder, slot: Int) -> Int Never! {
+    index := b.closes.len() - 1
+    loop index >= 0 {
+        if b.closes[index].slot == slot -> return index
+        index -= 1
+    }
+    -1
 }
 
 // The value in `slot` moves out of its variable: its scope no longer closes
-// it. A payload binding's value moves out of its carrier box, so the
-// variable holding the carrier no longer closes it either (Lower's partial
-// move of a matched payload, PartialDrop.jet).
+// it. A part read out of a closing variable's value (ir_close_note) moves
+// out of that value, so its variable's scope closes only the rest (Lower's
+// partial move, PartialDrop.jet): the part's bit of `armed` is set while
+// the variable is armed.
 fn ir_close_disarm(b: &IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 -> return
+    whole := false
     loop index in 0..<b.closes.len() {
         close :: b.closes[index]
-        if close.slot == slot -> ir_emit(&b.f, IROp.Const, close.armed, 0, -1, -1, b.line)
+        if close.slot != slot -> next
+        ir_emit(&b.f, IROp.Const, close.armed, 0, -1, -1, b.line)
+        whole = true
     }
-    index := b.bindings.len() - 1
-    loop index >= 0 {
-        binding :: b.bindings[index]
-        index -= 1
-        if binding.slot != slot || binding.indirect >= 0 -> next
-        if binding.carrier >= 0 && binding.carrier != slot -> ir_close_disarm(&b, binding.carrier)
-        return
-    }
+    if whole -> return
+    place :: ir_place_path(b, slot)
+    if place.root < 0 -> return
+    bit :: ir_moved_bit(&b, place.root, place.path)
+    if bit < 0 -> return
+    armed :: b.closes[ir_close_index(b, place.root)].armed
+    word :: b.f.slot_type[armed]
+    one :: ir_new_slot(&b, word, IRSlotKind.Temp, -1)
+    ir_emit(&b.f, IROp.Const, one, 1, -1, -1, b.line)
+    live :: ir_new_slot(&b, word, IRSlotKind.Temp, -1)
+    ir_emit(&b.f, IROp.BitAnd, live, armed, one, IR_OVERFLOW_WRAP, b.line)
+    mask :: ir_new_slot(&b, word, IRSlotKind.Temp, -1)
+    ir_emit(&b.f, IROp.Const, mask, ir_part_bit(bit), -1, -1, b.line)
+    ir_emit(&b.f, IROp.Mul, live, live, mask, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.BitOr, armed, armed, live, IR_OVERFLOW_WRAP, b.line)
 }
 
-// Re-arms the variable in `slot` after a new value is stored into it.
+// Re-arms the variable in `slot` after a new value is stored into it: the
+// new value is whole.
 fn ir_close_rearm(b: &IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 -> return
     loop index in 0..<b.closes.len() {
@@ -917,20 +1164,57 @@ fn ir_close_rearm(b: &IRBuilder, slot: Int) Never! {
     }
 }
 
+// The member `member` of the aggregate at `base` is about to be replaced:
+// its old value closes, but for the parts of it that moved out, whose bits
+// the new value clears.
+fn ir_close_overwritten(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, span: Span) Never! {
+    glue :: ir_close_glue(&m, p, &b, member.ty, false, span)
+    if glue < 0 -> return
+    old :: ir_member_value(&m, &b, base, member)
+    place :: if b.closes.len() == 0 -> IRPlacePath{root: -1, path: [IRPartStep]{}} else -> ir_place_path(b, base)
+    depth :: place.path.len()
+    step :: IRPartStep{selector: -1, offset: member.offset}
+    parts := [IRMovedPart]{}
+    cleared := 0
+    loop part in b.moved {
+        if place.root < 0 || part.root != place.root || part.path.len() <= depth -> next
+        if !ir_path_starts(part.path, place.path) || !ir_step_same(part.path[depth], step) -> next
+        &parts.push(part.copy())
+        cleared += ir_part_bit(part.bit)
+    }
+    if parts.len() == 0 -> return ir_close_call(&b, glue, old)
+    armed :: b.closes[ir_close_index(b, place.root)].armed
+    ir_close_partial(&m, p, &b, member.ty, old, armed, parts, depth + 1, false, span)
+    keep :: ir_word_const(&m, &b, -1 - cleared)
+    ir_emit(&b.f, IROp.BitAnd, armed, armed, keep, IR_OVERFLOW_WRAP, b.line)
+}
+
 // Closes the value of the variable in `slot` now if it still owns it (its
-// scope ends, or a new value replaces it).
+// scope ends, or a new value replaces it): what is left of it once parts
+// moved out (ir_close_disarm).
 fn ir_close_now(b: &IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 -> return
-    index := b.closes.len() - 1
-    loop index >= 0 {
-        close :: b.closes[index]
-        index -= 1
-        if close.slot != slot -> next
-        ir_open_if(&b.f, close.armed, b.line)
-        ir_close_call(&b, close.glue, slot)
-        ir_end(&b.f, b.line)
-        return
+    at :: ir_close_index(b, slot)
+    if at < 0 -> return
+    close :: b.closes[at]
+    word :: b.f.slot_type[close.armed]
+    zero :: ir_new_slot(&b, word, IRSlotKind.Temp, -1)
+    ir_emit(&b.f, IROp.Const, zero, 0, -1, -1, b.line)
+    live :: ir_new_slot(&b, close.flag, IRSlotKind.Temp, -1)
+    ir_emit(&b.f, IROp.Ne, live, close.armed, zero, -1, b.line)
+    ir_open_if(&b.f, live, b.line)
+    moves := false
+    loop part in b.moved {
+        if part.root == slot -> moves = true
     }
+    if moves {
+        start :: ir_args(&b.f, [Int]{slot, close.armed})
+        call :: ir_emit(&b.f, IROp.Call, -1, -1, start, 2, b.line)
+        &b.part_closes.push(IRPartClose{at: call, root: slot})
+    } else {
+        ir_close_call(&b, close.glue, slot)
+    }
+    ir_end(&b.f, b.line)
 }
 
 // Whether the variable in `slot` closes its value.
@@ -939,4 +1223,42 @@ fn ir_closes(b: IRBuilder, slot: Int) -> Bool Never! {
         if close.slot == slot -> return true
     }
     false
+}
+
+// `defer close(^x)` names the closing variable in `slot`: it closes before
+// the scope's automatic closes, after the defers that follow it (Lower's
+// defer frame runs before the scope's close frame). Its close row moves
+// last, so the deferred rows run latest first.
+fn ir_close_defer(b: &IRBuilder, slot: Int) Never! {
+    at :: ir_close_index(b, slot)
+    if at < 0 -> return
+    close :: b.closes[at]
+    kept := [IRClose]{}
+    loop index in 0..<b.closes.len() {
+        if index != at -> &kept.push(b.closes[index])
+    }
+    &kept.push(IRClose{slot: close.slot, armed: close.armed, glue: close.glue, members_only: close.members_only, flag: close.flag, deferred: true})
+    b.closes = kept
+}
+
+// Whether a `defer close` names the closing variable in `slot`.
+fn ir_close_is_deferred(b: IRBuilder, slot: Int) -> Bool Never! {
+    at :: ir_close_index(b, slot)
+    at >= 0 && b.closes[at].deferred
+}
+
+// Runs the deferred closes of the variables among bindings[mark..], the
+// latest defer first.
+fn ir_close_deferred(b: &IRBuilder, mark: Int) Never! {
+    index := b.closes.len() - 1
+    loop index >= 0 {
+        close :: b.closes[index]
+        index -= 1
+        if !close.deferred -> next
+        bound := false
+        loop at in mark..<b.bindings.len() {
+            if b.bindings[at].slot == close.slot && b.bindings[at].indirect < 0 -> bound = true
+        }
+        if bound -> ir_close_now(&b, close.slot)
+    }
 }
