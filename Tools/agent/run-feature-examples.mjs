@@ -8,7 +8,6 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
-  symlinkSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
@@ -289,21 +288,15 @@ function stageFeatureProject(entry, scratch, slot) {
   return { cwd: stageRoot };
 }
 
-// The build tier's copy of a single-file example: its directory's files
-// (subdirectories linked), so `jet build` writes its `.jet/build` outputs
-// into scratch, never into the repository.
+// The build tier's copy of a single-file example: its directory's sources,
+// subdirectories included, so `jet build` writes its `.jet/build` outputs
+// into scratch, never into the repository. Subdirectories are copied, not
+// linked: the CLI's source walk skips a symbolic link, so a linked `app/` or
+// `banner/` would leave a file import or `module` declaration unresolved.
 function stageExampleDirectory(entry, scratch, slot) {
   const stageRoot = join(scratch, "projects", `${slot}-${entry.stem.replaceAll("/", "_")}`);
   const source = dirname(entry.path);
-  const destination = join(stageRoot, relative(ROOT, source));
-  mkdirSync(destination, { recursive: true });
-  for (const item of readdirSync(source, { withFileTypes: true })) {
-    if (item.name === ".jet") continue;
-    const from = join(source, item.name);
-    const to = join(destination, item.name);
-    if (item.isDirectory()) symlinkSync(from, to);
-    else if (item.isFile()) copyFileSync(from, to);
-  }
+  copyFeatureProject(source, join(stageRoot, relative(ROOT, source)));
   return { cwd: stageRoot };
 }
 
