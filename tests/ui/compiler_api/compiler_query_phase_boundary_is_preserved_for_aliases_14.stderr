@@ -1,0 +1,17 @@
+Error [E0956]: `core.compiler.package` is compile-time only
+  --> compiler_query_phase_boundary_is_preserved_for_aliases_14.jet:2:18
+    |
+  2 | fn run() { facts.package() }
+    |                  ^^^^^^^
+ Why: The compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service
+ Fix: Move this call into `fn build` or a `comptime` binding
+More: jet-lang.dev/e/E0956
+
+Error [E2402]: This implicit fallible call can't convert `CompilerPackageError` into `Err` — no declared conversion exists
+  --> compiler_query_phase_boundary_is_preserved_for_aliases_14.jet:2:18
+    |
+  2 | fn run() { facts.package() }
+    |                  ^^^^^^^
+ Why: Ordinary fallible calls propagate automatically; `CompilerPackageError` can reach `Err` only through `impl CompilerPackageError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CompilerPackageError -> Err { … }`, or change the return type
+More: jet-lang.dev/e/E2402

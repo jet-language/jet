@@ -1,0 +1,26 @@
+Error [E0956]: `core.compiler.check` is compile-time only
+  --> compiler_query_phase_boundary_is_preserved_for_aliases_19.jet:2:26
+    |
+  2 | fn run() { root.compiler.check("not a syntax tree") }
+    |                          ^^^^^
+ Why: The compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service
+ Fix: Move this call into `fn build` or a `comptime` binding
+More: jet-lang.dev/e/E0956
+
+Error [E0108]: This needs CompilerSyntaxTree, but the value is String
+  --> compiler_query_phase_boundary_is_preserved_for_aliases_19.jet:2:32
+    |
+  2 | fn run() { root.compiler.check("not a syntax tree") }
+    |                                ^^^^^^^^^^^^^^^^^^^
+ Why: The value here does not have the type required by this declaration
+ Fix: Use a value of the required type or convert it explicitly
+More: jet-lang.dev/e/E0108
+
+Error [E2402]: This implicit fallible call can't convert `CompilerError` into `Err` — no declared conversion exists
+  --> compiler_query_phase_boundary_is_preserved_for_aliases_19.jet:2:26
+    |
+  2 | fn run() { root.compiler.check("not a syntax tree") }
+    |                          ^^^^^
+ Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl CompilerError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CompilerError -> Err { … }`, or change the return type
+More: jet-lang.dev/e/E2402
