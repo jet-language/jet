@@ -7,10 +7,10 @@ index, define the behavior.
 
 ## Run an example
 
-Use the checked-out executable (or the equivalent `jet` on your `PATH`):
+Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/jet-env jet`):
 
 ```sh
-target/debug/jet run Examples/features/basics/hello.jet
+jet run Examples/features/basics/hello.jet
 ```
 
 The feature runner exercises the same layout in one pass and records the

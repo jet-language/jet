@@ -238,7 +238,7 @@ fn read_table(table: CommandTable) -[Env, FS]> TableRead CensusError! {
 }
 
 // The command words `bytes` invokes as `jet <word>`: `jet` as its own word
-// (a path such as `target/debug/jet` counts), blanks, then the whole command
+// (a path such as `Compiler/JetCli/.jet/build/jet` counts), blanks, then the whole command
 // word, so `jet test-compare` never counts as `jet test`.
 fn invoked_commands(bytes: [U8], commands: [String:Int]) -> [String] Never! {
     invoked := [String]{}
@@ -426,7 +426,7 @@ fn invoked_text(text: String) -> String Never! {
 }
 
 #Test("an invocation is `jet` as its own word, blanks, then a whole command word") {
-    assert_eq(invoked_text("run `jet run x.jet` and target/debug/jet\ttest"), "run,test")
+    assert_eq(invoked_text("run `jet run x.jet` and Compiler/JetCli/.jet/build/jet\ttest"), "run,test")
     assert_eq(invoked_text("jet test-compare, my-jet run, x.jet build, jetrun, jet"), "")
     assert_eq(invoked_text("jet c++ then jet run then jet run"), "c++,run")
     assert_eq(invoked_text("jet jet build"), "")

@@ -3603,8 +3603,8 @@ The LSP integration coverage is in `tests/lsp.rs`.
 
 The VS Code/Cursor client in `Tools/editors/vscode/` provides the TextMate grammar
 and LSP transport. `install.sh` packages the extension. Server discovery uses
-`jet.languageServerPath`, then `<workspaceFolder>/target/debug/jet`, then
-`jet` on `PATH`; `jet self lsp` does not invoke `rustc`.
+`jet.executablePath`, then the legacy `jet.languageServerPath`, then `jet` on
+`PATH`; `jet self lsp` does not invoke `rustc`.
 
 ### Hand-rolled parser contracts
 

@@ -21,7 +21,7 @@ From the repository root, exercise an individual source with the checked-out
 compiler:
 
 ```sh
-target/debug/jet run Examples/suites/expense_report.jet
+jet run Examples/suites/expense_report.jet
 ```
 
 The suite checker in [`tests/suite_goldens.rs`](../../tests/suite_goldens.rs)

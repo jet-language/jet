@@ -80,7 +80,7 @@ const files = execFileSync(
   .filter((path) => path && !EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix)));
 const uniqueFiles = [...new Set(files)].sort();
 
-// `jet` as its own word (a path such as `target/debug/jet` counts), then the
+// `jet` as its own word (a path such as `Compiler/JetCli/.jet/build/jet` counts), then the
 // command word. The captured word is compared whole, so `jet test-compare`
 // never counts as `jet test`.
 const invocation = /(?<![\w.-])jet[ \t]+([a-z][a-z0-9+-]*)/g;

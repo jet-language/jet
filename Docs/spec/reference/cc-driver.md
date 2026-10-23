@@ -101,8 +101,9 @@ response file.
 
 ```sh
 repo="$(git rev-parse --show-toplevel)"
-cc="$repo/target/debug/jet-cc"
-cxx="$repo/target/debug/jet-c++"
+jet="${JET:-$(command -v jet)}"
+cc="$(dirname "$jet")/jet-cc"
+cxx="$(dirname "$jet")/jet-c++"
 make_src="$repo/tests/fixtures/foreign_build_hosts/make-cc"
 make_build="$make_src/build"
 

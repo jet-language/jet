@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -18,6 +19,18 @@ import { performance } from "node:perf_hooks";
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../../..");
+
+// The compiler under measurement when --artifact is absent: $JET (what
+// `Tools/agent/jet-env jet` runs), else `jet` on PATH, else the bare name (identity
+// then reports no artifact and preflight fails closed).
+function defaultJetBinary() {
+  if (process.env.JET) return process.env.JET;
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    const candidate = path.join(directory, "jet");
+    if (directory && existsSync(candidate)) return realpathSync(candidate);
+  }
+  return "jet";
+}
 
 export const PERFORMANCE_SURFACE_SCHEMA = "jet.gauntlet.performance-surface-evidence.v1";
 export const PERFORMANCE_SURFACE_VERSION = 1;
@@ -729,7 +742,7 @@ function cpuAffinity() {
 }
 
 export function collectIdentity(options = {}) {
-  const artifactPath = path.resolve(options.artifactPath ?? path.join(repoDir, "target/debug/jet"));
+  const artifactPath = path.resolve(options.artifactPath ?? defaultJetBinary());
   let artifact = null;
   if (existsSync(artifactPath)) {
     const bytes = readFileSync(artifactPath);
@@ -912,7 +925,7 @@ function measurementPairRow({ identity, sources, context, warmupOrders, warmupRo
     plain_source: sources.plain,
     surface_source_sha256: sha256(sources.surface),
     plain_source_sha256: sha256(sources.plain),
-    artifact: identity.artifact?.path ?? "target/debug/jet",
+    artifact: identity.artifact?.path ?? "jet",
     artifact_sha256: identity.artifact?.sha256 ?? null,
     revision: identity.revision ?? null,
     measurement_context: context,
@@ -956,7 +969,7 @@ function measurementPairRow({ identity, sources, context, warmupOrders, warmupRo
 
 export function measurePair(options = {}) {
   const root = path.resolve(options.repoDir ?? repoDir);
-  const artifactPath = path.resolve(options.artifactPath ?? path.join(root, "target/debug/jet"));
+  const artifactPath = path.resolve(options.artifactPath ?? defaultJetBinary());
   const scratchRoot = path.resolve(options.scratchRoot ?? process.env.JET_TEST_SCRATCH_DIR ?? path.join(os.homedir(), ".cache", "jet-dev", "perf-surface-pair"), "performance-surface");
   mkdirSync(scratchRoot, { recursive: true });
   const sources = { surface: SURFACE_SOURCE, plain: PLAIN_SOURCE };
@@ -1067,7 +1080,7 @@ export function measurePair(options = {}) {
     generated_at: generatedAt,
     target: TARGET,
     tier: PAIR_MEASUREMENT.tier,
-    artifact: identity.artifact?.path ?? "target/debug/jet",
+    artifact: identity.artifact?.path ?? "jet",
     artifact_sha256: identity.artifact?.sha256 ?? null,
     artifact_md5: identity.artifact?.md5 ?? null,
     artifact_bytes: identity.artifact?.bytes ?? null,

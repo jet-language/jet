@@ -3,7 +3,7 @@
 use std.[fs, env, process, thread]
 use std.net.[TcpListener, TcpStream]
 use std.process.[Child, Command, Stdio]
-use std.sync.[Condvar, Mutex, Once, OnceLock]
+use std.sync.[Condvar, Mutex, OnceLock]
 use std.sync.atomic.[AtomicU64, Ordering]
 use std.time.[Duration, Instant]
 use std.io.[BufReader, ErrorKind]
@@ -12,8 +12,6 @@ use jet.SHA256.[sha256_hex]
 // GATE #4483: selected-family dispatch for native process-tree cleanup.
 // GATE #4409: artifact cleanup preserves NotFound error-kind distinction.
 
-// Rust: tests/canvas_scenarios.rs:17
-BUILD_JET :: Once.new()
 // Rust: tests/canvas_scenarios.rs:18
 NEXT_CANVAS_CASE :: AtomicU64.new(0)
 // Rust: tests/canvas_scenarios.rs:19
@@ -126,7 +124,7 @@ fn assert_big_fixture_preflight(repo: &OSPath, case: &CanvasCase, port: U16) {
     assert_eq(actual.function_count, expected.function_count, "generated function count changed")
     assert_eq(actual.source_bytes, expected.source_bytes, "generated source bytes changed")
     assert_eq(actual.source_sha256, expected.source_sha256, "generated source changed")
-    jet :: cargo_target_dir(repo).join("debug/jet")
+    jet :: admitted_tool("JET", "jet")
     check :: Command.new(jet).current_dir(case.dir).args(["check", "main.jet", "--target=web"]).output().expect("check generated Canvas fixture with Jet")
     assert(check.status.success(), "generated Canvas fixture failed Jet check\n--- stdout ---\n{String.from_utf8_lossy(check.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(check.stderr)}")
     graph :: http_body(port, "/canvas/graph")
@@ -171,7 +169,6 @@ fn run_browser_scenario(name: &String, browser: &String, node: &OSPath, environm
 fn run_browser_scenario_with_server(name: &String, browser: &String, node: &OSPath, environment: &[(String, OSPath)], target_independent: Bool, program_target: String?) {
     browser_count :: if name == SESSION_SURFACE_MATRIX_SCENARIO -> 2 else -> 1
     _browser_permits :: (0..browser_count).map(_ -> CanvasBrowserPermit.acquire()).collect()
-    ensure_jet_built()
     repo :: OSPath.from(env.manifest_dir())
     case :: CanvasCase.new(repo, name)
     port :: free_port()
@@ -180,7 +177,7 @@ fn run_browser_scenario_with_server(name: &String, browser: &String, node: &OSPa
     session :: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port).cloned().expect("Canvas server session secret")
     command := Command.new(node)
     command.current_dir(repo).envs(environment.iter().copied()).env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
-        .env("JET_BIN", cargo_target_dir(repo).join("debug/jet")).env("JETPACK_BIN", cargo_target_dir(repo).join("debug/jetpack"))
+        .env("JET_BIN", admitted_tool("JET", "jet")).env("JETPACK_BIN", admitted_tool("JETPACK", "jetpack"))
         .arg("Tools/canvas-test/run.mjs").arg("--scenario").arg(name).arg("--browser").arg(browser).arg("--port").arg(port.to_string())
         .arg("--session").arg(session).arg("--out-dir").arg(case.screenshots).arg("--seed").arg("373")
     if program_target != none -> command.arg("--program-target").arg(program_target.unwrap())
@@ -191,23 +188,12 @@ fn run_browser_scenario_with_server(name: &String, browser: &String, node: &OSPa
     assert(server_exit == none, "Canvas devserver exited after the real browser loaded its projection: {server_exit}\n\n--- jet dev ---\n{server_log}")
     eprintln("{String.from_utf8_lossy(output.stdout)}")
 }
-// Rust: tests/canvas_scenarios.rs:1164
-fn ensure_jet_built() {
-    BUILD_JET.call_once(() -> {
-        repo :: OSPath.from(env.manifest_dir())
-        // The harness builds its external reference CLI in the checkout-local cache.
-        target :: cargo_target_dir(repo)
-        status :: Command.new("cargo").current_dir(repo).arg("build").status().expect("cargo build for Canvas scenarios")
-        assert(status.success(), "cargo build failed before Canvas scenarios")
-        assert(target.join("debug/jet").is_file(), "cargo build did not produce the Canvas scenario jet binary")
-    })
-}
-// Rust: tests/canvas_scenarios.rs:1188
-fn cargo_target_dir(repo: OSPath) -> OSPath {
-    dir :: env.var_os("CARGO_TARGET_DIR")
-    if dir == none -> repo.join("target")
-    else if OSPath.from(dir.unwrap()).is_absolute() -> OSPath.from(dir.unwrap())
-    else -> repo.join(dir.unwrap())
+// The admitted compiler or package manager: the binary named by `variable`
+// ($JET / $JETPACK, as Tools/agent/jet-env sets them), else `command` on PATH.
+fn admitted_tool(variable: &String, command: &String) -> OSPath {
+    bound :: env.var_os(variable)
+    if bound == none -> OSPath.from(command)
+    else -> OSPath.from(bound.unwrap())
 }
 // Rust: tests/canvas_scenarios.rs:1196
 fn canvas_tools() -> CanvasTools? {
@@ -315,9 +301,9 @@ struct DevServer {
     child: Child
     // Rust: tests/canvas_scenarios.rs:1397
     fn start(repo: OSPath, cwd: OSPath, entry: OSPath, port: U16, target_independent: Bool, program_target: String?) -> DevServer {
-        jet :: cargo_target_dir(repo).join("debug/jet")
+        jet :: admitted_tool("JET", "jet")
         command := if cwd.join("env.jet").is_file() {
-            command := Command.new(cargo_target_dir(repo).join("debug/jetpack"))
+            command := Command.new(admitted_tool("JETPACK", "jetpack"))
             command.current_dir(cwd).env("JET_ROOT", cwd).args(["env", "-y", "--"]).arg(jet)
             ^command
         } else -> Command.new(jet)

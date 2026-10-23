@@ -138,7 +138,7 @@ test("HTTP service probes require an expected header map", () => {
 });
 
 test("live reload probes use the caller environment by default", async () => {
-  const probe = await liveReloadInternals.probeAxisTool(null, repoDir, process.execPath, path.join(repoDir, "target/debug/jet"));
+  const probe = await liveReloadInternals.probeAxisTool(null, repoDir, process.execPath, "jet");
   assert.equal(probe.status, "available");
   assert.equal(probe.version_exit_code, 0);
 });

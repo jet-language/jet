@@ -56,9 +56,10 @@ Comparisons use same-run ratios. Raw times are machine-local. A full run emits
 the day's full report. These files are gitignored, and
 `Tools/gauntlet/harness/status.mjs --merge` folds them into `status.json`.
 
-The harness measures `target/release/jet`. Run and dev tiers execute inside the
-compiler process; a debug compiler would measure itself, not Jet. Use
-snapshot-only history unless the owner approves a different policy.
+The harness measures the admitted Jet compiler: `--jet-bin`, else `$JET`, else `jet`
+on PATH, run in place beside its runtime pack. Run and dev tiers execute inside the
+compiler process, so measure an optimized self-hosted build, not a debug one.
+Use snapshot-only history unless the owner approves a different policy.
 
 ## Seed and close
 

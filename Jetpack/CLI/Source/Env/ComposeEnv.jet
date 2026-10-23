@@ -111,11 +111,11 @@ fn cli_take_warm_realization(warm: &[String: [VerifiedRealization]], reference: 
 }
 
 // A native dev tool: the flake definition name, the command, and the
-// repository-relative binary it projects.
+// environment variable naming the admitted binary it projects.
 struct NativeDevTool {
     definition: String
     command: String
-    relative_binary: String
+    variable: String
 }
 
 // The target condition of a native output fact.
@@ -146,11 +146,12 @@ CLI_NATIVE_OUTPUT_FACTS :: prep { [NativeOutputFact]{
     {package: "raylib", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
 } }
 
-// The two repo-local dev tools are native projections of the cargo-built
-// binaries, not realized packages, and get no generated shell wrapper.
+// The two repo dev tools project the admitted native binaries named by $JET
+// and $JETPACK (flake.nix `mkJetDevBin`), not realized packages, and get no
+// generated shell wrapper.
 CLI_NATIVE_DEV_TOOLS :: prep { [NativeDevTool]{
-    {definition: "jetDev", command: "jet", relative_binary: "target/debug/jet"},
-    {definition: "jetpackDev", command: "jetpack", relative_binary: "target/debug/jetpack"}
+    {definition: "jetDev", command: "jet", variable: "JET"},
+    {definition: "jetpackDev", command: "jetpack", variable: "JETPACK"}
 } }
 
 enum NativeActivation {
@@ -171,9 +172,9 @@ struct NativeEnvironmentProjection {
     activation: NativeActivation
     nix_shell_scratch: NixShellScratch
 
-    fn from_realized(project_root: String, realized: [(name: String, output: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    fn from_realized(project_root: String, realized: [(name: String, output: String)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
-        loop tool in cli_native_dev_tool_paths(project_root) {
+        loop tool in dev_tools {
             directory :: files.dirname(tool.binary)
             if !native_bin_dirs.contains(directory) -> &native_bin_dirs.push(directory)
         }
@@ -228,16 +229,30 @@ fn cli_native_output_path(realized: [(name: String, output: String)], fact: Nati
     None
 }
 
-fn cli_native_dev_tool_paths(project_root: String) -> [(command: String, binary: String)] Never! {
+// The admitted dev tool binaries among `bound` (variable -> binary); an unset
+// or empty variable projects nothing.
+fn cli_native_dev_tool_paths(bound: [String: String]) -> [(command: String, binary: String)] Never! {
     tools := [(command: String, binary: String)]{}
-    loop tool in CLI_NATIVE_DEV_TOOLS -> &tools.push((command: tool.command, binary: files.join(project_root, tool.relative_binary)))
+    loop tool in CLI_NATIVE_DEV_TOOLS {
+        binary :: bound.get(tool.variable) ?? next
+        if binary != "" -> &tools.push((command: tool.command, binary: binary))
+    }
     tools
 }
 
+// The dev tool variables as the host binds them.
+fn cli_native_dev_tool_bindings() -[Env]> [String: String] Never! {
+    bound := [String: String]{}
+    loop tool in CLI_NATIVE_DEV_TOOLS {
+        if sys.get(tool.variable) == .Val(binary) -> bound[tool.variable] = binary
+    }
+    bound
+}
+
 // Native projection for the repository dev-shell contract, derived from
-// the project root and realized package outputs.
-fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
-    NativeEnvironmentProjection.from_realized(project_root, realized, inherited_loader_path)
+// the project root, the admitted dev tools, and realized package outputs.
+fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: String)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    NativeEnvironmentProjection.from_realized(project_root, realized, dev_tools, inherited_loader_path)
 }
 
 // Realize every ref in `plan` and compose the shell env. A realization
@@ -453,7 +468,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         theme.error_coded("E1333", "a language pack tool is missing from the realized environment", "missing required language tools: {missing_language_tools.join(", ")}", "realize the pack's declared packages again, or remove the language selection until its tools are available")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
-    native_projection :: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, sys.get("LD_LIBRARY_PATH"))) else -> None
+    native_projection :: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, cli_native_dev_tool_paths(cli_native_dev_tool_bindings()), sys.get("LD_LIBRARY_PATH"))) else -> None
     if native_projection == .Val(projection) {
         loop dir in projection.bin_dirs() -> &bin_dirs.push(dir)
     }

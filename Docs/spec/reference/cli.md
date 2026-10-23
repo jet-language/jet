@@ -5,7 +5,7 @@ for users choosing a command and for scripts that need the stable spelling of a
 flag. The executable truth is the generated output of
 
 ```sh
-target/debug/jet help
+jet help
 ```
 
 and the command table in
@@ -184,7 +184,7 @@ order, positional ordering, and duplicate visible job names; internal jobs do
 not become argv-reachable.
 ## Root command index
 
-The root index below mirrors `target/debug/jet help` in this checkout. It lists
+The root index below mirrors `jet help` from this checkout's compiler. It lists
 the most used commands first, in the order `node Tools/cli-census/census.mjs`
 measures from the guides, examples, and tests; `jet help --sort az` lists the
 same commands A to Z and `jet help --sort za` Z to A:
@@ -492,7 +492,7 @@ changes. A later write failure does not undo earlier successful writes.
 
 ## Shared option spellings
 
-The options below are intentionally named exactly as in `target/debug/jet help`:
+The options below are intentionally named exactly as in `jet help`:
 
 - `--target` selects a triple, `board.<name>`, or named database target;
   `--profile` selects `release`, `debug`, `ci`, `hardened`, or a named bundle.

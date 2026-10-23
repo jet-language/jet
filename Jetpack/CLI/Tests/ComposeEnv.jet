@@ -48,14 +48,17 @@
     files.remove(outside).drop("scratch cleanup")
 }
 
-#Test("cli native dev tools define both repo binaries without shell wrappers") {
+#Test("cli native dev tools project the admitted binaries named by JET and JETPACK") {
     definitions := [String]{}
     loop tool in CLI_NATIVE_DEV_TOOLS -> &definitions.push(tool.definition)
     assert_eq(definitions, [String]{"jetDev", "jetpackDev"})
-    tools :: cli_native_dev_tool_paths("/workspace/jet")
+    tools :: cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
     assert_eq(tools, [(command: String, binary: String)]{
-        (command: "jet", binary: "/workspace/jet/target/debug/jet"),
-        (command: "jetpack", binary: "/workspace/jet/target/debug/jetpack")
+        (command: "jet", binary: "/opt/jet/bin/jet"),
+        (command: "jetpack", binary: "/opt/jetpack/bin/jetpack")
+    })
+    assert_eq(cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": ""}), [(command: String, binary: String)]{
+        (command: "jet", binary: "/opt/jet/bin/jet")
     })
 }
 
@@ -64,8 +67,11 @@
         (name: "tzdata", output: "/hangar/tzdata-1"),
         (name: "raylib", output: "/hangar/raylib-1"),
         (name: "vulkan-loader", output: "/hangar/vulkan-1")
+    }, [(command: String, binary: String)]{
+        (command: "jet", binary: "/opt/jet/bin/jet"),
+        (command: "jetpack", binary: "/opt/jet/bin/jetpack")
     }, Val("/host/lib"))
-    assert_eq(projection.bin_dirs(), [String]{"/workspace/jet/target/debug"})
+    assert_eq(projection.bin_dirs(), [String]{"/opt/jet/bin"})
     vars :: projection.env_vars()
     assert_eq(vars.get("JET_ROOT"), Val("/workspace/jet"))
     assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))

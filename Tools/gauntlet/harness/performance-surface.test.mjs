@@ -153,7 +153,7 @@ function validFixture() {
     target: TARGET,
     tier: "interpreter",
     metric: METRIC,
-    artifact: "target/debug/jet",
+    artifact: "Compiler/JetCli/.jet/build/jet",
     artifact_sha256: artifactSha,
     artifact_sha256_after: artifactSha,
     revision,

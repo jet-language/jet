@@ -60,7 +60,7 @@ The executable is chosen in this order
 ```
 
 The extension never reads the worktree's files or guesses a repository build
-output such as `target/debug/jet`. A trusted worktree whose `PATH` puts a
+output. A trusted worktree whose `PATH` puts a
 different `jet` first gets that `jet`; pin `binary.path` to avoid it.
 
 `jet self lsp` does not invoke a host compiler, so a plain Jet executable is

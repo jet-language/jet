@@ -49,7 +49,7 @@ async function context(root, overrides = {}) {
   return {
     runDir: root,
     repoDir: ROOT,
-    jetBin: path.join(ROOT, "target/debug/jet"),
+    jetBin: "jet",
     outputLimit: 8192,
     stageAxisFiles,
     axisStagePath,

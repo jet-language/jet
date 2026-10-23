@@ -27,10 +27,10 @@ WatchService path stamps, so source and dependency edits miss the cache.
 
 ## Budget
 
-`D-SCRIPT-BUDGET1=B`: when `target/release/jet` (or `JET_BUDGET_BIN`) is present,
+`D-SCRIPT-BUDGET1=B`: when `JET_BUDGET_BIN` names an optimized Jet compiler,
 CI fails if the warm Jet no-op median is more than twice the fastest available
 peer median (Bash / Python / Node) on that host. Timing uses microsecond
 process-spawn medians (null stdio, one discard + seven samples). Peers still
-log for file and subprocess fixtures. Without a release binary, the test keeps
-a 100 ms debug sanity floor and logs that the hard B gate needs release jet.
+log for file and subprocess fixtures. Without `JET_BUDGET_BIN`, the test keeps
+a 100 ms sanity floor and logs that the hard B gate needs an optimized jet.
 
