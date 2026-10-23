@@ -1,0 +1,9 @@
+# tests/base_encoding_2026.rs::rfc4648_base64_base64url_and_base32_vectors_decode at tests/base_encoding_2026.rs:164; hand-port
+# The RFC 4648 section 10 vectors decode through core.encoding.base64: standard base64, unpadded base64url and
+# base32 each give back the plain text, and "+/8=" and "-_8" both decode to bytes 251 255.
+fixture: rfc4648_base64_base64url_and_base32_vectors_decode.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "|||\nf|f|f|f\nfo|fo|fo|fo\nfoo|foo|foo|foo\nfoob|foob|foob|foob\nfooba|fooba|fooba|fooba\nfoobar|foobar|foobar|foobar\n251 255\n251 255\n" # tests/base_encoding_2026.rs:174-189

@@ -1,0 +1,40 @@
+use core.encoding.base64 as b64
+
+fn show(bytes: [U8] b64.Base64Error!) -> String {
+    if bytes == {
+        .Ok(value) -> return String.from_bytes(value) ?? "<not utf8>"
+        .Err(err) -> return "<error {err.reason}>"
+    }
+}
+
+fn numbers(bytes: [U8] b64.Base64Error!) -> String {
+    if bytes == {
+        .Ok(value) -> {
+            out := ""
+            loop b in value { out = "{out}{Int.from_u8(b)} " }
+            return out.trim()
+        }
+        .Err(err) -> return "<error {err.reason}>"
+    }
+}
+
+fn run() {
+    vectors :: [[String]]{
+        [String]{"", "", ""},
+        [String]{"f", "Zg==", "MY======"},
+        [String]{"fo", "Zm8=", "MZXQ===="},
+        [String]{"foo", "Zm9v", "MZXW6==="},
+        [String]{"foob", "Zm9vYg==", "MZXW6YQ="},
+        [String]{"fooba", "Zm9vYmE=", "MZXW6YTB"},
+        [String]{"foobar", "Zm9vYmFy", "MZXW6YTBOI======"},
+    }
+    loop row in vectors {
+        plain :: row[0]
+        standard :: show(b64.decode(row[1]))
+        url :: show(b64.decode_url(b64.unpad(row[1])))
+        base32 :: show(b64.decode_base32(row[2]))
+        print("{plain}|{standard}|{url}|{base32}")
+    }
+    print(numbers(b64.decode("+/8=")))
+    print(numbers(b64.decode_url("-_8")))
+}

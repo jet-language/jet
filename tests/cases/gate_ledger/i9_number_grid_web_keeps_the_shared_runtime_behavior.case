@@ -1,0 +1,14 @@
+# tests/gate_ledger.rs::i9_number_grid_web_keeps_the_shared_runtime_behavior at tests/gate_ledger.rs:773; hand-port
+# The web build of the number-grid source runs under node and prints the same values as the native tiers. The
+# original's substring checks on generated JS and Rust-for-Wasm text tested the deleted Rust emitter.
+fixture: i9_number_grid_web_keeps_the_shared_runtime_behavior.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --target=web number_grid_web.jet
+exit: 0 # tests/gate_ledger.rs:774-778 the web source is accepted
+when tool node
+step web: node app.js
+cwd: .jet/build
+exit: 0 # tests/gate_ledger.rs the web app runs under node
+stdout: = "42\n3\n" # tests/gate_ledger.rs the node run prints 42 and 3
+end when

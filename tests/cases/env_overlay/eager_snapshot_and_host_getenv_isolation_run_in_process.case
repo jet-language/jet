@@ -1,0 +1,16 @@
+# tests/env_overlay.rs::eager_snapshot_and_host_getenv_isolation_run_in_process at tests/env_overlay.rs:222; hand-port
+# A program reads the host value snapshotted at start, then sees its own env.set. The original also spliced a host
+# std::env::set_var probe into the generated Rust main; that splice point no longer exists, so the program-visible
+# half is what this case checks. The package grants Env and IO, which every run now needs declared (E1803).
+fixture: eager_snapshot_and_host_getenv_isolation_run_in_process.fixture
+env: NO_COLOR=1
+env: JET_HOST_ISOLATION=host-before-snapshot
+env: JET_STORE_DIR={work}/cache
+step dev: jet run main.jet
+exit: 0 # tests/env_overlay.rs:247
+stdout: = "host-before-snapshot\njet-owned\n" # tests/env_overlay.rs:253-256
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0 # tests/env_overlay.rs:247 the built binary
+stdout: = "host-before-snapshot\njet-owned\n" # tests/env_overlay.rs:253-256

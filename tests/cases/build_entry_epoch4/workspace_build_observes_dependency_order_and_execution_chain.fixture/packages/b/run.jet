@@ -1,0 +1,17 @@
+
+use a
+
+fn build(b: Build) -[Exec]> {
+    #Impure("member b records its realized package") {
+        action :: b.action(
+            "b-order",
+            [],
+            ["b/b.jet"],
+            ["sh", "-c", "printf 'fn b_ready() -> Int { 1 }' > b/b.jet"],
+            ["Exec"]
+        )
+        target :: b.add_library("b", ["run.jet"], [action])
+        b.default(target)
+    }
+}
+fn run() {}

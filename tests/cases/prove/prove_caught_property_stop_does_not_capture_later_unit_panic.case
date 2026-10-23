@@ -1,0 +1,12 @@
+# tests/prove.rs::prove_caught_property_stop_does_not_capture_later_unit_panic at tests/prove.rs:1184; hand-port
+# A caught property stop on add_fee's postcondition does not swallow the later ordinary #Test panic: both reach the
+# JSON report.
+fixture: prove_caught_property_stop_does_not_capture_later_unit_panic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet prove mixed.jet --lens solver --json
+exit: 70 # tests/prove.rs:1197-1203
+stdout: ~ "\"code\":\"E3001\"" # tests/prove.rs:1205
+stdout: ~ "\"code\":\"E2950\"" # tests/prove.rs:1206
+stdout: ~ "fee grows" # tests/prove.rs:1222-1228 the postcondition failure is a runtime record
+stdout: ~ "ordinary later panic" # tests/prove.rs:1230-1236 the later unit panic is its own runtime record

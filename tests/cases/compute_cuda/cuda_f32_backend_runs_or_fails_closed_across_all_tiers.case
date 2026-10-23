@@ -1,0 +1,20 @@
+# tests/compute_cuda.rs::cuda_f32_backend_runs_or_fails_closed_across_all_tiers at tests/compute_cuda.rs:21; hand-port
+# The CUDA f32 program either runs on a CUDA device or fails closed with a rejected stream, and every tier agrees on
+# exit, stdout and stderr. Source and package are the originals (compute_cuda.rs:22-137, tir_support TIR_TEST_PACKAGE).
+fixture: cuda_f32_backend_runs_or_fails_closed_across_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run compute_cuda_backend.jet
+exit: 0 # tests/compute_cuda.rs default jet run succeeds
+stdout: ~any "cuda:unavailable" "cuda:available" # tests/compute_cuda.rs the CUDA branch executed
+step interpreter: jet run compute_cuda_backend.jet
+exit: == default # tests/compute_cuda.rs interpreter/JIT exit drift
+stdout: == default # tests/compute_cuda.rs interpreter/JIT output drift
+stderr: == default # tests/compute_cuda.rs interpreter/JIT diagnostics drift
+step: jet build compute_cuda_backend.jet
+exit: 0
+step aot: built
+exit: == default # tests/compute_cuda.rs AOT/JIT exit drift
+stdout: == default # tests/compute_cuda.rs AOT/JIT output drift
+stderr: == default # tests/compute_cuda.rs AOT/JIT diagnostics drift

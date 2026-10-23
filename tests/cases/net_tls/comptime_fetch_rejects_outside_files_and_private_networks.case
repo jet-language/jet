@@ -1,0 +1,22 @@
+# tests/net_tls.rs::comptime_fetch_rejects_outside_files_and_private_networks at tests/net_tls.rs:41; hand-port
+# Compile-time fetch rejects a file outside the source directory, a loopback destination and a reserved IPv4
+# destination with E3414. The sources are the originals; sed writes the absolute work path into proj/main.jet.
+requires: tool:sh
+fixture: comptime_fetch_rejects_outside_files_and_private_networks.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: sh -c "mkdir -p {work}/proj && sed s#WORK#{work}#g file.in > {work}/proj/main.jet"
+exit: 0
+step: jet check proj/main.jet
+exit: nonzero # tests/net_tls.rs:53-54 comptime fetch must not read outside its source directory
+stderr: ~ "[E3414]" # tests/net_tls.rs:55
+step: sh -c "cp loopback.in {work}/proj/main.jet"
+exit: 0
+step: jet check proj/main.jet
+exit: nonzero # tests/net_tls.rs:78-79 comptime fetch must reject loopback destinations
+stderr: ~ "[E3414]" # tests/net_tls.rs:80
+step: sh -c "cp reserved.in {work}/proj/main.jet"
+exit: 0
+step: jet check proj/main.jet
+exit: nonzero # tests/net_tls.rs:88-89 comptime fetch must reject reserved IPv4 destinations
+stderr: ~ "[E3414]" # tests/net_tls.rs:90

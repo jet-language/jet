@@ -1,0 +1,15 @@
+
+fn build(b: Build) -[Exec]> {
+    #Impure("member a records execution") {
+        action :: b.action(
+            "a-order",
+            [],
+            ["a/a.jet"],
+            ["sh", "-c", "printf 'fn a_ready() -> Int { 1 }' > a/a.jet"],
+            ["Exec"]
+        )
+        target :: b.add_library("a", ["run.jet"], [action])
+        b.default(target)
+    }
+}
+fn run() {}
