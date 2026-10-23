@@ -1,0 +1,15 @@
+# #5464: process.which and files.which follow a final link (every NixOS PATH entry is one); is_file does not.
+fixture: which_follows_linked_tools/input
+requires: os:unix
+step run: jet run run.jet
+env: PATH={work}/links:{env:PATH}
+exit: 0
+stdout: = "process.which linked: true\nfiles.which linked: true\nprocess.which dangling: none\nfiles.which dangling: none\nprocess.which dir link: none\nfiles.which dir link: none\nprocess.which sh: true\nis_file link: false\nis_symlink link: true\nis_file target: true\n"
+stderr: empty
+step: jet build run.jet
+exit: 0
+step aot: built
+env: PATH={work}/links:{env:PATH}
+exit: 0
+stdout: == run
+stderr: empty

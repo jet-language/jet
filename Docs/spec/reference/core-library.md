@@ -1885,7 +1885,7 @@ fn run() -[Exec, Time.Wait]> {
 | `process.env_keys()` | `[String] !EnvError -[Env]>` | List environment-variable names. |
 | `process.env_set(spec, key, value)` | `ProcessSpec` | Builder form that sets one child environment variable. |
 | `process.env_truthy(name)` | `Bool -[Env]>` | Test the conventional truthy environment values. |
-| `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. |
+| `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
 | `process.exit(code)` | `Never -[Exec]>` | Terminate the current process at the explicit process boundary. |
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |

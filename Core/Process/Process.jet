@@ -156,7 +156,7 @@ fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
 fn which(name: String) -[FS, Env]> String? Never! {
     if name.len() == 0 -> return None
     if contains_path_separator(name) || path_is_absolute(name) {
-        if path_is_file(name) -> return Val(name)
+        if resolves_to_file(name) -> return Val(name)
         return None
     }
     path :: core.sys.get("PATH") ?? return None
@@ -164,7 +164,7 @@ fn which(name: String) -[FS, Env]> String? Never! {
     separator :: path_separator_for_platform(family)
     loop directory in path_parts(path, separator) {
         candidate :: path_join(directory, name)
-        if path_is_file(candidate) -> return Val(candidate)
+        if resolves_to_file(candidate) -> return Val(candidate)
     }
     None
 }
@@ -179,8 +179,9 @@ fn path_is_absolute(path: String) -> Bool Never! {
         (raw[2] == (U8{47}) || raw[2] == (U8{92}))
 }
 
-fn path_is_file(path: String) -[FS]> Bool Never! {
-    row :: core.files.__stat_at(-1, path, false) ?? return false
+// A PATH search follows a final link, as a shell does: package managers install tools as links.
+fn resolves_to_file(path: String) -[FS]> Bool Never! {
+    row :: core.files.__stat_at(-1, path, true) ?? return false
     row[0] == 0
 }
 
