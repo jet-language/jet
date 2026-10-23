@@ -21,6 +21,7 @@ use jet_foundation.[
 use jet_lexer.[
     TOKEN_AND_AND,
     TOKEN_BREAK,
+    TOKEN_COLON,
     TOKEN_EOF,
     TOKEN_EQ_EQ,
     TOKEN_GE,
@@ -160,6 +161,13 @@ fn parser_expression_form_dispatch_op(kind: Int) -> BinOp? {
         TOKEN_GE -> Val(BinOp.Ge)
         else -> None
     }
+}
+
+// `if subject == {field: …} -> …`: a record pattern right after `==` is one
+// pattern test (Rust try_pattern_rhs), not a dispatch body, whose first arm
+// never starts `name:`.
+fn parser_expression_form_record_test_ahead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_EQ_EQ && parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_COLON
 }
 
 fn parser_expression_form_same_dispatch_subject(left: Expr, right: Expr) -> Bool Never! {
@@ -521,7 +529,7 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int, lint_styl
     saved_diagnostics :: state.diagnostics.len()
     subject :: parser_parse_expression_no_struct_lit_no_cmp(&state, depth + 1)
     dispatch :: parser_expression_form_dispatch_op(parser_current_kind(&state))
-    if dispatch == .Val(dispatch_op) && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+    if dispatch == .Val(dispatch_op) && parser_kind_at(&state, 1) == TOKEN_LBRACE && !parser_expression_form_record_test_ahead(&state) {
         parser_bump(&state)
         parser_expect(&state, TOKEN_LBRACE, "to open the `if` dispatch body")
         return parser_expression_form_parse_dispatch_table(&state, subject.expr, dispatch_op, start.span, depth + 1)
