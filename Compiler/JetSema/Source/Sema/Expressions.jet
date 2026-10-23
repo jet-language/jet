@@ -2351,8 +2351,10 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         discarded: false,
         foreign_effect_root: foreign_effect_root,
     })
-    // Demand: a codec call requires the generated codec it reaches.
+    // Demand: a codec call requires the generated codec it reaches, and a
+    // call of a demand-checked derived method requires its body.
     sema_codec_demand_call(program, callee, checked.value, checked.facts.return_type)
+    sema_derive_demand_call(program, callee)
     symbol :: callee ?? return true
     // Every early return here is the same `true`, and the target lookup is
     // pure, so the cheap tests go first and only a `comptime` target builds

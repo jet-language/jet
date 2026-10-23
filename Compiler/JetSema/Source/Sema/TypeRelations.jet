@@ -1143,8 +1143,10 @@ fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual:
 fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_recursive(graph, actual, caller, generic_params)
     // Demand: a checked codec bound requires the codecs of the
-    // types it is met at, so their generated bodies are checked.
+    // types it is met at, so their generated bodies are checked; an
+    // Equatable/Comparable bound, their demand-checked derived methods.
     if bound_name == "Encode" || bound_name == "Decode" -> sema_codec_demand_type(graph, bound_name, actual_resolved)
+    if bound_name == "Equatable" || bound_name == "Comparable" -> sema_derive_demand_type(graph, actual_resolved)
     structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller, generic_params)
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)

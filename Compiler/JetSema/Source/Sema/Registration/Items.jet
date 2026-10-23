@@ -703,11 +703,38 @@ struct SemaRegistrationGraph {
     codec_method_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
     codec_demand: Shared<SemaCodecDemand>
     codec_wave_rows: [String:Bool]{[String:Bool]{}}
+    // Demand-checked derives (sema_derive_index_methods): the derived
+    // `equal`/`compare` methods of compiler-owned modules (the Prelude error
+    // module, Core) are checked only when a checked call names one or an
+    // Equatable/Comparable bound is met at its type. `derive_method_rows`
+    // maps each such method key to its row, `derive_type_methods` each owner's
+    // leaf name to its method keys, `derive_demand` collects the keys the
+    // checks reach, `derive_wave_rows` names the methods the current derive
+    // wave checks (sema_derive_waves), and `derive_checked` every method a
+    // wave of this finalization checked.
+    derive_method_rows: [String:SemaDeriveMethodRow]{[String:SemaDeriveMethodRow]{}}
+    derive_type_methods: [String:[String]]{[String:[String]]{}}
+    derive_demand: Shared<SemaDeriveDemand>
+    derive_wave_rows: [String:Bool]{[String:Bool]{}}
+    derive_checked: [String:Bool]{[String:Bool]{}}
 }
 
 struct SemaRegistrationRowRef {
     module_index: Int
     row: Int
+}
+
+// A demand-checked derived method: nominal `nominal` of module
+// `module_index`, method `method` of it.
+struct SemaDeriveMethodRow {
+    module_index: Int
+    nominal: Int
+    method: Int
+}
+
+// The derived method keys a check reached (sema_derive_demand_add).
+struct SemaDeriveDemand {
+    keys: [String:Bool]
 }
 
 // A registered callable addressed by position, so in-place row updates
@@ -3535,10 +3562,11 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     if package_identity == "" || entry_module_identity == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}, derive_demand: shared SemaDeriveDemand{keys: [String:Bool]{}}}
     sema_registration_index_all_nominal_rows(&graph)
     sema_registration_index_source_impls(&graph)
     sema_serde_index_codec_methods(&graph)
+    sema_derive_index_methods(&graph)
     sema_registration_index_namespaces(&graph)
     if entry_module_identity != "" && sema_registration_module_index(graph, entry_module_identity) == None {
         &graph.diagnostics.push(sema_error_optional("E0003", None, "the declaration graph entry is not loaded", "the entry identity must name one prepared module", "include the entry module in the loader's module inputs"))

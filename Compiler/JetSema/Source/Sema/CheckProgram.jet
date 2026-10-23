@@ -3953,9 +3953,13 @@ fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, com
 // omitted once. The same addresses select workers and drive ordered apply.
 // A generated codec impl whose body no demand has filled is skipped; during a
 // codec wave (graph.codec_wave_rows) only that wave's filled codecs are jobs.
+// A demand-checked derived method (graph.derive_method_rows) is a job only
+// once a derive wave checked it (graph.derive_checked, so a recheck keeps
+// it); during a derive wave (graph.derive_wave_rows) only that wave's are.
 fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, impl_rows_scanned: &Int, count_work: Bool) -> [SemaBodyJob] Never! {
     jobs := [SemaBodyJob]{}
     codec_wave :: graph.codec_wave_rows.len() > 0
+    derive_wave :: graph.derive_wave_rows.len() > 0
     if !codec_wave {
         loop (nominal_index, nominal) in source_module.nominals {
             impl_method_keys := [String:Bool]{}
@@ -3965,10 +3969,20 @@ fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegis
             }
             loop (method_index, method) in nominal.methods {
                 if impl_method_keys.get(method.symbol.id.key) != None -> next
+                if method.declaration.compiler_generated && graph.derive_method_rows.get(method.symbol.id.key) != None {
+                    if derive_wave {
+                        if graph.derive_wave_rows.get(method.symbol.id.key) == None -> next
+                    } else if graph.derive_checked.get(method.symbol.id.key) == None {
+                        next
+                    }
+                } else if derive_wave {
+                    next
+                }
                 &jobs.push(SemaBodyJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
             }
         }
     }
+    if derive_wave -> return jobs
     module_index :: graph.module_rows.get(source_module.module_identity) ?? -1
     loop (implementation_index, implementation) in source_module.impls {
         if codec_wave {
@@ -7205,8 +7219,9 @@ struct SemaFinalizeChecked {
 fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
     // A codec wave (sema_codec_waves) checks only the generated codecs it
-    // filled, into the modules' existing results.
-    codec_wave :: graph.codec_wave_rows.len() > 0
+    // filled, and a derive wave (sema_derive_waves) only the derived methods
+    // demanded, into the modules' existing results.
+    codec_wave :: graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0
     memory_plan := sema_function_memory_plan_from_graph(graph)
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
@@ -7756,6 +7771,43 @@ fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, value
     ^graph
 }
 
+// Demand: after the body pass and the codec waves, every demand-checked
+// derived method a check reached (sema_derive_demand_call,
+// sema_derive_demand_type) is checked into its module's result. A wave's
+// bodies compare their fields, so they may demand more; waves repeat until
+// none is new. Derived `equal`/`compare` bodies call no codec, so no codec
+// wave follows. A program that compares no compiler-owned type runs none.
+fn sema_derive_waves(owned: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+    graph := ^owned
+    checked := 0
+    waves := 0
+    loop {
+        wave := [String:Bool]{}
+        affected := [Int]{}
+        loop key in sema_derive_demand_keys(graph.derive_demand) {
+            if graph.derive_checked.get(key) != None -> next
+            row :: graph.derive_method_rows.get(key) ?? next
+            wave[key] = true
+            graph.derive_checked[key] = true
+            if !affected.contains(row.module_index) -> &affected.push(row.module_index)
+        }
+        if wave.len() == 0 -> break
+        &affected.sort()
+        checked += wave.len()
+        waves += 1
+        graph.derive_wave_rows = ^wave
+        result := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.derives", trace_sink, &modules)
+        graph = ^result
+        graph.derive_wave_rows = [String:Bool]{}
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.sema.derive_deferred", graph.derive_method_rows.len(), -1)
+        sink.progress("counters.sema.derive_checked", checked, -1)
+        sink.progress("counters.sema.derive_waves", waves, -1)
+    }
+    ^graph
+}
+
 // sema_finalize_registration_graph on `resolved`, the registration graph
 // with `values` applied, moved in: every edit finalization makes to it is
 // recorded on `trail`, and the graph comes back as the result's
@@ -7789,12 +7841,17 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         if !result.complete && !result.obligations_pending -> complete = false
     }
     if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
+    // Derived methods are demanded afresh by this pass's checks.
+    sema_derive_demand_reset(resolved_graph.derive_demand)
+    resolved_graph.derive_checked = [String:Bool]{}
     all_modules :: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
     body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules)
     // Demand: only the generated codecs a requirement reached
-    // get bodies, checked into their modules' results before the failure solve.
-    after_body_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
+    // get bodies, checked into their modules' results before the failure solve,
+    // and only the derived methods of compiler-owned modules a check reached.
+    after_codec_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
+    after_body_graph := sema_derive_waves(^after_codec_graph, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
     // #3708: every body is checked, so the failure solve finds the
     // unannotated functions that can never fail.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)

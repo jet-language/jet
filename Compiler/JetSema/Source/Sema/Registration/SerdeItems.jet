@@ -1275,3 +1275,72 @@ fn sema_codec_undo_body(graph: &SemaRegistrationGraph, module_index: Int, row: I
     permit :: demand.guard_edit()
     _ := &permit.value.keys.remove(key)
 }
+
+// Demand-checked derives. A compiler-owned module (the Prelude error module,
+// a Core module) derives `equal`/`compare` for its types, and most programs
+// never compare them. Such a method is registered as usual but its body is
+// checked only once a checked call names it (sema_derive_demand_call) or an
+// Equatable/Comparable bound is met at its type (sema_derive_demand_type):
+// IR keeps a derived Core method only when a kept body names it
+// (ir_reachable_core_rows), and the Prelude error module's are reached the
+// same way. sema_derive_waves checks the demanded ones after the body pass.
+fn sema_derive_index_methods(graph: &SemaRegistrationGraph) {
+    rows := [String:SemaDeriveMethodRow]{}
+    types := [String:[String]]{}
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].source_file != SEMA_PRELUDE_ERROR_SOURCE_PATH && !sema_module_is_core_source(graph.modules[module_index].module_identity) -> next
+        loop nominal in 0..<graph.modules[module_index].nominals.len() {
+            loop method in 0..<graph.modules[module_index].nominals[nominal].methods.len() {
+                declaration :: graph.modules[module_index].nominals[nominal].methods[method].declaration
+                if !declaration.compiler_generated || (declaration.name != "equal" && declaration.name != "compare") -> next
+                key :: graph.modules[module_index].nominals[nominal].methods[method].symbol.id.key
+                rows[key] = SemaDeriveMethodRow{module_index: module_index, nominal: nominal, method: method}
+                leaf :: sema_serde_named_leaf(graph.modules[module_index].nominals[nominal].symbol.name)
+                keys := types.get(leaf) ?? [String]{}
+                &keys.push(key)
+                types[leaf] = ^keys
+            }
+        }
+    }
+    graph.derive_method_rows = ^rows
+    graph.derive_type_methods = ^types
+}
+
+fn sema_derive_demand_add(demand: Shared<SemaDeriveDemand>, keys: [String]) {
+    permit :: demand.guard_edit()
+    loop key in keys -> permit.value.keys[key] = true
+}
+
+// A checked call names a demand-checked derived method.
+fn sema_derive_demand_call(program: SemaProgramTables, callee: SymbolID?) {
+    if program.registration_graph == .Val(graph) {
+        if graph.derive_method_rows.len() == 0 -> return
+        id :: callee ?? return
+        if graph.derive_method_rows.get(id.key) == None -> return
+        sema_derive_demand_add(graph.derive_demand, [String]{id.key})
+    }
+}
+
+// An Equatable or Comparable bound is met at `ty`: every nominal inside it
+// may be compared through its derived method.
+fn sema_derive_demand_type(graph: SemaRegistrationGraph, ty: Type) {
+    if graph.derive_type_methods.len() == 0 -> return
+    names := [String]{}
+    sema_codec_type_names(ty, &names)
+    loop name in names {
+        keys :: graph.derive_type_methods.get(name) ?? next
+        sema_derive_demand_add(graph.derive_demand, keys)
+    }
+}
+
+// The demanded derived methods, in key order.
+fn sema_derive_demand_keys(demand: Shared<SemaDeriveDemand>) -> [String] {
+    permit :: demand.guard_edit()
+    loop (key, _) in permit.value.keys -> key.copy()
+}
+
+// Forgets every demand, so a later pass over the same graph demands afresh.
+fn sema_derive_demand_reset(demand: Shared<SemaDeriveDemand>) {
+    permit :: demand.guard_edit()
+    permit.value.keys = [String:Bool]{}
+}
