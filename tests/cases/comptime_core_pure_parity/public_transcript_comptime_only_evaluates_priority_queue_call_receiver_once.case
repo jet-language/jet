@@ -1,0 +1,11 @@
+# tests/comptime_core_pure_parity.rs::public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once at tests/comptime_core_pure_parity.rs:719; hand-port
+# The original read the in-process REPL transcript (the comptime evaluator). `jet repl` is E2104 in the
+# Jet-hosted CLI, so each transcript value is evaluated by that comptime evaluator through `prep` and
+# printed; stdout must equal the original exact values, in transcript order.
+# The original sources predate the receiver-mark law; calls that write their receiver now carry `&` (E0224).
+fixture: public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once.1.out

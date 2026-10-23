@@ -1,0 +1,9 @@
+# tests/comptime_core_pure_parity.rs::primitive_static_stringification_is_rejected_by_sema at tests/comptime_core_pure_parity.rs:548; hand-port
+# Primitive stringification belongs to values, not static type names: both calls are E0102.
+fixture: primitive_static_stringification_is_rejected_by_sema.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 1
+stderr: ~ "Error [E0102]: `Bool` has no static method `to_string`" # original assert_eq over (code, what) pairs
+stderr: ~ "Error [E0102]: `Char` has no static method `to_string`" # original assert_eq over (code, what) pairs

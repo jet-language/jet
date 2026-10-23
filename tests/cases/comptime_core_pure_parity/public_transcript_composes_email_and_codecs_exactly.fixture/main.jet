@@ -1,0 +1,30 @@
+use core.email as email
+use core.encoding.xml as xml
+
+fn serialized(message: Message) -> Bool {
+    if email.serialize(message) == {
+        .Ok(_) -> return true
+        .Err(_) -> return false
+    }
+    return false
+}
+
+TRANSCRIPT_0 :: prep {
+    sender :: email.address("Mara <mara@example.com>") ?? panic("sender")
+    recipient :: email.address("ada@example.net") ?? panic("recipient")
+    email.envelope(sender, [recipient])
+}
+TRANSCRIPT_1 :: prep {
+    sender :: email.address("Mara <mara@example.com>") ?? panic("sender")
+    recipient :: email.address("ada@example.net") ?? panic("recipient")
+    attachment :: email.attachment("note.txt", "Text/Plain", [104, 105]) ?? panic("attachment")
+    message :: email.message(sender, [recipient], [Address]{}, "Hello", "body", HTML{""}, [attachment]) ?? panic("message")
+    serialized(message)
+}
+TRANSCRIPT_2 :: prep { xml.canonical(xml.parse("<r b=\"2\" a=\"1\"><x/></r>") ?? panic("xml"), xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic("canonical") }
+
+fn run() {
+    print("{TRANSCRIPT_0}")
+    print("{TRANSCRIPT_1}")
+    print("{TRANSCRIPT_2}")
+}

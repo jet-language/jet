@@ -1,0 +1,27 @@
+use core.time as time
+use core.time as date
+use core.time as datetime
+
+fn civil_view() -> String {
+    d :: date.parse("2024-02-29") ?? panic("date")
+    other :: date.new(2024, 2, 1)
+    p :: time.period(0, 1, 2)
+    dt :: datetime.from_timestamp(-1)
+    span :: Duration.milliseconds(1500) ?? panic("duration")
+    return "{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate("month").to_string()}|{d.format("EEE yyyy-DDD")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format("yyyy-MM-dd HH:mm:ss")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate("minute").to_timestamp()}|{dt.round("minute").to_timestamp()}"
+}
+
+fn measurement_math() -> String {
+    a :: measurement(3.0, uncertainty: 4.0)
+    b :: measurement(0.0, uncertainty: 3.0)
+    q :: measurement(8.0, uncertainty: 0.0) / measurement(2.0, uncertainty: 0.0)
+    return "{(a + b).value()}|{(a + b).uncertainty()}|{(a - b).value()}|{(a - b).uncertainty()}|{(a * b).value()}|{(a * b).uncertainty()}|{q.value()}|{q.uncertainty()}"
+}
+
+TRANSCRIPT_0 :: prep { civil_view() }
+TRANSCRIPT_1 :: prep { measurement_math() }
+
+fn run() {
+    print("{TRANSCRIPT_0}")
+    print("{TRANSCRIPT_1}")
+}

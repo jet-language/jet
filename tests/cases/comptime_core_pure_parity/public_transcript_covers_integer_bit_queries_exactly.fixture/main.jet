@@ -1,0 +1,27 @@
+fn bit_byte(value: Int) -> U8 {
+    return U8.from_int(value) ?? 0
+}
+fn bit_parameter(value: U8) -> Int {
+    return (value).leading_zeros()
+}
+fn bit_inferred_local() -> Int {
+    value := U8.from_int(13) ?? 0
+    return value.leading_zeros()
+}
+fn integer_bit_queries_view() -> String {
+    int :: -1
+    i8 :: I8{ -2 }
+    i16 :: I16{ -32768 }
+    i32 :: I32{ 0 }
+    u8 :: U8{ 13 }
+    u16 :: U16{ 256 }
+    u32 :: U32{ 2147483648 }
+    u64 :: U64{ 255 }
+    return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}|{bit_parameter(13)}|{bit_inferred_local()}"
+}
+
+TRANSCRIPT_0 :: prep { integer_bit_queries_view() }
+
+fn run() {
+    print("{TRANSCRIPT_0}")
+}
