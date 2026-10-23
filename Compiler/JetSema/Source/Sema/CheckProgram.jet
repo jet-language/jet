@@ -322,6 +322,8 @@ struct SemaComptimeItemSource {
     // The startup check of a soft item: checked as code that runs at
     // startup, outside compile-time execution.
     startup: Bool{false}
+    // A body site's prepared locals, declared before its expression is checked.
+    prepared: [SemaComptimePreparedLocal]{[SemaComptimePreparedLocal]{}}
 }
 
 struct SemaComptimeItemRequest {
@@ -7004,6 +7006,22 @@ fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaPr
     sema_check_comptime_item_in(environment, program, &probe, available, source)
 }
 
+// A body site's prepared locals read as their finished values in the staged
+// check, as they do in the owner body (sema_stmt_check_prepared_binding).
+fn sema_comptime_declare_prepared_locals(source: SemaComptimeItemSource, table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
+    _ := sema_scope_enter(&table, &state, "{source.key}#prepared")
+    owner :: sema_scope_local_owner_key(table)
+    loop local in source.prepared {
+        id :: symbol_id(SymbolKind.Local, source.module_identity, owner, local.name)
+        symbol := Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_name: source.module_identity, owner: Val(owner), span: local.span, ty: Val(local.ty), visibility: 0}
+        if !sema_scope_declare_local(&table, symbol, false, AccessConvention.Read, None, false) -> next
+        last :: table.bindings.len() - 1
+        sema_scope_note_binding_edit(&table, last)
+        table.bindings[last].prepared = Val(local.value)
+        sema_ownership_declare_binding(&state, symbol, false)
+    }
+}
+
 // Read-only half of the item check: the environment is borrowed, so reading
 // its registration graph never copies the graph (a writable parameter would).
 // D2: this one check is where a source's constant dependencies come from
@@ -7035,6 +7053,7 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
         // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
         // records only under an owner) and its purity can be read.
         if source.soft || source.startup -> _ := sema_scope_enter(&probe.table, &state, "{source.key}#init")
+        if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, &probe.table, &state)
         checked := sema_check_expression(source.expression, source.expected_type, environment, program, &probe.table, &state, &tail_store, &context, &diagnostics)
         sema_scope_rollback(&probe.table, mark)
         dependencies := sema_comptime_dependencies_from_references(resolved_graph, context.name_references, [SemaComptimeItemValue]{})

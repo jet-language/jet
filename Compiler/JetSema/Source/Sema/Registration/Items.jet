@@ -596,6 +596,17 @@ struct SemaBuildFacts {
     stamp_at: String
     // This compile produces a shipped artifact (`jet build`).
     artifact_build: Bool{false}
+    // The package's declared settings with this build's values
+    // (`$build.settings.*`, sema_fact_build_setting).
+    settings: [SemaBuildSetting]{[SemaBuildSetting]{}}
+}
+
+// One declared setting: its type as written (`Bool`, `Int`, `Char`,
+// `String` or a fieldless enum) and its value's text for this build.
+struct SemaBuildSetting {
+    name: String
+    ty: String
+    value: String
 }
 
 // `debug(…)` traces are development-only. A shipped artifact or a

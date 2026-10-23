@@ -3,6 +3,7 @@ use jet_sema.[
     JET_CANONICAL_EFFECT_MODULE_PATH,
     JET_CANONICAL_EFFECT_PACKAGE_IDENTITY,
     SemaBuildFacts,
+    SemaBuildSetting,
     SemaCheckedForeignFunction,
     SemaCheckedTextEvaluation,
     SemaComptimeAvailableConstants,
@@ -141,7 +142,7 @@ use jet_parser.[
 ]
 
 use jet_eval.[JetEvalComptimeInputAdapter]
-use jet_ir.[IRProgram, ir_precise_helper_names, ir_function_value_keys, ir_reachable_core_rows]
+use jet_ir.[IRProgram, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
 use jet_eval.[
     JetEvalConfig,
     JetEvalIRResult,
@@ -535,10 +536,12 @@ fn jet_driver_host_os_key(value: String) -> String Never! {
 fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
+    settings := [SemaBuildSetting]{}
     loop package in load.packages {
         if package.identity == load.package_identity {
             package_name = package.name
             package_version = package.version ?? ""
+            settings = jet_driver_build_settings(package, request.profile)
         }
     }
     if package_name.len() == 0 {
@@ -561,7 +564,22 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
         stamp_dirty: false,
         stamp_toolchain: toolchain,
         stamp_at: "",
+        settings: ^settings,
     }
+}
+
+// Each declared setting's value for `profile`: its default, then the value
+// the selected `build:` profile gives it.
+fn jet_driver_build_settings(package: JetDriverPackageInfo, profile: String) -> [SemaBuildSetting] Never! {
+    settings := [SemaBuildSetting]{}
+    loop setting in package.settings {
+        value := setting.default
+        loop entry in package.profile_settings {
+            if entry.profile == profile && entry.name == setting.name -> value = entry.value
+        }
+        &settings.push(SemaBuildSetting{name: setting.name, ty: setting.ty, value: value})
+    }
+    settings
 }
 
 // Rust TARGET_MACHINE_NAMES and target_machine_by_name; restored45acf6f8f.
@@ -702,11 +720,12 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 // Rust `is_core_precise_source_target` roots it): it is checked and lowered
 // with the item, together with its own callees.
 fn jet_driver_comptime_precise_refs(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
-    // Function values the body stores are lowered with it, like its callees.
-    values :: ir_function_value_keys(tree, roots, body)
-    if values.len() > 0 {
+    // Function values the body stores, and Core source functions Sema
+    // rewrote a Core call to, are lowered with it, like its callees.
+    named :: ir_named_function_keys(tree, roots, body)
+    if named.len() > 0 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
-        loop key in values {
+        loop key in named {
             if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(&queue, &queued, owner, key)
         }
     }

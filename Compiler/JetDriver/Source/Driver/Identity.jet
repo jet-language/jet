@@ -402,6 +402,22 @@ struct JetDriverPackageEntry {
     span: Span?
 }
 
+// One declared `settings:` entry of a manifest (`tls: Bool = true`): its
+// type as written and its default's text (a string's decoded text).
+struct JetDriverPackageSetting {
+    name: String
+    ty: String
+    default: String
+}
+
+// One `build: { <profile>: Build{ settings: { key: value } } }` entry: the
+// value the profile gives a declared setting, as text.
+struct JetDriverProfileSetting {
+    profile: String
+    name: String
+    value: String
+}
+
 struct JetDriverPackageInfo {
     root_index: Int
     root_path: String
@@ -430,6 +446,10 @@ struct JetDriverPackageInfo {
     // The kinds the manifest's `outputs:` declare. A package
     // that declares a Library and no Executable has no `fn run` (E0625).
     outputs: JetDriverPackageOutputs
+    // The declared `settings:` and the values `build:` profiles give them
+    // (`$build.settings.*`, jet_driver_build_facts).
+    settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}}
+    profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}}
 }
 
 struct JetDriverPackageOutputs {

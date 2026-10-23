@@ -31,6 +31,7 @@ use jet_foundation.[
     TextEdit,
     Type,
     UnitScaleProvenance,
+    VariantPayload,
     ViewProvenance,
     ViewSourcePath,
     diagnostic_with_edit,
@@ -648,16 +649,118 @@ fn sema_fact_build_setting_undeclared(key: String, span: Span) -> Diagnostic {
     sema_error("E0302", span, "`$build.settings.{key}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{key}: Type = default` to the package `settings: {{ … }}` block")
 }
 
+// A setting value the package cannot use as its declared type (Rust
+// `setting_value_diagnostic`).
+fn sema_fact_build_setting_invalid(setting: SemaBuildSetting, detail: String, span: Span) -> Diagnostic {
+    sema_error("E0302", span, "setting `{setting.name}` cannot use `{setting.value}` as `{setting.ty}`", detail, "use a `{setting.ty}` value for the declared setting `{setting.name}`")
+}
+
+// Rust `unquote_setting`: the text between `"` quotes, with `\n`, `\r`, `\t`
+// and `\<c>` escapes decoded. Unquoted text is kept as written.
+fn sema_fact_build_setting_unquote(raw: String) -> String Never! {
+    text :: raw.trim()
+    body := text
+    if text.count_bytes() >= 2 && text.starts_with("\"") && text.ends_with("\"") -> body = text.slice(1, text.len() - 1)
+    out := ""
+    escaped := false
+    loop ch in body.chars() {
+        if escaped {
+            if ch == {
+                'n' -> out = "{out}\n"
+                'r' -> out = "{out}{String.from_bytes([U8]{U8{13}}) ?? ""}"
+                't' -> out = "{out}\t"
+                else -> out = "{out}{ch}"
+            }
+            escaped = false
+        } else if ch == '\\' {
+            escaped = true
+        } else {
+            out = "{out}{ch}"
+        }
+    }
+    if escaped -> out = "{out}\\"
+    out
+}
+
+// The declared setting's typed value for this build (Rust
+// `parse_setting_value`): `Bool`, `Int`, `Char`, `String` or a fieldless
+// enum the reading module resolves, written `.Variant` or `Variant`.
+fn sema_fact_build_setting_value(setting: SemaBuildSetting, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadValue? {
+    raw :: setting.value.trim()
+    ty :: setting.ty.trim()
+    if ty == "Bool" {
+        if raw == "true" -> return Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: true}})
+        if raw == "false" -> return Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: false}})
+        &diagnostics.push(sema_fact_build_setting_invalid(setting, "Bool settings use `true` or `false`", span))
+        return None
+    }
+    if ty == "Int" {
+        number :: Int.parse(raw) ?? {
+            &diagnostics.push(sema_fact_build_setting_invalid(setting, "Int settings use a signed 64-bit whole number", span))
+            return None
+        }
+        return Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: number}})
+    }
+    if ty == "String" -> return Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: sema_fact_build_setting_unquote(raw)}})
+    if ty == "Char" {
+        text := raw
+        if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") -> text = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
+        code :: sema_checked_const_char(text) ?? -1
+        count := 0
+        loop _ in text.chars() -> count += 1
+        if code < 0 || count != 1 {
+            &diagnostics.push(sema_fact_build_setting_invalid(setting, "Char settings use one quoted character", span))
+            return None
+        }
+        return Val(SemaFactReadValue{ty: Type.Char, value: TComptimeValue.Char{value: code}})
+    }
+    variant := raw
+    if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
+    graph :: program.registration_graph ?? return None
+    row :: sema_type_resolve_nominal_row(graph, Type.Named{name: ty}, environment.module_identity) ?? {
+        &diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` is not a declared fieldless enum", span))
+        return None
+    }
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Enum {
+        &diagnostics.push(sema_fact_build_setting_invalid(setting, "settings use Bool, Int, Char, String, or a fieldless enum type", span))
+        return None
+    }
+    loop row_variant in nominal.variants {
+        if row_variant.symbol.name != variant -> next
+        if row_variant.payload == {
+            .Unit -> {}
+            else -> break
+        }
+        return Val(SemaFactReadValue{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: [TComptimeEnumArg]{}}})
+    }
+    &diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` has no fieldless variant `{variant}`", span))
+    None
+}
+
+// `$build.settings.<key>`: the package's declared setting, read as its type.
+// The package declares it in `package.jet` (`settings: {{ key: Type = default }}`);
+// a `build:` profile may set it.
+fn sema_fact_build_setting(key: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadValue? {
+    if program.registration_graph == .Val(graph) {
+        loop setting in graph.build_facts.settings {
+            if setting.name == key -> return sema_fact_build_setting_value(setting, span, environment, program, &diagnostics)
+        }
+    }
+    &diagnostics.push(sema_fact_build_setting_undeclared(key, span))
+    None
+}
+
 // A complete `$package.*` / `$build.*` path folds to its
 // typed snapshot value (Rust `fold_fact_read`, which reads build paths before
-// the compile-time-only gate). The Jet loader declares no manifest settings
-// yet, so every `$build.settings.*` read is undeclared.
+// the compile-time-only gate); `$build.settings.<key>` reads a declared setting.
 fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     if !sema_fact_build_rooted(base) -> return sema_fact_read_unhandled()
     path :: sema_fact_path_text(base, member) ?? return sema_fact_read_unhandled()
     if sema_fact_build_setting_key(path) == .Val(key) {
-        &diagnostics.push(sema_fact_build_setting_undeclared(key, span))
-        return sema_fact_read_failed()
+        resolved :: sema_fact_build_setting(key, span, environment, program, &diagnostics) ?? return sema_fact_read_failed()
+        prepared :: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program) ?? return sema_fact_read_failed()
+        return SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, &diagnostics)}
     }
     if program.registration_graph == .Val(graph) {
     resolved :: sema_fact_build_value(path, graph.build_facts) ?? return sema_fact_read_unhandled()
@@ -715,7 +818,7 @@ fn sema_fact_struct(type_name: String, fields: [TComptimeField]) -> TComptimeVal
 }
 
 fn sema_fact_optional_string(value: String?) -> TComptimeValue Never! {
-    if value == .Val(text) -> sema_comptime_reflection_some(TComptimeValue.String{value: text}) else -> sema_comptime_reflection_none()
+    if value == .Val(text) -> sema_comptime_reflection_some(TComptimeValue.String{value: text}) else -> sema_comptime_reflection_none(Type.String)
 }
 
 fn sema_fact_unit_scale_provenance(value: UnitScaleProvenance) -> TComptimeValue Never! {
@@ -756,9 +859,9 @@ fn sema_fact_known(type_name: String, known: Bool) -> TComptimeValue Never! {
 fn sema_fact_untracked_origin() -> TComptimeValue Never! {
     sema_fact_struct("OriginInfo", [TComptimeField]{
         TComptimeField{name: "tracked", value: TComptimeValue.Bool{value: false}},
-        TComptimeField{name: "source", value: sema_comptime_reflection_none()},
-        TComptimeField{name: "line", value: sema_comptime_reflection_none()},
-        TComptimeField{name: "column", value: sema_comptime_reflection_none()},
+        TComptimeField{name: "source", value: sema_comptime_reflection_none(Type.String)},
+        TComptimeField{name: "line", value: sema_comptime_reflection_none(Type.Int)},
+        TComptimeField{name: "column", value: sema_comptime_reflection_none(Type.Int)},
         TComptimeField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
     })
 }
@@ -786,11 +889,19 @@ fn sema_fact_subject_item(symbol: Symbol?, environment: SemaScopeEnvironment, pr
 }
 
 // `TypeInfo` for a registered nominal subject. Fact reads need only the
-// type's own fact rows, so the marker catalog is empty here.
+// type's own fact rows, so the marker catalog is empty here. A type the
+// module scope does not bind (a Core type, `module.Type`) is the nominal row
+// its path names from this module.
 fn sema_fact_type_info(symbol: Symbol?, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
-    resolved :: symbol ?? return None
-    if resolved.kind != SymbolKind.Type -> return None
-    if program.registration_graph == .Val(graph) -> return sema_comptime_reflection_type_info(graph, resolved.module_name, name, TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}})
+    catalog :: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    if program.registration_graph == .Val(graph) {
+        if symbol == .Val(resolved) {
+            if resolved.kind != SymbolKind.Type -> return None
+            return sema_comptime_reflection_type_info(graph, resolved.module_name, name, catalog)
+        }
+        row :: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
+        return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog)
+    }
     None
 }
 
@@ -866,7 +977,7 @@ fn sema_fact_subject_value(read: FactRead, name: String, symbol: Symbol?, enviro
         if name != "report" -> return None
         value :: sema_fact_struct("AttributionInfo", [TComptimeField]{
             TComptimeField{name: "source", value: TComptimeValue.String{value: "report"}},
-            TComptimeField{name: "code", value: sema_comptime_reflection_none()},
+            TComptimeField{name: "code", value: sema_comptime_reflection_none(Type.String)},
         })
         return Val(SemaFactReadValue{ty: sema_fact_named("AttributionInfo"), value: value})
     }
@@ -959,6 +1070,16 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
             }
             folded :: sema_tir_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
             return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, &diagnostics)}
+        }
+    }
+    // `module.Type.$name`: a qualified type path is no value to check; it reads
+    // the reflected type it names.
+    if base == .Field(_, _, _, _) && (read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields) {
+        if sema_fact_expr_path(base) == .Val(path) {
+            if sema_fact_subject_value(read, path, None, environment, program) == .Val(resolved) {
+                folded :: sema_tir_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, &diagnostics)}
+            }
         }
     }
     checked_base :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_fact_read_failed()

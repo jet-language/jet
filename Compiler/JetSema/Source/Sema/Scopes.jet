@@ -343,6 +343,16 @@ struct SemaComptimeRequest {
     checked_text: SemaCheckedTextEvaluation?
 }
 
+// A prepared local (`name :: comptime { value }`) visible at a body comptime
+// site. The staged check declares it again, so the site's code reads its
+// finished value as it does in the owner body.
+struct SemaComptimePreparedLocal {
+    name: String
+    ty: Type
+    value: TComptimeValue
+    span: Span
+}
+
 struct SemaComptimeBodySource {
     module_identity: String
     function_key: String
@@ -354,6 +364,7 @@ struct SemaComptimeBodySource {
     expected_type: Type
     span: Span
     site_span: Span
+    prepared: [SemaComptimePreparedLocal]
 }
 
 struct SemaComptimeBodyValue {

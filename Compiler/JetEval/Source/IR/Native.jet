@@ -683,13 +683,25 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
         jet_eval_ir_source_fail(&s, "the list has {a} items, so position {index} doesn't exist")
         return
     }
+    // A `panic`/`assert`/`require` stop (Trap.jet jet_rt_require_stop), which
+    // a comptime item's unhandled failure raises too (JetIR
+    // ir_comptime_item_failure): an equality stop (kind 1) carries its two
+    // sides, every other its message. In a comptime evaluation it is a
+    // user-authored compile error (S26).
     if kind == X64_COMPTIME_STOP_REQUIRE {
-        if !s.runtime_execution {
-            jet_eval_ir_unsupported(&s, "RequireStop has no canonical comptime Control adapter")
+        message := ""
+        if a == 1 {
+            right :: jet_eval_ir_text(&s, d) ?? return
+            left :: jet_eval_ir_text(&s, c) ?? return
+            message = "expected: {right}, got: {left}"
+        } else if b != 0 {
+            message = jet_eval_ir_text(&s, b) ?? return
+        }
+        if s.runtime_execution {
+            jet_eval_ir_source_fail(&s, message)
             return
         }
-        message :: if b == 0 -> "" else -> jet_eval_ir_text(&s, b) ?? return
-        jet_eval_ir_source_fail(&s, message)
+        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `comptime` value is a compile error", "handle the failure inside the `comptime` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
         return
     }
     jet_eval_ir_problem(&s, "the comptime child stopped with kind {kind} ({a}, {b}, {c}, {d})")
@@ -703,6 +715,14 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
 fn jet_eval_native_refused(s: &JetEvalIRState, number: Int, first: Int) {
     if s.runtime_execution {
         jet_eval_ir_unsupported(&s, "system call {number}")
+        return
+    }
+    // The runtime's process abort (JetRuntime Alloc.jet alloc_abort) resets
+    // SIGABRT's handler: the served code hit a defect, not a host effect.
+    if number == 13 && first == 6 {
+        report :: String.from_bytes_lossy(s.child.stderr).trim()
+        s.child.stderr = [U8]{}
+        jet_eval_ir_problem(&s, if report == "" -> "the comptime child aborted" else -> "the comptime child aborted: {report}")
         return
     }
     what :: if number == {

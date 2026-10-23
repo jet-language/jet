@@ -177,6 +177,12 @@ struct IRProgram {
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
     spawn_sites: [String:Int]{[String:Int]{}}
+    // Whether this program's code computes compile-time values (comptime
+    // items, not a build invocation): outside an `#Impure` block, a Core
+    // call that reads ambient host or process state with no system call the
+    // comptime child's filter could refuse is refused while building
+    // (ir_comptime_ambient_refusal).
+    comptime_values: Bool{false}
     // The program entry's function row (ir_build_program; -1: no entry): its
     // returns tell the runtime the process is ending (ir_emit_return).
     entry: Int{-1}

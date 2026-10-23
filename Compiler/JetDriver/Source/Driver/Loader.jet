@@ -50,6 +50,7 @@ use jet_lexer.[
     TOKEN_COMMA,
     TOKEN_DOT,
     TOKEN_EOF,
+    TOKEN_EQ,
     TOKEN_IDENT,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
@@ -1027,6 +1028,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     dependencies := [JetDriverPackageDependency]{}
     configs := [String]{}
     outputs := jet_driver_no_package_outputs()
+    settings := [JetDriverPackageSetting]{}
+    profile_settings := [JetDriverProfileSetting]{}
     policy_unsafe_paths := [String]?{None}
     policy_expert := Bool?{None}
     name_seen := false
@@ -1039,6 +1042,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     configs_seen := false
     outputs_seen := false
     policy_seen := false
+    settings_seen := false
+    build_seen := false
     brace_depth := 0
     index := 0
     loop index < tokens.len() {
@@ -1196,6 +1201,25 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                         else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package outputs must be a block", "package entry resolution requires an explicit output entry", "write `outputs: .{{ app: Executable{{entry: function}} }}`"))
                     }
                 }
+                "settings" | "build" -> {
+                    open_index := value_index
+                    if open_index < tokens.len() && tokens[open_index].kind == TOKEN_DOT -> open_index += 1
+                    close_index :: jet_driver_manifest_matching_brace(tokens, open_index) ?? {
+                        &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package `{field}:` must be a closed record", "`settings:` declares typed settings and `build:` names build profiles, each in one balanced block", "write `{field}: {{ … }}`"))
+                        index = value_index
+                        next
+                    }
+                    if field == "settings" {
+                        if settings_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package settings are declared more than once", "one `settings:` block declares the package's typed settings", "keep one `settings:` block"))
+                        settings_seen = true
+                        jet_driver_parse_package_settings(source, tokens, lexed.tables, open_index, close_index, &settings, &diagnostics)
+                    } else {
+                        if build_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package build profiles are declared more than once", "one `build:` block names the package's build profiles", "keep one `build:` block"))
+                        build_seen = true
+                        jet_driver_parse_profile_settings(source, tokens, lexed.tables, open_index, close_index, &profile_settings, &diagnostics)
+                    }
+                    index = close_index
+                }
                 else -> {}
             }
         }
@@ -1203,6 +1227,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         if token.kind == TOKEN_RBRACE && brace_depth > 0 -> brace_depth -= 1
         index += 1
     }
+    jet_driver_check_profile_settings(settings, profile_settings, &diagnostics)
     if edition != JET_DRIVER_EDITION {
         &diagnostics.push(jet_driver_diagnostic_without_span("E2001", "package manifest requests an unsupported language edition", "this compiler supports edition 2026", "set `edition: \"2026\"` in package.jet"))
     }
@@ -1236,7 +1261,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs, settings: ^settings, profile_settings: ^profile_settings}
 }
 
 fn jet_driver_has_field_errors_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
@@ -1244,6 +1269,131 @@ fn jet_driver_has_field_errors_since(diagnostics: [Diagnostic], start: Int) -> B
         if diagnostics[index].severity == DIAGNOSTIC_ERROR && diagnostics[index].code != "E0751" -> return true
     }
     false
+}
+
+// The source text of tokens `start..<end` (comments dropped), and a lone
+// string token's decoded text.
+fn jet_driver_manifest_tokens_text(source: String, tokens: [Token], tables: TokenTables, start: Int, end: Int) -> String Never! {
+    if end == start + 1 && jet_driver_is_manifest_string(tokens[start].kind) -> return token_decoded(tables, tokens[start])
+    source_bytes :: source.bytes()
+    text := ""
+    loop token_index in start..<end {
+        token :: tokens[token_index]
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
+        if token.span.start >= 0 && token.span.end >= token.span.start && token.span.end <= source_bytes.len() {
+            text = "{text}{String.from_bytes(source_bytes[token.span.start..<token.span.end]) ?? ""}"
+        }
+    }
+    text
+}
+
+// The index of the next token after `start` that isn't a comma or comment,
+// stopping at `close`.
+fn jet_driver_manifest_skip_separators(tokens: [Token], start: Int, close: Int) -> Int Never! {
+    index := start
+    loop index < close && (tokens[index].kind == TOKEN_COMMA || tokens[index].kind == TOKEN_SEMI || tokens[index].kind == TOKEN_LINE_COMMENT || tokens[index].kind == TOKEN_BLOCK_COMMENT) -> index += 1
+    index
+}
+
+// `settings: { tls: Bool = true, api_base: String = "…" }`: each entry is a
+// name, a type and a required default (the block between `open` and `close`).
+fn jet_driver_parse_package_settings(source: String, tokens: [Token], tables: TokenTables, open: Int, close: Int, settings: &[JetDriverPackageSetting], diagnostics: &[Diagnostic]) {
+    index := jet_driver_manifest_skip_separators(tokens, open + 1, close)
+    loop index < close {
+        name_token :: tokens[index]
+        if (name_token.kind != TOKEN_IDENT && !jet_driver_is_manifest_string(name_token.kind)) || index + 1 >= close || tokens[index + 1].kind != TOKEN_COLON {
+            &diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "a `settings` entry must be `name: Type = default`", "a declared setting has a name, a type and a required default", "write `name: Type = default`"))
+            return
+        }
+        name :: token_decoded(tables, name_token)
+        type_start :: index + 2
+        equals := type_start
+        loop equals < close && tokens[equals].kind != TOKEN_EQ && tokens[equals].kind != TOKEN_COMMA -> equals += 1
+        if equals >= close || tokens[equals].kind != TOKEN_EQ || equals == type_start {
+            &diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "setting `{name}` needs a type and a default", "a declared setting has a name, a type and a required default", "write `{name}: Type = default`"))
+            return
+        }
+        value :: jet_driver_manifest_field_value(source, tokens, equals + 1)
+        value_end :: if value.next_index < close -> value.next_index else -> close
+        if value_end == equals + 1 {
+            &diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "setting `{name}` needs a default", "a declared setting has a name, a type and a required default", "write `{name}: Type = default`"))
+            return
+        }
+        seen :: loop setting in settings {
+            if setting.name == name -> break true
+        } ?? false
+        if seen {
+            &diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "`settings.{name}` is declared more than once", "one declaration gives a setting its type and default", "keep one `{name}` entry"))
+        } else {
+            &settings.push(JetDriverPackageSetting{name: name, ty: jet_driver_manifest_tokens_text(source, tokens, tables, type_start, equals), default: jet_driver_manifest_tokens_text(source, tokens, tables, equals + 1, value_end)})
+        }
+        index = jet_driver_manifest_skip_separators(tokens, value_end, close)
+    }
+}
+
+// `build: { release: Build{ optimize: full, settings: { tls: false } } }`:
+// the settings each profile gives (the block between `open` and `close`).
+fn jet_driver_parse_profile_settings(source: String, tokens: [Token], tables: TokenTables, open: Int, close: Int, profile_settings: &[JetDriverProfileSetting], diagnostics: &[Diagnostic]) {
+    index := jet_driver_manifest_skip_separators(tokens, open + 1, close)
+    loop index < close {
+        profile_token :: tokens[index]
+        if profile_token.kind != TOKEN_IDENT || index + 1 >= close || tokens[index + 1].kind != TOKEN_COLON {
+            &diagnostics.push(jet_driver_diagnostic("E0003", profile_token.span, "a `build` entry must be `profile: Build{{ … }}`", "the `build:` block names one record per build profile", "write `profile: Build{{ … }}`"))
+            return
+        }
+        profile :: token_decoded(tables, profile_token)
+        record_open := index + 2
+        loop record_open < close && (tokens[record_open].kind == TOKEN_IDENT || tokens[record_open].kind == TOKEN_DOT) -> record_open += 1
+        record_close :: jet_driver_manifest_matching_brace(tokens, record_open) ?? {
+            &diagnostics.push(jet_driver_diagnostic("E0003", profile_token.span, "build profile `{profile}` must be a record", "a build profile is one `Build{{ … }}` record", "write `{profile}: Build{{ … }}`"))
+            return
+        }
+        depth := 0
+        field := record_open + 1
+        loop field < record_close {
+            kind :: tokens[field].kind
+            if kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RBRACE || kind == TOKEN_RBRACKET || kind == TOKEN_RPAREN -> depth -= 1
+            if depth == 0 && kind == TOKEN_IDENT && field + 2 < record_close && tokens[field + 1].kind == TOKEN_COLON && token_decoded(tables, tokens[field]) == "settings" {
+                settings_open := field + 2
+                if tokens[settings_open].kind == TOKEN_DOT -> settings_open += 1
+                settings_close :: jet_driver_manifest_matching_brace(tokens, settings_open) ?? {
+                    &diagnostics.push(jet_driver_diagnostic("E0003", tokens[field].span, "the settings of build profile `{profile}` must be a record", "a profile gives declared settings their values in one block", "write `settings: {{ name: value }}`"))
+                    return
+                }
+                jet_driver_parse_profile_values(source, tokens, tables, profile, settings_open, settings_close, &profile_settings, &diagnostics)
+                field = settings_close
+            }
+            field += 1
+        }
+        index = jet_driver_manifest_skip_separators(tokens, record_close + 1, close)
+    }
+}
+
+// The `name: value` entries of one profile's `settings: { … }` block.
+fn jet_driver_parse_profile_values(source: String, tokens: [Token], tables: TokenTables, profile: String, open: Int, close: Int, profile_settings: &[JetDriverProfileSetting], diagnostics: &[Diagnostic]) {
+    index := jet_driver_manifest_skip_separators(tokens, open + 1, close)
+    loop index < close {
+        name_token :: tokens[index]
+        if (name_token.kind != TOKEN_IDENT && !jet_driver_is_manifest_string(name_token.kind)) || index + 1 >= close || tokens[index + 1].kind != TOKEN_COLON {
+            &diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "a profile setting must be `name: value`", "a build profile gives a declared setting one value", "write `name: value`"))
+            return
+        }
+        value :: jet_driver_manifest_field_value(source, tokens, index + 2)
+        value_end :: if value.next_index < close -> value.next_index else -> close
+        &profile_settings.push(JetDriverProfileSetting{profile: profile, name: token_decoded(tables, name_token), value: jet_driver_manifest_tokens_text(source, tokens, tables, index + 2, value_end)})
+        index = jet_driver_manifest_skip_separators(tokens, value_end, close)
+    }
+}
+
+// Every profile, active or not, may only give a declared setting a value.
+fn jet_driver_check_profile_settings(settings: [JetDriverPackageSetting], profile_settings: [JetDriverProfileSetting], diagnostics: &[Diagnostic]) {
+    loop entry in profile_settings {
+        declared :: loop setting in settings {
+            if setting.name == entry.name -> break true
+        } ?? false
+        if !declared -> &diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`$build.settings.{entry.name}` is undeclared", "build profile `{entry.profile}` gives it a value, but `package.jet` declares no such setting", "add `{entry.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`"))
+    }
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {

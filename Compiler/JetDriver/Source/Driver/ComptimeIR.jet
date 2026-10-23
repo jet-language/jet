@@ -44,7 +44,7 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
         &keys.push(item.key.copy())
         &functions.push(^item)
     }
-    if batch.bare -> return jet_eval_ir_comptime_build(^functions, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{})
+    if batch.bare -> return jet_eval_ir_comptime_build(^functions, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, true)
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
         value :: values[index]
@@ -79,7 +79,7 @@ fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeV
     if checked.entry_key == .Val(key) -> &keys.push(key.copy())
     if keys.len() == 0 -> return JetDriverInvocationRun{result: None, problem: Val("the checked invocation lost its entry function")}
     declarations := jet_driver_checked_declarations(&checked)
-    built := jet_eval_ir_comptime_build(^checked.functions, keys, ^declarations.type_defs, ^declarations.impls, ^declarations.constants)
+    built := jet_eval_ir_comptime_build(^checked.functions, keys, ^declarations.type_defs, ^declarations.impls, ^declarations.constants, false)
     if built.build_failures.len() > 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder refused the invocation's code: {built.build_failures.join("; ")}")}
     if built.items[0] < 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder did not build the invocation's entry function")}
     program := jet_eval_native_load(^built, config)

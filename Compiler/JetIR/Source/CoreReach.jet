@@ -315,24 +315,29 @@ fn ir_precise_helper_names(tree: BodyTree, roots: [Int], body: [Int]) -> [String
 
 // The precise helpers one checked expression and every expression below it
 // lower to, each added once, read in place (body_each_expr_child).
-// Functions an expression tree names as values (`probe: pkg_lua_render_probe`), not
-// calls: Sema records call facts only, so a compile-time body that stores a function
-// value must queue it for lowering itself. Each key once, in tree order.
-fn ir_function_value_keys(tree: BodyTree, roots: [Int], body: [Int]) -> [String] Never! {
+// Functions an expression tree names that Sema records no call fact for: a
+// function named as a value (`probe: pkg_lua_render_probe`), and a direct call
+// Sema rewrote to its Core source function (`math.sqrt(x)` checks as the
+// `core.math.sqrt` Core row, then calls `Core/Math/Math.jet` `sqrt`). A
+// compile-time body queues each for lowering itself. Each key once, in tree order.
+fn ir_named_function_keys(tree: BodyTree, roots: [Int], body: [Int]) -> [String] Never! {
     keys := [String]{}
-    loop root in roots -> ir_function_value_tree(tree, root, &keys)
+    loop root in roots -> ir_named_function_tree(tree, root, &keys)
     loop statement in body {
-        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_function_value_tree(tree, child, &keys))
+        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_named_function_tree(tree, child, &keys))
     }
     keys
 }
 
-fn ir_function_value_tree(tree: BodyTree, expression: Int, keys: &[String]) Never! {
+fn ir_named_function_tree(tree: BodyTree, expression: Int, keys: &[String]) Never! {
     node :: body_node(tree, expression)
-    if node.kind == .ConstRef(symbol) {
-        if symbol.key.starts_with("function:") && !keys.contains(symbol.key) -> &keys.push(symbol.key)
+    if node.kind == {
+        .ConstRef(symbol) | .Call(symbol, _, _) -> {
+            if symbol.key.starts_with("function:") && !keys.contains(symbol.key) -> &keys.push(symbol.key)
+        }
+        else -> {}
     }
-    body_each_expr_child(tree, node, (child: Int) -> ir_function_value_tree(tree, child, &keys))
+    body_each_expr_child(tree, node, (child: Int) -> ir_named_function_tree(tree, child, &keys))
 }
 
 fn ir_precise_tree_names(tree: BodyTree, expression: Int, names: &[String]) Never! {

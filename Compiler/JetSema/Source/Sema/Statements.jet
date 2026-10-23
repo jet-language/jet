@@ -5912,9 +5912,13 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .ComptimeSwitch(subject, arms, else_body, span) -> {
                 if !sema_stmt_check_prep_switch(subject, arms, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
-            .ComptimeBlock(_, _, span) -> {
-                complete = false
-                sema_check_unsupported(&context, "the statement-level `comptime` block at offset {span.start} is not executed by the self-hosted checker yet")
+            .ComptimeBlock(body, is_template_loop, span) -> {
+                if is_template_loop {
+                    complete = false
+                    sema_check_unsupported(&context, "the statement-level `comptime` block at offset {span.start} is not executed by the self-hosted checker yet")
+                } else if !sema_stmt_check_comptime_block(body, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) {
+                    complete = false
+                }
             }
             .Live(_, span) -> {
                 complete = false
@@ -6220,6 +6224,32 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     true
 }
 
+// Rust CheckerCore `check_comptime_block`
+// `comptime { … }` is compile-time code and emits no runtime code. Its
+// statements are staged through the body comptime evaluator like a
+// `comptime if` condition (sema_stmt_check_prep_if), reading the prepared
+// locals before it; once the run lands, the owner body is checked again and
+// the block leaves nothing behind. A failed check or a panic stops the build.
+// False while the block is staged.
+fn sema_stmt_check_comptime_block(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), span, span) != None -> return true
+    block :: Expr.If{
+        cond: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED},
+        then_body: body,
+        then_value: Expr.Unit{span: span, id: AST_NODE_GENERATED},
+        else_body: [Stmt]{},
+        else_value: Expr.Unit{span: span, id: AST_NODE_GENERATED},
+        span: span,
+        id: AST_NODE_GENERATED,
+    }
+    scopes.comptime_execution_depth += 1
+    checked :: sema_check_expression(block, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.comptime_execution_depth -= 1
+    checked_block :: checked ?? return false
+    _ := sema_comptime_body_capture(&context, environment, program, scopes, "comptime block", block, checked_block.ty, span, span)
+    false
+}
+
 fn sema_stmt_reads_runtime_local(expression: TExpr, found: &Bool) Never! {
     if expression.kind == .Local(_) {
         found = true
@@ -6256,17 +6286,15 @@ fn sema_stmt_check_dropped_prep_arm(body: [Stmt], return_type: Type?, environmen
 // `comptime if` check selects the arm. Every arm head is a distinct bare OS
 // variant, and the arms cover every OS or carry an `else`, whatever the
 // target. A `$build.settings.<key>` dispatch folds against the declared
-// setting; the Jet loader declares no manifest settings yet, so it reports
-// the undeclared setting, as a `$build.settings` read does
-// (sema_fact_build_read).
+// setting's value (sema_stmt_check_setting_switch).
 fn sema_stmt_check_prep_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     subject_span :: expr_span(subject)
     path :: sema_fact_expr_path(subject)
     if path != (Val("$build.os")) {
         if path == .Val(text) {
             if sema_fact_build_setting_key(text) == .Val(key) {
-                &diagnostics.push(sema_fact_build_setting_undeclared(key, subject_span))
-                return false
+                setting :: sema_fact_build_setting(key, subject_span, environment, program, &diagnostics) ?? return false
+                return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
             }
         }
         &diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
@@ -6327,6 +6355,85 @@ fn sema_stmt_check_prep_switch(subject: Expr, arms: [SwitchArm], else_body: [Stm
     }
     first :: arms[0]
     sema_stmt_check_prep_if(Expr.Bool{value: seen[0] == active, span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
+}
+
+// Whether a setting dispatch arm head names `value`: a literal or `.Variant`
+// the dispatch compares against (`true ->`, `8 ->`, `"eu" ->`, `.Fast ->`).
+// None when the head is no value of the setting's kind.
+fn sema_stmt_setting_arm_matches(cond: Expr, value: TComptimeValue) -> Bool? Never! {
+    if cond == {
+        .Binary(op, _, right, _, _) -> {
+            if op != BinOp.Eq -> return None
+            if right == {
+                .Bool(flag, _, _) -> {
+                    if value == .Bool(held) -> return Val(flag == held)
+                }
+                .Int(number, _, _, _, _) -> {
+                    if value == .Int(held) -> return Val(number == held)
+                }
+                .Char(text, _, _) -> {
+                    if value == .Char(held) -> return Val((sema_checked_const_char(text) ?? -1) == held)
+                }
+                .Str(parts, _, _) -> {
+                    if value == .String(held) {
+                        if parts.len() == 0 -> return Val(held == "")
+                        if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text == held)
+                    }
+                }
+                .EnumLit(_, variant, _, args, _, _, _) -> {
+                    if value == .Enum(_, held, _) {
+                        if args.len() == 0 -> return Val(variant == held)
+                    }
+                }
+                else -> {}
+            }
+            None
+        }
+        .PatternTest(_, pattern, _, _) -> {
+            if pattern == .Variant(variant, bindings, _, _) {
+                if value == .Enum(_, held, _) {
+                    if bindings.len() == 0 -> return Val(variant == held)
+                }
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+// `comptime if $build.settings.<key> == { … }`: each arm head is compared
+// with the setting's value for this build, and the folded Bool conditions
+// select the arm through the `comptime if` chain, as the `$build.os`
+// dispatch does.
+fn sema_stmt_check_setting_switch(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    matched := [Bool]{}
+    valid := true
+    loop arm in arms {
+        if sema_stmt_setting_arm_matches(arm.cond, value) == .Val(flag) {
+            &matched.push(flag)
+        } else {
+            &diagnostics.push(sema_error("E0302", arm.span, "this arm doesn't name a value of the setting `{key}`", "a `$build.settings.{key}` dispatch compares each arm head with the setting's value for this build", "write each arm head as a literal or `.Variant` of the setting's declared type"))
+            valid = false
+        }
+    }
+    if !valid -> return false
+    if arms.len() == 0 {
+        fallback :: else_body ?? return true
+        nested :: sema_stmt_check_block(fallback, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "prep-switch@{span.start}", loop_depth)
+        if !nested.complete -> return false
+        &output.push(TStmt.Inline{body: nested.value, span: span})
+        return true
+    }
+    tail := else_body
+    index := arms.len()
+    loop index > 1 {
+        index -= 1
+        arm :: arms[index]
+        node :: Stmt.ComptimeIf{cond: Expr.Bool{value: matched[index], span: arm.span, id: AST_NODE_GENERATED}, cond_span: arm.span, then_body: arm.body, else_body: tail, span: arm.span, selected_then: None}
+        tail = Val([Stmt]{node})
+    }
+    first :: arms[0]
+    sema_stmt_check_prep_if(Expr.Bool{value: matched[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
 }
 
 fn sema_stmt_os_dispatch_arm(found: String, span: Span) -> Diagnostic {

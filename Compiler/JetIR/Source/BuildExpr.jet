@@ -3365,6 +3365,13 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
         ir_return_slot(&m, p, &b, null, span)
         return
     }
+    // A comptime item (ir_comptime_item_shell) checks under the build's
+    // implicit `!Err` rail: a failure that reaches it fails the build with
+    // the error's text, as a panic does.
+    if b.failure == .Infallible && b.f.name == "__comptime_item" {
+        ir_comptime_item_failure(&m, p, &b, subject, is_result, span)
+        return
+    }
     // An infallible or diverging function's failure edge is dead (codegen
     // jet_codegen_lower_try_value `.Infallible` / `.Diverges`).
     if b.failure == .Infallible || b.failure == .Diverges(_) {
@@ -3372,6 +3379,36 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
         return
     }
     ir_fail(&b, span, "`?` without a matching failure carrier")
+}
+
+// The failure edge of a comptime item: a require stop (Trap.jet
+// jet_rt_require_stop, the stop `panic` raises) whose message is the
+// error's Show text, or that the value is absent; the descriptor is zeroed,
+// as ir_channel_capacity_stop's is, since the item's span locates the report.
+fn ir_comptime_item_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_result: Bool, span: Span) Never! {
+    string_row :: ir_string_row(&m)
+    message := -1
+    held :: m.types[b.f.slot_type[subject]].ty
+    if is_result && ir_untag(held) == .Result(_, err_ty) {
+        error_row :: ir_value_type(&m, p, err_ty) ?? {
+            _ :: ir_type_fail(&b, span, err_ty)
+            return
+        }
+        error :: ir_load_at(&m, &b, subject, 8, error_row)
+        message = ir_render(&m, p, &b, err_ty, error, IRRender.Show, span)
+        if ir_failed(b) -> return
+    } else {
+        text :: ir_static_text(&m, &b, "the compile-time value is absent")
+        message = ir_runtime(&m, &b, "jet_rt_string_from_static", text, string_row)
+    }
+    pointer_row :: ir_pointer_row(&m)
+    descriptor :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, descriptor, 88, 8, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    loop index in 0..<11 -> ir_emit(&b.f, IROp.Store, -1, descriptor, 8 * index, zero, b.line)
+    panic_kind :: ir_word_const(&m, &b, 2)
+    _ :: ir_runtime(&m, &b, "jet_rt_require_stop", [Int]{panic_kind, descriptor, message, zero, zero, zero}, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
 // `value ?? fallback` (codegen jet_codegen_lower_or_fallback).

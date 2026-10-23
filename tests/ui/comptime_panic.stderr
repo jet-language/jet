@@ -1,17 +1,8 @@
-Error [E0953]: Your comptime code stopped the build
-  --> tests/ui/comptime_panic.jet:2:5
+Error [E3010]: `n must be over 100`
+  --> tests/ui/comptime_panic.jet:6:17
     |
-  2 |     assert((n > 100), "n must be over 100")
-    |     ^^^^^^
- Why: While computing this value at compile time, the program panicked: n must be over 100
- Fix: This is the sanctioned way to validate at compile time — fix the input the check rejects
-More: jet-lang.dev/e/E0953
-
-Error [E0107]: Nothing named `X` exists here
-  --> tests/ui/comptime_panic.jet:8:20
-    |
-  8 | fn run() { print("{X}") }
-    |                    ^
- Why: A name must be declared before it's used
- Fix: Declare it first: `X :: ...`
-More: jet-lang.dev/e/E0107
+  6 | X :: comptime { validate(5) }
+    |                 ^^^^^^^^
+ Why: Compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `comptime` value is a compile error
+ Fix: Handle the failure inside the `comptime` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects
+More: jet-lang.dev/e/E3010

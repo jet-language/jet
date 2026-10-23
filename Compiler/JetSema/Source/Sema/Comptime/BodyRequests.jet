@@ -250,12 +250,27 @@ fn sema_comptime_body_capture(
         expected_type: expected_type,
         span: source_span,
         site_span: site_span,
+        prepared: sema_comptime_body_prepared_locals(environment, scopes),
     }
     loop previous in context.comptime_body_sources {
         if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
     }
     sema_comptime_body_source_append(&context, source)
     source
+}
+
+// The prepared locals the site can read: each visible binding with a value.
+fn sema_comptime_body_prepared_locals(environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaComptimePreparedLocal] Never! {
+    prepared := [SemaComptimePreparedLocal]{}
+    loop index in 0..<scopes.bindings.len() {
+        if scopes.bindings[index].prepared == None -> next
+        binding :: sema_scope_binding_row(environment, scopes, index)
+        if sema_scope_resolve_index(scopes, binding.symbol.name) != .Val(index) -> next
+        value :: binding.prepared ?? next
+        ty :: binding.symbol.ty ?? next
+        &prepared.push(SemaComptimePreparedLocal{name: binding.symbol.name, ty: ty, value: value, span: binding.symbol.span})
+    }
+    prepared
 }
 
 fn sema_comptime_body_value_find(
@@ -298,6 +313,7 @@ fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptim
         span: source.span,
         dependencies: [String]{},
         checked_text: None,
+        prepared: source.prepared,
     }
 }
 
