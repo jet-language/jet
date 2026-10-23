@@ -2027,7 +2027,12 @@ fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conve
             }
         }
     }
-    if conversion == .NoConversion && !framed {
+    // The Err box passes through unconverted only when it is the size of the
+    // function carrier's box: a box is freed with its own type's size
+    // (ir_box_bytes), so a callee carrier whose Ok is narrower or wider
+    // reboxes its error below.
+    carrier_row :: ir_value_type(&m, p, Type.Result{ok: success.copy(), err: error.copy()}) ?? return ir_fail_slot(&b, span, "layout of the {ir_type_name(error)} failure carrier")
+    if conversion == .NoConversion && !framed && ir_box_bytes(&m, p, b.f.slot_type[subject]) == ir_box_bytes(&m, p, carrier_row) {
         if site == .Val(at) {
             _ :: ir_journey_hop(&m, p, &b, at, -1, false, span)
         }

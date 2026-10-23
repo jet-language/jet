@@ -692,9 +692,8 @@ fn ir_bind_uninit(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, ty: 
         length :: ir_word_const(&m, &b, count)
         ir_emit(&b.f, IROp.Store, -1, slot, 0, length, b.line)
         ir_emit(&b.f, IROp.Store, -1, slot, 8, length, b.line)
-        word_row :: ir_word_row(&m)
         stride :: ir_list_stride(m, element_row)
-        data :: if count == 0 -> ir_word_const(&m, &b, 0) else -> ir_box_alloc(&m, &b, count * stride, word_row)
+        data :: if count == 0 -> ir_word_const(&m, &b, 0) else -> ir_list_buffer_alloc(&m, &b, count * stride)
         ir_emit(&b.f, IROp.Store, -1, slot, 16, data, b.line)
     }
     symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
@@ -4129,8 +4128,7 @@ fn ir_comptime_bytes(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: I
     count :: ir_word_const(&m, &b, bytes.len())
     ir_emit(&b.f, IROp.Store, -1, storage, 0, count, b.line)
     ir_emit(&b.f, IROp.Store, -1, storage, 8, count, b.line)
-    word_row :: ir_word_row(&m)
-    data :: ir_box_alloc(&m, &b, bytes.len(), word_row)
+    data :: ir_list_buffer_alloc(&m, &b, bytes.len())
     pointer_row :: ir_pointer_row(&m)
     source :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.DataAddress, source, ir_intern_bytes(&m, bytes), -1, -1, b.line)

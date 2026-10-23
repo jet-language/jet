@@ -1230,6 +1230,17 @@ fn ir_box_alloc(m: &IRModule, b: &IRBuilder, size: Int, row: Int) -> Int Never! 
     boxed
 }
 
+// A List buffer of exactly `bytes` bytes (jet_rt_alloc(bytes, 8)). Unlike a
+// box it is not rounded up: every List buffer is released as capacity *
+// stride (the List drop, ir_release_moved_buffer), and a free must name the
+// allocation's own size.
+fn ir_list_buffer_alloc(m: &IRModule, b: &IRBuilder, bytes: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    size :: ir_word_const(&m, &b, bytes)
+    align :: ir_word_const(&m, &b, 8)
+    ir_runtime(&m, &b, "jet_rt_alloc", [Int]{size, align}, word_row)
+}
+
 // Writes `value` at byte `offset` of the storage at `base`: an aggregate's
 // bytes are copied, a Unit value takes no bytes.
 fn ir_store_at(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, value: Int) Never! {
@@ -1384,8 +1395,7 @@ fn ir_list_from(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element_row
         ir_emit(&b.f, IROp.Store, -1, storage, 16, none, b.line)
         return storage
     }
-    word_row :: ir_word_row(&m)
-    data :: ir_box_alloc(&m, &b, elements.len() * stride, word_row)
+    data :: ir_list_buffer_alloc(&m, &b, elements.len() * stride)
     loop (index, slot) in elements -> ir_store_at(&m, p, &b, data, index * stride, slot)
     ir_emit(&b.f, IROp.Store, -1, storage, 16, data, b.line)
     storage
