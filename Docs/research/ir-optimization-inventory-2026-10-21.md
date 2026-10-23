@@ -1,6 +1,6 @@
 # Slot IR optimization inventory (2026-10-21)
 
-Status: the inventory tables (A-E), the old-backend measurements and the IR passes
+Status: the inventory tables (A-F), the old-backend measurements and the IR passes
 (`Compiler/JetIR/Source/Opt*.jet`, run at O1/O2 between the IR build and selection) are complete; "Row map"
 lists every row as done, pending (with its plan) or not needed (with the reason). This document remains a
 deletion gate of the old middle: the pending rows are the work left before the old optimizer goes.
@@ -90,7 +90,7 @@ level").
 | M12 | canonical program order (Facts/CanonicalOrdering.jet:42) | sorts program tables | determinism only | no | the IR module is built in a deterministic order and content-hashed per function |
 | M13 | decision rows (AccelerationDecisionLedger.jet:152) | ledger rows from loop/vector/bounds facts; Reach.jet reads them as mono edges | none on run time | no | the IR builder reaches functions through its own queue |
 | M14 | MIR lint (Verification/Lint.jet) | typed/ownership lint, ICE gate; optimize.lint 4.0 s of a self-build | verification | no | IR verifier plan P-V |
-| M15 | pure-call folding (Driver/PureFold.jet:89; Rust MIREval/PureFold.rs) | immutable locals initialized by effect-free calls over constants are evaluated at compile time and become constants (slice <= 256 instructions, output <= 256 KiB) | not measured separately | yes | needs the IR evaluator (IREval lane): plan P-PF |
+| M15 | pure-call folding (Driver/PureFold.jet:89; Rust MIREval/PureFold.rs) | immutable locals initialized by effect-free calls over constants are evaluated at compile time and become constants (slice <= 256 instructions, output <= 256 KiB) | not measured separately | yes | the MIR pass is deleted with the Pipeline MIR stage (cutover A); on IR, a small straight-line callee is inlined (OptInline.jet) and its constant arithmetic folded (OptSimplify.jet `fold`); calls with loops or recursion stay calls until plan P-PF |
 | M16 | move at last use (Codegen/LastUse.jet; Rust tir_to_mir_last_use.rs) | the last consuming read of an owned local becomes a move | part of O0 semantics of the old path | yes | builder-side today (fresh temps move); the general slot form is plan P-LU (copy of a drop type whose source is not read again and is dropped later -> move, drop goes) |
 | M17 | static drop-flag resolution (Codegen/DropFlags.jet; Rust tir_to_mir_drop_flags.rs) | constant-propagates drop flags so known drops are unconditional | O0 semantics | yes | the IR builder emits explicit Drop on the paths that own the value; any flag slot it emits is a Bool slot that `fold` resolves when it is a single-write constant |
 | M18 | prepared-constant / known-constant inlining (Codegen/PreparedConstants.jet; Functions.jet:922; Rust mir.rs:2818) | checker-prepared constants and small known constant globals become literals | O0 semantics | by construction | the builder reads the checked TIR with these folded |
@@ -170,6 +170,20 @@ All are selection techniques at every level; they apply to the IR selector, not 
 | E1/E2 | typed-fact enum equality/pattern folding | by construction | the checked TIR the builder reads carries the folded tests |
 | F | NativeLoopCursor.rs, NativeNumericBridge.rs, MIREval.rs | no | runtime bridges and the interpreter, not optimizations |
 
+### F. Census gaps (old Lower files and the back-end schedule; added 2026-10-23)
+
+Rows the first pass missed, found by the cutover census of `Compiler/JetBackend/Source/{Lower,Opt}/**` at dev
+175ddcaba.
+
+| id | work (old file) | what it does | applies? | IR status |
+|---|---|---|---|---|
+| N.1 | immortal literal text (Lower/StaticText.jet `lower_immortal_text`) | a String literal is one rodata header [data, length, cap 0] over its bytes, shared by every owner: clone returns it, drop ignores it, no allocation | yes | by construction: ConstText is the same immortal header (X64Select `ir_x64_text_header`), and the IR machine reads the same header (JetEval IR/Machine.jet) |
+| N.2 | borrowed literal view (StaticText.jet, the E4 view) | elides the String constructor and drop of a literal whose only use is a compile-time intrinsic argument | no | ConstText has no constructor or drop to elide (N.1) |
+| N.3 | frozen module constants (Lower/Statics.jet) | a constant's value is laid out once as read-only static objects, which every read borrows; a Map or a spilled exact Int is built once at startup by a recorded constructor | yes | by construction for frozen values (BuildStatic.jet: data_relocs, frozen List with capacity 0, immortal box counts, immortal Strings). A Map or an exact Int outside the inline range is built again at each read (`ir_comptime`), where the old path built it once at startup: plan P-STATIC |
+| N.4 | closure-taking List/Option methods (Lower/Combinators.jet) | `map`, `filter`, `fold`, `count_where`, `find`, `sort_by`, `option.map`, and so on, inlined as one element loop that calls the closure box per element, with no runtime kernel call | yes | by construction: BuildRoutes.jet `ir_closure_method` expands the same element walk (`ir_walk_open`/`ir_call_closure`), and Iter receivers go to the runtime kernels (BuildLazy.jet `ir_lazy_closure_method`) |
+| N.5 | parallel collection callbacks (Lower/Parallel.jet) | `para_map`, `para_filter`, `para_partition` and `para_fold` hand a typed callback adapter (env + invoke helper) to the runtime's parallel range scheduler (`jet_rt_native_para_walk`) | yes | done: BuildParallel.jet `ir_closure_parallel` / `ir_para_fold` build one helper per callback type (`para.map`, `para.fold`) and walk with `jet_rt_native_para_walk`; para_fold merges the 64-item chunk results in the caller up the fixed adjacent-pair tree |
+| N.6 | back-end schedule (Opt/Opt.jet `opt_schedule`, the streaming per-function back end) | per-function jobs ordered by dependency: a function becomes runnable once its direct non-recursive callees settle, and claiming threads take the longest remaining chain first; LIR lint, passes and x64 selection run in one job | yes | done differently: `ir_optimize_module` runs waves of the bottom-up call graph on admitted threads (Opt.jet `ir_opt_waves`, at least 20000 instructions per thread). Selection is a separate threaded step (X64Module.jet `compiler_threads_heaviest_first`). Results are identical for any thread count. A dependency queue instead of waves only pays if `ir.opt` shows wave tails, and it is under the trace's 10 ms resolution per program today (proof below) |
+
 ## Ported passes
 
 Entry `ir_optimize_module(m: &IRModule, level: Int) -> IROptReport` (Opt.jet), IR in, IR out, between
@@ -228,12 +242,15 @@ Every row of the tables above, by state.
   E1/E2, the exact-Int bitwise (wip) row.
 - Pending, with their plan below: P1.d and P3 (P-RANGE), P6 (P-CSE), W8 and the A2 hoist (P-LICM), M16 and D1
   (P-LU), M15 and B1-B6 (P-PF, needs the IR evaluator), M6 and C.7 (P-BCE), the `#Inline(Always)` attribute of M2
-  (P-IA), unreferenced slot rows of P1.o (P-SLOT), box elimination (P-BOX); selection: G2 (edge/ABI hints), G3
-  (Float in xmm), G4 (base+index*scale), G7 (live-range splitting per region).
+  (P-IA), unreferenced slot rows of P1.o (P-SLOT), box elimination (P-BOX), N.3's runtime-built constants
+  (P-STATIC); selection: G2 (edge/ABI hints), G3 (Float in xmm), G4 (base+index*scale), G7 (live-range splitting
+  per region).
+- Done by construction or differently (census rows): N.1, N.3 (frozen values), N.4, N.5 (P-PARA), N.6.
 - Not needed: M0, M14, B.i (verification, not optimization: P-V); M1, M10, M11, M12, M13 (fact and ledger rows,
   the IR has none: no run-time value); M8, M9, M19 (no native vectorizer: P-VEC once SIMD selection exists);
   P1.h, P1.n (LIR artifacts: inline tests and block parameters); C.12 (slots are mutated in place); A7 (a
-  declaration-table rewrite); F (runtime bridges and the interpreter); C1-C13 (the same rows as M0-M14).
+  declaration-table rewrite); F (runtime bridges and the interpreter); C1-C13 (the same rows as M0-M14); N.2 (no
+  literal constructor exists to elide).
 
 ## Plans for the rest
 
@@ -246,13 +263,20 @@ Every row of the tables above, by state.
   the Loop opener; no trapping ops (Div only by a constant != 0, != -1).
 - P-LU: copy-to-move at last use: a Copy of a drop type whose source is not read again before its Drop becomes a
   Move and that Drop goes (liveness over structured control, loops by fixed point).
-- P-PF: pure-call folding with the IR evaluator (IREval): a Call of an effect-free function on constant slots is
-  evaluated at compile time, budgets as PureFold (slice 256 instructions, output 256 KiB).
+- P-PF: pure-call folding with the IR evaluator (IREval), replacing the deleted MIR PureFold: a Call of an
+  effect-free function on constant slots that `inline` + `fold` leave in place (loops, recursion, callees over the
+  inline budget) is evaluated at compile time, budgets as PureFold (slice 256 instructions, output 256 KiB).
 - P-BCE: list-index bounds stops inside range loops whose counter is proven below the list length.
 - P-BOX: Option/Result box elimination (TextPerf R5): a `jet_rt_alloc` box that never escapes (only Load/Store at
   constant offsets and its own drop) becomes slots; needs the builder to mark the box drop as shallow.
 - P-IA: honor `#Inline(Always)` regardless of size (the builder carries the attribute on IRFunction).
 - P-SLOT: drop unreferenced slots after compaction so their frame homes go.
+- P-STATIC: a constant whose value is runtime-owned (a Map, an exact Int outside the inline range) becomes a
+  zeroed static slot filled once at program start by a constructor the entry runs (as Statics.jet's
+  recorded constructors were); reads borrow the slot instead of rebuilding the value.
+- P-PARA: done (BuildParallel.jet). The builder lowers ParaMap/ParaFilter/ParaPartition/ParaFold as
+  Lower/Parallel.jet did: one helper per callback type, the closure box as env, and `jet_rt_native_para_walk`
+  (the runtime has no separate para_fold entry; the chunk merges run in the caller).
 - P-ID: done (`fold` covers every identity of P1.g).
 - P-VEC: loop/vector facts and fixed-reduction normalization once SIMD selection exists.
 - P-V: an IR verifier (structure, slot ranges) for debug builds, replacing MIR legality/lint and LIR lint as the
