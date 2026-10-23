@@ -395,6 +395,29 @@ fn ir_x64_call(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
     }
 }
 
+// A call of an `#FFI(asm)` leaf with general arguments in registers, as its
+// template's bytes in place (ir_x64_asm_function without the frame): the
+// template's operand registers are the argument registers in order, it
+// writes only caller-saved registers, which a call clobbers anyway, and it
+// leaves rsp balanced. False, emitting nothing, for any other call.
+fn ir_x64_asm_inline(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, leaf: IRAsmLeaf, args: [Int], start: Int, count: Int, dst: Int) -> Bool Never! {
+    if count != leaf.regs.len() || count > IR_X64_ARGUMENT_REGISTERS.len() -> return false
+    if dst >= 0 && (leaf.result < 0 || ir_x64_class(ir_x64_type(m, f, dst)) != .General) -> return false
+    loop position in 0..<count {
+        if leaf.regs[position] != IR_X64_ARGUMENT_REGISTERS[position] || ir_x64_slot_class(m, f, args[start + position]) != .General -> return false
+    }
+    // Sources are callee-saved registers, frame homes and immediates, as
+    // for ir_x64_call.
+    loop position in 0..<count -> ir_x64_load(&e, m, f, al, args[start + position], leaf.regs[position])
+    &e.code.extend(leaf.code)
+    if dst < 0 -> return true
+    ty :: ir_x64_type(m, f, dst)
+    if leaf.result > 0 -> x64_mov_rr(&e.code, X64_RAX, leaf.result)
+    ir_x64_normalize(&e, ty, X64_RAX)
+    ir_x64_store(&e, m, f, al, dst, X64_RAX)
+    true
+}
+
 // A runtime helper call with general arguments (at most six) and a general result.
 fn ir_x64_helper(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, symbol: String, args: [IRX64Arg], dst: Int) Never! {
     loop (position, arg) in args {
@@ -1438,6 +1461,9 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Concat -> ir_x64_helper(&e, m, f, al, "jet_rt_string_concat", [IRX64Arg]{IRX64Arg.Slot{slot: f.a[at]}, IRX64Arg.Slot{slot: f.b[at]}}, dst)
         .Call -> {
             if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return ir_x64_fail(&e, f, at, "function {f.a[at]} is not in the module")
+            if m.functions[f.a[at]].asm == .Val(leaf) {
+                if ir_x64_asm_inline(&e, m, f, al, leaf, f.args, f.b[at], f.c[at], dst) -> return
+            }
             ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
         }
         .CallRuntime -> {
