@@ -1166,7 +1166,16 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector Never! {
                     entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"inner"})
                     &entries.push(KnowledgeEntry{path: [String]{}, plane: "Nominal", fact: KnowledgeFact.Nominal{name: "core.crypto"}})
                 }
-                else -> entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{})
+                // A user tag is a transparent flow classification: the inner
+                // facts stay at the tagged path, and the tag is its own fact.
+                else -> {
+                    entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{})
+                    classification :: if marker == {
+                        .User(name) -> name
+                        .Internal(internal_tag) -> type_internal_tag_name(internal_tag)
+                    }
+                    &entries.push(KnowledgeEntry{path: [String]{}, plane: "Classification", fact: KnowledgeFact.Classification{name: classification}})
+                }
             }
         }
         .Apply(name, args) -> {

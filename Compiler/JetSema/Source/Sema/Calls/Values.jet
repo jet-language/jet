@@ -92,6 +92,12 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     }
     // A lambda that takes a capture with `^` runs once.
     sema_ownership_call_once_lambda(&state, callee, scopes)
+    // A lambda that writes a capture changes it: not while a loop reads it.
+    if callee == .Ident(callee_name, callee_span, _) {
+        loop written in sema_ownership_closure_writes(&state, callee, scopes) {
+            if context.iter_borrowed.contains(written) -> &diagnostics.push(sema_collection_changed_in_loop(written, "calling `{callee_name}`, which writes `{written}` through its capture,", callee_span))
+        }
+    }
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     call_callee := callee_value
     if pins.len() > 0 {

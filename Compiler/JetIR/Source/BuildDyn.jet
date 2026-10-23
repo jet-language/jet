@@ -352,11 +352,11 @@ fn ir_codec_scalar(target: Type) -> String? Never! {
 
 // `value.encode()` into a Dyn (codegen jet_codegen_lower_serde_encode): a
 // Dyn is itself, a type with its own Encode implementation calls it, an
-// Int, fixed-width integer, Float, Bool or String value is boxed as its Dyn
-// variant (jet_codegen_data_encode_variant), and a String-keyed Map or a
-// List encodes as an Object or Array of its encoded values
-// (jet_codegen_lower_container_encode). The builtin and typed codec routes
-// have no lowering here.
+// Int, fixed-width integer, Float, Bool, Char or String value is boxed as its
+// Dyn variant (jet_codegen_data_encode_variant; a Char is the Text of its
+// one character), and a String-keyed Map or a List encodes as an Object or
+// Array of its encoded values (jet_codegen_lower_container_encode). The
+// builtin and typed codec routes have no lowering here.
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     concrete :: ir_subst(m, ir_ty(p, b, receiver))
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
@@ -377,7 +377,7 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         .Int | .IntN(_, _) -> "Int"
         .Float -> "Float"
         .Bool -> "Bool"
-        .String -> "Text"
+        .String | .Char -> "Text"
         else -> ""
     }
     if variant == "" || ir_dyn_def(p, ir_subst(m, ty)) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
@@ -387,6 +387,11 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     if ir_untag(concrete) == .IntN(_, _) {
         int_row :: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
         payload = ir_numeric_cast(&m, p, &b, slot, int_row, span)
+        if ir_failed(b) -> return -1
+    }
+    if ir_untag(concrete) == Type.Char {
+        string_row :: ir_string_row(&m)
+        payload = ir_runtime(&m, &b, "jet_rt_char_to_string", [Int]{slot}, string_row)
         if ir_failed(b) -> return -1
     }
     ir_dyn_box(&m, p, &b, ty, variant, payload, span)

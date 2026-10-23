@@ -126,6 +126,14 @@ struct SemaOwnershipOnceLambda {
     capture: String
 }
 
+// A lambda binding `key` whose body writes the captured `names` (TCaptureFacts
+// `mutable`): calling it changes them, so a call inside a loop reading one of
+// them is E0507.
+struct SemaOwnershipClosureWrites {
+    key: String
+    names: [String]
+}
+
 // An unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
 // the authored copy `name.copy()`.
@@ -208,6 +216,8 @@ struct SemaOwnershipState {
     // Run-once lambdas found in this function, and the
     // bindings holding them (Rust `once_lambda_sites` / `once_lambdas`).
     once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}}
+    // Lambda bindings that write a capture, by binding key.
+    closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}}
     // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
     fixed_length_write_params: [String]
@@ -3183,6 +3193,20 @@ fn sema_ownership_bind_once_lambda(state: &SemaOwnershipState, site: Span, key: 
     loop index in 0..<state.once_lambdas.len() {
         if sema_ownership_span_same(state.once_lambdas[index].site, site) -> state.once_lambdas[index].key = key
     }
+}
+
+// The binding `key` holds a lambda writing the captured `names`.
+fn sema_ownership_bind_closure_writes(state: &SemaOwnershipState, key: String, names: [String]) Never! {
+    &state.closure_writes.push(SemaOwnershipClosureWrites{key: key, names: names})
+}
+
+// The captured names a call of the lambda binding `callee` writes.
+fn sema_ownership_closure_writes(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable) -> [String] Never! {
+    binding :: sema_ownership_binding_for_expr(&state, callee, scopes) ?? return [String]{}
+    loop writes in state.closure_writes {
+        if writes.key == binding.symbol.id.key -> return writes.names.copy()
+    }
+    [String]{}
 }
 
 // A call of a run-once lambda binding moves the binding,

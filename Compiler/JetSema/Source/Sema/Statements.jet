@@ -1866,7 +1866,7 @@ fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: TForInMethod?,
             if (name == "Iter" || name == "ViewIter" || name == "Stream" || name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == "Receiver") && args.len() == 1 -> return Val(args[0])
         }
         .Named(name) -> {
-            if name == "HTTPBodyChunks" -> return Val(Type.Result{ok: Type.List{element: Type.Named{name: "U8"}}, err: Type.Named{name: "HTTPError"}})
+            if name == "HTTPBodyChunks" -> return Val(Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "HTTPError"}})
             if name == "FileLines" || name == "StdinLines" || name == "ProcessLines" -> return Val(Type.String)
             if name == "Range" -> return Val(Type.Int)
             return sema_stmt_for_in_encoding_item_type(name)
@@ -3291,8 +3291,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // place through a view; an exact `^name` later would copy it (E0201).
     if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_scope_mark_place_alias(&scopes, binding.name)
     sema_ownership_note_frozen_binding(&state, symbol.id.key, binding.init, scopes)
-    // A bound lambda that takes a capture runs once.
+    // A bound lambda that takes a capture runs once; one that writes a
+    // capture changes it at each call.
     if binding.init == .Lambda(bound_lambda, _) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
+    if init.kind == .Lambda(checked_lambda) && checked_lambda.capture_facts.mutable.len() > 0 -> sema_ownership_bind_closure_writes(&state, symbol.id.key, checked_lambda.capture_facts.mutable)
     sema_single_use_note_binding(&state, symbol, environment, program)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
     sema_stmt_track_origin(binding, environment, program, &scopes)
