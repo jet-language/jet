@@ -389,6 +389,18 @@ fn x64_process_threads() -> Int {
     listed.len()
 }
 
+// Sleep about `microseconds` (under a second) with nanosleep, not the
+// scheduler, whose timer thread would make jet multi-threaded again.
+fn x64_process_nap(microseconds: Int) {
+    nap :: os_map(16, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(nap) -> return
+    #Unsafe("the timespec lies in the fresh zeroed page; nanosleep only reads it") {
+        os_store_word(nap + 8, microseconds * 1000)
+        _ := os_syscall(OS_SYS_NANOSLEEP, nap, 0, 0, 0, 0, 0)
+    }
+    _ := os_unmap(nap, 16)
+}
+
 // Store `text` and a NUL below `at`; returns its address.
 fn loader_put_text(at: Int, text: String) -> Int {
     bytes :: text.bytes()

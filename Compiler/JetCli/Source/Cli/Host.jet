@@ -19,6 +19,7 @@ use jet_backend.[
     x64_link_executable,
     x64_link_with_runtime_image,
     x64_process_mirror,
+    x64_process_nap,
     x64_process_stop,
     x64_process_threads,
     x64_process_wait_foreground,
@@ -884,14 +885,27 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
     loaded :: x64_image_load(image)
     reason := loaded.failure
     if reason == "" {
-        // The compile's scheduler threads are idle now; joining them leaves
-        // jet single-threaded, so the program can take its place.
-        _ := jet_cli_scheduler_shutdown()
-        if x64_process_threads() == 1 {
+        // Joining the compile's scheduler threads leaves jet single-threaded,
+        // so the program can take its place. The shutdown refuses while a
+        // job or a timer is still pending, and a joined thread leaves
+        // /proc/self/task a moment after its join returns (the kernel wakes
+        // the joiner, then reaps the thread): both are waited out, every
+        // 100 µs for up to 100 ms.
+        joined := jet_cli_scheduler_shutdown()
+        threads := x64_process_threads()
+        waited := 0
+        loop threads > 1 && waited < 1000 {
+            x64_process_nap(100)
+            if (joined < I64{0}) -> joined = jet_cli_scheduler_shutdown()
+            threads = x64_process_threads()
+            waited += 1
+        }
+        if threads == 1 {
             jet_cli_perf_map(image, cli_process.current_pid())
             reason = x64_image_exec(loaded, launch)
             x64_image_unload(loaded)
         } else {
+            if verbose -> cli_term.eprint("jet run: running the program in a child process: {jet_cli_threads_reason(joined, threads)}")
             spawned :: x64_image_spawn(loaded, launch, [Int]{})
             x64_image_unload(loaded)
             if spawned.failure == "" {
@@ -909,6 +923,14 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
         if jet_cli_native_write(binary, image) == .Val(failure) -> return jet_cli_native_report(file, "run", failure, color)
     }
     jet_cli_launch_failed(x64_file_exec(binary, launch), color)
+}
+
+// Why jet is not single-threaded after jet_rt_scheduler_shutdown returned
+// `joined` (-1: work or a timer was pending) and `threads` remain.
+fn jet_cli_threads_reason(joined: I64, threads: Int) -> String {
+    if threads < 0 -> return "/proc/self/task can't be read"
+    if (joined < I64{0}) -> return "the compile's scheduler still had a job or a timer pending"
+    "{threads} threads still run after the compile's scheduler stopped"
 }
 
 fn jet_cli_launch_failed(why: String, color: Bool) -> JetDriverVerbOutput Never! {
