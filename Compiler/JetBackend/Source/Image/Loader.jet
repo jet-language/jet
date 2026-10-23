@@ -85,12 +85,14 @@ struct X64LoadedImage {
 }
 
 // What the program starts with besides its image: argv (argv[0] included),
-// the environment as NAME=value rows, the absolute path `os.executable()`
-// reports (also AT_EXECFN), the thread name (its first 15 bytes) and the
-// command prefix that relaunches `executable` (LOADER_AT_RELAUNCH).
+// its environment, the absolute path `os.executable()` reports (also
+// AT_EXECFN), the thread name (its first 15 bytes) and the command prefix
+// that relaunches `executable` (LOADER_AT_RELAUNCH). `env` lists NAME=value
+// rows; `None` passes this process's environment as it is, in its order and
+// undecoded, the way a kernel exec of the file would get it.
 struct X64Launch {
     argv: [String]
-    env: [String]
+    env: [String]?
     executable: String
     name: String
     relaunch: [String]
@@ -372,7 +374,9 @@ fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
 // read in, and only the ones it (or the patching here) writes are copied.
 // Only the program part is copied in. When the pack file is gone or no
 // longer the one `exe.image` was read from, the file's bytes are put
-// together and loaded as x64_image_load loads them.
+// together and loaded as x64_image_load loads them; an image part read
+// without its loaded segments (x64_image_file_read) can't be, and the load
+// fails.
 fn x64_executable_load(exe: X64Executable) -> X64LoadedImage {
     if exe.image_end == 0 -> return x64_image_load(exe.tail)
     // The file is opened between two checks of its identity, so the
@@ -385,7 +389,13 @@ fn x64_executable_load(exe: X64Executable) -> X64LoadedImage {
             file = -1
         }
     }
-    if file < 0 -> return x64_image_load(x64_executable_bytes(exe.copy()))
+    if file < 0 {
+        // copy: x64_executable_complete reads the whole image part into its own copy.
+        whole := exe.copy()
+        failure :: x64_executable_complete(&whole)
+        if failure != "" -> return loader_failed(failure)
+        return x64_image_load(x64_executable_bytes(^whole))
+    }
     // The ELF header as patched: the image's own names the image's program headers.
     header := exe.image[0..<64]
     loop (k, at) in exe.patch_at {
@@ -526,21 +536,70 @@ fn loader_view(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: Int
 // A runtime image file as read: its bytes and, when the file had the same
 // identity before and after the read, that identity (x64_executable_load
 // maps the file only while it still has it), else empty; `failure` is ""
-// or why it couldn't be read.
+// or why it couldn't be read. The bytes leave out the file's
+// [gap_at, gap_at + gap): the loaded segments past the first page, which
+// neither the bind (Image/MemoryLink.jet) nor the mapping reads (gap 0 when
+// the file was read whole).
 struct X64ImageFile {
     bytes: [U8]
     stamp: [Int]
+    gap_at: Int
+    gap: Int
     failure: String
 }
 
-// Read the runtime image file `path`. A pack file is replaced whole, never
-// rewritten in place, so the same identity before and after the read means
-// the bytes read are that file's.
+// Read the runtime image file `path`: its first page, and its bytes from
+// the end of its loaded segments on. A pack file is replaced whole, never
+// rewritten in place, so the same identity before and after the reads means
+// the bytes read are that file's. A file that changed between the reads, or
+// whose program headers don't lie in its first page, is read whole.
 fn x64_image_file_read(path: String) -> X64ImageFile {
     before :: loader_file_stamp(path)
-    bytes :: loader_files.read_bytes(path) ?? return X64ImageFile{bytes: [U8]{}, stamp: [Int]{}, failure: "{err}"}
+    if before.len() > 0 {
+        size :: before[2]
+        head := loader_files.read_at(path, 0, OS_PAGE_SIZE) ?? return loader_image_file_failed("{err}")
+        plan :: loader_segments(head, head, 0, size)
+        load_end := 0
+        loop segment in plan.segments {
+            if segment.offset + segment.file_size > load_end -> load_end = segment.offset + segment.file_size
+        }
+        if plan.failure == "" && load_end > head.len() {
+            tail :: loader_files.read_at(path, load_end, size - load_end) ?? return loader_image_file_failed("{err}")
+            after :: loader_file_stamp(path)
+            if tail.len() == size - load_end && loader_same_stamp(before, after) {
+                gap_at :: head.len()
+                &head.extend(tail)
+                return X64ImageFile{bytes: head, stamp: after, gap_at: gap_at, gap: load_end - gap_at, failure: ""}
+            }
+        }
+    }
+    loader_image_file_whole(path)
+}
+
+// Read the runtime image file `path` whole.
+fn loader_image_file_whole(path: String) -> X64ImageFile {
+    before :: loader_file_stamp(path)
+    bytes :: loader_files.read_bytes(path) ?? return loader_image_file_failed("{err}")
     after :: loader_file_stamp(path)
-    X64ImageFile{bytes: bytes, stamp: if loader_same_stamp(before, after) -> after else -> [Int]{}, failure: ""}
+    X64ImageFile{bytes: bytes, stamp: if loader_same_stamp(before, after) -> after else -> [Int]{}, gap_at: 0, gap: 0, failure: ""}
+}
+
+fn loader_image_file_failed(failure: String) -> X64ImageFile Never! {
+    X64ImageFile{bytes: [U8]{}, stamp: [Int]{}, gap_at: 0, gap: 0, failure: failure}
+}
+
+// Give `exe` its whole image part when x64_image_file_read left out the
+// loaded segments: the file is read again, whole, while it still has the
+// identity it had then; "" or why not.
+fn x64_executable_complete(exe: &X64Executable) -> String {
+    if exe.image_gap == 0 -> return ""
+    whole := loader_image_file_whole(exe.image_path)
+    if whole.failure != "" -> return "couldn't read the runtime image {exe.image_path}: {whole.failure}"
+    if !loader_same_stamp(whole.stamp, exe.image_stamp) -> return "the runtime image {exe.image_path} changed while jet ran"
+    exe.image = ^whole.bytes
+    exe.image_gap_at = 0
+    exe.image_gap = 0
+    ""
 }
 
 // The identity of the file at `path`: device, inode, size, and modification
@@ -597,6 +656,59 @@ fn loader_put_text(at: Int, text: String) -> Int {
         os_store_byte(start + bytes.len(), 0)
     }
     start
+}
+
+// Store `bytes` below `at`; returns their address.
+fn loader_put_bytes(at: Int, bytes: [U8]) -> Int {
+    start :: at - bytes.len()
+    #Unsafe("the caller owns the stack bytes below `at`") {
+        loop (k, byte) in bytes { os_store_byte(start + k, Int.from_u8(byte)) }
+    }
+    start
+}
+
+// The environment block `env` gives the program: its NUL-terminated
+// NAME=value strings, in order (X64Launch.env). `None` when this process's
+// environment can't be read.
+fn loader_environ(env: [String]?) -> [U8]? {
+    if env == .Val(rows) {
+        block := [U8]{}
+        loop row in rows {
+            &block.extend(row.bytes())
+            &block.push(U8{0})
+        }
+        return Val(block)
+    }
+    block := loader_files.read_bytes("/proc/self/environ") ?? return None
+    if block.len() > 0 && block[block.len() - 1] != (U8{0}) -> &block.push(U8{0})
+    Val(block)
+}
+
+// Where the strings of an environment block start, in order.
+fn loader_environ_starts(block: [U8]) -> [Int] {
+    starts := [Int]{}
+    start := 0
+    loop (k, byte) in block {
+        if byte != (U8{0}) -> next
+        if k > start -> &starts.push(start)
+        start = k + 1
+    }
+    starts
+}
+
+// This process's environment as NAME=value rows, in order; an entry that
+// isn't UTF-8 is left out. For a launch that changes the environment.
+fn x64_process_env() -> [String] {
+    rows := [String]{}
+    block :: loader_environ(None) ?? return rows
+    starts :: loader_environ_starts(block)
+    loop start in starts {
+        end := start
+        loop block[end] != (U8{0}) -> end += 1
+        row :: String.from_bytes(block[start..<end]) ?? next
+        &rows.push(row)
+    }
+    rows
 }
 
 fn loader_free(plan: LoaderPlan) {
@@ -828,12 +940,11 @@ fn loader_plan(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool)
     // (as execve lays them out), so [arg_start, arg_end) and
     // [env_start, env_end) are what /proc/<pid>/cmdline and environ read.
     env_end :: at
-    env := [Int]{}
-    loop k in 0..<launch.env.len() {
-        at = loader_put_text(at, launch.env[launch.env.len() - 1 - k])
-        &env.push(at)
-    }
+    environ :: loader_environ(launch.env) ?? return loader_plan_failed(plan, "couldn't read /proc/self/environ")
+    at = loader_put_bytes(at, environ)
     env_start :: at
+    env := [Int]{}
+    loop start in loader_environ_starts(environ) -> &env.push(env_start + start)
     argv := [Int]{}
     loop k in 0..<launch.argv.len() {
         at = loader_put_text(at, launch.argv[launch.argv.len() - 1 - k])
@@ -844,7 +955,7 @@ fn loader_plan(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool)
     words := [Int]{launch.argv.len()}
     loop k in 0..<argv.len() -> &words.push(argv[argv.len() - 1 - k])
     &words.push(0)
-    loop k in 0..<env.len() -> &words.push(env[env.len() - 1 - k])
+    loop address in env -> &words.push(address)
     &words.push(0)
     // This process's auxiliary vector, less what describes the image.
     auxv := 0
@@ -1006,15 +1117,17 @@ fn x64_process_mirror(status: Int) -> Int {
 // The fallback: execute the image file at `path` in place of this process
 // with `launch`'s argv and environment. Returns only on failure, with why.
 fn x64_file_exec(path: String, launch: X64Launch) -> String {
+    environ :: loader_environ(launch.env) ?? return "couldn't read /proc/self/environ"
+    starts :: loader_environ_starts(environ)
     texts := [String]{path}
     loop argument in launch.argv -> &texts.push(argument)
-    loop row in launch.env -> &texts.push(row)
-    bytes := 8 * (launch.argv.len() + launch.env.len() + 2) + 16
+    bytes := 8 * (launch.argv.len() + starts.len() + 2) + 16 + environ.len()
     loop text in texts -> bytes += text.bytes().len() + 1
     size :: os_page_round(bytes)
     block :: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(block) -> return "mapping execve's arguments failed (errno {-block})"
-    at := block + size
+    at := loader_put_bytes(block + size, environ)
+    env_start :: at
     addresses := [Int]{}
     loop text in texts {
         at = loader_put_text(at, text)
@@ -1026,8 +1139,8 @@ fn x64_file_exec(path: String, launch: X64Launch) -> String {
     #Unsafe("execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start") {
         loop k in 0..<launch.argv.len() { os_store_word(argv + 8 * k, addresses[1 + k]) }
         os_store_word(argv + 8 * launch.argv.len(), 0)
-        loop k in 0..<launch.env.len() { os_store_word(envp + 8 * k, addresses[1 + launch.argv.len() + k]) }
-        os_store_word(envp + 8 * launch.env.len(), 0)
+        loop (k, start) in starts { os_store_word(envp + 8 * k, env_start + start) }
+        os_store_word(envp + 8 * starts.len(), 0)
         // execve keeps the signal mask; the program starts with none blocked.
         _ := os_syscall(OS_SYS_RT_SIGPROCMASK, 2, block, 0, 8, 0, 0)
         result = os_syscall(OS_SYS_EXECVE, addresses[0], argv, envp, 0, 0, 0)

@@ -195,7 +195,9 @@ index of its defined global symbols. Binding a program object to that image
 (`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not relink the
 runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
-run base. The key hashes the source inventory, checked ABI, lifecycle, backend
+run base. `jet run` reads only the image's first page and the bytes after its
+loaded segments for that bind, and maps the segments from the file
+(`Image/Loader.jet`). The key hashes the source inventory, checked ABI, lifecycle, backend
 inputs and C platform archives. The accompanying `provenance.json` records each
 input digest, the pack and image digests and zero Rust or LLVM-generated Jet
 objects, with permitted C platform archives listed separately.

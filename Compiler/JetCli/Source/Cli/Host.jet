@@ -13,6 +13,7 @@ use jet_backend.[
     X64Launch,
     x64_bind_runtime_image,
     x64_executable_bytes,
+    x64_executable_complete,
     x64_executable_load,
     x64_executable_whole,
     x64_file_exec,
@@ -22,6 +23,7 @@ use jet_backend.[
     x64_image_spawn,
     x64_image_unload,
     x64_link_executable,
+    x64_process_env,
     x64_process_mirror,
     x64_process_nap,
     x64_process_stop,
@@ -455,7 +457,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
         // init/fini arrays, an import the image lacks) links the pack in full.
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
-        bound := x64_bind_runtime_image(executable_path, object.copy(), ^runtime, runtime_path, realized.runtime_stamp)
+        bound := x64_bind_runtime_image(executable_path, object.copy(), ^runtime, runtime_path, realized.runtime_stamp, realized.runtime_gap_at, realized.runtime_gap)
         if trace_sink == .Val(sink) -> sink.end("native.link", 2)
         if bound.errors.len() == 0 {
             if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
@@ -493,10 +495,14 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
 
 // Write the linked executable `executable` as the file `path`.
 fn jet_cli_native_write(path: String, executable: X64Executable) -[FS]> JetCLINativeFailure? Never! {
-    if {
-        executable.image_end == 0 -> cli_files.write_bytes(path, executable.tail) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
+    if executable.image_end == 0 {
+        cli_files.write_bytes(path, executable.tail) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
+    } else {
         // copy: the parts stay with the caller, which may still map them.
-        else -> cli_files.write_bytes(path, x64_executable_bytes(executable.copy())) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
+        whole := executable.copy()
+        failure :: x64_executable_complete(&whole)
+        if failure != "" -> return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {failure}"})
+        cli_files.write_bytes(path, x64_executable_bytes(^whole)) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
     }
     cli_files.set_mode(path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {path} executable: {err}"})
     None
@@ -506,14 +512,18 @@ fn jet_cli_native_write(path: String, executable: X64Executable) -[FS]> JetCLINa
 // (jet_cli_native_foreign_realize): the link inputs, else why it failed;
 // then the runtime the link reads from `runtime_path` (the prelinked runtime
 // image when `bound`, its file's identity `runtime_stamp` the same before and
-// after the read, else empty; else the Jet-only object for a platform
-// closure, else the pack), else why reading it failed.
+// after the read, else empty, and without its bytes
+// [runtime_gap_at, runtime_gap_at + runtime_gap), Image/Loader.jet
+// x64_image_file_read; else the Jet-only object for a platform closure, else
+// the pack), else why reading it failed.
 struct JetCLIForeignRealized {
     inputs: JetCLIForeignInputs?
     error: String
     runtime: [U8]?
     runtime_path: String
     runtime_stamp: [Int]
+    runtime_gap_at: Int
+    runtime_gap: Int
     runtime_error: String
     bound: Bool
 }
@@ -524,7 +534,7 @@ struct JetCLIForeignRealized {
 // runtime image (Image/MemoryLink.jet), so only the image is read; a pack
 // without one is read whole, as before.
 fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?, bind: Bool) -[FS, Env, Exec, Time.Wait]> JetCLIForeignRealized {
-    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_error: "", bound: false}
+    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_gap_at: 0, runtime_gap: 0, runtime_error: "", bound: false}
     platform := false
     no_closure := false
     if jet_cli_native_c_inputs(facts, rust_helper, sources, runtime_dir) == {
@@ -545,6 +555,8 @@ fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper:
         // the one read here (Image/Loader.jet x64_executable_load).
         image := x64_image_file_read(image_path)
         if image.failure == "" {
+            realized.runtime_gap_at = image.gap_at
+            realized.runtime_gap = image.gap
             realized.runtime = Val(^image.bytes)
             realized.runtime_stamp = ^image.stamp
             realized.runtime_path = image_path
@@ -936,19 +948,14 @@ fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
 
 // What a program `jet run` starts gets besides its image: argv[0] and
 // `os.executable()` are the absolute path of `file`, then `program_args`;
-// this process's environment. Launching its own path again runs it the way
-// it runs now: this jet, this profile, this invocation's authority
+// this process's environment, passed as it is (X64Launch.env None).
+// Launching its own path again runs it the way it runs now: this jet, this
+// profile, this invocation's authority
 // (`jet run [--release] [-A] [--allow=…] [--deny=…]`).
 fn jet_cli_launch_plan(file: String, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?) -> X64Launch {
     executable :: cli_files.absolute(file) ?? file
     argv := [String]{executable}
     loop argument in program_args -> &argv.push(argument)
-    env := [String]{}
-    names :: cli_sys.vars() ?? [String]{}
-    loop name in names {
-        value :: cli_sys.get(name) ?? next
-        &env.push("{name}={value}")
-    }
     relaunch := [String]{cli_sys.executable(), "run"}
     if release -> &relaunch.push("--release")
     if invocation == .Val(rows) {
@@ -956,7 +963,7 @@ fn jet_cli_launch_plan(file: String, program_args: [String], release: Bool, invo
         if rows.allow.len() > 0 -> &relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> &relaunch.push("--deny={rows.deny.join(",")}")
     }
-    X64Launch{argv: argv, env: env, executable: executable, name: jet_cli_stem(file), relaunch: relaunch}
+    X64Launch{argv: argv, env: None, executable: executable, name: jet_cli_stem(file), relaunch: relaunch}
 }
 
 #Import(c) fn jet_cli_scheduler_shutdown() -> I64 = "jet_rt_scheduler_shutdown"
@@ -971,7 +978,13 @@ fn jet_cli_perf_map(executable: X64Executable, pid: Int) {
     if (cli_sys.get("JET_PERF_MAP") ?? "") != "1" -> return
     jet :: cli_process.current_pid()
     // copy: the map reads the whole file's bytes; the parts stay mapped.
-    image :: x64_executable_bytes(executable.copy())
+    whole := executable.copy()
+    complete :: x64_executable_complete(&whole)
+    if complete != "" {
+        cli_term.eprint("jet: no perf map for the program: {complete}")
+        return
+    }
+    image :: x64_executable_bytes(^whole)
     failure := x64_image_perf_map(image, pid)
     if failure == "" && pid != jet -> failure = x64_image_perf_map(image, jet)
     if failure != "" -> cli_term.eprint("jet: no perf map for the program: {failure}")
@@ -1133,8 +1146,12 @@ fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, relea
 }
 
 fn jet_cli_script_launch(keep: JetCLIScriptKeep?, snapshot: JetDriverAuthorizedSourceSnapshot, authority: JetCLIAuthority, executable: X64Executable, file: String, binary: String, program_args: [String], release: Bool, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput {
-    // copy: the kept file holds the whole program; the parts stay to run it.
-    if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, x64_executable_bytes(executable.copy()), authority)
+    if keep == .Val(kept) {
+        // copy: the kept file holds the whole program; the parts stay to run it.
+        whole := executable.copy()
+        // A pack that changed since the bind leaves the program unkept; it still runs.
+        if x64_executable_complete(&whole) == "" -> jet_cli_script_keep(kept, snapshot, x64_executable_bytes(^whole), authority)
+    }
     jet_cli_launch(executable, file, binary, false, program_args, release, invocation, false, color)
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
@@ -2291,9 +2308,9 @@ fn jet_cli_dev_launch(executable: X64Executable, binary: String, file: String, p
     launch := jet_cli_launch_plan(file, program_args, release, invocation)
     if port == .Val(number) {
         rows := [String]{}
-        loop row in launch.env { if !row.starts_with("JET_DEV_PORT=") -> &rows.push(row) }
+        loop row in x64_process_env() { if !row.starts_with("JET_DEV_PORT=") -> &rows.push(row) }
         &rows.push("JET_DEV_PORT={number}")
-        launch.env = rows
+        launch.env = Val(rows)
         cli_term.eprint("jet dev: dev server port {number} (JET_DEV_PORT)")
     }
     loaded :: x64_executable_load(executable)

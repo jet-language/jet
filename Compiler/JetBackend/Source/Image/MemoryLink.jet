@@ -67,20 +67,35 @@ fn link_image_i64(bytes: [U8], at: Int) -> Int Never! {
     link_image_u32(bytes, at) + high * 0x100000000
 }
 
-// Read the runtime image in buffer `b`; errors are reported on `c`.
-fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
+// The index in the bytes read of file offset `at` of an image read without
+// its bytes [gap_at, gap_at + gap) (Image/Loader.jet x64_image_file_read);
+// -1 when `at` lies in that gap.
+fn link_image_at(at: Int, gap_at: Int, gap: Int) -> Int Never! {
+    if {
+        gap == 0 || at < gap_at -> at
+        at < gap_at + gap -> -1
+        else -> at - gap
+    }
+}
+
+// Read the runtime image in buffer `b`, the image file without its bytes
+// [gap_at, gap_at + gap) (none when gap is 0); errors are reported on `c`.
+// The headers, the program header table and the sections the bind reads
+// lie outside the gap; the view's offsets index `b`.
+fn link_image_view(c: &LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImageView Never! {
     v := LinkImageView{base: -1, phoff: 0, phnum: 0, load_end: 0, program_base: 0, sites: [Int]{}, symtab_at: 0, symtab_count: 0, first_global: 0, strtab_at: 0, strtab_size: 0, shoff: 0, alloc_headers: 0, names_at: 0, exports_at: 0, exports_slots: 0}
     size :: c.bufs[b].len()
+    head :: if gap == 0 -> size else -> gap_at
     if size < LINK_EHDR_SIZE || link_u32(c.bufs, b, 0) != 0x464c457f || link_u16(c.bufs, b, 16) != 2 || link_u16(c.bufs, b, 18) != 62 {
         link_error(&c, "runtime image: not an x86-64 ELF executable")
         return v
     }
     v.phoff = link_s64(c.bufs, b, 32)
     v.phnum = link_u16(c.bufs, b, 56)
-    v.shoff = link_s64(c.bufs, b, 40)
+    v.shoff = link_image_at(link_s64(c.bufs, b, 40), gap_at, gap)
     shnum :: link_u16(c.bufs, b, 60)
     shstrndx :: link_u16(c.bufs, b, 62)
-    if v.phoff < 0 || v.phoff + LINK_PHDR_SIZE * v.phnum > size || v.shoff < 0 || v.shoff + 64 * shnum > size || shstrndx >= shnum {
+    if v.phoff < 0 || v.phoff + LINK_PHDR_SIZE * v.phnum > head || v.shoff < 0 || v.shoff + 64 * shnum > size || shstrndx >= shnum {
         link_error(&c, "runtime image: truncated headers")
         return v
     }
@@ -92,7 +107,11 @@ fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
         end :: offset + link_s64(c.bufs, b, at + 32)
         if end > v.load_end -> v.load_end = end
     }
-    v.names_at = link_s64(c.bufs, b, v.shoff + 64 * shstrndx + 24)
+    v.names_at = link_image_at(link_s64(c.bufs, b, v.shoff + 64 * shstrndx + 24), gap_at, gap)
+    if v.names_at < 0 {
+        link_error(&c, "runtime image: malformed section headers")
+        return v
+    }
     bind_at := -1
     bind_size := 0
     exports_at := -1
@@ -103,25 +122,25 @@ fn link_image_view(c: &LinkContext, b: Int) -> LinkImageView Never! {
         name :: v.names_at + link_u32(c.bufs, b, h)
         if {
             link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB -> {
-                v.symtab_at = link_s64(c.bufs, b, h + 24)
+                v.symtab_at = link_image_at(link_s64(c.bufs, b, h + 24), gap_at, gap)
                 v.symtab_count = link_s64(c.bufs, b, h + 32).div_euclid(24)
                 v.first_global = link_u32(c.bufs, b, h + 44)
                 strings :: v.shoff + 64 * link_u32(c.bufs, b, h + 40)
-                v.strtab_at = link_s64(c.bufs, b, strings + 24)
+                v.strtab_at = link_image_at(link_s64(c.bufs, b, strings + 24), gap_at, gap)
                 v.strtab_size = link_s64(c.bufs, b, strings + 32)
             }
             link_name_has(c.bufs, b, name, LINK_IMAGE_BIND_SECTION, true) -> {
-                bind_at = link_s64(c.bufs, b, h + 24)
+                bind_at = link_image_at(link_s64(c.bufs, b, h + 24), gap_at, gap)
                 bind_size = link_s64(c.bufs, b, h + 32)
             }
             link_name_has(c.bufs, b, name, LINK_IMAGE_EXPORTS_SECTION, true) -> {
-                exports_at = link_s64(c.bufs, b, h + 24)
+                exports_at = link_image_at(link_s64(c.bufs, b, h + 24), gap_at, gap)
                 exports_size = link_s64(c.bufs, b, h + 32)
             }
             else -> {}
         }
     }
-    if v.base < 0 || v.symtab_count == 0 || bind_at < 0 || bind_size < 24 || bind_at + bind_size > size || link_s64(c.bufs, b, bind_at) != LINK_IMAGE_BIND_MAGIC {
+    if v.base < 0 || v.symtab_count == 0 || v.symtab_at < 0 || v.strtab_at < 0 || bind_at < 0 || bind_size < 24 || bind_at + bind_size > size || link_s64(c.bufs, b, bind_at) != LINK_IMAGE_BIND_MAGIC {
         link_error(&c, "runtime image: no loaded segments, symbol table or `{LINK_IMAGE_BIND_SECTION}` section")
         return v
     }
@@ -368,13 +387,19 @@ fn link_bind_sections(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageV
 // image part is the pack's own bytes, so Image/Loader.jet maps it from the
 // pack file `image_path` (x64_executable_load) instead of copying it, when
 // the file still has the identity `image_stamp` (x64_image_file_read) it
-// had when `image` was read from it. A whole executable is all `tail`
+// had when `image` was read from it. `image` lacks the file's bytes
+// [image_gap_at, image_gap_at + image_gap) when x64_image_file_read left
+// them out (image_gap 0 when it holds them all): the mapping reads only the
+// ELF header, and Image/Loader.jet x64_executable_complete reads the rest
+// for whoever needs the whole file. A whole executable is all `tail`
 // (image_end and tail_at 0). x64_executable_bytes puts the file together.
 struct X64Executable {
     image: [U8]
     image_path: String
     image_stamp: [Int]
     image_end: Int
+    image_gap_at: Int
+    image_gap: Int
     patch_at: [Int]
     patch_bytes: [[U8]]
     tail_at: Int
@@ -383,12 +408,13 @@ struct X64Executable {
 
 // The executable whose file is `bytes`.
 fn x64_executable_whole(bytes: ^[U8]) -> X64Executable Never! {
-    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_end: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: ^bytes}
+    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_end: 0, image_gap_at: 0, image_gap: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: ^bytes}
 }
 
-// The file of `exe`.
+// The file of `exe`, whose image part is whole (x64_executable_complete).
 fn x64_executable_bytes(exe: ^X64Executable) -> [U8] Never! {
     if exe.image_end == 0 -> return ^exe.tail
+    if exe.image_gap > 0 -> panic("x64_executable_bytes: the image part of {exe.image_path} was read without its loaded segments")
     out := exe.image[0..<exe.image_end]
     loop (k, at) in exe.patch_at {
         loop (j, byte) in exe.patch_bytes[k] -> out[at + j] = byte
@@ -406,10 +432,11 @@ struct X64BindResult {
 
 // Bind the program object `program` (named `name` in reports) to the
 // runtime image `image`, read from the file `image_path` with identity
-// `image_stamp` ("" and empty when it came from elsewhere): a static
-// executable at the image's base, in parts.
-fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path: String, image_stamp: [Int]) -> X64BindResult Never! {
-    bound := link_bind_image(name, ^program, ^image, None)
+// `image_stamp` ("" and empty when it came from elsewhere) and without its
+// bytes [gap_at, gap_at + gap) (Image/Loader.jet x64_image_file_read): a
+// static executable at the image's base, in parts.
+fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path: String, image_stamp: [Int], gap_at: Int, gap: Int) -> X64BindResult Never! {
+    bound := link_bind_image(name, ^program, ^image, gap_at, gap, None)
     if bound.errors.len() == 0 {
         bound.executable.image_path = image_path
         bound.executable.image_stamp = image_stamp
@@ -420,7 +447,7 @@ fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path
 // Link the program object `program` (named `name` in reports) against the
 // runtime image `image` into a static executable at the image's base.
 fn x64_link_with_runtime_image(name: String, program: ^[U8], image: ^[U8]) -> X64ExecutableResult Never! {
-    link_bind_bytes(link_bind_image(name, ^program, ^image, None))
+    link_bind_bytes(link_bind_image(name, ^program, ^image, 0, 0, None))
 }
 
 // The same with the program's part at `program_base`, a page boundary at or
@@ -429,7 +456,7 @@ fn x64_link_with_runtime_image(name: String, program: ^[U8], image: ^[U8]) -> X6
 // `program_base` up. File offsets stay address - image base, so the bytes
 // grow with `program_base`.
 fn x64_link_with_runtime_image_at(name: String, program: ^[U8], image: ^[U8], program_base: Int) -> X64ExecutableResult Never! {
-    link_bind_bytes(link_bind_image(name, ^program, ^image, Val(program_base)))
+    link_bind_bytes(link_bind_image(name, ^program, ^image, 0, 0, Val(program_base)))
 }
 
 fn link_bind_bytes(bound: ^X64BindResult) -> X64ExecutableResult Never! {
@@ -441,9 +468,9 @@ fn link_bind_failure(c: LinkContext) -> X64BindResult Never! {
     X64BindResult{executable: x64_executable_whole([U8]{}), errors: c.errors.copy()}
 }
 
-fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int?) -> X64BindResult Never! {
+fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap: Int, program_base: Int?) -> X64BindResult Never! {
     c := link_context(^[[U8]]{^program, ^image}, LINK_RUN_BASE)
-    view := link_image_view(&c, 1)
+    view := link_image_view(&c, 1, gap_at, gap)
     if c.errors.len() > 0 -> return link_bind_failure(c)
     if program_base == .Val(chosen) {
         if chosen.bit_and(LINK_PAGE - 1) != 0 || chosen < view.program_base {
@@ -516,6 +543,8 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], program_base: Int
     origin :: view.program_base - c.base
     exe := x64_executable_whole([U8]{})
     exe.image_end = view.load_end
+    exe.image_gap_at = gap_at
+    exe.image_gap = gap
     exe.tail_at = origin
     elf := link_bind_write(&c, &exe, view, layout, target)
     link_bind_sections(&c, &exe.tail, origin, view, layout, debug, &elf)
