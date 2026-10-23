@@ -532,7 +532,10 @@ fn jet_driver_host_os_key(value: String) -> String Never! {
 // The build snapshot sema folds `$package.*` and `$build.*`
 // from (Rust `seed_build_facts_from_stamp`). A manifest package names itself;
 // the manifest-less rung uses the entry file stem and version `0.0.0`. The
-// toolchain stamp is the compiler's own package version.
+// stamp is the lock's `[build.stamp]` the host read (request.build_stamp);
+// without one it is no git revision, clean, the compiler's own package
+// version and no time. A compile never captures a fresh stamp from git and
+// the clock: only lock writers do (Lock.rs `ensure_build_stamp`).
 fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
@@ -555,15 +558,24 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
     if request.host_facts.active_os == .Val(raw_os) -> host_os = jet_driver_host_os_key(raw_os)
     toolchain := ""
     if request.host_facts.compiler_identity == .Val(identity) -> toolchain = jet_target_package_version_from_compiler_identity(identity) ?? ""
+    stamp_git := String?{None}
+    stamp_dirty := false
+    stamp_at := ""
+    if request.build_stamp == .Val(stamp) {
+        stamp_git = stamp.git
+        stamp_dirty = stamp.dirty
+        toolchain = stamp.toolchain
+        stamp_at = stamp.at
+    }
     SemaBuildFacts{
         package_name: package_name,
         package_version: package_version,
         os: jet_target_active_os_name(target_machine.triple, host_os),
         profile: request.profile,
-        stamp_git: None,
-        stamp_dirty: false,
+        stamp_git: stamp_git,
+        stamp_dirty: stamp_dirty,
         stamp_toolchain: toolchain,
-        stamp_at: "",
+        stamp_at: stamp_at,
         settings: ^settings,
     }
 }

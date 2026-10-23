@@ -1,6 +1,7 @@
 use core.build.[BuildGraphNode]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
+use jet_pkg_model.[BuildStamp]
 use jet_foundation.[
     AppAuthorizedDirectory,
     CompilerThreads,
@@ -250,6 +251,10 @@ struct JetDriverCompileRequest {
     // When set, every Tier-1 comptime input this compile reads (path and
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
+    // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host
+    // (Lock.rs `build_stamp`): the provenance `$build.stamp.*` folds from.
+    // None keeps the default stamp (jet_driver_build_facts).
+    build_stamp: BuildStamp?{None}
 }
 
 struct JetDriverGatePolicy {

@@ -57,7 +57,7 @@ use jet_eval.[
 ]
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
 use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
-use jet_pkg_model.[DepSpec, PackageFacts, pkg_manifest_parse, pkg_to_manifest]
+use jet_pkg_model.[BuildStamp, DepSpec, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
 
 // The production CLI's compile, under the driver's all-phases collector when
 // JET_KEEP_GOING=1. A diagnostic trap is a failed compile, never an artifact.
@@ -753,11 +753,13 @@ impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
 }
 
 // The driver request for `snapshot` on this host: the Core rows, the
-// canonical effect source, the host facts, and at most `threads` compiler
-// threads (`None` admits threads automatically, up to one per physical core).
+// canonical effect source, the host facts, the lock's build stamp, and at
+// most `threads` compiler threads (`None` admits threads automatically, up
+// to one per physical core).
 fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os :: cli_sys.name()
     cores :: cli_sys.cpu_count()
+    stamp :: jet_cli_build_stamp(snapshot)
     JetDriverCompileRequest{
         authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
@@ -770,7 +772,21 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
+        build_stamp: stamp,
     }
+}
+
+// The `[build.stamp]` of the entry root's `.jet/lock` (Lock.rs `build_stamp`
+// over `load`). A missing or unparsable lock, or one without a stamp, is None:
+// the compile keeps the driver's default stamp and never captures a fresh one
+// from git and the clock.
+fn jet_cli_build_stamp(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> BuildStamp? {
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        lock := pkg_lock_load(root.canonical_path) ?? return None
+        return ^lock.build_stamp
+    }
+    None
 }
 
 // The evaluator configuration of a CLI compile: compile-time code runs
