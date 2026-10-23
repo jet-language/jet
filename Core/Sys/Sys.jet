@@ -173,22 +173,56 @@ fn replace_entry(entries: &[(name: [U8], value: [U8])], key: [U8], value: [U8]) 
 }
 
 fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
-    ordered := [(raw: [U8], name: String)]{}
+    raw := [[U8]]{}
+    names := [String]{}
     loop entry in entries {
         name :: String.from_bytes(entry.name) ?? return Err(EnvError.NonUnicode)
         _ :: String.from_bytes(entry.value) ?? return Err(EnvError.NonUnicode)
-        &ordered.push((raw: entry.name, name: name))
+        &raw.push(entry.name)
+        &names.push(name)
     }
-    loop index in 1..<ordered.len() {
-        position := index
-        loop position > 0 && env_key_compare(ordered[position - 1].raw, ordered[position].raw) > 0 {
-            &ordered.__swap(position - 1, position)
-            position -= 1
+    ordered := [String]{}
+    loop index in env_key_order(raw) -> &ordered.push(names[index])
+    Ok(ordered)
+}
+
+// The indexes of `keys` in env_key_compare order, equal keys in their
+// given order: a bottom-up merge sort, n log n host compares.
+fn env_key_order(keys: [[U8]]) -> [Int] Never! {
+    count :: keys.len()
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    merged := order.copy()
+    width := 1
+    loop width < count {
+        start := 0
+        loop start < count {
+            middle :: if start + width < count -> start + width else -> count
+            end :: if start + 2 * width < count -> start + 2 * width else -> count
+            left := start
+            right := middle
+            loop out in start..<end {
+                if right >= end || (left < middle && env_key_compare(keys[order[left]], keys[order[right]]) <= 0) {
+                    merged[out] = order[left]
+                    left += 1
+                } else {
+                    merged[out] = order[right]
+                    right += 1
+                }
+            }
+            start += 2 * width
         }
+        order = merged.copy()
+        width *= 2
     }
-    names := [String]{}
-    loop entry in ordered -> &names.push(entry.name)
-    Ok(names)
+    order
+}
+
+#Test("environment names enumerate in key order, odd counts and runs included") {
+    entries := [(name: [U8], value: [U8])]{}
+    loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) -> &entries.push((name: name.bytes(), value: "v".bytes()))
+    assert_eq(entry_names(entries), Ok([String]{"A", "A_1", "B", "C", "HOME", "PATH", "TERM"}))
+    assert_eq(entry_names([(name: [U8], value: [U8])]{}), Ok([String]{}))
 }
 
 #Test("logical environment replacement and removal retain one last spelling") {
