@@ -78,7 +78,6 @@ use jet_sema.[
     sema_marker_is_guest_export,
     sema_source_location_at,
     SemaCompilerModuleSource,
-    sema_graph_release_checked,
 ]
 use jet_foundation.[
     CompilerThreads,
@@ -4058,9 +4057,6 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         }
         compiler_transfer_rows<FnBody>(&checked_functions, &module_functions)
     }
-    // The published bodies moved out above; the checker's own trees have no
-    // reader past here.
-    sema_graph_release_checked(&checked_graph)
     // Every checked function has its owner now.
     registered_function_keys = [String:[String:Bool]]{}
     loaded_identity_counts = [String:Int]{}

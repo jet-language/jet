@@ -220,7 +220,7 @@ fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [S
 
 struct SemaResult {
     module_name: String
-    functions: [TFunc]
+    functions: [FnBody]
     call_facts: [SemaCallSiteFact]
     hardware_use: TargetHardwareUse
     name_references: [SemaNameReferenceFact]
@@ -240,11 +240,10 @@ struct SemaGraphModuleResult {
     module_path: String
     source_file: String
     declarations: TDeclarationFacts
-    // The checker's trees of this module's functions: sema's own working
-    // rows, read by sema's whole-program passes and by no other package.
-    checked: [TFunc]
-    // The published flat bodies of `checked` (sema_publish_module).
-    functions: [FnBody]{[FnBody]{}}
+    // This module's checked functions as flat bodies: each function check
+    // seals and flattens its own tree (sema_function_check_pass), so sema's
+    // whole-program passes and every later package read only these.
+    functions: [FnBody]
     nominals: [SemaRegistrationNominal]
     // Position in `nominals` of the first nominal per declared name, so a
     // nominal spelling resolves without scanning every module's nominals.
@@ -334,9 +333,7 @@ struct SemaComptimeItemRequest {
     destination_key: String
     source_file: String
     kind: SemaComptimeItemKind
-    // The checker's tree of the item expression (sema's own) and its
-    // published flat form.
-    checked: TExpr
+    // The item expression's flat form (sema_publish_expression).
     expression: BodyExpr
     expected_type: Type?
     span: Span
@@ -414,10 +411,8 @@ struct SemaComptimeItemCheck {
 struct SemaComptimeFunctionResult {
     module_identity: String
     function_key: String
-    // The checker's tree (sema's own) and its published flat body
-    // (sema_publish_comptime_function).
-    checked: TFunc?
-    function: FnBody?{None}
+    // The checked body (sema_function_check_pass flattens it).
+    function: FnBody?
     dependencies: [String]
     waiting_dependencies: [String]
     calls: [SemaComptimeRequest]
@@ -439,28 +434,6 @@ struct SemaComptimeFunctionResult {
     // Incomplete only because of failure obligations against unannotated
     // callees: a solve over the callees' rows discharges or emits them.
     obligations_pending: Bool{false}
-}
-
-// Sema publishes checked code as flat bodies (jet_foundation Facts/Body.jet);
-// its own trees (`checked`) stay inside sema. Every result that leaves sema
-// carries `functions` (or `function`, `expression`) built from them here.
-fn sema_publish_module(module_row: &SemaGraphModuleResult) Never! {
-    module_row.functions = body_flat_functions(module_row.checked)
-}
-
-fn sema_publish_modules(modules: &[SemaGraphModuleResult]) Never! {
-    loop index in 0..<modules.len() -> sema_publish_module(&modules[index])
-}
-
-// Drops the checker's own trees of a finished graph once its last sema reader
-// (semantic index, cost coverage) is done: from the Driver's lowering on only
-// the published bodies are resident.
-fn sema_graph_release_checked(graph: &SemaGraphResult) Never! {
-    loop index in 0..<graph.modules.len() -> graph.modules[index].checked = [TFunc]{}
-}
-
-fn sema_publish_comptime_function(result: &SemaComptimeFunctionResult) Never! {
-    result.function = if result.checked == .Val(function) -> Val(body_flat_function(function)) else -> None
 }
 
 // A checked item expression as a flat body of its own, its nodes numbered
@@ -1101,7 +1074,7 @@ fn sema_incremental_accept_packet(query: SemaBodyMemoQuery?, body: SemaParallelB
 }
 
 struct SemaFunctionResult {
-    value: TFunc?
+    value: FnBody?
     complete: Bool
     exact_int_reachable: Bool
     copy_events: [SemaCopyEvent]
@@ -1342,7 +1315,7 @@ fn sema_function_return_view_row(scopes: SemaScopeTable, rows: &[String:Int], ke
 
 // `rows`: the body loop's sema_function_return_view_rows, empty until the
 // first publish fills it.
-fn sema_function_publish_return_views(scopes: &SemaScopeTable, rows: &[String:Int], function: TFunc) -> Bool Never! {
+fn sema_function_publish_return_views(scopes: &SemaScopeTable, rows: &[String:Int], function: FnBody) -> Bool Never! {
     provenance :: function.return_view_provenance ?? return false
     index :: sema_function_return_view_row(scopes, &rows, function.key) ?? return false
     binding :: scopes.bindings[index]
@@ -1536,7 +1509,7 @@ fn sema_register_item(scopes: &SemaScopeTable, declarations: &[SemaScopeDeclarat
     false
 }
 
-fn sema_append_function(functions: &[TFunc], checked: SemaFunctionResult) -> Bool Never! {
+fn sema_append_function(functions: &[FnBody], checked: SemaFunctionResult) -> Bool Never! {
     function :: checked.value ?? return false
     &functions.push(function)
     true
@@ -2167,10 +2140,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         typed_goals: context.typed_goals.copy(),
         expr_types: ^expr_types,
     }
-    // Nodes no source expression produced take function-local rows.
+    // Nodes no source expression produced take function-local rows; the
+    // checker's tree ends here, as the function's flat body.
     _ := tir_function_seal(&tir, context.next_expr_id, false)
     SemaFunctionResult{
-        value: Val(^tir),
+        value: Val(body_flat_function(tir)),
         complete: true,
         exact_int_reachable: context.exact_int_reachable,
         copy_events: context.copy_events.copy(),
@@ -2192,7 +2166,7 @@ fn check_program(input: Program, module_name: String, source_file: String, sourc
     }
     source_program :: policy_program ?? input
     sema_marker_rules_validate_allow(source_program, &diagnostics)
-    functions := [TFunc]{}
+    functions := [FnBody]{}
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
     name_references := [SemaNameReferenceFact]{}
@@ -2287,8 +2261,8 @@ fn sema_comptime_checked_function_rows(functions: [SemaComptimeFunctionResult]) 
 
 // A result whose only errors are failure obligations is appended too: the
 // caller carries those obligations to the solve that settles them.
-fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
-    function :: result.checked ?? return false
+fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[FnBody], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
+    function :: result.function ?? return false
     &functions.push(function)
     loop fact in result.call_facts -> &call_facts.push(fact)
     loop request in result.calls -> &comptime_requests.push(request)
@@ -2310,8 +2284,7 @@ fn sema_comptime_push_obligations(result: SemaComptimeFunctionResult, diagnostic
 // sema_comptime_append_checked_function into one module result in place,
 // carrying the function's exact-int and copy facts as well.
 fn sema_comptime_append_checked_function_to_module(result: SemaComptimeFunctionResult, module_row: &SemaGraphModuleResult) -> Bool Never! {
-    if !sema_comptime_append_checked_function(result, &module_row.checked, &module_row.call_facts, &module_row.comptime_requests, &module_row.name_references) -> return false
-    if result.function == .Val(published) -> &module_row.functions.push(published)
+    if !sema_comptime_append_checked_function(result, &module_row.functions, &module_row.call_facts, &module_row.comptime_requests, &module_row.name_references) -> return false
     module_row.exact_int_reachable = module_row.exact_int_reachable || result.exact_int_reachable
     loop event in result.copy_events -> &module_row.copy_events.push(event)
     true
@@ -2389,7 +2362,7 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     unresolved := SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
-        checked: None,
+        function: None,
         dependencies: [String]{},
         waiting_dependencies: [String]{},
         calls: [SemaComptimeRequest]{},
@@ -2443,7 +2416,7 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
         return SemaComptimeFunctionResult{
             module_identity: module_identity,
             function_key: function_key,
-            checked: None,
+            function: None,
             dependencies: [String]{},
             waiting_dependencies: [String]{},
             calls: [SemaComptimeRequest]{},
@@ -2503,10 +2476,10 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     // bound from its value, an obligation its callees' rows would settle) is
     // a consequence of the wait, never a finding.
     if waiting.len() > 0 -> diagnostics = [Diagnostic]{}
-    published := SemaComptimeFunctionResult{
+    SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
-        checked: checked.value,
+        function: checked.value,
         dependencies: dependencies,
         waiting_dependencies: waiting,
         calls: calls,
@@ -2524,8 +2497,6 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
         failure: checked.failure,
         obligations_pending: settled && !complete && !sema_check_function_failed(diagnostics, 0, true),
     }
-    sema_publish_comptime_function(&published)
-    ^published
 }
 
 // Read-only graph reads of a comptime function check: the environment is
@@ -2589,7 +2560,7 @@ fn sema_keep_going_trap_return_span(func: Func) -> Span? Never! {
 // trap never looks clean to the keep-going report, even when the failure was
 // a post-solve recheck whose reports are settled away. A trap that could not
 // be built or recorded is one more reason.
-fn sema_keep_going_push_stub(stub: SemaFunctionResult?, label: String, functions: &[TFunc], reasons: &[String]) Never! {
+fn sema_keep_going_push_stub(stub: SemaFunctionResult?, label: String, functions: &[FnBody], reasons: &[String]) Never! {
     checked :: stub ?? {
         &reasons.push("{label}: its keep-going trap did not check (the declared signature fails)")
         return
@@ -3078,7 +3049,7 @@ fn sema_check_registration_module_start(environment: SemaScopeEnvironment, progr
             declarations: ^declarations,
             module_identity: graph.modules[module_index].module_identity,
             module_name: graph.modules[module_index].module_name,
-            checked: [TFunc]{},
+            functions: [FnBody]{},
             nominals: graph.modules[module_index].nominals,
             nominal_positions: sema_check_nominal_positions(graph.modules[module_index].nominals),
             constants: graph.modules[module_index].constants,
@@ -3272,7 +3243,7 @@ fn sema_check_registration_module_test(environment: SemaScopeEnvironment, progra
                 }
                 if checked_test.function == .Val(function) {
                     &module_result.injected_function_keys.push(function.key)
-                    &module_result.checked.push(function)
+                    &module_result.functions.push(function)
                     &module_result.tests.push(tir_test_artifact_fact(environment.module_identity, test))
                 }
             }
@@ -3330,7 +3301,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
     cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, owner_id.key)
     if cached == {
         .Val(checked_function) -> {
-            if checked_function.checked == .Val(function) {
+            if checked_function.function == .Val(function) {
                 if sema_function_publish_return_views(&scopes, &return_view_rows, function) {
                     scopes_changed = true
                     sema_incremental_publication(&memo)
@@ -3339,10 +3310,10 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             result.exact_int_reachable = result.exact_int_reachable || checked_function.exact_int_reachable
             sema_hardware_use_merge(&result.hardware_use, sema_hardware_use_snapshot(checked_function.hardware_use))
             loop event in checked_function.copy_events -> &result.copy_events.push(event)
-            if !sema_comptime_append_checked_function(checked_function, &result.checked, &result.call_facts, &result.comptime_requests, &result.name_references) {
+            if !sema_comptime_append_checked_function(checked_function, &result.functions, &result.call_facts, &result.comptime_requests, &result.name_references) {
                 result.complete = false
                 &result.incomplete_reasons.push("function `{function_name}`: comptime-checked body is incomplete")
-                if keep_going -> sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
+                if keep_going -> sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.functions, &result.incomplete_reasons)
             }
             loop source in checked_function.comptime_body_sources -> &result.comptime_body_sources.push(source)
             &result.compute_facts.push(checked_function.compute_facts)
@@ -3389,19 +3360,19 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             }
             result.exact_int_reachable = result.exact_int_reachable || checked.exact_int_reachable
             loop event in checked.copy_events -> &result.copy_events.push(event)
-            loop fact in function_call_facts -> &result.call_facts.push(fact)
-            loop request in function_comptime_requests -> &result.comptime_requests.push(request)
-            loop reference in function_name_references -> &result.name_references.push(reference)
+            &result.call_facts.extend(^function_call_facts)
+            &result.comptime_requests.extend(^function_comptime_requests)
+            &result.name_references.extend(^function_name_references)
             if !checked.complete {
                 result.complete = false
                 sema_check_push_function_reasons("function `{function_name}`", checked, &result.incomplete_reasons)
-                if keep_going -> sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
+                if keep_going -> sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.functions, &result.incomplete_reasons)
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
-                sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.checked, &result.incomplete_reasons)
+                sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.functions, &result.incomplete_reasons)
                 result.complete = false
             } else {
-                position :: result.checked.len()
-                if sema_append_function(&result.checked, checked) {
+                position :: result.functions.len()
+                if sema_append_function(&result.functions, checked) {
                     if checked.prelude_demands == .Val(demands) -> prelude_demands[position] = demands
                 } else {
                     result.complete = false
@@ -3412,7 +3383,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
     }
 }
 
-fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     label :: sema_check_registered_method_label(job, module_index, environment, program)
     owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return :: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
@@ -3464,7 +3435,7 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
         taken_checked := ^packet.checked
         packet.checked = None
         checked_result = ^taken_checked
-        loop diagnostic in packet.diagnostics -> &diagnostics.push(diagnostic)
+        &diagnostics.extend(^packet.diagnostics)
         function_call_facts = ^packet.call_facts
         function_comptime_requests = ^packet.comptime_requests
         function_name_references = ^packet.name_references
@@ -3526,11 +3497,11 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
     sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
     loop event in checked.copy_events -> &copy_events.push(event)
-    loop fact in function_call_facts -> &call_facts.push(fact)
-    loop request in function_comptime_requests -> &comptime_requests.push(request)
+    &call_facts.extend(^function_call_facts)
+    &comptime_requests.extend(^function_comptime_requests)
     loop source in checked.comptime_body_sources -> &comptime_body_sources.push(source)
     &compute_facts.push(checked.compute_facts)
-    loop reference in function_name_references -> &name_references.push(reference)
+    &name_references.extend(^function_name_references)
     if !memory_complete && owned_input.memory_found -> &reasons.push("{label}: memory plan is incomplete")
     if !owner_generic_complete -> &reasons.push("{label}: generic owner `{type_name(owned_input.normalized_owner_type)}` could not be resolved to a registered nominal")
     if !memory_complete || !owner_generic_complete {
@@ -3674,7 +3645,7 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaPr
             cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, owner_id.key)
             if cached == {
                 .Val(checked_function) -> {
-                    if checked_function.checked == .Val(function) {
+                    if checked_function.function == .Val(function) {
                         _ := sema_function_publish_return_views(&scopes, &return_view_rows, function)
                         provenance = function.return_view_provenance
                     }
@@ -3805,10 +3776,11 @@ fn sema_check_inline_memo_body(job_index: Int, job: SemaBodyJob, module_index: I
 
 fn sema_check_drain_body(body: ^SemaParallelBody, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     packet := ^body
-    loop diagnostic in packet.diagnostics -> &diagnostics.push(diagnostic)
-    loop fact in packet.call_facts -> &call_facts.push(fact)
-    loop request in packet.comptime_requests -> &comptime_requests.push(request)
-    loop reference in packet.name_references -> &name_references.push(reference)
+    // Moved, not copied: the packet is spent here.
+    &diagnostics.extend(^packet.diagnostics)
+    &call_facts.extend(^packet.call_facts)
+    &comptime_requests.extend(^packet.comptime_requests)
+    &name_references.extend(^packet.name_references)
     taken := ^packet.checked
     packet.checked = None
     ^taken ?? panic("an accepted body packet has no checked result")
@@ -4073,7 +4045,7 @@ fn sema_check_walk_prelude_demands(checked: ^SemaFunctionResult, module_identity
     if walked.value == None -> return walked
     taken := ^walked.value
     walked.value = None
-    functions := [TFunc]{^taken ?? panic("a checked body lost its function")}
+    functions := [FnBody]{^taken ?? panic("a checked body lost its function")}
     walked.prelude_demands = Val(sema_prelude_conversion_demands(module_identity, functions, [Int:[SemaPreludeConversionDemand]]{}))
     function := &functions.pop() ?? panic("a walked body lost its function")
     walked.value = Val(^function)
@@ -4227,7 +4199,7 @@ fn sema_check_generated_method_author_span(job: SemaBodyJob, module_index: Int, 
     panic("a registered Jet method lost its owning graph")
 }
 
-fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     ordinal :: if job == {
         .NominalMethod(position, _, _) -> position
         .ImplMethod(position, _, _) -> position
@@ -4519,7 +4491,11 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
         item_index := 0
         loop item_index < item_count {
             if count_work -> items_scanned += 1
-            if trace_sink == .Val(sink) -> sink.progress("sema.bodies", item_index, item_count)
+            // The trace throttles progress by time, and each report reads the
+            // clock and thread id from /proc: report every 64th item and the last.
+            if item_index %% SEMA_CHECK_PROGRESS_STRIDE == 0 || item_index + 1 == item_count {
+                if trace_sink == .Val(sink) -> sink.progress("sema.bodies", item_index, item_count)
+            }
             if sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) {
                 sema_check_registration_top_level(module_index, item_index, memory_plan, &environment, program, &scopes, &return_view_rows, &ready.bodies, &queries, &memo, host_hooks, comptime_functions, comptime_rows, &module_result, &prelude_demands, &scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, &functions_checked)
             } else {
@@ -4555,11 +4531,11 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
         }
         loop job in all_method_jobs {
             if count_work -> method_jobs += 1
-            if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready.bodies, &method_ready.queries, memo, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &module_result.diagnostics, &module_result.checked, &prelude_demands, &module_result.call_facts, &module_result.hardware_use, &module_result.comptime_requests, &module_result.name_references, &module_result.comptime_body_sources, &module_result.compute_facts, &module_result.exact_int_reachable, &module_result.copy_events, &module_result.incomplete_reasons, keep_going, pending_obligations) -> module_result.complete = false
+            if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready.bodies, &method_ready.queries, memo, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &module_result.diagnostics, &module_result.functions, &prelude_demands, &module_result.call_facts, &module_result.hardware_use, &module_result.comptime_requests, &module_result.name_references, &module_result.comptime_body_sources, &module_result.compute_facts, &module_result.exact_int_reachable, &module_result.copy_events, &module_result.incomplete_reasons, keep_going, pending_obligations) -> module_result.complete = false
         }
-        injected_from := module_result.checked.len()
-        if !sema_inject_prelude_error_conversions(module_identity, &environment, program, &scopes, host_hooks, &module_result.checked, prelude_demands, &module_result.diagnostics, &module_result.call_facts, &module_result.comptime_requests, &module_result.name_references, &module_result.incomplete_reasons, keep_going) -> module_result.complete = false
-        loop index in injected_from..<module_result.checked.len() -> &module_result.injected_function_keys.push(module_result.checked[index].key)
+        injected_from := module_result.functions.len()
+        if !sema_inject_prelude_error_conversions(module_identity, &environment, program, &scopes, host_hooks, &module_result.functions, prelude_demands, &module_result.diagnostics, &module_result.call_facts, &module_result.comptime_requests, &module_result.name_references, &module_result.incomplete_reasons, keep_going) -> module_result.complete = false
+        loop index in injected_from..<module_result.functions.len() -> &module_result.injected_function_keys.push(module_result.functions[index].key)
     }
     sema_check_registration_module_foreign(environment, program, module_index, &module_result)
     if trace_sink == .Val(sink) {
@@ -4570,6 +4546,10 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
     }
     SemaOwnedModuleCheck{module_result: ^module_result, environment: ^environment, program: ^program, memory_plan: ^memory_plan}
 }
+
+// sema_check_registration_module reports `sema.bodies` progress every this
+// many items (and at the last).
+SEMA_CHECK_PROGRESS_STRIDE :: 64
 
 struct SemaNameResolvedDeclaration {
     symbol: Symbol
@@ -6262,7 +6242,7 @@ fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> S
         source_file: evaluation.source_file,
         kind: SemaComptimeItemKind.CheckedText,
         expression: evaluation.source_expression,
-        expected_type: Val(evaluation.expression.ty),
+        expected_type: Val(evaluation.ty),
         span: evaluation.span,
         dependencies: evaluation.dependencies,
         checked_text: Val(evaluation),
@@ -6617,7 +6597,6 @@ fn sema_comptime_modules_with_values(program: SemaProgramTables, values: [SemaCo
         sema_check_registration_module_foreign(environment, program, module_index, &checked)
         &modules.push(^checked)
     }
-    sema_publish_modules(&modules)
     ^modules
 }
 
@@ -6895,9 +6874,8 @@ fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaPr
             destination_key: source.destination_key,
             source_file: source.source_file,
             kind: SemaComptimeItemKind.CheckedText,
-            checked: evaluation.expression,
-            expression: sema_publish_expression(evaluation.expression),
-            expected_type: Val(evaluation.expression.ty),
+            expression: evaluation.expression,
+            expected_type: Val(evaluation.ty),
             span: evaluation.span,
             dependencies: dependencies,
             calls: [SemaComptimeRequest]{},
@@ -6968,7 +6946,6 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
             destination_key: source.destination_key,
             source_file: source.source_file,
             kind: source.kind,
-            checked: expression,
             expression: sema_publish_expression(expression),
             expected_type: checked_expected,
             span: source.span,
@@ -7312,8 +7289,8 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
         if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
         prepared := sema_check_prepare_module(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers, session, phase, trace_sink)
         checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, threads, session, phase, trace_sink)
-        if trace_sink == .Val(sink) -> sink.end("sema.module", checked.checked.len())
-        checked_functions += checked.checked.len()
+        if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
+        checked_functions += checked.functions.len()
         &modules.push(^checked)
         start += 1
     }
@@ -7438,8 +7415,8 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
         bodies.started = Val(^started)
         sema_check_module_trace_begin_in_shared(shared_state, module_index, phase, trace_sink)
         checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^bodies, threads, None, phase, trace_sink)
-        if trace_sink == .Val(sink) -> sink.end("sema.module", checked.checked.len())
-        checked_functions += checked.checked.len()
+        if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
+        checked_functions += checked.functions.len()
         &modules.push(^checked)
     }
     checked_functions
@@ -7602,12 +7579,12 @@ fn sema_check_codec_module_in_shared(shared_state: Shared<SemaCheckShared>, host
     // Every codec body is checked here, never on a compiler thread, and the
     // codec wave injects no prelude conversion: no demand is kept.
     prelude_demands := [Int:[SemaPreludeConversionDemand]]{}
-    before :: result.checked.len()
+    before :: result.functions.len()
     loop job in jobs {
-        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.checked, &prelude_demands, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
+        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &prelude_demands, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
     }
     sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
-    result.checked.len() - before
+    result.functions.len() - before
 }
 
 // Moves the pass environment back into shared state alone.
@@ -7721,12 +7698,12 @@ fn sema_failure_reconcile_infallible(modules: &[SemaGraphModuleResult], projecte
     keys := [String:Bool]{}
     loop key in projected -> keys[key] = true
     loop module_index in 0..<modules.len() {
-        loop function_index in 0..<modules[module_index].checked.len() {
-            if keys.get(modules[module_index].checked[function_index].key) == None -> next
-            if modules[module_index].checked[function_index].ret == .Val(.Result(ok, _)) {
+        loop function_index in 0..<modules[module_index].functions.len() {
+            if keys.get(modules[module_index].functions[function_index].key) == None -> next
+            if modules[module_index].functions[function_index].ret == .Val(.Result(ok, _)) {
                 ret :: Type.Result{ok: ok, err: Type.Named{name: "Never"}}
-                modules[module_index].checked[function_index].ret = Val(ret)
-                modules[module_index].checked[function_index].failure_carrier = sema_failure_carrier(Val(ret))
+                modules[module_index].functions[function_index].ret = Val(ret)
+                modules[module_index].functions[function_index].failure_carrier = sema_failure_carrier(Val(ret))
             }
         }
         loop fact_index in 0..<modules[module_index].call_facts.len() {
@@ -7933,18 +7910,20 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     }
     // The `#Inline(Always)` promise (E0917-E0919) needs every body's
     // function-value references first. These read-only checks, the effect
-    // inputs and the liveness verdicts run side by side.
+    // inputs with each module's effect-graph rows, and the liveness verdicts
+    // run side by side.
     if trace_sink == .Val(sink) -> sink.begin("sema.side", "", -1, -1)
     effect_inputs := [SemaEffectModuleInput]{}
+    effect_prepared := sema_effect_prepared_empty()
     liveness := sema_finalize_side_liveness_empty()
-    final_graph = sema_finalize_side_checks(^final_graph, &modules, threads, &diagnostics, &complete, &effect_inputs, &liveness)
+    final_graph = sema_finalize_side_checks(^final_graph, &modules, threads, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness)
     if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy :: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
     package_memory_denials :: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(&modules, effect_inputs, package_memory_denials, threads)
+    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_memory_denials, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -8088,7 +8067,6 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> &programs.push(source_module.program)
     }
-    sema_publish_modules(&modules)
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
         entry_module_identity: final_graph.entry_module_identity,
@@ -8323,15 +8301,19 @@ fn sema_finalize_core_claim(queue: Shared<SemaFinalizeCoreQueue>) -> Int {
 // The finalization's read-only checks before the effect pass: each reads
 // the final graph and the checked modules and writes neither, so they run
 // side by side on compiler threads. Jobs are numbered in the serial order
-// their diagnostics join in; threads claim them heaviest first (the liveness
-// walk, the effect inputs, then the declaration checks).
+// their results join in; threads claim them heaviest first (the liveness
+// walk, the effect parts, then the declaration checks). Effect part `k`
+// reads the effect inputs and builds the effect-graph rows
+// (sema_effect_prepare_module) of the k-th of SEMA_FINALIZE_SIDE_EFFECT_PARTS
+// consecutive module ranges.
 SEMA_FINALIZE_SIDE_INLINE_ALWAYS :: 0
 SEMA_FINALIZE_SIDE_SCRIPT_ENTRIES :: 1
 SEMA_FINALIZE_SIDE_DECLARED_LEAVES :: 2
 SEMA_FINALIZE_SIDE_AUTHORITY_HANDLES :: 3
-SEMA_FINALIZE_SIDE_EFFECT_INPUTS :: 4
-SEMA_FINALIZE_SIDE_LIVENESS :: 5
-SEMA_FINALIZE_SIDE_JOBS :: 6
+SEMA_FINALIZE_SIDE_EFFECT_FIRST :: 4
+SEMA_FINALIZE_SIDE_EFFECT_PARTS :: 4
+SEMA_FINALIZE_SIDE_LIVENESS :: 8
+SEMA_FINALIZE_SIDE_JOBS :: 9
 // A program of fewer modules per admitted thread checks them on the calling
 // thread.
 SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD :: 16
@@ -8344,13 +8326,18 @@ struct SemaFinalizeSideShared {
 }
 
 // One side check's result: a declaration check's diagnostics and whether it
-// found any, the effect inputs, or the liveness verdicts.
+// found any, an effect part's inputs and graph rows, or the liveness verdicts.
 struct SemaFinalizeSide {
     job: Int
     found: Bool
     diagnostics: [Diagnostic]
     effect_inputs: [SemaEffectModuleInput]
+    effect_prepared: SemaEffectPrepared
     liveness: SemaLivenessResult
+}
+
+fn sema_finalize_side_new(job: Int) -> SemaFinalizeSide {
+    SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, effect_prepared: sema_effect_prepared_empty(), liveness: sema_finalize_side_liveness_empty()}
 }
 
 fn sema_finalize_side_liveness_empty() -> SemaLivenessResult {
@@ -8360,53 +8347,61 @@ fn sema_finalize_side_liveness_empty() -> SemaLivenessResult {
 // Runs every side check, on threads when the program is large enough, and
 // joins them in order: the declaration checks' diagnostics onto
 // `diagnostics` (any found leaves the graph incomplete), the effect inputs
-// onto `effect_inputs` and the liveness verdicts into `liveness`.
-fn sema_finalize_side_checks(graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], liveness: &SemaLivenessResult) -> SemaRegistrationGraph {
+// onto `effect_inputs` with their graph rows in `effect_prepared`, and the
+// liveness verdicts into `liveness`.
+fn sema_finalize_side_checks(graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult) -> SemaRegistrationGraph {
     owned := ^graph
     sides := [SemaFinalizeSide]{}
     workers :: compiler_threads_admit(threads, SEMA_FINALIZE_SIDE_JOBS, modules.len(), SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD, 0, 0)
     if workers <= 1 {
         loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(sema_finalize_side_run(job, owned, modules))
-        sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &liveness)
+        sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness)
         return owned
     }
-    loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, liveness: sema_finalize_side_liveness_empty()})
+    loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(sema_finalize_side_new(job))
     shared_state :: shared SemaFinalizeSideShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}}
     sema_finalize_side_fill(shared_state, ^owned, &modules)
     queue :: shared SemaFinalizeCoreQueue{next: 0}
     sema_finalize_side_claimers(shared_state, queue, 0, workers, &sides)
     returned := sema_finalize_side_take(shared_state, &modules)
-    sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &liveness)
+    sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness)
     returned
 }
 
 // One side check over the graph and the checked modules.
 fn sema_finalize_side_run(job: Int, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaFinalizeSide {
-    side := SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, liveness: sema_finalize_side_liveness_empty()}
+    side := sema_finalize_side_new(job)
     if {
         job == SEMA_FINALIZE_SIDE_INLINE_ALWAYS -> { side.found = sema_marker_rules_check_inline_always(graph, modules, &side.diagnostics) }
         job == SEMA_FINALIZE_SIDE_SCRIPT_ENTRIES -> { side.found = sema_check_script_entries(graph, &side.diagnostics) }
         job == SEMA_FINALIZE_SIDE_DECLARED_LEAVES -> { side.found = sema_effect_check_declared_leaves(graph, &side.diagnostics) }
         job == SEMA_FINALIZE_SIDE_AUTHORITY_HANDLES -> { side.found = sema_effect_check_authority_handles(graph, &side.diagnostics) }
-        job == SEMA_FINALIZE_SIDE_EFFECT_INPUTS -> {
-            loop module_index in 0..<modules.len() {
+        job == SEMA_FINALIZE_SIDE_LIVENESS -> { side.liveness = sema_liveness_structure(graph, modules) }
+        else -> {
+            part :: job - SEMA_FINALIZE_SIDE_EFFECT_FIRST
+            first :: part * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
+            last :: (part + 1) * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
+            loop module_index in first..<last {
                 source_index :: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-                &side.effect_inputs.push(sema_effect_module_input(graph.modules[source_index], module_index))
+                input := sema_effect_module_input(graph.modules[source_index], module_index)
+                // Input positions count from the part's first input; the join shifts them.
+                sema_effect_prepare_module(&side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len())
+                &side.effect_inputs.push(^input)
             }
         }
-        else -> { side.liveness = sema_liveness_structure(graph, modules) }
     }
     side
 }
 
 // Joins the side checks in job order.
-fn sema_finalize_side_join(sides: ^[SemaFinalizeSide], diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], liveness: &SemaLivenessResult) {
+fn sema_finalize_side_join(sides: ^[SemaFinalizeSide], diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult) {
     owned := ^sides
     &owned.reverse()
     loop owned.len() > 0 {
         side := &owned.pop() ?? break
         if side.found -> complete = false
         &diagnostics.extend(^side.diagnostics)
+        sema_effect_prepared_join(&effect_prepared, ^side.effect_prepared, effect_inputs.len())
         &effect_inputs.extend(^side.effect_inputs)
         if side.job == SEMA_FINALIZE_SIDE_LIVENESS {
             liveness = ^side.liveness

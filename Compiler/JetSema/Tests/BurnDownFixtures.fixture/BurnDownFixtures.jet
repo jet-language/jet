@@ -3,9 +3,9 @@ fn bd_require(ok: Bool, message: String) Never! {
     if !ok -> panic("recovered Source contract: {message}")
 }
 
-fn bd_returned(function: TFunc) -> TExpr Never! {
+fn bd_returned(function: FnBody) -> Int Never! {
     loop statement in function.body {
-        if statement == .Return(value, _) -> return value ?? panic("missing returned policy value")
+        if function.tree.stmts[statement] == .Return(value, _) -> return value ?? panic("missing returned policy value")
     }
     panic("missing policy return")
 }
@@ -24,8 +24,8 @@ fn bd_policy() Never! {
     loop function in checked.functions {
         if function.name == "__jet_policy_audit_value" -> saw_wrapper = true
         if function.name == "direct" {
-            returned :: bd_returned(function)
-            bd_require(if returned.kind == .IndirectCall(callee, _, _, _) -> if callee.kind == .FnValue(kind) -> if kind == .Policy(_, arguments, _, _, _, _) -> arguments.len() == 1 else -> false else -> false else -> false, "direct #Policy call uses its checked wrapper and default")
+            returned :: body_node(function.tree, bd_returned(function))
+            bd_require(if returned.kind == .IndirectCall(callee, _, _, _) -> if body_node(function.tree, callee).kind == .FnValue(kind) -> if kind == .Policy(_, arguments, _, _, _, _) -> arguments.len() == 1 else -> false else -> false else -> false, "direct #Policy call uses its checked wrapper and default")
             saw_direct = true
         }
     }

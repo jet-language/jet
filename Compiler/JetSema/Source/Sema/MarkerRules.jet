@@ -36,7 +36,8 @@ use jet_foundation.[
 struct SemaMarkerRuleArgumentObservation {
     ty: Type?
     constant: TComptimeValue?
-    checked_expression: TExpr?
+    // The argument checked against the rule's expected type.
+    checked: Bool
     comptime_requests: [SemaComptimeRequest]
     comptime_source: SemaComptimeItemSource?
     diagnostics: [Diagnostic]
@@ -49,7 +50,7 @@ struct SemaMarkerRuleArgumentFact {
     kind: TAppliedRuleArgKind
     ty: Type?
     constant: TComptimeValue?
-    checked_expression: TExpr?
+    checked: Bool
     comptime_requests: [SemaComptimeRequest]
 }
 
@@ -727,7 +728,7 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
     checked := sema_check_expression(argument, checked_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_ownership_fork_rollback(&state, probe_fork)
     sema_ownership_fork_close(&state, probe_fork)
-    checked_value := TExpr?{None}
+    checked_value := false
     constant := TComptimeValue?{None}
     staged_source := SemaComptimeItemSource?{None}
     observed_type := Type?{None}
@@ -750,7 +751,7 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
             }
         }
         if checked != None {
-            checked_value = checked
+            checked_value = true
             observed_type = Val(value.ty)
             if capture_constant {
                 constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, &context, environment, program, values)
@@ -769,7 +770,7 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
     SemaMarkerRuleArgumentObservation{
         ty: observed_type,
         constant: constant,
-        checked_expression: checked_value,
+        checked: checked_value,
         comptime_requests: requests,
         comptime_source: staged_source,
         diagnostics: diagnostics,
@@ -892,7 +893,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
         expression :: sema_marker_rules_marker_expression(marker, binding.source_index)
         if expression == None {
             if marker.name == "Interrupt" && binding.source_index == 1 {
-                &pending_facts.push(SemaMarkerRuleArgumentFact{marker_span: marker.name_span, source_index: binding.source_index, parameter_index: binding.parameter_index, kind: binding.kind, ty: None, constant: None, checked_expression: None, comptime_requests: [SemaComptimeRequest]{}})
+                &pending_facts.push(SemaMarkerRuleArgumentFact{marker_span: marker.name_span, source_index: binding.source_index, parameter_index: binding.parameter_index, kind: binding.kind, ty: None, constant: None, checked: false, comptime_requests: [SemaComptimeRequest]{}})
                 next
             }
             &diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
@@ -941,7 +942,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
         observation := SemaMarkerRuleArgumentObservation{
             ty: None,
             constant: None,
-            checked_expression: None,
+            checked: false,
             comptime_requests: [SemaComptimeRequest]{},
             comptime_source: None,
             diagnostics: [Diagnostic]{},
@@ -972,7 +973,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
             sema_marker_rules_append_comptime_requests(&comptime_requests, observation.comptime_requests)
         }
         matches := if {
-            declared -> observation.checked_expression != None
+            declared -> observation.checked
             else -> {
                 if binding.kind == {
                     .Any -> true
@@ -996,7 +997,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
             kind: binding.kind,
             ty: observation.ty,
             constant: observation.constant,
-            checked_expression: observation.checked_expression,
+            checked: observation.checked,
             comptime_requests: observation.comptime_requests,
         })
     }

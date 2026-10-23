@@ -1,5 +1,6 @@
 use jet_foundation.[
     Diagnostic,
+    FnBody,
     Func,
     Item,
     SymbolID,
@@ -43,7 +44,7 @@ fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
 }
 
 struct SemaTestFunctionCheckResult {
-    function: TFunc?
+    function: FnBody?
     call_facts: [SemaCallSiteFact]
     comptime_requests: [SemaComptimeRequest]
     name_references: [SemaNameReferenceFact]
@@ -91,7 +92,7 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
     // The synthetic has no own generic parameters: its merged environment is
     // unchanged. The canonical read checker scopes and restores its name.
     checked := sema_function_check_shared(synthetic, owner_id, TFuncKind.TopLevel, false, environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
-    function := TFunc?{None}
+    function := FnBody?{None}
     if checked.value == .Val(value) {
         updated_value := value
         updated_value.name = key

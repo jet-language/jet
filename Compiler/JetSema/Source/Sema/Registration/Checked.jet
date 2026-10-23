@@ -1524,7 +1524,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
         module_name: module_row.module_name,
         module_path: module_row.module_path,
         // Rust `function_foreign_provenance` keeps the leaf on its own source
-        // file, as an ordinary checked function's TFunc does, so the native
+        // file, as an ordinary checked function's FnBody does, so the native
         // backend reads the inline body from the declaration span.
         source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, registered.declaration.span),
         name: registered.declaration.name,
@@ -1557,7 +1557,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
 // `#Import(c)` declaration becomes the foreign row its calls bind to. The row
 // keeps the function's symbol identity, so a checked direct call to the
 // declaration lowers as a foreign C call of the marker's symbol; the
-// declaration itself has no Jet body and no TFunc.
+// declaration itself has no Jet body and no FnBody.
 fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
     symbol :: parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
@@ -2367,7 +2367,7 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
 }
 
 // A type row names each method by its function's SymbolId key, the key its
-// checked TFunc carries (Rust tir_to_mir_types.rs::resolve_type_methods
+// checked FnBody carries (Rust tir_to_mir_types.rs::resolve_type_methods
 // resolves these through the checked function registry).
 fn sema_checked_nominal_methods(definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
     keys := [String]{}

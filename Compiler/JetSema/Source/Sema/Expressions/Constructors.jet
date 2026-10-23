@@ -1281,7 +1281,8 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         type_name: type_name,
         source_file: source_file,
         source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
-        expression: checked,
+        expression: sema_publish_expression(checked),
+        ty: checked.ty,
         hardware_use: TargetHardwareUse{
             register_accesses: loop index in register_access_start..<context.hardware_use.register_accesses.len() -> context.hardware_use.register_accesses[index],
             interrupt_handlers: loop index in interrupt_handler_start..<context.hardware_use.interrupt_handlers.len() -> context.hardware_use.interrupt_handlers[index],

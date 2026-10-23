@@ -4,12 +4,14 @@
 // arm of `CheckerInfer/fallible.rs`.
 use jet_foundation.[
     AccessConvention,
+    BodyTree,
     CallArg,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
     ErrorConvDef,
     Expr,
+    FnBody,
     Func,
     Item,
     JET_CORE_OWNER_ANNOTATION_SUFFIXES,
@@ -24,6 +26,7 @@ use jet_foundation.[
     TextEdit,
     Type,
     ast_func,
+    body_node,
     core_call_typed_signature,
     core_module_export,
     core_module_has_type,
@@ -310,22 +313,23 @@ struct SemaPreludeDemandWalk {
     demands: [SemaPreludeConversionDemand]
 }
 
-// One expression of the demand walk: a propagation site whose conversion is
+// One node of the demand walk: a propagation site whose conversion is
 // this module's prelude routine for a Core error family member reaching `Err`
-// demands it (first site per routine), then its children are walked in place
-// (sema_effect_walk_expr_children), in the order tir_each_expr_child visits them.
-fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, expression: TExpr) {
-    conversion :: if expression.kind == {
-        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+// demands it (first site per routine), then its children are walked
+// (sema_effect_walk_expr_children), in the order body_each_expr_child visits them.
+fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
+    node :: body_node(tree, expression)
+    conversion :: if node.kind == {
+        // copy: `value` is a payload of the borrowed node row; the Val carrier owns this one
         .Try(_, value, _) -> Val(value.copy())
-        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        // copy: `value` is a payload of the borrowed node row; the Val carrier owns this one
         .TryWithContext(_, _, value, _, _, _) -> Val(value.copy())
         else -> None
     }
     if conversion == .Val(value) {
-        if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, expression.span)
+        if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, node.span)
     }
-    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller, expression)
+    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller, tree, node)
 }
 
 fn sema_prelude_conversion_demand_add(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
@@ -366,7 +370,7 @@ fn sema_prelude_demand_walk_take(state: Shared<SemaPreludeDemandWalk>) -> [SemaP
 // (made on the compiler thread that checked it), and keeping each in order
 // unless an earlier function demanded its routine gives what walking it here
 // would.
-fn sema_prelude_conversion_demands(module_identity: String, functions: [TFunc], walked: [Int:[SemaPreludeConversionDemand]]) -> [SemaPreludeConversionDemand] {
+fn sema_prelude_conversion_demands(module_identity: String, functions: [FnBody], walked: [Int:[SemaPreludeConversionDemand]]) -> [SemaPreludeConversionDemand] {
     walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
     walk :: SemaEffectWalk.PreludeDemands{state: walk_state}
     nodes := [SemaEffectNode]{}
@@ -377,7 +381,7 @@ fn sema_prelude_conversion_demands(module_identity: String, functions: [TFunc], 
             loop demand in demands -> sema_prelude_conversion_demand_keep(walk_state, demand)
             next
         }
-        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, 0, function.key), statement)
+        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, 0, function.key), function.tree, function.tree.stmts[statement])
     }
     sema_prelude_demand_walk_take(walk_state)
 }
@@ -390,7 +394,7 @@ fn sema_prelude_conversion_demands(module_identity: String, functions: [TFunc], 
 // a conversion whose body fails to check is kept as its typed trap.
 // `walked` holds the demands of the functions a compiler thread walked, by
 // position in `functions` (sema_prelude_conversion_demands).
-fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], walked: [Int:[SemaPreludeConversionDemand]], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
+fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[FnBody], walked: [Int:[SemaPreludeConversionDemand]], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
     demands :: sema_prelude_conversion_demands(module_identity, functions, walked)
     complete := true
     loop demand in demands {

@@ -6,7 +6,7 @@ use jet_sema.[
     SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
     SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
     sema_collect_comptime_declarations, sema_comptime_effect_sources, sema_effect_trait_bounds,
-    sema_effects_check_modules, sema_finalize_registration_graph, sema_has_error_since,
+    sema_effect_prepare_modules, sema_effects_check_modules, sema_finalize_registration_graph, sema_has_error_since,
     sema_output_resolve, sema_registration_module_index, sema_registration_prepare_graph,
 ]
 use jet_parser.[parse_source]
@@ -115,7 +115,8 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         })
     }
     &effect_inputs.reverse()
-    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"}, compiler_threads_single())
+    prepared := sema_effect_prepare_modules(checked.modules, effect_inputs)
+    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, ^prepared, [String]{"Mem.Alloc", "Mem.Rc"}, compiler_threads_single())
     if republished.memory_declarations.len() != 2 -> &failures.push("in-place effect publication: manifest memory declarations duplicated")
     function_count := 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()
