@@ -2,6 +2,13 @@
 // Registry-dependent nominal and trait relations are layered on these rules.
 use jet_foundation.[
     CallContractRow,
+    CtValue,
+    Expr,
+    Measure,
+    MeasureRule,
+    UnOp,
+    measure_kind,
+    measure_literal_value,
     EffectRowEntry,
     FunctionCallMetadata,
     FunctionObligations,
@@ -657,8 +664,8 @@ fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, 
         }
         .TraitObject(bounds) -> Type.TraitObject{bounds: loop bound in bounds -> sema_type_graph_resolve_trait_bound(graph, bound, caller)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_type_resolve_declared_recursive(graph, field.ty, caller, generic_params)}}
-        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
-        .FixedList(inner, length) -> Type.FixedList{elem: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params), len: length.copy()}
+        // copy: an unresolved `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(inner, length) -> Type.FixedList{elem: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params), len: sema_type_resolve_measure(graph, length, caller, generic_params, 0)}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_type_resolve_declared_recursive(graph, base, caller, generic_params), lo: lo, hi: hi}
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
@@ -668,6 +675,78 @@ fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, 
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
         .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
         else -> ty
+    }
+}
+
+// Rust `resolve_measure` (Registration/Items.rs): a fixed length spelled by
+// a constant of the module that spells it (`[T#N]`, `[T#(N * 2)]`) is that
+// constant's integer. A name that isn't such a constant (a generic length, a
+// constant computed by code) stays symbolic.
+fn sema_type_resolve_measure(graph: SemaRegistrationGraph, measure: Measure, caller: Int, generic_params: [TGenericParam], depth: Int) -> Measure Never! {
+    if measure == {
+        .Symbol(kind, name) -> {
+            if !sema_type_name_is_generic(generic_params, name) {
+                if sema_type_measure_constant(graph, caller, name, depth) == .Val(value) {
+                    if value >= 0 -> return Measure.Literal{kind: kind, value: value}
+                }
+            }
+            // copy: an unresolved measure is a payload of the caller's read type, which keeps the original.
+            measure.copy()
+        }
+        .Combined(kind, rule, left, right) -> {
+            resolved_left :: sema_type_resolve_measure(graph, left, caller, generic_params, depth)
+            resolved_right :: sema_type_resolve_measure(graph, right, caller, generic_params, depth)
+            if rule != MeasureRule.Match {
+                if measure_literal_value(resolved_left) == .Val(left_value) {
+                    if measure_literal_value(resolved_right) == .Val(right_value) {
+                        folded :: if rule == MeasureRule.Add -> left_value + right_value else -> left_value * right_value
+                        return Measure.Literal{kind: measure_kind(resolved_left), value: folded}
+                    }
+                }
+            }
+            Measure.Combined{kind: kind, rule: rule, left: resolved_left, right: resolved_right}
+        }
+        // copy: as the unresolved symbol above.
+        else -> measure.copy()
+    }
+}
+
+// The integer of constant `name` of module row `caller`: its staged value,
+// or its declared expression folded (an integer literal, `comptime { … }`
+// holding one, other such constants, `+ - * /`). Chains stop at 32 links.
+fn sema_type_measure_constant(graph: SemaRegistrationGraph, caller: Int, name: String, depth: Int) -> Int? Never! {
+    if caller < 0 || depth > 32 -> return None
+    loop constant_index in 0..<graph.modules[caller].constants.len() {
+        if graph.modules[caller].constants[constant_index].symbol.name != name -> next
+        if graph.modules[caller].constants[constant_index].declaration.mutable -> return None
+        if graph.modules[caller].constants[constant_index].declaration.ct == .Val(.Int(value)) -> return Val(value)
+        return sema_type_measure_fold(graph, caller, graph.modules[caller].constants[constant_index].declaration.value, depth + 1)
+    }
+    None
+}
+
+fn sema_type_measure_fold(graph: SemaRegistrationGraph, caller: Int, expression: Expr, depth: Int) -> Int? Never! {
+    if expression == {
+        .Int(value, _, _, _, _) -> Val(value)
+        .Paren(inner, _, _) -> sema_type_measure_fold(graph, caller, inner, depth)
+        .Ident(name, _, _) -> sema_type_measure_constant(graph, caller, name, depth)
+        .Unary(op, operand, _, _) -> {
+            if op != UnOp.Neg -> return None
+            value :: sema_type_measure_fold(graph, caller, operand, depth) ?? return None
+            Val(0 - value)
+        }
+        .Binary(op, left, right, _, _) -> {
+            l :: sema_type_measure_fold(graph, caller, left, depth) ?? return None
+            r :: sema_type_measure_fold(graph, caller, right, depth) ?? return None
+            if op == {
+                .Add -> Val(l + r)
+                .Sub -> Val(l - r)
+                .Mul -> Val(l * r)
+                .Div | .FloorDiv -> if r <= 0 || l < 0 -> None else -> Val(l /% r)
+                else -> None
+            }
+        }
+        else -> None
     }
 }
 
