@@ -1,0 +1,43 @@
+
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {
+    // Fold/unfold round trip through XMLReader/XMLWriter keeps order + lexical.
+    input :: files.open("round.xml") ?? panic("open")
+    out_path := "round.xml.out"
+    output :: files.create(out_path) ?? panic("create")
+    reader :: xml.reader(^input) ?? panic("reader")
+    writer :: xml.writer(^output) ?? panic("writer")
+    loop true {
+        maybe :: reader.next() ?? panic("next")
+        if maybe == {
+            Val(event) -> { writer.write(event) ?? panic("write") }
+            None -> { break }
+        }
+    }
+    writer.finish() ?? panic("finish")
+    print(files.read(out_path) ?? panic("read out"))
+
+    // Hostile: document_end before document_start → State, no bytes.
+    bad_out :: files.create("round.xml.bad") ?? panic("bad create")
+    bad :: xml.writer(^bad_out) ?? panic("bad writer")
+    end := Dyn.Object(["$xml_event": Dyn.Text("document_end")])
+    if bad.write(end) == {
+        .Ok(_) -> { print("hostile-missed") }
+        .Err(error) -> {
+            print(error.kind == encoding.EncodingErrorKind.State)
+            print(error.reason)
+        }
+    }
+
+    // Exclusive C14N omits unused xmlns on ancestors; utilized prefixes move down.
+    tree :: xml.parse("<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>") ?? panic("parse")
+    options := xml.XMLCanonical{ mode: .Exclusive10, comments: false, inclusive_prefixes: [] }
+    print(xml.canonical(tree, options) ?? panic("canonical"))
+
+    // InclusiveNamespaces PrefixList forces unused b onto the apex.
+    forced := xml.XMLCanonical{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"] }
+    print(xml.canonical(tree, forced) ?? panic("forced"))
+}

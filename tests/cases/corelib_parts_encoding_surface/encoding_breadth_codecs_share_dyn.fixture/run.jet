@@ -1,0 +1,43 @@
+
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.xml as xml
+use core.encoding.cbor as cbor
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+
+fn run() {
+    data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
+    print(json.canonical(data) ?? panic("value is not canonical JSON"))
+    print(json.events(data).contains("object_start $"))
+    rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
+    print(rows.len())
+    print((jsonl.to_string(rows) ?? panic("JSONL encode")).contains("\"a\":1"))
+    source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
+    doc := xml.parse(source) ?? panic("xml")
+    print(xml.to_string(doc) ?? panic("xml render"))
+    print((&doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
+    root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+    name := &root.field("name") ?? panic("root name")
+    print((&name.field("namespace_uri") ?? panic("root namespace")).text() ?? "bad")
+    content := &root.field("children") ?? panic("root children")
+    entity := content.at(1) ?? panic("entity")
+    comment := content.at(2) ?? panic("comment")
+    cdata := content.at(3) ?? panic("cdata")
+    pi := content.at(4) ?? panic("pi")
+    print((&entity.field("$xml") ?? panic("entity tag")).text() ?? "bad")
+    print((&comment.field("$xml") ?? panic("comment tag")).text() ?? "bad")
+    print((&cdata.field("$xml") ?? panic("cdata tag")).text() ?? "bad")
+    print((&pi.field("$xml") ?? panic("pi tag")).text() ?? "bad")
+    encoded := cbor.to_bytes(data) ?? panic("cbor encode")
+    print(encoded.len() > 0)
+    decoded := cbor.parse(encoded) ?? panic("cbor parse")
+    print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
+    bytes :: [U8]{ 104, 105 }
+    u := base64.encode_url(bytes)
+    print(u)
+    print((base64.decode_url(u) ?? panic("base64url")).len())
+    b32 := base32.encode(bytes)
+    print(b32)
+    print((base32.decode(b32) ?? panic("base32")).len())
+}

@@ -1,0 +1,85 @@
+
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+
+fn show64(text: String) -> String {
+    if base64.decode(text) == {
+        .Ok(bytes) -> { return "OK:{bytes}" }
+        .Err(reason) -> { return "ERR:{reason}" }
+    }
+    return "unreachable"
+}
+
+fn show64url(text: String) -> String {
+    if base64.decode_url(text) == {
+        .Ok(bytes) -> { return "OK:{bytes}" }
+        .Err(reason) -> { return "ERR:{reason}" }
+    }
+    return "unreachable"
+}
+
+fn show32(text: String) -> String {
+    if base32.decode(text) == {
+        .Ok(bytes) -> { return "OK:{bytes}" }
+        .Err(reason) -> { return "ERR:{reason}" }
+    }
+    return "unreachable"
+}
+
+STANDARD_WS :: prep { show64("Z g = =\n") }
+STANDARD_UNPADDED :: prep { show64("Zg") }
+STANDARD_INTERIOR :: prep { show64("Zg=A") }
+STANDARD_EXCESS :: prep { show64("Zg====") }
+STANDARD_BITS :: prep { show64("Zh==") }
+STANDARD_PADDING :: prep { show64("=AAA") }
+STANDARD_ALPHABET :: prep { show64("Zg-=") }
+STANDARD_SIZE :: prep { show64("A") }
+URL_OUTER_WS :: prep { show64url(" \tZg==\n") }
+URL_INTERIOR :: prep { show64url("Zg=A") }
+URL_STANDARD_ALPHABET :: prep { show64url("+w") }
+URL_BITS :: prep { show64url("Zh") }
+URL_PADDING :: prep { show64url("=AAA") }
+URL_SIZE :: prep { show64url("A") }
+BASE32_LOOSE :: prep { show32("m=y======\n") }
+BASE32_BITS :: prep { show32("MZ======") }
+BASE32_SHORT :: prep { show32("A") }
+BASE32_ALPHABET :: prep { show32("M0======") }
+
+fn run() {
+    r_standard_ws := show64("Z g = =\n")
+    r_standard_unpadded := show64("Zg")
+    r_standard_interior := show64("Zg=A")
+    r_standard_excess := show64("Zg====")
+    r_standard_bits := show64("Zh==")
+    r_standard_padding := show64("=AAA")
+    r_standard_alphabet := show64("Zg-=")
+    r_standard_size := show64("A")
+    r_url_outer_ws := show64url(" \tZg==\n")
+    r_url_interior := show64url("Zg=A")
+    r_url_standard_alphabet := show64url("+w")
+    r_url_bits := show64url("Zh")
+    r_url_padding := show64url("=AAA")
+    r_url_size := show64url("A")
+    r_base32_loose := show32("m=y======\n")
+    r_base32_bits := show32("MZ======")
+    r_base32_short := show32("A")
+    r_base32_alphabet := show32("M0======")
+    print("{STANDARD_WS}|{r_standard_ws}")
+    print("{STANDARD_UNPADDED}|{r_standard_unpadded}")
+    print("{STANDARD_INTERIOR}|{r_standard_interior}")
+    print("{STANDARD_EXCESS}|{r_standard_excess}")
+    print("{STANDARD_BITS}|{r_standard_bits}")
+    print("{STANDARD_PADDING}|{r_standard_padding}")
+    print("{STANDARD_ALPHABET}|{r_standard_alphabet}")
+    print("{STANDARD_SIZE}|{r_standard_size}")
+    print("{URL_OUTER_WS}|{r_url_outer_ws}")
+    print("{URL_INTERIOR}|{r_url_interior}")
+    print("{URL_STANDARD_ALPHABET}|{r_url_standard_alphabet}")
+    print("{URL_BITS}|{r_url_bits}")
+    print("{URL_PADDING}|{r_url_padding}")
+    print("{URL_SIZE}|{r_url_size}")
+    print("{BASE32_LOOSE}|{r_base32_loose}")
+    print("{BASE32_BITS}|{r_base32_bits}")
+    print("{BASE32_SHORT}|{r_base32_short}")
+    print("{BASE32_ALPHABET}|{r_base32_alphabet}")
+}

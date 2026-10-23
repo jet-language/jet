@@ -1,0 +1,27 @@
+# tests/corelib_parts/encoding_surface.rs::nondeterministic_core_matrix_matches_all_execution_tiers at tests/corelib_parts/encoding_surface.rs:262; hand-port
+fixture: nondeterministic_core_matrix_matches_all_execution_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step fold: jet check run.jet
+cwd: fold
+exit: nonzero
+stderr: ~ "E3403" # original predicate: diagnostics.iter().any(|d| d.code == "E3403")
+step impure: jet check run.jet
+cwd: impure
+exit: nonzero
+stderr: ~ "E3403" # original predicate: diagnostics.iter().any(|d| d.code == "E3403")
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ~ "\nshuffle-unit-ok\n" # original predicate (not the first line): aot_stdout.lines().any(|line| line == "shuffle-unit-ok")
+step dev: jet run run.jet
+exit: 0
+stdout: == aot
+stderr: empty
+step interpret: jet run --interpret run.jet
+exit: 0
+stdout: == aot
+stderr: empty
