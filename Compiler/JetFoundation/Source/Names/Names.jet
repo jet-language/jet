@@ -15,24 +15,69 @@ fn name_facts_leaf(name: String) -> String Never! {
     loop start > 0 && bytes[start - 1] != 46 -> start -= 1
     name.slice(start, name.len())
 }
+// A map keeps its keys sorted and an insert moves every later key, so each
+// map is filled in key order, where it grows at its end; filling it in row
+// order would cost time quadratic in the rows. A repeated key keeps its last
+// row, as a fill in row order does.
 fn name_ledger_from_facts(facts: ^NameFacts) -> NameLedger Never! {
     ledger := NameLedger{facts: ^facts, declarations: [(module_index: Int, name: String):Int]{}, aliases: [(module_index: Int, name: String):Int]{}, declaration_names: [String:[Int]]{}, alias_names: [String:[Int]]{}, display_paths: [(module_index: Int, path: String):String]{}}
-    loop (index, row) in ledger.facts.declarations {
-        ledger.declarations[(module_index: row.module_index, name: row.name)] = index
-        leaf :: name_facts_leaf(row.name)
-        positions := ledger.declaration_names.get(leaf) ?? [Int]{}
-        &positions.push(index)
-        ledger.declaration_names[leaf] = positions
+    modules := [Int]{}
+    names := [String]{}
+    leaves := [String]{}
+    loop row in ledger.facts.declarations {
+        &modules.push(row.module_index)
+        &names.push(row.name)
+        &leaves.push(name_facts_leaf(row.name))
     }
-    loop (index, row) in ledger.facts.aliases {
-        ledger.aliases[(module_index: row.module_index, name: row.name)] = index
-        leaf :: name_facts_leaf(row.name)
-        positions := ledger.alias_names.get(leaf) ?? [Int]{}
-        &positions.push(index)
-        ledger.alias_names[leaf] = positions
+    loop index in name_rows_by_key(modules, names) -> ledger.declarations[(module_index: modules[index], name: names[index])] = index
+    ledger.declaration_names = name_leaf_positions(leaves)
+    modules = [Int]{}
+    names = [String]{}
+    leaves = [String]{}
+    loop row in ledger.facts.aliases {
+        &modules.push(row.module_index)
+        &names.push(row.name)
+        &leaves.push(name_facts_leaf(row.name))
     }
-    loop row in ledger.facts.display_paths -> ledger.display_paths[(module_index: row.module_index, path: row.internal_path)] = row.display_path
+    loop index in name_rows_by_key(modules, names) -> ledger.aliases[(module_index: modules[index], name: names[index])] = index
+    ledger.alias_names = name_leaf_positions(leaves)
+    modules = [Int]{}
+    names = [String]{}
+    loop row in ledger.facts.display_paths {
+        &modules.push(row.module_index)
+        &names.push(row.internal_path)
+    }
+    loop index in name_rows_by_key(modules, names) -> ledger.display_paths[(module_index: modules[index], path: names[index])] = ledger.facts.display_paths[index].display_path
     ledger
+}
+
+// The rows ordered by (module, name), equal keys in row order.
+fn name_rows_by_key(modules: [Int], names: [String]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<names.len() -> &order.push(index)
+    &order.sort_by((a: Int, b: Int) -> (modules[a] <=> modules[b]).then(names[a] <=> names[b]).then(a <=> b))
+    order
+}
+
+// Each leaf's row positions, ascending, filled in leaf order.
+fn name_leaf_positions(leaves: [String]) -> [String:[Int]] Never! {
+    order := [Int]{}
+    loop index in 0..<leaves.len() -> &order.push(index)
+    &order.sort_by((a: Int, b: Int) -> (leaves[a] <=> leaves[b]).then(a <=> b))
+    positions := [String:[Int]]{}
+    start := 0
+    loop start < order.len() {
+        leaf :: leaves[order[start]]
+        rows := [Int]{}
+        end := start
+        loop end < order.len() && leaves[order[end]] == leaf {
+            &rows.push(order[end])
+            end += 1
+        }
+        positions[leaf] = ^rows
+        start = end
+    }
+    positions
 }
 fn name_ledger_declaration(ledger: NameLedger, module_index: Int, name: String) -> NameDeclaration? Never! {
     index :: ledger.declarations.get((module_index: module_index, name: name)) ?? return None
