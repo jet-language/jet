@@ -89,13 +89,16 @@ struct X64LoadedImage {
 // AT_EXECFN), the thread name (its first 15 bytes) and the command prefix
 // that relaunches `executable` (LOADER_AT_RELAUNCH). `env` lists NAME=value
 // rows; `None` passes this process's environment as it is, in its order and
-// undecoded, the way a kernel exec of the file would get it.
+// undecoded, the way a kernel exec of the file would get it. `parent_death`:
+// a spawned child gets SIGTERM when the thread that spawned it ends (see
+// loader_plan); only a spawn from jet's main thread may ask for it.
 struct X64Launch {
     argv: [String]
     env: [String]?
     executable: String
     name: String
     relaunch: [String]
+    parent_death: Bool
 }
 
 // A process started from an image: its pid, else why it didn't start.
@@ -1025,6 +1028,12 @@ fn loader_plan(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool)
 
     rows := [Int]{}
     if fork -> loader_record(&rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
+    // PR_SET_PDEATHSIG: a `jet run` or `jet dev` child gets SIGTERM when jet
+    // ends, however it ends, as the program would if it ran in jet's
+    // process; a killed jet leaves no orphan. Their spawn runs on jet's main
+    // thread, whose end is jet's end. A jet that ends between the fork and
+    // this record still orphans the child.
+    if fork && launch.parent_death -> loader_record(&rows, OS_SYS_PRCTL, 1, 15, 0, 0, 0, 0, 0)
     if fds.len() > 0 {
         // Two rounds through descriptors above every source, so no move
         // overwrites a source a later move reads.

@@ -947,7 +947,8 @@ fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
 
 // What a program `jet run` starts gets besides its image: argv[0] and
 // `os.executable()` are the absolute path of `file`, then `program_args`;
-// this process's environment, passed as it is (X64Launch.env None).
+// this process's environment, passed as it is (X64Launch.env None). A child
+// started from it ends with jet (parent_death; jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile, this invocation's authority
 // (`jet run [--release] [-A] [--allow=…] [--deny=…]`).
@@ -962,7 +963,7 @@ fn jet_cli_launch_plan(file: String, program_args: [String], release: Bool, invo
         if rows.allow.len() > 0 -> &relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> &relaunch.push("--deny={rows.deny.join(",")}")
     }
-    X64Launch{argv: argv, env: None, executable: executable, name: jet_cli_stem(file), relaunch: relaunch}
+    X64Launch{argv: argv, env: None, executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true}
 }
 
 #Import(c) fn jet_cli_scheduler_shutdown() -> I64 = "jet_rt_scheduler_shutdown"
