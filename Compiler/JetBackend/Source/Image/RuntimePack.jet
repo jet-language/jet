@@ -438,7 +438,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
 // Audited Jet exports are defined public globals in standalone objects;
 // private functions and imports are not exports. Archives only satisfy roots.
 fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
-    c := link_context(^bufs)
+    c := link_context(^bufs, LINK_BASE)
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     if c.obj_name.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}

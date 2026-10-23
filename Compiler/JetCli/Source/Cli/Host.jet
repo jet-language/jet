@@ -7,6 +7,7 @@ use core.sys as cli_sys
 use core.term as cli_term
 use core.time as cli_time
 use jet_backend.[
+    LINK_BASE,
     x64_link_executable,
 ]
 use jet_driver.[
@@ -416,7 +417,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     loop input in closure.bytes -> &bytes.push(input)
     input_count :: names.len()
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
-    image :: x64_link_executable(names, ^bytes)
+    image :: x64_link_executable(names, ^bytes, LINK_BASE)
     if trace_sink == .Val(sink) {
         sink.end("native.link", input_count)
         sink.progress("counters.native.link.bytes", image.bytes.len(), -1)

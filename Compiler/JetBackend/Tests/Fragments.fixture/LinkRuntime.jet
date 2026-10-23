@@ -38,7 +38,7 @@ fn lr_status(args: [String]) -> Int {
     // Names program objects may call directly besides the runtime's C ABI:
     // the memory primitives and libgcc's backtrace walk (the unwind probe).
     extra_roots :: [String]{"memcpy", "memmove", "memset", "memcmp", "_Unwind_Backtrace"}
-    result :: if pack -> x64_link_runtime_pack(names, ^bufs, extra_roots) else -> x64_link_executable(names, ^bufs)
+    result :: if pack -> x64_link_runtime_pack(names, ^bufs, extra_roots) else -> x64_link_executable(names, ^bufs, LINK_BASE)
     link_ms :: started.elapsed_millis()
     if result.errors.len() > 0 {
         loop error in result.errors -> print("link: {error}")

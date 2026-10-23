@@ -16,7 +16,7 @@ use jet_ir.[
     ir_args, ir_else, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_new, ir_open, ir_open_if, ir_slot,
     ir_optimize_module, ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
 ]
-use jet_backend.[x64_link_executable]
+use jet_backend.[LINK_BASE, x64_link_executable]
 use jet_foundation.[CompilerThreads, Type, compiler_threads_single]
 use core.files as files
 use core.process as process
@@ -882,7 +882,7 @@ fn xp_status(args: [String]) -> Int {
             next
         }
         bufs := [[U8]]{object.bytes, pack.copy()}
-        linked :: x64_link_executable([String]{"{program.name}.o", args[1]}, ^bufs)
+        linked :: x64_link_executable([String]{"{program.name}.o", args[1]}, ^bufs, LINK_BASE)
         if linked.errors.len() > 0 {
             loop error in linked.errors -> print("{program.name}: link: {error}")
             failures += 1
@@ -967,7 +967,7 @@ fn xp_level(m: IRModule, level: Int, pack: [U8], pack_path: String, exe: String,
     object :: ir_x64_object(^compiled)
     if object.errors.len() > 0 -> return xp_level_failed(object.errors.join("; "))
     bufs := [[U8]]{object.bytes, pack.copy()}
-    linked :: x64_link_executable([String]{"{exe}.o", pack_path}, ^bufs)
+    linked :: x64_link_executable([String]{"{exe}.o", pack_path}, ^bufs, LINK_BASE)
     if linked.errors.len() > 0 -> return xp_level_failed("link: {linked.errors.join("; ")}")
     files.write_bytes(exe, linked.bytes) ?? return xp_level_failed("cannot write {exe}")
     files.set_mode(exe, 0o755) ?? return xp_level_failed("cannot make {exe} executable")

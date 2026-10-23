@@ -22,9 +22,11 @@
 // 3. Garbage collection from `_start`, the init/fini arrays and the unwind
 //    tables' personality references, following relocations; an `.eh_frame`
 //    FDE lives exactly when the function it describes does.
-// 4. Layout at 0x400000 in three page-aligned segments (read-only data and
-//    unwind tables, code, writable data with TLS, GOT and bss), file offset
-//    equal to address minus the base.
+// 4. Layout at the link base in three page-aligned segments (read-only data
+//    and unwind tables, code, writable data with TLS, GOT and bss), file
+//    offset equal to address minus the base. `jet build` links at LINK_BASE;
+//    an image a running jet maps into itself (Image/Loader.jet) links at
+//    LINK_RUN_BASE, clear of jet's own image, its heap and its mappings.
 // 5. Relocation, with the static-executable relaxations: TLS
 //    general/local-dynamic to local-exec, initial-exec to local-exec, and
 //    GOT loads/calls to direct `lea`/`call`/`jmp` when the instruction allows.
@@ -37,6 +39,7 @@
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 
 LINK_BASE :: prep { 0x400000 }
+LINK_RUN_BASE :: prep { 0x200000000000 }
 LINK_PAGE :: prep { 0x1000 }
 LINK_EHDR_SIZE :: prep { 64 }
 LINK_PHDR_SIZE :: prep { 56 }
@@ -201,10 +204,12 @@ struct LinkContext {
     tls_align: Int
     eh_start: Int
     eh_size: Int
+    // The address of the first loaded byte (the ELF header).
+    base: Int
     errors: [String]
 }
 
-fn link_context(bufs: ^[[U8]]) -> LinkContext Never! {
+fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
     LinkContext{
         bufs: ^bufs, archives: [LinkArchive]{}, archive_buffer: [Int]{}, lookup: [String:Int]{}, pulled: [Int:Bool]{},
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
@@ -217,7 +222,7 @@ fn link_context(bufs: ^[[U8]]) -> LinkContext Never! {
         ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
         ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
         got: [Int:Int]{}, got_keys: [Int]{}, rel_base: [Int]{}, rel_slot: [Int]{}, got_start: 0, tls_start: 0, tls_end: 0, tls_align: 1,
-        eh_start: 0, eh_size: 0, errors: [String]{},
+        eh_start: 0, eh_size: 0, base: base, errors: [String]{},
     }
 }
 
@@ -1182,7 +1187,9 @@ fn link_got_form(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol: 
     if opcode == 0x8b && (modrm.bit_and(0xc7)) == 0x05 {
         rex :: link_u8(c.bufs, b, at - 3)
         if (rex.bit_and(0xf8)) == 0x48 {
-            form = if kind == LINK_R_REX_GOTPCRELX -> 4 else -> 1
+            // A sign-extended imm32 holds addresses below 2 GiB only; above
+            // (LINK_RUN_BASE) the load stays rip-relative as `lea`.
+            form = if kind == LINK_R_REX_GOTPCRELX && c.base < 0x80000000 -> 4 else -> 1
         } else if kind == LINK_R_GOTPCRELX && (rex.bit_and(0xf0)) != 0x40 {
             form = 1
         }
@@ -1336,7 +1343,7 @@ fn link_layout(c: &LinkContext) -> LinkLayout Never! {
     has_rw := c.got_keys.len() > 0 || commons
     loop class in LINK_TDATA..<LINK_CLASSES { if order[class].len() > 0 -> has_rw = true }
     phnum :: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0)
-    addr := LINK_BASE + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
+    addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
     addr = link_place(&c, order[LINK_RODATA], addr)
     // Unwind tables: kept records, then the zero terminator.
     eh_start :: link_align(addr, 8)
@@ -1416,7 +1423,7 @@ fn link_define_names(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
             "__preinit_array_end" -> l.preinit_end
             "__EH_FRAME_BEGIN__" -> c.eh_start
             "_GLOBAL_OFFSET_TABLE_" -> c.got_start
-            "__ehdr_start" | "__executable_start" -> LINK_BASE
+            "__ehdr_start" | "__executable_start" -> c.base
             "_etext" | "etext" -> l.text_end
             "_edata" | "edata" | "__bss_start" -> l.bss_start
             else -> l.mem_end
@@ -1450,8 +1457,8 @@ fn link_put_bytes(out: &[U8], at: Int, bytes: [Int]) Never! {
 // Apply a GOT-relative relocation (link_apply): through its slot, or
 // relaxed as link_got_form decides.
 fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off: Int, symbol: Int, addend: Int, pos: Int, place: Int) -> Bool Never! {
-    form :: link_got_form(c, kind, obj, s, off, symbol, addend)
-    if form == 0 {
+    decided :: link_got_form(c, kind, obj, s, off, symbol, addend)
+    if decided == 0 {
         slot :: c.got.get(link_got_key(c, obj, symbol)) ?? {
             link_reloc_error(&c, s, off, "GOT relocation without a slot")
             return false
@@ -1460,6 +1467,11 @@ fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off:
         return false
     }
     target :: link_target_addr(c, obj, symbol)
+    // Above 2 GiB a REX.W `mov` relaxes to `lea`, unless its target is low:
+    // an undefined weak symbol (address 0, e.g. musl's `_DYNAMIC`) is out of
+    // `lea` range there and becomes `mov reg, imm32` as GNU ld does. Neither
+    // form takes a GOT slot, so the scan's decision stands.
+    form :: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int.from_u8(out[pos - 3]).bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
     value :: if form == 4 -> target else -> target + addend - place
     if !link_fits32(value) -> link_reloc_error(&c, s, off, "relaxed GOT relocation out of range")
     if form == 1 {
@@ -1663,10 +1675,10 @@ fn link_pad_to(out: &[U8], offset: Int, fill: Int) Never! {
     loop out.len() < offset -> &out.push(U8{fill})
 }
 
-fn link_phdr(out: &[U8], kind: Int, flags: Int, start: Int, file_size: Int, mem_size: Int, align: Int) Never! {
+fn link_phdr(out: &[U8], base: Int, kind: Int, flags: Int, start: Int, file_size: Int, mem_size: Int, align: Int) Never! {
     elf64_u32(&out, kind)
     elf64_u32(&out, flags)
-    elf64_u64(&out, start - LINK_BASE)
+    elf64_u64(&out, start - base)
     elf64_u64(&out, start)
     elf64_u64(&out, start)
     elf64_u64(&out, file_size)
@@ -1691,10 +1703,10 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
     elf64_u16(&out, 0)
     elf64_u16(&out, 0)
     elf64_u16(&out, 0)
-    link_phdr(&out, 1, 4, LINK_BASE, l.r_end - LINK_BASE, l.r_end - LINK_BASE, LINK_PAGE)
-    link_phdr(&out, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
-    if l.has_rw -> link_phdr(&out, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
-    if l.has_tls -> link_phdr(&out, 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
+    link_phdr(&out, c.base, 1, 4, c.base, l.r_end - c.base, l.r_end - c.base, LINK_PAGE)
+    link_phdr(&out, c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
+    if l.has_rw -> link_phdr(&out, c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    if l.has_tls -> link_phdr(&out, c.base, 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
     // PT_GNU_STACK: the stack is not executable.
     elf64_u32(&out, 0x6474e551)
     elf64_u32(&out, 6)
@@ -1703,24 +1715,24 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
     file_classes :: [Int]{LINK_RODATA, LINK_EH, LINK_TEXT, LINK_TDATA, LINK_PREINIT, LINK_INIT, LINK_FINI, LINK_RELRO, LINK_DATA}
     loop class in file_classes {
         if class == LINK_EH {
-            link_pad_to(&out, c.eh_start - LINK_BASE, 0)
+            link_pad_to(&out, c.eh_start - c.base, 0)
             link_emit_eh(&c, &out)
             next
         }
         loop row in l.order[class] {
-            link_pad_to(&out, c.live_addr[row] - LINK_BASE, if class == LINK_TEXT -> 0xcc else -> 0)
+            link_pad_to(&out, c.live_addr[row] - c.base, if class == LINK_TEXT -> 0xcc else -> 0)
             link_emit_section(&c, &out, row)
         }
         if class == LINK_RELRO {
             // The GOT follows the read-only-after-relocation data.
-            link_pad_to(&out, c.got_start - LINK_BASE, 0)
+            link_pad_to(&out, c.got_start - c.base, 0)
             loop key in c.got_keys {
                 value :: if key >= 0 -> link_global_addr(c, key) else -> link_got_local(c, -1 - key)
                 elf64_u64(&out, value)
             }
         }
     }
-    if l.has_rw -> link_pad_to(&out, l.file_end - LINK_BASE, 0)
+    if l.has_rw -> link_pad_to(&out, l.file_end - c.base, 0)
     out
 }
 
@@ -1854,11 +1866,11 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         }
         if extent[1] > extent[0] {
             class_headers[class] = headers.len() + 1
-            &headers.push(LinkSectionHeader{name: names[class], kind: kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - LINK_BASE, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
+            &headers.push(LinkSectionHeader{name: names[class], kind: kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - c.base, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
         }
         // The GOT follows the read-only-after-relocation data.
         if class == LINK_RELRO && c.got_keys.len() > 0 {
-            &headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - LINK_BASE, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
+            &headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - c.base, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
         }
     }
     loop (group, name) in debug.names {
@@ -2054,16 +2066,17 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // bufs[i] in reports. Every object is loaded; archive members are pulled
 // as resolution needs them. The image starts at `_start`: the linker's own
 // startup object when the archives provide musl's `__libc_start_main` and
-// no object defines `_start`, else the objects' `_start`.
-fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, ^bufs, None)
+// no object defines `_start`, else the objects' `_start`. The ELF header is
+// loaded at `base` (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
+fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int) -> X64ExecutableResult Never! {
+    linked := link_executable_image(names, ^bufs, base, None)
     ^linked.image
 }
 
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
-fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLinkRequest?) -> X64ResidentLinkResult Never! {
-    c := link_context(^bufs)
+fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?) -> X64ResidentLinkResult Never! {
+    c := link_context(^bufs, base)
     if request == .Val(wanted) {
         if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
     }
@@ -2133,13 +2146,13 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLi
             &symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
         }
         segments := [X64ResidentSegment]{
-            {address: LINK_BASE, file_size: layout.r_end - LINK_BASE, memory_size: layout.r_end - LINK_BASE, align: LINK_PAGE, flags: 4},
+            {address: c.base, file_size: layout.r_end - c.base, memory_size: layout.r_end - c.base, align: LINK_PAGE, flags: 4},
             {address: layout.text_start, file_size: layout.text_end - layout.text_start, memory_size: layout.text_end - layout.text_start, align: LINK_PAGE, flags: 5},
         }
         if layout.has_rw -> &segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
         tls := X64ResidentSegment?{None}
         if layout.has_tls -> tls = Val(X64ResidentSegment{address: c.tls_start, file_size: layout.tdata_end - c.tls_start, memory_size: c.tls_end - c.tls_start, align: c.tls_align, flags: 4})
-        facts = Val(X64ResidentLinkFacts{base: LINK_BASE, entry: entry, segments: ^segments, tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: ^symbols})
+        facts = Val(X64ResidentLinkFacts{base: c.base, entry: entry, segments: ^segments, tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: ^symbols})
     }
     X64ResidentLinkResult{image: X64ExecutableResult{bytes: ^image, errors: [String]{}}, facts: ^facts}
 }

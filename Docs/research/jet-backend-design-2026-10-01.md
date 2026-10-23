@@ -1615,7 +1615,7 @@ fixture executable: `node Compiler/JetRuntime/Tests/run-execution-fixtures.mjs B
 
 ## In-process linking
 
-`Image/StaticLink.jet` (`x64_link_executable(names, bufs)`, #4549) links
+`Image/StaticLink.jet` (`x64_link_executable(names, bufs, base)`, #4549) links
 relocatable objects with the prebuilt runtime archive set into a static
 x86-64 executable without a system linker, compiler or child process.
 `Image/Archive.jet` reads GNU `ar` archives in place (member table, `/` and
@@ -1662,7 +1662,9 @@ the linker supplies the few glibc-only names below. What the linker does:
   exactly when the function it describes is live (and its LSDA then is), and
   every kept FDE's CIE pointer is recomputed. The same pass over each live
   section's relocations assigns GOT slots and reports undefined symbols.
-- **Layout.** ET_EXEC at 0x400000 with file offset = address - base, three
+- **Layout.** ET_EXEC at the link base (`LINK_BASE` 0x400000 for `jet
+  build`; `LINK_RUN_BASE` 0x200000000000 for an image `jet run` maps into its
+  own process, `Image/Loader.jet`) with file offset = address - base, three
   page-aligned `PT_LOAD` segments: read-only (headers, `.rodata*`,
   `.gcc_except_table*`, the kept unwind records plus a zero terminator),
   read+execute (`.text*`, padded with `int3`), read+write (`.tdata`, the
