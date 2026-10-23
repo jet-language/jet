@@ -15,10 +15,12 @@
 // shared tables stay with the caller.
 
 // How many threads the compiler may use. The host fills it: `cap` is the
-// user's `--threads N` (N >= 1), `None` when the flag is absent; `cores` is
-// the number of cores the system reports; `memory_available` is the memory
-// free for new work, in bytes, when the host can read it. The cap limits the
-// compiler only, never the threads of a program it builds or runs.
+// user's `--threads N` (N >= 1), or the host's default when the flag is
+// absent (the CLI's is one thread per physical core); `None` lets admission
+// start at `cores`. `cores` is the number of CPUs the process may use;
+// `memory_available` is the memory free for new work, in bytes, when the
+// host can read it. The cap limits the compiler only, never the threads of a
+// program it builds or runs.
 struct CompilerThreads {
     cap: Int?
     cores: Int

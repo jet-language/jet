@@ -1,0 +1,15 @@
+// The compiler's default thread count: Linux CPU lists and the physical-core count.
+use jet_cli.[jet_cli_cpu_list, jet_cli_physical_cores]
+
+#Test("cpu_list_reads_ranges_and_single_cpus") {
+    assert_eq(jet_cli_cpu_list("0-3,8-9") ?? [Int]{}, [Int]{0, 1, 2, 3, 8, 9})
+    assert_eq(jet_cli_cpu_list("0,16") ?? [Int]{}, [Int]{0, 16})
+    assert_eq(jet_cli_cpu_list("5") ?? [Int]{}, [Int]{5})
+    assert(jet_cli_cpu_list("x-3") == None)
+}
+
+#Test("physical_cores_stays_within_the_logical_count") {
+    cores :: jet_cli_physical_cores(4096)
+    assert(cores >= 1 && cores <= 4096)
+    assert_eq(jet_cli_physical_cores(1), 1)
+}

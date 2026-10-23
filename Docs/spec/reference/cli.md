@@ -511,9 +511,10 @@ The options below are intentionally named exactly as in `jet help`:
   WebAssembly assignment.
 - `--threads N` caps the compiler at N threads on `build`, `run`, `check`,
   `test`, `dev`, and `inspect` (D-JOBS1=A); without it the compiler admits
-  threads automatically up to the reported cores. It never limits the threads
-  of the program jet builds or runs, every value gives the same diagnostics
-  and output bytes, and `build --verbose` reports the cap it used. No
+  threads automatically up to one per physical core it may run on (SMT
+  siblings count once). It never limits the threads of the program jet
+  builds or runs, every value gives the same diagnostics and output bytes,
+  and `build --verbose` reports the cap it used. No
   environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
   that point to `--threads`, because `jobs` names project jobs.
 

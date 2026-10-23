@@ -671,6 +671,50 @@ fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
     Val(bytes)
 }
 
+// The compiler's thread default: one thread per physical core this process
+// may run on. Linux lists the CPUs the process may use in `/proc/self/status`
+// (`Cpus_allowed_list`) and the SMT siblings of each CPU in
+// `/sys/devices/system/cpu/cpuN/topology/thread_siblings_list`; an allowed
+// CPU and its siblings are one core, so only the first allowed CPU of each
+// core is read. The default is the measured-best count: today a compile past
+// one thread per core spends more CPU time for no wall time (#5472). When
+// the per-stage SMT acceptance shows all hardware threads (32 on a 16-core
+// SMT host) beating one per core, the default becomes all hardware threads.
+// `logical`, the count of CPUs the process may use, is the answer when the
+// host can't tell, and the default never exceeds it.
+fn jet_cli_physical_cores(logical: Int) -[FS]> Int Never! {
+    status :: cli_files.read("/proc/self/status") ?? return logical
+    allowed := [Int]{}
+    loop line in status.lines() {
+        if line.starts_with("Cpus_allowed_list:") -> allowed = jet_cli_cpu_list(line.slice(18..<line.len()).trim()) ?? return logical
+    }
+    covered := [Int]{}
+    cores := 0
+    loop cpu in allowed {
+        if covered.contains(cpu) -> next
+        siblings :: cli_files.read("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list") ?? return logical
+        &covered.extend(jet_cli_cpu_list(siblings.trim()) ?? return logical)
+        cores += 1
+    }
+    if cores < 1 || cores > logical -> return logical
+    cores
+}
+
+// The CPUs of a Linux CPU list (`0-3,8-11`, `0,2`); `None` when it is not one.
+fn jet_cli_cpu_list(text: String) -> [Int]? Never! {
+    cpus := [Int]{}
+    loop part in text.split(",") {
+        if part == "" -> next
+        bounds :: part.split("-").to_list()
+        first :: Int.parse(bounds[0]) ?? return None
+        last :: if bounds.len() == 2 -> Int.parse(bounds[1]) ?? return None else -> first
+        loop cpu in first..<(last + 1) {
+            &cpus.push(cpu)
+        }
+    }
+    Val(cpus)
+}
+
 // The Core library rows of the toolchain tree that `JET_TOOLCHAIN_ROOT`
 // names, or the refusal that stops the request. Each body is read when the
 // compile first schedules its row (jet_driver_core_text_file), so a compile
@@ -704,9 +748,10 @@ impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
 
 // The driver request for `snapshot` on this host: the Core rows, the
 // canonical effect source, the host facts, and at most `threads` compiler
-// threads (`None` admits threads automatically).
+// threads (`None` admits threads automatically, up to one per physical core).
 fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os :: cli_sys.name()
+    cores :: cli_sys.cpu_count()
     JetDriverCompileRequest{
         authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
@@ -715,7 +760,7 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         eval_config: jet_cli_eval_config(),
         record_store: None,
         trace_sink: None,
-        compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
+        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_physical_cores(cores)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
