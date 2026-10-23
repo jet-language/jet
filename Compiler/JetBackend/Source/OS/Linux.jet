@@ -262,56 +262,6 @@ fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
     """
 }
 
-#[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
-fn os_dl_open(path: Int) -> Int {
-    """
-    void *dlopen(const char *path, int flags);
-    int64_t os_dl_open(int64_t path) { return (int64_t)dlopen((const char *)path, 2); }
-    """
-}
-
-#[Unsafe("dlsym reads the NUL-terminated name at `name`"), FFI(c)]
-fn os_dl_symbol(library: Int, name: Int) -> Int {
-    """
-    void *dlsym(void *library, const char *name);
-    int64_t os_dl_symbol(int64_t library, int64_t name) { return (int64_t)dlsym((void *)library, (const char *)name); }
-    """
-}
-
-// `text` as a NUL-terminated string in a fresh mapping of
-// `os_page_round(text.len() + 1)` bytes, or 0.
-fn os_c_string(text: String) -> Int {
-    address :: os_map(text.len() + 1, OS_PROT_READ + OS_PROT_WRITE)
-    if os_failed(address) -> return 0
-    os_copy_in(address, text.bytes())
-    address
-}
-
-// Load the shared library at `path` into the process, binding every symbol
-// now. Returns its handle, or 0.
-fn os_library_open(path: String) -> Int {
-    name :: os_c_string(path)
-    if name == 0 -> return 0
-    library := 0
-    #Unsafe("`name` is a NUL-terminated copy of `path`") {
-        library = os_dl_open(name)
-    }
-    _ := os_unmap(name, path.len() + 1)
-    library
-}
-
-// The address of the exported symbol `symbol` of `library`, or 0.
-fn os_library_symbol(library: Int, symbol: String) -> Int {
-    name :: os_c_string(symbol)
-    if name == 0 -> return 0
-    address := 0
-    #Unsafe("`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table") {
-        address = os_dl_symbol(library, name)
-    }
-    _ := os_unmap(name, symbol.len() + 1)
-    address
-}
-
 // Runtime leaves use machine words, never exact Int: an allocator must not
 // enter the arbitrary-precision numeric runtime while bootstrapping its heap.
 #[Unsafe("a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments"), FFI(asm)]
