@@ -220,17 +220,19 @@ fn zip_decompress(data: [U8]) -> [U8] ArchiveError! {
 
 fn zip_names_json(archive: [U8]) -> String ArchiveError! {
     names :: zip_list(archive)
-    out := "["
+    out := [U8]{U8{91}}
+    total := 1
     first := true
     loop n in names {
         escaped :: json_escape(n)
         extra := escaped.len() + 2
         if !first -> extra = extra + 1
-        if out.len() + extra + 1 > C_MAX_JSON -> return Err(ArchiveError.Unsupported)
-        if first -> first = false else -> out = "{out},"
-        out = "{out}\"{escaped}\""
+        if total + extra + 1 > C_MAX_JSON -> return Err(ArchiveError.Unsupported)
+        names_json_push(&out, escaped, first)
+        total = total + extra
+        first = false
     }
-    Ok("{out}]")
+    names_json_finish(out)
 }
 /// Return the names stored in a ZIP archive.
 fn list(archive: [U8]) -> [String] ArchiveError! { zip_list(archive) }
@@ -381,7 +383,8 @@ fn tar_get(archive: [U8], name: String) -> [U8] ArchiveError! {
 
 fn tar_names_json(archive: [U8]) -> String ArchiveError! {
     if archive.len() == 0 -> return Err(ArchiveError.Malformed)
-    out := "["
+    out := [U8]{U8{91}}
+    total := 1
     first := true
     pending_name := ""
     has_pending_name := false
@@ -441,12 +444,28 @@ fn tar_names_json(archive: [U8]) -> String ArchiveError! {
         escaped :: json_escape(nm)
         extra := escaped.len() + 2
         if !first -> extra += 1
-        if out.len() + extra + 1 > C_MAX_JSON -> return Err(ArchiveError.Unsupported)
-        if first -> first = false else -> out = "{out},"
-        out = "{out}\"{escaped}\""
+        if total + extra + 1 > C_MAX_JSON -> return Err(ArchiveError.Unsupported)
+        names_json_push(&out, escaped, first)
+        total += extra
+        first = false
     }
     if !saw_end || has_pending_name -> return Err(ArchiveError.Malformed)
-    Ok("{out}]")
+    names_json_finish(out)
+}
+
+// The names JSON grows in one byte buffer: rebuilding a String per name made
+// listing an archive quadratic in the JSON size, minutes near C_MAX_JSON.
+fn names_json_push(out: &[U8], escaped: String, first: Bool) Never! {
+    if !first -> &out.push(U8{44})
+    &out.push(U8{34})
+    loop b in escaped.bytes() -> &out.push(b)
+    &out.push(U8{34})
+}
+
+fn names_json_finish(out: [U8]) -> String ArchiveError! {
+    done := out
+    &done.push(U8{93})
+    String.from_bytes(done) ?? return Err(ArchiveError.Malformed)
 }
 
 struct ZipFile {
