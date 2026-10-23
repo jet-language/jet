@@ -1,0 +1,10 @@
+# tests/marker_groups_modules.rs::same_module_marker_is_bare_and_imports_use_the_local_alias at tests/marker_groups_modules.rs:60; hand-port
+# Claim: same-module marker written bare (#LocalNote) and imported marker written through the local alias (#[LocalNote, lib.LibraryNote("direct")]) both accepted with no diagnostics (tests/marker_groups_modules.rs:61-64)
+# Not ported: resolve_marker_application row modules, declaration identity, and marker names 'lib.LibraryNote' (tests/marker_groups_modules.rs:65-75) read Rust-internal sema tables; no CLI output shows them
+fixture: same_module_marker_is_bare_and_imports_use_the_local_alias.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_groups_modules.rs:61-64 clean(): accepted with no diagnostics
+stderr: !~ "[E" # tests/marker_groups_modules.rs:61-64 clean(): accepted with no diagnostics

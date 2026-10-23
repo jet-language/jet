@@ -1,0 +1,35 @@
+# tests/fmt.rs::fmt_unified_loop_headers_and_next_stability at tests/fmt.rs:3103; hand-port
+# Claim: unified loop source keeps needles: `fn next()`, `next()`, `.next()`, `?? (next)`, `loop item in [1, 2, 3], 2`, `?? next`, `if value == 1 -> next` (tests/fmt.rs:3104-3117)
+# Claim: second pass identical (tests/fmt.rs:3118-3120)
+# Claim: each of 7 retired loop spellings is a parse error on fmt (tests/fmt.rs:3122-3134)
+fixture: fmt_unified_loop_headers_and_next_stability.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt a.jet
+exit: 0 # tests/fmt.rs:3118 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ "fn next()" # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ "next()" # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ ".next()" # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ "?? (next)" # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ "loop item in [1, 2, 3], 2" # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ "?? next" # tests/fmt.rs:3108-3114 needles kept
+stdout: ~ "if value == 1 -> next" # tests/fmt.rs:3108-3114 needles kept
+step: jet fmt --check a.jet
+exit: 0 # tests/fmt.rs:3119-3120 stable
+step: jet fmt b1.jet
+exit: 2 # tests/fmt.rs:3123 retired loop spelling is a parse error
+step: jet fmt b2.jet
+exit: 2 # tests/fmt.rs:3124 retired loop spelling is a parse error
+step: jet fmt b3.jet
+exit: 2 # tests/fmt.rs:3125 retired loop spelling is a parse error
+step: jet fmt b4.jet
+exit: 2 # tests/fmt.rs:3126 retired loop spelling is a parse error
+step: jet fmt b5.jet
+exit: 2 # tests/fmt.rs:3127 retired loop spelling is a parse error
+step: jet fmt b6.jet
+exit: 2 # tests/fmt.rs:3128 retired loop spelling is a parse error
+step: jet fmt b7.jet
+exit: 2 # tests/fmt.rs:3129 retired loop spelling is a parse error

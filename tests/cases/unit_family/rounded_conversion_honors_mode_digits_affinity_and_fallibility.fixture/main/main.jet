@@ -1,0 +1,36 @@
+
+#UnitFamily(Length, dimension, base: meter) {
+    meter
+    half(scale: 1/2)
+    eighth(scale: 1/8)
+    near_quarter(scale: 249/1000)
+    near_three_quarters(scale: 751/1000)
+    double(scale: 2)
+}
+#UnitFamily(Temperature, dimension, base: kelvin) {
+    kelvin
+    shifted(scale: 1, offset: 249/1000)
+}
+fn run() {
+    positive :: Half.from_float(Float{5.0})
+    negative :: Half.from_float(-Float{5.0})
+    positive_odd_tie :: Half.from_float(Float{7.0})
+    negative_odd_tie :: Half.from_float(-Float{7.0})
+    toward_zero_positive :: Meter.from_half_rounded(positive, .TowardZero, digits: 0) ?? panic("toward zero positive")
+    floor_positive :: Meter.from_half_rounded(positive, .Floor, digits: 0) ?? panic("floor positive")
+    ceiling_positive :: Meter.from_half_rounded(positive, .Ceiling, digits: 0) ?? panic("ceiling positive")
+    nearest_positive :: Meter.from_half_rounded(positive, .NearestEven, digits: 0) ?? panic("nearest positive")
+    toward_zero_negative :: Meter.from_half_rounded(negative, .TowardZero, digits: 0) ?? panic("toward zero negative")
+    floor_negative :: Meter.from_half_rounded(negative, .Floor, digits: 0) ?? panic("floor negative")
+    ceiling_negative :: Meter.from_half_rounded(negative, .Ceiling, digits: 0) ?? panic("ceiling negative")
+    nearest_negative :: Meter.from_half_rounded(negative, .NearestEven, digits: 0) ?? panic("nearest negative")
+    nearest_positive_odd :: Meter.from_half_rounded(positive_odd_tie, .NearestEven, digits: 0) ?? panic("nearest positive odd")
+    nearest_negative_odd :: Meter.from_half_rounded(negative_odd_tie, .NearestEven, digits: 0) ?? panic("nearest negative odd")
+    nearest_quarter :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2) ?? panic("nearest quarter")
+    nearest_three_quarters :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2) ?? panic("nearest three quarters")
+    unrepresentable_decimal :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? Meter.from_float(-Float{2.0})
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2) ?? panic("point")
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2) ?? panic("delta")
+    overflow :: Meter.from_double_rounded(Double.from_float(Float{1.7976931348623157e308}), .NearestEven, digits: 0) ?? Meter.from_float(-Float{1.0})
+    print("{(toward_zero_positive)} {(floor_positive)} {(ceiling_positive)} {(nearest_positive)} {(toward_zero_negative)} {(floor_negative)} {(ceiling_negative)} {(nearest_negative)} {(nearest_positive_odd)} {(nearest_negative_odd)} {(nearest_quarter)} {(nearest_three_quarters)} {(unrepresentable_decimal)} {(point)} {(delta)} {(overflow)}")
+}

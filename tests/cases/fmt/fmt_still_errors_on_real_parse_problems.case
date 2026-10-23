@@ -1,0 +1,11 @@
+# tests/fmt.rs::fmt_still_errors_on_real_parse_problems at tests/fmt.rs:1506; hand-port
+# Claim: formatting `fn run() { x :: ; }` fails instead of producing output (tests/fmt.rs:1508-1511)
+fixture: fmt_still_errors_on_real_parse_problems.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 2 # tests/fmt.rs:1509 format_source must Err (nonzero exit; exact code is the seed value)
+step: sh {work}/step-2.sh
+exit: 0 # fmt must not rewrite a file it cannot parse
+stdout: = "fn run() { x :: ; }\n" # fmt must not rewrite a file it cannot parse

@@ -1,0 +1,14 @@
+# tests/unit_family.rs::qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fail at tests/unit_family.rs:1931; hand-port
+# Claim: qualified alias dep.Inventory resolves clean (tests/unit_family.rs:1931)
+# Claim: unqualified ambiguous Inventory rejected E0905 (tests/unit_family.rs:1931)
+# Fixture migrated: use "stock" as dep becomes deps alias dep
+fixture: qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fail.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check qualified/main.jet
+exit: 0 # qualified alias dep.Inventory resolves clean (tests/unit_family.rs:1931)
+step: jet check ambiguous/main.jet
+exit: 1 # qualified alias dep.Inventory resolves clean (tests/unit_family.rs:1931)
+stderr: ~ "E0905" # qualified alias dep.Inventory resolves clean (tests/unit_family.rs:1931)
+stderr: ~ "ambiguous" # qualified alias dep.Inventory resolves clean (tests/unit_family.rs:1931)

@@ -1,0 +1,11 @@
+# tests/marker_groups_modules.rs::imported_file_group_establishes_transitive_marker_export_visibility at tests/marker_groups_modules.rs:383; hand-port
+# Claim: an imported file group (flags.Defaults = #[PubFile, NoPrelude]) applied in library.jet to its marker declarations is accepted when library's pub markers are used by main (tests/marker_groups_modules.rs:384-399)
+# Fixture migrated: removed `pub` from fixtures: seed rejects it (E0411 `pub` was removed); DEV Examples/features/modules/marker_groups uses no pub
+# Not ported: modules[library].pub_file / no_prelude, resolved.module/exported, is_inline asserts (tests/marker_groups_modules.rs:391-398) read Rust AST/resolver tables
+fixture: imported_file_group_establishes_transitive_marker_export_visibility.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_groups_modules.rs:392-399 clean()
+stderr: !~ "[E" # tests/marker_groups_modules.rs:392-399 clean()

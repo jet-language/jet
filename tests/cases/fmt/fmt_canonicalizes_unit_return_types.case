@@ -1,0 +1,21 @@
+# tests/fmt.rs::fmt_canonicalizes_unit_return_types at tests/fmt.rs:238; hand-port
+# Claim: unit-fallible return keeps `fn run() Err!` (tests/fmt.rs:239-244)
+# Claim: second pass identical (tests/fmt.rs:245-246)
+# Claim: retired bare `fn run() ? {` is rejected (tests/fmt.rs:247-250)
+# Claim: retired `=> Void !` is rejected (tests/fmt.rs:251-254)
+# Fixture migrated: error cases asserted as nonzero exit; observed exit 2 (E0081 "fn run has no body") for both retired spellings
+fixture: fmt_canonicalizes_unit_return_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt unit/a.jet
+exit: 0 # tests/fmt.rs:240 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:241-243
+stdout: ~ "fn run() Err!" # tests/fmt.rs:241-243
+step: jet fmt --check unit/a.jet
+exit: 0 # tests/fmt.rs:245-246 idempotent
+step: jet fmt unit/b.jet
+exit: 2 # tests/fmt.rs:247-250 retired spelling is an error
+step: jet fmt unit/c.jet
+exit: 2 # tests/fmt.rs:251-254 retired Void is an error

@@ -1,0 +1,14 @@
+# tests/fmt.rs::fmt_origin_compiler_fact_stability at tests/fmt.rs:2716; hand-port
+# Claim: origin compiler fact in comptime block formats and keeps `speed.$origin` (tests/fmt.rs:2718-2721)
+# Claim: second pass identical (tests/fmt.rs:2723-2724)
+fixture: fmt_origin_compiler_fact_stability.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:2718 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:2720 fact spelling kept
+stdout: ~ "speed.$origin" # tests/fmt.rs:2720 fact spelling kept
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:2723-2724 stable

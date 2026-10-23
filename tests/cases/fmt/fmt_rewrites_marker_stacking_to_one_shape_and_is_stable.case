@@ -1,0 +1,21 @@
+# tests/fmt.rs::fmt_rewrites_marker_stacking_to_one_shape_and_is_stable at tests/fmt.rs:2198; hand-port
+# Claim: `#[Codable]` before struct becomes `#Codable` (tests/fmt.rs:2201-2204)
+# Claim: single-marker output is stable (tests/fmt.rs:2205-2206)
+# Claim: `#Job #Every(5min) fn prune()` becomes `#[Job, Every(5min)] fn prune` (tests/fmt.rs:2210-2213)
+# Claim: marker-list output is stable (tests/fmt.rs:2214-2215)
+fixture: fmt_rewrites_marker_stacking_to_one_shape_and_is_stable.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt a.jet
+exit: 0 # tests/fmt.rs:2199-2200 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:2201-2204
+stdout: ~ "#Codable\nstruct Invoice" # tests/fmt.rs:2201-2204
+step: jet fmt b.jet
+exit: 0 # tests/fmt.rs:2208-2209 formats
+step: sh {work}/step-4.sh
+exit: 0 # tests/fmt.rs:2210-2213
+stdout: ~ "#[Job, Every(5min)]\nfn prune" # tests/fmt.rs:2210-2213
+step: jet fmt --check a.jet b.jet
+exit: 0 # tests/fmt.rs:2205, 2214 both outputs stable

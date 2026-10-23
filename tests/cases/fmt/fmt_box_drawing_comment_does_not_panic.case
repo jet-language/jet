@@ -1,0 +1,16 @@
+# tests/fmt.rs::fmt_box_drawing_comment_does_not_panic at tests/fmt.rs:2448; hand-port
+# Claim: fmt succeeds with no panic on the box-glyph comment (tests/fmt.rs:2457)
+# Claim: output keeps U+250C and U+2502 (tests/fmt.rs:2458-2461)
+# Claim: second pass identical (tests/fmt.rs:2462-2463)
+fixture: fmt_box_drawing_comment_does_not_panic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:2457 succeeds (exit 101 would be a panic)
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:2458-2461 box glyphs kept
+stdout: ~ "┌" # tests/fmt.rs:2458-2461 box glyphs kept
+stdout: ~ "│" # tests/fmt.rs:2458-2461 box glyphs kept
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:2462-2463 idempotent

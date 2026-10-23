@@ -1,0 +1,24 @@
+# tests/fmt.rs::fmt_keeps_optional_return_sugar at tests/fmt.rs:559; hand-port
+# Claim: `-> Int? {` stays (tests/fmt.rs:566-570)
+# Claim: `-> Int Err! {` stays (tests/fmt.rs:575-578)
+# Claim: retired infix `fn save() ! IOError {` is rejected (tests/fmt.rs:584-587)
+# Claim: retired suffix `Int ? String` is rejected (tests/fmt.rs:593-596)
+# Fixture migrated: error cases asserted as nonzero exit; observed exit 2 (E0081) for both
+fixture: fmt_keeps_optional_return_sugar.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt opt/a.jet
+exit: 0 # tests/fmt.rs:566 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:568
+stdout: ~ "fn parse_count(raw: String) -> Int? {" # tests/fmt.rs:568
+step: jet fmt opt/b.jet
+exit: 0 # tests/fmt.rs:575 formats
+step: sh {work}/step-4.sh
+exit: 0 # tests/fmt.rs:577
+stdout: ~ "-> Int Err! {" # tests/fmt.rs:577
+step: jet fmt opt/c.jet
+exit: 2 # tests/fmt.rs:584 retired infix unit failure is an error
+step: jet fmt opt/d.jet
+exit: 2 # tests/fmt.rs:593 retired suffix failure is an error

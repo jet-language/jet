@@ -1,0 +1,25 @@
+# tests/marker_groups_modules.rs::overlapping_groups_and_direct_members_share_the_duplicate_check at tests/marker_groups_modules.rs:154; hand-port
+# Claim: a group whose members overlap a direct #Fast member reports one E0999 (tests/marker_groups_modules.rs:155-158)
+# Claim: two groups sharing a member plus a direct member report one E0999 (tests/marker_groups_modules.rs:159-161)
+# Claim: a group repeating one member three times reports two E0999 (tests/marker_groups_modules.rs:162-164)
+# Claim: an imported group whose member duplicates another member reports E0999 (tests/marker_groups_modules.rs:165-167)
+fixture: overlapping_groups_and_direct_members_share_the_duplicate_check.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: a
+exit: 1 # tests/marker_groups_modules.rs:155-158 exactly one E0999
+stderr: ~ "[E0999]" # tests/marker_groups_modules.rs:155-158 exactly one E0999
+step: jet check main.jet
+cwd: b
+exit: 1 # tests/marker_groups_modules.rs:159-161 exactly one E0999
+stderr: ~ "[E0999]" # tests/marker_groups_modules.rs:159-161 exactly one E0999
+step: jet check main.jet
+cwd: c
+exit: 1 # tests/marker_groups_modules.rs:162-164 exactly two E0999
+stderr: ~ "[E0999]" # tests/marker_groups_modules.rs:162-164 exactly two E0999
+step: jet check main.jet
+cwd: d
+exit: 1 # tests/marker_groups_modules.rs:165-167 E0999
+stderr: ~ "[E0999]" # tests/marker_groups_modules.rs:165-167 E0999

@@ -1,0 +1,17 @@
+# tests/fmt.rs::fmt_preserves_destructuring_targets at tests/fmt.rs:1032; hand-port
+# Claim: struct destructuring is written dotless `Point{x, y} :: make()` (tests/fmt.rs:1045-1048)
+# Claim: list destructuring `[a, b, c] := nums()` kept (tests/fmt.rs:1049-1052)
+# Claim: second pass identical (tests/fmt.rs:1053-1054)
+# Fixture migrated: `Point.{ x, y }` dotted literal head -> `Point{ x, y }` (D-LIT-DOT1=B, Docs/spec/syntax-decisions.md:7938; syntax-roundtrip Docs/spec/…:249 `Point{x, y} :: Point.origin()`)
+fixture: fmt_preserves_destructuring_targets.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1044 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1045-1052
+stdout: ~ "Point{x, y} :: make()" # tests/fmt.rs:1045-1052
+stdout: ~ "[a, b, c] := nums()" # tests/fmt.rs:1045-1052
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1053-1054 stable

@@ -1,0 +1,16 @@
+# tests/marker_groups_modules.rs::nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed at tests/marker_groups_modules.rs:341; hand-port
+# Claim: an inner module's own import alias 'rules' binds the marker group locally and the nested group is accepted (tests/marker_groups_modules.rs:342-345)
+# Claim: an inner module's import alias that does not export the named marker does not fall through to the outer alias: rejected with E0927 (tests/marker_groups_modules.rs:346-351)
+# Fixture migrated: removed `pub` from fixtures: seed rejects it (E0411 `pub` was removed); DEV Examples/features/modules/marker_groups uses no pub
+fixture: nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: q1
+exit: 0 # tests/marker_groups_modules.rs:342-345 clean()
+stderr: !~ "[E" # tests/marker_groups_modules.rs:342-345 clean()
+step: jet check main.jet
+cwd: q2
+exit: 1 # tests/marker_groups_modules.rs:346-351 shadowed alias does not fall through -> E0927
+stderr: ~ "E0927" # tests/marker_groups_modules.rs:346-351 shadowed alias does not fall through -> E0927

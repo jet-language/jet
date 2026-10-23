@@ -1,0 +1,13 @@
+# tests/fmt.rs::fmt_classic_if_does_not_mix_braced_then_with_arrow_else at tests/fmt.rs:1910; hand-port
+# Claim: output does not contain `} else ->` (tests/fmt.rs:1924-1927)
+# Claim: output keeps a braced else body (`else {`) (tests/fmt.rs:1928-1931)
+fixture: fmt_classic_if_does_not_mix_braced_then_with_arrow_else.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --simplify run.jet
+exit: 0 # tests/fmt.rs:1921-1923 format_source_with_options(simplify: true) succeeds
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1924-1931
+stdout: ~ "else {" # tests/fmt.rs:1924-1931
+stdout: !~ "} else ->" # tests/fmt.rs:1924-1931

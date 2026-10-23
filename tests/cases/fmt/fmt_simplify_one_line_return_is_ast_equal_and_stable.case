@@ -1,0 +1,41 @@
+# tests/fmt.rs::fmt_simplify_one_line_return_is_ast_equal_and_stable at tests/fmt.rs:1159; hand-port
+# Claim: plain fmt gives `fn answer() -> Int { return 42 }` and no `:: 42` (tests/fmt.rs:1162-1169)
+# Claim: simplify output is exactly `fn answer() -> Int { 42 }` + newline (tests/fmt.rs:1174)
+# Claim: simplify output is stable (tests/fmt.rs:1187-1190)
+# Claim: wide body stays braced, no ` :: ` (tests/fmt.rs:1192-1199)
+# Claim: commented body stays braced (tests/fmt.rs:1201-1207)
+# Claim: nested-literal comment body stays braced and keeps its comment (tests/fmt.rs:1209-1220)
+# Not ported: AST equality via Lexer/Parser/canonical_program (tests/fmt.rs:1176-1186): Rust API, not CLI-visible
+fixture: fmt_simplify_one_line_return_is_ast_equal_and_stable.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt one/plain.jet
+exit: 0 # tests/fmt.rs:1161 plain format
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1162-1169
+stdout: ~ "fn answer() -> Int { return 42 }" # tests/fmt.rs:1162-1169
+stdout: !~ ":: 42" # tests/fmt.rs:1162-1169
+step: jet fmt --simplify one/simp.jet
+exit: 0 # tests/fmt.rs:1172-1174 simplify
+step: sh {work}/step-4.sh
+exit: 0 # tests/fmt.rs:1174 exact output
+stdout: = "fn answer() -> Int { 42 }\n" # tests/fmt.rs:1174 exact output
+step: jet fmt --simplify --check one/simp.jet
+exit: 0 # tests/fmt.rs:1189-1190 second simplify pass is identical
+step: jet fmt --simplify one/wide.jet
+exit: 0 # tests/fmt.rs:1194-1195 wide simplify
+step: sh {work}/step-7.sh
+exit: 0 # tests/fmt.rs:1196-1199 wide body braced
+stdout: !~ " :: " # tests/fmt.rs:1196-1199 wide body braced
+step: jet fmt --simplify one/commented.jet
+exit: 0 # tests/fmt.rs:1202-1203 commented simplify
+step: sh {work}/step-9.sh
+exit: 0 # tests/fmt.rs:1204-1207 commented body braced
+stdout: !~ " :: 42" # tests/fmt.rs:1204-1207 commented body braced
+step: jet fmt --simplify one/nested.jet
+exit: 0 # tests/fmt.rs:1211-1212 nested commented simplify
+step: sh {work}/step-11.sh
+exit: 0 # tests/fmt.rs:1213-1220 nested body braced, comment kept
+stdout: ~ "// keep this note" # tests/fmt.rs:1213-1220 nested body braced, comment kept
+stdout: !~ " :: " # tests/fmt.rs:1213-1220 nested body braced, comment kept

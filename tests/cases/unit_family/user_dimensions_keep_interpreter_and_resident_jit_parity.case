@@ -1,0 +1,18 @@
+# tests/unit_family.rs::user_dimensions_keep_interpreter_and_resident_jit_parity at tests/unit_family.rs:299; hand-port
+# Claim: user-dimension program passes Run-mode checks (tests/unit_family.rs:299)
+# Claim: program prints 3.0 (tests/unit_family.rs:299)
+# Not ported: Interpreter vs resident JIT tier split (tests/unit_family.rs:320-tests/unit_family.rs:330): no CLI tier selector
+fixture: user_dimensions_keep_interpreter_and_resident_jit_parity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # user-dimension program passes Run-mode checks (tests/unit_family.rs:299)
+step: jet run main.jet
+exit: 0 # user-dimension program passes Run-mode checks (tests/unit_family.rs:299)
+stdout: = "3.0\n" # user-dimension program passes Run-mode checks (tests/unit_family.rs:299)
+step: jet build main.jet
+exit: 0 # user-dimension program passes Run-mode checks (tests/unit_family.rs:299)
+step: .jet/build/main
+exit: 0 # user-dimension program passes Run-mode checks (tests/unit_family.rs:299)
+stdout: = "3.0\n" # user-dimension program passes Run-mode checks (tests/unit_family.rs:299)

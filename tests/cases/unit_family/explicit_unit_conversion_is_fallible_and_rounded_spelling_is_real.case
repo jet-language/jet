@@ -1,0 +1,13 @@
+# tests/unit_family.rs::explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real at tests/unit_family.rs:1092; hand-port
+# Claim: explicit fallible conversions print 3.0 -1.0 1.0 (tests/unit_family.rs:1092)
+# Claim: unchecked implicit conversion rejected with diagnostics (tests/unit_family.rs:1129)
+# Not ported: generated Rust-text checks (tests/unit_family.rs:1109-tests/unit_family.rs:1119): Rust lowering detail
+fixture: explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run checked/main.jet
+exit: 0 # explicit fallible conversions print 3.0 -1.0 1.0 (tests/unit_family.rs:1092)
+stdout: = "3.0 -1.0 1.0\n" # explicit fallible conversions print 3.0 -1.0 1.0 (tests/unit_family.rs:1092)
+step: jet check unchecked/main.jet
+exit: 1 # explicit fallible conversions print 3.0 -1.0 1.0 (tests/unit_family.rs:1092)

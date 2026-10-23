@@ -1,0 +1,15 @@
+# tests/fmt.rs::fmt_migrates_each_retired_print_spelling_to_one_canonical_job at tests/fmt.rs:202; hand-port
+# Claim: formatted output matches the canonical expected source exactly (tests/fmt.rs:208-211)
+# Claim: second pass is identical and has no retired print edits left (tests/fmt.rs:212-216)
+# Not ported: retired_print_family_edits count == 3 (tests/fmt.rs:204-205): Rust Formatter API; the rewrite result is checked instead
+fixture: fmt_migrates_each_retired_print_spelling_to_one_canonical_job.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt print.jet
+exit: 0 # tests/fmt.rs:207 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:208-211 expected output
+stdout: = fmt_migrates_each_retired_print_spelling_to_one_canonical_job-2.out # tests/fmt.rs:208-211 expected output
+step: jet fmt --check print.jet
+exit: 0 # tests/fmt.rs:212-216 idempotent

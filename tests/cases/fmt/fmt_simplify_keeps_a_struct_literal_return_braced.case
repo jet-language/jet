@@ -1,0 +1,17 @@
+# tests/fmt.rs::fmt_simplify_keeps_a_struct_literal_return_braced at tests/fmt.rs:1362; hand-port
+# Claim: braced struct-literal return survives simplify (tests/fmt.rs:1373-1376)
+# Claim: no `:: Rect{` or `:: {` collapse (tests/fmt.rs:1377-1380)
+# Claim: second simplify pass identical (tests/fmt.rs:1381-1385)
+fixture: fmt_simplify_keeps_a_struct_literal_return_braced.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --simplify lit/run.jet
+exit: 0 # tests/fmt.rs:1371 simplify succeeds
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1373-1380
+stdout: ~ "fn make(width: Int, height: Int) -> Rect { return {" # tests/fmt.rs:1373-1380
+stdout: !~ ":: Rect{" # tests/fmt.rs:1373-1380
+stdout: !~ ":: {" # tests/fmt.rs:1373-1380
+step: jet fmt --simplify --check lit/run.jet
+exit: 0 # tests/fmt.rs:1381-1385 stable

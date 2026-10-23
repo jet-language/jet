@@ -1,0 +1,15 @@
+# tests/fmt.rs::external_module_format_remains_parseable_and_idempotent at tests/fmt.rs:4191; hand-port
+# Claim: formatted `module helper` source has zero parse diagnostics (tests/fmt.rs:4193-4199)
+# Claim: second pass identical (tests/fmt.rs:4200-4203)
+# Fixture migrated: added helper.jet (`fn value() -> Int { return 1 }`) so `module helper` resolves; Rust parse-only had no resolution step
+# Not ported: Rust calls Compiler::parse_source and inspects diagnostics; port uses `jet check` on the formatted file (same diagnostics through the CLI)
+fixture: external_module_format_remains_parseable_and_idempotent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:4193 formats
+step: jet check run.jet
+exit: 0 # tests/fmt.rs:4194-4199 zero diagnostics on formatted output
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:4200-4203 stable

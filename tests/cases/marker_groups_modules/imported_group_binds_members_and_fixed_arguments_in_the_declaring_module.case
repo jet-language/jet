@@ -1,0 +1,11 @@
+# tests/marker_groups_modules.rs::imported_group_binds_members_and_fixed_arguments_in_the_declaring_module at tests/marker_groups_modules.rs:123; hand-port
+# Claim: imported group #lib.Fast whose member rules.LibraryNote("fixed") is bound in the declaring module, next to a local rules.LibraryNote(7), is accepted (tests/marker_groups_modules.rs:124-129)
+# Claim: the imported group's marker is inline and resolves to the declaring module's rules.jet (tests/marker_groups_modules.rs:131-136; Rust-internal)
+# Not ported: helper.is_inline, marker resolution module file_name == rules.jet, params[0].name, declaration identity (tests/marker_groups_modules.rs:131-136) read Rust AST/resolver tables
+fixture: imported_group_binds_members_and_fixed_arguments_in_the_declaring_module.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_groups_modules.rs:124-129 clean(): accepted with no diagnostics
+stderr: !~ "[E" # tests/marker_groups_modules.rs:124-129 clean(): accepted with no diagnostics

@@ -1,0 +1,13 @@
+# tests/unit_family.rs::explicit_units_policy_requires_destination_owned_conversion at tests/unit_family.rs:1014; hand-port
+# Claim: mixed meter+millimeter rejected E0127 under explicit_units (tests/unit_family.rs:1014)
+# Claim: Meter.from_millimeter(1000millimeter) compiles (tests/unit_family.rs:1014)
+# Not ported: module-scoped and block-scoped policy variants: exact placement (tests/unit_family.rs:1014) [VERIFY]
+fixture: explicit_units_policy_requires_destination_owned_conversion.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check implicit/main.jet
+exit: 1 # mixed meter+millimeter rejected E0127 under explicit_units (tests/unit_family.rs:1014)
+stderr: ~ "E0127" # mixed meter+millimeter rejected E0127 under explicit_units (tests/unit_family.rs:1014)
+step: jet check explicit/main.jet
+exit: 0 # mixed meter+millimeter rejected E0127 under explicit_units (tests/unit_family.rs:1014)

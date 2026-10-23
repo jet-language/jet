@@ -1,0 +1,14 @@
+# tests/marker_groups_modules.rs::codegen_controls_are_four_separate_registry_rows_and_projections at tests/marker_groups_modules.rs:215; hand-port
+# Claim: Inline, Inline(.Always), Scalar, and Kernel(.parallel) codegen controls are accepted together on four functions (tests/marker_groups_modules.rs:217-226)
+# Claim: the program runs and prints the comptime-evaluated static TABLE, 7 (tests/marker_groups_modules.rs:223; Rust asserts on registry rows are Rust-internal)
+# Not ported: applied_rule() registry rows and Rust AST flags is_inline / is_inline_always / kernel.proof (tests/marker_groups_modules.rs:217-234) read Rust-internal tables; no CLI output shows them
+fixture: codegen_controls_are_four_separate_registry_rows_and_projections.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_groups_modules.rs:217-226 clean()
+stderr: !~ "[E" # tests/marker_groups_modules.rs:217-226 clean()
+step: jet run main.jet
+exit: 0 # tests/marker_groups_modules.rs:223 TABLE evaluates to 7
+stdout: = "7\n" # tests/marker_groups_modules.rs:223 TABLE evaluates to 7

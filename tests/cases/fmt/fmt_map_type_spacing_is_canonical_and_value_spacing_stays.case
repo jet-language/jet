@@ -1,0 +1,20 @@
+# tests/fmt.rs::fmt_map_type_spacing_is_canonical_and_value_spacing_stays at tests/fmt.rs:1486; hand-port
+# Claim: param map type becomes `values: [String:Int]` (tests/fmt.rs:1489)
+# Claim: return map type becomes `) [String:Int] -> {` (tests/fmt.rs:1490)
+# Claim: map value literal `["key": 1]` keeps its spacing (tests/fmt.rs:1492-1494)
+# Claim: retired `[String: Int]` spelling is absent (tests/fmt.rs:1495-1498)
+# Claim: second formatting pass is identical (tests/fmt.rs:1499-1502)
+fixture: fmt_map_type_spacing_is_canonical_and_value_spacing_stays.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1488 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1489-1498 canonical spacing present, retired spelling absent
+stdout: ~ "values: [String:Int]" # tests/fmt.rs:1489-1498 canonical spacing present, retired spelling absent
+stdout: ~ ") [String:Int] { return [\"key\": 1] }" # tests/fmt.rs:1489-1498 canonical spacing present, retired spelling absent
+stdout: ~ "[\"key\": 1]" # tests/fmt.rs:1489-1498 canonical spacing present, retired spelling absent
+stdout: !~ "[String: Int]" # tests/fmt.rs:1489-1498 canonical spacing present, retired spelling absent
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1499-1502 stable

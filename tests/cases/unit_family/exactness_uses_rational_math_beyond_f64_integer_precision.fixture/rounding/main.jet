@@ -1,0 +1,24 @@
+
+#UnitFamily(Length, dimension, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+    half(scale: 1/2)
+    above_half(scale: 9007199254740993/18014398509481984)
+    three_halves(scale: 3/2)
+}
+#UnitFamily(Temperature, dimension, base: kelvin) {
+    kelvin
+    tie_offset(scale: 1, offset: 1/2)
+    above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
+    below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
+}
+fn run() {
+    exact :: Meter.from_almost(Almost.from_float(Float{9007199254740992.0})) ?? Meter.from_float(-Float{1.0})
+    tie :: Meter.from_half_rounded(Half.from_float(Float{1.0}), .NearestEven, digits: 0) ?? panic("tie")
+    above :: Meter.from_above_half_rounded(AboveHalf.from_float(Float{1.0}), .NearestEven, digits: 0) ?? panic("above")
+    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(-Float{1.0}), .NearestEven, digits: 0) ?? panic("negative")
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine tie")
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine above")
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine below")
+    print("{(exact)} {(tie)} {(above)} {(negative)} {(affine_tie)} {(affine_above)} {(affine_below)}")
+}

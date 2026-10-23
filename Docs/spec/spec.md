@@ -3306,7 +3306,7 @@ For example, the browser conformance surface uses
 runtime uses `addEventListener`, DOM selection, `localStorage`, and
 `sessionStorage`; native codegen provides inert checked routes rather than
 asking rustc to type-check browser APIs. The round-trip is exercised by
-[`tests/cases/web_build/`](../../tests/cases/web_build/).
+[`tests/web_build.rs`](../../tests/web_build.rs).
 
 ### Web queries
 
@@ -3477,7 +3477,7 @@ carrier is preserved byte-for-byte, including its source spans; only the Jet
 source after the carrier is formatted. The driver preflights every selected
 file before writing any file, so one read or parse failure leaves the batch
 unchanged. The formatter contract is exercised by
-[`tests/fmt.rs`](../../tests/fmt.rs); its idempotence law is
+[`tests/cases/fmt/`](../../tests/cases/fmt/); its idempotence law is
 `fmt(fmt(source)) == fmt(source)`.
 
 ## Writing and running tests

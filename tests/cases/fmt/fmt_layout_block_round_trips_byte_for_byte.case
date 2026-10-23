@@ -1,0 +1,14 @@
+# tests/fmt.rs::fmt_layout_block_round_trips_byte_for_byte at tests/fmt.rs:3312; hand-port
+# Claim: formatted `Layout{ ... }` source equals the input byte-for-byte (tests/fmt.rs:3330-3334)
+# Claim: second pass identical (tests/fmt.rs:3335-3336)
+fixture: fmt_layout_block_round_trips_byte_for_byte.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:3330 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:3331-3334 byte-for-byte round trip
+stdout: = fmt_layout_block_round_trips_byte_for_byte-2.out # tests/fmt.rs:3331-3334 byte-for-byte round trip
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:3335-3336 stable

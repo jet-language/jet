@@ -1,0 +1,26 @@
+# tests/marker_groups_modules.rs::local_group_expands_before_ordinary_applicability_and_argument_checks at tests/marker_groups_modules.rs:140; hand-port
+# Claim: local group Fast = #[Inline(.Always), Scalar] applied to fn helper(value: Int) is accepted (tests/marker_groups_modules.rs:141-143)
+# Claim: group member with a wrong argument value (Inline(.Other)) is rejected with E0930 (tests/marker_groups_modules.rs:144)
+# Claim: group with Inline applied to a struct is rejected with E0355 (tests/marker_groups_modules.rs:145)
+# Claim: an unused group with a bad member argument is still checked and rejected (tests/marker_groups_modules.rs:146)
+# Not ported: is_inline / is_inline_always / markers name asserts (tests/marker_groups_modules.rs:143-146) read Rust AST flags
+fixture: local_group_expands_before_ordinary_applicability_and_argument_checks.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: l1
+exit: 0 # tests/marker_groups_modules.rs:141-143 clean()
+stderr: !~ "[E" # tests/marker_groups_modules.rs:141-143 clean()
+step: jet check main.jet
+cwd: l2
+exit: 1 # tests/marker_groups_modules.rs:144 rejects(E0930)
+stderr: ~ "E0930" # tests/marker_groups_modules.rs:144 rejects(E0930)
+step: jet check main.jet
+cwd: l3
+exit: 1 # tests/marker_groups_modules.rs:145 rejects(E0355)
+stderr: ~ "E0355" # tests/marker_groups_modules.rs:145 rejects(E0355)
+step: jet check main.jet
+cwd: l4
+exit: 0 # tests/marker_groups_modules.rs:146 clean() unused group still checked
+stderr: !~ "[E" # tests/marker_groups_modules.rs:146 clean() unused group still checked

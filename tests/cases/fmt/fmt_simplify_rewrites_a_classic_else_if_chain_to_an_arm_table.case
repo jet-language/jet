@@ -1,0 +1,15 @@
+# tests/fmt.rs::fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table at tests/fmt.rs:1421; hand-port
+# Claim: output contains `if {` and no `else if` (tests/fmt.rs:1430-1433)
+# Claim: second simplify pass identical (tests/fmt.rs:1434-1438)
+fixture: fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --simplify elif/run.jet
+exit: 0 # tests/fmt.rs:1428 simplify succeeds
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1430-1433
+stdout: ~ "if {" # tests/fmt.rs:1430-1433
+stdout: !~ "else if" # tests/fmt.rs:1430-1433
+step: jet fmt --simplify --check elif/run.jet
+exit: 0 # tests/fmt.rs:1434-1438 stable

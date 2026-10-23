@@ -1,0 +1,26 @@
+# tests/fmt.rs::bar_formatting_is_stable at tests/fmt.rs:319; hand-port
+# Claim: alternatives-only bar `.Ready | .Waiting ->` kept (tests/fmt.rs:321-325)
+# Claim: alternative formatting stable (tests/fmt.rs:326-327)
+# Claim: named bitwise OR `bit_or(2)` kept and stable (tests/fmt.rs:329-339)
+# Claim: `value :: 1 |> print` is an error (tests/fmt.rs:340-343)
+# Fixture migrated: error case asserted as nonzero exit; observed exit 2 (E0003 at `|`)
+fixture: bar_formatting_is_stable.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt bar/a.jet
+exit: 0 # tests/fmt.rs:321 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:323-325
+stdout: ~ ".Ready | .Waiting ->" # tests/fmt.rs:323-325
+step: jet fmt --check bar/a.jet
+exit: 0 # tests/fmt.rs:326-327 stable
+step: jet fmt bar/b.jet
+exit: 0 # tests/fmt.rs:330 formats
+step: sh {work}/step-5.sh
+exit: 0 # tests/fmt.rs:332
+stdout: ~ "bit_or(2)" # tests/fmt.rs:332
+step: jet fmt --check bar/b.jet
+exit: 0 # tests/fmt.rs:337-338 stable
+step: jet fmt bar/c.jet
+exit: 2 # tests/fmt.rs:340-343 flow path is an error

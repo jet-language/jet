@@ -1,0 +1,19 @@
+# tests/unit_family.rs::poundforce_uses_the_exact_defined_ratio_across_execution_tiers at tests/unit_family.rs:230; hand-port
+# Claim: Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
+# Claim: AOT build matches run output (tests/unit_family.rs:230)
+# Not ported: include_str! check of Compiler/Prelude/Units.jet source text (tests/unit_family.rs:237)
+# Not ported: Interpreter vs resident JIT split (tests/unit_family.rs:262): no CLI tier selector; run and build+built are the observable tiers
+fixture: poundforce_uses_the_exact_defined_ratio_across_execution_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
+step: jet run main.jet
+exit: 0 # Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
+stdout: = "44482216152605.0\n" # Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
+step: jet build main.jet
+exit: 0 # Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
+step: .jet/build/main
+exit: 0 # Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
+stdout: = "44482216152605.0\n" # Newton.from_poundforce(10000000000000poundforce) prints 44482216152605.0 (tests/unit_family.rs:230)
