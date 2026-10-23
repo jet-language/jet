@@ -6,12 +6,14 @@
 // out of Loops (`unique`), and after Simplify adds scalar replacement of
 // frame aggregates (also of ones whose address is only lent out,
 // `promote`), simplifies again, and runs each function through SSA
-// (Ssa.jet, SsaOut.jet).
+// (Ssa.jet, SsaOut.jet). Both levels end by moving stop points right after
+// their calls (`stops`, OptStops.jet).
 //
 // Every pass keeps the program's meaning exactly, on every level: runtime
-// calls, drops, stores and stops stay in order; a fold that would wrap or
-// trap is not done; Float is never folded. A pass that needs to know where
-// a slot gets its value uses the structured nesting (OptFacts below)
+// calls, drops, stores and stops stay in order (but Int and word drops,
+// which move past a stop point to keep it next to its call); a fold that
+// would wrap or trap is not done; Float is never folded. A pass that needs
+// to know where a slot gets its value uses the structured nesting (OptFacts below)
 // instead of an SSA form: a slot with exactly one write reaches every read
 // in a region that the write's region encloses, after the write.
 //
@@ -22,7 +24,7 @@
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_transfer_rows]
 
 // What the optimizer runs: the level, the passes `disabled` names (to
-// bisect a difference to one pass: "unique", "once", "scalar", "promote", "range", "ssa"), whether every SSA
+// bisect a difference to one pass: "unique", "once", "scalar", "promote", "range", "ssa", "stops"), whether every SSA
 // form is verified (`verify`), whether every SSA value leaves SSA in a
 // fresh slot (`stress`, which exercises the moves out of SSA), and the
 // name of the functions whose IR before and after the passes the report
@@ -204,8 +206,9 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 }
 
 // One function's passes: at level 2 uniqueness hoisting, then inlining its
-// callees' final bodies (`bodies`), then Simplify, and at level 2 scalar
-// replacement, Simplify again and the SSA round trip.
+// callees' final bodies (`bodies`), then Simplify, at level 2 scalar
+// replacement, Simplify again and the SSA round trip, and last the stop
+// points after their calls.
 fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursive: [Bool], sites: [Int], options: IROptOptions, report: &IROptReport) -> IRFunction Never! {
     level :: options.level
     body := ^f
@@ -220,6 +223,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], f: ^IRFunction, recursiv
         }
         if ir_opt_enabled(options, "ssa") -> ir_opt_ssa(m, &out, options, &report)
     }
+    if ir_opt_enabled(options, "stops") -> ir_opt_stops_after_calls(&out, m, bodies)
     out
 }
 
