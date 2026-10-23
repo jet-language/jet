@@ -10,4 +10,9 @@ fn run() {
     print(text.slice(1, 3))
     print(text.slice(1, 3) == text.slice(1..<3))
     print(text.slice(2, 2) == "")
+    // A copied receiver keeps String's character slice: the 4-byte scalar
+    // is one position and the end stays excluded (#5515).
+    tagged :: "#é🙂"
+    print((tagged.copy()).slice(1, (tagged.copy()).len()))
+    print((tagged.copy()).slice(1, (tagged.copy()).len() - 1))
 }
