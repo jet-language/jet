@@ -1297,6 +1297,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .TaskGroupAny(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 1, span)
         .TaskGroupRace(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 2, span)
         .TraitBox(value, target) -> return ir_trait_box(&m, p, &b, value, target, span)
+        // A distinct value lays out as its base (codegen: a Transparent convert).
+        .DistinctCtor(argument) -> return ir_expr(&m, p, &b, argument)
+        .DistinctConvert(_, argument, operation, range, fallible) -> return ir_distinct_convert(&m, p, &b, expression.ty, argument, operation, range, fallible, span)
         else -> return ir_fail_slot(&b, span, "expression {ir_expr_kind_name(expression.kind)}")
     }
 }
