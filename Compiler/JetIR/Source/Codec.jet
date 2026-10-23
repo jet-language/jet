@@ -1,0 +1,418 @@
+// The IR module codec: a built IRModule and its export table as bytes. The
+// runtime pack build writes its optimized module this way (`runtime.ir`
+// beside the pack object), so compile-time evaluation runs the runtime's own
+// functions without checking JetRuntime on every compile.
+//
+// The bytes are the magic line, then the module's rows in order: types,
+// names, data, data relocations, functions, entry, exports. Every integer is
+// a zigzag LEB128 word; a text or a byte row is its length then its bytes; an
+// Int list is its length then its words; an enum is its declaration index.
+// Only the rows a function's execution reads are kept: the builder's memo
+// tables (layouts, instances, queues, ...) start empty. A decoded type row
+// has no checked type, so its `ty` is `Named(type key)`; the key is the row's
+// ir_intern_type key, the same text the encoder read.
+use jet_foundation.[Type]
+
+IR_CODEC_MAGIC :: "jet-ir-module/1\n"
+
+// A decoded module and the export table it was written with.
+struct IRCodecModule {
+    program: IRModule
+    exports: [IRLibraryExport]
+}
+
+struct IRCodecReader {
+    bytes: [U8]
+    at: Int
+    failed: Bool
+}
+
+fn ir_module_encode(m: IRModule, exports: [IRLibraryExport]) -> [U8] Never! {
+    out := [U8]{}
+    loop byte in IR_CODEC_MAGIC.bytes() -> &out.push(byte)
+    ir_codec_word(&out, m.types.len())
+    loop (row, ty) in m.types {
+        ir_codec_text(&out, m.type_keys[row])
+        ir_codec_word(&out, ir_codec_kind_index(ty.kind))
+        ir_codec_word(&out, ty.size)
+        ir_codec_word(&out, ty.align)
+        ir_codec_word(&out, ir_codec_class_index(ty.class))
+        ir_codec_flag(&out, ty.signed)
+        ir_codec_word(&out, ty.bits)
+        ir_codec_text(&out, ty.drop)
+        ir_codec_text(&out, ty.clone)
+    }
+    ir_codec_word(&out, m.names.len())
+    loop name in m.names -> ir_codec_text(&out, name)
+    ir_codec_word(&out, m.data.len())
+    loop row in m.data -> ir_codec_bytes(&out, row)
+    reloc_rows := [Int]{}
+    loop row in 0..<m.data.len() {
+        if m.data_relocs.get(row) != None -> &reloc_rows.push(row)
+    }
+    ir_codec_word(&out, reloc_rows.len())
+    loop row in reloc_rows {
+        relocs :: m.data_relocs.get(row) ?? [IRDataReloc]{}
+        ir_codec_word(&out, row)
+        ir_codec_word(&out, relocs.len())
+        loop reloc in relocs {
+            ir_codec_word(&out, reloc.offset)
+            ir_codec_word(&out, reloc.target)
+            ir_codec_word(&out, reloc.addend)
+            ir_codec_flag(&out, reloc.text)
+        }
+    }
+    ir_codec_word(&out, m.functions.len())
+    loop f in m.functions -> ir_codec_function(&out, f)
+    ir_codec_word(&out, m.entry)
+    ir_codec_word(&out, exports.len())
+    loop row in exports {
+        ir_codec_word(&out, row.function)
+        ir_codec_text(&out, row.symbol)
+        ir_codec_word(&out, row.init_priority)
+        ir_codec_word(&out, row.fini_priority)
+    }
+    out
+}
+
+// The module `bytes` encode, or None when they are not a whole encoding of
+// this codec version.
+fn ir_module_decode(bytes: ^[U8]) -> IRCodecModule? Never! {
+    r := IRCodecReader{bytes: ^bytes, at: 0, failed: false}
+    loop byte in IR_CODEC_MAGIC.bytes() {
+        if r.at >= r.bytes.len() || r.bytes[r.at] != byte -> return None
+        r.at += 1
+    }
+    m := ir_module_new()
+    kinds :: ir_codec_kinds()
+    classes :: ir_codec_classes()
+    type_count :: ir_codec_count(&r)
+    loop _ in 0..<type_count {
+        key :: ir_codec_read_text(&r)
+        kind :: ir_codec_read_word(&r)
+        size :: ir_codec_read_word(&r)
+        align :: ir_codec_read_word(&r)
+        class :: ir_codec_read_word(&r)
+        signed :: ir_codec_read_word(&r) != 0
+        bits :: ir_codec_read_word(&r)
+        drop :: ir_codec_read_text(&r)
+        clone :: ir_codec_read_text(&r)
+        if kind < 0 || kind >= kinds.len() || class < 0 || class >= classes.len() -> return None
+        row :: m.types.len()
+        &m.types.push(IRType{ty: Type.Named{name: key.copy()}, kind: kinds[kind], size: size, align: align, class: classes[class], signed: signed, bits: bits, drop: drop, clone: clone})
+        &m.type_keys.push(key.copy())
+        m.type_rows[key] = row
+    }
+    name_count :: ir_codec_count(&r)
+    loop _ in 0..<name_count {
+        name :: ir_codec_read_text(&r)
+        m.name_rows[name.copy()] = m.names.len()
+        &m.names.push(name)
+    }
+    data_count :: ir_codec_count(&r)
+    loop _ in 0..<data_count -> &m.data.push(ir_codec_read_bytes(&r))
+    reloc_count :: ir_codec_count(&r)
+    loop _ in 0..<reloc_count {
+        row :: ir_codec_read_word(&r)
+        count :: ir_codec_count(&r)
+        relocs := [IRDataReloc]{}
+        loop _ in 0..<count {
+            offset :: ir_codec_read_word(&r)
+            target :: ir_codec_read_word(&r)
+            addend :: ir_codec_read_word(&r)
+            text :: ir_codec_read_word(&r) != 0
+            &relocs.push(IRDataReloc{offset: offset, target: target, addend: addend, text: text})
+        }
+        if row < 0 || row >= m.data.len() -> return None
+        m.data_relocs[row] = relocs
+    }
+    ops :: ir_codec_ops()
+    function_count :: ir_codec_count(&r)
+    loop _ in 0..<function_count {
+        f :: ir_codec_read_function(&r, ops) ?? return None
+        m.function_rows[f.key.copy()] = m.functions.len()
+        &m.functions.push(f)
+    }
+    m.entry = ir_codec_read_word(&r)
+    exports := [IRLibraryExport]{}
+    export_count :: ir_codec_count(&r)
+    loop _ in 0..<export_count {
+        function :: ir_codec_read_word(&r)
+        symbol :: ir_codec_read_text(&r)
+        init_priority :: ir_codec_read_word(&r)
+        fini_priority :: ir_codec_read_word(&r)
+        if function < 0 || function >= m.functions.len() -> return None
+        &exports.push(IRLibraryExport{function: function, symbol: symbol, init_priority: init_priority, fini_priority: fini_priority})
+    }
+    if r.failed || r.at != r.bytes.len() -> return None
+    Val(IRCodecModule{program: m, exports: exports})
+}
+
+fn ir_codec_function(out: &[U8], f: IRFunction) Never! {
+    ir_codec_text(&out, f.name)
+    ir_codec_text(&out, f.key)
+    ir_codec_text(&out, f.symbol)
+    ir_codec_text(&out, f.source_file)
+    ir_codec_word(&out, f.line)
+    ir_codec_word(&out, f.param_count)
+    ir_codec_word(&out, f.result)
+    ir_codec_words(&out, f.slot_type)
+    ir_codec_word(&out, f.slot_kind.len())
+    loop kind in f.slot_kind {
+        index :: if kind == {
+            .Param -> 0
+            .Local -> 1
+            .Temp -> 2
+        }
+        ir_codec_word(&out, index)
+    }
+    ir_codec_words(&out, f.slot_name)
+    ir_codec_words(&out, f.slot_line)
+    ir_codec_word(&out, f.op.len())
+    loop op in f.op -> ir_codec_word(&out, ir_codec_op_index(op))
+    ir_codec_words(&out, f.dst)
+    ir_codec_words(&out, f.a)
+    ir_codec_words(&out, f.b)
+    ir_codec_words(&out, f.c)
+    ir_codec_words(&out, f.code_line)
+    ir_codec_words(&out, f.args)
+    if f.asm == .Val(leaf) {
+        ir_codec_flag(&out, true)
+        ir_codec_bytes(&out, leaf.code)
+        ir_codec_words(&out, leaf.regs)
+        ir_codec_word(&out, leaf.result)
+    } else {
+        ir_codec_flag(&out, false)
+    }
+}
+
+fn ir_codec_read_function(r: &IRCodecReader, ops: [IROp]) -> IRFunction? Never! {
+    name :: ir_codec_read_text(&r)
+    key :: ir_codec_read_text(&r)
+    symbol :: ir_codec_read_text(&r)
+    source_file :: ir_codec_read_text(&r)
+    line :: ir_codec_read_word(&r)
+    f := ir_function_new(name, key, symbol, source_file, line)
+    f.param_count = ir_codec_read_word(&r)
+    f.result = ir_codec_read_word(&r)
+    f.slot_type = ir_codec_read_words(&r)
+    kind_count :: ir_codec_count(&r)
+    loop _ in 0..<kind_count {
+        kind :: ir_codec_read_word(&r)
+        if kind == {
+            0 -> &f.slot_kind.push(IRSlotKind.Param)
+            1 -> &f.slot_kind.push(IRSlotKind.Local)
+            2 -> &f.slot_kind.push(IRSlotKind.Temp)
+            else -> return None
+        }
+    }
+    f.slot_name = ir_codec_read_words(&r)
+    f.slot_line = ir_codec_read_words(&r)
+    op_count :: ir_codec_count(&r)
+    loop _ in 0..<op_count {
+        op :: ir_codec_read_word(&r)
+        if op < 0 || op >= ops.len() -> return None
+        &f.op.push(ops[op])
+    }
+    f.dst = ir_codec_read_words(&r)
+    f.a = ir_codec_read_words(&r)
+    f.b = ir_codec_read_words(&r)
+    f.c = ir_codec_read_words(&r)
+    f.code_line = ir_codec_read_words(&r)
+    f.args = ir_codec_read_words(&r)
+    if ir_codec_read_word(&r) != 0 {
+        code :: ir_codec_read_bytes(&r)
+        regs :: ir_codec_read_words(&r)
+        result :: ir_codec_read_word(&r)
+        f.asm = Val(IRAsmLeaf{code: code, regs: regs, result: result})
+    }
+    slots :: f.slot_type.len()
+    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots -> return None
+    count :: f.op.len()
+    if f.dst.len() != count || f.a.len() != count || f.b.len() != count || f.c.len() != count || f.code_line.len() != count -> return None
+    if f.param_count < 0 || f.param_count > slots -> return None
+    Val(f)
+}
+
+// A zigzag LEB128 word: 0, -1, 1, -2, ... as 0, 1, 2, 3, ..., seven bits a
+// byte, least significant first, the high bit set on every byte but the last.
+fn ir_codec_word(out: &[U8], value: Int) Never! {
+    rest := if value >= 0 -> value * 2 else -> 0 - value * 2 - 1
+    loop {
+        low :: rest.bit_and(127)
+        rest = rest >> 7
+        if rest == 0 {
+            &out.push(U8{low})
+            return
+        }
+        &out.push(U8{low + 128})
+    }
+}
+
+fn ir_codec_flag(out: &[U8], value: Bool) Never! {
+    ir_codec_word(&out, if value -> 1 else -> 0)
+}
+
+fn ir_codec_bytes(out: &[U8], bytes: [U8]) Never! {
+    ir_codec_word(&out, bytes.len())
+    loop byte in bytes -> &out.push(byte)
+}
+
+fn ir_codec_text(out: &[U8], text: String) Never! {
+    ir_codec_bytes(&out, text.bytes())
+}
+
+fn ir_codec_words(out: &[U8], values: [Int]) Never! {
+    ir_codec_word(&out, values.len())
+    loop value in values -> ir_codec_word(&out, value)
+}
+
+fn ir_codec_read_word(r: &IRCodecReader) -> Int Never! {
+    value := 0
+    scale := 1
+    loop {
+        if r.at >= r.bytes.len() || scale > 9223372036854775808 {
+            r.failed = true
+            return 0
+        }
+        byte :: Int.from_u8(r.bytes[r.at])
+        r.at += 1
+        value += byte.bit_and(127) * scale
+        if byte < 128 -> break
+        scale *= 128
+    }
+    if value.bit_and(1) == 0 -> value /% 2 else -> 0 - (value + 1) /% 2
+}
+
+// A row count: never more than the bytes left, so a damaged length fails
+// instead of looping.
+fn ir_codec_count(r: &IRCodecReader) -> Int Never! {
+    count :: ir_codec_read_word(&r)
+    if count < 0 || count > r.bytes.len() - r.at {
+        r.failed = true
+        return 0
+    }
+    count
+}
+
+fn ir_codec_read_bytes(r: &IRCodecReader) -> [U8] Never! {
+    count :: ir_codec_count(&r)
+    bytes := [U8]{}
+    loop index in r.at..<(r.at + count) -> &bytes.push(r.bytes[index])
+    r.at += count
+    bytes
+}
+
+fn ir_codec_read_text(r: &IRCodecReader) -> String Never! {
+    bytes :: ir_codec_read_bytes(&r)
+    count :: bytes.len()
+    text :: String.from_bytes(bytes) ?? ""
+    // Bytes that are not UTF-8 give "", which has fewer bytes.
+    if text.bytes().len() != count -> r.failed = true
+    text
+}
+
+fn ir_codec_read_words(r: &IRCodecReader) -> [Int] Never! {
+    count :: ir_codec_count(&r)
+    values := [Int]{}
+    loop _ in 0..<count -> &values.push(ir_codec_read_word(&r))
+    values
+}
+
+fn ir_codec_kinds() -> [IRTypeKind] Never! {
+    [IRTypeKind]{.Unit, .Bool, .Int, .Word, .Float, .Float32, .Char, .String, .Pointer, .Aggregate}
+}
+
+fn ir_codec_kind_index(kind: IRTypeKind) -> Int Never! {
+    if kind == {
+        .Unit -> 0
+        .Bool -> 1
+        .Int -> 2
+        .Word -> 3
+        .Float -> 4
+        .Float32 -> 5
+        .Char -> 6
+        .String -> 7
+        .Pointer -> 8
+        .Aggregate -> 9
+    }
+}
+
+fn ir_codec_classes() -> [IRClass] Never! {
+    [IRClass]{.Integer, .Pointer, .Float, .Memory}
+}
+
+fn ir_codec_class_index(class: IRClass) -> Int Never! {
+    if class == {
+        .Integer -> 0
+        .Pointer -> 1
+        .Float -> 2
+        .Memory -> 3
+    }
+}
+
+// IROp in declaration order (IR.jet); ir_codec_op_index is its inverse.
+fn ir_codec_ops() -> [IROp] Never! {
+    [IROp]{
+        .Nop, .Const, .ConstText, .ConstBigInt, .Copy, .Move, .Drop, .Close,
+        .Add, .Sub, .Mul, .Div, .Rem, .FloorDiv, .Mod, .BitAnd, .BitOr, .BitXor, .Shl, .Shr,
+        .Eq, .Ne, .Lt, .Le, .Gt, .Ge, .Neg, .Not, .Convert, .Concat,
+        .Call, .CallRuntime, .CallIndirect, .FunctionAddress, .DataAddress,
+        .Load, .Store, .StackAddress, .Offset, .CopyBytes,
+        .Block, .Loop, .If, .Else, .End, .Br, .BrIf, .Return, .Unreachable,
+    }
+}
+
+fn ir_codec_op_index(op: IROp) -> Int Never! {
+    if op == {
+        .Nop -> 0
+        .Const -> 1
+        .ConstText -> 2
+        .ConstBigInt -> 3
+        .Copy -> 4
+        .Move -> 5
+        .Drop -> 6
+        .Close -> 7
+        .Add -> 8
+        .Sub -> 9
+        .Mul -> 10
+        .Div -> 11
+        .Rem -> 12
+        .FloorDiv -> 13
+        .Mod -> 14
+        .BitAnd -> 15
+        .BitOr -> 16
+        .BitXor -> 17
+        .Shl -> 18
+        .Shr -> 19
+        .Eq -> 20
+        .Ne -> 21
+        .Lt -> 22
+        .Le -> 23
+        .Gt -> 24
+        .Ge -> 25
+        .Neg -> 26
+        .Not -> 27
+        .Convert -> 28
+        .Concat -> 29
+        .Call -> 30
+        .CallRuntime -> 31
+        .CallIndirect -> 32
+        .FunctionAddress -> 33
+        .DataAddress -> 34
+        .Load -> 35
+        .Store -> 36
+        .StackAddress -> 37
+        .Offset -> 38
+        .CopyBytes -> 39
+        .Block -> 40
+        .Loop -> 41
+        .If -> 42
+        .Else -> 43
+        .End -> 44
+        .Br -> 45
+        .BrIf -> 46
+        .Return -> 47
+        .Unreachable -> 48
+    }
+}

@@ -127,10 +127,11 @@ try {
   const directory = join(out, key);
   mkdirSync(directory, { recursive: true });
   copyFileSync(prefix + '.o', join(directory, 'jet_runtime_jet.o'));
+  copyFileSync(prefix + '.ir', join(directory, 'runtime.ir'));
   copyFileSync(prefix + '.abi.json', join(directory, 'runtime.abi.json'));
   copyFileSync(prefix + '.exports', join(directory, 'runtime.exports'));
   copyFileSync(pack, join(directory, 'jet_runtime.pack.o'));
-  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256, recipeSha256 };
+  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), irSha256: sha256(readFileSync(prefix + '.ir')), packSha256: sha256(readFileSync(pack)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256, recipeSha256 };
   if (factory) provenance.bootstrapFactory = { sourceCommit: factory.sourceCommit, protocol: factory.compilerProtocol, receipt: factory.receipt, keepGoingReport: factory.census, producerSha256: sha256(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: sha256(readFileSync(new URL('../agent/stage1/native-factory.mjs', import.meta.url))) };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');

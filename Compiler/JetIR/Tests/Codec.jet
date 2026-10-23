@@ -1,0 +1,108 @@
+// The IR module codec (Source/Codec.jet): a module with every kind of row
+// (types, names, data with relocations, an `#FFI(asm)` leaf, an entry and an
+// export table) decodes to the same rows and function texts, words at the
+// edges of 64 bits round-trip, and damaged or truncated bytes are refused.
+use jet_ir.[
+    IRAsmLeaf, IRClass, IRDataReloc, IRLibraryExport, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_OVERFLOW_TRAP,
+    ir_args, ir_emit, ir_function_new, ir_function_text, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_decode, ir_module_encode, ir_module_new, ir_slot,
+]
+use jet_foundation.[Type]
+
+fn ir_codec_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("IRCodec: {message}")
+}
+
+fn ir_codec_refused(bytes: ^[U8]) -> Bool Never! {
+    if ir_module_decode(^bytes) == {
+        .Val(_) -> false
+        .None -> true
+    }
+}
+
+fn ir_codec_sample() -> IRModule Never! {
+    m := ir_module_new()
+    int :: ir_intern_type(&m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop", clone: "jet_rt_int_clone"})
+    word :: ir_intern_type(&m, "I64", IRType{ty: Type.IntN{signed: true, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: ""})
+    text :: ir_intern_type(&m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"})
+    pair :: ir_intern_type(&m, "Pair", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Memory, signed: false, bits: 0, drop: ""})
+    greeting :: ir_intern_text(&m, "héllo")
+    table :: m.data.len()
+    &m.data.push([U8]{0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0})
+    m.data_relocs[table] = [IRDataReloc]{IRDataReloc{offset: 0, target: greeting, addend: 0, text: true}}
+
+    leaf := ir_function_new("os_load_i64", "core.os_load_i64#asm", "core_os_load_i64__asm", "Linux.jet", 12)
+    _ := ir_slot(&leaf, word, IRSlotKind.Param, ir_intern_name(&m, "address"), 12)
+    leaf.result = word
+    leaf.asm = Val(IRAsmLeaf{code: [U8]{72, 139, 0, 195}, regs: [Int]{7}, result: 0})
+    &m.functions.push(leaf)
+
+    run := ir_function_new("run", "app.run", "run", "app.jet", 3)
+    run.result = int
+    low :: ir_slot(&run, word, IRSlotKind.Local, ir_intern_name(&m, "low"), 4)
+    high :: ir_slot(&run, word, IRSlotKind.Local, ir_intern_name(&m, "high"), 5)
+    big :: ir_slot(&run, int, IRSlotKind.Temp, -1, 6)
+    greeting_slot :: ir_slot(&run, text, IRSlotKind.Temp, -1, 7)
+    loaded :: ir_slot(&run, word, IRSlotKind.Temp, -1, 8)
+    area :: ir_slot(&run, pair, IRSlotKind.Temp, -1, 9)
+    ir_emit(&run, IROp.Const, low, -9223372036854775808, -1, -1, 4)
+    ir_emit(&run, IROp.Const, high, 18446744073709551615, -1, -1, 5)
+    ir_emit(&run, IROp.ConstBigInt, big, ir_intern_name(&m, "123456789012345678901234567890"), -1, -1, 6)
+    ir_emit(&run, IROp.ConstText, greeting_slot, greeting, -1, -1, 7)
+    start :: ir_args(&run, [Int]{low})
+    ir_emit(&run, IROp.Call, loaded, 0, start, 1, 8)
+    ir_emit(&run, IROp.StackAddress, area, 16, 8, -1, 9)
+    ir_emit(&run, IROp.Add, big, big, big, IR_OVERFLOW_TRAP, 10)
+    dropped :: ir_args(&run, [Int]{greeting_slot})
+    ir_emit(&run, IROp.CallRuntime, -1, ir_intern_name(&m, "jet_rt_string_drop"), dropped, 1, 11)
+    ir_emit(&run, IROp.Return, -1, big, -1, -1, 12)
+    &m.functions.push(run)
+    m.entry = 1
+    m
+}
+
+fn ir_codec_exports() -> [IRLibraryExport] Never! {
+    [IRLibraryExport]{
+        IRLibraryExport{function: 1, symbol: "jet_rt_run", init_priority: 3, fini_priority: -1},
+        IRLibraryExport{function: 0, symbol: "jet_rt_load", init_priority: -1, fini_priority: 1},
+    }
+}
+
+#Test("ir_codec_round_trip") {
+    m :: ir_codec_sample()
+    bytes := ir_module_encode(m, ir_codec_exports())
+    decoded :: ir_module_decode(bytes.copy()) ?? panic("IRCodec: the encoding does not decode")
+    d :: decoded.program
+    ir_codec_require(d.types.len() == m.types.len() && d.names.len() == m.names.len() && d.data.len() == m.data.len(), "row counts")
+    loop (row, key) in m.type_keys {
+        ir_codec_require(d.type_keys[row] == key && (d.type_rows.get(key) ?? -1) == row, "type key {row}")
+        ir_codec_require(d.types[row].ty == (Type.Named{name: key}), "type {row} decodes as its key")
+        ir_codec_require(d.types[row].kind == m.types[row].kind && d.types[row].class == m.types[row].class && d.types[row].size == m.types[row].size, "type {row} layout")
+        ir_codec_require(d.types[row].drop == m.types[row].drop && d.types[row].clone == m.types[row].clone, "type {row} routines")
+    }
+    loop (row, name) in m.names -> ir_codec_require(d.names[row] == name && (d.name_rows.get(name) ?? -1) == row, "name {row}")
+    loop (row, data) in m.data -> ir_codec_require(d.data[row] == data, "data row {row}")
+    relocs :: d.data_relocs.get(1) ?? panic("IRCodec: the table's relocations are lost")
+    ir_codec_require(relocs.len() == 1 && relocs[0].target == 0 && relocs[0].text, "relocation")
+    ir_codec_require(d.functions.len() == 2 && d.entry == 1, "functions and entry")
+    loop (id, f) in m.functions {
+        ir_codec_require(ir_function_text(d, d.functions[id]) == ir_function_text(m, f), "function {f.key} text")
+        ir_codec_require((d.function_rows.get(f.key) ?? -1) == id && d.functions[id].symbol == f.symbol && d.functions[id].source_file == f.source_file, "function {f.key} identity")
+    }
+    ir_codec_require(d.functions[1].a[0] == -9223372036854775808 && d.functions[1].a[1] == 18446744073709551615, "64-bit edge words")
+    ir_codec_require(decoded.exports.len() == 2 && decoded.exports[0].symbol == "jet_rt_run" && decoded.exports[0].init_priority == 3 && decoded.exports[1].fini_priority == 1, "exports")
+    again :: ir_module_encode(d, decoded.exports)
+    ir_codec_require(again == bytes, "re-encoding the decoded module gives the same bytes")
+}
+
+#Test("ir_codec_refuses_damage") {
+    bytes :: ir_module_encode(ir_codec_sample(), ir_codec_exports())
+    short := [U8]{}
+    loop index in 0..<(bytes.len() - 1) -> &short.push(bytes[index])
+    ir_codec_require(ir_codec_refused(^short), "a truncated encoding is refused")
+    longer := bytes.copy()
+    &longer.push(U8{0})
+    ir_codec_require(ir_codec_refused(^longer), "trailing bytes are refused")
+    magic := bytes.copy()
+    magic[0] = U8{88}
+    ir_codec_require(ir_codec_refused(^magic), "another format is refused")
+}

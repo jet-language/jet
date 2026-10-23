@@ -9,7 +9,7 @@ import { nativePackHash as hash, nativePackRecipe, readNativeRuntimePack } from 
 function receipt(t) {
   const root = mkdtempSync(join(tmpdir(), 'jet-native-pack-receipt-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const object = Buffer.from('object bytes'), pack = Buffer.from('pack bytes');
+  const object = Buffer.from('object bytes'), pack = Buffer.from('pack bytes'), ir = Buffer.from('ir bytes');
   const abi = JSON.stringify([{ symbol: 'jet_rt_alloc_init', parameters: [], result: null }]);
   const source = hash('runtime'), backend = hash('backend'), lifecycle = hash('lifecycle');
   const platform = [hash('platform')], compiler = hash('compiler');
@@ -20,11 +20,11 @@ function receipt(t) {
   const provenance = { backend: 'jet-native', runtimeKey: key, rustObjects: 0, llvmObjects: 0,
     source: { sha256: source }, backendInputs: { sha256: backend }, lifecycle: { sha256: lifecycle },
     cPlatformArchives: platform.map(sha256 => ({ sha256 })), compilerSha256: compiler,
-    recipeSha256: recipe, objectSha256: hash(object), packSha256: hash(pack), abiSha256: hash(abi) };
+    recipeSha256: recipe, objectSha256: hash(object), irSha256: hash(ir), packSha256: hash(pack), abiSha256: hash(abi) };
   const publish = () => writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance));
   publish();
   writeFileSync(join(root, 'native.key'), key + '\n');
-  for (const [name, bytes] of [['jet_runtime_jet.o', object], ['jet_runtime.pack.o', pack], ['runtime.abi.json', abi], ['runtime.exports', 'jet_rt_alloc_init\n']]) writeFileSync(join(directory, name), bytes);
+  for (const [name, bytes] of [['jet_runtime_jet.o', object], ['runtime.ir', ir], ['jet_runtime.pack.o', pack], ['runtime.abi.json', abi], ['runtime.exports', 'jet_rt_alloc_init\n']]) writeFileSync(join(directory, name), bytes);
   return { root, directory, provenance, recipe, key, pack, publish };
 }
 
@@ -41,12 +41,12 @@ test('matching cached receipt admits held artifact bytes', t => {
   const f = receipt(t), admitted = readNativeRuntimePack(f.root, f.recipe);
   assert.equal(admitted.key, f.key);
   assert.deepEqual(admitted.pack, f.pack);
-  assert.equal(admitted.files.size, 5);
+  assert.equal(admitted.files.size, 6);
 });
 test('changed recipe and every damaged artifact refuse reuse', t => {
   const f = receipt(t);
   assert.throws(() => readNativeRuntimePack(f.root, hash('new recipe')), /recipe/);
-  for (const name of ['jet_runtime_jet.o', 'jet_runtime.pack.o', 'runtime.abi.json']) {
+  for (const name of ['jet_runtime_jet.o', 'runtime.ir', 'jet_runtime.pack.o', 'runtime.abi.json']) {
     const admitted = readNativeRuntimePack(f.root);
     writeFileSync(join(f.directory, name), 'damaged');
     assert.throws(() => readNativeRuntimePack(f.root), /digest mismatch/);
