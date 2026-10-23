@@ -267,19 +267,22 @@ fn ir_codec_words(out: &[U8], values: [Int]) Never! {
     loop value in values -> ir_codec_word(&out, value)
 }
 
+// The tenth seven-bit group would shift past bit 63, which no word reaches,
+// so the read fails there. Counting the shift keeps every step on small
+// Ints, so a decode never builds a big Int.
 fn ir_codec_read_word(r: &IRCodecReader) -> Int Never! {
     value := 0
-    scale := 1
+    shift := 0
     loop {
-        if r.at >= r.bytes.len() || scale > 9223372036854775808 {
+        if r.at >= r.bytes.len() || shift > 63 {
             r.failed = true
             return 0
         }
         byte :: Int.from_u8(r.bytes[r.at])
         r.at += 1
-        value += byte.bit_and(127) * scale
+        value += byte.bit_and(127) << shift
         if byte < 128 -> break
-        scale *= 128
+        shift += 7
     }
     if value.bit_and(1) == 0 -> value /% 2 else -> 0 - (value + 1) /% 2
 }
