@@ -364,13 +364,48 @@ fn loader_record(rows: &[Int], number: Int, a1: Int, a2: Int, a3: Int, a4: Int, 
 
 // The data page's layout: a zeroed kernel sigaction (SIG_DFL, 32 bytes), a
 // stack_t with SS_DISABLE, a zeroed signal set, the thread name, this
-// process's auxiliary vector, and scratch for queries.
+// process's auxiliary vector, and scratch for queries. Once the vector is
+// read, its room holds the program's prctl_mm_map (loader_mm_record).
 LOADER_DATA_DEFAULT :: prep { 0 }
 LOADER_DATA_ALTSTACK :: prep { 64 }
 LOADER_DATA_MASK :: prep { 96 }
 LOADER_DATA_NAME :: prep { 128 }
 LOADER_DATA_SCRATCH :: prep { 192 }
 LOADER_DATA_AUXV :: prep { 256 }
+LOADER_DATA_MM :: prep { 256 }
+
+// The record that points the kernel's view of the process (/proc/<pid>/
+// cmdline and environ, so ps and the runtime's /proc/self/environ read)
+// at the program's argument and environment strings and its stack:
+// prctl(PR_SET_MM, PR_SET_MM_MAP) of a prctl_mm_map (twelve words, then
+// auxv_size 0 to keep the saved vector and exe_fd -1 to keep the exe link)
+// at `map`. Code, data and brk stay as they are, from /proc/self/stat and
+// brk(0). Unprivileged needs only CONFIG_CHECKPOINT_RESTORE; where the call
+// is refused it changes nothing, and the executor goes on past it.
+fn loader_mm_record(rows: &[Int], map: Int, stack: Int, arg_start: Int, arg_end: Int, env_start: Int, env_end: Int) {
+    stat :: loader_files.read("/proc/self/stat") ?? return
+    // The fields after the command name, which may hold spaces or ")".
+    parts :: stat.split(") ").to_list()
+    fields :: parts[parts.len() - 1].split(" ").to_list()
+    // stat(5) fields 26 startcode, 27 endcode, 45 start_data, 46 end_data,
+    // 47 start_brk; fields[0] is field 3.
+    if fields.len() < 49 -> return
+    start_code :: Int.parse(fields[23]) ?? return
+    end_code :: Int.parse(fields[24]) ?? return
+    start_data :: Int.parse(fields[42]) ?? return
+    end_data :: Int.parse(fields[43]) ?? return
+    start_brk :: Int.parse(fields[44]) ?? return
+    brk := 0
+    #Unsafe("brk(0) only reports the current break") {
+        brk = os_syscall(OS_SYS_BRK, 0, 0, 0, 0, 0, 0)
+    }
+    words :: [Int]{start_code, end_code, start_data, end_data, start_brk, brk, stack, arg_start, arg_end, env_start, env_end, 0, -4294967296}
+    #Unsafe("the map's 104 bytes lie in the data page's auxiliary-vector room, read already") {
+        loop (k, word) in words { os_store_word(map + k * 8, word) }
+    }
+    // PR_SET_MM, PR_SET_MM_MAP
+    loader_record(&rows, OS_SYS_PRCTL, 35, 14, map, 104, 0, 0, 0)
+}
 
 // The main stack's size: RLIMIT_STACK's soft limit, between 128 KiB and
 // 8 GiB (unlimited means 8 GiB); reserved, not committed.
@@ -529,21 +564,27 @@ fn loader_plan(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool)
         }
         relaunch = at
     }
+    // The environment's strings, the arguments' below them, each in order
+    // (as execve lays them out), so [arg_start, arg_end) and
+    // [env_start, env_end) are what /proc/<pid>/cmdline and environ read.
+    env_end :: at
     env := [Int]{}
-    loop row in launch.env {
-        at = loader_put_text(at, row)
+    loop k in 0..<launch.env.len() {
+        at = loader_put_text(at, launch.env[launch.env.len() - 1 - k])
         &env.push(at)
     }
+    env_start :: at
     argv := [Int]{}
-    loop argument in launch.argv {
-        at = loader_put_text(at, argument)
+    loop k in 0..<launch.argv.len() {
+        at = loader_put_text(at, launch.argv[launch.argv.len() - 1 - k])
         &argv.push(at)
     }
+    arg_start :: at
     at -= at % 16
     words := [Int]{launch.argv.len()}
-    loop address in argv -> &words.push(address)
+    loop k in 0..<argv.len() -> &words.push(argv[argv.len() - 1 - k])
     &words.push(0)
-    loop address in env -> &words.push(address)
+    loop k in 0..<env.len() -> &words.push(env[env.len() - 1 - k])
     &words.push(0)
     // This process's auxiliary vector, less what describes the image.
     auxv := 0
@@ -593,6 +634,7 @@ fn loader_plan(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool)
     #Unsafe("the words lie in the stack mapping, above its guard page") {
         loop (k, word) in words { os_store_word(sp + k * 8, word) }
     }
+    loader_mm_record(&rows, data + LOADER_DATA_MM, sp, arg_start, env_start, env_start, env_end)
 
     // Last, as execve drops the old address space: every mapping goes but
     // the image, its file view, this plan's pages, the new stack and the
