@@ -440,8 +440,10 @@ fn sema_function_memory_plan_for_program(program: Program, module_identity: Stri
 
 fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
     loop declaration in declarations {
-        // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet).
-        if declaration.key != PolicyKey.ScopedGC && declaration.key != PolicyKey.Copies -> return true
+        // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet),
+        // and so does `explicit_units` (E0127, Scopes.jet sema_scope_module_policy
+        // and sema_scope_push_unit_policy).
+        if declaration.key != PolicyKey.ScopedGC && declaration.key != PolicyKey.Copies && declaration.key != PolicyKey.ExplicitUnits -> return true
     }
     false
 }

@@ -101,7 +101,7 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
     if on.kind == TOKEN_IDENT && parser_value(state, on) == "on" {
         parser_skip_marker_trailer(&state)
         parser_add_fatal_code(&state, "E0381", on.span, "the checked-text marker declaration is retired", "every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form", "write `marker {marker_name}($sites: [.Text])` for a plain rule, or use a built-in typed text head")
-        return Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
+        return Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
     }
     params :: parser_marker_decl_params(&state)
     body := [DeriveBodyItem]?{None}
@@ -125,7 +125,7 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
         else -> {}
     }
     if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
-    Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, params: params, body: body, span: parser_cover(start.span, end)}}
+    Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, body: body, span: parser_cover(start.span, end)}}
 }
 
 // Consume a rejected marker-declaration trailer (the `on` word and its

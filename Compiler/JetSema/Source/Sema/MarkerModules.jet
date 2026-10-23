@@ -446,7 +446,7 @@ fn sema_marker_module_check_with(graph: SemaRegistrationGraph, catalog: SemaScop
             resolved :: sema_marker_module_resolve_application(graph, graph.modules[module_row_index].module_identity, marker)
             if marker.name.contains(".") || marker.declaration_module != None {
                 if {
-                    resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a library marker is public unless it is marked `priv`", "remove `priv` from the marker, or remove this use"))
+                    resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a marker declared inside a `priv module` is usable only by that module's parent and its other children", "use a marker from a public module, or remove `priv` from the module"))
                     resolved.status == "ambiguous" -> &diagnostics.push(sema_error("E0086", marker.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
                     resolved.status == "unknown" -> &diagnostics.push(sema_marker_rules_unknown_error(catalog, marker))
                     else -> {}

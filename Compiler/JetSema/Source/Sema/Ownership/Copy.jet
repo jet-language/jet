@@ -13,6 +13,9 @@ use jet_foundation.[
     TGenericParam,
     TagMarker,
     Type,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
+    core_record_literal_fields,
     core_source_owns_type,
     type_name,
     core_type_modules,
@@ -493,8 +496,51 @@ fn sema_copy_named_facts(
         sema_copy_named_is_builtin_resource(name) -> sema_copy_type_facts_known(false, false, false, false, true, false, true)
         name == "Clock" -> sema_copy_type_facts_known(false, true, false, true, false, false, true)
         sema_copy_named_is_core(name) -> sema_copy_type_facts_known(name == "Complex" || name == "Range", true, false, false, false, false, true)
-        else -> sema_copy_type_facts_known(false, false, false, false, false, false, false)
+        else -> sema_copy_core_row_facts(ty, name, graph, table, caller, generic_params, &walk) ?? sema_copy_type_facts_known(false, false, false, false, false, false, false)
     }
+}
+
+// A compiler-owned Core enum family or record without a module export or a
+// nominal row (`IOError`, `IOContext`, `ProcessResourceLimit`) is declared by
+// its generated payload/field rows, so its facts walk those parts.
+fn sema_copy_core_row_facts(
+    ty: Type,
+    name: String,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts? Never! {
+    parts := [Type]{}
+    if core_enum_payload_variants(name) == .Val(variants) {
+        loop variant in variants {
+            if core_enum_variant_payload(name, variant) == .Val(payload) {
+                loop part in payload -> &parts.push(part)
+            }
+        }
+    } else {
+        fields :: core_record_literal_fields(name) ?? return None
+        loop field in fields -> &parts.push(field.ty)
+    }
+    key :: "<core-row>::{name}"
+    if walk.active.contains(key) -> return Val(sema_copy_type_facts_known(false, true, false, false, false, false, true))
+    &walk.active.push(key)
+    cloneable := true
+    heap := false
+    clock := false
+    dynamic_loan := false
+    complete := true
+    loop part in parts {
+        nested :: sema_copy_type_facts(part, graph, table, caller, generic_params, &walk)
+        cloneable = cloneable && nested.cloneable
+        heap = heap || nested.heap
+        clock = clock || nested.observable_clock
+        dynamic_loan = dynamic_loan || nested.dynamic_loan
+        complete = complete && nested.complete
+    }
+    _ := &walk.active.pop()
+    Val(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), cloneable, heap, clock, false, dynamic_loan, complete))
 }
 
 fn sema_copy_nominal_facts(

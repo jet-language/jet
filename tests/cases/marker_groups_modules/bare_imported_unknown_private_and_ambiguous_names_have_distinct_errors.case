@@ -2,7 +2,7 @@
 # Claim: bare imported marker #LibraryNote is rejected with E0085 (tests/marker_groups_modules.rs:82,88)
 # Claim: #lib.Missing is rejected with E0927 (tests/marker_groups_modules.rs:83,88)
 # Claim: #Missing is rejected with E0927 (tests/marker_groups_modules.rs:84,88)
-# Claim: #lib.Hidden (private member) is rejected with E0605 (tests/marker_groups_modules.rs:85,88)
+# Claim: #lib.inner.Hidden (a marker inside a `priv module`) is rejected with E0605 (tests/marker_groups_modules.rs:85,88; S18: markers are public, only a `priv module` hides them)
 # Claim: ui fixture marker_module_bare is rejected with E0085 (tests/marker_groups_modules.rs:90-93)
 # Claim: two imports with the same alias make #lib.LibraryNote ambiguous, E0086 (tests/marker_groups_modules.rs:94-98)
 # Claim: ui fixture marker_module_ambiguous is rejected with E0086 (tests/marker_groups_modules.rs:99-102)
@@ -24,8 +24,8 @@ exit: 1 # tests/marker_groups_modules.rs:84,88 #Missing -> E0927
 stderr: ~ "E0927" # tests/marker_groups_modules.rs:84,88 #Missing -> E0927
 step: jet check main.jet
 cwd: b4
-exit: 1 # tests/marker_groups_modules.rs:85,88 #lib.Hidden -> E0605
-stderr: ~ "E0605" # tests/marker_groups_modules.rs:85,88 #lib.Hidden -> E0605
+exit: 1 # tests/marker_groups_modules.rs:85,88 #lib.inner.Hidden (priv module member) -> E0605
+stderr: ~ "E0605" # tests/marker_groups_modules.rs:85,88 #lib.inner.Hidden (priv module member) -> E0605
 step: jet check main.jet
 cwd: b5
 exit: 1 # tests/marker_groups_modules.rs:90-93 ui/marker_module_bare -> E0085 (main.jet/library.jet copied from ui fixture)
