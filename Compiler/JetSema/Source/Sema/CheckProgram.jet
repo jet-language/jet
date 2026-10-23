@@ -973,7 +973,7 @@ fn sema_incremental_module(session: SemaIncrementalCache?, environment: SemaScop
 // TFuncKind.Method/TraitMethod already carries the exact owner_type.
 fn sema_incremental_selected_body_query(memo: SemaModuleMemo?, job: SemaBodyJob, module_index: Int, raw: Func, owner_id: SymbolID, kind: TFuncKind, raw_protocol_return: Bool, memory_plan: SemaFunctionMemoryPlan, memory_owner: String, trait_symbol: Symbol?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaBodyMemoQuery? {
     module_memo :: memo ?? return None
-    position :: sema_function_memory_position(memory_plan, module_memo.module_identity, memory_owner, raw.span)
+    position :: sema_function_memory_position(memory_plan, module_memo.module_identity, memory_owner, raw.name, raw.span)
     memory_text :: if position == {
         .Val(index) -> "{memory_plan.functions[index]:Debug}"
         .None -> "None"
@@ -2199,7 +2199,7 @@ fn check_program(input: Program, module_name: String, source_file: String, sourc
                 function_call_facts := [SemaCallSiteFact]{}
                 function_comptime_requests := [SemaComptimeRequest]{}
                 function_name_references := [SemaNameReferenceFact]{}
-                memory_row := sema_function_memory_position(memory_plan, module_name, "", func.span)
+                memory_row := sema_function_memory_position(memory_plan, module_name, "", func.name, func.span)
                 memory_func := func
                 if memory_row == {
                     .Val(position) -> {
@@ -2387,7 +2387,7 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     entered :: sema_scope_environment_enter_probe_module(&environment, program, module_identity, ^body_values)
     if !entered -> return unresolved
     diagnostics := [Diagnostic]{}
-    memory_row := sema_function_memory_position(memory_plan, module_identity, sema_function_memory_owner(source.kind), source.declaration.span)
+    memory_row := sema_function_memory_position(memory_plan, module_identity, sema_function_memory_owner(source.kind), source.declaration.name, source.declaration.span)
     memory_func := source.declaration
     memory_complete := true
     if memory_row == {
@@ -2796,11 +2796,11 @@ fn sema_check_registered_memory_position(job: SemaBodyJob, module_index: Int, me
     if program.registration_graph == .Val(graph) {
         if job == {
             .TopLevel(item_index) -> {
-                if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", func.span)
+                if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", func.name, func.span)
                 panic("a selected source function lost its original item")
             }
-            .NominalMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].nominals[owner].ty) ?? "", graph.modules[module_index].nominals[owner].methods[row].declaration.span)
-            .ImplMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].impls[owner].target_type) ?? "", graph.modules[module_index].impls[owner].methods[row].declaration.span)
+            .NominalMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].nominals[owner].ty) ?? "", graph.modules[module_index].nominals[owner].methods[row].declaration.name, graph.modules[module_index].nominals[owner].methods[row].declaration.span)
+            .ImplMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].impls[owner].target_type) ?? "", graph.modules[module_index].impls[owner].methods[row].declaration.name, graph.modules[module_index].impls[owner].methods[row].declaration.span)
         }
     }
     panic("a registered Jet body check lost its owning graph")
@@ -4113,7 +4113,7 @@ fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegis
 
 fn sema_check_method_parallel_eligible(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, comptime_rows: [String:Int]) -> Bool {
     if comptime_rows.get("{source_module.module_identity}\n{registered.symbol.id.key}") != None -> return false
-    position :: memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.span)) ?? return false
+    position :: memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) ?? return false
     planned :: memory_plan.functions[position].function ?? registered.declaration
     if planned.type_params.len() != 0 -> return false
     // A concrete generic owner still has declared generics, even when
@@ -4245,7 +4245,7 @@ fn sema_check_body_claimed(environment: SemaScopeEnvironment, program: SemaProgr
                 // The function's span is read through a read parameter:
                 // a pattern over the payload binding copied the function.
                 if sema_registered_top_level_func_span(graph, module_index, item_index) == .Val(func_span) {
-                    memory_position :: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", func_span)
+                    memory_position :: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index), func_span)
                     diagnostics := [Diagnostic]{}
                     call_facts := [SemaCallSiteFact]{}
                     comptime_requests := [SemaComptimeRequest]{}

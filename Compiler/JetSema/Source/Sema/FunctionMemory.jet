@@ -57,6 +57,7 @@ struct SemaFunctionMemoryPlan {
 struct SemaFunctionMemorySource {
     module_identity: String
     owner: String
+    name: String
     span: Span
     // The declaration, copied only when a scoped-GC policy may rewrite it
     // (sema_function_memory_scope_may_annotate); `chain` is then its policy
@@ -94,13 +95,15 @@ struct SemaFunctionMemoryPolicy {
     explanation: String
 }
 
-// Exact function identity: module, owning type, and declaration span. A
-// derived member keeps its `Prelude/Derives.jet` template span, which every
-// derived type shares, so the owner tells `Effect.equal` from `Route.equal`.
-// The integers lead and the owner is an identifier, so no module identity
-// text can collide with another key.
-fn sema_function_memory_key(module_identity: String, owner: String, span: Span) -> String Never! {
-    "{span.start}:{span.end}:{owner}:{module_identity}"
+// Exact function identity: module, owning type, name, and declaration span.
+// A derived member keeps its `Prelude/Derives.jet` template span, which every
+// derived type shares, so the owner tells `Effect.equal` from `Route.equal`;
+// a `comptime loop` template declares one member per value at one span, so
+// the name tells `field_x` from `field_y` on the same owner. The integers lead
+// and the owner and name are identifiers, so no module identity text can
+// collide with another key.
+fn sema_function_memory_key(module_identity: String, owner: String, name: String, span: Span) -> String Never! {
+    "{span.start}:{span.end}:{owner}:{name}:{module_identity}"
 }
 
 fn sema_function_memory_policy_declaration_equal(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool Never! {
@@ -197,7 +200,7 @@ fn sema_function_memory_visit(walk: &SemaFunctionMemoryWalk, module_identity: St
     chain :: sema_function_memory_function_policies(outer, declarations, function)
     rewritable := Func?{None}
     if sema_function_memory_scope_may_annotate(function.body, chain) -> rewritable = Val(function)
-    &walk.sources.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), span: function.span, function: rewritable, chain: chain, transfer_root: transfer_root})
+    &walk.sources.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), name: function.name, span: function.span, function: rewritable, chain: chain, transfer_root: transfer_root})
 }
 
 fn sema_function_memory_collect_items(items: [Item], module_identity: String, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], walk: &SemaFunctionMemoryWalk) Never! {
@@ -286,7 +289,7 @@ fn sema_function_memory_plan_rows(plan: &SemaFunctionMemoryPlan, sources: [SemaF
         function_complete = function_complete && function_diagnostics.len() == 0
         loop diagnostic in function_diagnostics -> &plan.diagnostics.push(diagnostic)
         &plan.functions.push(SemaFunctionMemoryFunction{module_identity: source.module_identity, owner: source.owner, function: None, diagnostics: function_diagnostics, transfer_root: source.transfer_root, complete: function_complete})
-        &keys.push(sema_function_memory_key(source.module_identity, source.owner, source.span))
+        &keys.push(sema_function_memory_key(source.module_identity, source.owner, source.name, source.span))
     }
     sema_function_memory_fill_positions(&plan, &planned, keys)
     iteration := 0
@@ -445,8 +448,8 @@ fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaratio
 
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
-fn sema_function_memory_position(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> Int? {
-    plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span))
+fn sema_function_memory_position(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, name: String, span: Span) -> Int? {
+    plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), name, span))
 }
 
 // The owner name a method's memory row is found by: the base name of its
