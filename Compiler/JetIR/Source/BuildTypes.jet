@@ -234,7 +234,9 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
     if ir_task_element(ty) != None -> return Val(ir_task_row(&m, ty))
     if ir_channel_element(ty, "Sender") != None -> return Val(ir_channel_row(&m, ty, "Sender"))
     if ir_channel_element(ty, "Receiver") != None -> return Val(ir_channel_row(&m, ty, "Receiver"))
+    if ir_event_type(ty) -> return Val(ir_event_row(&m, ty))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
+    if ir_atomic_scalar(ty) == .Val(scalar) -> return Val(ir_atomic_row(&m, ty, ir_atomic_lane(scalar) ?? ""))
     name :: ir_nominal_name(ty) ?? return None
     args :: ir_type_args(ty)
     if args.len() == 0 {
@@ -272,6 +274,49 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         .Alias(target) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, target), laying) }
         else -> { return None }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Atomic<T> (Lower Atomic.jet): ONE inline 8-aligned word, borrowed by its
+// storage address (a local, a struct member); the runtime family
+// jet_rt_atomic_<lane>_* reads and writes it in place. An Atomic<Int> word
+// owns one exact Int its drop releases.
+
+// The runtime lane of Atomic scalar `scalar` (Lower lower_atomic_lane),
+// None for a type no Atomic carries.
+fn ir_atomic_lane(scalar: Type) -> String? Never! {
+    if ir_untag(scalar) == {
+        .Bool -> return Val("bool")
+        .Int -> return Val("int")
+        .IntN(signed, bits) -> {
+            if bits == 32 -> return Val(if signed -> "i32" else -> "u32")
+            if bits == 64 -> return Val(if signed -> "i64" else -> "u64")
+        }
+        .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_atomic_lane(inner)
+        .Named(name) -> {
+            if name == "Bool" -> return Val("bool")
+        }
+        else -> {}
+    }
+    None
+}
+
+// The scalar of Atomic type `ty` (Lower lower_atomic_scalar), None for any
+// other type.
+fn ir_atomic_scalar(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if (name == "Atomic" || name.ends_with("::Atomic") || name.ends_with(".Atomic")) && args.len() == 1 && ir_atomic_lane(args[0]) != None -> return Val(args[0])
+    }
+    None
+}
+
+// The row of Atomic type `ty` of lane `lane`: an 8-byte inline aggregate
+// whose value is its storage address; an Atomic<Int> drops through its
+// glue (ir_drop_glue, Lower lower_atomic_drop_glue).
+fn ir_atomic_row(m: &IRModule, ty: Type, lane: String) -> Int Never! {
+    row :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+    if lane == "int" && m.types[row].drop == "" -> m.types[row].drop = ir_drop_key(m, row)
+    row
 }
 
 // The row of struct declaration `row` applied to `args` (`identity`), None
@@ -609,6 +654,7 @@ fn ir_record_in_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span
         return -1
     }
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     id
 }
@@ -914,8 +960,21 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
         return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
     }
     if slot < 0 -> return ir_fail_slot(&b, span, "display of {ir_type_name(ty)} without a value")
-    selected :: ir_render_impl(&m, p, &b, slot, mode)
+    // A top-level Debug render (`{value:Debug}`, `.debug()`) calls the
+    // user's Debug implementation; members keep the structural render.
+    selected :: if mode == .Debug -> ir_render_debug_impl(&m, p, &b, slot) else -> ir_render_impl(&m, p, &b, slot, mode)
     if selected >= 0 -> return selected
+    // A Dyn shows its scalar leaf bare and a container as its tree text
+    // (JetRuntime Dyn.jet jet_rt_handle_show_dyn over a runtime tree).
+    if mode != .Debug {
+        if ir_dyn_def(p, ty) == .Val(dyn_row) {
+            tree :: ir_dyn_to_runtime(&m, p, &b, dyn_row, slot, span)
+            if tree < 0 -> return -1
+            text :: ir_runtime(&m, &b, if mode == .Show -> "jet_rt_handle_show_dyn" else -> "jet_rt_handle_display_dyn", [Int]{tree}, string_row)
+            _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
+            return text
+        }
+    }
     if ir_is_handle(m, b.f.slot_type[slot]) && !ir_carrier_type(ty) {
         // A runtime handle renders through its runtime type's own JetDisplay
         // / JetShow / JetDebug (Lower lower_render_value).
@@ -959,10 +1018,40 @@ fn ir_push_static(m: &IRModule, b: &IRBuilder, builder: Int, text: String) Never
 fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
     if mode == .Debug || p.render_impls.len() == 0 -> return -1
     trait_short :: if mode == .Show -> "Printable" else -> "Display"
-    row :: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") ?? return -1
+    receiver_ty :: m.types[b.f.slot_type[slot]].ty
+    row :: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, receiver_ty)}") ?? return -1
+    ir_render_impl_call(&m, p, &b, slot, row, trait_short)
+}
+
+// The owned String the user Debug implementation makes of `slot`, -1 when
+// its type has none (codegen jet_codegen_direct_render_function: a trait
+// method `debug` of Debug with a receiver convention whose owner is the
+// value's nominal type).
+fn ir_render_debug_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
+    candidates :: p.trait_methods.get("Debug|debug") ?? return -1
+    receiver_ty :: m.types[b.f.slot_type[slot]].ty
+    if ir_nominal_name(ir_untag(receiver_ty)) == None -> return -1
+    key :: ir_render_type_key(p.type_rows, p.types, receiver_ty)
+    loop row in candidates {
+        if p.functions[row].kind == .TraitMethod(_, convention, owner_type, _, _) {
+            if convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key -> return ir_render_impl_call(&m, p, &b, slot, row, "Debug")
+        }
+    }
+    -1
+}
+
+// The owned String implementation function `row` of trait `trait_short`
+// makes of `slot`.
+fn ir_render_impl_call(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, trait_short: String) -> Int Never! {
+    receiver_ty :: m.types[b.f.slot_type[slot]].ty
     function :: p.functions[row]
     if function.generic_params.len() > 0 {
         ir_fail(&b, Span{start: 0, end: 0}, "generic {trait_short} implementation {function.name}")
+        return -1
+    }
+    // An implementation for a generic type is built for this instance.
+    owner_args :: ir_owner_args(p, function, receiver_ty) ?? {
+        ir_fail(&b, Span{start: 0, end: 0}, "{trait_short} implementation {function.name} for {ir_type_name(receiver_ty)}")
         return -1
     }
     returned :: ir_executable_return(function) ?? return -1
@@ -970,7 +1059,7 @@ fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IR
     dst :: ir_fresh_temp(&m, &b, result_row)
     start :: ir_args(&b.f, [Int]{slot})
     at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 1, b.line)
-    &b.deferred.push(IRDeferredCall{at: at, key: function.key})
+    &b.deferred.push(IRDeferredCall{at: at, key: function.key, args: owner_args})
     string_row :: ir_string_row(&m)
     text :: ir_adapt(&m, p, &b, dst, string_row, Span{start: 0, end: 0})
     if text != dst -> b.fresh[text] = true
@@ -1102,7 +1191,7 @@ fn ir_render_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builder
     builder :: ir_new_slot(&a, builder_row, IRSlotKind.Param, ir_intern_name(&m, "builder"))
     ir_render_nominal(&m, p, &a, builder, value, mode, span)
     loop call in a.deferred {
-        &b.deferred.push(IRDeferredCall{at: call.at, key: call.key, function: if call.function >= 0 -> call.function else -> id})
+        &b.deferred.push(IRDeferredCall{at: call.at, key: call.key, function: if call.function >= 0 -> call.function else -> id, args: call.args})
     }
     if a.error != "" {
         ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
@@ -1607,6 +1696,7 @@ fn ir_order_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Sp
         return -1
     }
     ir_emit(&a.f, IROp.Return, -1, sign, -1, -1, a.line)
+    ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     id
 }
@@ -1908,6 +1998,7 @@ fn ir_equal_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Sp
         return -1
     }
     ir_emit(&a.f, IROp.Return, -1, same, -1, -1, a.line)
+    ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     id
 }
@@ -2495,10 +2586,10 @@ fn ir_set_element(ty: Type) -> Type? Never! {
 }
 
 // Whether `ty` is a native carrier Lower lays out itself (a Set, Rank,
-// PriorityQueue, Iter, Task, channel endpoint, ScopeGuard or Shared
+// PriorityQueue, Iter, Task, channel endpoint, Event, ScopeGuard or Shared
 // handle), not as its declared fields.
 fn ir_native_carrier(ty: Type) -> Bool Never! {
-    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
+    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_event_type(ty) || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
 }
 
 // The Bool test of a text pattern on the String `subject` (Lower

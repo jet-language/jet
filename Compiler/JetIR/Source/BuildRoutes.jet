@@ -1,7 +1,7 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the old path's route table (argument and result carriers, payloads).
 
-use jet_foundation.[CoreCallRecord, Span, Type, TypeTupleField, TBuiltinOp, TClosureOp, TExpr, core_call_native_return_labels, tir_builtin_mutates_receiver]
+use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, TCallArg, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, TExpr, TExprKind, TFailureCarrier, TFnValueKind, TLambda, TLambdaBody, TTryConvert, core_call_native_return_labels, tir_builtin_mutates_receiver, tir_generated_local, type_carrier_identity]
 use jet_backend.[LowerRouteCarrier, lower_environment_route, lower_float_constant_bits, lower_native_type, lower_route_nested, lower_runtime_route, runtime_abi_atom]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
@@ -410,6 +410,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TEx
     if operation == .OptionZip(_) -> return ir_option_zip(&m, p, &b, ty, receiver, args, span)
     if operation == .Zip(mode, fields, flatten, input_count, fill_mode, field_types) -> return ir_zip(&m, p, &b, ty, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types, span)
     if operation == .Unzip -> return ir_unzip(&m, p, &b, ty, receiver, span)
+    if operation == .AtomicMethod(method) -> return ir_atomic_method(&m, p, &b, ty, receiver, method, args, span)
     // A write through the receiver reaches it as a write place: each List or
     // Map on a path through an element (`&rows[0].cells.push(x)`) is made its
     // own first, so the write never lands in a buffer another holder shares.
@@ -548,15 +549,361 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TEx
 fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, operands: [Int], span: Span) -> Int Never! {
     if operation == {
         .ListMinMax | .Indexed | .MapToList | .IterSplit | .ToString
-        | .RemoveList(_, _) | .AtomicMethod(_) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
+        | .RemoveList(_, _) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
         else -> {}
     }
     if tir_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
     route :: jet_codegen_builtin_route_plan(operation, receiver_ty, ty, jet_codegen_failure_carrier_for_type(ty))
     if route.arity != operands.len() -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
+    if ir_list_value_builtin(&m, p, &b, ty, route.symbol, operands, span) == .Val(expanded) -> return expanded
     if ir_lazy_symbol(route.symbol, ir_subst(m, receiver_ty)) -> return ir_lazy_route(&m, p, &b, route.symbol, ty, operands, span)
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     ir_route(&m, p, &b, route.symbol, operands, route.borrow_mask, result, span)
+}
+
+// The List value builtins Lower expands over the borrowed header (Lower
+// Builtins.jet lower_value_builtin): Float max/min and binary_search; None for
+// any other route (the fixed-lane Float sum is ir_list_route's).
+fn ir_list_value_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: String, operands: [Int], span: Span) -> Int? Never! {
+    extremum :: symbol == "jet_list_max_float" || symbol == "jet_list_min_float"
+    search :: symbol == "jet_list_binary_search"
+    if !extremum && !search -> return None
+    if operands.len() != (if search -> 2 else -> 1) || operands[0] < 0 -> return None
+    list :: operands[0]
+    element :: ir_list_element(&m, p, b, list) ?? return None
+    if extremum && m.types[element].kind != .Float -> return Val(ir_fail_slot(&b, span, "Float collection reduction requires the checked Float carrier"))
+    result_row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+    if extremum -> return Val(ir_list_float_extremum(&m, p, &b, list, element, result_row, symbol == "jet_list_max_float"))
+    kind :: ir_map_key_kind(m, element)
+    if kind == "" -> return Val(ir_fail_slot(&b, span, "List binary_search element has no native Ord"))
+    needle :: ir_adapt(&m, p, &b, operands[1], element, span)
+    if ir_failed(b) -> return Val(-1)
+    found :: ir_list_binary_search(&m, p, &b, list, element, needle, kind, result_row)
+    ir_release(&m, &b, needle)
+    Val(found)
+}
+
+// Float max/min in an Option box: NaNs order after every number; ties keep
+// the last maximum and the first minimum (Lower lower_helper_float_extremum).
+fn ir_list_float_extremum(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Int, result_row: Int, maximum: Bool) -> Int Never! {
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    length :: ir_load_word(&m, &b, list, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Ne, length, zero)
+    ir_open_if(&b.f, present, b.line)
+    data :: ir_load_word(&m, &b, list, 16)
+    best :: ir_temp(&m, &b, element)
+    first :: ir_load_at(&m, &b, data, 0, element)
+    ir_emit(&b.f, IROp.Copy, best, first, -1, -1, b.line)
+    one :: ir_word_const(&m, &b, 1)
+    at :: ir_word_const(&m, &b, 1)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    ordered :: ir_temp(&m, &b, bool_row)
+    scan :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    more :: ir_bool_op(&m, &b, IROp.Lt, at, length)
+    ir_exit_unless(&m, &b, more, scan)
+    stride :: ir_list_stride(m, element)
+    address :: ir_element_address(&m, &b, data, at, stride)
+    item :: ir_load_at(&m, &b, address, 0, element)
+    // best orders above item: best > item, or best is NaN and item a number.
+    greater :: ir_bool_op(&m, &b, IROp.Gt, best, item)
+    ir_emit(&b.f, IROp.Copy, ordered, greater, -1, -1, b.line)
+    best_nan :: ir_bool_op(&m, &b, IROp.Ne, best, best)
+    ir_open_if(&b.f, best_nan, b.line)
+    item_number :: ir_bool_op(&m, &b, IROp.Eq, item, item)
+    ir_open_if(&b.f, item_number, b.line)
+    ir_emit(&b.f, IROp.Const, ordered, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_open_if(&b.f, ordered, b.line)
+    if !maximum -> ir_emit(&b.f, IROp.Copy, best, item, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    if maximum -> ir_emit(&b.f, IROp.Copy, best, item, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Add, at, at, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    size :: m.types[element].size
+    boxed :: ir_box_alloc(&m, &b, size, result_row)
+    ir_store_at(&m, p, &b, boxed, 0, best)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// binary_search(needle) over an ascending List: Some(an index whose element
+// equals the needle; which one among duplicates is unspecified), else None
+// (Lower lower_helper_binary_search, Rust slice.binary_search).
+fn ir_list_binary_search(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Int, needle: Int, kind: String, result_row: Int) -> Int Never! {
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    data :: ir_load_word(&m, &b, list, 16)
+    lo :: ir_word_const(&m, &b, 0)
+    hi :: ir_load_word(&m, &b, list, 0)
+    one :: ir_word_const(&m, &b, 1)
+    search :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    more :: ir_bool_op(&m, &b, IROp.Lt, lo, hi)
+    ir_exit_unless(&m, &b, more, search)
+    distance :: ir_word_op(&m, &b, IROp.Sub, hi, lo)
+    half :: ir_word_op(&m, &b, IROp.Shr, distance, one)
+    mid :: ir_word_op(&m, &b, IROp.Add, lo, half)
+    stride :: ir_list_stride(m, element)
+    address :: ir_element_address(&m, &b, data, mid, stride)
+    item :: ir_load_at(&m, &b, address, 0, element)
+    order :: ir_map_order(&m, p, &b, kind, item, needle)
+    ir_open_if(&b.f, order.same, b.line)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{mid}, int_row)
+    int_size :: ir_type_size(&m, p, Type.Int)
+    boxed :: ir_box_alloc(&m, &b, int_size, result_row)
+    ir_store_at(&m, p, &b, boxed, 0, exact)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_open_if(&b.f, order.less, b.line)
+    ir_emit(&b.f, IROp.Add, lo, mid, one, IR_OVERFLOW_WRAP, b.line)
+    ir_else(&b.f, b.line)
+    ir_emit(&b.f, IROp.Copy, hi, mid, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// A function value (codegen jet_codegen_lower_fn_value): a named function's
+// closure, a lambda, the value a call returns, or a callable policy applied
+// to a function. A policy is a closure over its parameters whose body calls
+// the policy's generated wrapper with the policy arguments, the function and
+// those parameters, all borrowed (the wrapper's own conventions decide what
+// it keeps); a SendFn is its value as is (Lower Convert.jet forwards the
+// SendFn conversion).
+fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: TFnValueKind, span: Span) -> Int Never! {
+    if kind == {
+        .NamedFn(name, lambda) -> {
+            if lambda == .Val(value) -> return ir_lambda(&m, p, &b, ty, value, span)
+            key :: name ?? return ir_fail_slot(&b, span, "function value without a function")
+            return ir_function_value(&m, p, &b, ty, key, span)
+        }
+        .Call(callee, args) -> return ir_indirect_call(&m, p, &b, callee, args, callee.ty, span)
+        .Policy(fn_type, policy_args, _, wrapper_name, captures, callee) -> {
+            wrapper :: wrapper_name ?? return ir_fail_slot(&b, span, "callable policy function value without a wrapper")
+            params := [Type]{}
+            returned := Type?{None}
+            if ir_untag(ir_subst(m, fn_type)) == .Fn(fn_params, fn_ret, _, _, _, _) {
+                params = fn_params
+                returned = fn_ret
+            } else {
+                return ir_fail_slot(&b, span, "callable policy without a function type")
+            }
+            args := policy_args
+            &args.push(ir_policy_arg(callee, true))
+            names := [String]{}
+            loop (index, param) in params {
+                name :: "policy_arg_{index}"
+                local :: TExpr{ty: param, kind: TExprKind.Local{local: tir_generated_local(name, span)}, span: span}
+                &args.push(ir_policy_arg(local, true))
+                &names.push(name)
+            }
+            result :: returned ?? Type.Named{name: "Unit"}
+            body :: TExpr{ty: result, kind: TExprKind.Call{callee: SymbolID{key: wrapper}, type_args: [Type]{}, args: args}, span: span}
+            lambda :: TLambda{
+                executable: TLambdaBody.Expr{value: body},
+                source_span: span,
+                frame_schedule: None,
+                frame_schedule_derivation: None,
+                capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}},
+                failure_carrier: TFailureCarrier.Infallible,
+                effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{wrapper}, maximal: false, direct_spans: [TEffectSpan]{}},
+                host_param_conventions: None,
+                source_params: names,
+                source_param_symbols: [SymbolID]{},
+                param_types: params,
+                ret: Val(result),
+                is_move: true,
+                boxed: false,
+                rc: false,
+                captures: captures,
+                materialized_captures: [String]{},
+                frozen_captures: [String]{},
+                uses_stack_sentry: false,
+            }
+            return ir_lambda(&m, p, &b, ty, lambda, span)
+        }
+        .Send(value) -> {
+            if value.kind == {
+                .Lambda(lambda) -> return ir_lambda(&m, p, &b, ty, lambda, span)
+                .FnValue(inner) -> return ir_fn_value(&m, p, &b, ty, inner, span)
+                else -> {}
+            }
+            return ir_expr(&m, p, &b, value)
+        }
+    }
+}
+
+fn ir_policy_arg(value: TExpr, borrow: Bool) -> TCallArg Never! {
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: borrow, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+}
+
+// Whether a function value of type row `have` stands where row `row` is
+// expected and the two differ only in fallibility: the same parameter count,
+// and exactly one returns a Result. Sema lets an infallible function value
+// fill a fallible function type (a `fn(Int) -> Int` parameter with the
+// inferred failure contract), and a named function whose inferred contract
+// is empty fill an infallible one (`[fn(String) -> String]{quote}`), but the
+// closures return differently: a fallible one returns its Result box.
+fn ir_fn_widens(m: IRModule, have: Int, row: Int) -> Bool Never! {
+    if ir_untag(m.types[have].ty) == .Fn(from_params, from_ret, _, _, _, _) {
+        if ir_untag(m.types[row].ty) == .Fn(to_params, to_ret, _, _, _, _) {
+            if from_params.len() != to_params.len() -> return false
+            from_fallible :: if from_ret == .Val(from) -> ir_is_result(from) else -> false
+            to_fallible :: if to_ret == .Val(to) -> ir_is_result(to) else -> false
+            return from_fallible != to_fallible
+        }
+    }
+    false
+}
+
+// The function value in `slot` as `row`, its fallible or infallible form: a
+// closure that owns it and calls it with its own arguments. Widening returns
+// Ok of what the value returns; narrowing unwraps the value's Result, whose
+// Err Sema has ruled out (`?` with the Never conversion). Built as its own
+// function like a source lambda (ir_lambda).
+fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
+    have :: b.f.slot_type[slot]
+    from_ty :: m.types[have].ty.copy()
+    to_ty :: m.types[row].ty.copy()
+    params := [Type]{}
+    from_ret := Type?{None}
+    returned := Type?{None}
+    if ir_untag(from_ty) == .Fn(_, fn_ret, _, _, _, _) -> from_ret = fn_ret
+    if ir_untag(to_ty) == .Fn(to_params, to_ret, _, _, _, _) {
+        params = to_params
+        returned = to_ret
+    }
+    unit :: Type.Named{name: "Unit"}
+    from_result :: from_ret ?? unit
+    to_result :: returned ?? unit
+    inner_name :: "fn_widen_inner"
+    inner :: TExpr{ty: from_ty, kind: TExprKind.Local{local: tir_generated_local(inner_name, span)}, span: span}
+    names := [String]{}
+    args := [TCallArg]{}
+    loop (index, param) in params {
+        name :: "fn_widen_arg_{index}"
+        local :: TExpr{ty: param, kind: TExprKind.Local{local: tir_generated_local(name, span)}, span: span}
+        &args.push(ir_policy_arg(local, true))
+        &names.push(name)
+    }
+    call :: TExpr{ty: from_result, kind: TExprKind.IndirectCall{callee: inner, type_args: [Type]{}, args: args, signature: from_ty}, span: span}
+    carrier := TFailureCarrier.Infallible
+    body := call.copy()
+    if ir_untag(to_result) == .Result(ok, err) {
+        carrier = TFailureCarrier.Result{success: ok, error: err}
+        body = TExpr{ty: to_result, kind: TExprKind.Ok{value: call}, span: span}
+    } else if ir_untag(from_result) == .Result(ok, err) {
+        body = TExpr{ty: ok, kind: TExprKind.Try{value: call, conversion: TTryConvert.Never, failure: TFailureCarrier.Result{success: ok, error: err}}, span: span}
+    } else {
+        return ir_fail_slot(&b, span, "function value of {ir_type_name(from_ty)} as {ir_type_name(to_ty)}")
+    }
+    lambda :: TLambda{
+        executable: TLambdaBody.Expr{value: body},
+        source_span: span,
+        frame_schedule: None,
+        frame_schedule_derivation: None,
+        capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}},
+        failure_carrier: carrier,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        host_param_conventions: None,
+        source_params: names,
+        source_param_symbols: [SymbolID]{},
+        param_types: params,
+        ret: returned,
+        is_move: true,
+        boxed: false,
+        rc: false,
+        captures: [TCapture]{},
+        materialized_captures: [String]{},
+        frozen_captures: [String]{},
+        uses_stack_sentry: false,
+    }
+    boxed :: ir_box_alloc(&m, &b, 32, row)
+    one :: ir_word_const(&m, &b, 1)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, one, b.line)
+    none :: ir_word_const(&m, &b, 0)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 16, none, b.line)
+    ir_store_at(&m, p, &b, boxed, 24, slot)
+    id :: m.functions.len()
+    key :: "{b.f.key}#fn_widen@{span.start}.{b.f.op.len()}"
+    &m.functions.push(ir_function_new("{b.f.name}.fn_widen@{span.start}", key, "{b.f.symbol}__fn_widen_{ir_key_hash(key)}", b.f.source_file, b.line))
+    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{IRCaptureSlot{name: inner_name, offset: 24, row: have, by_ref: false}}, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types})
+    &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
+    pointer_row :: ir_pointer_row(&m)
+    code :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.FunctionAddress, code, id, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 8, code, b.line)
+    boxed
+}
+
+// `Atomic.new(value)` (Lower lower_atomic_new): fresh 8-aligned frame
+// storage the runtime initializes with the scalar; an exact Int moves into
+// the word.
+fn ir_atomic_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [TCallArg], span: Span) -> Int Never! {
+    scalar :: ir_atomic_scalar(ir_subst(m, ty)) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
+    lane :: ir_atomic_lane(scalar) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
+    if args.len() != 1 || args[0].spread -> return ir_fail_slot(&b, span, "Atomic constructor with {args.len()} arguments")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    value :: ir_expr(&m, p, &b, args[0].value)
+    if ir_failed(b) -> return -1
+    if value < 0 -> return ir_fail_slot(&b, span, "Atomic constructor of a Unit value")
+    input :: ir_atomic_taken(&m, p, &b, value, lane)
+    storage :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, storage, 8, 8, -1, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_atomic_{lane}_init", [Int]{storage, input}, -1)
+    if input >= 0 -> b.fresh[input] = false
+    storage
+}
+
+// An Atomic operand the runtime consumes (Lower lower_atomic_taken): an
+// exact Int is passed as an owner of its own, any other lane's scalar as is.
+fn ir_atomic_taken(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, lane: String) -> Int Never! {
+    if lane != "int" -> return value
+    ir_own(&m, p, &b, value)
+}
+
+// An Atomic method (Lower lower_atomic_method): the borrowed receiver is
+// the word's own storage address, never a copy; each operand moves into the
+// runtime, and a load or the OLD value of an add returns a fresh owner.
+fn ir_atomic_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, method: String, args: [TExpr], span: Span) -> Int Never! {
+    scalar :: ir_atomic_scalar(ir_subst(m, receiver.ty)) ?? return ir_fail_slot(&b, span, "Atomic method {method} on {ir_type_name(receiver.ty)}")
+    lane :: ir_atomic_lane(scalar) ?? return ir_fail_slot(&b, span, "Atomic method {method} on {ir_type_name(receiver.ty)}")
+    operation :: if method == "observe" -> "load" else if method == "publish" -> "store" else -> method
+    arity :: if operation == "load" -> 0 else if operation == "compare_exchange" -> 2 else -> 1
+    known :: operation == "load" || operation == "store" || operation == "compare_exchange" || (operation == "add" && lane != "bool")
+    if !known || args.len() != arity -> return ir_fail_slot(&b, span, "Atomic method {method} with {args.len()} operands on {ir_type_name(receiver.ty)}")
+    address :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) -> return -1
+    if address < 0 || ir_kind_of(m, b, address) != .Aggregate -> return ir_fail_slot(&b, span, "Atomic method {method} receiver")
+    operands := [Int]{address}
+    loop arg in args {
+        value :: ir_expr(&m, p, &b, arg)
+        if ir_failed(b) -> return -1
+        if value < 0 -> return ir_fail_slot(&b, span, "Atomic method {method} on a Unit operand")
+        &operands.push(ir_atomic_taken(&m, p, &b, value, lane))
+    }
+    result_row := -1
+    if operation != "store" {
+        result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    }
+    result :: ir_runtime(&m, &b, "jet_rt_atomic_{lane}_{operation}", operands, result_row)
+    loop (index, operand) in operands {
+        if index > 0 -> b.fresh[operand] = false
+    }
+    ir_release(&m, &b, address)
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -623,6 +970,24 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             ir_open_if(&b.f, keep, b.line)
             ir_list_push(&m, p, &b, result, element, walk.item)
             ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+            return result
+        }
+        // flat_map(f): every element of each List the step produces, in
+        // order, is appended as a copy and the produced List ends (Lower
+        // lower_closure_flat_map).
+        .FlatMap -> {
+            part_ty :: ir_closure_result(ir_subst(m, args[args.len() - 1].ty)) ?? return ir_fail_slot(&b, span, "flat_map callback has no checked single-input type")
+            part_row :: ir_value_type(&m, p, part_ty) ?? return ir_type_fail(&b, span, part_ty)
+            result :: ir_list_empty(&m, &b, result_row)
+            produced :: ir_list_element(&m, p, b, result) ?? return ir_fail_slot(&b, span, "flat_map result {ir_type_name(ty)}")
+            walk :: ir_walk_open(&m, &b, list, element)
+            part :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, part_row)
+            part_element :: ir_list_element(&m, p, b, part) ?? return ir_fail_slot(&b, span, "flat_map step {ir_type_name(part_ty)} is not a List")
+            inner :: ir_walk_open(&m, &b, part, part_element)
+            ir_list_push(&m, p, &b, result, produced, inner.item)
+            ir_walk_close(&m, &b, inner)
+            ir_release(&m, &b, part)
             ir_walk_close(&m, &b, walk)
             return result
         }
@@ -869,6 +1234,48 @@ fn ir_option_zip_store(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, of
     owned :: if copied -> ir_copy_value(&m, p, &b, item, span) else -> item
     ir_store_at(&m, p, &b, boxed, offset, owned)
     if copied -> b.fresh[owned] = false
+}
+
+// `Option.lift2(f, left, right)` (codegen jet_codegen_lower_option_lift2):
+// both present lend their payloads to `f`, whose result is boxed fresh;
+// otherwise None. Both operands are only read.
+fn ir_option_lift2(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function: TExpr, left: TExpr, right: TExpr, span: Span) -> Int Never! {
+    result_ty :: if ir_untag(ir_subst(m, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 to {ir_type_name(ty)}") }
+    left_ty :: if ir_untag(ir_subst(m, left.ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(left.ty)}") }
+    right_ty :: if ir_untag(ir_subst(m, right.ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(right.ty)}") }
+    called_ty :: ir_closure_result(ir_subst(m, function.ty)) ?? return ir_fail_slot(&b, span, "Option.lift2 with {ir_type_name(function.ty)}")
+    if type_carrier_identity(called_ty) != type_carrier_identity(result_ty) -> return ir_fail_slot(&b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(result_ty)}")
+    if ir_unit_type(left_ty) || ir_unit_type(right_ty) || ir_unit_type(result_ty) -> return ir_fail_slot(&b, span, "Option.lift2 over Unit")
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    left_row :: ir_value_type(&m, p, left_ty) ?? return ir_type_fail(&b, span, left_ty)
+    right_row :: ir_value_type(&m, p, right_ty) ?? return ir_type_fail(&b, span, right_ty)
+    called_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
+    callback :: ir_expr(&m, p, &b, function)
+    if ir_failed(b) || callback < 0 -> return -1
+    first :: ir_expr(&m, p, &b, left)
+    if ir_failed(b) || first < 0 -> return -1
+    second :: ir_expr(&m, p, &b, right)
+    if ir_failed(b) || second < 0 -> return -1
+    result :: ir_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    first_present :: ir_option_is_some(&m, &b, first)
+    ir_open_if(&b.f, first_present, b.line)
+    second_present :: ir_option_is_some(&m, &b, second)
+    ir_open_if(&b.f, second_present, b.line)
+    first_item :: ir_load_at(&m, &b, first, 0, left_row)
+    second_item :: ir_load_at(&m, &b, second, 0, right_row)
+    called :: ir_call_closure(&m, &b, callback, [Int]{first_item, second_item}, called_row)
+    box_size :: ir_type_size(&m, p, result_ty)
+    boxed :: ir_box_alloc(&m, &b, box_size, result_row)
+    ir_store_at(&m, p, &b, boxed, 0, called)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, first)
+    ir_release(&m, &b, second)
+    ir_release(&m, &b, callback)
+    b.fresh[result] = true
+    result
 }
 
 fn ir_closure_op_name(operation: TClosureOp) -> String Never! {
@@ -2650,6 +3057,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     }
     if canonical.symbol == .Prelude(name) {
         if name == "jet_std::channel" || name == "jet_std::channel_bounded" -> return ir_channel_new(&m, p, &b, ty, name == "jet_std::channel_bounded", args, span)
+        if name == "jet_std::JetEvent::with_policy" -> return ir_event_with_policy(&m, p, &b, ty, args, span)
     }
     if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic Core call {canonical.module_name}.{canonical.member}")
     loop flag in widen {

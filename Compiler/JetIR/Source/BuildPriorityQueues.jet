@@ -24,7 +24,8 @@ fn ir_priority_queue_row(m: &IRModule, p: IRProgram, heap_row: Int) -> Int? Neve
 }
 
 // The id of PriorityQueue or List sort helper `name` over the header type
-// row `row` with element row `elem_row`, built on first use.
+// row `row` with element row `elem_row`, built on first use. Its deferred
+// calls (a user Comparable implementation) resolve before it is stored.
 fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
     key :: "{name}<{type_carrier_identity(m.types[row].ty)}>"
     if m.function_rows.get(key) == .Val(known) -> return known
@@ -47,6 +48,7 @@ fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: Str
     } else {
         ir_list_sort_body(&m, p, &a, kind, heap, elem_row, name == "list.sort_desc")
     }
+    ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     id
 }

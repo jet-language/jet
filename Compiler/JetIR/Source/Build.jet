@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, TConstantDef, TExpr, TFailureCarrier, TFunc, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
+use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, TCallArg, TConstantDef, TExpr, TFailureCarrier, TFunc, TGenericParam, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
 use jet_backend.[lower_int_inline]
 use jet_codegen.[jet_codegen_impl_method_leaf]
 use jet_sema.[SemaCheckedForeignFunction]
@@ -89,8 +89,8 @@ struct IRBuilder {
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
-// being built) names the checked function `key`.
-struct IRDeferredCall { at: Int, key: String, function: Int{-1} }
+// being built) names the checked function `key` applied to `args`.
+struct IRDeferredCall { at: Int, key: String, function: Int{-1}, args: [Type]{[Type]{}} }
 
 // The checked program the builder reads: the checked functions every IR
 // function id may name, by key, and the checked type declarations, by key
@@ -372,7 +372,7 @@ fn ir_type_def(p: IRProgram, name: String) -> Int? Never! {
 fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -> Int? Never! {
     row :: p.rows.get(key) ?? return None
     function :: p.functions[row]
-    if type_args.len() == 0 || function.generic_params.len() == 0 {
+    if type_args.len() == 0 || (function.generic_params.len() == 0 && ir_owner_binders(p, function).len() == 0) {
         if m.ids[row] >= 0 -> return Val(m.ids[row])
         id :: m.functions.len()
         &m.functions.push(ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line))
@@ -381,6 +381,8 @@ fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) ->
         &m.queue.push(IRQueued{row: row, id: id, args: [Type]{}})
         return Val(id)
     }
+    // An instance binds every one of its type parameters.
+    if type_args.len() != ir_generic_names(p, function).len() -> return None
     concrete := [Type]{}
     spelled := [String]{}
     loop arg in type_args {
@@ -397,10 +399,129 @@ fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) ->
     Val(id)
 }
 
-fn ir_generic_names(function: TFunc) -> [String] Never! {
+// The type parameters an instance of `function` binds, in order: those its
+// owner's pattern binds (a method of a generic type, `Pair<T>`), then its
+// own (codegen jet_codegen_checked_method_return_type).
+fn ir_generic_names(p: IRProgram, function: TFunc) -> [String] Never! {
     names := [String]{}
+    loop binder in ir_owner_binders(p, function) -> &names.push(binder.name)
     loop parameter in function.generic_params -> &names.push(parameter.name)
     names
+}
+
+// A type parameter of a generic owner a method binds, at argument `index`
+// of its owner pattern.
+struct IROwnerBinder { index: Int, name: String }
+
+// The owner type parameters a method of a generic type declaration binds:
+// each argument of its owner pattern that is one of the declaration's
+// parameters the method does not shadow with its own (`impl Pair<Int>`
+// binds none). None for any other function.
+fn ir_owner_binders(p: IRProgram, function: TFunc) -> [IROwnerBinder] Never! {
+    binders := [IROwnerBinder]{}
+    owner :: if function.kind == {
+        .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> ir_untag(owner_type)
+        .TopLevel -> { return binders }
+    }
+    if owner == .Apply(owner_name, args) {
+        row :: ir_type_def(p, owner_name) ?? return binders
+        declared :: p.types[row].generic_params
+        if declared.len() != args.len() -> return binders
+        loop (index, arg) in args {
+            name :: ir_type_parameter_name(arg) ?? next
+            if !ir_declares(declared, name) || ir_declares(function.generic_params, name) -> next
+            &binders.push(IROwnerBinder{index: index, name: name})
+        }
+    }
+    binders
+}
+
+fn ir_type_parameter_name(ty: Type) -> String? Never! {
+    if ty == .Named(name) -> return Val(name)
+    if ty == .Apply(name, args) {
+        if args.len() == 0 -> return Val(name)
+    }
+    None
+}
+
+fn ir_declares(params: [TGenericParam], name: String) -> Bool Never! {
+    loop parameter in params {
+        if parameter.name == name -> return true
+    }
+    false
+}
+
+// The owner arguments an instance of `function` binds for its owner type
+// `owner` (`[Int]` for `Pair<T>` at `Pair<Int>`): None when `owner` does
+// not spell them.
+fn ir_owner_args(p: IRProgram, function: TFunc, owner: Type) -> [Type]? Never! {
+    args := [Type]{}
+    binders :: ir_owner_binders(p, function)
+    if binders.len() == 0 -> return Val(args)
+    actual :: ir_type_args(owner)
+    loop binder in binders {
+        if binder.index >= actual.len() -> return None
+        &args.push(actual[binder.index].copy())
+    }
+    Val(args)
+}
+
+// The owner arguments a static call of `function` binds when its owner is
+// written without them (`Box.new(7)`): what the call's type `ty` and its
+// arguments' types give the owner parameters in the method's signature.
+// None when they leave one unbound.
+fn ir_infer_owner_args(p: IRProgram, function: TFunc, ty: Type, args: [TCallArg]) -> [Type]? Never! {
+    names := [String]{}
+    bound := [Type?]{}
+    loop binder in ir_owner_binders(p, function) {
+        &names.push(binder.name)
+        &bound.push(None)
+    }
+    if function.ret == .Val(ret) -> ir_bind_names(names, ret, ty, &bound)
+    loop (index, param) in function.params {
+        if index < args.len() -> ir_bind_names(names, param.ty, args[index].value.ty, &bound)
+    }
+    inferred := [Type]{}
+    loop slot in bound {
+        found :: slot ?? return None
+        &inferred.push(found)
+    }
+    Val(inferred)
+}
+
+// Binds each of `names` not yet in `bound` to what `actual` holds where
+// `pattern` (written with them) names it.
+fn ir_bind_names(names: [String], pattern: Type, actual: Type, bound: &[Type?]) Never! {
+    if ir_type_parameter_name(pattern) == .Val(name) {
+        loop (index, parameter) in names {
+            if parameter == name && bound[index] == None -> bound[index] = Val(ir_untag(actual))
+        }
+        return
+    }
+    concrete :: ir_untag(actual)
+    if pattern == {
+        .Apply(_, args) -> {
+            if concrete == .Apply(_, actuals) {
+                if actuals.len() == args.len() {
+                    loop (index, arg) in args -> ir_bind_names(names, arg, actuals[index], &bound)
+                }
+            }
+        }
+        .List(element) -> {
+            if concrete == .List(actual_element) -> ir_bind_names(names, element, actual_element, &bound)
+        }
+        .Option(inner) -> {
+            if concrete == .Option(actual_inner) -> ir_bind_names(names, inner, actual_inner, &bound)
+        }
+        .Result(ok, err) -> {
+            if concrete == .Result(actual_ok, actual_err) {
+                ir_bind_names(names, ok, actual_ok, &bound)
+                ir_bind_names(names, err, actual_err, &bound)
+            }
+        }
+        .Tagged(_, inner) -> ir_bind_names(names, inner, concrete, &bound)
+        else -> {}
+    }
 }
 
 // `ty` in the terms of the instance being built.
@@ -576,7 +697,7 @@ fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef],
     ir_foreign_index(&p, ^foreign)
     roots := [IRWaveJob]{}
     loop row in 0..<p.functions.len() {
-        if p.functions[row].generic_params.len() > 0 -> next
+        if p.functions[row].generic_params.len() > 0 || ir_owner_binders(p, p.functions[row]).len() > 0 -> next
         &roots.push(IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
     }
     ir_build_waves(^p, ^roots, false, threads)
@@ -613,7 +734,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
     }
     // copy: the checked function is read while later calls queue more rows.
     function :: p.functions[queued.row].copy()
-    m.subst_names = if queued.args.len() > 0 -> ir_generic_names(function) else -> [String]{}
+    m.subst_names = if queued.args.len() > 0 -> ir_generic_names(p, function) else -> [String]{}
     m.subst_types = queued.args.copy()
     ir_build_function(&m, p, &b, function)
     if b.error != "" {
@@ -629,7 +750,7 @@ fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
 
 fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     loop call in b.deferred {
-        callee :: ir_function_id(&m, p, call.key, [Type]{}) ?? -1
+        callee :: ir_function_id(&m, p, call.key, call.args) ?? -1
         if call.function >= 0 {
             m.functions[call.function].a[call.at] = callee
         } else {
@@ -1332,6 +1453,9 @@ fn ir_value_as(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr, row
 fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
     have :: b.f.slot_type[slot]
     if have == row -> return slot
+    // A function value standing for its fallible or infallible form returns
+    // through a converting closure (BuildRoutes ir_fn_widen).
+    if ir_fn_widens(m, have, row) -> return ir_fn_widen(&m, p, &b, slot, row, span)
     // A `Never` value (a call that does not return, as `?? fatal()`) ends
     // the path; what follows is unreached.
     if ir_never_type(m.types[have].ty) {

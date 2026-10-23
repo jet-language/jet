@@ -111,6 +111,7 @@ fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int 
         option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1
         ir_map_take_body(&m, p, &a, shape, map_row, map, probe_key, option_row, name == "map.remove")
     }
+    ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     id
 }
@@ -481,6 +482,39 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         other :: ir_adapt(&m, p, &b, operands[1], row, span)
         if ir_failed(b) -> return Val(-1)
         return Val(ir_map_merge_with(&m, p, &b, shape, row, subject, other, operands[2], span))
+    }
+    // `to_list()` / `items()`: the `(key, value)` entries in key order, as
+    // copies (Lower lower_map_entry_list shares the entry buffer).
+    if symbol == "jet_map_to_list" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map to_list with {operands.len() - 1} arguments"))
+        result_row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+        result :: ir_list_empty(&m, &b, result_row)
+        if ir_list_element(&m, p, b, result) != Val(shape.entry) -> return Val(ir_fail_slot(&b, span, "Map to_list entries as {ir_type_name(ty)}"))
+        walk :: ir_walk_open(&m, &b, subject, shape.entry)
+        ir_list_push(&m, p, &b, result, shape.entry, walk.item)
+        ir_walk_close(&m, &b, walk)
+        return Val(result)
+    }
+    // `intersection(other)`: a new Map of copies of the receiver's entries
+    // whose key `other` holds too (Lower lower_map_method_more).
+    if symbol == "jet_map_intersection" {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map intersection without an operand"))
+        other :: ir_adapt(&m, p, &b, operands[1], row, span)
+        if ir_failed(b) -> return Val(-1)
+        target :: ir_list_empty(&m, &b, row)
+        walk :: ir_walk_open(&m, &b, subject, shape.entry)
+        key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
+        word_row :: ir_word_row(&m)
+        found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{other, key}, word_row)
+        none :: ir_word_const(&m, &b, 0)
+        shared :: ir_bool_op(&m, &b, IROp.Ge, found, none)
+        ir_open_if(&b.f, shared, b.line)
+        value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
+        ir_map_set(&m, p, &b, row, target, key, value)
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, walk)
+        ir_release(&m, &b, other)
+        return Val(target)
     }
     keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
     if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_add_new" -> return None

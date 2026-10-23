@@ -34,6 +34,8 @@ fn ir_inline_members(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never!
 // clone. A View windows its owner's buffer and shares it uncounted.
 fn ir_copy_needs(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.types[row].clone != "" -> return true
+    // An Atomic<Int> word owns its exact Int (ir_atomic_row).
+    if ir_atomic_scalar(m.types[row].ty) != None -> return m.types[row].drop != ""
     if m.types[row].kind != .Aggregate -> return false
     if ir_counted_entry(&m, p, row) != None -> return true
     members :: ir_inline_members(&m, p, row) ?? return false
@@ -55,6 +57,16 @@ fn ir_copy_fixup(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) N
 }
 
 fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
+    if ir_atomic_scalar(m.types[row].ty) != None {
+        // Sema keeps Atomic non-Clone; a byte copy the builder makes of a
+        // moved holder publishes its own owner of the exact Int, so the
+        // copy and its source never drop one word twice.
+        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        value :: ir_runtime(&m, &b, "jet_rt_atomic_int_load", [Int]{at}, int_row)
+        b.fresh[value] = false
+        _ :: ir_runtime(&m, &b, "jet_rt_atomic_int_init", [Int]{at, value}, -1)
+        return
+    }
     if ir_counted_entry(&m, p, row) != None {
         // A frozen buffer (capacity 0: static, window, empty) has no owners.
         capacity :: ir_load_word(&m, &b, at, 8)
@@ -432,6 +444,10 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
     if ir_box_row(m, row) {
         ir_box_drop_body(&m, p, &a, row, at)
+    } else if ir_atomic_scalar(m.types[row].ty) != None {
+        // An Atomic<Int> releases the exact Int its word owns (Lower
+        // lower_atomic_drop_glue).
+        _ :: ir_runtime(&m, &a, "jet_rt_atomic_int_drop", [Int]{at}, -1)
     } else if ir_counted_entry(&m, p, row) == .Val(entry) {
         capacity :: ir_load_word(&m, &a, at, 8)
         zero :: ir_word_const(&m, &a, 0)
@@ -734,7 +750,8 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
     if method >= 0 {
         method_key :: p.functions[method].key.copy()
         generic :: p.functions[method].generic_params.len() > 0
-        args :: if generic -> ir_row_args(m, row) else -> [Type]{}
+        // A Close method of a generic type is built for this instance.
+        args :: if generic -> ir_row_args(m, row) else -> ir_owner_args(p, p.functions[method], m.types[row].ty) ?? [Type]{}
         callee :: ir_function_id(&m, p, method_key, args) ?? -1
         if callee < 0 {
             ir_fail(&a, span, "the Close method of {ir_type_name(m.types[row].ty)}")
