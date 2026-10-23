@@ -80,6 +80,7 @@ use jet_ir.[
     IRFunction,
     IROp,
     IROutputCheck,
+    IRProgram,
     IRTestCase,
     IRTestHarness,
     ir_build_program,
@@ -239,7 +240,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     entry_key :: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
     declarations := jet_driver_checked_declarations(&checked)
     // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
-    layouts :: ir_program_new([FnBody]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    layouts := ir_program_new([FnBody]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     // A failure the evaluator reports points at `run`.
     span := Span{start: 0, end: 0}
     loop function in checked.functions {
@@ -253,7 +254,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     entry :: built.program.function_rows.get(entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
     config.eval_entry = true
-    program := jet_eval_native_load(JetEvalIRComptime{code: ^built.program, layouts: layouts, items: [Int]{entry}, build_failures: [String]{}}, config)
+    program := jet_eval_native_load(JetEvalIRComptime{code: ^built.program, layouts: shared [IRProgram]{^layouts}, items: [Int]{entry}, build_failures: [String]{}}, config)
     evaluated :: jet_eval_native_run(&program, 0, [TComptimeValue]{}, config, span)
     if evaluated.error == .Val(failure) {
         jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})

@@ -137,7 +137,7 @@ use jet_parser.[
 ]
 
 use jet_eval.[JetEvalComptimeInputAdapter]
-use jet_ir.[ir_precise_helper_names, ir_function_value_keys, ir_reachable_core_rows]
+use jet_ir.[IRProgram, ir_precise_helper_names, ir_function_value_keys, ir_reachable_core_rows]
 use jet_eval.[
     JetEvalConfig,
     JetEvalIRResult,
@@ -812,14 +812,18 @@ fn jet_driver_comptime_function_closure(
     JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons}
 }
 
-// The run's comptime staging: `rows` holds the declaration rows evaluations
-// lay values out by once `staged` (jet_driver_comptime_stage); `declared`
-// the declaration pass's modules (moved in, or empty), handed back at the
-// run's end; `sites` the value sites of the program's graph, through which
-// landings apply.
+// The run's comptime staging: `program` holds (its one row, once `staged`:
+// jet_driver_comptime_stage) the declared IR program every evaluation that
+// reaches a declaration builds over and lays values out by, `landed`
+// counting the values whose constant rows it took over and `taken` their
+// keys (jet_driver_comptime_ir_build); `declared` the declaration pass's
+// modules (moved in, or empty), handed back at the run's end; `sites` the
+// value sites of the program's graph, through which landings apply.
 struct JetDriverComptimeStaging {
     staged: Bool
-    rows: JetDriverComptimeRows
+    program: Shared<[IRProgram]>
+    landed: Int
+    taken: [String:Bool]
     declared: [SemaGraphModuleResult]
     sites: SemaComptimeValueSites
 }
@@ -1099,9 +1103,13 @@ fn jet_driver_comptime_any_available(available: SemaComptimeAvailableConstants, 
 // Whether a checked item whose check and closure read nothing its batch
 // holds back (jet_driver_comptime_reads_batch) may wait in the batch, to be
 // evaluated together with it: a constant, not checked text, whose key a
-// later check names in its waits when it reads it. Any other item is
-// evaluated at its turn, alone.
+// later check names in its waits when it reads it; or a field default whose
+// struct doesn't bake it, whose value no check of the run reads (it lands
+// only on the field's shape, sema_checked_shape_defaults) and whose failure
+// lands nothing and reports nothing. Any other item is evaluated at its
+// turn, alone.
 fn jet_driver_comptime_batchable(source: SemaComptimeItemSource) -> Bool Never! {
+    if source.kind == SemaComptimeItemKind.FieldDefault -> return !source.baked_default
     source.kind == SemaComptimeItemKind.Constant && source.checked_text == None
 }
 
@@ -1157,15 +1165,15 @@ fn jet_driver_comptime_forget_functions(checked_functions: &[SemaComptimeFunctio
     }
 }
 
-// Stages the declaration rows comptime IR lays values out by, at the run's
-// first evaluated entry that reaches a declaration (`head`): the type, impl
-// and constant rows of every module, from the declaration pass's modules
-// when they are the graph's whole module set (`staging.declared`, read in
-// place), else from every module checked under the values so far. A value
-// that lands later changes only its own constant's row
-// (sema_comptime_staged_constant_rows), and each build puts the rows of the
-// values landed so far first (jet_driver_comptime_ir_build), so one staging
-// serves the run. None, or the run's result when staging failed.
+// Stages the declared IR program comptime builds over and lays values out
+// by, at the run's first evaluated entry that reaches a declaration
+// (`head`): over the type, impl and constant rows of every module, from the
+// declaration pass's modules when they are the graph's whole module set
+// (`staging.declared`, read in place), else from every module checked under
+// the values so far. A value that lands later changes only its own
+// constant's row (sema_comptime_staged_constant_rows), which each build
+// takes over (jet_driver_comptime_ir_build), so one staging serves the run.
+// None, or the run's result when staging failed.
 fn jet_driver_comptime_stage(
     graph: SemaRegistrationGraph,
     head: SemaComptimeItemRequest,
@@ -1178,8 +1186,8 @@ fn jet_driver_comptime_stage(
 ) -> JetDriverComptimeRunResult? {
     if staging.staged -> return None
     if staging.declared.len() > 0 && staging.declared.len() == graph.modules.len() {
-        declared_rows := jet_driver_comptime_rows(staging.declared)
-        staging.rows = ^declared_rows
+        declared := jet_driver_comptime_declared(staging.declared)
+        staging.program = shared [IRProgram]{^declared}
         staging.staged = true
         return None
     }
@@ -1188,8 +1196,8 @@ fn jet_driver_comptime_stage(
         &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0003", head.span, "the staged comptime declaration graph lost a registered module", "comptime IR lays values out by every module of the registered graph", "preserve the complete resolved module set while applying staged values"))
         return Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
     }
-    rows := jet_driver_comptime_rows(modules)
-    staging.rows = ^rows
+    declared := jet_driver_comptime_declared(modules)
+    staging.program = shared [IRProgram]{^declared}
     staging.staged = true
     None
 }
@@ -1259,7 +1267,7 @@ fn jet_driver_comptime_flush(
         }
     }
     if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.build", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
-    built := jet_driver_comptime_ir_build(batch, start, staging, values)
+    built := jet_driver_comptime_ir_build(batch, start, &staging, values)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.build", batch.functions.len() + built.items.len())
     counters.programs_built += 1
     counters.functions_built += batch.functions.len() + built.items.len()
@@ -1459,7 +1467,7 @@ fn jet_driver_run_comptime(
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
-    staging := JetDriverComptimeStaging{staged: false, rows: jet_driver_comptime_rows_empty(), declared: ^declared, sites: sema_comptime_value_sites_empty()}
+    staging := JetDriverComptimeStaging{staged: false, program: shared [IRProgram]{}, landed: 0, taken: [String:Bool]{}, declared: ^declared, sites: sema_comptime_value_sites_empty()}
     // Each in a one-row slot: a pass's prechecks move them into the threads'
     // shared state and back (moving a borrowed value out would copy the
     // whole graph once per pass).

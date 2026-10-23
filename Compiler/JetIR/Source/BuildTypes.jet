@@ -2140,11 +2140,7 @@ fn ir_union_key(ty: Type) -> String Never! {
 fn ir_add_union_types(types: &[TTypeDef], functions: [FnBody]) Never! {
     if types.len() == 0 -> return
     found := [Type]{}
-    loop function in functions {
-        if function.generic_params.len() > 0 -> next
-        loop param in function.params -> ir_collect_unions(param.ty, &found)
-        if function.ret == .Val(ret) -> ir_collect_unions(ret, &found)
-    }
+    ir_collect_signature_unions(functions, &found)
     loop definition in types {
         if definition.generic_params.len() > 0 -> next
         if definition.kind == {
@@ -2166,11 +2162,42 @@ fn ir_add_union_types(types: &[TTypeDef], functions: [FnBody]) Never! {
         key :: ir_union_key(ty)
         if declared.get(key) != None -> next
         declared[key] = true
+        if ty == .Union(members) -> &types.push(ir_union_def(module_identity, key, members))
+    }
+}
+
+// Adds the structural enum of each union type `functions`' signatures name
+// that `types` lacks (`type_rows`: its rows by key and name, which the
+// added ones join; a union's key is its name).
+fn ir_add_signature_union_types(types: &[TTypeDef], type_rows: &[String:Int], functions: [FnBody]) Never! {
+    if types.len() == 0 -> return
+    found := [Type]{}
+    ir_collect_signature_unions(functions, &found)
+    module_identity :: types[0].module_identity.copy()
+    loop ty in found {
+        key :: ir_union_key(ty)
+        if type_rows.get(key) != None -> next
         if ty == .Union(members) {
-            variants :: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: member.copy()}, discriminant: None}
-            &types.push(ir_compiler_owned_def(module_identity, key, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
+            type_rows[key.copy()] = types.len()
+            &types.push(ir_union_def(module_identity, key, members))
         }
     }
+}
+
+// The union types the non-generic `functions`' parameters and results name.
+fn ir_collect_signature_unions(functions: [FnBody], found: &[Type]) Never! {
+    loop function in functions {
+        if function.generic_params.len() > 0 -> next
+        loop param in function.params -> ir_collect_unions(param.ty, &found)
+        if function.ret == .Val(ret) -> ir_collect_unions(ret, &found)
+    }
+}
+
+// The structural enum of union `key`: one variant per member, named by its
+// union member tag and carrying the member.
+fn ir_union_def(module_identity: String, key: String, members: [Type]) -> TTypeDef Never! {
+    variants :: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: member.copy()}, discriminant: None}
+    ir_compiler_owned_def(module_identity, key, TTypeDefKind.Enum{variants: variants, methods: [String]{}})
 }
 
 // Every union type `ty` holds, outermost first.

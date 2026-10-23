@@ -103,10 +103,11 @@ struct JetEvalNativeChild {
 
 // One loaded batch: per item its wrapper's address (0: none), result row
 // and parameter rows; `types` the batch module's rows (functions dropped),
-// in which host values intern their rows, and `layouts` its declarations.
+// in which host values intern their rows, and `layouts` (its one row) the
+// program the batch was built from.
 struct JetEvalNativeProgram {
     types: Shared<IRModule>
-    layouts: Shared<IRProgram>
+    layouts: Shared<[IRProgram]>
     entries: [Int]
     results: [Int]
     sizes: [Int]
@@ -143,7 +144,7 @@ struct JetEvalIRState {
     // by, the build host of a fn-build or fn-dev invocation, and the
     // compiler values its code holds (a host word is index + 1).
     host_types: Shared<IRModule>?{None}
-    host_layouts: Shared<IRProgram>?{None}
+    host_layouts: Shared<[IRProgram]>?{None}
     host_adapter: JetEvalBuildHostAdapter?{None}
     host_values: [TComptimeValue]{[TComptimeValue]{}}
 }
@@ -276,7 +277,7 @@ fn jet_eval_native_load(built: ^JetEvalIRComptime, config: JetEvalConfig) -> Jet
         &params.push(^rows)
         &names.push(name)
     }
-    program := JetEvalNativeProgram{types: shared ir_module_new(), layouts: shared layouts, entries: [Int]{}, results: ^results, sizes: ^sizes, params: ^params, code: X64ComptimeCode{segments: [X64Segment]{}, bytes: [U8]{}, high: 0, failure: ""}, generation: 0, runtime_execution: config.runtime_execution, failure: "", missing: false}
+    program := JetEvalNativeProgram{types: shared ir_module_new(), layouts: ^layouts, entries: [Int]{}, results: ^results, sizes: ^sizes, params: ^params, code: X64ComptimeCode{segments: [X64Segment]{}, bytes: [U8]{}, high: 0, failure: ""}, generation: 0, runtime_execution: config.runtime_execution, failure: "", missing: false}
     session_cell :: config.native ?? {
         program.failure = "no runtime image"
         program.missing = true
@@ -532,7 +533,7 @@ fn jet_eval_native_call(s: &JetEvalIRState, program: JetEvalNativeProgram, item:
         raw :: jet_eval_ir_read(&s, cell, width) ?? return None
         word = jet_eval_ir_canonical(ty, raw, width)
     }
-    value :: jet_eval_ir_data(&types.value, layouts.value, &s, word, row) ?? return None
+    value :: jet_eval_ir_data(&types.value, layouts.value[0], &s, word, row) ?? return None
     if jet_eval_ir_failed(s) -> return None
     Val(value)
 }

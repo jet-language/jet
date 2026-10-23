@@ -21,6 +21,13 @@ struct IRBuildResult {
     failures: [IRBuildFailure]
 }
 
+// A build that hands its checked program back (ir_build_roots_in): the
+// program serves the next build over the same declarations.
+struct IRBuildKept {
+    result: IRBuildResult
+    program: IRProgram
+}
+
 // A visible name: `slot` holds the variable named `name`. `indirect` is the
 // type row of the value when `slot` holds its address (a write parameter, or
 // a variable a closure writes, kept in a frame cell); -1: the slot is the
@@ -123,6 +130,15 @@ struct IRProgram {
     // The implementation methods a dynamic trait call may select, by
     // "<trait>|<method>" (function rows; see ir_trait_methods).
     trait_methods: [String:[Int]]
+    // The host target's trait implementations, read once by
+    // ir_program_declared: the traits each implementing method serves, by
+    // "<module>|<owner key>|<method>" (`impl_slots` rows of `impl_traits`),
+    // and the Display, Printable, Close and user Comparable implementations
+    // (`impl_methods`) whose methods ir_program_bind selects among the bound
+    // functions.
+    impl_slots: [String:Int]
+    impl_traits: [[String]]
+    impl_methods: [IRImplMethod]
     // The checked source files' bytes and line starts by row, and each
     // path's row: a source location reads the file in place.
     source_bytes: [[U8]]
@@ -134,6 +150,10 @@ struct IRProgram {
     // a call of one is its machine operation, never a call.
     intrinsics: [String:IRRuntimeIntrinsic]
 }
+
+// A Display, Printable, Close or user Comparable implementation: the
+// method it selects, its trait's short name and its owner's rendered type key.
+struct IRImplMethod { method: String, trait_short: String, owner_key: String }
 
 // The checked source files (`path` -> text) as rows of bytes and line
 // starts (codegen Builder.jet jet_codegen_source_index).
@@ -220,6 +240,17 @@ struct IRLambdaJob {
 struct IRCaptureSlot { name: String, offset: Int, row: Int, by_ref: Bool }
 
 fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
+    p := ir_program_declared(^type_defs, ^impl_defs, ^constant_defs, functions)
+    ir_program_bind(&p, ^functions)
+    ir_source_index(&p, ^sources)
+    p
+}
+
+// A program over the checked declarations with no function bound yet
+// (ir_program_bind binds them): the constants by key, the types with the
+// compiler-owned ones and the union types the declarations and `functions`'
+// signatures name, and the host target's trait implementations.
+fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_defs: ^[TConstantDef], functions: [FnBody]) -> IRProgram Never! {
     constants := [String:TConstantDef]{}
     loop definition in ^constant_defs {
         if constants.get(definition.key) == None -> constants[definition.key] = definition
@@ -227,14 +258,9 @@ fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TIm
         qualified :: "constant:{definition.module_identity}::{definition.name}"
         if constants.get(qualified) == None -> constants[qualified] = definition
     }
-    owned := ^functions
-    rows := [String:Int]{}
-    loop (index, function) in owned {
-        if rows.get(function.key) == None -> rows[function.key] = index
-    }
     types := ^type_defs
     ir_add_compiler_owned_types(&types)
-    ir_add_union_types(&types, owned)
+    ir_add_union_types(&types, functions)
     type_rows := [String:Int]{}
     loop (index, definition) in types {
         if type_rows.get(definition.key) == None -> type_rows[definition.key] = index
@@ -242,40 +268,14 @@ fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TIm
     loop (index, definition) in types {
         if type_rows.get(definition.name) == None -> type_rows[definition.name] = index
     }
-    // An implementation method is checked as its owner's method of that name
-    // (a TraitMethod when its trait resolves in the implementing module,
-    // else a plain Method, as codegen jet_codegen_impl_method_matches reads it).
-    owner_methods := [String:Int]{}
-    render_impls := [String:Int]{}
-    loop (index, function) in owned {
-        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" -> next
-        if function.kind == {
-            .TopLevel -> {}
-            .Method(_, owner_type) -> {
-                key :: "{function.name}||{ir_render_type_key(type_rows, types, owner_type)}"
-                if owner_methods.get(key) == None -> owner_methods[key] = index
-            }
-            .TraitMethod(_, _, owner_type, trait_name, _) -> {
-                trait_short :: ir_short_name(trait_name.key)
-                owner_key :: ir_render_type_key(type_rows, types, owner_type)
-                key :: "{function.name}|{trait_short}|{owner_key}"
-                if owner_methods.get(key) == None -> owner_methods[key] = index
-                selected :: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
-                if selected {
-                    render_key :: "{trait_short}|{owner_key}"
-                    if render_impls.get(render_key) == None -> render_impls[render_key] = index
-                }
-            }
-        }
-    }
     // The Display, Printable and Close implementations of the host target
     // (Lower lower_render_impl_applies, lower_close_index), and the user
     // Comparable ones (a derived Comparable orders structurally: Lower
     // lower_order_user_impl). Every trait implementation of the host target
     // also names its methods' traits for ir_trait_methods.
-    close_methods := [String:Int]{}
     impl_slots := [String:Int]{}
     impl_traits := [[String]]{}
+    impl_methods := [IRImplMethod]{}
     loop implementation in ^impl_defs {
         trait_name :: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
         if trait_name == "" -> next
@@ -302,19 +302,81 @@ fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TIm
             else -> ""
         }
         if method == "" -> next
-        row :: owner_methods.get("{method}|{trait_short}|{owner_key}") ?? owner_methods.get("{method}||{owner_key}") ?? -1
+        &impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
+    }
+    IRProgram{functions: [FnBody]{}, rows: [String:Int]{}, types: ^types, type_rows: type_rows, constants: constants, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+}
+
+// Binds `functions` to `p` in place of the functions it had: their rows,
+// the union types their signatures name that `p` lacks, and the
+// implementation methods and trait method tables that name function rows.
+// The declarations stay, so one declared program serves many builds.
+fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
+    owned := ^functions
+    ir_add_signature_union_types(&p.types, &p.type_rows, owned)
+    rows := [String:Int]{}
+    loop (index, function) in owned {
+        if rows.get(function.key) == None -> rows[function.key] = index
+    }
+    // An implementation method is checked as its owner's method of that name
+    // (a TraitMethod when its trait resolves in the implementing module,
+    // else a plain Method, as codegen jet_codegen_impl_method_matches reads it).
+    owner_methods := [String:Int]{}
+    render_impls := [String:Int]{}
+    loop (index, function) in owned {
+        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" -> next
+        if function.kind == {
+            .TopLevel -> {}
+            .Method(_, owner_type) -> {
+                key :: "{function.name}||{ir_render_type_key(p.type_rows, p.types, owner_type)}"
+                if owner_methods.get(key) == None -> owner_methods[key] = index
+            }
+            .TraitMethod(_, _, owner_type, trait_name, _) -> {
+                trait_short :: ir_short_name(trait_name.key)
+                owner_key :: ir_render_type_key(p.type_rows, p.types, owner_type)
+                key :: "{function.name}|{trait_short}|{owner_key}"
+                if owner_methods.get(key) == None -> owner_methods[key] = index
+                selected :: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
+                if selected {
+                    render_key :: "{trait_short}|{owner_key}"
+                    if render_impls.get(render_key) == None -> render_impls[render_key] = index
+                }
+            }
+        }
+    }
+    close_methods := [String:Int]{}
+    loop implementation in p.impl_methods {
+        row :: owner_methods.get("{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? owner_methods.get("{implementation.method}||{implementation.owner_key}") ?? -1
         if row < 0 -> next
-        if trait_short == "Close" {
-            if close_methods.get(owner_key) == None -> close_methods[owner_key] = row
+        if implementation.trait_short == "Close" {
+            if close_methods.get(implementation.owner_key) == None -> close_methods[implementation.owner_key] = row
         } else {
-            render_key :: "{trait_short}|{owner_key}"
+            render_key :: "{implementation.trait_short}|{implementation.owner_key}"
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
         }
     }
-    trait_methods :: ir_trait_methods(owned, type_rows, types, impl_slots, impl_traits)
-    p := IRProgram{functions: ^owned, rows: rows, types: ^types, type_rows: type_rows, constants: constants, render_impls: render_impls, close_methods: close_methods, trait_methods: trait_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
-    ir_source_index(&p, ^sources)
-    p
+    p.trait_methods = ir_trait_methods(owned, p.type_rows, p.types, p.impl_slots, p.impl_traits)
+    p.functions = ^owned
+    p.rows = rows
+    p.render_impls = render_impls
+    p.close_methods = close_methods
+}
+
+// `definition` takes over `p`'s constant rows of its key and its qualified
+// name (a compile-time value landed after the program was declared), each
+// not taken over yet (`taken`, which it joins): a key's first landed row
+// stands.
+fn ir_program_put_constant(p: &IRProgram, definition: ^TConstantDef, taken: &[String:Bool]) Never! {
+    owned := ^definition
+    qualified :: "constant:{owned.module_identity}::{owned.name}"
+    if taken.get(qualified) == None {
+        taken[qualified.copy()] = true
+        p.constants[qualified.copy()] = owned.copy()
+    }
+    if taken.get(owned.key) == None {
+        taken[owned.key.copy()] = true
+        p.constants[owned.key.copy()] = ^owned
+    }
 }
 
 // An empty module ready to build `p`'s functions (no function queued yet).
@@ -616,12 +678,12 @@ fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImpl
     ir_build_waves(^p, ^roots, true, threads)
 }
 
-// Builds the functions `root_keys` name and every function they reach, as
-// ir_build_program does, with no program entry: compile-time evaluation runs
-// each root itself.
-fn ir_build_roots(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], root_keys: [String], threads: CompilerThreads) -> IRBuildResult Never! {
-    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
-    ir_foreign_index(&p, ^foreign)
+// Builds the functions `root_keys` name in `program` (ir_program_new, or
+// ir_program_declared and ir_program_bind) and every function they reach,
+// as ir_build_program does, with no program entry: compile-time evaluation
+// runs each root itself. The program comes back with the build.
+fn ir_build_roots_in(program: ^IRProgram, root_keys: [String], threads: CompilerThreads) -> IRBuildKept Never! {
+    p := ^program
     roots := [IRWaveJob]{}
     failures := [IRBuildFailure]{}
     loop key in root_keys {
@@ -631,8 +693,11 @@ fn ir_build_roots(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDe
         }
         &roots.push(IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
     }
-    if failures.len() > 0 -> return IRBuildResult{program: ir_module_for(p), failures: failures}
-    ir_build_waves(^p, ^roots, false, threads)
+    if failures.len() > 0 {
+        empty := ir_module_for(p)
+        return IRBuildKept{result: IRBuildResult{program: ^empty, failures: failures}, program: ^p}
+    }
+    ir_build_waves_kept(^p, ^roots, false, threads)
 }
 
 // The function the executable starts: `entry` itself when it takes nothing

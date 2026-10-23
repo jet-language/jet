@@ -1,44 +1,35 @@
 // Native comptime: a flush's checked closure and the item functions of its
-// evaluated entries are built as one slot IR program
-// (jet_eval_ir_comptime_build), laid out by the run's staged declaration
-// rows, compiled and loaded once into the session's comptime child
-// (jet_eval_native_load), and each entry runs its own item function there
-// (jet_eval_native_run).
-use jet_foundation.[Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility]
+// evaluated entries are built as one slot IR program, bound to the run's
+// declared program (jet_eval_ir_comptime_build_over: the staged declaration
+// rows, declared once per run), compiled and loaded once into the session's
+// comptime child (jet_eval_native_load), and each entry runs its own item
+// function there (jet_eval_native_run).
+use jet_foundation.[FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility]
 use jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
-use jet_ir.[ir_comptime_item_function]
-use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_native_load, jet_eval_native_run]
+use jet_ir.[IRProgram, ir_comptime_item_function, ir_program_declared]
+use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
 
-// The type, impl and constant rows of every module of a run's graph
-// (jet_driver_comptime_stage).
-struct JetDriverComptimeRows {
-    type_defs: [TTypeDef]
-    impls: [TImplDef]
-    constants: [TConstantDef]
-}
-
-fn jet_driver_comptime_rows_empty() -> JetDriverComptimeRows Never! {
-    JetDriverComptimeRows{type_defs: [TTypeDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}}
-}
-
-fn jet_driver_comptime_rows(modules: [SemaGraphModuleResult]) -> JetDriverComptimeRows Never! {
-    rows := jet_driver_comptime_rows_empty()
+// The declared IR program (ir_program_declared) over the type, impl and
+// constant rows of every module of a run's graph (jet_driver_comptime_stage).
+fn jet_driver_comptime_declared(modules: [SemaGraphModuleResult]) -> IRProgram Never! {
+    type_defs := [TTypeDef]{}
+    impls := [TImplDef]{}
+    constants := [TConstantDef]{}
     loop checked in modules {
-        loop definition in checked.declarations.type_defs -> &rows.type_defs.push(definition.copy())
-        loop definition in checked.declarations.impls -> &rows.impls.push(definition.copy())
-        loop definition in checked.declarations.constants -> &rows.constants.push(definition.copy())
+        loop definition in checked.declarations.type_defs -> &type_defs.push(definition.copy())
+        loop definition in checked.declarations.impls -> &impls.push(definition.copy())
+        loop definition in checked.declarations.constants -> &constants.push(definition.copy())
     }
-    rows
+    ir_program_declared(^type_defs, ^impls, ^constants, [FnBody]{})
 }
 
 // The IR of `batch`'s evaluated entries from `start` on: the batch's checked
 // closure and each entry's item function, a zero-parameter function that
 // returns the entry's expression. A batch that reaches no declaration
-// (JetDriverComptimeBatch.bare) builds with none; any other lays values out
-// by the run's staged rows, after a row for each value landed so far, which
-// the builder takes over the staged row of the same key (it keeps a key's
-// first row).
-fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, staging: JetDriverComptimeStaging, values: [SemaComptimeItemValue]) -> JetEvalIRComptime {
+// (JetDriverComptimeBatch.bare) builds with none; any other builds over the
+// run's declared program, whose constant rows the values landed since its
+// last build take over first (a key's first landed value stands).
+fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue]) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     loop index in start..<batch.entries.len() {
@@ -54,14 +45,14 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
         &functions.push(^item)
     }
     if batch.bare -> return jet_eval_ir_comptime_build(^functions, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{})
-    constants := [TConstantDef]{}
-    loop value in values {
-        &constants.push(jet_driver_comptime_value_row(value, value.key))
-        if value.destination_key != value.key -> &constants.push(jet_driver_comptime_value_row(value, value.destination_key))
+    landed := [TConstantDef]{}
+    loop index in staging.landed..<values.len() {
+        value :: values[index]
+        &landed.push(jet_driver_comptime_value_row(value, value.key))
+        if value.destination_key != value.key -> &landed.push(jet_driver_comptime_value_row(value, value.destination_key))
     }
-    // copy: the staged rows serve every later build of the run.
-    loop definition in staging.rows.constants -> &constants.push(definition.copy())
-    jet_eval_ir_comptime_build(^functions, keys, staging.rows.type_defs.copy(), staging.rows.impls.copy(), ^constants)
+    staging.landed = values.len()
+    jet_eval_ir_comptime_build_over(staging.program.copy(), ^functions, keys, ^landed, &staging.taken)
 }
 
 // The constant row of landed value `value` under `key`.

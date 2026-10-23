@@ -34,7 +34,7 @@ fn jet_eval_ir_host_types(s: &JetEvalIRState) -> Shared<IRModule>? Never! {
     }
 }
 
-fn jet_eval_ir_host_layouts(s: &JetEvalIRState) -> Shared<IRProgram>? Never! {
+fn jet_eval_ir_host_layouts(s: &JetEvalIRState) -> Shared<[IRProgram]>? Never! {
     if s.host_layouts == {
         .Val(cell) -> Val(cell.copy())
         .None -> {
@@ -58,7 +58,7 @@ fn jet_eval_ir_host_arguments(s: &JetEvalIRState, params: [Int], args: [TComptim
     layouts :: layouts_cell.guard_read()
     words := [Int]{}
     loop (index, value) in args {
-        &words.push(jet_eval_ir_host_store(&types.value, layouts.value, &s, value, params[index], 0) ?? return None)
+        &words.push(jet_eval_ir_host_store(&types.value, layouts.value[0], &s, value, params[index], 0) ?? return None)
     }
     Val(words)
 }
@@ -79,13 +79,13 @@ fn jet_eval_ir_host_method_route(s: &JetEvalIRState, args: [Int], dst_row: Int, 
     at := 2
     loop at < args.len() {
         row :: jet_eval_ir_host_row(types.value, &s, args[at]) ?? return None
-        &values.push(jet_eval_ir_data(&types.value, layouts.value, &s, args[at + 1], row) ?? return None)
+        &values.push(jet_eval_ir_data(&types.value, layouts.value[0], &s, args[at + 1], row) ?? return None)
         at += 2
     }
     fallible :: dst_row >= 0 && ir_untag(types.value.types[dst_row].ty) == .Result(_, _)
     answer :: jet_eval_ir_host_answer(&s, parts[0], parts[1], member, values, fallible, args[1] != 0) ?? return None
     if dst_row < 0 -> return Val(0)
-    jet_eval_ir_host_store(&types.value, layouts.value, &s, answer, dst_row, area)
+    jet_eval_ir_host_store(&types.value, layouts.value[0], &s, answer, dst_row, area)
 }
 
 // jet_comptime_host_field(field, row key, word): field `field` of the
@@ -98,14 +98,14 @@ fn jet_eval_ir_host_field_route(s: &JetEvalIRState, args: [Int], dst_row: Int, a
     types := types_cell.guard_edit()
     layouts :: layouts_cell.guard_read()
     row :: jet_eval_ir_host_row(types.value, &s, args[1]) ?? return None
-    base :: jet_eval_ir_data(&types.value, layouts.value, &s, args[2], row) ?? return None
+    base :: jet_eval_ir_data(&types.value, layouts.value[0], &s, args[2], row) ?? return None
     found := TComptimeValue?{None}
     if base == .Struct(_, fields) -> found = jet_eval_compiler_value_field(fields, field)
     value :: found ?? {
         jet_eval_ir_problem(&s, "compiler value {type_name(types.value.types[row].ty)} has no field `{field}`")
         return None
     }
-    jet_eval_ir_host_store(&types.value, layouts.value, &s, value, dst_row, area)
+    jet_eval_ir_host_store(&types.value, layouts.value[0], &s, value, dst_row, area)
 }
 
 // The type row of `types` whose intern key is the String at `key` (the

@@ -72,6 +72,12 @@ struct IRWaves {
 // they reach on up to `threads` threads; with `entry`, roots[0] is the
 // program entry (ir_entry_function), built after the first drain.
 fn ir_build_waves(program: ^IRProgram, roots: ^[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildResult Never! {
+    kept := ir_build_waves_kept(^program, ^roots, entry, threads)
+    ^kept.result
+}
+
+// ir_build_waves, handing the checked program back with the build.
+fn ir_build_waves_kept(program: ^IRProgram, roots: ^[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildKept Never! {
     p := ^program
     count :: compiler_threads_admit(threads, p.functions.len(), p.functions.len(), IR_BUILD_MIN_FUNCTIONS_PER_THREAD, 0, 0)
     slots := [Shared<IRWaveWorker>]{}
@@ -105,7 +111,14 @@ fn ir_build_waves(program: ^IRProgram, roots: ^[IRWaveJob], entry: Bool, threads
     loop order in 0..<(2 * w.jobs.len()) {
         if w.failures.get(order) == .Val(listed) -> &failures.extend(listed)
     }
-    IRBuildResult{program: ir_merge(^parts, roots_merged, entry_index), failures: failures}
+    merged := ir_merge(^parts, roots_merged, entry_index)
+    IRBuildKept{result: IRBuildResult{program: ^merged, failures: failures}, program: ir_waves_take_program(inputs)}
+}
+
+fn ir_waves_take_program(inputs: Shared<IRWaveInputs>) -> IRProgram Never! {
+    held := inputs.guard_edit()
+    program := &held.value.programs.pop() ?? panic("the IR build lost its checked program")
+    ^program
 }
 
 fn ir_waves_take_modules(slot: Shared<IRWaveWorker>) -> [IRModule] {
