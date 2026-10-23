@@ -16,6 +16,7 @@ use jet_backend.[
     x64_image_spawn,
     x64_image_unload,
     x64_link_executable,
+    x64_link_with_runtime_image,
     x64_process_mirror,
     x64_process_stop,
     x64_process_threads,
@@ -309,6 +310,10 @@ JET_CLI_RUNTIME_PACK_FILE :: "jet_runtime.pack.o"
 // The Jet-only runtime object the pack was linked from, beside it. A program
 // with a foreign closure links it with that closure's platform archives once.
 JET_CLI_RUNTIME_OBJECT_FILE :: "jet_runtime_jet.o"
+// The pack prelinked at LINK_RUN_BASE (Image/RuntimePack.jet
+// x64_link_runtime_image), beside it: `jet run` binds a program with no C
+// closure to it instead of linking the pack.
+JET_CLI_RUNTIME_IMAGE_FILE :: "jet_runtime.image"
 // Written by packaging: the toolchain's native runtime key for every profile.
 JET_CLI_RUNTIME_KEY_FILE :: "native.key"
 // Written by packaging beside the pack: every symbol the runtime exports, one
@@ -375,7 +380,10 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // (LINK_BASE for a file, LINK_RUN_BASE for Image/Loader.jet; `executable_path`
 // names it in link diagnostics; the one compiled runtime). Link inputs are always
 // [object, runtime, C closure...]; a program with a C closure links the
-// Jet-only runtime object instead of the pack. The C closure reads only the
+// Jet-only runtime object instead of the pack. At LINK_RUN_BASE a program
+// with no C closure is bound to the pack's prelinked runtime image instead
+// (Image/MemoryLink.jet), without relinking the runtime; one the image
+// can't bind links in full. The C closure reads only the
 // checked foreign facts, so it is realized on a thread of its own (its C
 // compiler children and archive digests, then the read of the runtime it
 // selects) while this thread builds the object; its failures are reported
@@ -417,7 +425,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     // copy: the closure's thread owns its inputs; this function still reads them.
     foreign_link :: result.foreign_link.copy()
     task.group native_foreign {
-        realizing :: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key)
+        realizing :: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE)
         object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census)
         if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
         &objects.push(^object)
@@ -429,11 +437,28 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     if trace_sink == .Val(sink) -> sink.end("native.foreign", if realized.inputs == .Val(found) -> found.names.len() else -> 0)
     closure :: realized.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: realized.error}}
     runtime := ^realized.runtime ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: realized.runtime_error}}
+    object := ^built.bytes
+    runtime_path := realized.runtime_path
+    if realized.bound {
+        // A program with no C closure binds to the prelinked runtime image
+        // (Image/MemoryLink.jet); one it can't bind (thread-local data,
+        // init/fini arrays, an import the image lacks) links the pack in full.
+        if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
+        // copy: the full link needs the object again when the bind refuses it.
+        bound := x64_link_with_runtime_image(executable_path, object.copy(), ^runtime)
+        if trace_sink == .Val(sink) -> sink.end("native.link", 2)
+        if bound.errors.len() == 0 {
+            if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.bytes.len(), -1)
+            return JetCLINativeLinked.Image{bytes: ^bound.bytes}
+        }
+        runtime_path = "{runtime_dir}/{runtime_key ?? ""}/{JET_CLI_RUNTIME_PACK_FILE}"
+        runtime = cli_files.read_bytes(runtime_path) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"}}
+    }
     // Input names appear only in link diagnostics; the image is a function of
     // the bytes and their order. The object and runtime move in, uncopied; the
     // object never touches the disk.
-    names := [String]{"{executable_path} (program object)", realized.runtime_path}
-    bytes := [[U8]]{^built.bytes, ^runtime}
+    names := [String]{"{executable_path} (program object)", runtime_path}
+    bytes := [[U8]]{^object, ^runtime}
     loop name in closure.names -> &names.push(name)
     loop input in closure.bytes -> &bytes.push(input)
     input_count :: names.len()
@@ -464,24 +489,31 @@ fn jet_cli_native_write(path: String, bytes: [U8]) -[FS]> JetCLINativeFailure? N
 
 // The program's C closure as its own thread realized it
 // (jet_cli_native_foreign_realize): the link inputs, else why it failed;
-// then the runtime the link reads from `runtime_path` (the Jet-only object
-// for a platform closure, else the pack), else why reading it failed.
+// then the runtime the link reads from `runtime_path` (the prelinked runtime
+// image when `bound`, else the Jet-only object for a platform closure, else
+// the pack), else why reading it failed.
 struct JetCLIForeignRealized {
     inputs: JetCLIForeignInputs?
     error: String
     runtime: [U8]?
     runtime_path: String
     runtime_error: String
+    bound: Bool
 }
 
 // `runtime_key` is None when the object's route already fails on it; the
 // runtime is read only for a realized closure, as the link would read it.
-fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?) -[FS, Env, Exec, Time.Wait]> JetCLIForeignRealized {
-    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_error: ""}
+// `bind`: a program with no closure at all binds to the pack's prelinked
+// runtime image (Image/MemoryLink.jet), so only the image is read; a pack
+// without one is read whole, as before.
+fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?, bind: Bool) -[FS, Env, Exec, Time.Wait]> JetCLIForeignRealized {
+    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_error: "", bound: false}
     platform := false
+    no_closure := false
     if jet_cli_native_c_inputs(facts, rust_helper, sources, runtime_dir) == {
         .Ok(found) -> {
             platform = found.platform
+            no_closure = found.names.len() == 0
             realized.inputs = Val(found)
         }
         .Err(error) -> {
@@ -490,6 +522,15 @@ fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper:
         }
     }
     key :: runtime_key ?? return realized
+    if bind && no_closure && !platform {
+        image_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}"
+        if cli_files.read_bytes(image_path) == .Ok(bytes) {
+            realized.runtime = Val(bytes)
+            realized.runtime_path = image_path
+            realized.bound = true
+            return realized
+        }
+    }
     runtime_file :: if platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
     realized.runtime_path = "{runtime_dir}/{key}/{runtime_file}"
     if cli_files.read_bytes(realized.runtime_path) == {
