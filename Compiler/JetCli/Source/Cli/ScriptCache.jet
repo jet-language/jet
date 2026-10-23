@@ -39,13 +39,23 @@ JET_CLI_SCRIPT_KEEP_MAX :: 64
 
 // A `jet run` compile whose program is kept when it finishes: its slot, the
 // toolchain and sources it started from, and the log of the comptime inputs
-// it reads.
+// it reads. `core_files` is whether the toolchain read found every Core row
+// a regular file, so the request need not check them again
+// (jet_cli_core_sources).
 struct JetCLIScriptKeep {
     slot: String
     toolchain: String
+    core_files: Bool
     sources: String
     release: Bool
     input_log: Shared<JetDriverComptimeInputLog>
+}
+
+// A toolchain's record rows (jet_cli_script_toolchain) and whether each of
+// its Core rows is a regular file.
+struct JetCLIScriptToolchain {
+    rows: String
+    core_files: Bool
 }
 
 // The toolchain a kept program was built with, or None when this compiler
@@ -53,7 +63,7 @@ struct JetCLIScriptKeep {
 // Core files and the runtime pack are named by their file identities (size,
 // modification time, device, inode), as `make` names its inputs. They are
 // not hashed: a rerun compares them with the record's.
-fn jet_cli_script_toolchain(identity: String, release: Bool) -> String? {
+fn jet_cli_script_toolchain(identity: String, release: Bool) -> JetCLIScriptToolchain? {
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
     runtime_dir :: jet_cli_runtime_dir()
     runtime_key :: jet_cli_runtime_key(runtime_dir) ?? return None
@@ -69,11 +79,13 @@ fn jet_cli_script_toolchain(identity: String, release: Bool) -> String? {
         "{pack} {jet_cli_script_file_identity(pack_stat)}",
         toolchain,
     }
+    core_files := true
     loop row in CORE_SOURCE_OWNED_ROWS {
         stat :: cli_files.stat(jet_cli_authority_path(toolchain, row.path)) ?? return None
+        if !stat.is_file -> core_files = false
         &rows.push("{row.path} {jet_cli_script_file_identity(stat)}")
     }
-    Val(rows.join("\n"))
+    Val(JetCLIScriptToolchain{rows: rows.join("\n"), core_files: core_files})
 }
 
 // A file's identity in a toolchain row: size, modification time in
@@ -250,7 +262,8 @@ fn jet_cli_script_keeper(release: Bool, snapshot: JetDriverAuthorizedSourceSnaps
     toolchain :: jet_cli_script_toolchain(identity, release) ?? return None
     Val(JetCLIScriptKeep{
         slot: jet_cli_script_slot(release, snapshot.entry_path),
-        toolchain: toolchain,
+        toolchain: toolchain.rows,
+        core_files: toolchain.core_files,
         sources: jet_cli_script_sources(snapshot),
         release: release,
         input_log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}},
@@ -262,6 +275,12 @@ fn jet_cli_script_input_log(keep: JetCLIScriptKeep?) -> Shared<JetDriverComptime
     kept :: keep ?? return None
     // copy: the compile and the keeper share the one log.
     Val(kept.input_log.copy())
+}
+
+// Whether `keep`'s toolchain read found every Core row a regular file.
+fn jet_cli_script_core_files(keep: JetCLIScriptKeep?) -> Bool Never! {
+    kept :: keep ?? return false
+    kept.core_files
 }
 
 fn jet_cli_script_inputs_read(log: Shared<JetDriverComptimeInputLog>) -> Int Never! {

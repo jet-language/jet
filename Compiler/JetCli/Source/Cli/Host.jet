@@ -97,6 +97,7 @@ use jet_ir.[
     ir_build_tests,
     ir_optimize_module,
     ir_x64_compile_module,
+    ir_x64_hot_order,
     ir_x64_object,
 ]
 use jet_parser.[
@@ -334,6 +335,9 @@ JET_CLI_RUNTIME_KEY_FILE :: "native.key"
 // Written by packaging beside the pack: every symbol the runtime exports, one
 // per line, sorted (Request.jet).
 JET_CLI_RUNTIME_EXPORTS_FILE :: "runtime.exports"
+// In a package root, beside package.jet: the functions `jet build` lays out
+// first, one name per line (jet_cli_hot_text).
+JET_CLI_HOT_TEXT_FILE :: "hot-text.list"
 
 // jet-runtime/ beside the `jet` executable.
 fn jet_cli_runtime_dir() -[Env]> String Never! {
@@ -415,8 +419,9 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // C closure can't link there (absolute 32-bit relocations in non-PIC C) is
 // linked at LINK_BASE instead: the loader then can't map it into jet and
 // `jet run` runs the file (Image/Loader.jet). `file` is the entry path the
-// command named (jet_cli_debug_directory).
-fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String], file: String) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
+// command named (jet_cli_debug_directory). `hot`: the functions to lay out
+// first (ir_x64_hot_order; jet_cli_hot_text).
+fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     if harness == None && checked.entry_key == None -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.NoEntry}
@@ -439,7 +444,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     foreign_link :: result.foreign_link.copy()
     task.group native_foreign {
         realizing :: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE)
-        object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census, file)
+        object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census, file, hot)
         if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
         &objects.push(^object)
         &closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
@@ -655,7 +660,9 @@ fn jet_cli_runtime_exports_compare(bytes: [U8], start: Int, end: Int, row: [U8])
 }
 
 // `ir.build`, `ir.opt`, `ir.x64` and `ir.object` of jet_cli_native_executable.
-fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String], file: String) -[FS, Env]> JetCLINativeObject Never! {
+// The object lays out the functions `hot` names first (ir_x64_hot_order);
+// `--trace` counts the names that name none (`ir.object.hot_missing`).
+fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env]> JetCLINativeObject Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     declarations := jet_driver_checked_declarations(&checked)
@@ -724,10 +731,12 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     }
     if rows.len() > 0 -> return jet_cli_native_object_failure(JetCLINativeFailure.Build{rows: rows})
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
+    hot_missing :: ir_x64_hot_order(&compiled, hot)
     object := ir_x64_object(^compiled)
     if trace_sink == .Val(sink) {
         sink.end("ir.object", function_count)
         sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)
+        sink.progress("counters.ir.object.hot_missing", hot_missing, -1)
     }
     if object.errors.len() > 0 {
         if keep_going {
@@ -776,7 +785,8 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: Je
     keep_going :: jet_cli_keep_going_enabled()
     census := [String]{}
     base :: if command == "run" -> LINK_RUN_BASE else -> LINK_BASE
-    linked := jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), binary, base, keep_going, &census, file)
+    hot :: if command == "build" -> jet_cli_hot_text(snapshot.roots[0].canonical_path) else -> [String]{}
+    linked := jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), binary, base, keep_going, &census, file, hot)
     if census.len() > 0 {
         problem :: jet_cli_keep_going_append(census)
         if problem != "" -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
@@ -792,6 +802,20 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: Je
         .Image(executable) -> JetCLIBuilt.Image{executable: ^executable, path: binary}
         .Failed(failure) -> JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
     }
+}
+
+// The functions `jet build` lays out first in the package at `root`: the
+// lines of its JET_CLI_HOT_TEXT_FILE in order, blank lines and `#` comments
+// skipped; none when the package has no list. Compiler/JetCli's is written
+// by Tools/perf/hot-text.mjs.
+fn jet_cli_hot_text(root: String) -[FS]> [String] Never! {
+    text :: cli_files.read("{root}/{JET_CLI_HOT_TEXT_FILE}") ?? return [String]{}
+    names := [String]{}
+    loop line in text.split("\n").to_list() {
+        if line == "" || line.starts_with("#") -> next
+        &names.push(line)
+    }
+    names
 }
 
 // The report of why `jet {command} {file}`'s native route stopped.
@@ -1119,7 +1143,7 @@ fn jet_cli_compile_kept(file: String, source: String, color: Bool, release: Bool
         }
     }
     prepared :: if ^held == {
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program)
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program, jet_cli_script_core_files(keep))
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
     }
     compiled := jet_cli_compile_executable(^prepared, release, jet_cli_script_input_log(keep), None)
@@ -1184,7 +1208,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     // The harness's build, object and link are one traced span.
     if result.trace_sink == .Val(sink) -> sink.begin("native.build", "", -1, -1)
     census := [String]{}
-    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), binary, LINK_BASE, false, &census, file)
+    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, if options.release -> 2 else -> 0, jet_cli_runtime_dir(), binary, LINK_BASE, false, &census, file, [String]{})
     if native == {
         .Failed(failure) -> return jet_cli_test_native_failure(file, failure, color)
         .Image(executable) -> {

@@ -80,7 +80,7 @@ fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Ne
 }
 
 fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerbOutput Never! {
-    core_sources :: if jet_cli_core_sources() == {
+    core_sources :: if jet_cli_core_sources(false) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> {
             return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, false), exit_code: 1}

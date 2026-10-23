@@ -723,17 +723,19 @@ fn jet_cli_cpu_list(text: String) -> [Int]? Never! {
 // compile first schedules its row (jet_driver_core_text_file), so a compile
 // reads only the Core files its imports reach; every file is checked to be
 // present here, so a missing one still refuses the request up front.
+// `checked` says the caller already found every row a regular file (the
+// `jet run` keeper's toolchain read), so they aren't checked twice.
 enum JetCLICoreSources {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
 }
 
-fn jet_cli_core_sources() -> JetCLICoreSources Never! {
+fn jet_cli_core_sources(checked: Bool) -> JetCLICoreSources Never! {
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
     core_sources := [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
-        if !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+        if !checked && !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
         &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
     }
     JetCLICoreSources.Loaded{sources: core_sources}
@@ -1210,13 +1212,14 @@ fn jet_cli_snapshot_file_count(snapshot: JetDriverAuthorizedSourceSnapshot) -> I
 fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
     if jet_cli_prepare_snapshot(anchor, entry, overlays, color) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode)
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode, false)
     }
 }
 
-// The request that compiles `snapshot` against the Core sources of this toolchain.
-fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
-    core_sources :: if jet_cli_core_sources() == {
+// The request that compiles `snapshot` against the Core sources of this
+// toolchain; `core_checked` as jet_cli_core_sources's `checked`.
+fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool) -> JetCLIPrepared {
+    core_sources :: if jet_cli_core_sources(core_checked) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }

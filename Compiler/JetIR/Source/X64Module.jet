@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
+use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
 use jet_backend.[
     LIRData, LIRDataID, LIRDataReloc, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunctionID, LIRModuleDebug,
     X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64FunctionSource, X64LineRow, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
@@ -339,6 +339,53 @@ fn ir_x64_object(compiled: ^IRX64Result) -> X64ExecutableResult Never! {
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
     x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, owned.threads)
+}
+
+// Order the functions of `compiled` (and their debug rows) for the object's
+// text: those `hot` names first, in the list's order, then the rest, each
+// group in function order. `hot` lists the functions a short run enters
+// (Compiler/JetCli/hot-text.list, written by Tools/perf/hot-text.mjs), so
+// their code shares pages and a cold start faults in fewer of them. Returns
+// how many names of `hot` name no function.
+fn ir_x64_hot_order(compiled: &IRX64Result, hot: [String]) -> Int Never! {
+    if hot.len() == 0 -> return 0
+    ranks := [String:Int]{}
+    loop (position, name) in hot {
+        if ranks.get(name) == None -> ranks[name.copy()] = position
+    }
+    count :: compiled.functions.len()
+    // Per function its rank, -1 when not listed; then per rank where its
+    // functions start in the new order (a counting sort keeps function order
+    // within a rank).
+    found := [Int]{}
+    starts := [Int]{}
+    loop _ in 0..<hot.len() + 1 -> &starts.push(0)
+    loop index in 0..<count {
+        listed :: ranks.get(compiled.functions[index].name) ?? -1
+        &found.push(listed)
+        if listed >= 0 -> starts[listed + 1] = starts[listed + 1] + 1
+    }
+    missing := 0
+    loop place in 0..<hot.len() {
+        if starts[place + 1] == 0 && (ranks.get(hot[place]) ?? -1) == place -> missing += 1
+        starts[place + 1] = starts[place + 1] + starts[place]
+    }
+    order := [Int]{}
+    loop _ in 0..<count -> &order.push(0)
+    cold := starts[hot.len()]
+    loop index in 0..<count {
+        level :: found[index]
+        if level >= 0 {
+            order[starts[level]] = index
+            starts[level] = starts[level] + 1
+        } else {
+            order[cold] = index
+            cold += 1
+        }
+    }
+    compiler_apply_order<X64CompiledFunction>(&compiled.functions, order.copy())
+    compiler_apply_order<X64FunctionDebug>(&compiled.debug, order)
+    missing
 }
 
 // The relocatable object of a library module (moved in, every row moved

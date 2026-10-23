@@ -54,7 +54,7 @@ fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir
 }
 
 fn jet_config_evaluate_program(program: String, base_dir: String) -> JetConfigOutcome {
-    core_sources :: if jet_cli_core_sources() == {
+    core_sources :: if jet_cli_core_sources(false) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), fix)} }
     }
