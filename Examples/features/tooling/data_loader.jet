@@ -1,3 +1,8 @@
+package {
+    name: "data_loader"
+    authority: { holds: { allow: [FS.Read, FS.Write, IO] } }
+}
+
 // D-DX-LOADERS1: typed local loaders, snapshots, lifecycle state, and bounded streams.
 use core.data as data
 use core.data.[snapshot]
@@ -27,7 +32,7 @@ fn run() {
     files.write(csv_path, "service,latency_ms\napi,10.0\ndb,5.0\n") ?? panic("write csv")
 
     limits :: data.DataLimits.safe()
-    file_loader :: data.file<[Event]>(csv_path, "csv", limits) ?? panic("file loader")
+    file_loader := data.file<[Event]>(csv_path, "csv", limits) ?? panic("file loader")
     file_source :: data_loader.source_identity(file_loader)
     print("source:{loader_kind_name(file_source.kind)}")
     authority :: data_loader.authority(file_loader)
@@ -48,7 +53,7 @@ fn run() {
     print("url:bound:{url_snapshot.value.len()}")
 
     // A file-member loader reports its typed provider boundary without fake archive IO.
-    member_loader :: data.file_member<[Dyn]>(
+    member_loader := data.file_member<[Dyn]>(
         parquet_path,
         "int32_with_null_pages.parquet",
         "parquet",
@@ -60,7 +65,7 @@ fn run() {
     }
 
     // Database construction is real; absent provider payload is an explicit typed outcome.
-    database_loader :: data.database<[Dyn]>(
+    database_loader := data.database<[Dyn]>(
         "SELECT service, latency_ms FROM events WHERE service = ?",
         [String]{"api"},
         "local",
@@ -93,13 +98,13 @@ fn run() {
     data_loader.cancel(&default_loaded)
     _ :: data_loader.status(default_loaded)
 
-    stream := data_loader.stream(&loaded) ?? panic("stream")
+    stream := data_loader.stream(loaded) ?? panic("stream")
     first :: data_stream.next(&stream) ?? panic("next")
     rest :: data_stream.collect(&stream) ?? panic("collect")
     print("stream:true:{rest.len()}")
 
     cancel_loader := data.file<[Event]>(csv_path, "csv", limits) ?? panic("cancel loader")
-    cancel_stream :: data_loader.stream(&cancel_loader) ?? panic("cancel stream")
+    cancel_stream := data_loader.stream(cancel_loader) ?? panic("cancel stream")
     data_stream.cancel(&cancel_stream)
     print("stream cancelled")
 
@@ -113,7 +118,7 @@ fn run() {
     print("json:{json_first.service}:{json_first.latency_ms}")
 
     values :: [Event]{Event{service: "memory", latency_ms: 1.0}}
-    value_loader :: data.value<[Event]>(values, limits) ?? panic("value loader")
+    value_loader := data.value<[Event]>(values, limits) ?? panic("value loader")
     value_snapshot :: snapshot<[Event]>(&value_loader) ?? panic("value snapshot")
     print("value:{value_snapshot.value.len()}")
 }
