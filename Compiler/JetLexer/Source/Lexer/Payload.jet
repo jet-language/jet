@@ -188,7 +188,9 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
     // A typed head is a name whose first character is an
     // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
-    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
+    // A function's return type before its body (`-> String {`, `-> a.B {`)
+    // is none.
+    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT && !returned_type_at(facts, qualified_start(facts, before_open)) {
         first :: byte_at(source, facts[before_open * 4 + 1])
         if first >= 65 && first <= 90 -> raw = true
     }
@@ -198,7 +200,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
         if {
             before_close >= 0 && kind_at(facts, before_close) == K_IDENT && fact_text(source, facts, before_close) == "U8" -> {
                 before_type :: previous_code_index(facts, before_close)
-                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET
+                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET && !returned_type_at(facts, before_type)
             }
             else -> {
                 if before_close >= 0 {
@@ -207,7 +209,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
                         u8 :: previous_code_index(facts, hash)
                         if u8 >= 0 && kind_at(facts, u8) == K_IDENT && fact_text(source, facts, u8) == "U8" {
                             bracket :: previous_code_index(facts, u8)
-                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET
+                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET && !returned_type_at(facts, bracket)
                         }
                     }
                 }
@@ -215,6 +217,37 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
         }
     }
     (byte_head: byte, raw_head: raw)
+}
+
+// Whether the type whose first token is at `first` is a function's return
+// type: `fn name(...) -> ` (or `fn name<...>(...) -> `, `fn Owner.name(...) -> `,
+// `fn(...) -> `) before it.
+fn returned_type_at(facts: [Int], first: Int) -> Bool Never! {
+    arrow :: previous_code_index(facts, first)
+    if arrow < 0 || kind_at(facts, arrow) != K_UNIFIED_ARROW -> return false
+    close :: previous_code_index(facts, arrow)
+    if close < 0 || kind_at(facts, close) != K_RPAREN -> return false
+    paren :: matching_open(facts, close, K_LPAREN, K_RPAREN)
+    if paren < 0 -> return false
+    cursor := previous_code_index(facts, paren)
+    if cursor >= 0 && kind_at(facts, cursor) == K_GT {
+        angle :: matching_open(facts, cursor, K_LT, K_GT)
+        cursor = if angle < 0 -> -1 else -> previous_code_index(facts, angle)
+    }
+    if cursor >= 0 && kind_at(facts, cursor) == K_IDENT -> cursor = previous_code_index(facts, qualified_start(facts, cursor))
+    cursor >= 0 && kind_at(facts, cursor) == K_FN
+}
+
+// The first name of the dotted path `a.b.c` ending at the name at `last`.
+fn qualified_start(facts: [Int], last: Int) -> Int Never! {
+    start := last
+    loop {
+        dot :: previous_code_index(facts, start)
+        name :: if dot >= 0 && kind_at(facts, dot) == K_DOT -> previous_code_index(facts, dot) else -> -1
+        if name < 0 || kind_at(facts, name) != K_IDENT -> break
+        start = name
+    }
+    start
 }
 
 fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {

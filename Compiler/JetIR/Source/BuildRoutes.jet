@@ -1234,16 +1234,24 @@ fn ir_closure_group_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: In
 
 // `opt.map(f)` (Lower Combinators.jet `jet_option_map_ref`): None stays
 // None; Some lends its payload to the closure, whose result is boxed fresh.
-// The receiver is only read.
+// The receiver is only read. Sema types the map by the callback's success
+// (sema_value_method_option_map): where the callback returns a Result the
+// map's payload is its Ok and a failure passes up from the call
+// (D-CALLBACK-ERR1); where it returns an Option, that is the map's result.
 fn ir_option_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     inner_ty :: if ir_untag(ir_subst(m, receiver_ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map on {ir_type_name(receiver_ty)}") }
     mapped_ty :: if ir_untag(ir_subst(m, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map to {ir_type_name(ty)}") }
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Option map with {args.len()} arguments")
     if ir_unit_type(inner_ty) || ir_unit_type(mapped_ty) -> return ir_fail_slot(&b, span, "Option map over Unit")
+    returned := mapped_ty
+    if ir_closure_result(ir_subst(m, ir_ty(p, b, args[0]))) == .Val(callback_ret) -> returned = ir_subst(m, callback_ret)
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     inner_row :: ir_value_type(&m, p, inner_ty) ?? return ir_type_fail(&b, span, inner_ty)
     mapped_row :: ir_value_type(&m, p, mapped_ty) ?? return ir_type_fail(&b, span, mapped_ty)
+    returned_row :: ir_value_type(&m, p, returned) ?? return ir_type_fail(&b, span, returned)
+    flattened :: returned_row != mapped_row && ir_is_option(returned)
+    unwrapped :: returned_row != mapped_row && ir_is_result(returned)
     option :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || option < 0 -> return -1
     callback :: ir_expr(&m, p, &b, args[0])
@@ -1251,15 +1259,29 @@ fn ir_option_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     result :: ir_temp(&m, &b, result_row)
     ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
     some :: ir_option_is_some(&m, &b, option)
+    owned_option :: b.fresh[option]
     ir_open_if(&b.f, some, b.line)
     item :: ir_load_at(&m, &b, option, 0, inner_row)
-    mapped :: ir_call_closure(&m, &b, callback, [Int]{item}, mapped_row)
-    payload_bytes :: ir_type_size(&m, p, mapped_ty)
-    boxed :: ir_box_alloc(&m, &b, payload_bytes, result_row)
-    ir_store_at(&m, p, &b, boxed, 0, mapped)
-    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
-    ir_end(&b.f, b.line)
+    called :: ir_call_closure(&m, &b, callback, [Int]{item}, returned_row)
+    // The payload was only lent to the call; a failure leaves without it.
     ir_release(&m, &b, option)
+    if flattened {
+        ir_emit(&b.f, IROp.Copy, result, called, -1, -1, b.line)
+    } else {
+        mapped := called
+        if unwrapped {
+            mapped = ir_try_slot(&m, p, &b, called, returned, TTryConvert.NoConversion, None, span)
+            if ir_failed(b) -> return -1
+        }
+        payload_bytes :: ir_type_size(&m, p, mapped_ty)
+        boxed :: ir_box_alloc(&m, &b, payload_bytes, result_row)
+        ir_store_at(&m, p, &b, boxed, 0, mapped)
+        ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    }
+    ir_else(&b.f, b.line)
+    b.fresh[option] = owned_option
+    ir_release(&m, &b, option)
+    ir_end(&b.f, b.line)
     b.fresh[result] = true
     result
 }

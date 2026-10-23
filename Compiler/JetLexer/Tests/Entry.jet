@@ -100,6 +100,17 @@ fn lexer_test_first_string(source: String) -> String Never! {
     assert_eq(lexer_test_first_string(`Regex.{"a\"b"}`), `a\"b`)
 }
 
+// A function's return type before its body is no typed head: the body's
+// leading string decodes its escapes.
+#Test("return_type_before_body_is_no_typed_head") {
+    assert_eq(lexer_test_first_string(`fn quote(s: String) -> String { "a\"b" }`), "a\"b")
+    assert_eq(lexer_test_first_string(`fn size<T>(s: T) -> Int { "a\tb".len() }`), "a\tb")
+    assert_eq(lexer_test_first_string(`fn Box.name(self) -> core.Text { "a\nb" }`), "a\nb")
+    assert_eq(lexer_test_first_string(`f :: fn(s: String) -> String { "a\\b" }`), "a\\b")
+    assert_eq(lexer_test_first_string(`x :: Regex{"\d+"}`), `\d+`)
+    assert_eq(lexer_test_first_string(`if ok(x) -> Regex{"\d+"}`), `\d+`)
+}
+
 // Rust: crates/jet-lexer/src/lib.rs:57
 #Test("typed_head_doubled_braces_stay_literal") {
     assert_eq(lexer_test_first_string(`Regex.{"\d{{2}}"}`), `\d{2}`)

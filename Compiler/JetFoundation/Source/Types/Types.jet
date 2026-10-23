@@ -455,8 +455,8 @@ fn type_carrier_identity(ty: Type) -> String Never! {
         .List(inner) -> "[{type_carrier_identity(inner)}]"
         .Map(key, _, value) -> "[{type_carrier_identity(key)}:{type_carrier_identity(value)}]"
         .Shared(inner) -> "Shared<{type_carrier_identity(inner)}>"
-        .Option(inner) -> "?{type_carrier_identity(inner)}"
-        .Result(ok, err) -> "{type_carrier_identity(ok)} ! {type_carrier_identity(err)}"
+        .Option(inner) -> "?{type_carrier_identity_grouped(inner)}"
+        .Result(ok, err) -> "{type_carrier_identity_grouped(ok)} ! {type_carrier_identity_grouped(err)}"
         .Fn(params, ret, _, _, _, _) -> {
             names := [String]{}
             loop param in params -> &names.push(type_carrier_identity(param))
@@ -488,11 +488,23 @@ fn type_carrier_identity(ty: Type) -> String Never! {
         .Tagged(_, inner) -> type_carrier_identity(inner)
         .Union(members) -> {
             names := [String]{}
-            loop member in members -> &names.push(type_carrier_identity(member))
+            loop member in members -> &names.push(type_carrier_identity_grouped(member))
             names.join(" | ")
         }
         .Quantity(base, _) -> type_carrier_identity(base)
         .Measure(_) -> "Int"
+    }
+}
+
+// A member's identity inside an Option, Result or union: a function, Result
+// or union is grouped, since its identity has no end of its own
+// (`?(fn(String) => String) ! Err`, a Result of an optional function, is not
+// `?(fn(String) => String ! Err)`, an optional fallible function).
+fn type_carrier_identity_grouped(ty: Type) -> String Never! {
+    if ty == {
+        .Fn(_, _, _, _, _, _) | .Result(_, _) | .Union(_) -> "({type_carrier_identity(ty)})"
+        .Tagged(_, inner) -> type_carrier_identity_grouped(inner)
+        else -> type_carrier_identity(ty)
     }
 }
 
