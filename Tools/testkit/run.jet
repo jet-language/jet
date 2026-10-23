@@ -100,7 +100,10 @@ struct KitEnv {
     jet: String
     jetpack: String
     timeout: Duration
+    // A case's `limit: memory=`, Core memory_limit semantics; 0 is none.
     memory_limit: Int
+    // Run-wide resident-memory (VmRSS) guard in bytes; 0 is none.
+    resident_limit: Int{0}
     env_clear: Bool{false}
     version: String{""}
     version_error: String{""}
@@ -782,7 +785,7 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     run_scratch :: files.join(canonical, "testkit-{process.current_pid()}-{options.suite}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
-    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 8589934592}
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: 8589934592}
     if sys.get("JET_NATIVE_TRACE_LOG") != None {
         env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
         env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""

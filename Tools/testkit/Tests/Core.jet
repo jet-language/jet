@@ -115,6 +115,25 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq((kit_exec_process_failure(spawn) ?? panic("spawn")).status, "ERROR")
 }
 
+#Test("the resident guard reads VmRSS and names a memory kill") {
+    assert_eq(kit_exec_resident_bytes("Name:\tjet\nVmSize:\t 8388608 kB\nVmRSS:\t   20480 kB\nThreads:\t33\n"), 20971520)
+    assert_eq(kit_exec_resident_bytes("Name:\tjet\nState:\tZ (zombie)\n"), 0)
+    killed :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: false, error: "", limit_hit: "memory"}
+    assert_eq((kit_exec_process_failure(killed) ?? panic("memory")).detail, "memory limit hit")
+}
+
+#Test("the resident guard kills a step above its VmRSS limit") {
+    root :: cases_test_root("resident-guard")
+    env :: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0, resident_limit: 67108864}
+    run :: kit_exec_invoke(env, ["/bin/sh", "-c", "x=$(head -c 268435456 /dev/zero | tr '\\0' a); sleep 20"], root, root, "")
+    assert_eq(run.limit_hit, "memory")
+    assert(run.elapsed_ns < 15000000000)
+    small :: kit_exec_invoke(env, ["/bin/sh", "-c", "printf ok"], root, root, "")
+    assert_eq(small.stdout, "ok")
+    assert_eq(small.limit_hit, "")
+    files.remove_all(root) ?? panic("remove resident scratch")
+}
+
 #Test("argv0 replaces only the first usage prefix") {
     assert_eq(kit_expect_argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
 }

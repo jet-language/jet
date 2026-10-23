@@ -118,14 +118,59 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
     started :: time.instant()
     child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
+    (done, watching) :: channel<Int>()
+    watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, watching)
     input_error := ""
     child.stdin.write(stdin) ?? {
         input_error = "stdin: {err}"
         ()
     }
     child.stdin.close()
-    receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
-    kit_exec_receipt(receipt, started.elapsed().ns, input_error)
+    receipt :: child.wait() ?? {
+        done.send(0)
+        _ :: ^watcher.join() ?? false
+        return kit_exec_failed("wait: {err}")
+    }
+    done.send(0)
+    killed :: ^watcher.join() ?? false
+    run := kit_exec_receipt(receipt, started.elapsed().ns, input_error)
+    if killed -> run.limit_hit = "memory"
+    run
+}
+
+// The run-wide memory guard counts resident memory, not address space: a
+// RLIMIT_AS limit fails thread-stack reservations long before the child uses
+// that memory. Polls VmRSS every 100 ms and kills the child above `limit`
+// bytes; true when it did. A case's `limit: memory=` keeps Core memory_limit.
+fn kit_exec_watch_resident(pid: Int, limit: Int, done: Receiver<Int>) -> Bool Never! {
+    if pid <= 0 -> return false
+    path :: "/proc/{pid}/status"
+    tick := 0
+    loop {
+        if done.is_ready() -> return false
+        if tick % 10 == 0 {
+            status :: files.read(path) ?? return false
+            if kit_exec_resident_bytes(status) > limit {
+                #Unsafe("the testkit stops its own step child at the resident-memory guard") {
+                    sys.kill(pid, 9) ?? return false
+                }
+                return true
+            }
+        }
+        tick += 1
+        time.sleep(10ms)
+    }
+    false
+}
+
+fn kit_exec_resident_bytes(status: String) -> Int {
+    loop line in status.split("\n") {
+        if !line.starts_with("VmRSS:") -> next
+        loop field in line.slice(6, line.len()).trim().split(" ") {
+            if field.len() > 0 -> return (Int.parse(field.copy()) ?? 0) * 1024
+        }
+    }
+    0
 }
 
 fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
@@ -135,6 +180,7 @@ fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, st
 fn kit_exec_process_failure(run: KitRun) -> KitVerdict? {
     if run.error != "" -> return Val(kit_expect_verdict("ERROR", run.error))
     if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
+    if run.limit_hit == "memory" -> return Val(kit_expect_verdict("ERROR", "memory limit hit"))
     if run.signal != None -> return Val(kit_expect_verdict("ERROR", "child terminated by signal"))
     if run.code == 101 -> return Val(kit_expect_verdict("ERROR", "internal compiler error (exit 101)"))
     None
