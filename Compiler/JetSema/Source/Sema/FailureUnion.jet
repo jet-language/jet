@@ -387,15 +387,16 @@ fn sema_failure_function_row(graph: SemaRegistrationGraph, module_index: Int, fu
 // function. Every replaced row is recorded on `trail`.
 fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [SemaFailureProjection], trail: &SemaGraphTrail) {
     if projections.len() == 0 -> return
-    // Projected key -> its new symbol and item; "{module}|{key}" and
-    // "{module}|{name}" -> the key, for the rows of its declaring module.
+    // Projected key -> its new symbol and item; per declaring module (slot
+    // `declaring_slot[module]`), its projected keys and name -> key, for the
+    // rows of that module.
     symbols := [String:Symbol]{}
     items := [String:Item]{}
-    local_keys := [String:Bool]{}
-    local_names := [String:String]{}
+    slot_keys := [[String:Bool]]{}
+    slot_names := [[String:String]]{}
     declaring := [Int]{}
-    seen := [Bool]{}
-    loop _ in 0..<graph.modules.len() -> &seen.push(false)
+    declaring_slot := [Int]{}
+    loop _ in 0..<graph.modules.len() -> &declaring_slot.push(-1)
     unused_diagnostics := [Diagnostic]{}
     loop projection in projections {
         module_index :: projection.module_index
@@ -404,46 +405,47 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
         updated.return_type = Val(projection.return_type)
         updated.return_type_span = None
         row :: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, &unused_diagnostics)
+        if declaring_slot[module_index] < 0 {
+            declaring_slot[module_index] = declaring.len()
+            &declaring.push(module_index)
+            &slot_keys.push([String:Bool]{})
+            &slot_names.push([String:String]{})
+        }
+        slot :: declaring_slot[module_index]
         symbols[projection.key] = row.symbol
-        local_keys["{module_index}|{projection.key}"] = true
-        local_names["{module_index}|{updated.name}"] = projection.key
+        slot_keys[slot][projection.key] = true
+        slot_names[slot][updated.name] = projection.key
         items[projection.key] = Item.Func{value: ^updated}
         &trail.entries.push(SemaGraphUndo.FunctionRow{module_index: module_index, row: projection.row, old: graph.modules[module_index].functions[projection.row]})
         graph.modules[module_index].functions[projection.row] = ^row
-        if !seen[module_index] {
-            seen[module_index] = true
-            &declaring.push(module_index)
-        }
     }
-    loop module_index in declaring {
+    loop (slot, module_index) in declaring {
         loop index in 0..<graph.modules[module_index].symbols.len() {
-            key :: graph.modules[module_index].symbols[index].id.key.copy()
-            if local_keys.get("{module_index}|{key}") == None -> next
-            symbol :: symbols.get(key) ?? next
+            if slot_keys[slot].get(graph.modules[module_index].symbols[index].id.key) == None -> next
+            symbol :: symbols.get(graph.modules[module_index].symbols[index].id.key) ?? next
             &trail.entries.push(SemaGraphUndo.SymbolRow{module_index: module_index, position: index, old: graph.modules[module_index].symbols[index]})
             graph.modules[module_index].symbols[index] = symbol
         }
         loop index in 0..<graph.modules[module_index].declarations.len() {
-            name := ""
-            if graph.modules[module_index].declarations[index] == .Func(declared) -> name = declared.name
-            key :: local_names.get("{module_index}|{name}") ?? next
+            found := String?{None}
+            if graph.modules[module_index].declarations[index] == .Func(declared) -> found = slot_names[slot].get(declared.name)
+            key :: found ?? next
             item :: items.get(key) ?? next
             &trail.entries.push(SemaGraphUndo.DeclarationRow{module_index: module_index, position: index, old: graph.modules[module_index].declarations[index]})
             graph.modules[module_index].declarations[index] = item
         }
         loop index in 0..<graph.modules[module_index].program.items.len() {
-            name := ""
-            if graph.modules[module_index].program.items[index] == .Func(declared) -> name = declared.name
-            key :: local_names.get("{module_index}|{name}") ?? next
+            found := String?{None}
+            if graph.modules[module_index].program.items[index] == .Func(declared) -> found = slot_names[slot].get(declared.name)
+            key :: found ?? next
             item :: items.get(key) ?? next
             &trail.entries.push(SemaGraphUndo.ProgramItemRow{module_index: module_index, position: index, old: graph.modules[module_index].program.items[index]})
             graph.modules[module_index].program.items[index] = item
         }
         loop index in 0..<graph.modules[module_index].exports.len() {
-            key :: graph.modules[module_index].exports[index].symbol.id.key.copy()
-            if local_keys.get("{module_index}|{key}") == None -> next
-            symbol :: symbols.get(key) ?? next
-            item :: items.get(key) ?? next
+            if slot_keys[slot].get(graph.modules[module_index].exports[index].symbol.id.key) == None -> next
+            symbol :: symbols.get(graph.modules[module_index].exports[index].symbol.id.key) ?? next
+            item :: items.get(graph.modules[module_index].exports[index].symbol.id.key) ?? next
             &trail.entries.push(SemaGraphUndo.ExportRow{module_index: module_index, position: index, old: graph.modules[module_index].exports[index]})
             graph.modules[module_index].exports[index].symbol = symbol
             graph.modules[module_index].exports[index].declaration = Val(item)
@@ -452,9 +454,8 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
     loop importer_index in 0..<graph.modules.len() {
         loop import_index in 0..<graph.modules[importer_index].imports.len() {
             loop binding_index in 0..<graph.modules[importer_index].imports[import_index].bindings.len() {
-                key :: graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key.copy()
-                symbol :: symbols.get(key) ?? next
-                item :: items.get(key) ?? next
+                symbol :: symbols.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key) ?? next
+                item :: items.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key) ?? next
                 &trail.entries.push(SemaGraphUndo.ImportBindingRow{module_index: importer_index, import_index: import_index, binding: binding_index, old: graph.modules[importer_index].imports[import_index].bindings[binding_index]})
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol = symbol
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].declaration = Val(item)
