@@ -37,7 +37,7 @@ export function readNativeRuntimePack(directory, recipe = null) {
   }
   if (recipe !== null && provenance.recipeSha256 !== recipe) throw Error('runtime pack recipe does not match this toolchain');
   const files = new Map([['provenance.json', provenanceBytes]]);
-  for (const [name, expected] of [['jet_runtime.pack.o', provenance.packSha256],
+  for (const [name, expected] of [['jet_runtime.pack.o', provenance.packSha256], ['jet_runtime.image', provenance.imageSha256],
     ['jet_runtime_jet.o', provenance.objectSha256], ['runtime.ir', provenance.irSha256], ['runtime.abi.json', provenance.abiSha256]]) {
     const bytes = heldFile(join(root, name));
     if (!/^[a-f0-9]{64}$/.test(expected ?? '') || nativePackHash(bytes) !== expected) throw Error(`runtime pack digest mismatch: ${name}`);

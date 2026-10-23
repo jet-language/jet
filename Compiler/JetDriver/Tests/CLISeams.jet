@@ -3,7 +3,7 @@
 use jet_driver.[
     JET_DRIVER_CORE_SOURCE_ROOT, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
     JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
-    JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_checked_projection,
+    JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_checked_projection, jet_driver_core_text,
     jet_driver_compile, jet_driver_has_errors, jet_driver_invocation_run, jet_driver_load, jet_driver_lowering_inputs,
     jet_driver_module_display, jet_driver_registration_module_inputs,
     jet_driver_schema_pending_breaks, jet_driver_source_query,
@@ -104,8 +104,8 @@ fn seams_checked_projection() {
     seams_require(fallback.compile.complete && fallback.compile.doc_modules.len() == 2 && fallback.source_modules.len() == 1, "explicit ABI-only Core fallback stays checked but is not a Review source")
     real_request := seams_request("use core.devtools as tools\nfn serve() -> Int {{ 7 }}", JetDriverCompileMode.Check)
     real_request.core_sources = [JetDriverCoreSource]{
-        {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, source: ""},
-        {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, source: ""},
+        {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
+        {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
     }
     seams_registration_inputs(real_request, 3)
     real :: jet_driver_checked_projection(real_request)

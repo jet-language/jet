@@ -1345,17 +1345,7 @@ fn link_layout(c: &LinkContext) -> LinkLayout Never! {
     phnum :: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0)
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
     addr = link_place(&c, order[LINK_RODATA], addr)
-    // Unwind tables: kept records, then the zero terminator.
-    eh_start :: link_align(addr, 8)
-    c.eh_start = eh_start
-    eh := 0
-    loop piece in 0..<c.ep_sec.len() {
-        if !c.ep_keep[piece] -> next
-        c.ep_out[piece] = eh
-        eh += c.ep_len[piece]
-    }
-    c.eh_size = eh + 4
-    r_end :: eh_start + eh + 4
+    r_end :: link_place_eh(&c, addr)
     text_start :: link_align(r_end, LINK_PAGE)
     text_end :: link_place(&c, order[LINK_TEXT], text_start)
     rw_start :: link_align(text_end, LINK_PAGE)
@@ -1403,6 +1393,21 @@ fn link_layout(c: &LinkContext) -> LinkLayout Never! {
         fini_start: fini_start, fini_end: fini_end, preinit_start: preinit_start, preinit_end: preinit_end,
         bss_start: file_end, notes: [String:Int]{},
     }
+}
+
+// Place the kept unwind records at the first 8-aligned address from `addr`,
+// then the zero terminator; returns the end of the tables.
+fn link_place_eh(c: &LinkContext, addr: Int) -> Int Never! {
+    eh_start :: link_align(addr, 8)
+    c.eh_start = eh_start
+    eh := 0
+    loop piece in 0..<c.ep_sec.len() {
+        if !c.ep_keep[piece] -> next
+        c.ep_out[piece] = eh
+        eh += c.ep_len[piece]
+    }
+    c.eh_size = eh + 4
+    eh_start + eh + 4
 }
 
 // Give every referenced linker-defined name its address.
@@ -1712,6 +1717,13 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
     elf64_u32(&out, 6)
     loop _ in 0..<5 -> elf64_u64(&out, 0)
     elf64_u64(&out, 16)
+    link_write_contents(&c, &out, l)
+    out
+}
+
+// Append the loaded sections, unwind tables and GOT of layout `l` to `out`,
+// which ends at or before the first of them.
+fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout) Never! {
     file_classes :: [Int]{LINK_RODATA, LINK_EH, LINK_TEXT, LINK_TDATA, LINK_PREINIT, LINK_INIT, LINK_FINI, LINK_RELRO, LINK_DATA}
     loop class in file_classes {
         if class == LINK_EH {
@@ -1733,7 +1745,6 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
         }
     }
     if l.has_rw -> link_pad_to(&out, l.file_end - c.base, 0)
-    out
 }
 
 // Address of the local file symbol `fsym` (a GOT entry for a local).
@@ -1922,13 +1933,19 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     strtab_at :: out.len()
     &out.extend(strtab)
     &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
+    link_write_section_headers(&out, headers)
+}
+
+// Append the section name table and the section headers `headers` (after
+// the null header; the name table's own is added) to `out`, and point the
+// ELF header at them.
+fn link_write_section_headers(out: &[U8], headers: [LinkSectionHeader]) Never! {
     shstrtab := [U8]{U8{0}}
     name_offsets := [Int]{}
     loop header in headers -> &name_offsets.push(elf64_string(&shstrtab, header.name))
-    &name_offsets.push(elf64_string(&shstrtab, ".shstrtab"))
+    names_offset :: elf64_string(&shstrtab, ".shstrtab")
     shstrtab_at :: out.len()
     &out.extend(shstrtab)
-    &headers.push(LinkSectionHeader{name: ".shstrtab", kind: 3, flags: 0, addr: 0, offset: shstrtab_at, size: shstrtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
     elf64_pad(&out, 8)
     shoff :: out.len()
     loop _ in 0..<64 -> &out.push(U8{0})
@@ -1944,9 +1961,10 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         elf64_u64(&out, header.align)
         elf64_u64(&out, header.entry_size)
     }
+    elf64_section_header(&out, names_offset, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
     // e_shoff, e_shentsize, e_shnum and e_shstrndx.
     link_put64(&out, 40, shoff)
-    count :: headers.len() + 1
+    count :: headers.len() + 2
     fields :: [Int]{64, count, count - 1}
     loop (index, value) in fields {
         out[58 + 2 * index] = U8{value.bit_and(255)}

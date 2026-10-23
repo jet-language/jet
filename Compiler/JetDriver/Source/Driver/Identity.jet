@@ -158,6 +158,7 @@ struct JetDriverDocModule {
 // `owner` schedules private parts, and `owned_members` selects the public
 // functions that crossed the Core cutover. Runtime units retain every function
 // and may import other runtime units; only an exact runtime entry keeps tests.
+// `text` holds the module's source; read it with `source()`.
 struct JetDriverCoreSource {
     module_name: String
     alias: String
@@ -165,7 +166,41 @@ struct JetDriverCoreSource {
     owner: String
     owned_members: [String]
     runtime: Bool
-    source: String
+    text: Shared<JetDriverCoreText>
+    fn source(self) -> String Never! {
+        permit :: self.text.guard_edit()
+        if permit.value.text == .Val(text) -> return text
+        reader :: permit.value.reader ?? panic("the Core source `{self.path}` has neither text nor reader")
+        text :: reader.read(permit.value.file) ?? panic("can't read the Core library source `{permit.value.file}`")
+        permit.value.text = Val(text)
+        text
+    }
+}
+
+// A Core row's source text. A host that embeds Core supplies the text
+// (jet_driver_core_text). A host that reads Core from a toolchain tree
+// supplies the file and a reader instead (jet_driver_core_text_file). The
+// text is then read on the first `source()`, so a compile reads only the rows
+// its imports schedule; `jet run` of hello reads none of the 169 files, not
+// all 9.7 MB. Copies of a row share this cell, so each file is read at most
+// once.
+struct JetDriverCoreText {
+    file: String
+    reader: JetDriverCoreSourceReader?
+    text: String?
+}
+
+// The host's read of one Core file; `None` when it can't be read.
+trait JetDriverCoreSourceReader {
+    fn read(self, file: String) -[FS.Read]> String?
+}
+
+fn jet_driver_core_text(text: String) -> Shared<JetDriverCoreText> Never! {
+    shared JetDriverCoreText{file: "", reader: None, text: Val(text)}
+}
+
+fn jet_driver_core_text_file(file: String, reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
+    shared JetDriverCoreText{file: file, reader: Val(reader), text: None}
 }
 
 // Selected build output is compiler-produced source, never a fabricated

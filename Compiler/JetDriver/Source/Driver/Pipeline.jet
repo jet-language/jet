@@ -347,7 +347,7 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
                 if unit.file_index >= 0 {
                     if unit.file_index >= request.core_sources.len() -> return [JetDriverDocModule]{}
                     row :: request.core_sources[unit.file_index]
-                    if row.module_name != unit.module_name || row.path != unit.relative_path || row.source != source -> return [JetDriverDocModule]{}
+                    if row.module_name != unit.module_name || row.path != unit.relative_path || row.source() != source -> return [JetDriverDocModule]{}
                     path = row.path
                     alias = row.alias
                 } else {
@@ -1017,8 +1017,10 @@ fn jet_driver_comptime_prechecked(precheck: ^SemaComptimeItemCheck?, values: [Se
 // Applies the values that landed from position `from` on to the run's
 // program graph in place, through the graph's value sites `sites`
 // (sema_comptime_value_sites), recording each typed row on `trail`, and
-// counts them as available. False when the tables lost their graph.
-fn jet_driver_comptime_apply_landed(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int, trail: &SemaGraphTrail) -> Bool {
+// counts them as available. False when the tables lost their graph. Its
+// trace span is `comptime.apply`.
+fn jet_driver_comptime_apply_landed(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int, trail: &SemaGraphTrail, trace_sink: CompilerTraceSink?) -> Bool {
+    jet_driver_trace_step_begin(trace_sink, "comptime.apply")
     landed := [SemaComptimeItemValue]{}
     body_values_changed := false
     loop value_index in from..<values.len() {
@@ -1028,11 +1030,15 @@ fn jet_driver_comptime_apply_landed(environment: &SemaScopeEnvironment, program:
         if values[value_index].kind == SemaComptimeItemKind.BodyExpression -> body_values_changed = true
     }
     if &program.registration_graph == {
-        None -> return false
+        None -> {
+            jet_driver_trace_step_end(trace_sink, "comptime.apply", 0)
+            return false
+        }
         .Val(resolved_graph) -> sema_comptime_graph_apply_sites(&resolved_graph, sites, landed, &trail)
     }
     sema_comptime_available_constants_add(&available, values)
     sema_comptime_environment_publish_body_values(&environment, values, from, body_values_changed)
+    jet_driver_trace_step_end(trace_sink, "comptime.apply", values.len() - from)
     true
 }
 
@@ -1243,13 +1249,15 @@ fn jet_driver_comptime_flush(
     // wait on it), and rows of constants an item does not name never change
     // its value.
     if !batch.bare {
+        if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.stage", batch.entries[start].source.source_file, batch.entries[start].source.name)
         staged :: jet_driver_comptime_stage(graph, batch.entries[start].request, values, checked_functions, trace, program, &staging, &diagnostics)
+        if request.trace_sink == .Val(sink) -> sink.end("comptime.stage", 1)
         if staged == .Val(stopped) {
             flushed.stop = Val(stopped)
             return flushed
         }
     }
-    if request.trace_sink == .Val(sink) -> sink.begin("comptime.build", "program", -1, -1)
+    if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.build", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
     built := jet_driver_comptime_ir_build(batch, start, staging, values)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.build", batch.functions.len() + built.items.len())
     counters.programs_built += 1
@@ -1284,7 +1292,9 @@ fn jet_driver_comptime_flush(
         counters.item_functions_evaluated += 1
         source :: entry.source
         comptime_request :: entry.request
+        if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.eval", source.source_file, source.name)
         eval_result :: jet_eval_ir_comptime_run(&built, item, jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file)), comptime_request.span)
+        if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
         jet_driver_record_eval_result(&trace, eval_result)
         if source.kind == SemaComptimeItemKind.FieldDefault && eval_result.error != None && eval_result.internal_problem == None {
             // Rust CheckerMarkers an unevaluable field default lands
@@ -1341,6 +1351,17 @@ fn jet_driver_comptime_flush(
     }
     flushed
 }
+
+// The names of `batch`'s evaluated entries from `start` on, the label of
+// its build's trace span (Tools/perf/comptime-items.mjs splits it).
+fn jet_driver_comptime_batch_names(batch: JetDriverComptimeBatch, start: Int) -> String Never! {
+    names := [String]{}
+    loop index in start..<batch.entries.len() {
+        if batch.entries[index].plain == None -> &names.push(batch.entries[index].source.name)
+    }
+    names.join(", ")
+}
+
 // `known` holds the `module\nkey` of every source already pending or staged.
 fn jet_driver_comptime_checked_text_source_add(sources: &[SemaComptimeItemSource], known: &[String:Bool], evaluation: SemaCheckedTextEvaluation) Never! {
     source := sema_comptime_checked_text_source(evaluation)
@@ -1547,13 +1568,15 @@ fn jet_driver_comptime_run(
         // takes its check at its turn when no value it depends on has landed
         // since (jet_driver_comptime_prechecked).
         if values.len() > resolved_count {
-            if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail) {
+            if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail, request.trace_sink) {
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return jet_driver_comptime_lost_graph(values, checked_functions, trace)
             }
             resolved_count = values.len()
         }
+        jet_driver_trace_step_begin(request.trace_sink, "comptime.precheck")
         prechecks := sema_comptime_precheck_items(&environments, &programs, available, pending, request.compiler_threads)
+        jet_driver_trace_step_end(request.trace_sink, "comptime.precheck", pending.len())
         &prechecks.reverse()
         prechecked_values :: values.len()
         loop source in pending {
@@ -1562,7 +1585,7 @@ fn jet_driver_comptime_run(
             loop retry {
                 retry = false
                 if values.len() > resolved_count {
-                    if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail) {
+                    if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail, request.trace_sink) {
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return jet_driver_comptime_lost_graph(values, checked_functions, trace)
                     }
@@ -1582,7 +1605,9 @@ fn jet_driver_comptime_run(
                         next
                     }
                 }
+                if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.check", source.source_file, source.name)
                 checked_item := jet_driver_comptime_prechecked(^precheck, values, prechecked_values) ?? sema_check_comptime_item(&environments[0], &programs[0], &probe, available, source)
+                jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                 precheck = None
                 counters.items_checked += 1
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
@@ -1594,12 +1619,14 @@ fn jet_driver_comptime_run(
                         return stopped
                     }
                     if values.len() > resolved_count {
-                        if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail) {
+                        if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail, request.trace_sink) {
                             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                             return jet_driver_comptime_lost_graph(values, checked_functions, trace)
                         }
                         resolved_count = values.len()
+                        if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.check", source.source_file, source.name)
                         checked_item = sema_check_comptime_item(&environments[0], &programs[0], &probe, available, source)
+                        jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                         counters.items_checked += 1
                     }
                 }
@@ -1685,7 +1712,9 @@ fn jet_driver_comptime_run(
                     }
                 }
                 checked_mark := checked_functions.len()
+                if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
                 closure := jet_driver_comptime_function_closure(&environments[0], programs[0], &probe, available, &run_index, &memory_plan, values, &checked_functions, comptime_request, &diagnostics)
+                jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len())
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
                     loop diagnostics.len() > item_diagnostic_start {
                         _ := &diagnostics.pop()
@@ -1808,7 +1837,7 @@ fn jet_driver_comptime_run(
     // Values that landed in the last pass join the program's graph, which
     // its owning run hands back with the result.
     if values.len() > resolved_count {
-        if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail) {
+        if !jet_driver_comptime_apply_landed(&environments[0], &programs[0], &available, staging.sites, values, resolved_count, &trail, request.trace_sink) {
             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
             return jet_driver_comptime_lost_graph(values, checked_functions, trace)
         }

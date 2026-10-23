@@ -2139,7 +2139,7 @@ fn jet_driver_namespace_item_names(items: [Item]) -> [NamedSpan] Never! {
 fn jet_driver_module_source_bytes(unit: JetDriverSourceUnit, roots: [JetDriverAuthorizedSourceRoot], core_sources: [JetDriverCoreSource]) -> [U8] Never! {
     if jet_driver_unit_is_core(unit) {
         if unit.file_index < 0 || unit.file_index >= core_sources.len() -> return [U8]{}
-        return core_sources[unit.file_index].source.bytes()
+        return core_sources[unit.file_index].source().bytes()
     }
     if unit.root_index < 0 || unit.root_index >= roots.len() || unit.file_index < 0 || unit.file_index >= roots[unit.root_index].files.len() -> return [U8]{}
     roots[unit.root_index].files[unit.file_index].source.bytes()
@@ -3174,7 +3174,7 @@ fn jet_driver_generated_module_path(package_identity: String, relative_path: Str
 fn jet_driver_source_unit_text(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> String? Never! {
     if jet_driver_unit_is_core(unit) {
         if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return None
-        return Val(request.core_sources[unit.file_index].source)
+        return Val(request.core_sources[unit.file_index].source())
     }
     if unit.source_origin == SemaSourceOrigin.CompilerGenerated {
         loop generated in request.generated_modules {
@@ -3195,7 +3195,7 @@ fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceU
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row :: request.core_sources[unit.file_index]
-    JetDriverParseJob.Core{text: row.source, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}
+    JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}
 }
 
 fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
@@ -3307,7 +3307,7 @@ fn jet_driver_core_runtime_member_imports(program: &Program, core_sources: [JetD
 fn jet_driver_runtime_entry_row(core_sources: [JetDriverCoreSource], unit: JetDriverSourceUnit, source: String) -> Int? {
     loop (row_index, row) in core_sources {
         if !row.runtime -> next
-        if (unit.relative_path == row.path || unit.path.ends_with("/{row.path}")) && row.source == source -> return Val(row_index)
+        if (unit.relative_path == row.path || unit.path.ends_with("/{row.path}")) && row.source() == source -> return Val(row_index)
     }
     None
 }
@@ -3535,7 +3535,7 @@ fn jet_driver_core_unit(
     }
     loop (row_index, row) in core_sources {
         if row.owner != "" || row.module_name != module_name || (row.runtime && !importer_core) -> next
-        target :: jet_driver_add_core_unit(&source_units, &queued, &generated, row.module_name, row.path, row_index, row.source)
+        target :: jet_driver_add_core_unit(&source_units, &queued, &generated, row.module_name, row.path, row_index, row.source())
         loop (part_index, part) in core_sources {
             if part.owner != module_name -> next
             // Rust Loader schedules each part module once (`scheduled.insert`):
@@ -3545,7 +3545,7 @@ fn jet_driver_core_unit(
                 if jet_driver_unit_is_core(unit) && unit.module_name == part.module_name -> scheduled = true
             }
             if scheduled -> next
-            part_unit :: jet_driver_add_core_unit(&source_units, &queued, &generated, part.module_name, part.path, part_index, part.source)
+            part_unit :: jet_driver_add_core_unit(&source_units, &queued, &generated, part.module_name, part.path, part_index, part.source())
             queued[part_unit] = true
             &pending.push(part_unit)
         }
@@ -3922,7 +3922,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                                     break
                                 }
                             }
-                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source))
+                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source()))
                             break
                         }
                         if target_index == None {
@@ -4068,7 +4068,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                                     break
                                 }
                             }
-                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source))
+                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source()))
                             if target_index == .Val(core_index) && !queued[core_index] {
                                 queued[core_index] = true
                                 &pending.push(core_index)

@@ -188,15 +188,20 @@ library entry, and lowers its checked exports plus `lifecycle.list` into one
 native object. Jet's linker resolves its permitted musl/libgcc C dependencies;
 no Rust runtime, standard-library rlibs, rustc or system linker participates.
 Packaging writes `jet-runtime/native.key` beside the compiler and installs
-`jet-runtime/<key>/jet_runtime.pack.o`. The key hashes the source inventory,
-checked ABI, lifecycle, backend inputs and C platform archives. The accompanying
-`provenance.json` records each input digest, the pack digest and zero Rust or
-LLVM-generated Jet objects, with permitted C platform archives listed separately.
+`jet-runtime/<key>/jet_runtime.pack.o` and `jet_runtime.image`: the pack linked
+once at the run base (`LINK_RUN_BASE`), with its symbol table and a
+`.jet.bind` section naming where it calls `main`. Binding a program object to
+that image (`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not
+relink the runtime; the bound bytes are a complete static executable at the
+run base. The key hashes the source inventory, checked ABI, lifecycle, backend
+inputs and C platform archives. The accompanying `provenance.json` records each
+input digest, the pack and image digests and zero Rust or LLVM-generated Jet
+objects, with permitted C platform archives listed separately.
 Packaging first checks a separate recipe digest of the runtime sources, backend,
 lifecycle, C archive bytes and compiler executable. Neither the consumer program
 nor its build profile enters that recipe. A matching recipe reuses the produced
 pack without checking or compiling the runtime again; changed producer inputs
-rebuild it. Reuse requires held regular-file reads, matching object/pack/ABI
+rebuild it. Reuse requires held regular-file reads, matching object/pack/image/ABI
 digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.

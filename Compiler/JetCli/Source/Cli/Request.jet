@@ -31,6 +31,7 @@ use jet_driver.[
     JetDriverLoweringInputs,
     JetDriverLoweringInputsResult,
     JetDriverCoreSource,
+    JetDriverCoreSourceReader,
     JetDriverComptimeInputLog,
     JetDriverHostFacts,
     JetDriverVerbOutput,
@@ -43,6 +44,7 @@ use jet_driver.[
     jet_driver_compile_escaped_failure,
     jet_driver_shared_build_inputs,
     jet_driver_shared_build_http_inputs,
+    jet_driver_core_text_file,
     JetDriverScriptDependency,
 ]
 use jet_eval.[
@@ -51,7 +53,7 @@ use jet_eval.[
     jet_eval_default_config,
     jet_eval_runtime_ir,
 ]
-use jet_backend.[x64_link_runtime_pack]
+use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
 use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_module_encode, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[DepSpec, PackageFacts, pkg_manifest_parse, pkg_to_manifest]
 
@@ -157,7 +159,9 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
 }
 
 // JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
-// with the platform inputs into the Rust-free runtime pack.
+// with the platform inputs into the Rust-free runtime pack, and
+// JET_FRONT_RUNTIME_IMAGE_OUTPUT: the pack prelinked at the run base, which
+// `jet run` binds programs to (Image/RuntimePack.jet x64_link_runtime_image).
 fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object: ^[U8]) -> JetDriverCompileResult {
     if cli_sys.get("JET_FRONT_RUNTIME_PACK_OUTPUT") == .Val(pack_path) {
         names := [String]{"{prefix}.o"}
@@ -177,6 +181,14 @@ fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object:
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
         }
         cli_files.write_bytes(pack_path, linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack: {err}")
+        if cli_sys.get("JET_FRONT_RUNTIME_IMAGE_OUTPUT") == .Val(image_path) {
+            image :: x64_link_runtime_image(pack_path, linked.bytes.copy())
+            if image.errors.len() > 0 {
+                cli_files.write("{prefix}.pack-issues", image.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime image findings: {err}")
+                return jet_driver_compile_escaped_failure("runtime image linking failed; see {prefix}.pack-issues")
+            }
+            cli_files.write_bytes(image_path, image.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime image: {err}")
+        }
     }
     result
 }
@@ -663,8 +675,11 @@ fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
     Val(bytes)
 }
 
-// The Core library rows with their bodies, read from the toolchain tree that
-// `JET_TOOLCHAIN_ROOT` names, or the refusal that stops the request.
+// The Core library rows of the toolchain tree that `JET_TOOLCHAIN_ROOT`
+// names, or the refusal that stops the request. Each body is read when the
+// compile first schedules its row (jet_driver_core_text_file), so a compile
+// reads only the Core files its imports reach; every file is checked to be
+// present here, so a missing one still refuses the request up front.
 enum JetCLICoreSources {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
@@ -675,10 +690,20 @@ fn jet_cli_core_sources() -> JetCLICoreSources Never! {
     core_sources := [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
-        body :: cli_files.read(core_path) ?? return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
-        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, source: body})
+        if !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
     }
     JetCLICoreSources.Loaded{sources: core_sources}
+}
+
+// The CLI's read of one Core file for jet_driver_core_text_file.
+struct JetCLICoreSourceReader {}
+
+impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
+    fn read(self, file: String) -[FS.Read]> String? {
+        text :: cli_files.read(file) ?? return None
+        Val(text)
+    }
 }
 
 // The driver request for `snapshot` on this host: the Core rows, the
@@ -1379,25 +1404,13 @@ fn jet_cli_trace_object(sink: ^JetCLITraceSink) -> CompilerTraceSink Never! {
 
 impl JetCLITraceSink.CompilerTraceSink {
     fn begin(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]> {
-        ts :: jet_cli_trace_micros(self.start_ms)
-        thread :: jet_cli_trace_thread()
-        label :: if detail == "" -> name else -> detail
-        start :: jet_cli_trace_usage()
-        permit := self.state.guard_edit()
-        if !permit.value.writing -> return
-        stack := permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}
-        line := ""
-        if self.human {
-            item :: if detail == "" -> "" else -> " {detail}"
-            line = "{jet_cli_trace_prefix(self, ts, thread, stack.len())}> {name}{item}{jet_cli_trace_place(index, total)}\n"
-        } else {
-            if !permit.value.stacks.has_key(thread) -> line = jet_cli_trace_thread_name(self.pid, thread)
-            args :: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
-            line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, self.pid, thread)}{args}}},\n"
-        }
-        &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start})
-        permit.value.stacks[thread] = stack
-        jet_cli_trace_write(self.target, &permit.value, line)
+        args :: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
+        jet_cli_trace_open(self, name, detail, args, jet_cli_trace_place(index, total))
+    }
+
+    fn begin_item(self, name: String, file: String, item: String) Never! -[FS]> {
+        args :: ",\"args\":{{\"file\":{foundation_json_quote(file)},\"item\":{foundation_json_quote(item)}}}"
+        jet_cli_trace_open(self, name, item, args, " ({file})")
     }
 
     // Closes the innermost open span of kind `name` on this thread, and any
@@ -1480,6 +1493,29 @@ impl JetCLITraceSink {
             _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "JET_PHASE_COUNTERS {{\"phase\":{foundation_json_quote(phase)},{foundation_json_quote(counter_name)}:{value}}}\n")
         }
     }
+}
+
+// Opens a span of kind `name` labelled `detail` (`name` when empty): its `B`
+// event carries `args` (`,"args":{...}` or ""), its readable line `place`.
+fn jet_cli_trace_open(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String) Never! -[FS]> {
+    ts :: jet_cli_trace_micros(sink.start_ms)
+    thread :: jet_cli_trace_thread()
+    label :: if detail == "" -> name else -> detail
+    start :: jet_cli_trace_usage()
+    permit := sink.state.guard_edit()
+    if !permit.value.writing -> return
+    stack := permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}
+    line := ""
+    if sink.human {
+        item :: if detail == "" -> "" else -> " {detail}"
+        line = "{jet_cli_trace_prefix(sink, ts, thread, stack.len())}> {name}{item}{place}\n"
+    } else {
+        if !permit.value.stacks.has_key(thread) -> line = jet_cli_trace_thread_name(sink.pid, thread)
+        line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, sink.pid, thread)}{args}}},\n"
+    }
+    &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start})
+    permit.value.stacks[thread] = stack
+    jet_cli_trace_write(sink.target, &permit.value, line)
 }
 
 // A span's close. Machine form: its `E` event (with args only for the span

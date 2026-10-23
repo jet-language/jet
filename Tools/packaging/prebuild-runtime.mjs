@@ -68,6 +68,7 @@ if (existsSync(join(out, 'native.key'))) {
     const cached = readNativeRuntimePack(out, recipeSha256);
     noRust(join(out, cached.key, 'jet_runtime_jet.o'));
     noRust(join(out, cached.key, 'jet_runtime.pack.o'));
+    noRust(join(out, cached.key, 'jet_runtime.image'));
     publishPlatform();
     console.log(join(out, cached.key, 'jet_runtime.pack.o'));
     process.exit(0);
@@ -89,10 +90,13 @@ try {
   execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), library, '--assemble-only'], { stdio: 'inherit' });
   const prefix = join(work, 'jet_runtime_jet');
   const pack = join(work, 'jet_runtime.pack.o');
+  // The pack prelinked at the run base, which `jet run` binds programs to.
+  const image = join(work, 'jet_runtime.image');
   const policy = {
     JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix,
     JET_FRONT_LIBRARY_LIFECYCLE: join(repo, 'Compiler/JetRuntime/lifecycle.list'),
     JET_FRONT_RUNTIME_PACK_OUTPUT: pack,
+    JET_FRONT_RUNTIME_IMAGE_OUTPUT: image,
     JET_FRONT_RUNTIME_PLATFORM_INPUTS: platform.join('\n'),
   };
   // The runtime-library seam in the hosted source loader (Request.jet
@@ -105,7 +109,7 @@ try {
   });
   if (run.error) throw run.error;
   if (run.status !== 0) throw Error(`Jet runtime production failed (${run.status})`);
-  for (const path of [prefix + '.o', pack]) noRust(path);
+  for (const path of [prefix + '.o', pack, image]) noRust(path);
   const abiBytes = readFileSync(prefix + '.abi.json');
   const abi = JSON.parse(abiBytes);
   if (!Array.isArray(abi) || !abi.length) throw Error('runtime ABI inventory is empty');
@@ -121,7 +125,8 @@ try {
   copyFileSync(prefix + '.abi.json', join(directory, 'runtime.abi.json'));
   copyFileSync(prefix + '.exports', join(directory, 'runtime.exports'));
   copyFileSync(pack, join(directory, 'jet_runtime.pack.o'));
-  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), irSha256: sha256(readFileSync(prefix + '.ir')), packSha256: sha256(readFileSync(pack)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256, recipeSha256 };
+  copyFileSync(image, join(directory, 'jet_runtime.image'));
+  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), irSha256: sha256(readFileSync(prefix + '.ir')), packSha256: sha256(readFileSync(pack)), imageSha256: sha256(readFileSync(image)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256, recipeSha256 };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   publishPlatform();
