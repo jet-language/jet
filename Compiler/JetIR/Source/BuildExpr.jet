@@ -411,7 +411,7 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         .Match(subject, arms, _, span) -> ir_match(&m, p, &b, subject, arms, None, span)
         .EnumMatch(subject, arms, else_body, _, span) -> ir_match(&m, p, &b, subject, arms, else_body, span)
         .RangeSwitch(subject, arms, else_body, span) -> ir_range_switch(&m, p, &b, subject, arms, else_body, span)
-        .ForIn(label, variable, variable_two, _, collection, step, method_kind, columnar, _, _, body, span) -> {
+        .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, _, _, body, span) -> {
             // `loop c in s.chars()`: codegen streams the scalars
             // (MIRLoopSourceKind.Chars); the walk of the checked `s.chars()`
             // list visits the same Chars in the same order.
@@ -420,7 +420,10 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
             lines :: file_lines || method_kind == (Val(TForInMethod.LinesStdin))
             received :: method_kind == (Val(TForInMethod.ChannelReceiver))
             if (method_kind != None && !chars && !lines && !received) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
-            if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, collection, file_lines, body, span)
+            // `loop line in handle.lines()` reads its source, the handle
+            // (Sema sema_stmt_for_in_source); `collection` is the checked
+            // `lines()` call, which has no function of its own.
+            if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, source, file_lines, body, span)
             if received -> return ir_channel_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             if ir_iter_element(ir_subst(m, collection.ty)) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
@@ -432,7 +435,7 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         .Reactive(_, span) -> ir_fail(&b, span, "statement Reactive")
         .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
         .ContextBlock(_, _, span) -> ir_fail(&b, span, "statement ContextBlock")
-        .Shield(_, span) -> ir_fail(&b, span, "statement Shield")
+        .Shield(body, _) -> ir_shield(&m, p, &b, body)
         // Test scope members (codegen jet_codegen_lower_scope_member): a
         // `.setup` body runs in the enclosing scope, so its bindings stay
         // visible after it; a `.measure` body runs as a plain scope (no
@@ -1070,15 +1073,18 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             if type_args.len() > 0 && p.rows.get(key) == None -> return ir_fail_slot(&b, span, "generic method call outside the checked program")
             row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "method call outside the checked program: {method.name}")
             receiver_access :: ir_receiver_access(p.functions[row].kind)
+            // A method of a generic type is built for the receiver's instance.
+            all := ir_owner_args(p, p.functions[row], ir_subst(m, receiver.ty)) ?? return ir_fail_slot(&b, span, "method {method.name} on {ir_type_name(receiver.ty)}, which does not spell its owner's type arguments")
+            loop arg in type_args -> &all.push(arg)
             if receiver_access == "static" {
-                value :: ir_call(&m, p, &b, key, type_args, -1, [IRWriteBack]{}, args, span)
+                value :: ir_call(&m, p, &b, key, all, -1, [IRWriteBack]{}, args, span)
                 return ir_trait_propagate(&m, p, &b, method, value, expression.ty, span)
             }
             backs := [IRWriteBack]{}
             self_slot :: if receiver_access == "write" -> ir_place_address(&m, p, &b, receiver, &backs, span) else -> ir_expr(&m, p, &b, receiver)
             if ir_failed(b) -> return -1
             if self_slot < 0 -> return ir_fail_slot(&b, span, "Unit receiver")
-            value :: ir_call(&m, p, &b, key, type_args, self_slot, backs, args, span)
+            value :: ir_call(&m, p, &b, key, all, self_slot, backs, args, span)
             return ir_trait_propagate(&m, p, &b, method, value, expression.ty, span)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
@@ -1157,7 +1163,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             ir_emit(&b.f, IROp.StackAddress, storage, m.types[ty].size, 8, -1, b.line)
             loop field in fields {
                 member :: ir_member_of(&m, p, b, storage, field.field.name) ?? return ir_fail_slot(&b, span, "struct field {field.field.name}")
-                value :: ir_expr(&m, p, &b, field.value)
+                // A member of a field's structural union is boxed as that
+                // union (codegen widens the checked field value the same way).
+                value :: ir_value_as(&m, p, &b, field.value, member.ty, span)
                 if ir_failed(b) -> return -1
                 if value < 0 -> return ir_fail_slot(&b, span, "Unit struct field")
                 ir_member_write(&m, p, &b, storage, member, value)
@@ -1253,6 +1261,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             return ir_list_index(&m, p, &b, base, index, span)
         }
         .Lambda(value) -> return ir_lambda(&m, p, &b, expression.ty, value, span)
+        .FnValue(kind) -> return ir_fn_value(&m, p, &b, expression.ty, kind, span)
         .IndirectCall(callee, type_args, args, signature) -> {
             if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic indirect call")
             return ir_indirect_call(&m, p, &b, callee, args, signature, span)
@@ -1295,6 +1304,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .NumericBinaryMethod(receiver, operation, argument) -> return ir_numeric_euclid(&m, p, &b, expression.ty, receiver, operation, argument, span)
         .HandleMethod(receiver, operation, args) -> return ir_handle_method(&m, p, &b, expression.ty, receiver, operation, args, span)
         .CoreClosureCall(kind) -> return ir_core_closure_call(&m, p, &b, expression.ty, kind, span)
+        .SelectWait(table, nonblocking) -> return ir_select_wait(&m, p, &b, expression.ty, table, nonblocking, span)
+        .OptionLift2(function, left, right) -> return ir_option_lift2(&m, p, &b, expression.ty, function, left, right, span)
         .TaskGroupAll(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 0, span)
         .TaskGroupAny(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 1, span)
         .TaskGroupRace(tasks) -> return ir_task_group_value(&m, p, &b, expression.ty, tasks, 2, span)
@@ -1390,6 +1401,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .DynLen(site, location) -> return ir_dyn_len(&m, p, &b, ty, receiver, site, location, span)
     if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
+    if ir_event_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if operation == .SerdeEncode -> return ir_serde_encode(&m, p, &b, ty, receiver, span)
     dedicated :: if operation == {
         .Hardware(_) | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
@@ -1782,6 +1794,7 @@ fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TS
         if method.trait_owner != None -> return ir_fail_slot(&b, span, "trait-qualified Prelude static call {path}.{method.name}")
         member :: method.operator_identity ?? method.name
         if path == "core.data.plot" && member == "column" -> return ir_fail_slot(&b, span, "Prelude static call core.data.plot.column")
+        if rooted && path == "JetAtomic" && member == "new" -> return ir_atomic_new(&m, p, &b, ty, args, span)
         symbol := "{path}::{member}"
         if rooted && path == "JetAuthority" {
             if member == "from_rights" -> symbol = "jet_authority_from_rights"
@@ -1806,18 +1819,20 @@ fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TS
         result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
         return ir_route(&m, p, &b, symbol, slots, borrowed, result, span)
     }
+    row :: p.rows.get(method.symbol.key) ?? return ir_fail_slot(&b, span, "static call outside the checked program: {method.name}")
+    function :: p.functions[row]
+    expected :: function.generic_params.len()
+    if expected > 0 && type_args.len() > 0 && type_args.len() != expected -> return ir_fail_slot(&b, span, "static call of {method.name} with {type_args.len()} of {expected} type arguments")
+    // The owner's arguments: what the call's types give them (`Box.new(7)`),
+    // else the ones the owner is written with (`Box<Int>.empty()`).
     all := [Type]{}
-    if owner_type == .Val(written) {
-        if ir_untag(written) == .Apply(_, owner_args) {
-            loop arg in owner_args -> &all.push(arg)
-        }
+    if ir_infer_owner_args(p, function, ty, args) == .Val(inferred) {
+        all = inferred
+    } else {
+        written :: owner_type ?? return ir_fail_slot(&b, span, "static call of {method.name} leaves its owner's type arguments unbound")
+        all = ir_owner_args(p, function, written) ?? return ir_fail_slot(&b, span, "static call of {method.name} leaves its owner's type arguments unbound")
     }
     loop arg in type_args -> &all.push(arg)
-    row :: p.rows.get(method.symbol.key) ?? return ir_fail_slot(&b, span, "static call outside the checked program: {method.name}")
-    expected :: p.functions[row].generic_params.len()
-    // A method that declares no type parameters of its own takes none, as
-    // ir_function_id builds it.
-    if expected > 0 && all.len() > 0 && all.len() != expected -> return ir_fail_slot(&b, span, "static call of {method.name} with {all.len()} of {expected} type arguments")
     ir_call(&m, p, &b, method.symbol.key, all, -1, [IRWriteBack]{}, args, span)
 }
 
@@ -1973,7 +1988,7 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
     callee :: ir_function_id(&m, p, key, type_args) ?? return ir_fail_slot(&b, span, "call of {key}")
     params :: p.functions[row].params
     // The callee's parameter and return types in concrete terms.
-    names :: if type_args.len() > 0 -> ir_generic_names(p.functions[row]) else -> [String]{}
+    names :: if type_args.len() > 0 -> ir_generic_names(p, p.functions[row]) else -> [String]{}
     concrete := [Type]{}
     loop arg in type_args -> &concrete.push(ir_subst(m, arg))
     if params.len() != args.len() -> return ir_fail_slot(&b, span, "call with defaulted or variadic arguments")

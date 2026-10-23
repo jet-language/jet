@@ -3,6 +3,7 @@
 // one runtime channel into the tuple, the endpoint methods cross the native
 // channel exports, and `loop value in rx` walks the receiver as an Iter.
 
+use jet_codegen.[jet_codegen_select_payload_type]
 use jet_foundation.[Span, TExpr, THandleOp, TLocal, TStmt, Type, type_carrier_identity]
 
 // The element of a `Sender<T>` / `Receiver<T>` endpoint (Lower Tasks.jet
@@ -156,4 +157,64 @@ fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, va
     source :: ir_runtime(&m, &b, "jet_rt_native_receiver_iter", [Int]{handle, moved, meta}, iter_row)
     ir_release(&m, &b, handle)
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, item_row, body)
+}
+
+// `select { ... }` (codegen jet_codegen_lower_select_wait, Lower Tasks.jet
+// lower_task_select): the readiness table's receivers and timer deadlines
+// (exact nanoseconds) become two owned Lists, which the runtime empties, and
+// the runtime writes the ready arm and its payload (the received value's
+// box, or None for a timer) into the result tuple.
+fn ir_select_wait(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, table: TExpr, nonblocking: Bool, span: Span) -> Int Never! {
+    result_ty :: ir_subst(m, ty)
+    fields :: if ir_untag(result_ty) == .Tuple(items) -> items else -> { return ir_fail_slot(&b, span, "select producing {ir_type_name(result_ty)}") }
+    members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, result_ty)
+    if members.len() != 2 -> return ir_fail_slot(&b, span, "select producing {ir_type_name(result_ty)}")
+    receivers := [TExpr]{}
+    durations := [TExpr]{}
+    if !ir_select_table(table, &receivers, &durations) -> return ir_fail_slot(&b, span, "select over a non-canonical readiness table")
+    payload :: jet_codegen_select_payload_type(result_ty)
+    receiver_list_ty :: Type.List{element: Type.Apply{name: "Receiver", args: [Type]{payload}}}
+    recvs :: ir_list_literal(&m, p, &b, receiver_list_ty, receivers, span)
+    if ir_failed(b) || recvs < 0 -> return -1
+    int_row :: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
+    nanoseconds := [Int]{}
+    loop duration in durations {
+        value :: ir_expr(&m, p, &b, duration)
+        if ir_failed(b) || value < 0 -> return -1
+        &nanoseconds.push(ir_route(&m, p, &b, "jet_duration_ns_value", [Int]{value}, [Bool]{true}, Type.Int, span))
+        if ir_failed(b) -> return -1
+        ir_release(&m, &b, value)
+    }
+    timer_list_ty :: Type.List{element: Type.Int}
+    timer_row :: ir_value_type(&m, p, timer_list_ty) ?? return ir_type_fail(&b, span, timer_list_ty)
+    timers :: ir_list_from(&m, p, &b, timer_row, int_row, nanoseconds)
+    if ir_failed(b) -> return -1
+    row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
+    storage :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    arm :: ir_address_at(&m, &b, storage, members[0].offset)
+    value :: ir_address_at(&m, &b, storage, members[1].offset)
+    mode :: ir_word_const(&m, &b, if nonblocking -> 1 else -> 0)
+    _ :: ir_runtime(&m, &b, "jet_rt_native_select_wait", [Int]{recvs, timers, mode, arm, value}, -1)
+    ir_release(&m, &b, recvs)
+    ir_release(&m, &b, timers)
+    storage
+}
+
+// The receivers and timer durations of a readiness table, latest arm first
+// (codegen jet_codegen_lower_select_builder); false for any other builder.
+fn ir_select_table(table: TExpr, receivers: &[TExpr], durations: &[TExpr]) -> Bool Never! {
+    if table.kind == {
+        .SelectStart -> return true
+        .SelectRecv(previous, channel) -> {
+            &receivers.push(channel.copy())
+            return ir_select_table(previous, &receivers, &durations)
+        }
+        .SelectAfter(previous, duration, value) -> {
+            if value != None -> return false
+            &durations.push(duration.copy())
+            return ir_select_table(previous, &receivers, &durations)
+        }
+        else -> return false
+    }
 }
