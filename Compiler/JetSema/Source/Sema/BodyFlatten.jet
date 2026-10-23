@@ -1,14 +1,14 @@
-// Flattens a sealed checked function (tir_function_seal) into its FnBody:
-// every expression becomes a BodyNode row keyed by its node id, children
-// first, every statement a StmtKind row in post order.
+// Flattens a checked function into its FnBody: every expression becomes a
+// BodyNode row keyed by its node id, children first, every statement a
+// StmtKind row in post order.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     BodyCallArg,
     BodyContextGuard,
     BodyContract,
     BodyCoreClosureKind,
     BodyEnumArg,
     BodyEnumPayload,
-    BodyExpr,
     BodyFnValueKind,
     BodyHandleOp,
     BodyHostCall,
@@ -46,12 +46,13 @@ use jet_foundation.[
     NodeKind,
     OrFallback,
     StmtKind,
+    TEXPR_FIRST_FLAT_ID,
     TExprType,
     Variant,
     body_tree_new,
 ]
 
-// The FnBody of sealed function `value`.
+// The FnBody of checked function `value`.
 fn body_flat_function(value: TFunc) -> FnBody Never! {
     tree := body_tree_new()
     params :: body_flat_list_parameter(value.params, &tree)
@@ -101,14 +102,6 @@ fn body_flat_function(value: TFunc) -> FnBody Never! {
     }
 }
 
-// The BodyExpr of a standalone sealed expression.
-fn body_flat_root(value: TExpr) -> BodyExpr Never! {
-    tree := body_tree_new()
-    root :: body_flat_expr(value, &tree)
-    body_tree_finish(&tree)
-    BodyExpr{root: root, tree: tree}
-}
-
 // Sorts the rows by node id. A node a desugaring placed twice keeps one row.
 fn body_tree_finish(tree: &BodyTree) Never! {
     &tree.nodes.sort_by((left: BodyNode, right: BodyNode) -> left.id <=> right.id)
@@ -124,11 +117,15 @@ fn body_tree_finish(tree: &BodyTree) Never! {
     tree.expr_types = ^types
 }
 
+// Files `value` as a row of `tree`, children first. A node the checker gave no
+// id (AST_NODE_GENERATED) takes the next flat-local id below
+// TEXPR_FIRST_FLAT_ID: one per row, so no two such nodes share one.
 fn body_flat_expr(value: TExpr, tree: &BodyTree) -> Int Never! {
     kind :: body_flat_expr_kind(value.kind, &tree)
-    &tree.nodes.push(BodyNode{id: value.id, kind: kind, span: value.span})
-    &tree.expr_types.push(TExprType{id: value.id, ty: value.ty})
-    value.id
+    id :: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - tree.nodes.len() else -> value.id
+    &tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
+    &tree.expr_types.push(TExprType{id: id, ty: value.ty})
+    id
 }
 
 fn body_flat_stmt(value: TStmt, tree: &BodyTree) -> Int Never! {

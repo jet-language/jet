@@ -4530,16 +4530,16 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
     value := checked ?? return None
     if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
     sema_cell_guard_check_construct(expr, value.ty, &diagnostics)
-    sema_check_record_expr_type(expr, &value, &context)
+    sema_check_record_expr_id(expr, &value, &context)
     Val(^value)
 }
 
 // An expression form checked outside the common exit (a ranged view
-// argument, a materialized view read, a bare member chain) files its value
-// in the column there.
+// argument, a materialized view read, a bare member chain) files its node id
+// there.
 fn sema_check_expression_recorded(expr: Expr, checked: TExpr?, context: &SemaCheckContext) -> TExpr? Never! {
     value := checked ?? return None
-    sema_check_record_expr_type(expr, &value, &context)
+    sema_check_record_expr_id(expr, &value, &context)
     Val(^value)
 }
 

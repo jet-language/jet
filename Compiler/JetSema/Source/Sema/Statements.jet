@@ -6445,7 +6445,7 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
                     checked :: sema_check_statements(body, return_type, environment, program, &scopes, &erased_state, &tail_store, &context, &diagnostics, loop_depth)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> &erased_reasons.push(context.incomplete_reasons[reason_index])
-                    if marker.name == "DebugOnly" -> sema_check_context_rollback_keep_expr_types(&context, erased_mark) else -> sema_check_context_rollback(&context, erased_mark)
+                    if marker.name == "DebugOnly" -> sema_check_context_rollback_keep_expr_ids(&context, erased_mark) else -> sema_check_context_rollback(&context, erased_mark)
                     sema_scope_rollback(&scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {

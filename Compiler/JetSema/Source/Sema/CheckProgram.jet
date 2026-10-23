@@ -4,8 +4,6 @@
 use jet_foundation.[
     BodyExpr,
     FnBody,
-    TEXPR_FIRST_LOCAL_ID,
-    TExprSeal,
     body_tree_new,
     AST_NODE_GENERATED,
     WebPartitionMarker,
@@ -54,7 +52,6 @@ use jet_foundation.[
     TDeclarationFacts,
     TEffectFacts,
     TEffectSpan,
-    TExprType,
     TFailureCarrier,
     TFuncKind,
     TGenericParam,
@@ -436,14 +433,10 @@ struct SemaComptimeFunctionResult {
     obligations_pending: Bool{false}
 }
 
-// A checked item expression as a flat body of its own, its nodes numbered
-// function-locally (tir_function_seal's renumber mode).
+// A checked item expression as a flat body of its own.
 fn sema_publish_expression(value: TExpr) -> BodyExpr Never! {
-    sealed := value.copy()
-    seal := TExprSeal{rows: [TExprType]{}, next: TEXPR_FIRST_LOCAL_ID, renumber: true}
-    tir_seal_expr(&sealed, &seal)
     tree := body_tree_new()
-    root :: body_flat_expr(sealed, &tree)
+    root :: body_flat_expr(value, &tree)
     body_tree_finish(&tree)
     BodyExpr{root: root, tree: ^tree}
 }
@@ -1967,7 +1960,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params
             default_context.host_hooks = context.host_hooks
-            // The default's rows are the function's column rows.
+            // The default's node ids are the function's ids.
             default_context.next_expr_id = context.next_expr_id
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork :: sema_ownership_fork(&state)
@@ -1981,7 +1974,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
                 }
                 else -> {
                     default_expr = checked_default
-                    sema_check_context_merge_expr_types(default_context, &context)
+                    sema_check_context_merge_expr_ids(default_context, &context)
                 }
             }
         }
@@ -2096,8 +2089,6 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     }
     sema_place_borrow_function(&body, params, place_borrow_receiver)
     target :: sema_function_target_applicability(func)
-    expr_types := ^context.expr_types
-    context.expr_types = [TExprType]{}
     tir := TFunc{
         name: func.name,
         module_name: module_name,
@@ -2138,11 +2129,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         kind: function_kind,
         origin_facts: context.origin_facts.copy(),
         typed_goals: context.typed_goals.copy(),
-        expr_types: ^expr_types,
     }
-    // Nodes no source expression produced take function-local rows; the
-    // checker's tree ends here, as the function's flat body.
-    _ := tir_function_seal(&tir, context.next_expr_id, false)
+    // The checker's tree ends here, as the function's flat body; nodes the
+    // checker gave no id take flat-local ones.
     SemaFunctionResult{
         value: Val(body_flat_function(tir)),
         complete: true,

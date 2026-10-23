@@ -1,0 +1,45 @@
+// #5477: a panic inside `#Transact` rolls back like every other non-commit
+// exit: the changed balance is restored (through the Ledger's `Rollback`
+// implementation, which says so), then the `on_rollback` hooks run newest
+// first. A hook that fails is never fatal: its failure is appended to the
+// panic's report after "while rolling back, this also failed:", and the next
+// hook still runs. After the rollback the panic keeps propagating
+// (D-NOPANIC1), so the program stops with the panic's report.
+struct Ledger {
+    balance: Int
+}
+
+struct LedgerSnap {
+    balance: Int
+}
+
+impl Ledger.Rollback {
+    type Snapshot = LedgerSnap
+
+    fn snapshot(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+
+    fn restore(&self, snap: ^LedgerSnap) {
+        print("balance {self.balance} restored to {snap.balance}")
+        self.balance = snap.balance
+    }
+}
+
+fn audit() {
+    panic("the audit log is unavailable")
+}
+
+fn withdraw(ledger: &Ledger) {
+    #Transact(tx) {
+        ledger.balance -= 10
+        tx.on_rollback(() -> print("hook: release the hold"))
+        tx.on_rollback(() -> audit())
+        tx.on_rollback(() -> print("hook: notify the owner"))
+        panic("the card was declined")
+    }
+}
+
+fn run() {
+    ledger := Ledger{balance: 100}
+    withdraw(&ledger)
+    print("not reached: balance {ledger.balance}")
+}

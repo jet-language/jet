@@ -862,16 +862,7 @@ enum TFactPurity {
     Impure
 }
 
-// The expression-type column under construction (tir_function_seal): the
-// rows filed so far, the next free function-local id, and whether every node
-// takes a fresh id (a function assembled from other functions' nodes).
-struct TExprSeal {
-    rows: [TExprType]
-    next: Int
-    renumber: Bool
-}
-
-// The type a sealed column (tir_function_seal) files for node id `id`.
+// The type a body's sorted rows (BodyTree.expr_types) file for node id `id`.
 fn tir_expr_type(rows: [TExprType], id: Int) -> Type? Never! {
     low := 0
     high := rows.len()
@@ -883,5 +874,9 @@ fn tir_expr_type(rows: [TExprType], id: Int) -> Type? Never! {
     None
 }
 
-// The first function-local id `tir_function_seal` hands out.
+// The first function-local id the checker hands out (sema_check_record_expr_id).
 TEXPR_FIRST_LOCAL_ID :: -2
+
+// The first flat-local id the flattener (body_flat_expr) hands a node the
+// checker gave no id, far below the checker's function-local ids.
+TEXPR_FIRST_FLAT_ID :: -549755813888

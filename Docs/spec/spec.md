@@ -1364,15 +1364,32 @@ for the bounded-queue shape.
 Inside `#Transact`, writes to `Shared` values are buffered and commit atomically.
 The body runs exactly once. At commit, touched values are write-locked together
 in stable-address order, buffered writes are applied, and the locks are released.
-Contention waits; it does not retry the body. A `?` failure or early return
-before commit drops buffered writes. Irreversible `Net`, `FS`, or `Exec` effects
-inside the body are E0746; move them after the transaction or register them with
-`on_commit` on a named transaction. A transaction name is optional; the named
-form exposes `on_commit` and `on_rollback`. `name.on_rollback(() -> { … })`
-hooks run in reverse registration order after a `?` failure or early return and
-are dropped on a clean commit. Registering one takes control of undo for the
-handled value, so that value is not automatically snapshotted (D-STM1,
-D-CONC-STM1=A, D-TXN-ROLLBACK).
+Contention waits; it does not retry the body. Irreversible `Net`, `FS`, or `Exec`
+effects inside the body are E0746; move them after the transaction or register
+them with `on_commit` on a named transaction. A transaction name is optional;
+the named form exposes `on_commit` and `on_rollback`. Registering an
+`on_rollback` hook takes control of undo for the handled value, so that value is
+not automatically snapshotted (D-STM1, D-CONC-STM1=A, D-TXN-ROLLBACK).
+
+Every exit other than the body's clean end rolls back, the same way on `jet run`,
+`jet build` and `--release`: a failure that propagates out of the block, an
+early `return`, a `break` or `next` out of the block, a panic or trap, a
+cancellation or deadline, `process.exit` and `os.stop`. Rollback restores the
+snapshotted values (latest first), drops the buffered `Shared` writes, then runs
+the `on_rollback` hooks in reverse registration order, in the same cleanup that
+runs the frame's closes and guards (D-FAIL-EXIT1). A clean commit drops the
+rollback hooks unrun. Each hook runs with the stop that is unwinding the frame
+masked (a cancellation or deadline does not reach it) and under its own
+deadline of 5 seconds, observed at the hook's wait points like any `#Context`
+deadline. A failure inside a hook (a panic, a trap, its deadline) is never
+fatal: it stops only that hook, the remaining hooks and the frame's cleanup
+still run, and it is reported as a secondary failure after `while rolling back,
+this also failed:`. It is appended to the report of the panic or stop being
+unwound, or written to stderr when the rollback came from a propagated failure
+or an early exit, and the program goes on. Rollback never turns a panic into a
+recoverable error: after the hooks the panic keeps propagating (D-NOPANIC1). A
+hard kill (SIGKILL, power loss) runs nothing; the buffered writes were never
+applied, so no half transaction is visible (#5477).
 
 ```jet
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {

@@ -113,6 +113,10 @@ struct IRBuilder {
     // entry returning (ir_entry_ending), so its drops can leave the heap to
     // the kernel (#5478).
     entry: Bool{false}
+    // The checked program, set while a `#Transact` block with snapshots is
+    // built (ir_transact): its stop edges restore them (ir_stop_return),
+    // which builds their Rollback calls and assignments.
+    program: IRProgram?{None}
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
@@ -979,7 +983,7 @@ fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
 }
 
 // The first id of the nodes a builder makes itself (ir_node), far below the
-// function-local ids the checker and tir_function_seal hand out.
+// function-local ids the checker and the flattener (TEXPR_FIRST_FLAT_ID) hand out.
 IR_FIRST_NODE_ID :: -1099511627776
 
 // The first index of the statements a builder makes itself (ir_stmt_node),
@@ -1510,6 +1514,8 @@ fn ir_route_can_stop(symbol: String) -> Bool Never! {
         "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_journey_reset" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
+        // A rollback hook's failure is taken by _leave (BuildTransact.jet ir_transaction_walk).
+        "jet_rt_transaction_hook_enter" | "jet_rt_transaction_hook_leave" -> false
         else -> true
     }
 }
@@ -1580,27 +1586,48 @@ fn ir_stop_poll(m: &IRModule, key: String) -> Int Never! {
     id
 }
 
-// The stop edge: the cleanup of a return from here (the open transactions'
-// Stm and handle drops, whose rollback hooks run, then every owned
+// The stop edge: the cleanup of a return from here (each open
+// transaction's snapshots restored, latest first, then its Stm and handle
+// dropped, whose rollback hooks run, as ir_tx_unwind does; then every owned
 // variable's close and drop), inside one runtime cleanup scope, then a
 // return with no result written (no caller reads it: its own stop check
-// comes first). Snapshots are not restored: the frame is being left.
+// comes first).
 fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
     if ir_stop_cleans(b) {
         b.stopping = true
         word_row :: ir_word_row(&m)
         saved :: ir_runtime(&m, &b, "jet_rt_cleanup_enter", [Int]{}, word_row)
-        index := b.transactions.len() - 1
+        states :: ir_own_states(b, b.bindings.len())
+        // A restore's own code must not unwind again.
+        open :: b.transactions
+        b.transactions = [IRTxFrame]{}
+        program :: b.program.copy()
+        index := open.len() - 1
         loop index >= 0 {
-            frame :: b.transactions[index]
+            frame :: open[index]
             index -= 1
-            if frame.stm >= 0 -> ir_emit(&b.f, IROp.Drop, -1, frame.stm, -1, -1, b.line)
-            if frame.handle >= 0 -> ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
+            if frame.snapshots.len() > 0 && program == .Val(p) {
+                position := frame.snapshots.len() - 1
+                loop position >= 0 {
+                    ir_tx_restore(&m, p, &b, frame.snapshots[position], Span{start: 0, end: 0})
+                    position -= 1
+                }
+            }
+            // Cleared, as ir_tx_unwind does, so the binding drops below find
+            // null: a second drop of the handle ran the rollback hooks again.
+            if frame.stm >= 0 {
+                ir_emit(&b.f, IROp.Drop, -1, frame.stm, -1, -1, b.line)
+                ir_emit(&b.f, IROp.Const, frame.stm, 0, -1, -1, b.line)
+            }
+            if frame.handle >= 0 {
+                ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
+                ir_emit(&b.f, IROp.Const, frame.handle, 0, -1, -1, b.line)
+            }
             if frame.shield {
                 _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
             }
         }
-        states :: ir_own_states(b, b.bindings.len())
+        b.transactions = open
         ir_drop_bindings(&m, &b, 0)
         ir_set_own_states(&b, states)
         _ :: ir_runtime(&m, &b, "jet_rt_cleanup_leave", [Int]{saved}, -1)

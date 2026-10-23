@@ -6,9 +6,11 @@
 // committed, else the rollback hooks LIFO, and releases the other list
 // un-run. A block touching Shared values also owns a runtime Stm, committed
 // at the clean end and rolled back by its drop. The values the block mutates
-// are snapshotted on entry; a `return` or a `break`/`next` leaving the block
-// restores them, latest first, and drops the Stm and the handle before the
-// exit's own drops (ir_tx_unwind).
+// are snapshotted on entry. Every exit that is not the clean end rolls back
+// the same way (#5477): a `return`, a propagated error or a `break`/`next`
+// leaving the block (ir_tx_unwind) and a stop (a panic, a cancellation,
+// process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
+// latest first, then drop the Stm and the handle before the exit's own drops.
 
 use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
 
@@ -57,11 +59,11 @@ fn ir_transaction_drop_body(m: &IRModule, a: &IRBuilder) Never! {
     zero :: ir_word_const(&m, &a, 0)
     clean :: ir_bool_op(&m, &a, IROp.Ne, committed, zero)
     ir_open_if(&a.f, clean, a.line)
-    ir_transaction_walk(&m, &a, commit_hooks, true)
-    ir_transaction_walk(&m, &a, rollback_hooks, false)
+    ir_transaction_walk(&m, &a, commit_hooks, true, false)
+    ir_transaction_walk(&m, &a, rollback_hooks, false, false)
     ir_else(&a.f, a.line)
-    ir_transaction_walk(&m, &a, rollback_hooks, true)
-    ir_transaction_walk(&m, &a, commit_hooks, false)
+    ir_transaction_walk(&m, &a, rollback_hooks, true, true)
+    ir_transaction_walk(&m, &a, commit_hooks, false, false)
     ir_end(&a.f, a.line)
     size :: ir_word_const(&m, &a, 24)
     ir_free(&m, &a, handle, size)
@@ -71,7 +73,12 @@ fn ir_transaction_drop_body(m: &IRModule, a: &IRBuilder) Never! {
 
 // Walks the hook list from `head`: each node's callback runs (when `run`)
 // and is released, then the node is freed (Lower lower_transaction_walk).
-fn ir_transaction_walk(m: &IRModule, a: &IRBuilder, head: Int, run: Bool) Never! {
+// A `guarded` callback (a rollback hook) runs between
+// jet_rt_transaction_hook_enter and _leave (SharedTransactions.jet): masked
+// from the stop being unwound, under its own deadline, and a failure in it
+// is reported as a secondary failure, so the call has no stop check and
+// the walk goes on to the next hook.
+fn ir_transaction_walk(m: &IRModule, a: &IRBuilder, head: Int, run: Bool, guarded: Bool) Never! {
     node :: ir_temp_like(&m, &a, head)
     ir_emit(&a.f, IROp.Copy, node, head, -1, -1, a.line)
     exit :: ir_open(&a.f, IROp.Block, a.line)
@@ -79,7 +86,15 @@ fn ir_transaction_walk(m: &IRModule, a: &IRBuilder, head: Int, run: Bool) Never!
     more :: ir_option_is_some(&m, &a, node)
     ir_exit_unless(&m, &a, more, exit)
     boxed :: ir_load_word(&m, &a, node, 0)
-    if run {
+    if run && guarded {
+        word_row :: ir_word_row(&m)
+        frame :: ir_runtime(&m, &a, "jet_rt_transaction_hook_enter", [Int]{}, word_row)
+        stopping :: a.stopping
+        a.stopping = true
+        _ :: ir_call_closure(&m, &a, boxed, [Int]{}, -1)
+        a.stopping = stopping
+        _ :: ir_runtime(&m, &a, "jet_rt_transaction_hook_leave", [Int]{frame}, -1)
+    } else if run {
         _ :: ir_call_closure(&m, &a, boxed, [Int]{}, -1)
     }
     following :: ir_load_word(&m, &a, node, 8)
@@ -125,6 +140,7 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
         taken :: ir_tx_snapshot(&m, p, &b, snapshot, span) ?? return
         &saved.push(taken)
     }
+    if saved.len() > 0 -> b.program = Val(p.copy())
     &b.transactions.push(IRTxFrame{handle: handle_slot, stm: stm_slot, snapshots: saved, loops: b.loops.len(), shield: false})
     ir_stmts(&m, p, &b, body)
     _ :: &b.transactions.pop()
