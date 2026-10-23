@@ -66,6 +66,8 @@ export function usage() {
     "       compiler-diff.mjs --canary [--reference <jet>]",
     "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else $JET; required)",
     "  --candidate PATH     candidate compiler (default $JET_CANDIDATE_COMPILER; required)",
+    "  --reference-env K=V  environment for the reference compiler only, e.g. JET_TOOLCHAIN_ROOT (repeatable)",
+    "  --candidate-env K=V  environment for the candidate compiler only (repeatable)",
     "  --corpus NAME        golden | ui | differential | all (default all; repeatable)",
     "  --phases LIST        override phases: check,run,build",
     "  --filter TEXT        keep cases whose path contains TEXT (repeatable)",
@@ -97,6 +99,8 @@ export function parseArgs(argv) {
     root: null,
     list: false,
     canary: false,
+    referenceEnv: {},
+    candidateEnv: {},
     help: false,
   };
   const value = (i, flag) => {
@@ -107,7 +111,12 @@ export function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--reference") options.reference = value(++i, arg);
     else if (arg === "--candidate") options.candidate = value(++i, arg);
-    else if (arg === "--corpus") {
+    else if (arg === "--reference-env" || arg === "--candidate-env") {
+      const pair = value(++i, arg);
+      const eq = pair.indexOf("=");
+      if (eq <= 0) throw new Unavailable(`${arg} expects KEY=VALUE, got ${pair}`);
+      options[arg === "--reference-env" ? "referenceEnv" : "candidateEnv"][pair.slice(0, eq)] = pair.slice(eq + 1);
+    } else if (arg === "--corpus") {
       const corpus = value(++i, arg);
       if (corpus === "all") options.corpora.push(...CORPORA);
       else if (CORPORA.includes(corpus)) options.corpora.push(corpus);
@@ -600,6 +609,26 @@ function invoke(compiler, command, cwd, env, options) {
       });
     });
   });
+}
+
+// A compiler that cannot run a trivial program in its scrubbed side
+// environment (a missing toolchain root or identity, a broken runtime pack)
+// would fail every case the same way as the other side and look "matched".
+// Refuse to compare until each side proves it runs.
+const READY_TEXT = "compiler-diff-ready";
+
+async function requireReady(compiler, options) {
+  const dir = join(compiler.sideRoot, "ready");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `ready.${EXT}`), `fn run() {\n    print("${READY_TEXT}")\n}\n`);
+  const run = await invoke(compiler, { args: ["run", `ready.${EXT}`], stdin: null }, dir, sideEnv(compiler.sideRoot), options);
+  rmSync(dir, { recursive: true, force: true });
+  if (run.spawnError) throw new Unavailable(`${compiler.role} compiler could not start: ${run.spawnError}`);
+  if (run.code !== 0 || run.stdout.trim() !== READY_TEXT) {
+    const why = run.stderr.trim().split("\n").slice(0, 3).join(" | ") || `stdout ${JSON.stringify(run.stdout.slice(0, 200))}`;
+    throw new Unavailable(`${compiler.role} compiler cannot run a trivial program in its side environment (status ${run.code ?? run.signal}): ${why}; pass --${compiler.role}-env KEY=VALUE for any variable it needs`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,7 +1146,7 @@ async function compare(options) {
         role: "reference",
         path: referencePath,
         argv: [referencePath],
-        env: {},
+        env: { ...options.referenceEnv },
         sideRoot: join(root, "reference"),
         pinned: pinFiles([referencePath]),
       },
@@ -1126,7 +1155,7 @@ async function compare(options) {
           role: "candidate",
           path: CANARY_CANDIDATE,
           argv: [process.execPath, CANARY_CANDIDATE],
-          env: { COMPILER_DIFF_CANARY_REAL: referencePath },
+          env: { ...options.referenceEnv, COMPILER_DIFF_CANARY_REAL: referencePath },
           sideRoot: join(root, "candidate"),
           pinned: pinFiles([CANARY_CANDIDATE, referencePath]),
         }
@@ -1134,7 +1163,7 @@ async function compare(options) {
           role: "candidate",
           path: candidatePath,
           argv: [candidatePath],
-          env: {},
+          env: { ...options.candidateEnv },
           sideRoot: join(root, "candidate"),
           pinned: pinFiles([candidatePath]),
         },
@@ -1149,6 +1178,8 @@ async function compare(options) {
     }
     const corpora = options.canary ? ["canary"] : options.corpora;
     console.log(`compiler-diff: ${cases.length} case(s) from ${corpora.join(", ")}; root ${tilde(root)}`);
+    await requireReady(context.reference, options);
+    if (!options.canary) await requireReady(context.candidate, options);
 
     const width = String(cases.length).length;
     const results = await runAll(cases, context, options, (index, result) => {

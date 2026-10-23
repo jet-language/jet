@@ -99,22 +99,56 @@ test("a missing candidate is unavailable, never a match", () => {
   assert.doesNotMatch(run.stdout, /summary:/u);
 });
 
+// A fake compiler that passes the readiness probe (`run ready.jet`), then
+// runs `script` for every case.
+const READY = 'if [ "$1 $2" = "run ready.jet" ]; then echo compiler-diff-ready; exit 0; fi\n';
+
+function fakeCompilers(dir, script) {
+  return ["reference", "candidate"].map((role) => {
+    const path = join(dir, `jet-${role}`);
+    writeFileSync(path, `#!/bin/sh\n${script}`, { mode: 0o755 });
+    return path;
+  });
+}
+
+// A compiler that cannot run in its scrubbed side environment fails every
+// case exactly as the other side does; that must never compare as a match.
+test("a compiler that fails the readiness probe is unavailable, never a match", () => {
+  const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-dev/scratch");
+  mkdirSync(base, { recursive: true });
+  const dir = mkdtempSync(join(base, "compiler-diff-test-"));
+  try {
+    const compilers = fakeCompilers(dir, 'echo "Error [E2105]: JET_TOOLCHAIN_ROOT is not set" >&2\nexit 1\n');
+    const run = spawnSync(process.execPath, [
+      fileURLToPath(new URL("./compiler-diff.mjs", import.meta.url)),
+      "--reference", compilers[0],
+      "--candidate", compilers[1],
+      "--corpus", "differential",
+      "--phases", "check",
+      "--limit", "1",
+      "--mem-limit", "none",
+      "--root", join(dir, "root"),
+    ], { encoding: "utf8" });
+    assert.equal(run.status, 2, run.stdout + run.stderr);
+    assert.match(run.stderr, /unavailable: reference compiler cannot run a trivial program .*E2105/u);
+    assert.doesNotMatch(run.stdout, /summary:/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Snapshot rotation can delete or replace a pinned binary mid-run. Both sides
 // then fail identically, which must never compare as a match.
 for (const [mutation, script] of [
-  ["deleted", 'rm -f "$0"\necho "no problems"\n'],
-  ["replaced", 'printf "#!/bin/sh\\necho replaced\\n" > "$0"\necho "no problems"\n'],
+  ["deleted", `${READY}rm -f "$0"\necho "no problems"\n`],
+  ["replaced", `${READY}printf "#!/bin/sh\\necho replaced\\n" > "$0"\necho "no problems"\n`],
 ]) {
   test(`a compiler ${mutation} mid-run is unavailable, never a match`, () => {
     const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-dev/scratch");
     mkdirSync(base, { recursive: true });
     const dir = mkdtempSync(join(base, "compiler-diff-test-"));
     try {
-      const compilers = ["reference", "candidate"].map((role) => {
-        const path = join(dir, `jet-${role}`);
-        writeFileSync(path, `#!/bin/sh\n${script}`, { mode: 0o755 });
-        return path;
-      });
+      const compilers = fakeCompilers(dir, script);
       const run = spawnSync(process.execPath, [
         fileURLToPath(new URL("./compiler-diff.mjs", import.meta.url)),
         "--reference", compilers[0],
