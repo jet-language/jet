@@ -1,21 +1,22 @@
 // A `jet run` program, kept in the user cache directory
 // (`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`), so a rerun
 // of unchanged sources runs it without compiling. Each entry file has one
-// slot, named by this compiler, the profile and the entry's path. The slot's
-// record names its kept program and what that program was built from:
+// slot, named by the profile and the entry's path. The slot's record names
+// its kept program and what that program was built from:
 // - the toolchain: this compiler, its runtime pack and the Core sources, by
 //   file identity;
 // - a hash of the schema snapshots its checks read and of every file of its
 //   authorized source snapshot.
-// A rerun whose toolchain and sources match the record runs the program.
-// Any other compile replaces the slot, so the cache holds one program per
-// entry file. A compile that read a comptime input (`embed_file`,
-// `embed_bytes`, `find`) keeps nothing: those files lie outside the snapshot,
-// so the record would not name them.
+// A rerun whose toolchain and sources match the record runs the program and
+// marks the record used. Any other compile replaces the slot, so the cache
+// holds one program per entry file, and at most JET_CLI_SCRIPT_KEEP_MAX
+// slots, the most recently used. A compile that read a comptime input
+// (`embed_file`, `embed_bytes`, `find`) keeps nothing: those files lie
+// outside the snapshot, so the record would not name them.
 use core.crypto as script_crypto
 use core.files as cli_files
 use core.sys as cli_sys
-use jet_backend.[X64Executable, x64_executable_file, x64_executable_write]
+use jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverComptimeInputLog,
@@ -26,11 +27,15 @@ use jet_driver.[
 use jet_foundation.[CORE_SOURCE_OWNED_ROWS]
 
 // Names the kept-program records; a new layout is a new name.
-JET_CLI_SCRIPT_RECORD :: "jet.script-run/v2"
+JET_CLI_SCRIPT_RECORD :: "jet.script-run/v3"
 
 // The rows of a slot record before its toolchain rows: the record name, the
 // program file, the sources hash and the four authority rows.
 JET_CLI_SCRIPT_RECORD_HEAD :: 7
+
+// The most slots the cache holds; a keep past it removes the least recently
+// used ones.
+JET_CLI_SCRIPT_KEEP_MAX :: 64
 
 // A `jet run` compile whose program is kept when it finishes: its slot, the
 // toolchain and sources it started from, and the log of the comptime inputs
@@ -129,11 +134,11 @@ fn jet_cli_script_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> String
     script_crypto.sha256(framed).hex()
 }
 
-// The slot of the entry file `entry_path` under the compiler `identity` and
-// the profile.
-fn jet_cli_script_slot(identity: String, release: Bool, entry_path: String) -> String Never! {
+// The slot of the entry file `entry_path` under the profile. A new compiler
+// replaces the program in the same slot (the record's toolchain names it),
+// so compilers that come and go don't add programs.
+fn jet_cli_script_slot(release: Bool, entry_path: String) -> String Never! {
     framed := [U8]{}
-    jet_cli_script_frame(&framed, identity)
     jet_cli_script_frame(&framed, if release -> "release" else -> "dev")
     jet_cli_script_frame(&framed, entry_path)
     script_crypto.sha256(framed).hex()
@@ -173,20 +178,69 @@ fn jet_cli_script_record_program(rows: [String]) -> String? Never! {
 // The program kept in `keep`'s slot for exactly its toolchain and sources,
 // run with this invocation's authority; None when the slot holds no such
 // program, so the file compiles. The kept program runs from memory as a
-// compiled one does, mapped from its file, or from that file
-// (jet_cli_launch).
-fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
+// compiled one does, or from the file `binary` (jet_cli_launch). A program
+// a concurrent keep removed before it was read is a miss too.
+fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String, binary: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
     directory :: jet_cli_script_cache_dir() ?? return None
-    text :: cli_files.read("{directory}/{keep.slot}.run") ?? return None
+    record :: "{directory}/{keep.slot}.run"
+    text :: cli_files.read(record) ?? return None
     rows :: text.split("\n").to_list()
     program :: jet_cli_script_record_program(rows) ?? return None
     if rows[2] != keep.sources || rows[JET_CLI_SCRIPT_RECORD_HEAD..<rows.len()].join("\n") != keep.toolchain -> return None
-    executable :: x64_executable_file("{directory}/{program}") ?? return None
+    executable :: x64_executable_kept("{directory}/{program}") ?? return None
     authority := JetCLIAuthority{required: jet_cli_script_rights(rows[3]), granted: jet_cli_script_rights(rows[4]), denied: jet_cli_script_rights(rows[5]), authority: rows[6]}
     jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, invocation))
     refused :: jet_cli_authority_report(file, source, color, "run", authority)
     if refused != None -> return refused
-    Val(jet_cli_launch(executable, file, "{directory}/{program}", true, program_args, release, invocation, false, color))
+    jet_cli_script_used(record, text)
+    Val(jet_cli_launch(executable, file, binary, program_args, release, invocation, false, color))
+}
+
+// Mark the slot record `record`, whose text is `text`, as just used: a copy
+// written beside it and renamed over it, so a concurrent run reads either
+// record whole and the oldest-used slots are the ones trimmed. A keep that
+// replaced the record meanwhile is undone, leaving the next run to compile
+// again (its program may be gone).
+fn jet_cli_script_used(record: String, text: String) {
+    staged :: "{record}.{cli_sys.pid()}"
+    cli_files.write(staged, text) ?? return
+    if cli_files.rename(staged, record) == .Err(_) -> cli_files.remove(staged).drop("a staged record is never read")
+}
+
+// Remove the least recently used slots of `directory` past
+// JET_CLI_SCRIPT_KEEP_MAX, each record before its program, so the cache stays
+// bounded however many entry files run. A run that read a removed record
+// before its removal finds the program gone and compiles again.
+fn jet_cli_script_trim(directory: String) {
+    listed :: cli_files.list_dir(directory) ?? return
+    names := [String]{}
+    used := [Int]{}
+    latest := 0
+    loop entry in listed {
+        if !entry.name.ends_with(".run") -> next
+        status :: cli_files.stat("{directory}/{entry.name}") ?? next
+        modified :: status.modified.to_unix_ns() ?? next
+        &names.push(entry.name)
+        &used.push(modified)
+        if modified > latest -> latest = modified
+    }
+    // The oldest-used slot, one at a time; a removed one counts as newer than
+    // any.
+    excess := names.len() - JET_CLI_SCRIPT_KEEP_MAX
+    loop excess > 0 {
+        excess -= 1
+        oldest := 0
+        loop index in 1..<names.len() {
+            if used[index] < used[oldest] -> oldest = index
+        }
+        used[oldest] = latest + 1
+        record :: "{directory}/{names[oldest]}"
+        text :: cli_files.read(record) ?? next
+        cli_files.remove(record) ?? next
+        if jet_cli_script_record_program(text.split("\n").to_list()) == .Val(program) {
+            cli_files.remove("{directory}/{program}").drop("a run reads its program whole before it runs")
+        }
+    }
 }
 
 // The keeper of a `jet run` compile of `snapshot`; None keeps nothing (no
@@ -195,7 +249,7 @@ fn jet_cli_script_keeper(release: Bool, snapshot: JetDriverAuthorizedSourceSnaps
     identity :: jet_cli_compiler_identity() ?? return None
     toolchain :: jet_cli_script_toolchain(identity, release) ?? return None
     Val(JetCLIScriptKeep{
-        slot: jet_cli_script_slot(identity, release, snapshot.entry_path),
+        slot: jet_cli_script_slot(release, snapshot.entry_path),
         toolchain: toolchain,
         sources: jet_cli_script_sources(snapshot),
         release: release,
@@ -216,19 +270,18 @@ fn jet_cli_script_inputs_read(log: Shared<JetDriverComptimeInputLog>) -> Int Nev
 }
 
 // Keep the program `executable` that `keep`'s compile built, with its `authority`
-// before any invocation rows, in place of the slot's previous one. Nothing
-// is kept when the compile read a comptime input or the toolchain changed
-// while it compiled. The program goes to a file of its own, named by the
-// slot, this process and its sources, so a run still mapping the previous
-// program never sees it change. Each file is written beside its place and
+// before any invocation rows, in place of the slot's previous one, in the
+// kept form (Image/Loader.jet x64_executable_keep: its program part, not a
+// copy of the runtime image). Nothing is kept when the compile read a
+// comptime input. The record names the toolchain the compile started from,
+// so a toolchain that changed while it compiled leaves a record no later
+// run matches. The program goes to a file of its own, named by the slot,
+// this process and its sources. Each file is written beside its place and
 // renamed into it, and the record last, so a concurrent run never sees a
 // partial one. A cache that can't be written leaves the next run to compile
 // again.
 fn jet_cli_script_keep(keep: JetCLIScriptKeep, executable: X64Executable, authority: JetCLIAuthority) {
     if jet_cli_script_inputs_read(keep.input_log) > 0 -> return
-    identity :: jet_cli_compiler_identity() ?? return
-    current :: jet_cli_script_toolchain(identity, keep.release) ?? return
-    if current != keep.toolchain -> return
     directory :: jet_cli_script_cache_dir() ?? return
     cli_files.create_dir_all(directory) ?? return
     record :: "{directory}/{keep.slot}.run"
@@ -239,15 +292,15 @@ fn jet_cli_script_keep(keep: JetCLIScriptKeep, executable: X64Executable, author
     pid :: cli_sys.pid()
     program :: "{keep.slot}-{pid}-{keep.sources}"
     staged :: "{directory}/{program}.tmp"
-    if x64_executable_write(executable, staged) != "" {
+    if x64_executable_keep(executable, staged) != "" {
         cli_files.remove(staged).drop("a partial program is never named by a record")
         return
     }
-    cli_files.set_mode(staged, 0o755) ?? return
     cli_files.rename(staged, "{directory}/{program}") ?? return
     cli_files.write("{record}.{pid}", jet_cli_script_record_encode(program, keep, authority)) ?? return
     cli_files.rename("{record}.{pid}", record) ?? return
     if previous == .Val(old) {
         if old != program -> cli_files.remove("{directory}/{old}").drop("a stale program only takes space")
     }
+    jet_cli_script_trim(directory)
 }

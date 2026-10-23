@@ -392,10 +392,9 @@ fn link_bind_sections(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageV
 // them out (image_gap 0 when it holds them all): the mapping reads only the
 // ELF header, and Image/Loader.jet x64_executable_complete reads the rest
 // for whoever needs the whole file. A whole executable is all `tail`
-// (image_end and tail_at 0). A kept program's file (Image/Loader.jet
-// x64_executable_file) is all image part, `image_path` that file, read
-// without all but its first page. x64_executable_bytes puts the file
-// together.
+// (image_end and tail_at 0). A kept program (Image/Loader.jet
+// x64_executable_kept) is bound to its pack file again, its `image` that
+// file's first page. x64_executable_bytes puts the file together.
 struct X64Executable {
     image: [U8]
     image_path: String

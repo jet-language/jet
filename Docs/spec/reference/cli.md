@@ -589,13 +589,14 @@ script alone, and the source walk of a package leaves every script out.
 `jet run` keeps the program it built in the user cache directory
 (`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
 [`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)). This
-applies to scripts and to any other file. There is one program per entry file,
-compiler identity and profile. Its record names the toolchain it was built
-with (the compiler, runtime pack and Core source file identities) and a hash
-of its source snapshot. A rerun with the same toolchain and sources runs the
-kept program without compiling. Any change compiles again and replaces the
-kept program. A compile that read a comptime input file keeps nothing, and a
-`--verbose` or traced run always compiles.
+applies to scripts and to any other file. There is one program per entry file
+and profile. Its record names the toolchain it was built with (the compiler,
+runtime pack and Core source file identities) and a hash of its source
+snapshot. A rerun with the same toolchain and sources runs the kept program
+without compiling. Any change, including a different compiler, compiles again
+and replaces the kept program. The cache holds at most 64 programs; keeping
+another removes the least recently run one. A compile that read a comptime
+input file keeps nothing, and a `--verbose` or traced run always compiles.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
