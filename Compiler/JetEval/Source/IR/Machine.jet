@@ -1,55 +1,84 @@
 // The slot IR interpreter: compile-time evaluation runs the same IR the
 // machine code is selected from (Compiler/JetIR/Source/IR.jet), so comptime
-// and run time share one meaning. Every instruction does what the x86-64
-// selection makes of it: a slot holds one machine word, memory is bytes in
-// the native layout, and runtime routes are the runtime's symbols with its
-// semantics.
+// and run time share one meaning. Two modules run side by side: the
+// evaluated item's (unit 0) and the runtime pack's own (unit 1: runtime.ir,
+// the O1 module the runtime object is compiled from; JetIR Codec.jet). Every
+// runtime route is the runtime's code; only the host primitives beneath it
+// (`#FFI(asm)` leaves and Linux system calls) and the stops are the
+// machine's (Runtime.jet).
 //
-// Words. An exact Int slot holds an inline integer (bits 63 and 62 agree)
-// or a big-integer handle; a fixed-width integer its sign- or zero-extended
-// value; a Float its IEEE bits (signed), a Float32 its 32 bits; a Bool 0/1.
-// Pointers are words too: a memory address is `region << 32 | offset`
-// (region 0 is null), a String is a text handle, a function address a
-// function handle, a String builder a builder handle. Handles never alias an
-// address, so a Load through a String or a dangling address is an internal
-// problem, never silent garbage.
+// Words. A slot holds one machine word, as the x86-64 selection keeps it:
+// an exact Int is inline (bits 63 and 62 agree) or its runtime node's
+// address tagged with bit 62 (Int.jet); a fixed-width integer its sign- or
+// zero-extended value; a Float its IEEE bits (signed), a Float32 its 32
+// bits; a Bool 0/1; a String the address of its [data, len, cap] header
+// (Text.jet). A memory address is `region << 32 | offset` (region 0 is
+// null). A function address is a handle (JET_EVAL_IR_FUNCTION_TAG + unit *
+// JET_EVAL_IR_UNIT + function), never an address, so a Load through it is
+// an internal problem, never silent garbage.
 use core.math as math
 use jet_foundation.[Span]
 use jet_backend.[lower_float_constant_bits]
-use jet_ir.[IRFunction, IRModule, IROp, IRType, IRTypeKind, IR_OVERFLOW_WRAP]
+use jet_ir.[IRFunction, IRModule, IROp, IRType, IRTypeKind, IR_OVERFLOW_WRAP, ir_box_share]
 
 JET_EVAL_IR_REGION :: 4294967296
-JET_EVAL_IR_TEXT_TAG :: 1152921504606846976
 JET_EVAL_IR_FUNCTION_TAG :: 2305843009213693952
-JET_EVAL_IR_BUILDER_TAG :: 3458764513820540928
-JET_EVAL_IR_BIG_TAG :: 4611686018427387904
+JET_EVAL_IR_UNIT :: 4294967296
+JET_EVAL_IR_INT_TAG :: 4611686018427387904
 JET_EVAL_IR_INLINE_MIN :: -4611686018427387904
 JET_EVAL_IR_INLINE_MAX :: 4611686018427387903
+// The stack pointer os_stack_address_i64 reads: a band no region reaches.
+JET_EVAL_IR_STACK :: 1152921504606781440
+// Runtime-module steps per unit of fuel: a runtime route is many IR steps
+// where the item's own code is one.
+JET_EVAL_IR_RUNTIME_FUEL :: 64
 
-// The interpreter's mutable state; the module is read-only beside it.
-// `regions[r]` is the bytes of region r (0 unused), `live[r]` whether it
-// may still be read; `targets[f]` the branch target of each instruction of
-// function f (built on its first call, `ready[f]`).
+// One module's state beside its read-only code: `data_regions[row]` the
+// address of data row `row`, `data_texts[row]` the String header a
+// ConstText of it reads (0 until first used), `statics` the address of a
+// name row's bytes (a ConstBigInt decimal), `routes` the resolved target of
+// a CallRuntime name row (Runtime.jet jet_eval_ir_resolve), `prims[f]` the
+// host primitive function f is (0: none); `targets[f]`, `frames[f]` and
+// `frame_sizes[f]` function f's branch targets and frame layout (built on
+// its first call, `ready[f]`).
+struct JetEvalIRUnit {
+    data_regions: [Int]
+    data_texts: [Int]
+    statics: [Int:Int]
+    routes: [Int:Int]
+    prims: [Int]
+    targets: [[Int]]
+    frames: [[Int]]
+    frame_sizes: [Int]
+    ready: [Bool]
+}
+
+// The interpreter's mutable state; the modules are read-only beside it.
+// `regions[r]` is the bytes of region r (0 unused), `live[r]` whether it may
+// still be read, `spare` released regions a new mapping reuses. `runtime`
+// is 0 before the runtime unit starts, 1 once its init hooks ran, 2 when it
+// can't run; `hooks` is set while they run. `gs_base` is the GS base
+// arch_prctl set (Thread.jet's TCB).
 struct JetEvalIRState {
     regions: [[U8]]
     live: [Bool]
-    texts: [String]
-    bigs: [Int]
-    builders: [[U8]]
-    data_regions: [Int]
-    data_texts: [Int]
-    targets: [[Int]]
-    // The owner count of each counted buffer (by data address) shared by more
-    // than one owner; a buffer missing here has one (Refcount.jet's count word).
-    owners: [Int:Int]
-    ready: [Bool]
+    spare: [Int]
+    units: [JetEvalIRUnit]
+    runtime: Int
+    hooks: Bool
+    sources: [String:Int]
+    gs_base: Int
     stdout: String
     stderr: String
     steps: Int
     fuel: Int
+    runtime_steps: Int
+    runtime_fuel: Int
     depth: Int
     max_depth: Int
     runtime_execution: Bool
+    // config.eval_entry: ambient effects are refused as `jet eval` refuses them.
+    eval_entry: Bool
     span: Span
     failure: JetEvalError?
     internal_problem: JetEvalInternalProblem?
@@ -60,43 +89,70 @@ struct JetEvalIRState {
 
 fn jet_eval_ir_state_new(m: IRModule, config: JetEvalConfig, span: Span) -> JetEvalIRState Never! {
     s := JetEvalIRState{
-        regions: [[U8]]{[U8]{}}, live: [Bool]{false}, texts: [String]{}, bigs: [Int]{}, builders: [[U8]]{},
-        data_regions: [Int]{}, data_texts: [Int]{}, targets: [[Int]]{}, owners: [Int:Int]{}, ready: [Bool]{},
-        stdout: "", stderr: "", steps: 0, fuel: config.fuel, depth: 0, max_depth: config.max_call_depth,
-        runtime_execution: config.runtime_execution, span: span, failure: None, internal_problem: None, exit_code: None,
+        regions: [[U8]]{[U8]{}}, live: [Bool]{false}, spare: [Int]{}, units: [JetEvalIRUnit]{}, runtime: 0, hooks: false, sources: [String:Int]{}, gs_base: 0,
+        stdout: "", stderr: "", steps: 0, fuel: config.fuel, runtime_steps: 0, runtime_fuel: config.fuel * JET_EVAL_IR_RUNTIME_FUEL,
+        depth: 0, max_depth: config.max_call_depth, runtime_execution: config.runtime_execution, eval_entry: config.eval_entry, span: span, failure: None, internal_problem: None, exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,
     }
-    loop row in m.data {
-        region :: s.regions.len()
-        &s.regions.push(row.copy())
-        &s.live.push(true)
-        &s.data_regions.push(region * JET_EVAL_IR_REGION)
-        text :: jet_eval_ir_text_new(&s, String.from_bytes_lossy(row))
-        &s.data_texts.push(text)
-    }
-    // A static object's address words (JetIR BuildStatic.jet): a data row's
-    // address, or the text a ConstText of the target row reads.
-    loop row in 0..<m.data.len() {
-        relocs :: m.data_relocs.get(row) ?? next
-        loop reloc in relocs {
-            if reloc.target < 0 || reloc.target >= s.data_regions.len() -> next
-            word :: if reloc.text -> s.data_texts[reloc.target] else -> s.data_regions[reloc.target] + reloc.addend
-            at :: s.data_regions[row] + reloc.offset
-            _ := jet_eval_ir_write(&s, at, 8, word)
-        }
-    }
-    loop _ in m.functions {
-        &s.targets.push([Int]{})
-        &s.ready.push(false)
-    }
+    jet_eval_ir_unit_open(m, &s, jet_eval_ir_module_primitives(m, [String:Int]{}))
     s
 }
 
-// Whether `pointer` is in a data row: static storage, never released.
-fn jet_eval_ir_static(s: JetEvalIRState, pointer: Int) -> Bool Never! {
-    if pointer <= 0 || pointer >= JET_EVAL_IR_TEXT_TAG -> return false
-    region :: pointer /% JET_EVAL_IR_REGION
-    region >= 1 && region <= s.data_regions.len()
+// Opens the next unit over module `code`: its data rows copied into regions
+// and their static address words (JetIR BuildStatic.jet) resolved.
+fn jet_eval_ir_unit_open(code: IRModule, s: &JetEvalIRState, prims: [Int]) Never! {
+    unit := JetEvalIRUnit{data_regions: [Int]{}, data_texts: [Int]{}, statics: [Int:Int]{}, routes: [Int:Int]{}, prims: prims, targets: [[Int]]{}, frames: [[Int]]{}, frame_sizes: [Int]{}, ready: [Bool]{}}
+    loop row in code.data {
+        &unit.data_regions.push(jet_eval_ir_region_new(&s, row.copy()))
+        &unit.data_texts.push(0)
+    }
+    loop _ in code.functions {
+        &unit.targets.push([Int]{})
+        &unit.frames.push([Int]{})
+        &unit.frame_sizes.push(0)
+        &unit.ready.push(false)
+    }
+    index :: s.units.len()
+    &s.units.push(unit)
+    loop row in 0..<code.data.len() {
+        relocs :: code.data_relocs.get(row) ?? next
+        loop reloc in relocs {
+            if reloc.target < 0 || reloc.target >= code.data.len() -> next
+            word :: if reloc.text -> jet_eval_ir_data_text(code, &s, index, reloc.target) else -> s.units[index].data_regions[reloc.target] + reloc.addend
+            at :: s.units[index].data_regions[row] + reloc.offset
+            _ := jet_eval_ir_write(&s, at, 8, word)
+        }
+    }
+}
+
+// The immortal String header of data row `row` of `unit` (X64Module.jet's
+// text header): [data, len, cap 0], built on first use.
+fn jet_eval_ir_data_text(code: IRModule, s: &JetEvalIRState, unit: Int, row: Int) -> Int Never! {
+    existing :: s.units[unit].data_texts[row]
+    if existing != 0 -> return existing
+    header :: jet_eval_ir_region_new(&s, jet_eval_ir_zeroes(24))
+    text :: s.units[unit].data_regions[row]
+    _ := jet_eval_ir_write(&s, header, 8, text)
+    _ := jet_eval_ir_write(&s, header + 8, 8, code.data[row].len())
+    s.units[unit].data_texts[row] = header
+    header
+}
+
+// The address of name row `row`'s bytes in static storage.
+fn jet_eval_ir_name_bytes(code: IRModule, s: &JetEvalIRState, unit: Int, row: Int) -> Int Never! {
+    if s.units[unit].statics.get(row) == .Val(address) -> return address
+    address :: jet_eval_ir_region_new(&s, code.names[row].bytes())
+    s.units[unit].statics[row] = address
+    address
+}
+
+// The address of `text`'s bytes in static storage (a source path a located
+// runtime route reports).
+fn jet_eval_ir_text_bytes(s: &JetEvalIRState, text: String) -> Int Never! {
+    if s.sources.get(text) == .Val(address) -> return address
+    address :: jet_eval_ir_region_new(&s, text.bytes())
+    s.sources[text.copy()] = address
+    address
 }
 
 fn jet_eval_ir_failed(s: JetEvalIRState) -> Bool Never! { s.failure != None || s.internal_problem != None || s.exit_code != None }
@@ -110,7 +166,7 @@ fn jet_eval_ir_source_fail(s: &JetEvalIRState, what: String) Never! {
 }
 
 fn jet_eval_ir_unsupported(s: &JetEvalIRState, operation: String) Never! {
-    if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Unsupported, s.span, "MIR evaluation does not implement `{operation}`", "this operation has no compiler-time evaluator yet", "do not treat the incomplete evaluation as successful"))
+    if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Unsupported, s.span, "compile-time evaluation does not implement `{operation}`", "this operation has no compiler-time evaluator yet", "do not treat the incomplete evaluation as successful"))
 }
 
 // ---------------------------------------------------------------------------
@@ -140,38 +196,24 @@ fn jet_eval_ir_in_range(value: Int, bits: Int, signed: Bool) -> Bool Never! {
     value >= 0 && value < jet_eval_ir_pow2(bits)
 }
 
-// The exact integer an Int word holds.
+fn jet_eval_ir_inline(word: Int) -> Bool Never! { word >= JET_EVAL_IR_INLINE_MIN && word <= JET_EVAL_IR_INLINE_MAX }
+
+// The exact integer an Int word holds: inline, or its runtime node's u32
+// base-1e9 limbs (Int.jet: negative@16, limbs@24, len@32).
 fn jet_eval_ir_int_value(s: &JetEvalIRState, word: Int) -> Int? Never! {
-    if word < JET_EVAL_IR_BIG_TAG -> return Val(word)
-    index :: word - JET_EVAL_IR_BIG_TAG
-    if index >= s.bigs.len() {
-        jet_eval_ir_problem(&s, "an Int word is neither inline nor a live big integer")
-        return None
+    if jet_eval_ir_inline(word) -> return Val(word)
+    node :: word.bit_and(JET_EVAL_IR_INLINE_MAX)
+    negative :: jet_eval_ir_read(&s, node + 16, 8) ?? return None
+    limbs :: jet_eval_ir_read(&s, node + 24, 8) ?? return None
+    length :: jet_eval_ir_read(&s, node + 32, 8) ?? return None
+    value := 0
+    at := length - 1
+    loop at >= 0 {
+        limb :: jet_eval_ir_read(&s, limbs + 4 * at, 4) ?? return None
+        value = value * 1000000000 + limb
+        at -= 1
     }
-    Val(s.bigs[index])
-}
-
-// The Int word of an exact integer: inline when it fits 62 bits.
-fn jet_eval_ir_int_word(s: &JetEvalIRState, value: Int) -> Int Never! {
-    if value >= JET_EVAL_IR_INLINE_MIN && value <= JET_EVAL_IR_INLINE_MAX -> return value
-    index :: s.bigs.len()
-    &s.bigs.push(value)
-    JET_EVAL_IR_BIG_TAG + index
-}
-
-fn jet_eval_ir_text_new(s: &JetEvalIRState, text: String) -> Int Never! {
-    index :: s.texts.len()
-    &s.texts.push(text)
-    JET_EVAL_IR_TEXT_TAG + index
-}
-
-fn jet_eval_ir_text(s: &JetEvalIRState, word: Int) -> String? Never! {
-    index :: word - JET_EVAL_IR_TEXT_TAG
-    if word < JET_EVAL_IR_TEXT_TAG || index >= s.texts.len() {
-        jet_eval_ir_problem(&s, "a String word is not a live text")
-        return None
-    }
-    Val(s.texts[index].copy())
+    Val(if negative != 0 -> 0 - value else -> value)
 }
 
 fn jet_eval_ir_float(word: Int) -> Float Never! { math.from_bits(word) }
@@ -203,28 +245,52 @@ fn jet_eval_ir_float32_word(value: Float) -> Int Never! {
     lower_float_constant_bits(value, true)
 }
 
+// The word `raw` as a value of `ty` holds it in a register: a Bool its low
+// byte's truth, a narrow integer its wrapped value.
+fn jet_eval_ir_fit(ty: IRType, raw: Int) -> Int Never! {
+    if ty.kind == .Bool -> return if raw.bit_and(255) != 0 -> 1 else -> 0
+    if ty.kind == .Word && (ty.bits < 64 || !ty.signed) -> return jet_eval_ir_wrap(raw, jet_eval_ir_word_bits(ty), ty.signed)
+    raw
+}
+
 // ---------------------------------------------------------------------------
 // Memory.
 
-fn jet_eval_ir_alloc(s: &JetEvalIRState, size: Int) -> Int Never! {
-    region :: s.regions.len()
+fn jet_eval_ir_zeroes(size: Int) -> [U8] Never! {
     bytes := [U8]{}
     loop _ in 0..<(if size > 0 -> size else -> 0) -> &bytes.push(U8{0})
+    bytes
+}
+
+// A fresh region holding `bytes`: a released one's number when one is spare.
+fn jet_eval_ir_region_new(s: &JetEvalIRState, bytes: [U8]) -> Int Never! {
+    if s.spare.len() > 0 {
+        region :: &s.spare.pop() ?? 0
+        s.regions[region] = bytes
+        s.live[region] = true
+        return region * JET_EVAL_IR_REGION
+    }
+    region :: s.regions.len()
     &s.regions.push(bytes)
     &s.live.push(true)
     region * JET_EVAL_IR_REGION
 }
 
+fn jet_eval_ir_alloc(s: &JetEvalIRState, size: Int) -> Int Never! { jet_eval_ir_region_new(&s, jet_eval_ir_zeroes(size)) }
+
+// Releases the region `pointer` starts (a frame, an unmapped mapping).
 fn jet_eval_ir_release(s: &JetEvalIRState, pointer: Int) Never! {
     region :: pointer /% JET_EVAL_IR_REGION
-    if pointer <= 0 || pointer >= JET_EVAL_IR_TEXT_TAG || region >= s.regions.len() -> return
+    if pointer <= 0 || pointer >= JET_EVAL_IR_FUNCTION_TAG || region >= s.regions.len() || !s.live[region] -> return
+    if pointer != region * JET_EVAL_IR_REGION -> return
     s.live[region] = false
     s.regions[region] = [U8]{}
+    &s.spare.push(region)
 }
 
 // The region of `pointer` when `width` bytes from it are readable.
 fn jet_eval_ir_region(s: &JetEvalIRState, pointer: Int, width: Int) -> Int? Never! {
-    if pointer <= 0 || pointer >= JET_EVAL_IR_TEXT_TAG {
+    if pointer <= 0 || pointer >= JET_EVAL_IR_FUNCTION_TAG {
         jet_eval_ir_problem(&s, if pointer == 0 -> "memory access through a null pointer" else -> "memory access through a word that is not an address")
         return None
     }
@@ -255,6 +321,12 @@ fn jet_eval_ir_read(s: &JetEvalIRState, pointer: Int, width: Int) -> Int? Never!
     Val(value)
 }
 
+// The signed 64-bit word at `pointer`.
+fn jet_eval_ir_read_word(s: &JetEvalIRState, pointer: Int) -> Int? Never! {
+    raw :: jet_eval_ir_read(&s, pointer, 8) ?? return None
+    Val(jet_eval_ir_wrap(raw, 64, true))
+}
+
 fn jet_eval_ir_write(s: &JetEvalIRState, pointer: Int, width: Int, value: Int) -> Bool Never! {
     region :: jet_eval_ir_region(&s, pointer, width) ?? return false
     offset :: pointer - region * JET_EVAL_IR_REGION
@@ -262,6 +334,7 @@ fn jet_eval_ir_write(s: &JetEvalIRState, pointer: Int, width: Int, value: Int) -
     true
 }
 
+// `count` bytes from `from` to `to`; overlapping ranges move as memmove does.
 fn jet_eval_ir_move_bytes(s: &JetEvalIRState, to: Int, from: Int, count: Int) -> Bool Never! {
     if count <= 0 -> return true
     source :: jet_eval_ir_region(&s, from, count) ?? return false
@@ -272,6 +345,24 @@ fn jet_eval_ir_move_bytes(s: &JetEvalIRState, to: Int, from: Int, count: Int) ->
     loop index in 0..<count -> &copied.push(s.regions[source][from_offset + index])
     loop index in 0..<count -> s.regions[target][to_offset + index] = copied[index]
     true
+}
+
+// The bytes at `pointer`.
+fn jet_eval_ir_bytes(s: &JetEvalIRState, pointer: Int, count: Int) -> [U8]? Never! {
+    bytes := [U8]{}
+    if count <= 0 -> return Val(bytes)
+    region :: jet_eval_ir_region(&s, pointer, count) ?? return None
+    offset :: pointer - region * JET_EVAL_IR_REGION
+    loop index in 0..<count -> &bytes.push(s.regions[region][offset + index])
+    Val(bytes)
+}
+
+// The text of the String whose header is at `header`.
+fn jet_eval_ir_text(s: &JetEvalIRState, header: Int) -> String? Never! {
+    data :: jet_eval_ir_read_word(&s, header) ?? return None
+    length :: jet_eval_ir_read_word(&s, header + 8) ?? return None
+    bytes :: jet_eval_ir_bytes(&s, data, length) ?? return None
+    Val(String.from_bytes_lossy(bytes))
 }
 
 // Bytes a value of `ty` occupies in memory (IR Load/Store).
@@ -293,15 +384,19 @@ fn jet_eval_ir_canonical(ty: IRType, raw: Int, width: Int) -> Int Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Structured control.
+// Structured control and frames.
 
-// The instruction a Br or BrIf at `at` continues at: a Loop's first body
-// instruction, else the instruction after the construct's End.
-fn jet_eval_ir_prepare(m: IRModule, s: &JetEvalIRState, id: Int) Never! {
-    if s.ready[id] -> return
-    f :: m.functions[id]
+// The instruction a Br or BrIf at `at` continues at (a Loop's first body
+// instruction, else the instruction after the construct's End), and the
+// frame offset of each instruction's storage: a StackAddress area, or an
+// aggregate call result's (-1 none).
+fn jet_eval_ir_prepare(code: IRModule, s: &JetEvalIRState, unit: Int, id: Int) Never! {
+    if s.units[unit].ready[id] -> return
+    f :: code.functions[id]
     targets := [Int]{}
+    frames := [Int]{}
     open := [Int]{}
+    size := 0
     loop at in 0..<f.op.len() {
         op :: f.op[at]
         target := -1
@@ -318,55 +413,80 @@ fn jet_eval_ir_prepare(m: IRModule, s: &JetEvalIRState, id: Int) Never! {
             }
         }
         &targets.push(target)
+        need := -1
+        align := 8
+        if op == .StackAddress {
+            need = if f.a[at] > 0 -> f.a[at] else -> 8
+            if f.b[at] > 8 -> align = f.b[at]
+        }
+        if (op == .Call || op == .CallIndirect || op == .CallRuntime) && f.dst[at] >= 0 && code.types[f.slot_type[f.dst[at]]].kind == .Aggregate {
+            need = code.types[f.slot_type[f.dst[at]]].size
+            if need <= 0 -> need = 8
+        }
+        if need > 0 {
+            size = (size + align - 1) /% align * align
+            &frames.push(size)
+            size += need
+        } else {
+            &frames.push(-1)
+        }
         if op == .Block || op == .Loop || op == .If -> &open.push(at)
         if op == .End -> _ := &open.pop()
     }
-    s.targets[id] = targets
-    s.ready[id] = true
+    s.units[unit].targets[id] = targets
+    s.units[unit].frames[id] = frames
+    s.units[unit].frame_sizes[id] = size
+    s.units[unit].ready[id] = true
 }
 
 // ---------------------------------------------------------------------------
 // Calls.
 
-// Runs function `id` on `args` (one word per parameter). An Aggregate
-// result's bytes go to `result_area`, which is the returned word.
-fn jet_eval_ir_invoke(m: IRModule, s: &JetEvalIRState, id: Int, args: [Int], result_area: Int) -> Int? {
-    if id < 0 || id >= m.functions.len() {
+// Runs function `id` of `unit` on `args` (one word per parameter). An
+// Aggregate result's bytes go to `result_area`, which is the returned word.
+fn jet_eval_ir_invoke(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, unit: Int, id: Int, args: [Int], result_area: Int) -> Int? {
+    if unit == 0 -> return jet_eval_ir_invoke_in(m, m, rt, &s, 0, id, args, result_area)
+    jet_eval_ir_invoke_in(rt.code, m, rt, &s, 1, id, args, result_area)
+}
+
+fn jet_eval_ir_invoke_in(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, unit: Int, id: Int, args: [Int], result_area: Int) -> Int? {
+    if id < 0 || id >= code.functions.len() {
         jet_eval_ir_problem(&s, "call of function {id}, which is not in the module")
         return None
     }
+    prim :: s.units[unit].prims[id]
+    if prim != 0 -> return jet_eval_ir_primitive(m, rt, &s, prim, code.functions[id].name, args, -1)
     if s.depth >= s.max_depth {
         limit :: s.max_depth
         jet_eval_ir_source_fail(&s, "compile-time call depth exceeds {limit}")
         return None
     }
-    jet_eval_ir_prepare(m, &s, id)
-    f :: m.functions[id]
-    if f.asm != None {
-        jet_eval_ir_problem(&s, "{f.name} is an inline asm leaf; compile-time code does not run machine code")
-        return None
-    }
+    jet_eval_ir_prepare(code, &s, unit, id)
+    f :: code.functions[id]
     if args.len() != f.param_count {
         jet_eval_ir_problem(&s, "{f.name} takes {f.param_count} arguments, the call passes {args.len()}")
         return None
     }
     slots := [Int]{}
     loop index in 0..<f.slot_type.len() -> &slots.push(if index < args.len() -> args[index] else -> 0)
-    areas := [Int:Int]{}
+    size :: s.units[unit].frame_sizes[id]
+    frame :: if size > 0 -> jet_eval_ir_alloc(&s, size) else -> 0
     s.depth += 1
-    returned := jet_eval_ir_run(m, &s, id, &slots, &areas, result_area)
+    returned := jet_eval_ir_exec(code, m, rt, &s, unit, id, &slots, frame, result_area)
     s.depth -= 1
-    loop (_, pointer) in areas -> jet_eval_ir_release(&s, pointer)
+    if frame != 0 -> jet_eval_ir_release(&s, frame)
     returned
 }
 
-// Frame storage of instruction `at`: one area per instruction, the same
-// address each time the instruction runs, live until the function returns.
-fn jet_eval_ir_area(s: &JetEvalIRState, areas: &[Int:Int], at: Int, size: Int) -> Int Never! {
-    if areas.get(at) == .Val(pointer) -> return pointer
-    pointer :: jet_eval_ir_alloc(&s, if size > 0 -> size else -> 8)
-    areas[at] = pointer
-    pointer
+// The function a handle word names, as (unit, function), or None.
+fn jet_eval_ir_handle(s: &JetEvalIRState, word: Int) -> (unit: Int, id: Int)? Never! {
+    index :: word - JET_EVAL_IR_FUNCTION_TAG
+    unit :: index /% JET_EVAL_IR_UNIT
+    if word < JET_EVAL_IR_FUNCTION_TAG || unit >= s.units.len() {
+        jet_eval_ir_problem(&s, "indirect call through a word that is not a function address")
+        return None
+    }
+    Val((unit: unit, id: index - unit * JET_EVAL_IR_UNIT))
 }
 
 fn jet_eval_ir_call_args(f: IRFunction, slots: [Int], at: Int) -> [Int] Never! {
@@ -376,8 +496,14 @@ fn jet_eval_ir_call_args(f: IRFunction, slots: [Int], at: Int) -> [Int] Never! {
     args
 }
 
-fn jet_eval_ir_run(m: IRModule, s: &JetEvalIRState, id: Int, slots: &[Int], areas: &[Int:Int], result_area: Int) -> Int? {
-    f :: m.functions[id]
+fn jet_eval_ir_area(s: &JetEvalIRState, unit: Int, id: Int, frame: Int, at: Int) -> Int Never! {
+    offset :: s.units[unit].frames[id][at]
+    if offset < 0 -> return 0
+    frame + offset
+}
+
+fn jet_eval_ir_exec(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, unit: Int, id: Int, slots: &[Int], frame: Int, result_area: Int) -> Int? {
+    f :: code.functions[id]
     count :: f.op.len()
     ip := 0
     loop {
@@ -386,10 +512,12 @@ fn jet_eval_ir_run(m: IRModule, s: &JetEvalIRState, id: Int, slots: &[Int], area
             jet_eval_ir_problem(&s, "{f.name} ran past its last instruction")
             return None
         }
-        s.steps += 1
-        if !s.runtime_execution && s.steps > s.fuel {
-            if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "MIR evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program"))
-            return None
+        if unit == 0 {
+            s.steps += 1
+            if !s.runtime_execution && s.steps > s.fuel -> return jet_eval_ir_out_of_fuel(&s)
+        } else {
+            s.runtime_steps += 1
+            if !s.runtime_execution && s.runtime_steps > s.runtime_fuel -> return jet_eval_ir_out_of_fuel(&s)
         }
         at :: ip
         ip += 1
@@ -398,76 +526,85 @@ fn jet_eval_ir_run(m: IRModule, s: &JetEvalIRState, id: Int, slots: &[Int], area
         if op == {
             .Nop | .Block | .Loop | .End -> {}
             .Const -> {
-                if dst >= 0 -> slots[dst] = jet_eval_ir_const(m.types[f.slot_type[dst]], f.a[at])
+                if dst >= 0 -> slots[dst] = jet_eval_ir_const(code.types[f.slot_type[dst]], f.a[at])
             }
             .ConstText -> {
-                if f.a[at] < 0 || f.a[at] >= s.data_texts.len() {
+                if f.a[at] < 0 || f.a[at] >= code.data.len() {
                     jet_eval_ir_problem(&s, "data row {f.a[at]} is not in the module")
                     return None
                 }
-                slots[dst] = s.data_texts[f.a[at]]
+                slots[dst] = jet_eval_ir_data_text(code, &s, unit, f.a[at])
             }
             .ConstBigInt -> {
-                text :: m.names[f.a[at]]
-                value :: Int.parse(text) ?? {
-                    jet_eval_ir_problem(&s, "big integer constant `{text}` is not a decimal")
-                    return None
-                }
-                slots[dst] = jet_eval_ir_int_word(&s, value)
+                decimal :: jet_eval_ir_name_bytes(code, &s, unit, f.a[at])
+                slots[dst] = jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_int_from_static", [Int]{decimal, code.names[f.a[at]].bytes().len()}) ?? return None
             }
-            .Copy | .Move -> slots[dst] = slots[f.a[at]]
-            .Drop -> {}
+            .Copy -> slots[dst] = jet_eval_ir_copy(code, m, rt, &s, f, slots[f.a[at]], f.a[at]) ?? return None
+            .Move -> slots[dst] = slots[f.a[at]]
+            .Drop -> {
+                if !jet_eval_ir_drop(code, m, rt, &s, unit, f, slots[f.a[at]], f.a[at]) -> return None
+            }
             .Close -> {
-                routine :: m.names[f.b[at]]
-                _ := jet_eval_ir_runtime(m, &s, routine, [Int]{slots[f.a[at]]}, -1, f.source_file, f.code_line[at]) ?? return None
+                _ := jet_eval_ir_route(code, m, rt, &s, unit, f.b[at], [Int]{slots[f.a[at]]}, -1, 0) ?? return None
             }
             .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> {
-                slots[dst] = jet_eval_ir_binary(&s, op, m.types[f.slot_type[f.a[at]]], slots[f.a[at]], slots[f.b[at]], f.c[at]) ?? return None
+                ty :: code.types[f.slot_type[f.a[at]]]
+                if ty.kind == .Int {
+                    slots[dst] = jet_eval_ir_int_binary(m, rt, &s, op, slots[f.a[at]], slots[f.b[at]], f.source_file, f.code_line[at]) ?? return None
+                } else if ty.kind == .String {
+                    slots[dst] = jet_eval_ir_text_compare(m, rt, &s, op, slots[f.a[at]], slots[f.b[at]]) ?? return None
+                } else {
+                    slots[dst] = jet_eval_ir_binary(&s, op, ty, slots[f.a[at]], slots[f.b[at]], f.c[at]) ?? return None
+                }
             }
-            .Neg -> slots[dst] = jet_eval_ir_negate(&s, m.types[f.slot_type[f.a[at]]], slots[f.a[at]], f.c[at]) ?? return None
-            .Not -> slots[dst] = jet_eval_ir_not(&s, m.types[f.slot_type[f.a[at]]], slots[f.a[at]]) ?? return None
-            .Convert -> slots[dst] = jet_eval_ir_convert(&s, m.types[f.slot_type[f.a[at]]], m.types[f.slot_type[dst]], slots[f.a[at]]) ?? return None
-            .Concat -> {
-                left :: jet_eval_ir_text(&s, slots[f.a[at]]) ?? return None
-                right :: jet_eval_ir_text(&s, slots[f.b[at]]) ?? return None
-                slots[dst] = jet_eval_ir_text_new(&s, "{left}{right}")
+            .Neg -> {
+                ty :: code.types[f.slot_type[f.a[at]]]
+                if ty.kind == .Int {
+                    slots[dst] = jet_eval_ir_int_binary(m, rt, &s, IROp.Sub, 0, slots[f.a[at]], f.source_file, f.code_line[at]) ?? return None
+                } else {
+                    slots[dst] = jet_eval_ir_negate(&s, ty, slots[f.a[at]], f.c[at]) ?? return None
+                }
             }
+            .Not -> {
+                ty :: code.types[f.slot_type[f.a[at]]]
+                if ty.kind == .Int {
+                    slots[dst] = jet_eval_ir_int_binary(m, rt, &s, IROp.BitXor, slots[f.a[at]], -1, f.source_file, f.code_line[at]) ?? return None
+                } else {
+                    slots[dst] = jet_eval_ir_not(&s, ty, slots[f.a[at]]) ?? return None
+                }
+            }
+            .Convert -> slots[dst] = jet_eval_ir_convert(&s, code.types[f.slot_type[f.a[at]]], code.types[f.slot_type[dst]], slots[f.a[at]]) ?? return None
+            .Concat -> slots[dst] = jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_string_concat", [Int]{slots[f.a[at]], slots[f.b[at]]}) ?? return None
             .Call -> {
                 args :: jet_eval_ir_call_args(f, slots, at)
-                area := 0
-                if dst >= 0 && m.types[f.slot_type[dst]].kind == .Aggregate -> area = jet_eval_ir_area(&s, &areas, at, m.types[f.slot_type[dst]].size)
-                value :: jet_eval_ir_invoke(m, &s, f.a[at], args, area) ?? return None
+                area :: jet_eval_ir_area(&s, unit, id, frame, at)
+                value :: jet_eval_ir_invoke(m, rt, &s, unit, f.a[at], args, area) ?? return None
                 if dst >= 0 -> slots[dst] = value
             }
             .CallIndirect -> {
-                code :: slots[f.a[at]]
-                if code < JET_EVAL_IR_FUNCTION_TAG || code >= JET_EVAL_IR_BUILDER_TAG {
-                    jet_eval_ir_problem(&s, "indirect call through a word that is not a function address")
-                    return None
-                }
+                target :: jet_eval_ir_handle(&s, slots[f.a[at]]) ?? return None
                 args :: jet_eval_ir_call_args(f, slots, at)
-                area := 0
-                if dst >= 0 && m.types[f.slot_type[dst]].kind == .Aggregate -> area = jet_eval_ir_area(&s, &areas, at, m.types[f.slot_type[dst]].size)
-                value :: jet_eval_ir_invoke(m, &s, code - JET_EVAL_IR_FUNCTION_TAG, args, area) ?? return None
+                area :: jet_eval_ir_area(&s, unit, id, frame, at)
+                value :: jet_eval_ir_invoke(m, rt, &s, target.unit, target.id, args, area) ?? return None
                 if dst >= 0 -> slots[dst] = value
             }
             .CallRuntime -> {
                 args :: jet_eval_ir_call_args(f, slots, at)
-                result_ty := -1
-                if dst >= 0 -> result_ty = f.slot_type[dst]
-                value :: jet_eval_ir_runtime(m, &s, m.names[f.a[at]], args, result_ty, f.source_file, f.code_line[at]) ?? return None
-                if dst >= 0 -> slots[dst] = value
+                row :: if dst >= 0 -> f.slot_type[dst] else -> -1
+                area :: jet_eval_ir_area(&s, unit, id, frame, at)
+                value :: jet_eval_ir_route(code, m, rt, &s, unit, f.a[at], args, row, area) ?? return None
+                if dst >= 0 -> slots[dst] = jet_eval_ir_fit(code.types[row], value)
             }
-            .FunctionAddress -> slots[dst] = JET_EVAL_IR_FUNCTION_TAG + f.a[at]
+            .FunctionAddress -> slots[dst] = JET_EVAL_IR_FUNCTION_TAG + unit * JET_EVAL_IR_UNIT + f.a[at]
             .DataAddress -> {
-                if f.a[at] < 0 || f.a[at] >= s.data_regions.len() {
+                if f.a[at] < 0 || f.a[at] >= code.data.len() {
                     jet_eval_ir_problem(&s, "data row {f.a[at]} is not in the module")
                     return None
                 }
-                slots[dst] = s.data_regions[f.a[at]]
+                slots[dst] = s.units[unit].data_regions[f.a[at]]
             }
             .Load -> {
-                ty :: m.types[f.slot_type[dst]]
+                ty :: code.types[f.slot_type[dst]]
                 width :: jet_eval_ir_width(ty)
                 if width > 0 {
                     raw :: jet_eval_ir_read(&s, slots[f.a[at]] + f.b[at], width) ?? return None
@@ -475,11 +612,11 @@ fn jet_eval_ir_run(m: IRModule, s: &JetEvalIRState, id: Int, slots: &[Int], area
                 }
             }
             .Store -> {
-                ty :: m.types[f.slot_type[f.c[at]]]
+                ty :: code.types[f.slot_type[f.c[at]]]
                 width :: jet_eval_ir_width(ty)
                 if width > 0 && !jet_eval_ir_write(&s, slots[f.a[at]] + f.b[at], width, slots[f.c[at]]) -> return None
             }
-            .StackAddress -> slots[dst] = jet_eval_ir_area(&s, &areas, at, f.a[at])
+            .StackAddress -> slots[dst] = jet_eval_ir_area(&s, unit, id, frame, at)
             .Offset -> slots[dst] = slots[f.a[at]] + f.b[at]
             .CopyBytes -> {
                 if !jet_eval_ir_move_bytes(&s, slots[f.a[at]], slots[f.b[at]], f.c[at]) -> return None
@@ -488,19 +625,19 @@ fn jet_eval_ir_run(m: IRModule, s: &JetEvalIRState, id: Int, slots: &[Int], area
                 if slots[f.a[at]] == 0 -> ip = if f.b[at] >= 0 -> f.b[at] + 1 else -> f.c[at] + 1
             }
             .Else -> ip = f.a[at] + 1
-            .Br -> ip = s.targets[id][at]
+            .Br -> ip = s.units[unit].targets[id][at]
             .BrIf -> {
-                if slots[f.a[at]] != 0 -> ip = s.targets[id][at]
+                if slots[f.a[at]] != 0 -> ip = s.units[unit].targets[id][at]
             }
             .Return -> {
                 if f.a[at] < 0 -> return Val(0)
                 value :: slots[f.a[at]]
-                if f.result >= 0 && m.types[f.result].kind == .Aggregate {
+                if f.result >= 0 && code.types[f.result].kind == .Aggregate {
                     if result_area == 0 {
                         jet_eval_ir_problem(&s, "{f.name} returns an aggregate without result storage")
                         return None
                     }
-                    if !jet_eval_ir_move_bytes(&s, result_area, value, m.types[f.result].size) -> return None
+                    if !jet_eval_ir_move_bytes(&s, result_area, value, code.types[f.result].size) -> return None
                     return Val(result_area)
                 }
                 return Val(value)
@@ -517,11 +654,48 @@ fn jet_eval_ir_run(m: IRModule, s: &JetEvalIRState, id: Int, slots: &[Int], area
     }
 }
 
+fn jet_eval_ir_out_of_fuel(s: &JetEvalIRState) -> Int? Never! {
+    if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program"))
+    None
+}
+
 // The word of a Const of type `ty`: an exact Int, a fixed-width integer, a
 // Bool, a Char or Float bits, as the builder wrote it.
 fn jet_eval_ir_const(ty: IRType, value: Int) -> Int Never! {
     if ty.kind == .Word -> return jet_eval_ir_wrap(value, jet_eval_ir_word_bits(ty), ty.signed)
     value
+}
+
+// ---------------------------------------------------------------------------
+// Ownership, as the selection's transfer and drop (X64Select.jet
+// ir_x64_transfer, ir_x64_drop).
+
+// A Copy of slot `slot` holding `word`: a counted Int or String is cloned by
+// the runtime; an aggregate (its address) and a shared box alias.
+fn jet_eval_ir_copy(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, f: IRFunction, word: Int, slot: Int) -> Int? {
+    ty :: code.types[f.slot_type[slot]]
+    if ty.drop == "" || ty.kind == .Aggregate || ty.clone == ir_box_share() -> return Val(word)
+    if ty.kind == .Int {
+        if jet_eval_ir_inline(word) -> return Val(word)
+        return jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_int_clone", [Int]{word})
+    }
+    if ty.kind == .String -> return jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_string_clone", [Int]{word})
+    jet_eval_ir_problem(&s, "Copy of {ir_kind_text(ty.kind)} with drop {ty.drop} has no clone route")
+    None
+}
+
+// A Drop of slot `slot` holding `word`: its type's drop routine, the
+// module's own glue when it built one under that symbol, else the runtime's.
+fn jet_eval_ir_drop(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, unit: Int, f: IRFunction, word: Int, slot: Int) -> Bool {
+    ty :: code.types[f.slot_type[slot]]
+    if ty.drop == "" -> return true
+    if ty.kind == .Int && jet_eval_ir_inline(word) -> return true
+    if code.function_rows.get(ty.drop) == .Val(glue) {
+        _ := jet_eval_ir_invoke(m, rt, &s, unit, glue, [Int]{word}, 0) ?? return false
+        return true
+    }
+    _ := jet_eval_ir_runtime_call(m, rt, &s, ty.drop, [Int]{word}) ?? return false
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -550,15 +724,82 @@ fn jet_eval_ir_order(left: Int, right: Int) -> Int Never! {
     0
 }
 
+// Exact Int, as the selection: inline operands with an inline result take
+// the fast path, everything else the runtime's jet_int_* kernel (Int.jet),
+// located kernels with the instruction's source file and line.
+fn jet_eval_ir_int_binary(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, op: IROp, left: Int, right: Int, file: String, line: Int) -> Int? {
+    inline :: jet_eval_ir_inline(left) && jet_eval_ir_inline(right)
+    if jet_eval_ir_is_compare(op) {
+        if inline -> return Val(jet_eval_ir_compare(op, jet_eval_ir_order(left, right)))
+        order :: jet_eval_ir_runtime_call(m, rt, &s, "jet_int_compare", [Int]{left, right}) ?? return None
+        return Val(jet_eval_ir_compare(op, jet_eval_ir_wrap(order, 64, true)))
+    }
+    located :: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Shl || op == .Shr
+    if inline {
+        if jet_eval_ir_exact_inline(op, left, right) == .Val(value) {
+            if jet_eval_ir_inline(value) -> return Val(value)
+        }
+    }
+    symbol :: if op == {
+        .Add -> "jet_int_add"
+        .Sub -> "jet_int_sub"
+        .Mul -> "jet_int_mul"
+        .Div -> "jet_int_div"
+        .Rem -> "jet_int_rem"
+        .FloorDiv -> "jet_int_floor_div"
+        .Mod -> "jet_int_mod"
+        .Shl -> "jet_int_shl"
+        .Shr -> "jet_int_shr"
+        .BitAnd -> "jet_int_bit_and"
+        .BitOr -> "jet_int_bit_or"
+        else -> "jet_int_bit_xor"
+    }
+    if !located -> return jet_eval_ir_runtime_call(m, rt, &s, symbol, [Int]{left, right})
+    path :: jet_eval_ir_text_bytes(&s, file)
+    jet_eval_ir_runtime_call(m, rt, &s, symbol, [Int]{left, right, path, file.bytes().len(), line})
+}
+
+// The exact result of an operator on two inline Ints, or None when the
+// runtime kernel computes it: a zero divisor and a negative or wide shift
+// count take the located route, which keeps their stops.
+fn jet_eval_ir_exact_inline(op: IROp, a: Int, b: Int) -> Int? Never! {
+    if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && b == 0 -> return None
+    if (op == .Shl || op == .Shr) && (b < 0 || b >= 64) -> return None
+    if op == {
+        .Add -> Val(a + b)
+        .Sub -> Val(a - b)
+        .Mul -> Val(a * b)
+        .Div -> Val((a - a %% b) /% b)
+        .Rem -> Val(a %% b)
+        .FloorDiv -> Val(a /% b)
+        .Mod -> Val(a - b * (a /% b))
+        .BitAnd -> Val(a.bit_and(b))
+        .BitOr -> Val(a.bit_or(b))
+        .BitXor -> Val(a.bit_xor(b))
+        .Shl -> Val(a << b)
+        .Shr -> Val(a >> b)
+        else -> None
+    }
+}
+
+// String comparison: Eq/Ne by the runtime's equality, ordering by the sign
+// of its three-way order.
+fn jet_eval_ir_text_compare(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, op: IROp, left: Int, right: Int) -> Int? {
+    if !jet_eval_ir_is_compare(op) {
+        jet_eval_ir_problem(&s, "String operands take Concat or a comparison")
+        return None
+    }
+    if op == .Eq || op == .Ne {
+        equal :: jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_string_eq", [Int]{left, right}) ?? return None
+        same :: equal.bit_and(255) != 0
+        return Val(jet_eval_ir_bool(if op == .Eq -> same else -> !same))
+    }
+    order :: jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_string_compare", [Int]{left, right}) ?? return None
+    Val(jet_eval_ir_compare(op, jet_eval_ir_wrap(order, 64, true)))
+}
+
 fn jet_eval_ir_binary(s: &JetEvalIRState, op: IROp, ty: IRType, left: Int, right: Int, overflow: Int) -> Int? {
     if ty.kind == {
-        .Int -> {
-            a :: jet_eval_ir_int_value(&s, left) ?? return None
-            b :: jet_eval_ir_int_value(&s, right) ?? return None
-            if jet_eval_ir_is_compare(op) -> return Val(jet_eval_ir_compare(op, jet_eval_ir_order(a, b)))
-            exact :: jet_eval_ir_exact(&s, op, a, b) ?? return None
-            Val(jet_eval_ir_int_word(&s, exact))
-        }
         .Word -> jet_eval_ir_fixed(&s, op, ty, left, right, overflow != IR_OVERFLOW_WRAP)
         .Bool | .Char | .Pointer | .Unit -> {
             if jet_eval_ir_is_compare(op) -> return Val(jet_eval_ir_compare(op, jet_eval_ir_order(left, right)))
@@ -573,78 +814,14 @@ fn jet_eval_ir_binary(s: &JetEvalIRState, op: IROp, ty: IRType, left: Int, right
             }
         }
         .Float | .Float32 -> jet_eval_ir_float_binary(&s, op, ty.kind == .Float32, left, right)
-        .String -> {
-            if !jet_eval_ir_is_compare(op) {
-                jet_eval_ir_problem(&s, "String operands take Concat or a comparison")
-                return None
-            }
-            a :: jet_eval_ir_text(&s, left) ?? return None
-            b :: jet_eval_ir_text(&s, right) ?? return None
-            Val(jet_eval_ir_compare(op, jet_eval_ir_text_order(a, b)))
-        }
-        .Aggregate -> {
-            jet_eval_ir_problem(&s, "arithmetic on an aggregate")
+        else -> {
+            jet_eval_ir_problem(&s, "arithmetic on {ir_kind_text(ty.kind)}")
             None
         }
     }
 }
 
 fn ir_kind_text(kind: IRTypeKind) -> String Never! { "{kind}" }
-
-// Byte-wise order of two texts (jet_rt_string_compare).
-fn jet_eval_ir_text_order(left: String, right: String) -> Int Never! {
-    a :: left.bytes()
-    b :: right.bytes()
-    shorter :: if a.len() < b.len() -> a.len() else -> b.len()
-    loop index in 0..<shorter {
-        x :: Int.from_u8(a[index])
-        y :: Int.from_u8(b[index])
-        if x != y -> return if x < y -> -1 else -> 1
-    }
-    jet_eval_ir_order(a.len(), b.len())
-}
-
-// Exact Int Add .. Shr (the runtime's jet_int_* routes).
-fn jet_eval_ir_exact(s: &JetEvalIRState, op: IROp, a: Int, b: Int) -> Int? {
-    if op == {
-        .Add -> Val(a + b)
-        .Sub -> Val(a - b)
-        .Mul -> Val(a * b)
-        .Div | .Rem | .FloorDiv | .Mod -> {
-            if b == 0 {
-                jet_eval_ir_source_fail(&s, "division by zero")
-                return None
-            }
-            Val(jet_eval_ir_divide(op, a, b))
-        }
-        .BitAnd -> Val(a.bit_and(b))
-        .BitOr -> Val(a.bit_or(b))
-        .BitXor -> Val(a.bit_xor(b))
-        .Shl | .Shr -> {
-            if b < 0 {
-                jet_eval_ir_source_fail(&s, "shift count is negative")
-                return None
-            }
-            Val(if op == .Shl -> a << b else -> a >> b)
-        }
-        else -> {
-            jet_eval_ir_problem(&s, "no exact Int form of this operator")
-            None
-        }
-    }
-}
-
-// The runtime's int_division: Div truncates toward zero, Rem takes the
-// dividend's sign, FloorDiv rounds toward negative infinity and Mod takes
-// the divisor's sign.
-fn jet_eval_ir_divide(op: IROp, a: Int, b: Int) -> Int Never! {
-    if op == {
-        .Div -> (a - a %% b) /% b
-        .Rem -> a %% b
-        .FloorDiv -> a /% b
-        else -> a - b * (a /% b)
-    }
-}
 
 // Fixed-width arithmetic: wrapping, or (trap) stopping when the result
 // leaves the type's range; a shift count outside 0..<bits stops when
@@ -785,10 +962,6 @@ fn jet_eval_ir_scale2(value: Float, power: Int) -> Float Never! {
 
 fn jet_eval_ir_negate(s: &JetEvalIRState, ty: IRType, value: Int, overflow: Int) -> Int? {
     if ty.kind == {
-        .Int -> {
-            a :: jet_eval_ir_int_value(&s, value) ?? return None
-            Val(jet_eval_ir_int_word(&s, 0 - a))
-        }
         .Float -> Val(jet_eval_ir_float_word(-jet_eval_ir_float(value)))
         .Float32 -> Val(value.bit_xor(2147483648))
         .Word -> jet_eval_ir_fixed(&s, IROp.Sub, ty, 0, value, overflow != IR_OVERFLOW_WRAP)
@@ -803,10 +976,6 @@ fn jet_eval_ir_not(s: &JetEvalIRState, ty: IRType, value: Int) -> Int? {
     if ty.kind == {
         .Bool -> Val(value.bit_xor(1))
         .Word -> Val(jet_eval_ir_wrap(value.bit_xor(-1), jet_eval_ir_word_bits(ty), ty.signed))
-        .Int -> {
-            a :: jet_eval_ir_int_value(&s, value) ?? return None
-            Val(jet_eval_ir_int_word(&s, a.bit_xor(-1)))
-        }
         else -> {
             jet_eval_ir_problem(&s, "no `not` of {ir_kind_text(ty.kind)}")
             None

@@ -323,45 +323,6 @@ fn jet_codegen_function_index(functions: ^[TFunc]) -> JetCodegenFunctionIndex Ne
     JetCodegenFunctionIndex{rows: functions, first_by_key: first_by_key, first_by_name: first_by_name, next_by_key: next_by_key, next_by_name: next_by_name, qualified_rows: qualified_rows}
 }
 
-// Appends `functions` to `index` in order, as if they had followed its rows
-// when it was built: first rows and qualified rows keep their earlier
-// owners, and each same-key and same-name chain gains the new rows at its
-// end. Moves the rows out of `functions` (left empty).
-fn jet_codegen_function_index_append(index: &JetCodegenFunctionIndex, functions: &[TFunc]) Never! {
-    reversed := [TFunc]{}
-    loop functions.len() > 0 {
-        function := &functions.pop() ?? { break }
-        &reversed.push(^function)
-    }
-    loop reversed.len() > 0 {
-        function := &reversed.pop() ?? { break }
-        row :: index.rows.len()
-        &index.next_by_key.push(-1)
-        &index.next_by_name.push(-1)
-        key_tail := index.first_by_key.get(function.key) ?? -1
-        if key_tail < 0 {
-            index.first_by_key[function.key] = row
-        } else {
-            loop index.next_by_key[key_tail] >= 0 {
-                key_tail = index.next_by_key[key_tail]
-            }
-            index.next_by_key[key_tail] = row
-        }
-        name_tail := index.first_by_name.get(function.name) ?? -1
-        if name_tail < 0 {
-            index.first_by_name[function.name] = row
-        } else {
-            loop index.next_by_name[name_tail] >= 0 {
-                name_tail = index.next_by_name[name_tail]
-            }
-            index.next_by_name[name_tail] = row
-        }
-        qualified :: jet_codegen_qualified_function_key(function.module_identity, function.key)
-        if index.qualified_rows.get(qualified) == None -> index.qualified_rows[qualified] = row else -> index.qualified_rows[qualified] = -1
-        &index.rows.push(^function)
-    }
-}
-
 // The program-wide inputs of lowering, read-only while functions lower: every
 // function taking a builder takes this beside it, so compiler threads can
 // share one program while each lowers on its own builder.

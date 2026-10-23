@@ -20,11 +20,10 @@ What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request
 - work counters (`C` events, summed per name): `parse.{user_,core_,}lines`,
   `parse.{user_,core_,}tokens`, `lower.functions`, `{lower,assemble,optimize}.mir_insts`,
   `native.lower.functions`, `native.lower.lir_insts`,
-  `native.object.bytes`, `native.link.bytes`, `comptime.functions_lowered`,
-  `lower.comptime_overlap_functions`;
+  `native.object.bytes`, `native.link.bytes`;
 - the spans the plan had no measurement for: `load.marker_groups.relex` /
-  `.reparse` (D10b), `comptime.lower` (detail `program` or `grow`, D12) with
-  the overlap counter, `mir.digest` (detail: the consumer, `web.semantic`; D5;
+  `.reparse` (D10b), `comptime.build` (detail `program`: one IR build of a
+  comptime batch, D12), `mir.digest` (detail: the consumer, `web.semantic`; D5;
   traces written before the D5 cutover also carry `optimize.seal_check` and
   `optimize.seal`), and the MIR checks `optimize.legality` (on the lowered
   input) and `optimize.lint` (on the final MIR) (P9; the D3 single-checker

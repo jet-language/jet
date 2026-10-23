@@ -5,44 +5,48 @@
 // its variant name, Some/Ok as Present, None as a clean failure and Err as a
 // told one, a fixed-width integer as an Int.
 use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, TFunc, TImplDef, TTypeDef, Type, compiler_threads_single, type_name]
-use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IRTypeKind, ir_build_program, ir_enum_def, ir_list_stride, ir_program_new, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, ir_build_roots, ir_enum_def, ir_list_stride, ir_program_new, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // What one IR evaluation produced: its value (when it completed with data),
-// the failure it reports, its output, and the builder failures that kept it
-// from running at all (`build_failures`, one line per failing function).
+// the failure it reports, and its output.
 struct JetEvalIRResult {
     value: TComptimeValue?
     complete: Bool
     error: JetEvalError?
     internal_problem: JetEvalInternalProblem?
     stdout: String
+    stderr: String
+    exit_code: Int?
     steps: Int
+}
+
+// The IR of comptime items: the checked functions they reach and the item
+// functions (zero-parameter functions returning the items' expressions)
+// built together, `items` holding each item's function, in order, and
+// `layouts` the type declarations their values read back by; or the builder
+// failures (`build_failures`, one line per failing function) that keep them
+// from running at all.
+struct JetEvalIRComptime {
+    code: IRModule
+    layouts: IRProgram
+    items: [Int]
     build_failures: [String]
 }
 
-// Evaluates the comptime item `item` (a zero-parameter function whose body
-// returns the item's expression) on the IR built from it and the checked
-// `closure` it reaches; `type_defs` and `constants` are the checked modules'
-// declarations the builder lays values out by. The comptime value reads no
-// source location, so the build has no source files.
-fn jet_eval_ir_comptime(closure: ^[TFunc], item: ^TFunc, type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
-    functions := ^closure
-    key :: item.key.copy()
-    &functions.push(^item)
+// Builds `functions` from the roots `item_keys`; `type_defs`, `impls` and
+// `constants` are the checked modules' declarations the builder lays values
+// out by. A comptime value reads no source location and links no C closure,
+// so the build has no source files and no foreign functions.
+fn jet_eval_ir_comptime_build(functions: ^[TFunc], item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef]) -> JetEvalIRComptime {
     // copy: the builder consumes its own type rows; transport lays values out by them again.
-    layouts :: type_defs.copy()
-    // An evaluation links no C closure: it has no foreign functions to call.
-    built := ir_build_program(^functions, ^type_defs, ^impls, [String:String]{}, ^constants, [SemaCheckedForeignFunction]{}, key, compiler_threads_single())
-    if built.failures.len() > 0 {
-        lines := [String]{}
-        loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))
-        return JetEvalIRResult{value: None, complete: false, error: None, internal_problem: None, stdout: "", steps: 0, build_failures: lines}
-    }
-    // The item itself, not the program entry: the generated entry drops a
-    // valued result (ir_entry_function).
-    function :: built.program.function_rows.get(key) ?? -1
-    jet_eval_ir_entry(^built.program, function, ^layouts, config, span)
+    layouts := ir_program_new([TFunc]{}, type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    built := ir_build_roots(^functions, ^type_defs, ^impls, [String:String]{}, ^constants, [SemaCheckedForeignFunction]{}, item_keys, compiler_threads_single())
+    lines := [String]{}
+    loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))
+    items := [Int]{}
+    loop key in item_keys -> &items.push(built.program.function_rows.get(key) ?? -1)
+    JetEvalIRComptime{code: ^built.program, layouts: ^layouts, items: ^items, build_failures: ^lines}
 }
 
 fn jet_eval_ir_build_failure_text(failure: IRBuildFailure) -> String Never! {
@@ -50,10 +54,32 @@ fn jet_eval_ir_build_failure_text(failure: IRBuildFailure) -> String Never! {
 }
 
 // Runs function `entry` of the module (no parameters) and reads its result
-// back.
-fn jet_eval_ir_entry(built: ^IRModule, entry: Int, type_defs: ^[TTypeDef], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
+// back by the type declarations of `layouts`. Runtime routes run on the
+// runtime pack's IR the config carries, decoded on the first evaluation
+// that has it.
+fn jet_eval_ir_run(code: &IRModule, layouts: IRProgram, entry: Int, config: JetEvalConfig, span: Span) -> JetEvalIRResult {
+    if config.runtime_ir == .Val(cell) {
+        jet_eval_runtime_ir_load(cell)
+        reads :: cell.guard_read()
+        return jet_eval_ir_entry_on(&code, reads.value, layouts, entry, config, span)
+    }
+    jet_eval_ir_entry_on(&code, jet_eval_runtime_ir_none(), layouts, entry, config, span)
+}
+
+// Runs item `item` of `built` (its function `built.items[item]`).
+fn jet_eval_ir_comptime_run(built: &JetEvalIRComptime, item: Int, config: JetEvalConfig, span: Span) -> JetEvalIRResult {
+    entry :: built.items[item]
+    jet_eval_ir_run(&built.code, built.layouts, entry, config, span)
+}
+
+// jet_eval_ir_run over a module of its own with no type declarations.
+fn jet_eval_ir_entry(built: ^IRModule, entry: Int, config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     m := ^built
-    p := ir_program_new([TFunc]{}, ^type_defs, [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    p :: ir_program_new([TFunc]{}, [TTypeDef]{}, [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    jet_eval_ir_run(&m, p, entry, config, span)
+}
+
+fn jet_eval_ir_entry_on(m: &IRModule, rt: JetEvalRuntimeIR, p: IRProgram, entry: Int, config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     s := jet_eval_ir_state_new(m, config, span)
     if entry < 0 || entry >= m.functions.len() {
         jet_eval_ir_problem(&s, "the module has no entry function")
@@ -62,15 +88,19 @@ fn jet_eval_ir_entry(built: ^IRModule, entry: Int, type_defs: ^[TTypeDef], confi
     row :: m.functions[entry].result
     area := 0
     if row >= 0 && m.types[row].kind == .Aggregate -> area = jet_eval_ir_alloc(&s, m.types[row].size)
-    word :: jet_eval_ir_invoke(m, &s, entry, [Int]{}, area)
+    word :: jet_eval_ir_invoke(m, rt, &s, 0, entry, [Int]{}, area)
     if word == None || jet_eval_ir_failed(s) -> return jet_eval_ir_result(s, None)
     value :: if row < 0 -> Val(TComptimeValue.Unit) else -> jet_eval_ir_data(&m, p, &s, word ?? 0, row)
+    jet_eval_ir_runtime_finish(m, rt, &s)
+    // Standard error that no runtime stop read back is the evaluated code's
+    // own output, an effect a comptime evaluation refuses.
+    if !s.runtime_execution && s.stderr != "" && !jet_eval_ir_failed(s) -> jet_eval_ir_effect_refused(&s, "standard error", false)
     jet_eval_ir_result(s, value)
 }
 
 fn jet_eval_ir_result(s: JetEvalIRState, value: TComptimeValue?) -> JetEvalIRResult Never! {
     complete :: value != None && !jet_eval_ir_failed(s)
-    JetEvalIRResult{value: if complete -> value else -> None, complete: complete, error: s.failure, internal_problem: s.internal_problem, stdout: s.stdout, steps: s.steps, build_failures: [String]{}}
+    JetEvalIRResult{value: if complete -> value else -> None, complete: complete, error: s.failure, internal_problem: s.internal_problem, stdout: s.stdout, stderr: s.stderr, exit_code: s.exit_code, steps: s.steps}
 }
 
 // The data of the word `word` of type row `row`.

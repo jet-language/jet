@@ -482,6 +482,25 @@ fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplD
     ir_build_waves(^p, ^roots, true, threads)
 }
 
+// Builds the functions `root_keys` name and every function they reach, as
+// ir_build_program does, with no program entry: compile-time evaluation runs
+// each root itself.
+fn ir_build_roots(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], root_keys: [String], threads: CompilerThreads) -> IRBuildResult Never! {
+    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+    ir_foreign_index(&p, ^foreign)
+    roots := [IRWaveJob]{}
+    failures := [IRBuildFailure]{}
+    loop key in root_keys {
+        row :: p.rows.get(key) ?? {
+            &failures.push(IRBuildFailure{key: key.copy(), name: key.copy(), message: "the root function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+            next
+        }
+        &roots.push(IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
+    }
+    if failures.len() > 0 -> return IRBuildResult{program: ir_module_for(p), failures: failures}
+    ir_build_waves(^p, ^roots, false, threads)
+}
+
 // The function the executable starts: `entry` itself when it takes nothing
 // and returns nothing, otherwise a generated `entry` function that calls it
 // and handles its failure carrier as Lower's entry helper does

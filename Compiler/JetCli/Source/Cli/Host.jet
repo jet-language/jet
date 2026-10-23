@@ -33,10 +33,7 @@ use jet_driver.[
     jet_driver_source_query,
 ]
 use jet_eval.[
-    jet_eval_comptime_value,
-    jet_eval_function,
-    jet_eval_host_config,
-    jet_eval_retire_result,
+    jet_eval_ir_run,
 ]
 use jet_foundation.[
     CtValue,
@@ -47,7 +44,7 @@ use jet_foundation.[
     Span,
     JET_COMPILER_TARGET_USIZE_MAX,
     PolicyKey,
-    TComptimeValue,
+    TFunc,
     ast_comptime_value_json,
     ast_comptime_value_show,
     diagnostic_from_registry,
@@ -69,6 +66,7 @@ use jet_ir.[
     IRTestCase,
     IRTestHarness,
     ir_build_program,
+    ir_program_new,
     ir_build_tests,
     ir_optimize_module,
     ir_x64_compile_module,
@@ -192,9 +190,11 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
 
 // `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks for the
 // interpreter (Eval mode under `--pure`, where the driver adds the transitive
-// E3401 purity walk from `run`), then JetEval evaluates `run` over the
-// canonical MIR. What the program printed is program output: before the
-// value, or on stderr under `--json` so stdout stays one `eval` document.
+// E3401 purity walk from `run`) and stops before lowering; the checked
+// program builds as slot IR from `run`, and the IR evaluator runs `run` itself
+// (not the generated entry, which drops a valued result) over the runtime
+// pack's IR. What the program printed is program output: before the value,
+// or on stderr under `--json` so stdout stays one `eval` document.
 fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     source :: cli_files.read(file) ?? return JetDriverVerbOutput{
         stdout: "",
@@ -203,36 +203,46 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
-    compiled :: jet_cli_compile_file(file, color, None, mode)
-    if compiled == {
-        .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> jet_cli_eval_result(file, source, color, json, ^result, snapshot)
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, mode)
+    compiled := jet_cli_compile_executable(^prepared, false, None, None)
+    if ^compiled == {
+        .Refused(refusal) -> output = refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_eval_result(file, source, color, json, result, ^inputs, snapshot)
     }
     output
 }
 
-// The result moves in because its MIR moves on into the evaluator, so the
-// process ends here with the output while both are live (jet_cli_finish).
-fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: ^JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> Never {
+// The checked inputs move into the IR build, so the process ends here with
+// the output (jet_cli_finish).
+fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> Never {
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
     if errors.len() > 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
-    program :: ^result.mir ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without a MIR program"))
-    entry :: result.entry_function ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
-    config :: jet_eval_host_config()
-    span :: Span{start: 0, end: 0}
-    evaluated := jet_eval_function(^program, entry, [TComptimeValue]{}, ^config)
-    data := TComptimeValue?{None}
-    if evaluated.error == None && evaluated.internal_problem == None && evaluated.complete && !evaluated.soft_stop {
-        data = jet_eval_comptime_value(&evaluated, span)
+    checked := ^inputs ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its checked functions"))
+    entry_key :: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
+    declarations := jet_cli_checked_declarations(&checked)
+    // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
+    layouts :: ir_program_new([TFunc]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    // A failure the evaluator reports points at `run`.
+    span := Span{start: 0, end: 0}
+    loop function in checked.functions {
+        if function.key == entry_key -> span = function.source_span
     }
-    jet_eval_retire_result(&evaluated, span)
+    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, result.compiler_threads)
+    if built.failures.len() > 0 {
+        rows :: loop failure in built.failures -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
+        jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet evaluator can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), "correct the reported backend problems, then retry `jet eval {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    }
+    entry :: built.program.function_rows.get(entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
+    config := jet_cli_eval_config()
+    config.eval_entry = true
+    evaluated :: jet_eval_ir_run(&built.program, layouts, entry, config, span)
     if evaluated.error == .Val(failure) {
         jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
     if evaluated.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem.message))
-    checked :: data ?? jet_cli_finish(jet_cli_ice("evaluating `run` in `{file}` produced no value"))
-    value :: sema_user_template_ct_value(checked) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` is not compile-time data"))
+    data :: evaluated.value ?? jet_cli_finish(jet_cli_ice("evaluating `run` in `{file}` produced no value"))
+    value :: sema_user_template_ct_value(data) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` is not compile-time data"))
     if json {
         encoded :: ast_comptime_value_json(value) ?? jet_cli_finish(jet_cli_eval_json_unsupported(err.byte_offset, err.path, err.reason, evaluated.stdout))
         rendered :: jet_cli_status_value_parse(encoded) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` has no JSON form"))
@@ -291,6 +301,9 @@ JET_CLI_RUNTIME_KEY_FILE :: "native.key"
 // Written by packaging beside the pack: every symbol the runtime exports, one
 // per line.
 JET_CLI_RUNTIME_EXPORTS_FILE :: "runtime.exports"
+// Written by packaging beside the pack: the runtime's optimized IR module
+// (JetIR Codec.jet), which compile-time evaluation runs.
+JET_CLI_RUNTIME_IR_FILE :: "runtime.ir"
 
 // jet-runtime/ beside the `jet` executable.
 fn jet_cli_runtime_dir() -[Env]> String Never! {

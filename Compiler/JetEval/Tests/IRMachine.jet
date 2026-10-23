@@ -1,12 +1,19 @@
 // The slot IR interpreter on hand-built modules: structured control and
-// calls, the exact Int spill to big integers, fixed-width wrap and trap,
-// text routes, frame storage and a List read back as checked data.
-use jet_foundation.[Span, TComptimeValue, TTypeDef, Type]
-use jet_ir.[IRFunction, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IRClass, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP, ir_args, ir_depth, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_new, ir_open, ir_open_if, ir_slot]
-use jet_eval.[JetEvalIRResult, jet_eval_default_config, jet_eval_ir_entry]
+// calls, fixed-width wrap and trap, and runtime routes run on a hand-built
+// runtime module installed as the runtime pack's IR (an init hook, exports,
+// `#FFI(asm)` leaves over an anonymous mapping, a ConstText String).
+use jet_foundation.[Span, TComptimeValue, Type]
+use jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IRClass, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP, ir_args, ir_depth, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_encode, ir_module_new, ir_open, ir_slot]
+use jet_eval.[JetEvalConfig, JetEvalIRResult, jet_eval_default_config, jet_eval_ir_entry, jet_eval_runtime_ir]
 
 fn ir_machine_require(ok: Bool, message: String) Never! {
     if !ok -> panic("IRMachine: {message}")
+}
+
+// The headline of the diagnostic a stopped run reports ("" when none).
+fn ir_machine_error_what(result: JetEvalIRResult) -> String Never! {
+    if result.error == .Val(error) -> return error.diagnostic.what.copy()
+    ""
 }
 
 fn ir_machine_int_row(m: &IRModule) -> Int Never! {
@@ -30,8 +37,12 @@ fn ir_machine_string_row(m: &IRModule) -> Int Never! {
 }
 
 fn ir_machine_run(built: ^IRModule) -> JetEvalIRResult {
+    ir_machine_run_with(^built, jet_eval_default_config())
+}
+
+fn ir_machine_run_with(built: ^IRModule, config: JetEvalConfig) -> JetEvalIRResult {
     entry :: built.entry
-    jet_eval_ir_entry(^built, entry, [TTypeDef]{}, jet_eval_default_config(), Span{start: 0, end: 0})
+    jet_eval_ir_entry(^built, entry, config, Span{start: 0, end: 0})
 }
 
 // fn sum(n: Int) -> Int: the sum of 0..<n by a Block/Loop walk.
@@ -83,27 +94,6 @@ fn ir_machine_sum(m: &IRModule) -> IRFunction Never! {
     ir_machine_require(result.value == (Val(TComptimeValue.Int{value: 45})), "sum(10) is 45, got {result.value}")
 }
 
-#Test("ir_machine_exact_int_spill") {
-    m := ir_module_new()
-    int :: ir_machine_int_row(&m)
-    run := ir_function_new("run", "run", "run", "ir.jet", 1)
-    run.result = int
-    a :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    b :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    c :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    d :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    ir_emit(&run, IROp.Const, a, 4611686018427387903, -1, -1, 1)
-    ir_emit(&run, IROp.Const, b, 4611686018427387903, -1, -1, 1)
-    ir_emit(&run, IROp.Mul, c, a, b, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.FloorDiv, d, c, a, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.Return, -1, c, -1, -1, 1)
-    &m.functions.push(run)
-    m.entry = 0
-    result :: ir_machine_run(^m)
-    // Outside 64 bits, so it reads back as a BigInt decimal (jet_eval_ir_data).
-    expected :: 4611686018427387903 * 4611686018427387903
-    ir_machine_require(result.value == (Val(TComptimeValue.BigInt{decimal: "{expected}"})), "a big product spills exactly, got {result.value}")
-}
 
 #Test("ir_machine_fixed_width") {
     m := ir_module_new()
@@ -138,112 +128,137 @@ fn ir_machine_sum(m: &IRModule) -> IRFunction Never! {
     ir_machine_require(!trapped.complete && trapped.error != None, "a checked U8 overflow stops")
 }
 
-#Test("ir_machine_text_and_list") {
-    m := ir_module_new()
-    text :: ir_machine_string_row(&m)
-    word :: ir_machine_word_row(&m)
-    list :: ir_intern_type(&m, "[String]", IRType{ty: Type.List{element: Type.String}, kind: IRTypeKind.Aggregate, size: 24, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
-    run := ir_function_new("run", "run", "run", "ir.jet", 1)
-    run.result = list
-    hello :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    world :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    joined :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    upper :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    header :: ir_slot(&run, list, IRSlotKind.Temp, -1, 1)
-    data :: ir_slot(&run, word, IRSlotKind.Temp, -1, 1)
-    two :: ir_slot(&run, word, IRSlotKind.Temp, -1, 1)
-    bytes :: ir_slot(&run, word, IRSlotKind.Temp, -1, 1)
-    align :: ir_slot(&run, word, IRSlotKind.Temp, -1, 1)
-    ir_emit(&run, IROp.ConstText, hello, ir_intern_text(&m, "hello, "), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, world, ir_intern_text(&m, "world"), -1, -1, 1)
-    ir_emit(&run, IROp.Concat, joined, hello, world, -1, 1)
-    start :: ir_args(&run, [Int]{joined})
-    ir_emit(&run, IROp.CallRuntime, upper, ir_intern_name(&m, "jet_unicode_upper"), start, 1, 1)
-    ir_emit(&run, IROp.StackAddress, header, 24, 8, -1, 1)
-    ir_emit(&run, IROp.Const, two, 2, -1, -1, 1)
-    ir_emit(&run, IROp.Const, bytes, 16, -1, -1, 1)
-    ir_emit(&run, IROp.Const, align, 8, -1, -1, 1)
-    alloc :: ir_args(&run, [Int]{bytes, align})
-    ir_emit(&run, IROp.CallRuntime, data, ir_intern_name(&m, "jet_rt_alloc"), alloc, 2, 1)
-    ir_emit(&run, IROp.Store, -1, data, 0, joined, 1)
-    ir_emit(&run, IROp.Store, -1, data, 8, upper, 1)
-    ir_emit(&run, IROp.Store, -1, header, 0, two, 1)
-    ir_emit(&run, IROp.Store, -1, header, 8, two, 1)
-    ir_emit(&run, IROp.Store, -1, header, 16, data, 1)
-    ir_emit(&run, IROp.Return, -1, header, -1, -1, 1)
-    &m.functions.push(run)
-    m.entry = 0
-    result :: ir_machine_run(^m)
-    expected :: TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.String{value: "hello, world"}, TComptimeValue.String{value: "HELLO, WORLD"}}}
-    ir_machine_require(result.value == Val((expected)), "a List of two texts reads back, got {result.value} {result.internal_problem}")
-}
 
-// The text and Int parse routes: after/before, the byte order of texts and
-// jet_int_parse's Result slots (an exact big value and a refused text).
-#Test("ir_machine_parse_and_compare") {
+// An exact Int product past the inline range is the runtime's jet_int_mul:
+// without the runtime pack's IR it is unsupported, never computed by hand.
+#Test("ir_machine_exact_int_needs_runtime") {
     m := ir_module_new()
     int :: ir_machine_int_row(&m)
-    text :: ir_machine_string_row(&m)
-    word :: ir_machine_word_row(&m)
     run := ir_function_new("run", "run", "run", "ir.jet", 1)
     run.result = int
-    number :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    junk :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    pair :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    sep :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    a :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    b :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    v :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    key :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    after :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    before :: ir_slot(&run, text, IRSlotKind.Temp, -1, 1)
-    out :: ir_slot(&run, word, IRSlotKind.Temp, -1, 1)
-    good :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    bad :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    parsed :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    order :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    same_after :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    same_before :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    total :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
-    ir_emit(&run, IROp.ConstText, number, ir_intern_text(&m, "  -123456789012345678901 "), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, junk, ir_intern_text(&m, "x1"), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, pair, ir_intern_text(&m, "key=v"), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, sep, ir_intern_text(&m, "="), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, a, ir_intern_text(&m, "a"), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, b, ir_intern_text(&m, "b"), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, v, ir_intern_text(&m, "v"), -1, -1, 1)
-    ir_emit(&run, IROp.ConstText, key, ir_intern_text(&m, "key"), -1, -1, 1)
-    ir_emit(&run, IROp.StackAddress, out, 8, 8, -1, 1)
-    parse :: ir_intern_name(&m, "jet_int_parse")
-    compare :: ir_intern_name(&m, "jet_rt_string_compare")
-    after_route :: ir_intern_name(&m, "jet_string_after")
-    before_route :: ir_intern_name(&m, "jet_string_before")
-    good_args :: ir_args(&run, [Int]{number, out, out})
-    ir_emit(&run, IROp.CallRuntime, good, parse, good_args, 3, 1)
-    ir_emit(&run, IROp.Load, parsed, out, 0, -1, 1)
-    bad_args :: ir_args(&run, [Int]{junk, out, out})
-    ir_emit(&run, IROp.CallRuntime, bad, parse, bad_args, 3, 1)
-    order_args :: ir_args(&run, [Int]{b, a})
-    ir_emit(&run, IROp.CallRuntime, order, compare, order_args, 2, 1)
-    split_args :: ir_args(&run, [Int]{pair, sep})
-    ir_emit(&run, IROp.CallRuntime, after, after_route, split_args, 2, 1)
-    split_again :: ir_args(&run, [Int]{pair, sep})
-    ir_emit(&run, IROp.CallRuntime, before, before_route, split_again, 2, 1)
-    after_args :: ir_args(&run, [Int]{after, v})
-    ir_emit(&run, IROp.CallRuntime, same_after, compare, after_args, 2, 1)
-    before_args :: ir_args(&run, [Int]{before, key})
-    ir_emit(&run, IROp.CallRuntime, same_before, compare, before_args, 2, 1)
-    // parsed + good + bad + order + same_after + same_before
-    ir_emit(&run, IROp.Add, total, parsed, good, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.Add, total, total, bad, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.Add, total, total, order, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.Add, total, total, same_after, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.Add, total, total, same_before, IR_OVERFLOW_TRAP, 1)
-    ir_emit(&run, IROp.Return, -1, total, -1, -1, 1)
+    a :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    small :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    c :: ir_slot(&run, int, IRSlotKind.Temp, -1, 1)
+    ir_emit(&run, IROp.Const, a, 4611686018427387903, -1, -1, 1)
+    ir_emit(&run, IROp.Const, small, 3, -1, -1, 1)
+    ir_emit(&run, IROp.Mul, c, small, small, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Mul, c, a, c, IR_OVERFLOW_TRAP, 1)
+    ir_emit(&run, IROp.Return, -1, c, -1, -1, 1)
     &m.functions.push(run)
     m.entry = 0
     result :: ir_machine_run(^m)
-    // Outside 64 bits, so it reads back as a BigInt decimal (jet_eval_ir_data).
-    expected :: 0 - 123456789012 * 1000000000 - 345678901 + 2
-    ir_machine_require(result.value == (Val(TComptimeValue.BigInt{decimal: "{expected}"})), "parse, order, after and before, got {result.value} {result.internal_problem} {result.error}")
+    ir_machine_require(!result.complete && result.error != None && result.internal_problem == None, "a spilling product without the runtime is unsupported, got {result.value} {result.internal_problem}")
+    what :: ir_machine_error_what(result)
+    ir_machine_require(what == "Compile-time evaluation of runtime route `jet_int_mul` needs the runtime pack's IR", "a runtime route without the runtime IR names the missing pack, got {what}")
+}
+
+// An `#FFI(asm)` leaf: no body; the machine answers it by name.
+fn ir_machine_leaf(m: &IRModule, name: String, params: Int, word: Int) -> IRFunction Never! {
+    f := ir_function_new(name, name, name, "Linux.jet", 1)
+    loop index in 0..<params {
+        param :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "p{index}"), 1)
+    }
+    f.result = word
+    f.asm = Val(IRAsmLeaf{code: [U8]{}, regs: [Int]{}, result: 0})
+    f
+}
+
+// A runtime module: rt_init (init hook) maps a page through the syscall
+// leaf, keeps its address in data row `cell` and stores 42 there through
+// os_store_i64; jet_test_answer loads it back through os_load_i64;
+// jet_test_hello returns a ConstText String.
+fn ir_machine_runtime() -> [U8] Never! {
+    r := ir_module_new()
+    word :: ir_machine_word_row(&r)
+    text :: ir_machine_string_row(&r)
+    cell :: r.data.len()
+    &r.data.push([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
+    syscall_leaf := ir_machine_leaf(&r, "os_syscall_i64", 7, word)
+    &r.functions.push(syscall_leaf)
+    store_leaf := ir_machine_leaf(&r, "os_store_i64", 2, word)
+    &r.functions.push(store_leaf)
+    load_leaf := ir_machine_leaf(&r, "os_load_i64", 1, word)
+    &r.functions.push(load_leaf)
+    init := ir_function_new("rt_init", "rt_init", "rt_init", "rt.jet", 1)
+    number :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    zero :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    size :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    prot :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    flags :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    none :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    page :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    at :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    answer :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    ignored :: ir_slot(&init, word, IRSlotKind.Temp, -1, 1)
+    ir_emit(&init, IROp.Const, number, 9, -1, -1, 1)
+    ir_emit(&init, IROp.Const, zero, 0, -1, -1, 1)
+    ir_emit(&init, IROp.Const, size, 4096, -1, -1, 1)
+    ir_emit(&init, IROp.Const, prot, 3, -1, -1, 1)
+    ir_emit(&init, IROp.Const, flags, 34, -1, -1, 1)
+    ir_emit(&init, IROp.Const, none, -1, -1, -1, 1)
+    map :: ir_args(&init, [Int]{number, zero, size, prot, flags, none, zero})
+    ir_emit(&init, IROp.Call, page, 0, map, 7, 1)
+    ir_emit(&init, IROp.DataAddress, at, cell, -1, -1, 1)
+    ir_emit(&init, IROp.Store, -1, at, 0, page, 1)
+    ir_emit(&init, IROp.Const, answer, 42, -1, -1, 1)
+    store :: ir_args(&init, [Int]{page, answer})
+    ir_emit(&init, IROp.Call, ignored, 1, store, 2, 1)
+    ir_emit(&init, IROp.Return, -1, -1, -1, -1, 1)
+    &r.functions.push(init)
+    read := ir_function_new("rt_answer", "rt_answer", "jet_test_answer", "rt.jet", 1)
+    read.result = word
+    slot :: ir_slot(&read, word, IRSlotKind.Temp, -1, 1)
+    held :: ir_slot(&read, word, IRSlotKind.Temp, -1, 1)
+    value :: ir_slot(&read, word, IRSlotKind.Temp, -1, 1)
+    ir_emit(&read, IROp.DataAddress, slot, cell, -1, -1, 1)
+    ir_emit(&read, IROp.Load, held, slot, 0, -1, 1)
+    load :: ir_args(&read, [Int]{held})
+    ir_emit(&read, IROp.Call, value, 2, load, 1, 1)
+    ir_emit(&read, IROp.Return, -1, value, -1, -1, 1)
+    &r.functions.push(read)
+    hello := ir_function_new("rt_hello", "rt_hello", "jet_test_hello", "rt.jet", 1)
+    hello.result = text
+    greeting :: ir_slot(&hello, text, IRSlotKind.Temp, -1, 1)
+    ir_emit(&hello, IROp.ConstText, greeting, ir_intern_text(&r, "hello"), -1, -1, 1)
+    ir_emit(&hello, IROp.Return, -1, greeting, -1, -1, 1)
+    &r.functions.push(hello)
+    exports :: [IRLibraryExport]{
+        IRLibraryExport{function: 3, symbol: "rt_init", init_priority: 0, fini_priority: -1},
+        IRLibraryExport{function: 4, symbol: "jet_test_answer", init_priority: -1, fini_priority: -1},
+        IRLibraryExport{function: 5, symbol: "jet_test_hello", init_priority: -1, fini_priority: -1},
+    }
+    ir_module_encode(r, exports)
+}
+
+// An item module calling runtime route `symbol` (no arguments) and
+// returning its result (a String when `string`, else an I64).
+fn ir_machine_route_item(symbol: String, string: Bool) -> IRModule Never! {
+    m := ir_module_new()
+    row :: if string -> ir_machine_string_row(&m) else -> ir_machine_word_row(&m)
+    run := ir_function_new("run", "run", "run", "ir.jet", 1)
+    run.result = row
+    out :: ir_slot(&run, row, IRSlotKind.Temp, -1, 1)
+    start :: ir_args(&run, [Int]{})
+    ir_emit(&run, IROp.CallRuntime, out, ir_intern_name(&m, symbol), start, 0, 1)
+    ir_emit(&run, IROp.Return, -1, out, -1, -1, 1)
+    &m.functions.push(run)
+    m.entry = 0
+    m
+}
+
+fn ir_machine_runtime_config() -> JetEvalConfig Never! {
+    config := jet_eval_default_config()
+    config.runtime_ir = Val(jet_eval_runtime_ir(ir_machine_runtime()))
+    config
+}
+
+#Test("ir_machine_runtime_routes") {
+    answer :: ir_machine_run_with(ir_machine_route_item("jet_test_answer", false), ir_machine_runtime_config())
+    ir_machine_require(answer.value == (Val(TComptimeValue.Int{value: 42})), "the init hook's page holds 42, got {answer.value} {answer.internal_problem} {answer.error}")
+    hello :: ir_machine_run_with(ir_machine_route_item("jet_test_hello", true), ir_machine_runtime_config())
+    ir_machine_require(hello.value == (Val(TComptimeValue.String{value: "hello"})), "a runtime ConstText reads back, got {hello.value} {hello.internal_problem} {hello.error}")
+    missing :: ir_machine_run_with(ir_machine_route_item("jet_test_missing", false), ir_machine_runtime_config())
+    ir_machine_require(!missing.complete && missing.error != None && missing.internal_problem == None, "an unknown runtime symbol is unsupported, got {missing.value} {missing.internal_problem}")
+    unknown :: ir_machine_error_what(missing)
+    ir_machine_require(unknown == "Compile-time evaluation does not implement `IR runtime route `jet_test_missing``", "an unknown runtime symbol is named, got {unknown}")
 }

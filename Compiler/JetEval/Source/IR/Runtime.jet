@@ -1,129 +1,381 @@
-// The runtime routes the IR calls (CallRuntime, Close), with the runtime's
-// semantics (Compiler/JetRuntime/Source): Text.jet, Display.jet, Int.jet,
-// IntParse.jet, Err.jet, CompilerNeededMath.jet, Alloc.jet, Collections.jet,
-// Host.jet and Trap.jet. Host String methods are
-// the same runtime routes compiled into this binary, so they agree byte for
-// byte. A comptime stop reports the diagnostic the MIR evaluator reports for
-// the same stop.
+// The runtime unit and the host beneath it. A CallRuntime (or Close) names a
+// runtime symbol; the machine runs the runtime pack's own IR for it (unit
+// 1, the module packaging writes as runtime.ir: JetIR Codec.jet), started
+// once per evaluation by its lifecycle init hooks in priority order, as
+// .init_array runs them. Only what has no Jet body is the machine's:
+// - the `#FFI(asm)` leaves (JetBackend OS/Linux.jet), by name;
+// - the Linux system calls those leaves make, over the machine's memory
+//   (jet_eval_ir_syscall): anonymous mappings, the GS base, stdout and
+//   stderr, and the init hooks' probes (no file opens, no event poller);
+//   the host effects of evaluated code are refused (jet_eval_ir_ambient),
+//   and any other call as unsupported, never guessed;
+// - the C math the runtime imports (jet_eval_ir_libm);
+// - the stops (Trap.jet's jet_rt_*_stop / panic routes and
+//   jet_rt_require_stop), which report the diagnostic the MIR evaluator
+//   reports for the same stop;
+// - jet_comptime_input, the compiler's answer to a Tier-1 comptime input.
 use core.math as math
-use jet_foundation.[TComptimeValue, foundation_debug_quoted]
-use jet_ir.[IRModule, IROp]
+use jet_foundation.[TComptimeValue, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights]
+use jet_ir.[IRModule, ir_module_decode, ir_module_new]
 
-fn jet_eval_ir_runtime(m: IRModule, s: &JetEvalIRState, symbol: String, args: [Int], result_ty: Int, file: String, line: Int) -> Int? {
+// The runtime pack's IR, shared by every evaluation of a compile: the
+// encoded bytes until the first evaluation that needs them decodes them
+// (`state` 1; 2 when they don't decode). `exports` maps a runtime symbol to
+// its function, `init` and `fini` are the lifecycle hooks in the order
+// they run, and `prims[f]` the host primitive function f is (0: none).
+struct JetEvalRuntimeIR {
+    bytes: [U8]
+    state: Int
+    code: IRModule
+    exports: [String:Int]
+    init: [Int]
+    fini: [Int]
+    prims: [Int]
+}
+
+fn jet_eval_runtime_ir(bytes: [U8]) -> Shared<JetEvalRuntimeIR> Never! {
+    shared JetEvalRuntimeIR{bytes: bytes, state: 0, code: ir_module_new(), exports: [String:Int]{}, init: [Int]{}, fini: [Int]{}, prims: [Int]{}}
+}
+
+fn jet_eval_runtime_ir_none() -> JetEvalRuntimeIR Never! {
+    JetEvalRuntimeIR{bytes: [U8]{}, state: 2, code: ir_module_new(), exports: [String:Int]{}, init: [Int]{}, fini: [Int]{}, prims: [Int]{}}
+}
+
+JET_EVAL_IR_HOOK_ORDER :: 1048576
+
+// Decodes the shared runtime IR on first use.
+fn jet_eval_runtime_ir_load(cell: Shared<JetEvalRuntimeIR>) Never! {
+    permit := cell.guard_edit()
+    if permit.value.state != 0 -> return
+    bytes := permit.value.bytes
+    permit.value.bytes = [U8]{}
+    decoded := ir_module_decode(^bytes) ?? {
+        permit.value.state = 2
+        return
+    }
+    exports := [String:Int]{}
+    // A hook's sort key is priority * JET_EVAL_IR_HOOK_ORDER + export index:
+    // lower priorities run first, ties in export order; .fini_array runs in
+    // reverse.
+    hooks := [Int]{}
+    finals := [Int]{}
+    loop (order, row) in decoded.exports {
+        exports[row.symbol.copy()] = row.function
+        if row.init_priority >= 0 -> &hooks.push(row.init_priority * JET_EVAL_IR_HOOK_ORDER + order)
+        if row.fini_priority >= 0 -> &finals.push(row.fini_priority * JET_EVAL_IR_HOOK_ORDER + order)
+    }
+    &hooks.sort()
+    &finals.sort()
+    permit.value.init = loop key in hooks -> decoded.exports[key %% JET_EVAL_IR_HOOK_ORDER].function
+    fini := [Int]{}
+    at := finals.len() - 1
+    loop at >= 0 {
+        &fini.push(decoded.exports[finals[at] %% JET_EVAL_IR_HOOK_ORDER].function)
+        at -= 1
+    }
+    permit.value.fini = fini
+    permit.value.prims = jet_eval_ir_module_primitives(decoded.program, exports)
+    permit.value.exports = exports
+    permit.value.code = decoded.program
+    permit.value.state = 1
+}
+
+// ---------------------------------------------------------------------------
+// Primitives.
+
+JET_EVAL_IR_P_SYSCALL :: 1
+JET_EVAL_IR_P_LOAD :: 2
+JET_EVAL_IR_P_STORE :: 3
+JET_EVAL_IR_P_LOAD8 :: 4
+JET_EVAL_IR_P_STORE8 :: 5
+JET_EVAL_IR_P_CAS :: 6
+JET_EVAL_IR_P_PAUSE :: 7
+JET_EVAL_IR_P_STACK :: 8
+JET_EVAL_IR_P_COPY_UP :: 9
+JET_EVAL_IR_P_COPY_DOWN_BYTES :: 10
+JET_EVAL_IR_P_COPY_DOWN_WORDS :: 11
+JET_EVAL_IR_P_WRITE_WORD :: 12
+JET_EVAL_IR_P_WRITE_LINE :: 13
+JET_EVAL_IR_P_TLS :: 14
+JET_EVAL_IR_P_TLS_PROBE :: 15
+JET_EVAL_IR_P_FETCH_ADD :: 16
+JET_EVAL_IR_P_SWAP :: 17
+JET_EVAL_IR_P_CALL :: 18
+JET_EVAL_IR_P_REFUSED :: 19
+JET_EVAL_IR_P_NUMERIC_STOP :: 20
+JET_EVAL_IR_P_SHIFT_STOP :: 21
+JET_EVAL_IR_P_PANIC :: 22
+JET_EVAL_IR_P_LIST_BOUNDS :: 23
+JET_EVAL_IR_P_UNREACHABLE :: 24
+JET_EVAL_IR_P_REQUIRE_STOP :: 25
+JET_EVAL_IR_P_COMPTIME_INPUT :: 26
+JET_EVAL_IR_P_LIBM :: 27
+
+// The primitive an `#FFI(asm)` leaf named `name` is (OS/Linux.jet), or 0.
+fn jet_eval_ir_leaf_primitive(name: String) -> Int Never! {
+    if name == {
+        "os_syscall_i64" | "os_syscall" -> JET_EVAL_IR_P_SYSCALL
+        "os_load_i64" | "os_load_word" -> JET_EVAL_IR_P_LOAD
+        "os_store_i64" | "os_store_word" -> JET_EVAL_IR_P_STORE
+        "os_load_u8" | "os_load_byte" -> JET_EVAL_IR_P_LOAD8
+        "os_store_u8" | "os_store_byte" -> JET_EVAL_IR_P_STORE8
+        "os_cas_i64" -> JET_EVAL_IR_P_CAS
+        "os_spin_pause" -> JET_EVAL_IR_P_PAUSE
+        "os_stack_address_i64" -> JET_EVAL_IR_P_STACK
+        "os_copy_ascending_i64" -> JET_EVAL_IR_P_COPY_UP
+        "os_copy_descending_bytes_i64" -> JET_EVAL_IR_P_COPY_DOWN_BYTES
+        "os_copy_descending_words_i64" -> JET_EVAL_IR_P_COPY_DOWN_WORDS
+        "os_write_word_i64" -> JET_EVAL_IR_P_WRITE_WORD
+        "os_write_line_i64" -> JET_EVAL_IR_P_WRITE_LINE
+        "os_tls_base_i64" -> JET_EVAL_IR_P_TLS
+        "os_tls_base_probe_i64" -> JET_EVAL_IR_P_TLS_PROBE
+        "os_fetch_add_i64" -> JET_EVAL_IR_P_FETCH_ADD
+        "os_swap_i64" -> JET_EVAL_IR_P_SWAP
+        "os_call_address_i64" | "os_call_address_two_i64" | "os_call1_unit_i64" | "os_call2_unit_i64" | "os_call3_unit_i64" | "os_call1_i64" | "os_call2_i64" | "os_call3_i64" | "os_call4_i64" | "os_call5_i64" | "os_call0_unit" | "os_call_address" | "os_call_address_two" | "os_call_address_three" | "os_call_address_unit" | "os_call_address_one_unit" | "os_call_address_two_unit" | "os_call_address_three_unit" -> JET_EVAL_IR_P_CALL
+        else -> JET_EVAL_IR_P_REFUSED
+    }
+}
+
+// The primitive a runtime symbol is when the machine answers it itself.
+fn jet_eval_ir_symbol_primitive(symbol: String) -> Int Never! {
     if symbol == {
-        "jet_rt_alloc" -> {
-            if args.len() != 2 || args[0] < 0 -> return jet_eval_ir_route_shape(&s, symbol)
-            return Val(jet_eval_ir_alloc(&s, args[0]))
+        "jet_rt_numeric_stop" -> JET_EVAL_IR_P_NUMERIC_STOP
+        "jet_rt_fixed_shift_stop" -> JET_EVAL_IR_P_SHIFT_STOP
+        "jet_rt_panic_message" -> JET_EVAL_IR_P_PANIC
+        "jet_rt_panic_list_bounds" -> JET_EVAL_IR_P_LIST_BOUNDS
+        "jet_rt_unreachable" -> JET_EVAL_IR_P_UNREACHABLE
+        "jet_rt_require_stop" -> JET_EVAL_IR_P_REQUIRE_STOP
+        "jet_comptime_input" -> JET_EVAL_IR_P_COMPTIME_INPUT
+        // The C math the runtime imports (CompilerNeededMath.jet), which the
+        // platform archive supplies natively and runtime.ir does not hold.
+        "acos" | "acosh" | "asin" | "asinh" | "atan" | "atan2" | "atanh" | "cbrt" | "ceil" | "cos" | "cosh" | "exp" | "expm1" | "exp2" | "floor" | "fma" | "fmod" | "hypot" | "log" | "log1p" | "log10" | "log2" | "pow" | "round" | "sin" | "sinh" | "sqrt" | "tan" | "tanh" | "trunc" -> JET_EVAL_IR_P_LIBM
+        else -> 0
+    }
+}
+
+// The primitive of every function of `code`: its asm leaves by name, and
+// the functions exported (`exports`) under a symbol the machine answers.
+fn jet_eval_ir_module_primitives(code: IRModule, exports: [String:Int]) -> [Int] Never! {
+    prims := [Int]{}
+    loop f in code.functions -> &prims.push(if f.asm != None -> jet_eval_ir_leaf_primitive(f.name) else -> 0)
+    loop (symbol, id) in exports {
+        prim :: jet_eval_ir_symbol_primitive(symbol)
+        if prim != 0 && id >= 0 && id < prims.len() -> prims[id] = prim
+    }
+    prims
+}
+
+// ---------------------------------------------------------------------------
+// Routes.
+
+// A CallRuntime of name row `row` in `unit` on `args` (`dst_row` the result
+// slot's type row, -1 for none; `area` its storage when it is an
+// aggregate): a primitive the machine answers, or the runtime export of
+// that symbol. The resolution is kept per name row: a primitive as
+// -2 - code, an export as its function, an unknown symbol as -1.
+fn jet_eval_ir_route(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, unit: Int, row: Int, args: [Int], dst_row: Int, area: Int) -> Int? {
+    if row < 0 || row >= code.names.len() {
+        jet_eval_ir_problem(&s, "runtime route name {row} is not in the module")
+        return None
+    }
+    target := s.units[unit].routes.get(row) ?? -3
+    if target == -3 {
+        symbol :: code.names[row]
+        prim :: jet_eval_ir_symbol_primitive(symbol)
+        target = if prim != 0 -> -2 - prim else -> rt.exports.get(symbol) ?? -1
+        s.units[unit].routes[row] = target
+    }
+    if target <= -2 {
+        if target == -2 - JET_EVAL_IR_P_COMPTIME_INPUT -> return jet_eval_ir_comptime_input_route(code, m, rt, &s, args, dst_row)
+        return jet_eval_ir_primitive(m, rt, &s, -2 - target, code.names[row], args, dst_row)
+    }
+    if target == -1 {
+        if rt.state != 1 {
+            jet_eval_ir_no_runtime(&s, code.names[row])
+        } else {
+            jet_eval_ir_unsupported(&s, "IR runtime route `{code.names[row]}`")
         }
-        "jet_rt_mem_move" -> {
-            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
+        return None
+    }
+    if !jet_eval_ir_runtime_start(m, rt, &s, code.names[row]) -> return None
+    jet_eval_ir_invoke(m, rt, &s, 1, target, args, area)
+}
+
+// A call of runtime export `symbol` the machine makes for an operation the
+// selection lowers to one (exact Int kernels, text concatenation, clones).
+fn jet_eval_ir_runtime_call(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, symbol: String, args: [Int]) -> Int? {
+    prim :: jet_eval_ir_symbol_primitive(symbol)
+    if prim != 0 -> return jet_eval_ir_primitive(m, rt, &s, prim, symbol, args, -1)
+    if !jet_eval_ir_runtime_start(m, rt, &s, symbol) -> return None
+    id :: rt.exports.get(symbol) ?? {
+        jet_eval_ir_unsupported(&s, "IR runtime route `{symbol}`")
+        return None
+    }
+    jet_eval_ir_invoke(m, rt, &s, 1, id, args, 0)
+}
+
+// Opens the runtime unit and runs its init hooks, once per evaluation.
+fn jet_eval_ir_runtime_start(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, symbol: String) -> Bool {
+    if s.runtime == 1 -> return true
+    if s.runtime == 2 || rt.state != 1 {
+        s.runtime = 2
+        jet_eval_ir_no_runtime(&s, symbol)
+        return false
+    }
+    s.runtime = 1
+    jet_eval_ir_unit_open(rt.code, &s, rt.prims)
+    s.hooks = true
+    loop id in rt.init {
+        _ := jet_eval_ir_invoke(m, rt, &s, 1, id, [Int]{}, 0) ?? {
+            s.runtime = 2
+            s.hooks = false
+            return false
+        }
+    }
+    s.hooks = false
+    true
+}
+
+// A runtime route with no runtime IR to run it on: this compiler has no
+// readable runtime pack beside it (or its runtime.ir does not decode).
+fn jet_eval_ir_no_runtime(s: &JetEvalIRState, symbol: String) Never! {
+    if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Unsupported, s.span, "compile-time evaluation of runtime route `{symbol}` needs the runtime pack's IR", "compile-time evaluation runs runtime routes on the runtime pack's own IR (`runtime.ir` in `jet-runtime/` beside the compiler), which is missing or does not decode", "build the runtime pack with this compiler (Tools/packaging/prebuild-runtime.mjs) into `jet-runtime/` beside its executable"))
+}
+
+// Runs the runtime's fini hooks (the stdout flush) after a completed
+// evaluation that started it.
+fn jet_eval_ir_runtime_finish(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState) {
+    if s.runtime != 1 || jet_eval_ir_failed(s) -> return
+    loop id in rt.fini {
+        _ := jet_eval_ir_invoke(m, rt, &s, 1, id, [Int]{}, 0) ?? return
+    }
+}
+
+fn jet_eval_ir_primitive_shape(s: &JetEvalIRState, name: String) -> Int? Never! {
+    jet_eval_ir_problem(&s, "host primitive {name} called with the wrong operands")
+    None
+}
+
+// Primitive `prim` (named `name`) on `args`.
+fn jet_eval_ir_primitive(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, prim: Int, name: String, args: [Int], dst_row: Int) -> Int? {
+    if prim == {
+        JET_EVAL_IR_P_SYSCALL -> {
+            if args.len() != 7 -> return jet_eval_ir_primitive_shape(&s, name)
+            return jet_eval_ir_syscall(&s, args)
+        }
+        JET_EVAL_IR_P_LOAD -> {
+            if args.len() != 1 -> return jet_eval_ir_primitive_shape(&s, name)
+            return jet_eval_ir_read_word(&s, args[0])
+        }
+        JET_EVAL_IR_P_STORE -> {
+            if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, name)
+            if !jet_eval_ir_write(&s, args[0], 8, args[1]) -> return None
+            return Val(0)
+        }
+        JET_EVAL_IR_P_LOAD8 -> {
+            if args.len() != 1 -> return jet_eval_ir_primitive_shape(&s, name)
+            return jet_eval_ir_read(&s, args[0], 1)
+        }
+        JET_EVAL_IR_P_STORE8 -> {
+            if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, name)
+            if !jet_eval_ir_write(&s, args[0], 1, args[1]) -> return None
+            return Val(0)
+        }
+        JET_EVAL_IR_P_CAS -> {
+            // lock cmpxchg: the previous word; the store only when it matched.
+            if args.len() != 3 -> return jet_eval_ir_primitive_shape(&s, name)
+            previous :: jet_eval_ir_read_word(&s, args[0]) ?? return None
+            if previous == jet_eval_ir_wrap(args[1], 64, true) && !jet_eval_ir_write(&s, args[0], 8, args[2]) -> return None
+            return Val(previous)
+        }
+        JET_EVAL_IR_P_FETCH_ADD -> {
+            if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, name)
+            previous :: jet_eval_ir_read_word(&s, args[0]) ?? return None
+            if !jet_eval_ir_write(&s, args[0], 8, previous + args[1]) -> return None
+            return Val(previous)
+        }
+        JET_EVAL_IR_P_SWAP -> {
+            if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, name)
+            previous :: jet_eval_ir_read_word(&s, args[0]) ?? return None
+            if !jet_eval_ir_write(&s, args[0], 8, args[1]) -> return None
+            return Val(previous)
+        }
+        JET_EVAL_IR_P_PAUSE -> return Val(0)
+        JET_EVAL_IR_P_STACK -> return Val(JET_EVAL_IR_STACK)
+        JET_EVAL_IR_P_COPY_UP -> {
+            if args.len() != 3 -> return jet_eval_ir_primitive_shape(&s, name)
             if !jet_eval_ir_move_bytes(&s, args[0], args[1], args[2]) -> return None
             return Val(0)
         }
-        // Buffer owner counts (Refcount.jet): a buffer missing from `owners`
-        // has one owner. A release reports whether it was the last; the
-        // buffer's bytes then stay until the region ends. A static box (in a
-        // data row: JetIR BuildStatic.jet) is immortal, as its negative
-        // count word makes it in the runtime.
-        "jet_rt_block_retain" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            if jet_eval_ir_static(s, args[0]) -> return Val(0)
-            s.owners[args[0]] = (s.owners.get(args[0]) ?? 1) + 1
+        JET_EVAL_IR_P_COPY_DOWN_BYTES | JET_EVAL_IR_P_COPY_DOWN_WORDS -> {
+            // The units starting at the last ones, copied downward: the same
+            // bytes a memmove of the whole ranges moves.
+            if args.len() != 3 -> return jet_eval_ir_primitive_shape(&s, name)
+            unit :: if prim == JET_EVAL_IR_P_COPY_DOWN_WORDS -> 8 else -> 1
+            if args[2] <= 0 -> return Val(0)
+            span :: (args[2] - 1) * unit
+            if !jet_eval_ir_move_bytes(&s, args[0] - span, args[1] - span, args[2] * unit) -> return None
             return Val(0)
         }
-        "jet_rt_block_release" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            if jet_eval_ir_static(s, args[0]) -> return Val(0)
-            count :: s.owners.get(args[0]) ?? 1
-            if count <= 1 -> return Val(1)
-            s.owners[args[0]] = count - 1
-            return Val(0)
-        }
-        "jet_rt_block_unique" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            if jet_eval_ir_static(s, args[0]) -> return Val(0)
-            return Val(if (s.owners.get(args[0]) ?? 1) <= 1 -> 1 else -> 0)
-        }
-        "jet_rt_free" -> {
-            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
-            return Val(0)
-        }
-        "jet_rt_string_builder_new" -> {
-            index :: s.builders.len()
-            &s.builders.push([U8]{})
-            return Val(JET_EVAL_IR_BUILDER_TAG + index)
-        }
-        "jet_rt_string_builder_push" -> {
-            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
-            text :: jet_eval_ir_text(&s, args[1]) ?? return None
-            return jet_eval_ir_builder_append(&s, args[0], text.bytes())
-        }
-        "jet_rt_string_builder_push_static" -> {
-            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
+        JET_EVAL_IR_P_WRITE_WORD -> {
+            if args.len() != 3 || args[2] < 0 || args[2] > 8 -> return jet_eval_ir_primitive_shape(&s, name)
             bytes := [U8]{}
-            if args[2] > 0 {
-                region :: jet_eval_ir_region(&s, args[1], args[2]) ?? return None
-                offset :: args[1] - region * JET_EVAL_IR_REGION
-                loop index in 0..<args[2] -> &bytes.push(s.regions[region][offset + index])
-            }
-            // Invalid UTF-8 appends its lossy spelling (U+FFFD per bad sequence).
-            return jet_eval_ir_builder_append(&s, args[0], String.from_bytes_lossy(bytes).bytes())
+            loop index in 0..<args[2] -> &bytes.push(U8{(args[1] >> (8 * index)).bit_and(255)})
+            return jet_eval_ir_output(&s, args[0], bytes)
         }
-        "jet_rt_string_builder_finish" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            index :: jet_eval_ir_builder_index(&s, args[0]) ?? return None
-            text :: String.from_bytes_lossy(s.builders[index])
-            s.builders[index] = [U8]{}
-            return Val(jet_eval_ir_text_new(&s, text))
+        JET_EVAL_IR_P_WRITE_LINE -> {
+            if args.len() != 3 -> return jet_eval_ir_primitive_shape(&s, name)
+            bytes := jet_eval_ir_bytes(&s, args[1], args[2]) ?? return None
+            &bytes.push(U8{10})
+            return jet_eval_ir_output(&s, args[0], bytes)
         }
-        "jet_rt_string_clone" | "jet_rt_int_clone" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            return Val(args[0])
-        }
-        "jet_rt_string_drop" | "jet_rt_int_drop" -> return Val(0)
-        "jet_rt_require_debug_string" -> {
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            return Val(jet_eval_ir_text_new(&s, foundation_debug_quoted(text, 34)))
-        }
-        "jet_rt_int_to_string" -> {
-            value :: jet_eval_ir_int_value(&s, args[0]) ?? return None
-            return Val(jet_eval_ir_text_new(&s, "{value}"))
-        }
-        "jet_rt_i64_to_string" -> return Val(jet_eval_ir_text_new(&s, "{jet_eval_ir_wrap(args[0], 64, true)}"))
-        "jet_rt_u64_to_string" -> return Val(jet_eval_ir_text_new(&s, "{jet_eval_ir_wrap(args[0], 64, false)}"))
-        "jet_rt_bool_to_string" -> return Val(jet_eval_ir_text_new(&s, if args[0].bit_and(255) != 0 -> "true" else -> "false"))
-        "jet_rt_char_to_string" -> {
-            code := args[0]
-            if code < 0 || code > 1114111 || (code >= 55296 && code <= 57343) -> code = 65533
-            return Val(jet_eval_ir_text_new(&s, jet_eval_format_char_text(code)))
-        }
-        "jet_rt_float_to_string" | "jet_rt_float_debug" -> return Val(jet_eval_ir_text_new(&s, "{jet_eval_ir_float(args[0])}"))
-        "jet_rt_float32_to_string" | "jet_rt_float32_debug" -> {
-            // The Float32 renderer spells the shortest binary32 digits, which the
-            // evaluator has no width-preserving renderer for (as MIR Float32 display).
-            jet_eval_ir_unsupported(&s, "Float32 display without a width-preserving renderer")
-            return None
-        }
-        "jet_term_write_stdout_line" -> {
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            s.stdout = "{s.stdout}{text}\n"
-            return Val(0)
-        }
-        "jet_int_owned_from_i64" -> return Val(jet_eval_ir_int_word(&s, jet_eval_ir_wrap(args[0], 64, true)))
-        "jet_int_owned_to_i64" -> {
-            value :: jet_eval_ir_int_value(&s, args[0]) ?? return None
-            if !jet_eval_ir_in_range(value, 64, true) {
-                jet_eval_ir_source_fail(&s, "native Int argument exceeds host range")
+        JET_EVAL_IR_P_TLS -> {
+            if s.gs_base == 0 {
+                jet_eval_ir_problem(&s, "a TLS read before the runtime attached the thread")
                 return None
             }
-            return Val(value)
+            base :: s.gs_base
+            return jet_eval_ir_read_word(&s, base)
         }
-        "jet_rt_panic_list_bounds" -> {
+        JET_EVAL_IR_P_TLS_PROBE -> return Val(s.gs_base)
+        JET_EVAL_IR_P_CALL -> {
+            // os_call*: the code address is a function handle; the rest are
+            // its arguments.
+            if args.len() < 1 -> return jet_eval_ir_primitive_shape(&s, name)
+            target :: jet_eval_ir_handle(&s, args[0]) ?? return None
+            rest := [Int]{}
+            loop index in 1..<args.len() -> &rest.push(args[index])
+            return jet_eval_ir_invoke(m, rt, &s, target.unit, target.id, rest, 0)
+        }
+        JET_EVAL_IR_P_NUMERIC_STOP -> {
+            // (file, file_len, line, message, message_len)
+            if args.len() != 5 -> return jet_eval_ir_primitive_shape(&s, name)
+            message :: jet_eval_ir_bytes(&s, args[3], args[4]) ?? return None
+            jet_eval_ir_source_fail(&s, String.from_bytes_lossy(message))
+            return None
+        }
+        JET_EVAL_IR_P_SHIFT_STOP -> {
+            // (direction, count, count_unsigned, bits, file, file_len, line)
+            if args.len() != 7 -> return jet_eval_ir_primitive_shape(&s, name)
+            count :: if args[2] != 0 -> jet_eval_ir_wrap(args[1], 64, false) else -> jet_eval_ir_wrap(args[1], 64, true)
+            jet_eval_ir_source_fail(&s, "shift count {count} is outside 0..<{args[3]}")
+            return None
+        }
+        JET_EVAL_IR_P_PANIC | JET_EVAL_IR_P_UNREACHABLE -> {
+            if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, name)
+            message :: jet_eval_ir_bytes(&s, args[0], args[1]) ?? return None
+            jet_eval_ir_source_fail(&s, String.from_bytes_lossy(message))
+            return None
+        }
+        JET_EVAL_IR_P_LIST_BOUNDS -> {
+            if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, name)
             index :: jet_eval_ir_int_value(&s, args[1]) ?? return None
             jet_eval_ir_source_fail(&s, "the list has {args[0]} items, so position {index} doesn't exist")
             return None
         }
-        "jet_rt_require_stop" -> {
+        JET_EVAL_IR_P_REQUIRE_STOP -> {
+            // (kind, descriptor, message, left, right, locals)
+            if args.len() != 6 -> return jet_eval_ir_primitive_shape(&s, name)
             if !s.runtime_execution {
                 jet_eval_ir_unsupported(&s, "MIR RequireStop has no canonical comptime Control adapter")
                 return None
@@ -132,207 +384,222 @@ fn jet_eval_ir_runtime(m: IRModule, s: &JetEvalIRState, symbol: String, args: [I
             jet_eval_ir_source_fail(&s, message)
             return None
         }
-        "jet_char_len" -> {
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            return Val(jet_eval_ir_int_word(&s, text.len()))
+        JET_EVAL_IR_P_LIBM -> return jet_eval_ir_libm(&s, name, args)
+        else -> {}
+    }
+    jet_eval_ir_unsupported(&s, "host primitive `{name}`")
+    None
+}
+
+// C math function `name` on Float words, computed by the compiler's own Core
+// math (the same kernels the platform archive links natively). C `round`
+// rounds half away from zero.
+fn jet_eval_ir_libm(s: &JetEvalIRState, name: String, args: [Int]) -> Int? Never! {
+    arity :: if name == {
+        "atan2" | "fmod" | "hypot" | "pow" -> 2
+        "fma" -> 3
+        else -> 1
+    }
+    if args.len() != arity -> return jet_eval_ir_primitive_shape(&s, name)
+    x :: jet_eval_ir_float(args[0])
+    y :: if arity > 1 -> jet_eval_ir_float(args[1]) else -> Float{0.0}
+    result :: if name == {
+        "acos" -> math.acos(x)
+        "acosh" -> math.acosh(x)
+        "asin" -> math.asin(x)
+        "asinh" -> math.asinh(x)
+        "atan" -> math.atan(x)
+        "atan2" -> math.atan2(x, y)
+        "atanh" -> math.atanh(x)
+        "cbrt" -> math.cbrt(x)
+        "ceil" -> math.ceil(x)
+        "cos" -> math.cos(x)
+        "cosh" -> math.cosh(x)
+        "exp" -> math.exp(x)
+        "expm1" -> math.exp_m1(x)
+        "exp2" -> math.exp2(x)
+        "floor" -> math.floor(x)
+        "fma" -> math.fma(x, y, jet_eval_ir_float(args[2]))
+        "fmod" -> jet_eval_ir_fmod(x, y)
+        "hypot" -> math.hypot(x, y)
+        "log" -> math.ln(x)
+        "log1p" -> math.ln_1p(x)
+        "log10" -> math.log10(x)
+        "log2" -> math.log2(x)
+        "pow" -> x.pow(y)
+        "round" -> {
+            whole :: math.trunc(x)
+            if x - whole >= 0.5 -> whole + 1.0 else -> if whole - x >= 0.5 -> whole - 1.0 else -> whole
         }
-        "jet_string_is_empty" -> {
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            return Val(jet_eval_ir_bool(text.bytes().len() == 0))
+        "sin" -> math.sin(x)
+        "sinh" -> math.sinh(x)
+        "sqrt" -> math.sqrt(x)
+        "tan" -> math.tan(x)
+        "tanh" -> math.tanh(x)
+        else -> math.trunc(x)
+    }
+    Val(jet_eval_ir_float_word(result))
+}
+
+// ---------------------------------------------------------------------------
+// System calls (Linux x86-64 numbers; a failure is -errno).
+
+fn jet_eval_ir_syscall(s: &JetEvalIRState, args: [Int]) -> Int? {
+    number :: args[0]
+    if number == {
+        1 -> {
+            // write(fd, bytes, count)
+            bytes :: jet_eval_ir_bytes(&s, args[2], args[3]) ?? return None
+            return jet_eval_ir_output(&s, args[1], bytes)
         }
-        "jet_string_contains" | "jet_string_starts_with" | "jet_string_ends_with" -> {
-            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            needle :: jet_eval_ir_text(&s, args[1]) ?? return None
-            found :: if symbol == {
-                "jet_string_contains" -> text.contains(needle)
-                "jet_string_starts_with" -> text.starts_with(needle)
-                else -> text.ends_with(needle)
+        20 -> {
+            // writev(fd, iov, count): each iovec is [base, length].
+            bytes := [U8]{}
+            loop index in 0..<args[3] {
+                base :: jet_eval_ir_read_word(&s, args[2] + 16 * index) ?? return None
+                length :: jet_eval_ir_read_word(&s, args[2] + 16 * index + 8) ?? return None
+                part :: jet_eval_ir_bytes(&s, base, length) ?? return None
+                loop byte in part -> &bytes.push(byte)
             }
-            return Val(jet_eval_ir_bool(found))
+            return jet_eval_ir_output(&s, args[1], bytes)
         }
-        "jet_string_replace" -> {
-            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            from :: jet_eval_ir_text(&s, args[1]) ?? return None
-            to :: jet_eval_ir_text(&s, args[2]) ?? return None
-            return Val(jet_eval_ir_text_new(&s, text.replace(from, to)))
-        }
-        "jet_unicode_trim" | "jet_text_trim_start" | "jet_text_trim_end" | "jet_unicode_upper" | "jet_unicode_lower" -> {
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            changed :: if symbol == {
-                "jet_unicode_trim" -> text.trim()
-                "jet_text_trim_start" -> text.trim_start()
-                "jet_text_trim_end" -> text.trim_end()
-                "jet_unicode_upper" -> text.upper()
-                else -> text.lower()
+        9 -> {
+            // mmap: an anonymous private mapping is a fresh zeroed region.
+            if args[5] != -1 || args[4].bit_and(32) == 0 {
+                jet_eval_ir_unsupported(&s, "mmap of a file at compile time")
+                return None
             }
-            return Val(jet_eval_ir_text_new(&s, changed))
+            if args[2] <= 0 -> return Val(-22)
+            return Val(jet_eval_ir_alloc(&s, (args[2] + 4095) /% 4096 * 4096))
         }
-        "jet_int_add" | "jet_int_sub" | "jet_int_mul" | "jet_int_div" | "jet_int_rem" | "jet_int_floor_div" | "jet_int_mod" | "jet_int_div_euclid" | "jet_int_rem_euclid" | "jet_int_shl" | "jet_int_shr" | "jet_int_bit_and" | "jet_int_bit_or" | "jet_int_bit_xor" | "jet_int_compare" | "jet_int_pow" -> {
-            // The exact Int kernels (Int.jet): (left, right[, file, length, line]).
-            if args.len() < 2 -> return jet_eval_ir_route_shape(&s, symbol)
-            a :: jet_eval_ir_int_value(&s, args[0]) ?? return None
-            b :: jet_eval_ir_int_value(&s, args[1]) ?? return None
-            if symbol == "jet_int_compare" -> return Val(jet_eval_ir_order(a, b))
-            result :: jet_eval_ir_int_route(&s, symbol, a, b) ?? return None
-            return Val(jet_eval_ir_int_word(&s, result))
-        }
-        "jet_comptime_input" -> {
-            // A Tier-1 comptime input: (builtin, literal path) -> the value the
-            // compiler's comptime input host reads and records.
-            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
-            builtin :: jet_eval_ir_text(&s, args[0]) ?? return None
-            path :: jet_eval_ir_text(&s, args[1]) ?? return None
-            return jet_eval_ir_comptime_input(m, &s, builtin, path, result_ty)
-        }
-        "jet_rt_string_compare" -> {
-            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
-            left :: jet_eval_ir_text(&s, args[0]) ?? return None
-            right :: jet_eval_ir_text(&s, args[1]) ?? return None
-            return Val(jet_eval_ir_text_order(left, right))
-        }
-        "jet_string_after" | "jet_string_before" -> {
-            // Text.jet rt_text_after/rt_text_before: the text past (before) the
-            // first `needle`; the whole text after (before) a missing one.
-            if args.len() != 2 -> return jet_eval_ir_route_shape(&s, symbol)
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            needle :: jet_eval_ir_text(&s, args[1]) ?? return None
-            part :: if symbol == "jet_string_after" -> text.after(needle) else -> text.before(needle)
-            return Val(jet_eval_ir_text_new(&s, part))
-        }
-        "jet_int_parse" -> {
-            // IntParse.jet's Result ABI: (text, ok slot, err slot) -> 1 with the
-            // Int in the ok slot, or 0 with the error text in the err slot.
-            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
-            text :: jet_eval_ir_text(&s, args[0]) ?? return None
-            if jet_eval_ir_parse_int(text) == .Val(value) {
-                word :: jet_eval_ir_int_word(&s, value)
-                if !jet_eval_ir_write(&s, args[1], 8, word) -> return None
-                return Val(1)
-            }
-            message :: jet_eval_ir_text_new(&s, "cannot parse `{text}` as an integer")
-            if !jet_eval_ir_write(&s, args[2], 8, message) -> return None
+        11 -> {
+            jet_eval_ir_release(&s, args[1])
             return Val(0)
         }
-        "jet_std_math_floor" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            return Val(jet_eval_ir_float_word(math.floor(jet_eval_ir_float(args[0]))))
+        // ioctl: no stream is a terminal.
+        16 -> return Val(-25)
+        39 | 186 -> return Val(1)
+        // futex: one thread, so nothing waits and nothing is woken.
+        202 -> return Val(0)
+        // The init hooks' probes: the environment and /proc reads see no
+        // file (openat: ENOENT) and no open descriptor (read, close: EBADF),
+        // no signal is ever delivered (rt_sigaction), and there is no event
+        // poller (epoll_create1: ENOSYS). Evaluated code making these calls
+        // reaches the host (jet_eval_ir_ambient).
+        257 | 0 | 3 | 13 | 291 -> {
+            if !s.hooks -> return jet_eval_ir_ambient(&s, number)
+            if number == 257 -> return Val(-2)
+            if number == 13 -> return Val(0)
+            if number == 291 -> return Val(-38)
+            return Val(-9)
         }
-        "jet_std_math_is_finite" -> {
-            if args.len() != 1 -> return jet_eval_ir_route_shape(&s, symbol)
-            return Val(jet_eval_ir_bool(math.is_finite(jet_eval_ir_float(args[0]))))
+        // clock_gettime, getrandom: ambient time and randomness.
+        228 | 318 -> return jet_eval_ir_ambient(&s, number)
+        158 -> {
+            // arch_prctl: ARCH_SET_GS, ARCH_GET_GS.
+            if args[1] == 4097 {
+                s.gs_base = args[2]
+                return Val(0)
+            }
+            if args[1] == 4100 {
+                base :: s.gs_base
+                if !jet_eval_ir_write(&s, args[2], 8, base) -> return None
+                return Val(0)
+            }
+            return Val(-22)
         }
-        "jet_rt_record_new_jet_err" -> {
-            // Err.jet err_new_take over a zeroed 88-byte Err (ErrLayout.jet): the
-            // message at 0, the code text (the word its option box holds; 0 for
-            // none) at 8 and the taken cause at 16. Texts are immutable words
-            // here, so the runtime's clones are the same words.
-            if args.len() != 3 -> return jet_eval_ir_route_shape(&s, symbol)
-            code :: if args[1] == 0 -> 0 else -> jet_eval_ir_read(&s, args[1], 8) ?? return None
-            record :: jet_eval_ir_alloc(&s, 88)
-            if !jet_eval_ir_write(&s, record, 8, args[0]) || !jet_eval_ir_write(&s, record + 8, 8, code) || !jet_eval_ir_write(&s, record + 16, 8, args[2]) -> return None
-            return Val(record)
+        60 | 231 -> {
+            // exit, exit_group: a runtime stop (Trap.jet trap_exit) after its
+            // report went to stderr.
+            if s.runtime_execution {
+                s.exit_code = Val(args[1])
+                return None
+            }
+            report :: s.stderr.trim()
+            jet_eval_ir_source_fail(&s, if report == "" -> "the runtime exited with status {args[1]}" else -> report)
+            return None
         }
-        // JourneyTLS.jet clears the thread's recorded hops; the machine records
-        // none, so there is nothing to clear.
-        "jet_journey_reset" -> return Val(0)
         else -> {}
     }
-    jet_eval_ir_unsupported(&s, "IR runtime route `{symbol}`")
+    jet_eval_ir_unsupported(&s, "system call {number}")
     None
 }
 
-// IntParse.jet numeric_int_parse at radix 10: Unicode white space trimmed,
-// one optional sign, then one or more ASCII digits; the exact value.
-fn jet_eval_ir_parse_int(text: String) -> Int? Never! {
-    bytes :: text.trim().bytes()
-    at := 0
-    negative := false
-    if bytes.len() > 0 && (bytes[0] == U8{43} || bytes[0] == U8{45}) {
-        negative = bytes[0] == U8{45}
-        at = 1
+// Bytes written to fd 1 or 2; any other descriptor is not open (-EBADF).
+// Standard output is a comptime evaluation's ambient effect; standard error
+// carries a runtime stop's report (read back at its exit).
+fn jet_eval_ir_output(s: &JetEvalIRState, fd: Int, bytes: [U8]) -> Int? Never! {
+    text :: String.from_bytes_lossy(bytes)
+    if fd == 1 {
+        if !s.runtime_execution && !s.hooks -> return jet_eval_ir_ambient(&s, 1)
+        s.stdout = "{s.stdout}{text}"
+        return Val(bytes.len())
     }
-    if at == bytes.len() -> return None
-    value := 0
-    loop at < bytes.len() {
-        digit :: Int.from_u8(bytes[at]) - 48
-        if digit < 0 || digit > 9 -> return None
-        value = value * 10 + digit
-        at += 1
+    if fd == 2 {
+        s.stderr = "{s.stderr}{text}"
+        return Val(bytes.len())
     }
-    Val(if negative -> 0 - value else -> value)
+    Val(-9)
 }
 
-fn jet_eval_ir_route_shape(s: &JetEvalIRState, symbol: String) -> Int? Never! {
-    jet_eval_ir_problem(&s, "runtime route {symbol} called with the wrong operands")
+// System call `number` made by evaluated code (not an init hook) that
+// reaches the host. Runtime execution has no host for it (unsupported). A
+// comptime evaluation refuses it as the MIR evaluator refused the Core call
+// making it: ambient time and randomness are E3403, any other effect is
+// observable outside the program, so folding it would bake one build-time
+// result into every run (E3410).
+fn jet_eval_ir_ambient(s: &JetEvalIRState, number: Int) -> Int? Never! {
+    if s.runtime_execution {
+        jet_eval_ir_unsupported(&s, "system call {number}")
+        return None
+    }
+    what :: if number == {
+        1 -> "standard output"
+        257 -> "opening a file"
+        0 -> "reading a file"
+        3 -> "closing a file"
+        13 -> "a signal handler"
+        291 -> "an event poller"
+        228 -> "the clock"
+        318 -> "OS randomness"
+        else -> "system call {number}"
+    }
+    jet_eval_ir_effect_refused(&s, what, number == 228 || number == 318)
     None
 }
 
-fn jet_eval_ir_builder_index(s: &JetEvalIRState, word: Int) -> Int? Never! {
-    index :: word - JET_EVAL_IR_BUILDER_TAG
-    if word < JET_EVAL_IR_BUILDER_TAG || word >= JET_EVAL_IR_BIG_TAG || index >= s.builders.len() {
-        jet_eval_ir_problem(&s, "a String builder word is not a live builder")
-        return None
+// A comptime evaluation's refusal of host effect `what` (`nondeterministic`:
+// ambient time or randomness); `jet eval` refuses every one as its evaluator
+// mode does.
+fn jet_eval_ir_effect_refused(s: &JetEvalIRState, what: String, nondeterministic: Bool) Never! {
+    if s.failure != None -> return
+    if s.eval_entry {
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, what, "this effect is not permitted in the current evaluator mode", "run the effect in an authorized runtime ambient context"))
+        return
     }
-    Val(index)
+    if nondeterministic {
+        entry :: diagnostic_registry_row("E3403") ?? panic("E3403 has no registry row")
+        refusal :: diagnostic_from_registry("E3403", Val(s.span), entry.what.replace("{{what}}", what), entry.why, entry.fix)
+        s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{what}, [String]{}, None)})
+        return
+    }
+    s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3410", Val(s.span), "`{what}` is a Tier-2 comptime effect — it requires a `#Impure` gate", "effectful Core APIs are not allowed in pure comptime evaluation", "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and pass `--gate impure=allow` to the build, or keep the call at runtime")})
 }
 
-fn jet_eval_ir_builder_append(s: &JetEvalIRState, word: Int, bytes: [U8]) -> Int? Never! {
-    index :: jet_eval_ir_builder_index(&s, word) ?? return None
-    loop byte in bytes -> &s.builders[index].push(byte)
-    Val(0)
-}
+// ---------------------------------------------------------------------------
+// Comptime inputs.
 
-fn jet_eval_ir_int_route(s: &JetEvalIRState, symbol: String, a: Int, b: Int) -> Int? {
-    if symbol == {
-        "jet_int_add" -> return jet_eval_ir_exact(&s, IROp.Add, a, b)
-        "jet_int_sub" -> return jet_eval_ir_exact(&s, IROp.Sub, a, b)
-        "jet_int_mul" -> return jet_eval_ir_exact(&s, IROp.Mul, a, b)
-        "jet_int_div" -> return jet_eval_ir_exact(&s, IROp.Div, a, b)
-        "jet_int_rem" -> return jet_eval_ir_exact(&s, IROp.Rem, a, b)
-        "jet_int_floor_div" -> return jet_eval_ir_exact(&s, IROp.FloorDiv, a, b)
-        "jet_int_mod" -> return jet_eval_ir_exact(&s, IROp.Mod, a, b)
-        "jet_int_shl" -> return jet_eval_ir_exact(&s, IROp.Shl, a, b)
-        "jet_int_shr" -> return jet_eval_ir_exact(&s, IROp.Shr, a, b)
-        "jet_int_bit_and" -> return jet_eval_ir_exact(&s, IROp.BitAnd, a, b)
-        "jet_int_bit_or" -> return jet_eval_ir_exact(&s, IROp.BitOr, a, b)
-        "jet_int_bit_xor" -> return jet_eval_ir_exact(&s, IROp.BitXor, a, b)
-        else -> {}
-    }
-    if b == 0 && (symbol == "jet_int_div_euclid" || symbol == "jet_int_rem_euclid") {
-        jet_eval_ir_source_fail(&s, "division by zero")
-        return None
-    }
-    if symbol == "jet_int_div_euclid" || symbol == "jet_int_rem_euclid" {
-        magnitude :: if b < 0 -> 0 - b else -> b
-        rest :: a - magnitude * (a /% magnitude)
-        if symbol == "jet_int_rem_euclid" -> return Val(rest)
-        return Val((a - rest) /% b)
-    }
-    // jet_int_pow: square-and-multiply; 0^0 is 1.
-    if b < 0 {
-        jet_eval_ir_source_fail(&s, "integer exponent cannot be negative")
-        return None
-    }
-    result := 1
-    base := a
-    exponent := b
-    loop exponent > 0 {
-        if exponent.bit_and(1) == 1 -> result = result * base
-        exponent = exponent >> 1
-        if exponent > 0 -> base = base * base
-    }
-    Val(result)
-}
-
-// The MIR evaluator's jet_eval_route_comptime_input over IR words: the
-// adapter's value, written as the IR value of type row `result_ty`.
-fn jet_eval_ir_comptime_input(m: IRModule, s: &JetEvalIRState, builtin: String, path: String, result_ty: Int) -> Int? {
+// jet_comptime_input(builtin, literal path): the value the compiler's
+// comptime input host reads and records, as the IR value of type row
+// `dst_row` (the MIR evaluator's jet_eval_route_comptime_input).
+fn jet_eval_ir_comptime_input_route(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, args: [Int], dst_row: Int) -> Int? {
+    if args.len() != 2 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_input")
     if s.runtime_execution {
         jet_eval_ir_problem(&s, "a comptime input reached runtime evaluation")
         return None
     }
+    builtin :: jet_eval_ir_text(&s, args[0]) ?? return None
+    path :: jet_eval_ir_text(&s, args[1]) ?? return None
     adapter :: if s.inputs == {
         .Val(installed) -> installed.clone_input_adapter()
         .None -> {
@@ -347,30 +614,36 @@ fn jet_eval_ir_comptime_input(m: IRModule, s: &JetEvalIRState, builtin: String, 
             return None
         }
     }
-    if result_ty < 0 {
+    if dst_row < 0 {
         jet_eval_ir_problem(&s, "a comptime input call has no result slot")
         return None
     }
-    jet_eval_ir_store_data(m, &s, value, result_ty)
+    jet_eval_ir_store_data(code, m, rt, &s, value, dst_row)
 }
 
 // The IR word of compile-time data of type row `row`, for the shapes a
-// comptime input produces: a String, the bytes of a [U8], a [String].
-fn jet_eval_ir_store_data(m: IRModule, s: &JetEvalIRState, value: TComptimeValue, row: Int) -> Int? {
+// comptime input produces: a String, the bytes of a [U8], a [String]. Texts
+// and buffers are the runtime's own (jet_rt_string_from_static,
+// jet_rt_alloc), so the program owns and drops them as any other.
+fn jet_eval_ir_store_data(code: IRModule, m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, value: TComptimeValue, row: Int) -> Int? {
     if value == {
-        .String(text) -> return Val(jet_eval_ir_text_new(&s, text.copy()))
+        .String(text) -> return jet_eval_ir_store_text(m, rt, &s, text)
         .Bytes(bytes) -> {
-            data :: jet_eval_ir_alloc(&s, bytes.len())
-            loop (index, byte) in bytes {
-                if !jet_eval_ir_write(&s, data + index, 1, Int.from_u8(byte)) -> return None
+            data := 0
+            if bytes.len() > 0 {
+                data = jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_alloc", [Int]{bytes.len(), 1}) ?? return None
+                loop (index, byte) in bytes {
+                    if !jet_eval_ir_write(&s, data + index, 1, Int.from_u8(byte)) -> return None
+                }
             }
             return jet_eval_ir_list_header(&s, data, bytes.len())
         }
         .List(values) -> {
-            data :: jet_eval_ir_alloc(&s, 8 * values.len())
+            data := 0
+            if values.len() > 0 -> data = jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_alloc", [Int]{8 * values.len(), 8}) ?? return None
             loop (index, item) in values {
                 if item == .String(text) {
-                    word :: jet_eval_ir_text_new(&s, text.copy())
+                    word :: jet_eval_ir_store_text(m, rt, &s, text) ?? return None
                     if !jet_eval_ir_write(&s, data + 8 * index, 8, word) -> return None
                 } else {
                     jet_eval_ir_unsupported(&s, "a comptime input list of {item}")
@@ -381,8 +654,14 @@ fn jet_eval_ir_store_data(m: IRModule, s: &JetEvalIRState, value: TComptimeValue
         }
         else -> {}
     }
-    jet_eval_ir_unsupported(&s, "writing comptime data {value} as an IR value of {m.types[row].ty}")
+    jet_eval_ir_unsupported(&s, "writing comptime data {value} as an IR value of {code.types[row].ty}")
     None
+}
+
+// A runtime String of `text`'s bytes.
+fn jet_eval_ir_store_text(m: IRModule, rt: JetEvalRuntimeIR, s: &JetEvalIRState, text: String) -> Int? {
+    bytes :: jet_eval_ir_text_bytes(&s, text)
+    jet_eval_ir_runtime_call(m, rt, &s, "jet_rt_string_from_static", [Int]{bytes, text.bytes().len()})
 }
 
 // A List header {len, cap, data} in its own storage.

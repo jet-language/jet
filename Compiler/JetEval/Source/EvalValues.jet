@@ -587,10 +587,13 @@ struct JetEvalConfig {
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
     host_hooks: Shared<SemaRegistrationHostHooks>
-    // Comptime differential oracle: each evaluated comptime item also runs on
-    // the slot IR (jet_eval_ir_comptime) and the driver traces whether both
-    // evaluators agree. Set by `JET_COMPTIME_IR_DIFF=1`.
-    ir_differential: Bool{false}
+    // The runtime pack's IR (runtime.ir), which IR evaluation runs runtime
+    // routes on (IR/Runtime.jet); None leaves them unsupported.
+    runtime_ir: Shared<JetEvalRuntimeIR>?{None}
+    // `jet eval`'s `run`: an ambient effect is refused as the evaluator mode
+    // refuses it (E3401, jet_eval_effect_fail), not as a comptime effect a
+    // gate admits (E3410).
+    eval_entry: Bool{false}
 }
 fn jet_eval_default_config() -> JetEvalConfig Never! {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}

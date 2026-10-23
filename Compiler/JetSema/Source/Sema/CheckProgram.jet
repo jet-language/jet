@@ -47,7 +47,6 @@ use jet_foundation.[
     TComptimeValue,
     TConstantDef,
     TContract,
-    TCoreBuiltinOwner,
     TDeclarationFacts,
     TEffectFacts,
     TEffectSpan,
@@ -56,12 +55,10 @@ use jet_foundation.[
     TFunc,
     TFuncKind,
     TGenericParam,
-    TImplDef,
     TParameter,
     TStmt,
     TTargetApplicability,
     TTestFact,
-    TTraitDef,
     TAppliedRule,
     TTypeDef,
     TUnsafeGate,
@@ -6471,37 +6468,6 @@ fn sema_comptime_modules_with_values(program: SemaProgramTables, values: [SemaCo
         &modules.push(^checked)
     }
     ^modules
-}
-
-// Identity-only module for a comptime batch that reaches no declarations.
-fn sema_comptime_bare_module(source_module: SemaRegistrationModule) -> SemaGraphModuleResult Never! {
-    SemaGraphModuleResult{
-        package_identity: source_module.package_identity,
-        module_path: source_module.module_path,
-        source_file: source_module.source_file,
-        declarations: TDeclarationFacts{type_defs: [TTypeDef]{}, traits: [TTraitDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}, core_builtin_owners: [TCoreBuiltinOwner]{}},
-        module_identity: source_module.module_identity,
-        module_name: source_module.module_name,
-        functions: [TFunc]{},
-        nominals: [SemaRegistrationNominal]{},
-        nominal_positions: [String:Int]{},
-        constants: [SemaRegistrationConstant]{},
-        impls: [SemaRegistrationImpl]{},
-        exports: [SemaRegistrationExport]{},
-        imports: [SemaRegistrationImport]{},
-        foreign_providers: [SemaCheckedForeignProvider]{},
-        foreign_functions: [SemaCheckedForeignFunction]{},
-        call_facts: [SemaCallSiteFact]{},
-        hardware_use: sema_hardware_empty_use(),
-        name_references: [SemaNameReferenceFact]{},
-        comptime_requests: [SemaComptimeRequest]{},
-        comptime_body_sources: [SemaComptimeBodySource]{},
-        compute_facts: [SemaComputeFunctionFacts]{},
-        exact_int_reachable: false,
-        copy_events: [SemaCopyEvent]{},
-        diagnostics: [Diagnostic]{},
-        complete: true,
-    }
 }
 
 // Checks one registered module's declarations (no bodies) with the pass

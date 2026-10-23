@@ -933,7 +933,7 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
     census_items :: [CensusItem]{
         CensusItem{name: "D10b marker groups", kind: "load.marker_groups.relex", labelled: false},
         CensusItem{name: "D10b marker groups", kind: "load.marker_groups.reparse", labelled: false},
-        CensusItem{name: "D12 comptime lower", kind: "comptime.lower", labelled: true},
+        CensusItem{name: "D12 comptime build", kind: "comptime.build", labelled: true},
         CensusItem{name: "D5 MIR digest", kind: "mir.digest", labelled: true},
     }
     loop item in census_items {
@@ -961,11 +961,6 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
     }
     &out.push("")
     &out.push(table([String]{"census", "span", "spans", "seconds", "ns/line", "items"}, census))
-    overlap :: counter_value(trace, "lower.comptime_overlap_functions")
-    comptime_lowered :: counter_value(trace, "comptime.functions_lowered") ?? nan()
-    program_lowered :: counter_value(trace, "lower.functions") ?? nan()
-    overlap_text :: if overlap == .Val(value) -> "{grouped(value)} functions lowered by a comptime program and again by `lower` (comptime lowered {grouped(comptime_lowered)}, lower {grouped(program_lowered)})" else -> "not in trace"
-    &out.push("D12 overlap: {overlap_text}")
 
     if notes.len() > 0 {
         &out.push("")
@@ -1093,7 +1088,6 @@ fn tail(cells: [String], from: Int, to: Int) -> String Never! {
     assert_eq(tail(test_row(outcome.out, "P11+P12+P13"), 3, 7), "13,000|3,250|4.0x|OVER")
     assert_eq(test_row(outcome.out, "P3")[6], "absent")
     assert(!text.contains("native.lir_lint"))
-    assert(text.contains("D12 overlap: not in trace"))
     assert(text.contains("FAIL: over the 1M budget"))
 }
 

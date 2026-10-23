@@ -47,7 +47,9 @@ use jet_driver.[
 ]
 use jet_eval.[
     JetEvalConfig,
+    JetEvalRuntimeIR,
     jet_eval_host_config,
+    jet_eval_runtime_ir,
 ]
 use jet_backend.[x64_link_runtime_pack]
 use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_module_encode, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
@@ -703,14 +705,21 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
     }
 }
 
-// The evaluator configuration of a CLI compile. Dev verification knob:
-// JET_COMPTIME_IR_DIFF=1 also runs every comptime item on the slot IR
-// evaluator and traces whether it agrees with the MIR evaluator (span
-// `comptime.ir` of `--trace`).
+// The evaluator configuration of a CLI compile: comptime runs on the IR
+// machine over the runtime pack's IR (jet_cli_runtime_ir).
 fn jet_cli_eval_config() -> JetEvalConfig Never! {
     config := jet_eval_host_config()
-    config.ir_differential = (cli_sys.get("JET_COMPTIME_IR_DIFF") ?? "") == "1"
+    config.runtime_ir = jet_cli_runtime_ir()
     config
+}
+
+// The runtime pack's IR (runtime.ir beside the pack), which compile-time
+// evaluation runs runtime routes on; None when this toolchain has none.
+fn jet_cli_runtime_ir() -> Shared<JetEvalRuntimeIR>? Never! {
+    runtime_dir :: jet_cli_runtime_dir()
+    key :: jet_cli_runtime_key(runtime_dir) ?? return None
+    bytes :: cli_files.read_bytes("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IR_FILE}") ?? return None
+    Val(jet_eval_runtime_ir(bytes))
 }
 
 // The CLI's raw build-input transport for checked `fn build` input services:

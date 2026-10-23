@@ -1,63 +1,67 @@
-// The comptime differential oracle: with `eval_config.ir_differential` set,
-// every comptime item the MIR evaluator evaluates is also built as slot IR
-// and run on the IR evaluator (jet_eval_ir_comptime), and one trace span
-// `comptime.ir` records the item and whether both agree. The MIR result is
-// what the compile uses; this only observes it.
-use jet_foundation.[CompilerTraceSink, Diagnostic, Span, TComptimeValue, TConstantDef, TExpr, TFunc, TImplDef, TStmt, TTypeDef, TVisibility]
-use jet_sema.[SemaComptimeItemRequest, SemaComptimeItemValue, SemaGraphModuleResult]
+// Comptime evaluation on the IR machine: a flush's checked closure and the
+// item functions of its evaluated entries are built as one slot IR program
+// (jet_eval_ir_comptime_build), laid out by the run's staged declaration
+// rows, and each entry runs its own item function on it
+// (jet_eval_ir_comptime_run) over the runtime pack's IR.
+use jet_foundation.[Span, TConstantDef, TImplDef, TStmt, TTypeDef, TVisibility]
+use jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
 use jet_codegen.[jet_codegen_comptime_item_function]
-use jet_eval.[JetEvalConfig, JetEvalError, JetEvalInternalProblem, JetEvalIRResult, jet_eval_ir_comptime]
+use jet_eval.[JetEvalIRComptime, jet_eval_ir_comptime_build]
 
-fn jet_driver_comptime_ir_differential(
-    modules: [SemaGraphModuleResult],
-    closure: [TFunc],
-    request: SemaComptimeItemRequest,
-    values: [SemaComptimeItemValue],
-    config: JetEvalConfig,
-    mir_value: TComptimeValue?,
-    mir_error: JetEvalError?,
-    mir_problem: JetEvalInternalProblem?,
-    trace_sink: CompilerTraceSink?,
-) {
-    item := jet_codegen_comptime_item_function(request, request.module_identity)
-    item.body = [TStmt]{TStmt.Return{value: Val(request.expression.copy()), span: request.span}}
-    type_defs := [TTypeDef]{}
-    impls := [TImplDef]{}
-    constants := [TConstantDef]{}
-    // Landed values first: the builder keeps the first row of a key.
-    loop value in values {
-        &constants.push(TConstantDef{module_identity: value.module_identity.copy(), key: value.key.copy(), name: value.key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()})
-        if value.destination_key != value.key {
-            &constants.push(TConstantDef{module_identity: value.module_identity.copy(), key: value.destination_key.copy(), name: value.destination_key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()})
-        }
-    }
+// The type, impl and constant rows of every module of a run's graph
+// (jet_driver_comptime_stage).
+struct JetDriverComptimeRows {
+    type_defs: [TTypeDef]
+    impls: [TImplDef]
+    constants: [TConstantDef]
+}
+
+fn jet_driver_comptime_rows_empty() -> JetDriverComptimeRows Never! {
+    JetDriverComptimeRows{type_defs: [TTypeDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}}
+}
+
+fn jet_driver_comptime_rows(modules: [SemaGraphModuleResult]) -> JetDriverComptimeRows Never! {
+    rows := jet_driver_comptime_rows_empty()
     loop checked in modules {
-        loop definition in checked.declarations.type_defs -> &type_defs.push(definition.copy())
-        loop definition in checked.declarations.impls -> &impls.push(definition.copy())
-        loop definition in checked.declarations.constants -> &constants.push(definition.copy())
+        loop definition in checked.declarations.type_defs -> &rows.type_defs.push(definition.copy())
+        loop definition in checked.declarations.impls -> &rows.impls.push(definition.copy())
+        loop definition in checked.declarations.constants -> &rows.constants.push(definition.copy())
     }
-    ir := jet_eval_ir_comptime(closure.copy(), ^item, ^type_defs, ^impls, ^constants, config, request.span)
-    row :: jet_driver_comptime_ir_row(request.key, mir_value, mir_error, mir_problem, ir)
-    if trace_sink == .Val(sink) {
-        sink.begin("comptime.ir", row, -1, -1)
-        sink.end("comptime.ir", 0)
-    }
+    rows
 }
 
-// `<verdict>\t<item key>\t<MIR result>\t<IR result>`: SAME when both
-// produce the same value or the same diagnostic, DIFF otherwise, BUILD when
-// the IR builder could not build the item's closure.
-fn jet_driver_comptime_ir_row(key: String, mir_value: TComptimeValue?, mir_error: JetEvalError?, mir_problem: JetEvalInternalProblem?, ir: JetEvalIRResult) -> String Never! {
-    mir :: jet_driver_comptime_ir_outcome(mir_value, mir_error, mir_problem, "")
-    if ir.build_failures.len() > 0 -> return "BUILD\t{key}\t{mir}\t{ir.build_failures.join(" | ")}"
-    other :: jet_driver_comptime_ir_outcome(ir.value, ir.error, ir.internal_problem, ir.stdout)
-    verdict :: if mir == other -> "SAME" else -> "DIFF"
-    "{verdict}\t{key}\t{mir}\t{other}"
+// The IR of `batch`'s evaluated entries from `start` on: the batch's checked
+// closure and each entry's item function, a zero-parameter function that
+// returns the entry's expression. A batch that reaches no declaration
+// (JetDriverComptimeBatch.bare) builds with none; any other lays values out
+// by the run's staged rows, after a row for each value landed so far, which
+// the builder takes over the staged row of the same key (it keeps a key's
+// first row).
+fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, staging: JetDriverComptimeStaging, values: [SemaComptimeItemValue]) -> JetEvalIRComptime {
+    // copy: the batch keeps its closure for a retry one entry at a time
+    // (jet_driver_comptime_batch_single).
+    functions := batch.functions.copy()
+    keys := [String]{}
+    loop index in start..<batch.entries.len() {
+        entry :: batch.entries[index]
+        if entry.plain != None -> next
+        item := jet_codegen_comptime_item_function(entry.request, entry.request.module_identity)
+        item.body = [TStmt]{TStmt.Return{value: Val(entry.request.expression.copy()), span: entry.request.span}}
+        &keys.push(item.key.copy())
+        &functions.push(^item)
+    }
+    if batch.bare -> return jet_eval_ir_comptime_build(^functions, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{})
+    constants := [TConstantDef]{}
+    loop value in values {
+        &constants.push(jet_driver_comptime_value_row(value, value.key))
+        if value.destination_key != value.key -> &constants.push(jet_driver_comptime_value_row(value, value.destination_key))
+    }
+    // copy: the staged rows serve every later build of the run.
+    loop definition in staging.rows.constants -> &constants.push(definition.copy())
+    jet_eval_ir_comptime_build(^functions, keys, staging.rows.type_defs.copy(), staging.rows.impls.copy(), ^constants)
 }
 
-fn jet_driver_comptime_ir_outcome(value: TComptimeValue?, error: JetEvalError?, problem: JetEvalInternalProblem?, stdout: String) -> String Never! {
-    if problem == .Val(found) -> return "internal: {found.message}"
-    if error == .Val(failed) -> return "error {failed.diagnostic.code}: {failed.diagnostic.what}"
-    if value == .Val(data) -> return "value {data}"
-    "incomplete"
+// The constant row of landed value `value` under `key`.
+fn jet_driver_comptime_value_row(value: SemaComptimeItemValue, key: String) -> TConstantDef Never! {
+    TConstantDef{module_identity: value.module_identity.copy(), key: key.copy(), name: key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()}
 }

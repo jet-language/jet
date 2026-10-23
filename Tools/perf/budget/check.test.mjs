@@ -67,7 +67,6 @@ test("process CPU per line, nested checks and digests subtracted from their phas
   assert.equal(row(out, "P3")[6], "absent");
   assert.doesNotMatch(out, /native\.lir_lint/);
   assert.match(out, /load\.marker_groups\.relex\s+1\s+0\.001/);
-  assert.match(out, /D12 overlap: not in trace/);
   assert.match(out, /FAIL: over the 1M budget/);
 });
 

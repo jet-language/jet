@@ -14,9 +14,7 @@ use jet_foundation.[
     MIRCaptureOperand,
     MIRComponentSignatureDescriptor,
     MIRConstant,
-    MIRConstantDef,
     MIRCopyFact,
-    MIRCoreCall,
     MIRCoreClosureKind,
     MIRCoreOwner,
     MIRDerivationRef,
@@ -24,7 +22,6 @@ use jet_foundation.[
     MIREnumArg,
     MIRFailureCarrier,
     MIRFieldID,
-    MIRFieldRow,
     MIRFieldValue,
     MIRForeign,
     MIRForeignID,
@@ -142,7 +139,7 @@ fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         build_host_adapter: build_host_adapter,
         output_context: config.output_context,
         host_hooks: config.host_hooks,
-        ir_differential: config.ir_differential,
+        runtime_ir: config.runtime_ir,
     }
 }
 
@@ -637,9 +634,8 @@ fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
 // Retires `result`'s session where it stands: drains callbacks, drops the
 // value, cleans up the frames, and records the final outcome on `result`. The
 // retired session stays on `result` until jet_eval_retire_result drops it, or
-// its owner moves it out to evaluate the next function on the same program
-// (jet_eval_session_function). None when draining callbacks failed; the
-// session then stays live.
+// its owner moves it out. None when draining callbacks failed; the session
+// then stays live.
 fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
     ok := true
     if &result.session == {
@@ -732,99 +728,6 @@ fn jet_eval_is_unit_attempt(program: MIRProgram, function_id: MIRFunctionID, run
         if test.function == function_id && test.kind == .Unit -> return true
     }
     false
-}
-
-// jet_eval_function on the program of `session`, a session an earlier result
-// retired in place (jet_eval_retire_in_place): it starts over with `config`
-// (jet_eval_reset_session), so the result is the one a new machine over the
-// same program would give, without rebuilding the program or its row index.
-// Only the program, its rows and the globals carry over, so a session whose
-// callbacks failed to drain is reused exactly as a fresh machine would be.
-// The evaluation's globals are the session's (those of its last evaluation)
-// plus `added`; `config`'s own are dropped. That equals a fresh machine with
-// the union as `config.globals` (the evaluator only reads globals), without
-// copying every global of a long comptime run once per evaluation.
-fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig, added: [String:TComptimeValue]) -> JetEvalResult {
-    reused := ^session
-    globals := ^reused.machine.config.globals
-    reused.machine.config.globals = [String:TComptimeValue]{}
-    loop (key, value) in added -> globals[key] = value
-    session_config := ^config
-    session_config.globals = ^globals
-    jet_eval_reset_session(&reused.machine, ^session_config)
-    reused.retired = false
-    reused.shared_site_attempt = jet_eval_is_unit_attempt(reused.machine.program, function_id, reused.machine.config.runtime_execution)
-    value := jet_eval_function_in(&reused.machine, function_id, args)
-    complete :: value != None
-    jet_eval_session_result(^reused, value, complete)
-}
-
-// The rows a growing comptime program (A2c: Codegen lower_comptime_growth)
-// gains between two evaluations on one session. Every function, field, Core
-// call and Prelude call id, constant key and type-instance identity is new
-// to the session's program.
-struct JetEvalProgramGrowth {
-    functions: [MIRFunction]
-    callbacks: [MIRCallbackAdapter]
-    fields: [MIRFieldRow]
-    constants: [MIRConstantDef]
-    core_calls: [MIRCoreCall]
-    prelude_calls: [MIRPreludeCall]
-    type_instances: [MIRType]
-}
-
-// Appends `growth` to the program of `session` (retired in place, as for
-// jet_eval_session_function) and indexes the new rows, so the next
-// evaluation runs on the larger program as a machine built over it would:
-// lookups go through the id maps (jet_eval_program_rows keeps the first row
-// per id, and each id here is new), and appending moves no earlier row.
-fn jet_eval_session_grow(session: &JetEvalRuntimeSession, growth: ^JetEvalProgramGrowth) {
-    jet_eval_machine_grow(&session.machine, ^growth)
-}
-
-fn jet_eval_machine_grow(machine: &JetEvalMachine, growth: ^JetEvalProgramGrowth) Never! {
-    added := ^growth
-    functions := [MIRFunction]{}
-    loop added.functions.len() > 0 {
-        function := &added.functions.pop() ?? { break }
-        &functions.push(^function)
-    }
-    loop functions.len() > 0 {
-        function := &functions.pop() ?? { break }
-        if machine.rows.functions.get(function.id.value) == None -> machine.rows.functions[function.id.value] = machine.program.functions.len()
-        &machine.rows.function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
-        &machine.program.functions.push(^function)
-    }
-    constants := [MIRConstantDef]{}
-    loop added.constants.len() > 0 {
-        constant := &added.constants.pop() ?? { break }
-        &constants.push(^constant)
-    }
-    loop constants.len() > 0 {
-        constant := &constants.pop() ?? { break }
-        if machine.rows.constants.get(constant.key) == None -> machine.rows.constants[constant.key] = machine.program.constants.len()
-        &machine.program.constants.push(^constant)
-    }
-    loop callback in added.callbacks -> &machine.program.callbacks.push(callback)
-    loop field in added.fields {
-        if machine.rows.fields.get(field.id.value) == None -> machine.rows.fields[field.id.value] = machine.program.fields.len()
-        &machine.program.fields.push(field)
-    }
-    loop call in added.core_calls {
-        if machine.rows.core_calls.get(call.id.value) == None -> machine.rows.core_calls[call.id.value] = machine.program.core_calls.len()
-        &machine.program.core_calls.push(call)
-    }
-    loop call in added.prelude_calls {
-        if machine.rows.prelude_calls.get(call.id.value) == None -> machine.rows.prelude_calls[call.id.value] = machine.program.prelude_calls.len()
-        &machine.program.prelude_calls.push(call)
-    }
-    loop instance in added.type_instances {
-        identity :: instance.identity ?? next
-        rows := machine.rows.type_instances.get(identity.value) ?? [Int]{}
-        &rows.push(machine.program.type_instances.len())
-        machine.rows.type_instances[identity.value] = rows
-        &machine.program.type_instances.push(instance)
-    }
 }
 
 // The value of one evaluation of `function_id` on `machine`; None when it
