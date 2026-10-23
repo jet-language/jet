@@ -3562,8 +3562,10 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             else -> {}
         }
         if !sema_expr_is_numeric(value.ty) {
-            if sema_expr_has_numeric_overload(value.ty) -> return None
-            &diagnostics.push(sema_error("E0109", span, "unary `-` needs a number", "negation is defined for numeric values", "use a number here"))
+            // Rust CheckerInfer/expr.rs UnOp::Neg: no user or Core type has a
+            // negation hook (Duration has `.negated()`), so every other operand
+            // is this report, never an unreported incomplete check.
+            &diagnostics.push(sema_error("E0109", span, "`-` needs a number, but this is {sema_type_show(value.ty)}", "only Int and Float values can be negated", "use a number here"))
             return None
         }
         result_ty := sema_expr_numeric_base(value.ty)
