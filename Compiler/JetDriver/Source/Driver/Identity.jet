@@ -107,8 +107,12 @@ struct JetDriverHostFacts {
 // JetEval's IR evaluation, without AOT emission. Eval checks the selected
 // root's transitive pure row; Interpreter leaves effects to its runtime
 // authorizer.
+// `Check` is `jet check`: the Program checks, then it stops before lowering.
+// No Core reachability pruning and no C export rows; the entry and the
+// foreign facts are still resolved, so their diagnostics are the same.
 enum JetDriverCompileMode {
     Program
+    Check
     Test
     Doc
     Comptime

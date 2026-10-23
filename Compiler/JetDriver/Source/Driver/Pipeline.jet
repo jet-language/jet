@@ -3729,6 +3729,25 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
     if failed_stage != None && !kg.enabled -> return jet_driver_doc_failure(jet_driver_compile_result(load, load.diagnostics, failed_stage, false, trace), request.mode, Val(checked_graph.names.structure_facts))
+    // `jet check` stops before lowering: no C export rows, no Core
+    // reachability pruning. The entry resolves over every checked function
+    // (pruning only drops unreached Core bodies, never a user entry), and the
+    // foreign facts check realizes come from the same graphs.
+    if request.mode == JetDriverCompileMode.Check {
+        // JET_KEEP_GOING has no lowering to keep going into here.
+        if failed_stage != None -> return jet_driver_compile_result(load, load.diagnostics, failed_stage, false, trace)
+        jet_driver_trace_step_begin(request.trace_sink, "driver.check.entry")
+        entry_diagnostics := load.diagnostics
+        load.diagnostics = [Diagnostic]{}
+        _ := jet_driver_resolve_entry_key(load, checked_graph, checked_functions, runtime_semantic_modules, &entry_diagnostics)
+        load.diagnostics = entry_diagnostics
+        jet_driver_trace_step_end(request.trace_sink, "driver.check.entry", -1)
+        if jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
+        result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
+        result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
+        result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
+        return result
+    }
 
     // From here on the registration graph is read only for the entry
     // module's C export rows and the Rust foreign facts.
