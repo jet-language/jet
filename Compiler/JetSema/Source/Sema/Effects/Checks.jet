@@ -1637,12 +1637,25 @@ struct SemaEffectPending {
     name: String
 }
 
+// Each node's callers, in caller and call-edge order: the reverse call graph
+// the fixed point and the reach walks share.
+fn sema_effect_callers(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [[Int]] Never! {
+    callers := (loop _ in nodes -> [Int]{})
+    loop (index, node) in nodes {
+        loop edge in node.call_edges {
+            if edge == "__jet_panic__" -> next
+            target :: sema_effect_node_index(node_by_key, edge) ?? next
+            &callers[target].push(index)
+        }
+    }
+    callers
+}
+
 // Propagate each newly reached effect to callers once. Set insertion keeps
 // the established root-rank/name order, so worklist order cannot change
 // published rows or diagnostics. Direct rows and call-site spans are untouched.
-fn sema_effect_solve(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [[String]] Never! {
+fn sema_effect_solve(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] Never! {
     solved := [[String]]{}
-    callers := (loop _ in nodes -> [Int]{})
     pending := [SemaEffectPending]{}
     loop (index, node) in nodes {
         row := node.direct
@@ -1650,10 +1663,8 @@ fn sema_effect_solve(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [[St
         loop edge in node.call_edges {
             if edge == "__jet_panic__" {
                 sema_effect_set_add(&row, "Panic")
-                next
+                break
             }
-            target :: sema_effect_node_index(node_by_key, edge) ?? next
-            &callers[target].push(index)
         }
         loop name in row -> &pending.push(SemaEffectPending{node: index, name: name})
         &solved.push(row)
@@ -1672,15 +1683,10 @@ fn sema_effect_solve(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [[St
 // Rust `solve_reachability` "secret" row: only a direct `Secret` read seeds
 // it, never the every-root row of an open-world (maximal) call, and callers
 // inherit it along call edges. E1264 consults this row, not `solved`.
-fn sema_effect_secret_reach(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [Bool] Never! {
+fn sema_effect_secret_reach(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool] Never! {
     reached := (loop _ in nodes -> false)
-    callers := (loop _ in nodes -> [Int]{})
     pending := [Int]{}
     loop (index, node) in nodes {
-        loop edge in node.call_edges {
-            target :: sema_effect_node_index(node_by_key, edge) ?? next
-            &callers[target].push(index)
-        }
         loop effect_name in node.direct {
             if sema_effect_root(effect_name) == "Secret" {
                 reached[index] = true
@@ -1726,15 +1732,10 @@ fn sema_effect_locate_dispatch(site: SemaEffectDispatchSite, inputs: [SemaEffect
 // Nodes from which some unbounded trait dispatch is reachable through the
 // call graph (the node itself included): one reverse walk from every node
 // that dispatches.
-fn sema_effect_dispatch_reach(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [Bool] Never! {
+fn sema_effect_dispatch_reach(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool] Never! {
     reach := (loop _ in nodes -> false)
-    callers := (loop _ in nodes -> [Int]{})
     pending := [Int]{}
     loop (index, node) in nodes {
-        loop edge in node.call_edges {
-            target :: sema_effect_node_index(node_by_key, edge) ?? next
-            &callers[target].push(index)
-        }
         if node.dispatches.len() > 0 {
             reach[index] = true
             &pending.push(index)
@@ -2209,7 +2210,8 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         if node.is_unsafe -> break true
     } ?? false
     calls = sema_effect_collect_threads(&modules, inputs, &nodes, ^calls, any_unsafe, &diagnostics, threads)
-    solved :: sema_effect_solve(nodes, calls.node_by_key)
+    callers :: sema_effect_callers(nodes, calls.node_by_key)
+    solved :: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
         sites := [String:SharedLifetime]{}
         site_diagnostics := [Diagnostic]{}
@@ -2234,8 +2236,8 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         }
         sema_effect_publish_diagnostics(&diagnostics, inputs[module_index].source_segments, ^site_diagnostics)
     }
-    secret_reach :: sema_effect_secret_reach(nodes, calls.node_by_key)
-    dispatch_reach :: sema_effect_dispatch_reach(nodes, calls.node_by_key)
+    secret_reach :: sema_effect_secret_reach(nodes, callers)
+    dispatch_reach :: sema_effect_dispatch_reach(nodes, callers)
     dispatch_seen := (loop _ in nodes -> false)
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
