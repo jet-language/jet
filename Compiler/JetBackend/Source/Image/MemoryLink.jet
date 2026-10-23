@@ -183,12 +183,9 @@ fn link_bind_layout(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
 // and its ELF header naming the combined program header table, then the
 // program part.
 fn link_bind_write(c: &LinkContext, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
-    // One whole-buffer copy, then the tail (symbol table, section headers)
-    // dropped: much cheaper than extending by a slice byte by byte.
-    out := c.bufs[1].copy()
-    loop out.len() > view.load_end {
-        _ :: &out.pop()
-    }
+    // The loaded bytes in one copy (a List range is a List of its own); the
+    // image's tail (symbol table, section headers) is left behind.
+    out := c.bufs[1][0..<view.load_end]
     link_put64(&out, 32, view.program_base - c.base)
     out[56] = U8{l.phnum.bit_and(255)}
     out[57] = U8{(l.phnum >> 8).bit_and(255)}

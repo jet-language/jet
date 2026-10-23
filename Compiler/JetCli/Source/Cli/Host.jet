@@ -545,24 +545,19 @@ fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper:
     realized
 }
 
-// The runtime's key and the symbols it exports (one per line of its
-// exports file), else the failure jet_cli_native_object reports where it
-// reads them.
+// The runtime's key and its exports file (one exported symbol per line),
+// else the failure jet_cli_native_object reports where it reads them.
 struct JetCLIRuntimeExports {
     key: String
-    exported: [String:Bool]
+    exports: String
     failure: JetCLINativeFailure?
 }
 
 fn jet_cli_runtime_exports(runtime_dir: String) -[FS]> JetCLIRuntimeExports Never! {
-    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exported: [String:Bool]{}, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
+    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: "", failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
     exports_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
-    exports_text :: cli_files.read(exports_path) ?? return JetCLIRuntimeExports{key: key, exported: [String:Bool]{}, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
-    exported := [String:Bool]{}
-    loop line in exports_text.split("\n").to_list() {
-        if line != "" -> exported[line] = true
-    }
-    JetCLIRuntimeExports{key: key, exported: ^exported, failure: None}
+    exports :: cli_files.read(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: "", failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
+    JetCLIRuntimeExports{key: key, exports: exports, failure: None}
 }
 
 // The program's object (jet_cli_native_executable), else why the route
@@ -598,10 +593,24 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     // A runtime call the runtime does not export would fail the whole link;
     // its function fails here instead, like any construct the builder rejects.
     if runtime.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
+    // Each runtime call the C closure doesn't define, true once the runtime's
+    // exports name it: one walk over the thousands of exports looks up only
+    // the few names the program calls.
+    exported := [String:Bool]{}
+    loop index in 0..<built.program.functions.len() {
+        loop (at, op) in built.program.functions[index].op {
+            if op == .CallRuntime && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None && exported.get(built.program.names[built.program.functions[index].a[at]]) == None -> exported[built.program.names[built.program.functions[index].a[at]].copy()] = false
+        }
+    }
+    if exported.len() > 0 {
+        loop line in runtime.exports.split("\n") {
+            if exported.get(line) != None -> exported[line] = true
+        }
+    }
     loop index in 0..<built.program.functions.len() {
         missing := String?{None}
         loop (at, op) in built.program.functions[index].op {
-            if op == .CallRuntime && runtime.exported.get(built.program.names[built.program.functions[index].a[at]]) == None && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None {
+            if op == .CallRuntime && !(exported.get(built.program.names[built.program.functions[index].a[at]]) ?? true) {
                 missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
                 break
             }

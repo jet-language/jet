@@ -1676,8 +1676,17 @@ fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
 }
 
 // Pad `out` to `offset` with `fill` (0xcc, `int3`, between code sections).
+// A long pad (a page gap) appends one doubled run of `fill` and a prefix of
+// it: a few block copies, not a push per byte.
 fn link_pad_to(out: &[U8], offset: Int, fill: Int) Never! {
-    loop out.len() < offset -> &out.push(U8{fill})
+    if offset - out.len() <= 16 {
+        loop out.len() < offset -> &out.push(U8{fill})
+        return
+    }
+    run := [U8]{U8{fill}}
+    loop 2 * run.len() <= offset - out.len() -> &run.extend(run.copy())
+    &out.extend(run[0..<offset - out.len() - run.len()])
+    &out.extend(run)
 }
 
 fn link_phdr(out: &[U8], base: Int, kind: Int, flags: Int, start: Int, file_size: Int, mem_size: Int, align: Int) Never! {

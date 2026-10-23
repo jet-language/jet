@@ -715,6 +715,33 @@ fn ir_x64_exact_bitwise(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     &e.colds.push(cold)
 }
 
+// A runtime Int route whose result for an inline Int is the value itself
+// (jet_int_owned_to_i64: its word; jet_rt_int_clone: its copy) into `dst`;
+// a big one takes the runtime call in a slow path.
+fn ir_x64_inline_route(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, symbol: String, value: Int, dst: Int) Never! {
+    sites := [Int]{}
+    ir_x64_load(&e, m, f, al, value, X64_RAX)
+    ir_x64_operand_test(&e, al, value, X64_RAX, &sites)
+    ir_x64_store(&e, m, f, al, dst, X64_RAX)
+    if sites.is_empty() -> return
+    cold := ir_x64_cold(IRX64ColdKind.Route, sites)
+    cold.resume = e.code.len()
+    cold.symbol = symbol
+    cold.left = value
+    cold.dst = dst
+    &e.colds.push(cold)
+}
+
+// jet_rt_block_unique(block) inline (Refcount.jet): the count word 24
+// bytes before the payload is 1. The Bool is fused into a following branch
+// like a comparison's.
+fn ir_x64_block_unique(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, block: Int) Never! {
+    ir_x64_load(&e, m, f, al, block, X64_RAX)
+    x64_load(&e.code, X64_RCX, X64_RAX, -24)
+    x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 1)
+    ir_x64_compare_result(&e, m, f, al, at, X64Cond.E)
+}
+
 // Exact Int `value << count` / `value >> count` (Int.jet jet_int_shl/shr):
 // native when both are inline and the count is in 0..<63 (shl) or 0..<64
 // (shr: an arithmetic shift of an inline word stays inline). A left shift
@@ -1468,7 +1495,14 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         }
         .CallRuntime -> {
             if f.a[at] < 0 || f.a[at] >= m.names.len() -> return ir_x64_fail(&e, f, at, "runtime name {f.a[at]} is not interned")
-            ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: m.names[f.a[at]]}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+            symbol :: m.names[f.a[at]]
+            // One-argument runtime leaves with a result inline on their fast path.
+            leaf :: f.c[at] == 1 && dst >= 0
+            if {
+                leaf && (symbol == "jet_int_owned_to_i64" || symbol == "jet_rt_int_clone") -> ir_x64_inline_route(&e, m, f, al, symbol, f.args[f.b[at]], dst)
+                leaf && symbol == "jet_rt_block_unique" -> ir_x64_block_unique(&e, m, f, al, at, f.args[f.b[at]])
+                else -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+            }
         }
         .CallIndirect -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: ""}, f.a[at], f.args, f.b[at], f.c[at], dst, al.stack[at])
         .FunctionAddress -> {

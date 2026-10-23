@@ -165,26 +165,16 @@ fn ir_list_swap(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, se
 // source (cap 0) owns nothing, and a source its holder keeps (`owned` false)
 // stays untouched: their elements are copied (Lower lower_list_make_unique).
 fn ir_list_extend(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, source: Int, owned: Bool) Never! {
-    if !owned {
-        kept :: ir_walk_open(&m, &b, source, row)
-        ir_list_push(&m, p, &b, list, row, kept.item)
-        return ir_walk_close(&m, &b, kept)
-    }
+    if !owned -> return ir_list_append(&m, p, &b, list, row, source, false)
     capacity :: ir_load_word(&m, &b, source, 8)
     zero :: ir_word_const(&m, &b, 0)
     frozen :: ir_bool_op(&m, &b, IROp.Eq, capacity, zero)
     ir_open_if(&b.f, frozen, b.line)
-    copies :: ir_walk_open(&m, &b, source, row)
-    ir_list_push(&m, p, &b, list, row, copies.item)
-    ir_walk_close(&m, &b, copies)
+    ir_list_append(&m, p, &b, list, row, source, false)
     ir_else(&b.f, b.line)
     // A buffer another holder shares is first the source's own.
     ir_make_unique(&m, p, &b, source)
-    moves :: ir_walk_open(&m, &b, source, row)
-    item :: moves.item
-    if item >= 0 -> b.fresh[item] = true
-    ir_list_push(&m, p, &b, list, row, item)
-    ir_walk_close(&m, &b, moves)
+    ir_list_append(&m, p, &b, list, row, source, true)
     stride :: ir_list_stride(m, row)
     if stride > 0 {
         width :: ir_word_const(&m, &b, stride)
@@ -195,6 +185,53 @@ fn ir_list_extend(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     }
     loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, source, offset, zero, b.line)
     ir_end(&b.f, b.line)
+}
+
+// The elements of the List-family header at `source` copied (`moving`: moved)
+// onto the end of `list` in order. Plain data, whose byte copy shares
+// nothing with its source (ir_copy_needs), goes as one byte move into a
+// buffer grown at most once; any other element is pushed one by one.
+fn ir_list_append(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, source: Int, moving: Bool) Never! {
+    stride :: ir_list_stride(m, row)
+    if stride == 0 || ir_copy_needs(&m, p, row) {
+        walk :: ir_walk_open(&m, &b, source, row)
+        if moving && walk.item >= 0 -> b.fresh[walk.item] = true
+        ir_list_push(&m, p, &b, list, row, walk.item)
+        return ir_walk_close(&m, &b, walk)
+    }
+    width :: ir_word_const(&m, &b, stride)
+    count :: ir_load_word(&m, &b, source, 0)
+    from :: ir_load_word(&m, &b, source, 16)
+    length :: ir_load_word(&m, &b, list, 0)
+    capacity :: ir_load_word(&m, &b, list, 8)
+    total :: ir_word_op(&m, &b, IROp.Add, length, count)
+    kept :: ir_word_op(&m, &b, IROp.Mul, length, width)
+    added :: ir_word_op(&m, &b, IROp.Mul, count, width)
+    full :: ir_bool_op(&m, &b, IROp.Gt, total, capacity)
+    ir_open_if(&b.f, full, b.line)
+    grown :: ir_word_op(&m, &b, IROp.Add, capacity, capacity)
+    below :: ir_bool_op(&m, &b, IROp.Lt, grown, total)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Copy, grown, total, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    align :: ir_word_const(&m, &b, 8)
+    grown_bytes :: ir_word_op(&m, &b, IROp.Mul, grown, width)
+    word_row :: ir_word_row(&m)
+    data :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{grown_bytes, align}, word_row)
+    old_data :: ir_load_word(&m, &b, list, 16)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, old_data, kept}, -1)
+    // The source may window the old buffer: it is copied before that goes.
+    grown_end :: ir_word_op(&m, &b, IROp.Add, data, kept)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{grown_end, from, added}, -1)
+    ir_release_moved_buffer(&m, &b, old_data, capacity, stride)
+    ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
+    ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
+    ir_else(&b.f, b.line)
+    elements :: ir_load_word(&m, &b, list, 16)
+    tail_at :: ir_word_op(&m, &b, IROp.Add, elements, kept)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{tail_at, from, added}, -1)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Store, -1, list, 0, total, b.line)
 }
 
 // `xs.try_reserve(additional)` (Lower lower_helper_list_try_reserve): room
@@ -2253,9 +2290,7 @@ fn ir_ordering_method(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, i
 // List-family header at `source`, in order (Lower lower_inline_clone).
 fn ir_list_clone(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: Int, list_row: Int) -> Int Never! {
     out :: ir_list_empty(&m, &b, list_row)
-    walk :: ir_walk_open(&m, &b, source, row)
-    ir_list_push(&m, p, &b, out, row, walk.item)
-    ir_walk_close(&m, &b, walk)
+    ir_list_append(&m, p, &b, out, row, source, false)
     out
 }
 
