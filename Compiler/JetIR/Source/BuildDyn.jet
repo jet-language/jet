@@ -7,7 +7,7 @@
 // back; `decode<T>()` calls T's Decode implementation.
 
 use jet_backend.[LowerRouteCarrier]
-use jet_foundation.[Span, TCallArg, TExpr, THandleOp, TPanicLoc, Type]
+use jet_foundation.[Span, TBuiltinOp, TCallArg, TExpr, TExprKind, THandleOp, TPanicLoc, TStmt, Type, tir_generated_local, tir_user_local]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
@@ -263,10 +263,12 @@ fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, tar
 }
 
 // `value.encode()` into a Dyn (codegen jet_codegen_lower_serde_encode): a
-// Dyn is itself, a type with its own Encode implementation calls it, and an
+// Dyn is itself, a type with its own Encode implementation calls it, an
 // Int, fixed-width integer, Float, Bool or String value is boxed as its Dyn
-// variant (jet_codegen_data_encode_variant). The builtin, container and
-// typed codec routes have no lowering here.
+// variant (jet_codegen_data_encode_variant), and a String-keyed Map or a
+// List encodes as an Object or Array of its encoded values
+// (jet_codegen_lower_container_encode). The builtin and typed codec routes
+// have no lowering here.
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
     concrete :: ir_subst(m, receiver.ty)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
@@ -275,6 +277,14 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         self_slot :: ir_expr(&m, p, &b, receiver)
         if ir_failed(b) || self_slot < 0 -> return -1
         return ir_call(&m, p, &b, key, [Type]{}, self_slot, [IRWriteBack]{}, [TCallArg]{}, span)
+    }
+    if ir_dyn_def(p, ir_subst(m, ty)) != None {
+        typed := receiver.copy()
+        typed.ty = concrete.copy()
+        if ir_untag(concrete) == .Map(map_key, _, _) {
+            if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(&m, p, &b, ty, typed, span)
+        }
+        if ir_untag(concrete) == .List(element) -> return ir_dyn_array_encode(&m, p, &b, ty, typed, element, span)
     }
     variant :: if ir_untag(concrete) == {
         .Int | .IntN(_, _) -> "Int"
@@ -293,6 +303,41 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         if ir_failed(b) -> return -1
     }
     ir_dyn_box(&m, p, &b, ty, variant, payload, span)
+}
+
+// A List's `encode()` (codegen jet_codegen_lower_container_encode): the
+// Array of each item's encode(), in order, built by a loop over the list
+// the way ir_dyn_object_encode builds an Object.
+fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TExpr, element: Type, span: Span) -> Int Never! {
+    output_ty :: Type.List{element: ty}
+    output_row :: ir_value_type(&m, p, output_ty) ?? return ir_type_fail(&b, span, output_ty)
+    ir_scope_open(&b)
+    source :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || source < 0 {
+        ir_scope_close(&m, &b)
+        return -1
+    }
+    source_local :: tir_generated_local("encode_source_{source}", span)
+    source_owned :: b.fresh[source] && ir_has_drop(m, b, source)
+    &b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
+    b.fresh[source] = false
+    // The item List leaves the scope as the payload: its binding never owns it.
+    output :: ir_list_empty(&m, &b, output_row)
+    b.fresh[output] = false
+    output_local :: tir_generated_local("encode_output_{output}", span)
+    &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
+    item_local :: tir_user_local("encode_item_{output}", span)
+    item_expr :: TExpr{ty: element, kind: TExprKind.Local{local: item_local}, span: span}
+    encoded :: TExpr{ty: ty, kind: TExprKind.HandleMethod{receiver: item_expr, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span: span}
+    output_expr :: TExpr{ty: output_ty, kind: TExprKind.Local{local: output_local}, span: span}
+    push :: TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [TExpr]{encoded}}, span: span}
+    source_expr :: TExpr{ty: value.ty, kind: TExprKind.Local{local: source_local}, span: span}
+    walk :: TStmt.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [TStmt]{TStmt.ExprStmt{value: push, span: span}}, span: span}
+    ir_stmt(&m, p, &b, walk)
+    ir_scope_close(&m, &b)
+    if ir_failed(b) -> return -1
+    b.fresh[output] = true
+    ir_dyn_box(&m, p, &b, ty, "Array", output, span)
 }
 
 // The key of `concrete`'s own `codec` implementation method (`Decode|decode`,
