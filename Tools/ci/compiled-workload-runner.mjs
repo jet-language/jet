@@ -615,9 +615,10 @@ function peerLauncherInfo() {
     process.platform === "win32" ? "compiled-workload-peer-launcher.exe" : "compiled-workload-peer-launcher",
   );
   if (!configured && !fs.existsSync(launcherPath)) {
-    const source = path.join(root, "Tools", "ci", "compiled-workload-peer-launcher.rs");
-    fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
-    const build = spawnSync("rustc", ["--edition=2021", "-O", source, "-o", launcherPath], {
+    // `jet build` writes the binary to `.jet/build/<stem>` beside the source.
+    const source = path.join(root, "Tools", "ci", "CompiledWorkloadPeerLauncher.jet");
+    const built = path.join(path.dirname(source), ".jet", "build", "CompiledWorkloadPeerLauncher" + exeSuffix);
+    const build = spawnSync(jetBin, ["build", "--quiet", source], {
       cwd: root,
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
@@ -625,6 +626,9 @@ function peerLauncherInfo() {
     if (build.error || build.status !== 0) {
       fail("peer isolation launcher build failed: " + cleanText(build.stderr || build.stdout || build.error?.message));
     }
+    fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+    fs.copyFileSync(built, launcherPath);
+    fs.chmodSync(launcherPath, 0o755);
   }
   const launcher = resolveExecutable(launcherPath);
   if (!launcher) fail("peer isolation launcher is unavailable: " + launcherPath);
