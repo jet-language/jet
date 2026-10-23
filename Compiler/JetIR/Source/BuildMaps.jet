@@ -409,7 +409,7 @@ fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, ind
     site :: b.line
     value_ty :: m.types[shape.value.ty].ty
     value_type :: ir_ty(p, b, value)
-    result :: ir_binary(&m, p, &b, binary, false, site, value_ty, current, right, value_type, span)
+    result :: ir_binary(&m, p, &b, binary, ir_assign_overflow(binary), site, value_ty, current, right, value_type, span)
     ir_release(&m, &b, right)
     if ir_failed(b) -> return
     if m.types[shape.value.ty].drop != "" -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)

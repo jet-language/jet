@@ -1627,6 +1627,15 @@ fn ir_route_member(op: TBinaryOp) -> String Never! {
     }
 }
 
+// Whether compound assignment `place op= value` checks overflow: as its
+// binary form does (sema_expr_check_binary), for + - * / ** << >>; only a
+// fixed-width integer reads it (D-NUMOPS1: plain arithmetic traps). An
+// `op=` under an `#Arithmetic` policy never reaches here: sema lowers it to
+// `place = OverflowOpt(...)` (Statements.jet sema_stmt_policy_compound).
+fn ir_assign_overflow(op: TBinaryOp) -> Bool Never! {
+    op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Pow || op == .Shl || op == .Shr
+}
+
 // `left op right` (codegen jet_codegen_binary_dispatch + Lower lower_binary):
 // exact Int arithmetic, division, bit operators and comparisons are IR ops
 // (inline, with the big-integer or located runtime route as the slow path);

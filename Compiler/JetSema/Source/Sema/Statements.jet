@@ -3,6 +3,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    ArithmeticOperation,
     BinOp,
     BindName,
     BindPattern,
@@ -3630,6 +3631,16 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
     local := tir_symbol_local(name, binding.symbol.span, binding.symbol.id)
     local.mutable = true
+    span :: Span{start: name_span.start, end: expr_span(expr).end}
+    value := checked
+    if op != None {
+        operator :: op
+        read :: sema_tir_node(required, TExprKind.Local{local: local.copy()}, name_span)
+        if sema_stmt_policy_compound(operator, required, read, checked, line, span, context) == .Val(policed) {
+            value = policed
+            tir_op = None
+        }
+    }
     updated_bounds := TIntegerBounds?{None}
     // Mutable loop-carried values cannot inherit a one-iteration interval.
     // Their declared range remains available through the type fact channel.
@@ -3637,7 +3648,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     scopes.bindings[index].integer_bounds = updated_bounds
     // A new value has no `#Track` origin (Rust `clear_origin`).
     scopes.bindings[index].origin = None
-    Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tir_op, value: checked, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
+    Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tir_op, value: value, line: line, span: span})
 }
 
 // Rust `is_global_mutable_binding`: this module's own `name := …` binding that
@@ -3693,7 +3704,18 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     storage := tir_persistent_local(name, environment.module_identity, required, name_span)
     storage.mutable = true
     place :: sema_tir_node(required, TExprKind.Local{local: storage}, name_span)
-    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
+    span :: Span{start: name_span.start, end: expr_span(expr).end}
+    value := checked
+    if op != None {
+        operator :: op
+        // The storage reads as its constant reference (sema_expr_check_ident).
+        read :: sema_tir_node(required, TExprKind.ConstRef{symbol: symbol.id}, name_span)
+        if sema_stmt_policy_compound(operator, required, read, checked, line, span, context) == .Val(policed) {
+            value = policed
+            tir_op = None
+        }
+    }
+    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: value, line: line, span: span})
 }
 
 // Rust `source != target && source.numeric_widening_to(target).is_some()`.
@@ -4543,6 +4565,10 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     sema_ownership_release_value_only_views(&state, target, &tail_store, &context)
     if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 6")
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 7")
+    // A compound update under an `#Arithmetic` policy reads the place as a
+    // value (sema_stmt_policy_compound), before it becomes the write.
+    read := TExpr?{None}
+    if op != None -> read = Val(place.copy())
     if place.kind == {
         .Index(base, index, kind, _, checked_call, location) -> place.kind = TExprKind.Index{base: base, index: index, kind: kind, access: AccessConvention.Write, checked_call: checked_call, location: location}
         else -> {}
@@ -4551,7 +4577,50 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         sema_check_unsupported(&context, "the assignment place span {place.span.start}..{place.span.end} has no source line in this module")
         return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 17")
     }
-    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, line: line, span: Span{start: place.span.start, end: expr_span(expr).end}})
+    assign_span :: Span{start: place.span.start, end: expr_span(expr).end}
+    assigned := checked
+    if op != None {
+        operator :: op
+        if read == .Val(current) && sema_stmt_policy_compound(operator, place.ty, current, checked, line, assign_span, context) == .Val(policed) {
+            assigned = policed
+            tir_op = None
+        }
+    }
+    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: assigned, line: line, span: assign_span})
+}
+
+// A compound update `place op= value` of a fixed-width integer under the
+// function's `#Arithmetic` policy, for + - * **: `place = OverflowOpt(read,
+// value)`, the policy's operation exactly as the binary form lowers it
+// (Expressions.jet sema_expr_check_binary, sema_expr_arithmetic_policy_value).
+// `read` is the place read as a value. None outside a policy, for any other
+// operator or type, and for a place whose second read could differ from the
+// first (a call on its path); those keep the compound form, which JetIR
+// checks for overflow (BuildTypes ir_assign_overflow).
+fn sema_stmt_policy_compound(op: BinOp, ty: Type, read: TExpr, value: TExpr, line: Int, span: Span, context: SemaCheckContext) -> TExpr? {
+    if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Pow) && ty == .IntN(_, _) && sema_stmt_pure_place(read) && context.arithmetic_policy == .Val(policy) {
+        operation :: if op == {
+            .Add -> ArithmeticOperation.Add
+            .Sub -> ArithmeticOperation.Sub
+            .Mul -> ArithmeticOperation.Mul
+            else -> ArithmeticOperation.Pow
+        }
+        return Val(sema_expr_arithmetic_policy_value(policy, operation, ty, span, line, read, value))
+    }
+    None
+}
+
+// Whether reading the place `place` again yields what the first read did:
+// locals, constants and literals, and fields and plain indexes of them.
+fn sema_stmt_pure_place(place: TExpr) -> Bool {
+    if place.kind == {
+        .Local(_) | .ConstRef(_) | .IntLit(_, _) | .BoolLit(_) -> return true
+        .Field(receiver, _) -> return sema_stmt_pure_place(receiver)
+        .Index(base, index, _, _, checked_call, _) -> return checked_call == None && sema_stmt_pure_place(base) && sema_stmt_pure_place(index)
+        .Binary(_, _, _, lhs, rhs) -> return sema_stmt_pure_place(lhs) && sema_stmt_pure_place(rhs)
+        .Unary(_, operand) -> return sema_stmt_pure_place(operand)
+        else -> return false
+    }
 }
 
 fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {

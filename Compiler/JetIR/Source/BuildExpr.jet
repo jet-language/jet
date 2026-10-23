@@ -273,7 +273,7 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
                 left_ty :: m.types[b.f.slot_type[current]].ty
                 site :: b.line
                 value_ty :: ir_ty(p, b, value)
-                result = ir_binary(&m, p, &b, binary, false, site, left_ty, current, right, value_ty, span)
+                result = ir_binary(&m, p, &b, binary, ir_assign_overflow(binary), site, left_ty, current, right, value_ty, span)
                 ir_release(&m, &b, right)
                 if ir_failed(b) -> return
             }
@@ -813,7 +813,7 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
         if op == .Val(binary) {
             current :: ir_member_read(&m, &b, base, member)
             site :: b.line
-            result = ir_binary(&m, p, &b, binary, false, site, field.ty, current, right, value_ty, span)
+            result = ir_binary(&m, p, &b, binary, ir_assign_overflow(binary), site, field.ty, current, right, value_ty, span)
             ir_release(&m, &b, right)
             if ir_failed(b) -> return
         }
@@ -856,7 +856,7 @@ fn ir_storage_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op:
         row :: ir_value_type(&m, p, definition.ty) ?? return ir_fail(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
         current :: ir_load_at(&m, &b, address, 0, row)
         site :: b.line
-        result = ir_binary(&m, p, &b, binary, false, site, definition.ty, current, right, value_ty, span)
+        result = ir_binary(&m, p, &b, binary, ir_assign_overflow(binary), site, definition.ty, current, right, value_ty, span)
         ir_release(&m, &b, right)
         if ir_failed(b) -> return
     }
@@ -3725,7 +3725,7 @@ fn ir_list_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
         site :: b.line
         right :: slot
         element_ty :: m.types[row].ty
-        slot = ir_binary(&m, p, &b, binary, false, site, element_ty, current, right, value_ty, span)
+        slot = ir_binary(&m, p, &b, binary, ir_assign_overflow(binary), site, element_ty, current, right, value_ty, span)
         ir_release(&m, &b, right)
         if ir_failed(b) -> return
     }
