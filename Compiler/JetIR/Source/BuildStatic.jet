@@ -42,6 +42,11 @@ struct IRStaticReloc { offset: Int, target: Int, addend: Int, local: Bool, text:
 // The objects of one constant, numbered locally until they become data rows.
 struct IRStaticBuild { bytes: [[U8]], relocs: [[IRStaticReloc]] }
 
+// Where a struct value's field `name` goes, found once for every struct value
+// of one type (ir_static_struct): its member's position, its declared type
+// and, once a field value needs it, that type's value row (-1 before).
+struct IRStaticField { name: String, member: Int, ty: Type, row: Int }
+
 fn ir_static_new(s: &IRStaticBuild, size: Int) -> Int Never! {
     bytes := [U8]{}
     loop _ in 0..<size -> &bytes.push(U8{0})
@@ -335,18 +340,8 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
     if value == {
         .Struct(_, fields) -> {
             members :: ir_static_members(&m, p, row) ?? return false
-            loop field in fields {
-                found := -1
-                loop (index, member) in members {
-                    if member.name == field.name -> found = index
-                }
-                if found < 0 -> return false
-                field_ty :: ir_declared_field_type(m, p, ty, field.name) ?? return false
-                if field.value == .Unit -> next
-                value_row :: ir_value_type(&m, p, field_ty) ?? return false
-                if !ir_static_member(&m, p, &s, object, offset, members[found], field_ty, value_row, field.value) -> return false
-            }
-            return true
+            plan := [IRStaticField]{}
+            return ir_static_struct(&m, p, &s, object, offset, ty, members, &plan, fields)
         }
         .List(values) -> {
             if ir_untag(ty) == .List(element) {
@@ -354,7 +349,21 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
                 if values.len() == 0 -> return true
                 stride :: ir_list_stride(m, element_row)
                 data :: ir_static_new(&s, values.len() * stride)
+                // Struct items share one member list and one field plan.
+                members := [IRMember]{}
+                laid := false
+                plan := [IRStaticField]{}
                 loop (index, item) in values {
+                    if item == .Struct(_, fields) {
+                        if m.types[element_row].kind == .Aggregate {
+                            if !laid {
+                                members = ir_static_members(&m, p, element_row) ?? return false
+                                laid = true
+                            }
+                            if !ir_static_struct(&m, p, &s, data, index * stride, element, members, &plan, fields) -> return false
+                            next
+                        }
+                    }
                     if !ir_static_into(&m, p, &s, data, index * stride, element, element_row, item) -> return false
                 }
                 ir_static_put(&s, object, offset, IRStaticWord{word: values.len()}, 8)
@@ -394,6 +403,35 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
         }
         else -> return false
     }
+}
+
+// Lays struct value `fields` of type `ty` (members `members`) out at
+// `offset` of `object`, member by member (ir_comptime_struct). `plan` keeps
+// each field position's member, declared type and value row for the next
+// value of the same type; a position naming another field is found again.
+fn ir_static_struct(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, members: [IRMember], plan: &[IRStaticField], fields: [TComptimeField]) -> Bool Never! {
+    loop (position, field) in fields {
+        if position >= plan.len() || plan[position].name != field.name {
+            found := -1
+            loop (index, member) in members {
+                if member.name == field.name -> found = index
+            }
+            if found < 0 -> return false
+            field_ty :: ir_declared_field_type(m, p, ty, field.name) ?? return false
+            known :: IRStaticField{name: field.name.copy(), member: found, ty: field_ty, row: -1}
+            if position < plan.len() {
+                plan[position] = known
+            } else {
+                &plan.push(known)
+            }
+        }
+        if field.value == .Unit -> next
+        if plan[position].row < 0 {
+            plan[position].row = ir_value_type(&m, p, plan[position].ty) ?? return false
+        }
+        if !ir_static_member(&m, p, &s, object, offset, members[plan[position].member], plan[position].ty, plan[position].row, field.value) -> return false
+    }
+    true
 }
 
 // The positions of a Map constant's `entries` in the order its Map keeps
