@@ -596,6 +596,7 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         &operands.push(slot)
     }
     if operands.len() == 0 -> return ir_fail_slot(&b, span, "closure method without a closure")
+    if operation == .ParaMap || operation == .ParaFilter || operation == .ParaPartition || operation == .ParaFold -> return ir_closure_parallel(&m, p, &b, ty, list, element, operation, operands, span)
     callback :: operands[operands.len() - 1]
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     result_row :: if ir_unit_type(ty) -> -1 else -> ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -1520,7 +1521,7 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     if name == "jet_ordering_then" || name == "jet_ordering_reverse" -> return Val(ir_ordering_method(&m, p, &b, name, inputs, span))
     if name == "jet_std::JetShared::new" -> return Val(ir_shared_new(&m, p, &b, inputs, result, span))
     strings :: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
-    lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
+    lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
     if !strings && !lists -> return None
     loop slot in inputs {
         if slot < 0 -> return Val(ir_fail_slot(&b, span, "runtime route {name} argument without a value"))
@@ -1545,7 +1546,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     shown :: ir_type_name(m.types[b.f.slot_type[list]].ty)
     row :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "runtime route {name} on {shown}")
     reducing :: name == "jet_list_sum" || name == "jet_list_product"
-    single :: reducing || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
+    single :: reducing || name == "jet_list_sum_fixed_f64" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
     expected :: if single -> 1 else if name == "jet_list_replace" || name == "jet_list_slice" -> 3 else -> 2
     if inputs.len() != expected -> return ir_fail_slot(&b, span, "runtime route {name} takes {expected} arguments, not {inputs.len()}")
     stride :: ir_list_stride(m, row)
@@ -1563,6 +1564,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
         ir_walk_close(&m, &b, walk)
         return total
     }
+    if name == "jet_list_sum_fixed_f64" -> return ir_list_sum_fixed(&m, &b, list, row, span)
     if name == "jet_list_equal" {
         other :: inputs[1]
         other_ty :: m.types[b.f.slot_type[other]].ty
@@ -1630,6 +1632,40 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     ir_end(&b.f, b.line)
     ir_walk_close(&m, &b, walk)
     found
+}
+
+// A Float `xs.sum()` (and a Float fold with step `acc + x`): the D-FRED1=A
+// fixed tree (Lower lower_helper_sum_fixed). Item i adds into lane i & 7 in
+// source order, and the lanes combine as ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
+fn ir_list_sum_fixed(m: &IRModule, b: &IRBuilder, list: Int, row: Int, span: Span) -> Int Never! {
+    if m.types[row].kind != .Float -> return ir_fail_slot(&b, span, "fixed Float sum of {ir_type_name(m.types[row].ty)}")
+    pointer_row :: ir_pointer_row(&m)
+    lanes :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, lanes, 64, 8, -1, b.line)
+    zero :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Const, zero, 0, -1, -1, b.line)
+    loop lane in 0..<8 -> ir_emit(&b.f, IROp.Store, -1, lanes, lane * 8, zero, b.line)
+    seven :: ir_word_const(&m, &b, 7)
+    walk :: ir_walk_open(&m, &b, list, row)
+    lane :: ir_word_op(&m, &b, IROp.BitAnd, walk.index, seven)
+    slot :: ir_element_address(&m, &b, lanes, lane, 8)
+    total :: ir_load_at(&m, &b, slot, 0, row)
+    next_total :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Add, next_total, total, walk.item, -1, b.line)
+    ir_emit(&b.f, IROp.Store, -1, slot, 0, next_total, b.line)
+    ir_walk_close(&m, &b, walk)
+    values := [Int]{}
+    loop index in 0..<8 -> &values.push(ir_load_at(&m, &b, lanes, index * 8, row))
+    loop values.len() > 1 {
+        merged := [Int]{}
+        loop index in 0..<(values.len() >> 1) {
+            sum :: ir_temp(&m, &b, row)
+            ir_emit(&b.f, IROp.Add, sum, values[index * 2], values[index * 2 + 1], -1, b.line)
+            &merged.push(sum)
+        }
+        values = merged
+    }
+    values[0]
 }
 
 // `xs.starts_with(ys)` / `xs.ends_with(ys)` (Lower lower_helper_list_starts_with):
