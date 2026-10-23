@@ -1,0 +1,94 @@
+// D-MEMPROVENANCE2: a subrange of a declared view reborrows that view's
+// owner. `view[a..<b]` narrows the window over the same storage; it never
+// copies, so writes through a `ViewMut<T>` subrange land in the owner.
+struct Reader {
+    bytes: View<U8>
+    at: Int
+
+    // The grabbed window borrows the reader's bytes, so `from self.bytes`
+    // names its owner even through the `Ok(..)` carrier.
+    fn grab(&self, count: Int) -> View<U8> Err! from self.bytes {
+        if self.bytes.len() - self.at < count -> return Err("short read")
+        start :: self.at
+        self.at += count
+        Ok(self.bytes[start..<self.at])
+    }
+}
+
+struct Packet {
+    header: View<U8>
+    body: View<U8>
+}
+
+fn total(view: View<U8>) -> Int {
+    sum := 0
+    loop byte in view -> sum += Int.from_u8(byte)
+    sum
+}
+
+// A subrange of a view parameter is still owned by that parameter.
+fn middle(view: View<U8>, start: Int, end: Int) -> View<U8> from view {
+    view[start..<end]
+}
+
+fn split(bytes: View<U8>) -> Packet Err! from bytes {
+    if bytes.len() < 2 -> return Err("too short")
+    header :: bytes[0..<2]
+    body :: bytes[2..<bytes.len()]
+    Ok(Packet{header: header, body: body})
+}
+
+fn fill(window: ViewMut<U8>, value: Int) {
+    loop i in 0..<window.len() -> window[i] = U8{value}
+}
+
+// A write window over part of a write window reborrows the same storage.
+fn tail_mut(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
+    &window[start..<window.len()]
+}
+
+// A reader over a view parameter grabs subranges of that view.
+fn read(all: View<U8>) {
+    reader := Reader{bytes: all, at: 0}
+    first :: &reader.grab(2) ?? return
+    print(total(first))
+    second :: &reader.grab(3) ?? return
+    print(total(second))
+    print(reader.at)
+    tail :: &reader.grab(4) ?? all[0..<1]
+    print(total(tail))
+}
+
+fn run() {
+    asset :: [U8{1}, U8{2}, U8{3}, U8{4}, U8{5}, U8{6}]
+    all :: asset[0..<6]
+    inner :: middle(all, 1, 5)
+    print(total(inner))
+    print(total(inner[1..<3]))
+    print(inner[0..<2].len())
+    deeper :: inner[1..<4]
+    print(total(deeper[0..<2]))
+    read(all)
+    packet :: split(all) ?? return
+    print(total(packet.header))
+    print(total(packet.body))
+    // A write subrange of a write view takes over that view's exclusive loan,
+    // and writes through it land in `data`.
+    data := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    edit :: &data[0..<data.len()]
+    window :: &edit[1..<4]
+    window[0] = U8{7}
+    window[2] = U8{9}
+    center :: &window[1..<2]
+    center[0] = U8{5}
+    loop byte in data -> print(Int.from_u8(byte))
+    // Constant-bound write windows lend their storage to a write view
+    // parameter, and a write subrange returned from one still reaches `cells`.
+    cells := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    lead :: &cells[0..<2]
+    fill(lead, 7)
+    whole :: &cells[0..<5]
+    rest :: tail_mut(whole, 3)
+    fill(rest, 9)
+    loop byte in cells -> print(Int.from_u8(byte))
+}

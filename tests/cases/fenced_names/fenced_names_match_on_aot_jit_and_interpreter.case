@@ -1,0 +1,15 @@
+# tests/fenced_names.rs::fenced_names_match_on_aot_jit_and_interpreter at tests/fenced_names.rs:68; hand-port (the expected stdout is tests/fenced_names.rs:69)
+fixture: fenced_names_match_on_aot_jit_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0 # tests/fenced_names.rs:26
+stdout: = fenced_names_match_on_aot_jit_and_interpreter.1.out
+step dev: jet run main.jet
+exit: 0 # tests/fenced_names.rs:54
+stdout: = fenced_names_match_on_aot_jit_and_interpreter.1.out
+stderr: empty # tests/fenced_names.rs:55

@@ -1,0 +1,20 @@
+
+use core.archive.gzip as gzip
+use core.archive.zstd as zstd
+
+fn run() {
+    data :: [U8]{72, 101, 108, 108, 111, 32, 74, 101, 116}
+
+    gz :: gzip.compress(data) ?? panic("compress")
+    print(gzip.is_gzip(gz))
+    print((gzip.decompress(gz) ?? [U8]{}) == data)
+
+    zst :: zstd.compress(data) ?? panic("compress")
+    print(zstd.is_zstd(zst))
+    print((zstd.decompress(zst) ?? [U8]{}) == data)
+
+    print(gzip.decompress(gz) == .Ok(_))
+    print(zstd.decompress(zst) == .Ok(_))
+    print(gzip.decompress([U8]{1, 2, 3}) == .Err(_))
+    print(zstd.decompress([U8]{1, 2, 3}) == .Err(_))
+}

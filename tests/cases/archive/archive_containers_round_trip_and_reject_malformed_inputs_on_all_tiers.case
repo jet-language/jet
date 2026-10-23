@@ -1,0 +1,15 @@
+# tests/archive.rs::archive_containers_round_trip_and_reject_malformed_inputs_on_all_tiers at tests/archive.rs:39; hand-port
+fixture: archive_containers_round_trip_and_reject_malformed_inputs_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step run: jet run run.jet
+exit: 0
+stdout: = archive_containers_round_trip_and_reject_malformed_inputs_on_all_tiers.1.out
+step build: jet build run.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run

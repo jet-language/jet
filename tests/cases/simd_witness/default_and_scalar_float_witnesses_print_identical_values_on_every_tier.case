@@ -1,0 +1,32 @@
+# tests/simd_witness.rs::default_and_scalar_float_witnesses_print_identical_values_on_every_tier at tests/simd_witness.rs:246; hand-port (default_run is `jet run` (it ran twice, once labelled interpreter); build_and_run_full is `jet build` + the binary; assert_native_simd_artifact rebuilt the generated Rust at opt-level 3, so the packed-arithmetic objdump check reads the `jet build --release` binary; assert_web_simd_artifacts_run is `jet build --target web` + `node app.js`)
+fixture: default_and_scalar_float_witnesses_print_identical_values_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run main.jet
+exit: 0 # tests/simd_witness.rs:249
+stdout: = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: == dev # tests/simd_witness.rs:258
+stdout: = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"
+step: jet build --release main.jet
+exit: 0
+step native: built
+exit: 0 # tests/simd_witness.rs:103
+stdout: = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"
+when arch x86_64
+when tool objdump
+step: objdump -d .jet/build/main
+exit: 0 # tests/simd_witness.rs:128
+stdout: ~any mulpd vmulpd addpd vaddpd # tests/simd_witness.rs:134 packed arithmetic stays in the release binary
+end when
+end when
+step: jet build --target web main.jet
+exit: 0 # tests/simd_witness.rs:144
+step web: node app.js
+cwd: .jet/build
+exit: 0 # tests/simd_witness.rs:207
+stdout: = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"

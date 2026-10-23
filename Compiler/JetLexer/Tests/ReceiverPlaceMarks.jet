@@ -1,0 +1,29 @@
+// Jet-pass port of tests/receiver_place_marks.rs (D-CAP-RECEIVER1=D): a line that starts with
+// `&name` or `^name` begins a new statement, and a continued bitwise-and or power line keeps a
+// space (or a parenthesis) after its operator. The Rust test lexed each source and asserted
+// whether the token right before the first mark is the statement terminator.
+use jet_lexer.[TOKEN_AMP, TOKEN_CARET, TOKEN_SEMI, lex]
+
+// Whether `lex` put a statement terminator right before the first `mark` token of `source`.
+fn place_mark_semi_before(source: String, mark: Int) -> Bool Never! {
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    loop index in 0..<lexed.tokens.len() {
+        if lexed.tokens[index].kind == mark -> return index > 0 && lexed.tokens[index - 1].kind == TOKEN_SEMI
+    }
+    panic("the source has no mark token")
+}
+
+// Rust: tests/receiver_place_marks.rs:17-22
+#Test("line start place marks begin statements") {
+    assert(place_mark_semi_before("x\n&buf.push(1)\n", TOKEN_AMP))
+    assert(place_mark_semi_before("x\n^buf.seal()\n", TOKEN_CARET))
+    assert(place_mark_semi_before("x\n&self.items.push(1)\n", TOKEN_AMP))
+}
+
+// Rust: tests/receiver_place_marks.rs:24-29
+#Test("spaced operators continue the previous line") {
+    assert(!place_mark_semi_before("x\n& mask\n", TOKEN_AMP))
+    assert(!place_mark_semi_before("x\n^ 2\n", TOKEN_CARET))
+    assert(!place_mark_semi_before("x\n&(mask)\n", TOKEN_AMP))
+}

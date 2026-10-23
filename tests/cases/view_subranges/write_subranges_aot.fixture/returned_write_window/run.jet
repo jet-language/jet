@@ -1,0 +1,14 @@
+
+fn fill(window: ViewMut<U8>, value: Int) {
+    loop i in 0..<window.len() -> window[i] = U8{value}
+}
+fn tail_mut(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
+    &window[start..<window.len()]
+}
+fn run() {
+    data := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    edit :: &data[0..<5]
+    rest :: tail_mut(edit, 3)
+    fill(rest, 9)
+    loop byte in data -> print(Int.from_u8(byte))
+}

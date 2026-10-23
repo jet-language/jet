@@ -1,0 +1,43 @@
+
+use core.text.parse as parse
+use combinators
+
+fn run() {
+    // Failure fallbacks differ from the expected payload, so None cannot pass.
+    binary :: (parse.parse_int_base("101101", 2) ?? -1) == 45
+    hexadecimal :: (parse.parse_int_base("FF", 16) ?? -1) == 255
+    base36 :: (parse.parse_int_base("z", 36) ?? -1) == 35
+    print("integer valid: base2={binary} base16={hexadecimal} base36={base36}")
+
+    base_low :: parse.parse_int_base("1", 1) == .None
+    base_high :: parse.parse_int_base("1", 37) == .None
+    empty :: parse.parse_int_base("", 10) == .None
+    plus_only :: parse.parse_int_base("+", 10) == .None
+    minus_only :: parse.parse_int_base("-", 10) == .None
+    illegal_digit :: parse.parse_int_base("12z", 10) == .None
+    print("integer invalid: base1={base_low} base37={base_high} empty={empty} plus={plus_only} minus={minus_only} digit={illegal_digit}")
+
+    true_text :: (parse.parse_bool(" \tTrUe\n") ?? false) == true
+    false_text :: (parse.parse_bool("\tOFF ") ?? true) == false
+    invalid_bool :: parse.parse_bool("truthy") == .None
+    print("bool: true={true_text} false={false_text} invalid={invalid_bool}")
+
+    signed :: combinators.int_dec(combinators.input(" \t-42tail"))
+    if signed == .Val(decimal) {
+        rest :: combinators.remaining(decimal.next)
+        print("decimal: value={decimal.n} pos={decimal.next.pos} rest={rest}")
+    } else {
+        print("decimal: missing")
+    }
+    no_digits :: combinators.int_dec(combinators.input(" \t+tail")) == .None
+    print("no digits={no_digits}")
+
+    split_utf8 :: combinators.take_n(combinators.input("é"), 1) == .None
+    print("take split utf8={split_utf8}")
+    if combinators.take_n(combinators.input("jet"), 2) == .Val(taken) {
+        rest :: combinators.remaining(taken.next)
+        print("take valid: chunk={taken.chunk} pos={taken.next.pos} rest={rest}")
+    } else {
+        print("take valid: rejected")
+    }
+}

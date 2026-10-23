@@ -1,0 +1,23 @@
+
+use core.archive as archive
+use core.files as files
+
+fn run() {
+    zip_names :: files.read_bytes("zip_names.bin") ?? panic("zip names fixture")
+    print(archive.zip_names_json(zip_names) == .Err(_))
+
+    zip_entries :: files.read_bytes("zip_entries.bin") ?? panic("zip entries fixture")
+    print(archive.zip_open(zip_entries) == .Err(_))
+
+    zip_output :: files.read_bytes("zip_output.bin") ?? panic("zip output fixture")
+    print(archive.zip_decompress(zip_output) == .Err(_))
+
+    zip_materialization :: files.read_bytes("zip_materialization.bin") ?? panic("zip materialization fixture")
+    print(archive.zip_decompress(zip_materialization) == .Err(_))
+
+    tar_names :: files.read_bytes("tar_names.bin") ?? panic("tar names fixture")
+    print(archive.tar_names_json(tar_names) == .Err(_))
+
+    tar_entries :: files.read_bytes("tar_entries.bin") ?? panic("tar entries fixture")
+    print(archive.tar_get(tar_entries, "entry-0") == .Err(_))
+}

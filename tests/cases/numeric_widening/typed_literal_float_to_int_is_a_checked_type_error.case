@@ -1,0 +1,18 @@
+# tests/numeric_widening.rs::typed_literal_float_to_int_is_a_checked_type_error at tests/numeric_widening.rs:29; hand-port
+# A Float typed body never becomes an integer: exactly one error, E0112, whose fix names the explicit conversions.
+fixture: typed_literal_float_to_int_is_a_checked_type_error.fixture
+env: NO_COLOR=1
+
+step: jet check int.jet
+exit: 1
+stderr: ~ "Error [E0112]" # tests/numeric_widening.rs:37 errors[0].code
+stderr: ~ "Use `Int.from_float(value)`" # tests/numeric_widening.rs:38 fix names {head}.from_float(value)
+stderr: ~ "`math.round(value)`" # tests/numeric_widening.rs:39 fix names math.round(value)
+stderr: ~ "1 problem found" # tests/numeric_widening.rs:36 exactly one error
+
+step: jet check i64.jet
+exit: 1
+stderr: ~ "Error [E0112]" # tests/numeric_widening.rs:37 errors[0].code
+stderr: ~ "Use `I64.from_float(value)`" # tests/numeric_widening.rs:38 fix names {head}.from_float(value)
+stderr: ~ "`math.round(value)`" # tests/numeric_widening.rs:39 fix names math.round(value)
+stderr: ~ "1 problem found" # tests/numeric_widening.rs:36 exactly one error
