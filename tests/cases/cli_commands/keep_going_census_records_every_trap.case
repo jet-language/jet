@@ -1,5 +1,6 @@
-# #5566: under JET_KEEP_GOING a function lowered as a #Todo trap is a row of the
-# failure census, so a build whose functions trap never reports clean.
+# #5566, #5662: under JET_KEEP_GOING a function lowered as a #Todo trap is one
+# row of the failure census naming its cause, so a build whose functions trap
+# never reports clean.
 fixture: keep_going_census_records_every_trap.fixture
 step: jet build main.jet
 env: JET_KEEP_GOING=1
@@ -7,4 +8,4 @@ env: JET_KEEP_GOING_REPORT={work}/census.tsv
 env: NO_COLOR=1
 exit: nonzero
 file: census.tsv ~ "`broken`: lowered as a keep-going trap" # the trapped function is a census row of its own
-file: census.tsv ~ "`mismatched`: lowered as a keep-going trap" # a failed return check traps and is a row too
+file: census.tsv ~ "`mismatched`: lowered as a keep-going trap: " # a failed return check traps, and its row names why

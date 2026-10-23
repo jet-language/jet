@@ -423,6 +423,10 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
         checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
         if !checked.complete {
             complete = false
+            if keep_going {
+                sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), label, sema_keep_going_cause(checked.incomplete_reasons, diagnostics, before), &functions, &reasons)
+                next
+            }
             loop reason in checked.incomplete_reasons -> &reasons.push("{label}: {reason}")
             if checked.incomplete_reasons.len() == 0 {
                 // A check that records no reason stopped on a report; name the
@@ -431,7 +435,6 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
                 loop index in before..<diagnostics.len() -> &reported.push("{diagnostics[index].code} {diagnostics[index].what}")
                 if reported.len() == 0 -> &reasons.push("{label}: body checking is incomplete") else -> &reasons.push("{label}: body checking stopped on {reported.join("; ")}")
             }
-            if keep_going -> sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), label, &functions, &reasons)
             next
         }
         if !sema_append_function(&functions, checked) {

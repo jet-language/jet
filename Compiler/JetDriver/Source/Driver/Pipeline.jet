@@ -3049,14 +3049,15 @@ struct JetDriverKeepGoingLog {
     // Row bodies (all but the phase) already recorded, so a failure seen by
     // two phases is one row.
     seen: [String:Bool]
-    // Reports before this index of the stage diagnostics are recorded.
-    diagnostic_mark: Int
+    // No index mark: each call reads the whole stage list and `seen` keeps
+    // one row per report, so a stage that rebuilds or replaces its list
+    // still has every error recorded (#5662).
     // Rows before this index are written to the trace sink.
     streamed: Int
 }
 
 fn jet_driver_keep_going_log(options: JetDriverKeepGoing?) -> JetDriverKeepGoingLog Never! {
-    log := JetDriverKeepGoingLog{enabled: false, skip: [String]{}, rows: [String]{}, seen: [String:Bool]{}, diagnostic_mark: 0, streamed: 0}
+    log := JetDriverKeepGoingLog{enabled: false, skip: [String]{}, rows: [String]{}, seen: [String:Bool]{}, streamed: 0}
     if options == .Val(value) {
         log.enabled = true
         log.skip = value.skip
@@ -3116,12 +3117,10 @@ fn jet_driver_has_errors_since(diagnostics: [Diagnostic], start: Int) -> Bool Ne
     false
 }
 
-// The error reports added to the stage diagnostics since the last call.
+// The error reports of the stage diagnostics not yet recorded.
 fn jet_driver_keep_going_diagnostics(kg: &JetDriverKeepGoingLog, phase: String, diagnostics: [Diagnostic]) {
-    start := kg.diagnostic_mark
-    if start > diagnostics.len() -> start = 0
-    loop index in start..<diagnostics.len() {
-        diagnostic :: diagnostics[index]
+    if !kg.enabled -> return
+    loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         message := diagnostic.what
         if diagnostic.detail == .Val(detail) -> message = "{message}: {detail}"
@@ -3130,7 +3129,6 @@ fn jet_driver_keep_going_diagnostics(kg: &JetDriverKeepGoingLog, phase: String, 
         if diagnostic.span == .Val(span) -> site = "{path}:{span.start}..{span.end}"
         jet_driver_keep_going_row(&kg, phase, path, diagnostic.code, message, site)
     }
-    kg.diagnostic_mark = diagnostics.len()
 }
 
 // Why each incomplete module is incomplete (each failed function's label and
@@ -3307,8 +3305,6 @@ fn jet_driver_lowering_inputs(request: JetDriverCompileRequest, keep_going: JetD
     if collecting {
         jet_driver_trace_keep_going_begin(request.trace_sink)
         if compile.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
-        // Reports of a stage that returned early; recorded rows are not repeated.
-        kg.diagnostic_mark = 0
         jet_driver_keep_going_diagnostics(&kg, "final", compile.diagnostics)
         compile.keep_going_rows = kg.rows
         jet_driver_trace_keep_going_end(request.trace_sink, compile.keep_going_rows.len())
@@ -3533,7 +3529,6 @@ fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: Jet
     jet_driver_trace_keep_going_begin(request.trace_sink)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
-    kg.diagnostic_mark = 0
     jet_driver_keep_going_diagnostics(&kg, "final", result.diagnostics)
     result.keep_going_rows = kg.rows
     jet_driver_trace_keep_going_end(request.trace_sink, result.keep_going_rows.len())
@@ -3945,6 +3940,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if validation.soft_stop -> return jet_driver_compile_result(load, load.diagnostics, None, false, trace)
     if kg.enabled {
         jet_driver_keep_going_diagnostics(&kg, "comptime.validate", load.diagnostics)
+        // The final checked graph: a trap installed by validation's own
+        // recheck is a row too (#5662); reasons already recorded stay one row.
+        jet_driver_keep_going_incomplete_modules(&kg, "comptime.validate", validation.graph.modules)
         if !validation.complete -> jet_driver_keep_going_row(&kg, "comptime.validate", "-", "INCOMPLETE", validation.internal_problem ?? "checked text evaluation did not complete", "-")
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
