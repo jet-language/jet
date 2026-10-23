@@ -108,6 +108,11 @@ struct IRBuilder {
     lambdas: [String:Int]
     // Building a stop edge (ir_stop_return): its cleanup checks for no stop.
     stopping: Bool{false}
+    // Building the program entry itself (IRProgram.entry, not a lambda or a
+    // generic instance in it): its end and each return first report the
+    // entry returning (ir_entry_ending), so its drops can leave the heap to
+    // the kernel (#5478).
+    entry: Bool{false}
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
@@ -168,6 +173,9 @@ struct IRProgram {
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
     spawn_sites: [String:Int]{[String:Int]{}}
+    // The program entry's function row (ir_build_program; -1: no entry): its
+    // returns tell the runtime the process is ending (ir_emit_return).
+    entry: Int{-1}
 }
 
 // A Display, Printable, Close or user Comparable implementation: the
@@ -773,6 +781,7 @@ fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImpl
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
         return IRBuildResult{program: ir_module_for(p), failures: failures}
     }
+    p.entry = row
     roots := [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
     ir_build_waves(^p, ^roots, true, threads)
 }
@@ -934,6 +943,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
     m.subst_names = if queued.args.len() > 0 -> ir_generic_names(p, function) else -> [String]{}
     m.subst_types = queued.args.copy()
     b.row = queued.row
+    b.entry = queued.row == p.entry && queued.args.len() == 0
     ir_build_function(&m, p, &b, function)
     if b.error != "" {
         &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: function.name, message: b.error, source_file: function.source_file, span: if b.error_span.end > 0 -> b.error_span else -> function.source_span})
@@ -1098,9 +1108,17 @@ fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
         ir_disown(&b, slot)
     }
     ir_close_disarm(&b, slot)
+    ir_entry_ending(&m, &b)
     ir_drop_bindings(&m, &b, 0)
     ir_emit(&b.f, IROp.Return, -1, slot, -1, -1, b.line)
     ir_set_own_states(&b, states)
+}
+
+// The program entry is about to drop its variables and return: the runtime
+// learns the process is ending (jet_rt_process_entry_return), so those
+// drops free nothing (#5478). Its user cleanup (closes, guards) still runs.
+fn ir_entry_ending(m: &IRModule, b: &IRBuilder) Never! {
+    if b.entry -> _ :: ir_runtime(&m, &b, "jet_rt_process_entry_return", [Int]{}, -1)
 }
 
 // Drops the owned variables among bindings[mark..], latest first; a

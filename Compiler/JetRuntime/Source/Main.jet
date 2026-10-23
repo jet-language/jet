@@ -25,6 +25,26 @@ main_exit_root := I64{0}
     thread_zero(main_exit_root, I64{32})
 }
 
+// #5478: nonzero once this process is ending: process.exit's winning claim,
+// a stop the process root (jet_rt_main's, main_root_control) accepts, or
+// the program entry returning with no task in flight. From then on the heap
+// is the kernel's to reclaim: jet_rt_free returns at once and
+// jet_rt_rc_release gives up no owner, so no drop walks or frees a counted
+// block on any tier, while user cleanup (closes, guards, defers, exit
+// handlers, rollback hooks) still runs. A stop or exit ends the process;
+// only jet_rt_main's normal return clears it, for a loaded-image host that
+// runs another entry.
+main_process_ending := I64{0}
+main_root_control := I64{0}
+
+fn main_process_end() { main_process_ending = I64{1} }
+
+// The program entry returning, before its drops (JetIR ir_emit_return). A
+// task still in flight keeps the heap reclaimed: it may run long after.
+#Export(c) fn jet_rt_process_entry_return() {
+    if (main_root_control != I64{0} && scheduler_idle()) -> main_process_end()
+}
+
 fn main_exit_claim(code: I64) {
     tid :: thread_tid()
     owner :: sync_cas(main_exit_root, I64{0}, tid)
@@ -63,6 +83,8 @@ fn main_exit_cleanup() -> I64 {
 // precedes the original stop report (Core.rs:1171-1175), rather than follows it.
 #Export(c) fn jet_rt_process_exit_begin(code: I64) {
     main_exit_claim(code)
+    // Only the winner gets here, and it always ends the process.
+    main_process_end()
     _ := main_exit_cleanup()
     // Fatal/explicit process::exit does not join other threads. Never drain
     // here: the winner may be a live scheduler worker counted as in-flight.
@@ -105,11 +127,13 @@ fn main_exit_cleanup() -> I64 {
     // process exits with the stop's code (D-FAIL-EXIT1).
     save :: jet_rt_alloc(I64{40}, I64{8})
     root :: jet_rt_root_begin(save)
+    main_root_control = root
     #Unsafe("entry is the loader/object's checked executable System V void(void) address, not a closure header") {
         os_call0_unit(entry)
     }
     record :: jet_rt_root_take_stop(root, save + I64{32})
     jet_rt_root_leave(root, save)
+    main_root_control = I64{0}
     if (record != I64{0}) {
         code :: trap_word(save + I64{32})
         report :: scheduler_stop_take_message(record)
@@ -139,8 +163,11 @@ fn main_exit_cleanup() -> I64 {
         sync_store(main_exit_root + I64{8}, parked_code)
         jet_rt_process_exit_finish()
     }
-    // Loaded-image hosts can run another normal entry in this same process.
-    // Fatal/explicit claims never reach this release.
+    // Loaded-image hosts can run another normal entry in this same process,
+    // which frees again. Fatal/explicit claims never reach this release. An
+    // ending process dropped nothing, so its live Secrets are scrubbed here.
+    if (main_process_ending != I64{0}) -> secret_scrub()
+    main_process_ending = I64{0}
     sync_store(main_exit_root, I64{0})
     // CAbi.rs:182: normal entry returns zero, not the entry's unused register.
     I64{0}

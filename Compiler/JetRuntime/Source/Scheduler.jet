@@ -344,6 +344,9 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     }
     sync_mutex_unlock(control + I64{72})
     if accepted -> scheduler_stop_drop(previous) else -> scheduler_stop_drop(record)
+    // jet_rt_main's root takes every stop it accepts and ends the process,
+    // so the frames unwinding to it leave their heap to the kernel (#5478).
+    if accepted && control == main_root_control -> main_process_end()
     accepted
 }
 
@@ -1065,13 +1068,18 @@ fn scheduler_completion_order(out: I64) {
     sync_park_drop(slot)
 }
 
-#Export(c) fn jet_scheduler_drain_after_exit() {
+// Whether no task is queued or running (the root's counts at 8 and 40).
+fn scheduler_idle() -> Bool {
     root :: scheduler_root_required()
+    sync_mutex_lock(root)
+    idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
+    sync_mutex_unlock(root)
+    idle
+}
+
+#Export(c) fn jet_scheduler_drain_after_exit() {
     loop {
-        sync_mutex_lock(root)
-        idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
-        sync_mutex_unlock(root)
-        if idle && jet_rt_observe_io_quiescent() -> return
+        if scheduler_idle() && jet_rt_observe_io_quiescent() -> return
         #Unsafe("sched_yield retains no memory and yields this OS worker") {
             _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }

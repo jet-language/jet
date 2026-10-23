@@ -197,6 +197,9 @@ fn ir_stmts(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
         if ir_failed(b) -> break
         ir_stmt(&m, p, &b, statement)
     }
+    // The entry's outermost block ends: its variables drop before the
+    // return it falls through to (ir_return_fallthrough).
+    if b.scopes.len() == 1 -> ir_entry_ending(&m, &b)
     ir_scope_close(&m, &b)
     ir_set_own_states(&b, states)
 }

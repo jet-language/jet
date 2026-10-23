@@ -100,7 +100,10 @@ fn trap_defect_prepare() {
     control :: scheduler_report_control_current()
     if (control != I64{0}) -> jet_rt_string_drop(scheduler_root_capture_take(control))
 }
+// Every exit_group of a stop, process.exit or defect: the live Secrets are
+// scrubbed first, as no drop will clear them (#5478).
 fn trap_defect_exit(status: I64) {
+    secret_scrub()
     _ := trap_syscall(I64{231}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 

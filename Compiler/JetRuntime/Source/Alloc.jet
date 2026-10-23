@@ -870,6 +870,8 @@ fn alloc_try(size: I64, align: I64) -> I64 {
         rt_trap_invalid_box_layout()
         return
     }
+    // An ending process leaves its heap to the kernel (#5478, Main.jet).
+    if (main_process_ending != I64{0}) -> return
     alloc_release(alloc_untrack(pointer))
     alloc_free_validated(pointer, size, align)
 }
@@ -1500,7 +1502,9 @@ fn alloc_out_of_memory(size: I64) {
 }
 
 // One process-abort mechanism for allocation failure and panic in cleanup.
+// The live Secrets are scrubbed first: a core dump must not hold them.
 fn alloc_abort() {
+    secret_scrub()
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
         pid :: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})

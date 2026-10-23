@@ -87,6 +87,9 @@ fn fault_stack_end(stack: I64) {
     if (fault_main_stack != I64{0} && sync_cas(fault_main_stack + I64{24}, I64{0}, I64{1}) != I64{0}) {
         loop { _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
     }
+    // No Secret outlives the process in its memory or its core (#5478),
+    // even if the report itself faults.
+    secret_scrub()
     address :: fault_word(info + I64{16})
     rbp :: fault_word(context + I64{120})
     rsp :: fault_word(context + I64{160})

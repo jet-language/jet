@@ -41,8 +41,11 @@ fn rc_init(count: I64) { rc_store(count, I64{1}) }
     if (old == I64{9223372036854775807}) -> jet_rt_panic_overflow()
 }
 
+// An ending process gives up no owner, so no last owner frees (#5478,
+// Main.jet main_process_ending): a later unique test of a shared block stays
+// false and its writer copies, as for any other shared block.
 #Export(c) fn jet_rt_rc_release(count: I64) -> Bool {
-    if (rc_load(count) < I64{0}) -> return false
+    if (rc_load(count) < I64{0} || main_process_ending != I64{0}) -> return false
     rc_add(count, I64{-1}) == I64{1}
 }
 
