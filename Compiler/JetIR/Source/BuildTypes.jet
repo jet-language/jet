@@ -138,9 +138,25 @@ fn ir_value_type(m: &IRModule, p: IRProgram, written: Type) -> Int? Never! {
 // ir_value_type while the structs `laying` (instance identities) are being laid
 // out: one of them reached again through a pointer (an Option, Result or List
 // member) is already known to lay out; reached inline it has no finite size.
+// A bare name's row rests on the name alone when no struct is being laid
+// out, so it is kept in m.nominal_rows.
 fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Int? Never! {
     ty :: ir_subst(m, written)
     if ir_type_row(&m, ty) == .Val(row) -> return Val(row)
+    if laying.len() == 0 {
+        if ty == .Named(name) {
+            known :: m.nominal_rows.get(name) ?? -2
+            if known >= 0 -> return Val(known)
+            if known == -1 -> return None
+            found :: ir_value_type_laid(&m, p, ty, laying)
+            m.nominal_rows[name] = found ?? -1
+            return found
+        }
+    }
+    ir_value_type_laid(&m, p, ty, laying)
+}
+
+fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if ir_shared_guard_editable(ty) == .Val(editable) {
         // An owned runtime permit with no Clone; which permit its drop
         // releases follows its checked read/edit provenance (Lower
