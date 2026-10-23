@@ -5,7 +5,7 @@
 // helper functions built once per Map type (map.find, map.set, map.get,
 // map.remove, map.insert), as Lower's glue helpers are.
 
-use jet_foundation.[Span, Type, TBinaryOp, TExpr, TMapEntry, TypeTupleField, type_carrier_identity]
+use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
 fn ir_map_entry_type(ty: Type) -> Type? Never! {
@@ -291,7 +291,7 @@ fn ir_list_reserve(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Neve
 
 // `[k: v, ...]` (BuildMap): an empty header, then each entry set in order,
 // a later duplicate key replacing the earlier value (Lower lower_build_map).
-fn ir_map_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, entries: [TMapEntry], span: Span) -> Int Never! {
+fn ir_map_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, entries: [BodyMapEntry], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map literal of {ir_type_name(ty)}")
     map :: ir_list_empty(&m, &b, row)
@@ -333,7 +333,7 @@ fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map
 }
 
 // `map[key]` read as a value (borrowed: the map keeps it).
-fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, span: Span) -> Int Never! {
+fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, span: Span) -> Int Never! {
     base_ty :: ir_ty(p, b, base)
     map :: ir_expr(&m, p, &b, base)
     if ir_failed(b) || map < 0 -> return -1
@@ -349,7 +349,7 @@ fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: T
 // `&map[key]` as a write place: the key's value in the map's own buffer (a
 // missing key stops, as a read does). An aggregate value is its storage's
 // address, any other the address of its word (ir_place_address).
-fn ir_map_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, backs: &[IRWriteBack], span: Span) -> Int Never! {
+fn ir_map_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, backs: &[IRWriteBack], span: Span) -> Int Never! {
     base_ty :: ir_ty(p, b, base)
     map :: ir_place_address(&m, p, &b, base, &backs, span)
     if ir_failed(b) -> return -1
@@ -371,7 +371,7 @@ fn ir_map_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, 
 // assignment updates the value in place. The value comes before the place
 // (ir_assign_place), and the place is a write base (ir_write_base): a Map
 // inside a List element writes that List's own buffer, never a shared one.
-fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, op: TBinaryOp?, value: TExpr, span: Span) Never! {
+fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, op: TBinaryOp?, value: Int, span: Span) Never! {
     base_ty :: ir_ty(p, b, base)
     written_row :: ir_value_type(&m, p, base_ty) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
     written :: ir_map_shape(&m, p, written_row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")

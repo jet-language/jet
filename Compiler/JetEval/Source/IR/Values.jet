@@ -4,7 +4,7 @@
 // value (jet_eval_data): a struct by its declaration's name, an enum case by
 // its variant name, Some/Ok as Present, None as a clean failure and Err as a
 // told one, a fixed-width integer as an Int.
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, TFunc, TImplDef, TTypeDef, Type, compiler_threads_single, type_name]
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, type_name, FnBody]
 use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, ir_build_roots, ir_enum_def, ir_host_value_row, ir_list_stride, ir_program_new, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 use jet_sema.[SemaCheckedForeignFunction]
 
@@ -38,9 +38,9 @@ struct JetEvalIRComptime {
 // `constants` are the checked modules' declarations the builder lays values
 // out by. A comptime value reads no source location and links no C closure,
 // so the build has no source files and no foreign functions.
-fn jet_eval_ir_comptime_build(functions: ^[TFunc], item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef]) -> JetEvalIRComptime {
+fn jet_eval_ir_comptime_build(functions: ^[FnBody], item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef]) -> JetEvalIRComptime {
     // copy: the builder consumes its own type rows; transport lays values out by them again.
-    layouts := ir_program_new([TFunc]{}, type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    layouts := ir_program_new([FnBody]{}, type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     built := ir_build_roots(^functions, ^type_defs, ^impls, [String:String]{}, ^constants, [SemaCheckedForeignFunction]{}, item_keys, compiler_threads_single())
     lines := [String]{}
     loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))
@@ -88,7 +88,7 @@ fn jet_eval_ir_comptime_invoke(built: &JetEvalIRComptime, item: Int, args: [TCom
 // jet_eval_ir_run over a module of its own with no type declarations.
 fn jet_eval_ir_entry(built: ^IRModule, entry: Int, config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     m := ^built
-    p :: ir_program_new([TFunc]{}, [TTypeDef]{}, [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    p :: ir_program_new([FnBody]{}, [TTypeDef]{}, [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     jet_eval_ir_run(&m, p, entry, config, span)
 }
 

@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 
-use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TExpr, TField, TFunc, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, type_carrier_identity, type_name, type_union_member_tag]
+use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, type_carrier_identity, type_name, type_union_member_tag]
 
 // A rendered type's identity: its declaration key when it names one (every
 // instance of a generic declaration shares it).
@@ -482,7 +482,7 @@ fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
 // Method `method` of compiler value `owner`, which the evaluator answers:
 // jet_comptime_host_method(`{owner}.{method}`, impure, (row, word)...) over
 // the receiver and the arguments, `impure` inside an `#Impure` block.
-fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: TExpr, args: [TExpr], span: Span) -> Int Never! {
+fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: Int, args: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     string_row :: ir_string_row(&m)
     member :: ir_temp(&m, &b, string_row)
@@ -500,11 +500,12 @@ fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: St
 }
 
 // Appends operand `operand`'s type row and word to a host method's operands.
-fn ir_host_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: TExpr, operands: &[Int], words: &[Int]) -> Bool Never! {
+fn ir_host_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: Int, operands: &[Int], words: &[Int]) -> Bool Never! {
     word :: ir_expr(&m, p, &b, operand)
     if ir_failed(b) -> return false
     if word < 0 {
-        ir_fail(&b, operand.span, "Unit operand of a compiler host method")
+        operand_span :: ir_body_node(p, b, operand).span
+        ir_fail(&b, operand_span, "Unit operand of a compiler host method")
         return false
     }
     word_row :: b.f.slot_type[word]
@@ -1873,7 +1874,7 @@ fn ir_order_decide(m: &IRModule, b: &IRBuilder, below: Int, sign: Int, decided: 
 // runs only while every earlier one held, and each operand is evaluated
 // once. The right operand an open test keeps for the next comparison is
 // dropped on the arm that leaves the chain early.
-fn ir_compare_chain(m: &IRModule, p: IRProgram, b: &IRBuilder, operands: [TExpr], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
+fn ir_compare_chain(m: &IRModule, p: IRProgram, b: &IRBuilder, operands: [Int], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
     if operators.len() == 0 || operands.len() != operators.len() + 1 -> return ir_fail_slot(&b, span, "comparison chain shape")
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     result :: ir_temp(&m, &b, bool_row)
@@ -2106,7 +2107,7 @@ fn ir_union_key(ty: Type) -> String Never! {
 // Adds the structural enum of each union type a signature or a declaration
 // names (codegen jet_codegen_synthetic_union_definition): one variant per
 // member, named by its union member tag and carrying the member.
-fn ir_add_union_types(types: &[TTypeDef], functions: [TFunc]) Never! {
+fn ir_add_union_types(types: &[TTypeDef], functions: [FnBody]) Never! {
     if types.len() == 0 -> return
     found := [Type]{}
     loop function in functions {
@@ -2167,7 +2168,7 @@ fn ir_collect_unions(ty: Type, found: &[Type]) Never! {
 
 // The call argument `value` widened to the union `union_ty` (sema
 // widen_to_union).
-fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, union_ty: Type, span: Span) -> Int Never! {
+fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, union_ty: Type, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     subst_ty :: ir_subst(m, value_ty)
     member_row :: ir_value_type(&m, p, subst_ty) ?? return ir_type_fail(&b, span, value_ty)
@@ -2793,7 +2794,7 @@ fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> 
 // Numeric methods (codegen jet_codegen_lower_numeric_method; Lower
 // Convert.jet lower_convert_numeric / lower_convert_prelude).
 
-fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, span: Span) -> Int Never! {
+fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TNumericOp, span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if operation == .CheckedIntToFixed(_, _) {
@@ -2802,7 +2803,7 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         // U64 above I64 range is its bit pattern. This is also what keeps
         // the runtime's own kernels (jet_int_checked_fixed), written with
         // sized literals, from calling themselves.
-        if ir_int_literal(receiver) == .Val(value) {
+        if ir_int_literal(p, b, receiver) == .Val(value) {
             if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, ir_wide_word(value))
         }
     }
@@ -3073,8 +3074,8 @@ fn ir_checked_widen(m: &IRModule, b: &IRBuilder, value: Int, target: Int, line: 
 
 // The value of an integer literal expression: `5`, a literal sema folded
 // (CtLit; one beyond I64 range keeps its decimal), and negations of those.
-fn ir_int_literal(expression: TExpr) -> Int? Never! {
-    if expression.kind == {
+fn ir_int_literal(p: IRProgram, b: IRBuilder, expression: Int) -> Int? Never! {
+    if ir_body_node(p, b, expression).kind == {
         .IntLit(value, _) -> return Val(value)
         .CtLit(constant) -> {
             if constant == .Int(number) -> return Val(number)
@@ -3085,7 +3086,7 @@ fn ir_int_literal(expression: TExpr) -> Int? Never! {
         }
         .Unary(op, operand) -> {
             if op == .Neg {
-                number :: ir_int_literal(operand) ?? return None
+                number :: ir_int_literal(p, b, operand) ?? return None
                 return Val(0 - number)
             }
         }

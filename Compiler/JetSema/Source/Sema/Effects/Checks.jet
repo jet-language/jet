@@ -22,22 +22,9 @@ use jet_foundation.[
     Span,
     Stmt,
     SymbolKind,
-    TCallArg,
-    TContract,
-    TCoreClosureKind,
     TEffectFacts,
     TEffectSpan,
-    TExpr,
     TFailureCarrier,
-    TFunc,
-    THostCall,
-    TIfCond,
-    TLambda,
-    TMatchArm,
-    TPatternShape,
-    TPlace,
-    TRequireKind,
-    TStmt,
     Type,
     compiler_take_rows,
     compiler_threads_admit,
@@ -2168,7 +2155,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     source_indices :: loop module_index in 0..<inputs.len() -> sema_effect_source_index(inputs[module_index].sources)
     node_by_key := [String:Int]{}
     loop module_index in 0..<inputs.len() {
-        sema_effect_add_module_nodes(modules[inputs[module_index].module_index].functions, inputs[module_index], module_index, source_indices[module_index], &nodes, &node_by_key, &diagnostics)
+        sema_effect_add_module_nodes(modules[inputs[module_index].module_index].checked, inputs[module_index], module_index, source_indices[module_index], &nodes, &node_by_key, &diagnostics)
     }
     // Rust `seed_trait_dispatch_effects` (one module's items at a time):
     // implementing types by `{module}|{trait}`, and each
@@ -2199,7 +2186,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             implementer_seen[seen_key] = true
             &implementer_lists[group_row].push(pair.after)
         }
-        sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, module_identity, source_indices[module_index], &trait_impls)
+        sema_effect_add_trait_impls(modules[module_row.module_index].checked, module_row, module_identity, source_indices[module_index], &trait_impls)
     }
     trait_implementers := [String:[String]]{}
     loop (group_row, trait_key) in implementer_keys -> trait_implementers[trait_key] = implementer_lists[group_row]
@@ -2275,7 +2262,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
-        sema_effect_check_trait_bounds(module_row, modules[module_row.module_index].functions, source_indices[module_index], nodes, calls.node_by_key, solved, &bound_diagnostics)
+        sema_effect_check_trait_bounds(module_row, modules[module_row.module_index].checked, source_indices[module_index], nodes, calls.node_by_key, solved, &bound_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^bound_diagnostics)
     }
     loop node_index in 0..<nodes.len() {
@@ -2297,7 +2284,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         }
     }
     loop module_index in 0..<inputs.len() {
-        sema_effect_check_module_regions(modules[inputs[module_index].module_index].functions, inputs[module_index], module_index, source_indices[module_index], solved, calls, &nodes, &diagnostics)
+        sema_effect_check_module_regions(modules[inputs[module_index].module_index].checked, inputs[module_index], module_index, source_indices[module_index], solved, calls, &nodes, &diagnostics)
     }
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, solved, &diagnostics)
@@ -2305,9 +2292,9 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     // All source reads are finished: stamp the solved rows in place.
     loop module_row in inputs {
         target :: module_row.module_index
-        loop function_index in 0..<modules[target].functions.len() {
-            node_index :: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
-            modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
+        loop function_index in 0..<modules[target].checked.len() {
+            node_index :: sema_effect_node_index(calls.node_by_key, modules[target].checked[function_index].key) ?? next
+            modules[target].checked[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
     }
     complete :: !sema_has_error_since(diagnostics, 0)
@@ -2393,7 +2380,7 @@ fn sema_effect_collect_threads(modules: &[SemaGraphModuleResult], inputs: [SemaE
     unit_of_node := [Int:Int]{}
     work := 0
     loop (input_position, module_row) in inputs {
-        loop (function_index, function) in modules[module_row.module_index].functions {
+        loop (function_index, function) in modules[module_row.module_index].checked {
             node_index :: sema_effect_node_index(index.node_by_key, function.key) ?? next
             job :: job_input.len()
             &job_input.push(input_position)
@@ -2418,7 +2405,7 @@ fn sema_effect_collect_threads(modules: &[SemaGraphModuleResult], inputs: [SemaE
     workers :: compiler_threads_admit(threads, unit_first.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, 0, unit_first.len() * SEMA_EFFECT_NODE_BYTES)
     if workers <= 1 {
         loop (input_position, module_row) in inputs {
-            sema_effect_collect_module(modules[module_row.module_index].functions, module_row, input_position, index, any_unsafe, &nodes, &diagnostics)
+            sema_effect_collect_module(modules[module_row.module_index].checked, module_row, input_position, index, any_unsafe, &nodes, &diagnostics)
         }
         return index
     }
@@ -2545,7 +2532,7 @@ fn sema_effect_collect_claimed(shared_state: Shared<SemaEffectCollectShared>, bo
                 function_diagnostics := [Diagnostic]{}
                 input_position :: inputs.value.job_input[job]
                 // Passed straight through: a local binding of a guarded row would copy it.
-                sema_effect_collect_one(&own, 0, inputs.value.modules[inputs.value.module_rows[input_position]].functions[inputs.value.job_function[job]], inputs.value.calls[0], input_position, inputs.value.any_unsafe, &function_diagnostics)
+                sema_effect_collect_one(&own, 0, inputs.value.modules[inputs.value.module_rows[input_position]].checked[inputs.value.job_function[job]], inputs.value.calls[0], input_position, inputs.value.any_unsafe, &function_diagnostics)
                 if function_diagnostics.len() > 0 -> &reports.push(SemaEffectCollectReport{job: job, diagnostics: ^function_diagnostics})
                 job = inputs.value.job_next[job]
             }

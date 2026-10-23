@@ -3,7 +3,7 @@
 // a dynamic call loads the key and calls the matching implementation, an
 // unknown key stops at jet_rt_unreachable.
 
-use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TMethodRef, TTryConvert, Type, sha256_bytes, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, TMethodRef, TTryConvert, Type, sha256_bytes, type_carrier_identity]
 
 // The payload key of concrete type `ty`: a function of its identity alone
 // (56 bits of the identity's SHA-256, from 1), so it does not depend on the
@@ -71,10 +71,11 @@ fn ir_trait_implementer(p: IRProgram, row: Int, owner: SymbolID) -> Type? Never!
 }
 
 // The list literal values boxed as trait values of `target`.
-fn ir_trait_boxes(b: &IRBuilder, values: [TExpr], target: Type) -> [TExpr] Never! {
-    boxed := [TExpr]{}
+fn ir_trait_boxes(p: IRProgram, b: &IRBuilder, values: [Int], target: Type) -> [Int] Never! {
+    boxed := [Int]{}
     loop value in values {
-        &boxed.push(ir_node(&b, target, TExprKind.TraitBox{value: value, target: target}, value.span))
+        value_span :: ir_body_node(p, b, value).span
+        &boxed.push(ir_node(&b, target, NodeKind.TraitBox{value: value, target: target}, value_span))
     }
     boxed
 }
@@ -83,7 +84,7 @@ fn ir_trait_boxes(b: &IRBuilder, values: [TExpr], target: Type) -> [TExpr] Never
 // a box of 8 + its payload size (at least a word) holding the concrete
 // type's key at 0 and the owned payload at 8. A value that already is a
 // trait value is kept.
-fn ir_trait_box(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, target: Type, span: Span) -> Int Never! {
+fn ir_trait_box(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target: Type, span: Span) -> Int Never! {
     bounds :: if ir_untag(target) == .TraitObject(names) -> names else -> { return ir_fail_slot(&b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait") }
     if bounds.len() != 1 -> return ir_fail_slot(&b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait")
     concrete :: ir_subst(m, ir_ty(p, b, value))
@@ -118,7 +119,7 @@ struct IRTraitTarget { key: String, concrete: Type, access: String }
 // receiver or an aggregate) or the payload value, moved out of the box for
 // a move receiver. No implementation, or an unknown key, stops at
 // jet_rt_unreachable; `ty` is the call's checked type.
-fn ir_trait_call(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg], ty: Type, span: Span) -> Int Never! {
+fn ir_trait_call(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
     if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic dynamic trait receivers are not object-safe")
     owner :: method.trait_owner ?? return ir_fail_slot(&b, span, "trait call has no trait owner")
     targets := [IRTraitTarget]{}

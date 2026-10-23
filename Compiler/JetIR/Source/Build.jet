@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, TCallArg, TConstantDef, TExpr, TExprKind, TExprType, TFailureCarrier, TFunc, TGenericParam, TImplDef, TLambda, TLocal, TTypeDef, tir_expr_type, type_carrier_identity]
+use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, tir_expr_type, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -85,11 +85,12 @@ struct IRBuilder {
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
     impure: Int{0}
-    // The checked function whose expression-type column (TFunc.expr_types)
-    // types the nodes this body reads (-1: glue with no checked body), and
-    // the nodes the builder made itself (ir_node) with the next id it hands out.
+    // The checked function whose body tree (FnBody.tree) holds the nodes and
+    // statements this body reads (-1: glue with no checked body), and the
+    // nodes and statements the builder made itself (ir_node, ir_stmt_node)
+    // with the next node id it hands out.
     row: Int{-1}
-    nodes: [TExprType]{[TExprType]{}}
+    made: BodyTree{BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}}
     next_node: Int{IR_FIRST_NODE_ID}
     // The closures this body created so far, by key base (ir_lambda).
     lambdas: [String:Int]
@@ -106,7 +107,7 @@ struct IRDeferredCall { at: Int, key: String, function: Int{-1}, args: [Type]{[T
 // built once per distinct list of concrete type arguments (monomorphized as
 // the old path's Mono pass does).
 struct IRProgram {
-    functions: [TFunc]
+    functions: [FnBody]
     rows: [String:Int]
     types: [TTypeDef]
     type_rows: [String:Int]
@@ -199,17 +200,17 @@ struct IRQueued { row: Int, id: Int, args: [Type], lambda: Int{-1} }
 
 // A lambda body to build as its own function: the box holds its captures
 // at their offsets; the instance substitution it was created under; the
-// checked function whose column types its nodes and the nodes the creating
-// builder made (IRBuilder `row`, `nodes`, `next_node`).
+// checked function whose tree holds its nodes and the nodes the creating
+// builder made (IRBuilder `row`, `made`, `next_node`).
 struct IRLambdaJob {
-    lambda: TLambda
+    lambda: BodyLambda
     captures: [IRCaptureSlot]
     source_file: String
     line: Int
     subst_names: [String]
     subst_types: [Type]
     row: Int
-    nodes: [TExprType]
+    made: BodyTree
     next_node: Int
 }
 
@@ -218,7 +219,7 @@ struct IRLambdaJob {
 // body writes) instead of its value.
 struct IRCaptureSlot { name: String, offset: Int, row: Int, by_ref: Bool }
 
-fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
+fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
     constants := [String:TConstantDef]{}
     loop definition in ^constant_defs {
         if constants.get(definition.key) == None -> constants[definition.key] = definition
@@ -329,7 +330,7 @@ fn ir_module_for(p: IRProgram) -> IRModule Never! {
 // checked as a TraitMethod when its trait resolves in the implementing
 // module, else as a plain Method of the owner, which `impl_slots` (by
 // "<module>|<owner key>|<method>") and `impl_traits` name the traits of.
-fn ir_trait_methods(functions: [TFunc], type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
+fn ir_trait_methods(functions: [FnBody], type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
     slots := [String:Int]{}
     keys := [String]{}
     rows := [[Int]]{}
@@ -414,7 +415,7 @@ fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) ->
 // The type parameters an instance of `function` binds, in order: those its
 // owner's pattern binds (a method of a generic type, `Pair<T>`), then its
 // own (codegen jet_codegen_checked_method_return_type).
-fn ir_generic_names(p: IRProgram, function: TFunc) -> [String] Never! {
+fn ir_generic_names(p: IRProgram, function: FnBody) -> [String] Never! {
     names := [String]{}
     loop binder in ir_owner_binders(p, function) -> &names.push(binder.name)
     loop parameter in function.generic_params -> &names.push(parameter.name)
@@ -429,7 +430,7 @@ struct IROwnerBinder { index: Int, name: String }
 // each argument of its owner pattern that is one of the declaration's
 // parameters the method does not shadow with its own (`impl Pair<Int>`
 // binds none). None for any other function.
-fn ir_owner_binders(p: IRProgram, function: TFunc) -> [IROwnerBinder] Never! {
+fn ir_owner_binders(p: IRProgram, function: FnBody) -> [IROwnerBinder] Never! {
     binders := [IROwnerBinder]{}
     owner :: if function.kind == {
         .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> ir_untag(owner_type)
@@ -466,7 +467,7 @@ fn ir_declares(params: [TGenericParam], name: String) -> Bool Never! {
 // The owner arguments an instance of `function` binds for its owner type
 // `owner` (`[Int]` for `Pair<T>` at `Pair<Int>`): None when `owner` does
 // not spell them.
-fn ir_owner_args(p: IRProgram, function: TFunc, owner: Type) -> [Type]? Never! {
+fn ir_owner_args(p: IRProgram, function: FnBody, owner: Type) -> [Type]? Never! {
     args := [Type]{}
     binders :: ir_owner_binders(p, function)
     if binders.len() == 0 -> return Val(args)
@@ -482,7 +483,7 @@ fn ir_owner_args(p: IRProgram, function: TFunc, owner: Type) -> [Type]? Never! {
 // written without them (`Box.new(7)`): what the call's type `ty` and its
 // arguments' types give the owner parameters in the method's signature.
 // None when they leave one unbound.
-fn ir_infer_owner_args(p: IRProgram, b: IRBuilder, function: TFunc, ty: Type, args: [TCallArg]) -> [Type]? Never! {
+fn ir_infer_owner_args(p: IRProgram, b: IRBuilder, function: FnBody, ty: Type, args: [BodyCallArg]) -> [Type]? Never! {
     names := [String]{}
     bound := [Type?]{}
     loop binder in ir_owner_binders(p, function) {
@@ -589,7 +590,7 @@ fn ir_subst_list(names: [String], types: [Type], list: [Type]) -> [Type] Never! 
 }
 
 // The object symbol of a function: its module and name, made a C identifier.
-fn ir_symbol_name(function: TFunc) -> String Never! {
+fn ir_symbol_name(function: FnBody) -> String Never! {
     bytes := [U8]{}
     loop byte in "{function.module_name}.{function.name}".bytes() {
         alphanumeric :: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
@@ -604,7 +605,7 @@ fn ir_symbol_name(function: TFunc) -> String Never! {
 // in module order; `sources` the checked source files' text by path (the
 // source locations of journeys and contract reports); `foreign` the checked
 // foreign functions.
-fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, threads: CompilerThreads) -> IRBuildResult Never! {
+fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
     row :: p.rows.get(entry_key) ?? {
@@ -618,7 +619,7 @@ fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplD
 // Builds the functions `root_keys` name and every function they reach, as
 // ir_build_program does, with no program entry: compile-time evaluation runs
 // each root itself.
-fn ir_build_roots(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], root_keys: [String], threads: CompilerThreads) -> IRBuildResult Never! {
+fn ir_build_roots(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], root_keys: [String], threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
     roots := [IRWaveJob]{}
@@ -704,7 +705,7 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
 // Builds every checked non-generic function (a library or a coverage
 // census) on up to `threads` threads; generic functions are built per
 // instance their callers reach.
-fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
+fn ir_build_all(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
     roots := [IRWaveJob]{}
@@ -737,7 +738,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
         m.subst_names = job.subst_names
         m.subst_types = job.subst_types
         b.row = job.row
-        b.nodes = job.nodes
+        b.made = job.made
         b.next_node = job.next_node
         ir_build_lambda(&m, p, &b, job)
         if b.error != "" {
@@ -768,26 +769,58 @@ fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
 // function-local ids the checker and tir_function_seal hand out.
 IR_FIRST_NODE_ID :: -1099511627776
 
+// The first index of the statements a builder makes itself (ir_stmt_node),
+// far above any checked body's statement count.
+IR_FIRST_STMT_INDEX :: 1099511627776
+
+// Node `id`: a row of the builder's checked function tree, or a node the
+// builder made (ir_node).
+fn ir_body_node(p: IRProgram, b: IRBuilder, id: Int) -> BodyNode Never! {
+    if id <= IR_FIRST_NODE_ID {
+        loop node in b.made.nodes {
+            if node.id == id -> return node.copy()
+        }
+        panic("{b.f.name}: builder node {id} was never made")
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    body_node(p.functions[b.row].tree, id)
+}
+
+// Statement `index`: a statement of the builder's checked function tree, or
+// one the builder made (ir_stmt_node).
+fn ir_body_stmt(p: IRProgram, b: IRBuilder, index: Int) -> StmtKind Never! {
+    if index >= IR_FIRST_STMT_INDEX -> return b.made.stmts[index - IR_FIRST_STMT_INDEX].copy()
+    if b.row < 0 -> panic("{b.f.name}: statement {index} read without a checked body")
+    body_stmt(p.functions[b.row].tree, index)
+}
+
 // The checked type of `value`: its row in the expression-type column of the
 // builder's checked function, or of the nodes the builder made (ir_node).
-fn ir_ty(p: IRProgram, b: IRBuilder, value: TExpr) -> Type Never! {
-    if value.id <= IR_FIRST_NODE_ID {
-        loop row in b.nodes {
-            if row.id == value.id -> return row.ty.copy()
+fn ir_ty(p: IRProgram, b: IRBuilder, value: Int) -> Type Never! {
+    if value <= IR_FIRST_NODE_ID {
+        loop row in b.made.expr_types {
+            if row.id == value -> return row.ty.copy()
         }
     } else if b.row >= 0 {
-        if tir_expr_type(p.functions[b.row].expr_types, value.id) == .Val(ty) -> return ty
+        if tir_expr_type(p.functions[b.row].tree.expr_types, value) == .Val(ty) -> return ty
     }
-    panic("{b.f.name}: node {value.id} at {value.span.start} has no expression-type row")
+    panic("{b.f.name}: node {value} has no expression-type row")
 }
 
 // A node the builder makes itself (a desugared step), typed `ty` under the
 // next builder id.
-fn ir_node(b: &IRBuilder, ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
+fn ir_node(b: &IRBuilder, ty: Type, kind: NodeKind, span: Span) -> Int Never! {
     id :: b.next_node
     b.next_node -= 1
-    &b.nodes.push(TExprType{id: id, ty: ty.copy()})
-    TExpr{ty: ty, kind: kind, span: span, id: id}
+    &b.made.expr_types.push(TExprType{id: id, ty: ty})
+    &b.made.nodes.push(BodyNode{id: id, kind: kind, span: span})
+    id
+}
+
+// A statement the builder makes itself (a desugared step).
+fn ir_stmt_node(b: &IRBuilder, statement: StmtKind) -> Int Never! {
+    &b.made.stmts.push(statement)
+    IR_FIRST_STMT_INDEX + b.made.stmts.len() - 1
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
@@ -841,9 +874,9 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 
 // Marks the pending payload bindings from `from` on, those of a test on
 // `subject`, as write windows when the subject is one (`&place`).
-fn ir_pending_windows(b: &IRBuilder, subject: TExpr, from: Int) Never! {
+fn ir_pending_windows(p: IRProgram, b: &IRBuilder, subject: Int, from: Int) Never! {
     write := false
-    if subject.kind == .Borrow(_, access) -> write = access == .Write
+    if ir_body_node(p, b, subject).kind == .Borrow(_, access) -> write = access == .Write
     if !write -> return
     loop index in from..<b.pending.len() {
         row :: b.pending[index]
@@ -1483,9 +1516,9 @@ fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: B
 // is boxed into `Ok` where its carrier is wanted, and a Result box is
 // unwrapped where its plain success is (codegen
 // jet_codegen_reconcile_plain_call_return, jet_codegen_lower_return_value).
-fn ir_value_as(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr, row: Int, span: Span) -> Int Never! {
+fn ir_value_as(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, row: Int, span: Span) -> Int Never! {
     if !ir_is_result(m.types[row].ty) {
-        if expression.kind == .Ok(inner) -> return ir_value_as(&m, p, &b, inner, row, span)
+        if ir_body_node(p, b, expression).kind == .Ok(inner) -> return ir_value_as(&m, p, &b, inner, row, span)
     }
     slot :: ir_expr(&m, p, &b, expression)
     if ir_failed(b) || slot < 0 -> return slot
@@ -1647,7 +1680,7 @@ fn ir_native_index(m: &IRModule, b: &IRBuilder, position: Int, span: Span) -> In
 
 // The address of element `index` of the list at `list`, after the bounds
 // check (jet_rt_panic_list_bounds(length, index)).
-fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, index: TExpr, row: Int, span: Span) -> Int Never! {
+fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, index: Int, row: Int, span: Span) -> Int Never! {
     position :: ir_expr(&m, p, &b, index)
     if ir_failed(b) || position < 0 -> return -1
     native :: ir_native_index(&m, &b, position, span)

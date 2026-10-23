@@ -73,6 +73,7 @@ use jet_sema.[
     sema_marker_is_guest_export,
     sema_source_location_at,
     SemaCompilerModuleSource,
+    sema_graph_release_checked,
 ]
 use jet_foundation.[
     CompilerThreads,
@@ -92,14 +93,16 @@ use jet_foundation.[
     TComptimeField,
     TComptimeReport,
     TComptimeValue,
-    TEnumPayload,
-    TExpr,
-    TIfCond,
-    TExprKind,
-    TStmt,
+    BodyEnumPayload,
+    BodyIfCond,
+    BodyNode,
+    BodyTree,
+    NodeKind,
+    StmtKind,
+    TExprType,
     TUnaryOp,
     Type,
-    TFunc,
+    FnBody,
     TFunctionRef,
     TOutputCheckFact,
     TTestFact,
@@ -118,15 +121,16 @@ use jet_foundation.[
     jet_target_package_version_from_compiler_identity,
     source_file_id,
     symbol_id,
-    tir_each_expr_child,
-    tir_each_stmt_child,
-    tir_function_seal,
+    body_each_expr_child,
+    body_each_stmt_child,
+    body_node,
     TEXPR_FIRST_LOCAL_ID,
     TTypeDef,
     TImplDef,
     TConstantDef,
     StructureFact,
     TLocal,
+    body_type,
 ]
 use jet_parser.[
     parse_source,
@@ -430,7 +434,7 @@ fn jet_driver_entry_selection(load: JetDriverLoadResult) -> JetDriverPackageEntr
 // manifest `entry:` binding, else of the entry module's `fn run` when it
 // takes no parameter or one `#CLI` record. None when the program has no
 // executable entry (a diagnostic says why when a binding fails).
-fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaGraphResult, functions: [TFunc], modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> String? {
+fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaGraphResult, functions: [FnBody], modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> String? {
     counts := [String:Int]{}
     loop function in functions -> counts[function.key] = (counts.get(function.key) ?? 0) + 1
     loop source_module in semantic_graph.modules {
@@ -493,7 +497,7 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
 
 // jet_driver_default_run_entry over the checked functions: the entry
 // module's `fn run`, when it takes no parameter.
-fn jet_driver_default_run_key(load: JetDriverLoadResult, functions: [TFunc]) -> String? Never! {
+fn jet_driver_default_run_key(load: JetDriverLoadResult, functions: [FnBody]) -> String? Never! {
     key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "run").key
     loop function in functions {
         if function.key != key -> next
@@ -652,7 +656,7 @@ struct JetDriverComptimeFunctionRef {
 }
 
 struct JetDriverComptimeFunctionClosure {
-    functions: [TFunc]
+    functions: [FnBody]
     waiting_dependencies: [String]
     complete: Bool
     // Each incomplete reachable function's recorded causes, keyed by function.
@@ -686,16 +690,16 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 // for it, so the closure queues each helper `roots` and `body` lower to (as
 // Rust `is_core_precise_source_target` roots it): it is checked and lowered
 // with the item, together with its own callees.
-fn jet_driver_comptime_precise_refs(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, roots: [TExpr], body: [TStmt], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
+fn jet_driver_comptime_precise_refs(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
     // Function values the body stores are lowered with it, like its callees.
-    values :: ir_function_value_keys(roots, body)
+    values :: ir_function_value_keys(tree, roots, body)
     if values.len() > 0 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
         loop key in values {
             if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(&queue, &queued, owner, key)
         }
     }
-    names :: ir_precise_helper_names(roots, body)
+    names :: ir_precise_helper_names(tree, roots, body)
     if names.len() == 0 -> return
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
     loop module_row in graph.modules {
@@ -730,7 +734,7 @@ fn jet_driver_comptime_function_closure(
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeFunctionClosure {
     graph_option :: program.registration_graph
-    graph :: graph_option ?? return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false, incomplete_reasons: [String]{"the staged comptime environment lost its registration graph"}}
+    graph :: graph_option ?? return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false, incomplete_reasons: [String]{"the staged comptime environment lost its registration graph"}}
     // Each function enters the queue once, so the queue is also the set of
     // functions processed.
     queue := [JetDriverComptimeFunctionRef]{}
@@ -741,13 +745,13 @@ fn jet_driver_comptime_function_closure(
         module_identity := jet_driver_comptime_function_owner(index, function_key)
         if module_identity == None {
             &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
-            return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false}
+            return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false}
         }
-        owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false}
+        owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false}
         jet_driver_comptime_function_ref_add(&queue, &queued, owner_identity, function_key)
     }
-    jet_driver_comptime_precise_refs(graph, &index, [TExpr]{request.expression}, [TStmt]{}, &queue, &queued)
-    functions := [TFunc]{}
+    jet_driver_comptime_precise_refs(graph, &index, request.expression.tree, [Int]{request.expression.root}, [Int]{}, &queue, &queued)
+    functions := [FnBody]{}
     waiting := [String]{}
     complete := true
     incomplete_reasons := [String]{}
@@ -772,15 +776,15 @@ fn jet_driver_comptime_function_closure(
             }
             else -> {
                 function :: checked.function ?? {
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no TIR body", "the interpreter fragment is lowered only from a complete typed function", "return the checked TFunc from the canonical on-demand Sema result"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no published body", "the interpreter fragment is lowered only from a complete typed function", "publish the checked body from the canonical on-demand Sema result"))
                     complete = false
                     next
                 }
-                defaults := [TExpr]{}
+                defaults := [Int]{}
                 loop parameter in function.params {
                     if parameter.default == Val(value) -> &defaults.push(value)
                 }
-                jet_driver_comptime_precise_refs(graph, &index, defaults, function.body, &queue, &queued)
+                jet_driver_comptime_precise_refs(graph, &index, function.tree, defaults, function.body, &queue, &queued)
                 &functions.push(function)
                 if index.checked_rows.get(checked_key) == None {
                     index.checked_rows[checked_key] = checked_functions.len()
@@ -836,7 +840,7 @@ struct JetDriverComptimeBatch {
     // The union of the entries' checked closures, each function once, in
     // the order the entries first name them; `function_rows` maps each
     // function's `module\nkey` to its position.
-    functions: [TFunc]
+    functions: [FnBody]
     function_rows: [String:Int]
     // The source key of every entry: an item check that waits on one of
     // them reads a value the batch still holds back.
@@ -935,8 +939,8 @@ fn jet_driver_trace_step_end(trace_sink: CompilerTraceSink?, name: String, items
 // Moves the rows of `functions` flagged in `mask` onto `kept` and the others
 // onto `rest`, both in order, leaving `functions` empty. Each pop moves one
 // row, so no row is ever copied.
-fn jet_driver_partition_checked_functions(functions: &[TFunc], mask: [Bool], kept: &[TFunc], rest: &[TFunc]) Never! {
-    reversed := [TFunc]{}
+fn jet_driver_partition_checked_functions(functions: &[FnBody], mask: [Bool], kept: &[FnBody], rest: &[FnBody]) Never! {
+    reversed := [FnBody]{}
     loop functions.len() > 0 {
         function := &functions.pop() ?? { break }
         &reversed.push(^function)
@@ -1095,13 +1099,13 @@ fn jet_driver_comptime_batchable(source: SemaComptimeItemSource) -> Bool Never! 
 }
 
 fn jet_driver_comptime_batch_new() -> JetDriverComptimeBatch Never! {
-    JetDriverComptimeBatch{entries: [JetDriverComptimeEntry]{}, functions: [TFunc]{}, function_rows: [String:Int]{}, keys: [String:Bool]{}, bare: true}
+    JetDriverComptimeBatch{entries: [JetDriverComptimeEntry]{}, functions: [FnBody]{}, function_rows: [String:Int]{}, keys: [String:Bool]{}, bare: true}
 }
 
 // Appends an item to `batch`, moving the functions of its checked closure
 // that the batch does not hold yet out of `functions` (left empty).
-fn jet_driver_comptime_batch_add(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[TFunc], plain: TComptimeValue?) Never! {
-    reversed := [TFunc]{}
+fn jet_driver_comptime_batch_add(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], plain: TComptimeValue?) Never! {
+    reversed := [FnBody]{}
     loop functions.len() > 0 {
         function := &functions.pop() ?? { break }
         &reversed.push(^function)
@@ -1224,7 +1228,7 @@ fn jet_driver_comptime_flush(
     start := 0
     loop start < batch.entries.len() {
         plain :: batch.entries[start].plain ?? { break }
-        &values.push(jet_driver_comptime_item_value(batch.entries[start].source, plain, batch.entries[start].request.expression.ty))
+        &values.push(jet_driver_comptime_item_value(batch.entries[start].source, plain, body_type(batch.entries[start].request.expression.tree, batch.entries[start].request.expression.root)))
         flushed.progressed = true
         start += 1
     }
@@ -1271,7 +1275,7 @@ fn jet_driver_comptime_flush(
     loop index in start..<batch.entries.len() {
         entry :: batch.entries[index]
         if entry.plain == .Val(plain) {
-            &values.push(jet_driver_comptime_item_value(entry.source, plain, entry.request.expression.ty))
+            &values.push(jet_driver_comptime_item_value(entry.source, plain, body_type(entry.request.expression.tree, entry.request.expression.root)))
             flushed.progressed = true
             next
         }
@@ -1332,7 +1336,7 @@ fn jet_driver_comptime_flush(
             flushed.progressed = true
             next
         }
-        &values.push(jet_driver_comptime_item_value(source, value, comptime_request.expression.ty))
+        &values.push(jet_driver_comptime_item_value(source, value, body_type(comptime_request.expression.tree, comptime_request.expression.root)))
         flushed.progressed = true
     }
     flushed
@@ -1651,11 +1655,11 @@ fn jet_driver_comptime_run(
                     if jet_driver_comptime_read_input(request, source.source_file, comptime_request.expression) == {
                         .Ok(value) -> {
                             if batch.entries.len() > 0 {
-                                no_functions := [TFunc]{}
+                                no_functions := [FnBody]{}
                                 jet_driver_comptime_batch_add(&batch, source, comptime_request, &no_functions, Val(value))
                                 next
                             }
-                            &values.push(jet_driver_comptime_item_value(source, value, comptime_request.expression.ty))
+                            &values.push(jet_driver_comptime_item_value(source, value, body_type(comptime_request.expression.tree, comptime_request.expression.root)))
                             made_progress = true
                             next
                         }
@@ -1668,14 +1672,14 @@ fn jet_driver_comptime_run(
                     }
                 }
                 if source.kind != SemaComptimeItemKind.CheckedText && comptime_request.calls.len() == 0 {
-                    if jet_driver_comptime_fold(comptime_request.expression, values) == .Val(plain) {
+                    if jet_driver_comptime_fold(comptime_request.expression.tree, comptime_request.expression.root, values) == .Val(plain) {
                         // Behind a batch, the literal's value lands in its turn.
                         if batch.entries.len() > 0 {
-                            no_functions := [TFunc]{}
+                            no_functions := [FnBody]{}
                             jet_driver_comptime_batch_add(&batch, source, comptime_request, &no_functions, Val(plain))
                             next
                         }
-                        &values.push(jet_driver_comptime_item_value(source, plain, comptime_request.expression.ty))
+                        &values.push(jet_driver_comptime_item_value(source, plain, body_type(comptime_request.expression.tree, comptime_request.expression.root)))
                         made_progress = true
                         next
                     }
@@ -1841,10 +1845,10 @@ fn jet_driver_comptime_reach_local(reach: &JetDriverComptimeReach, local: TLocal
     if local.deref || local.address_lifetime != None || local.persist_key != None || local.string_bytes_source != None || local.uninit_scalar || local.uninit_fixed -> reach.everything = true
 }
 
-fn jet_driver_comptime_reach_expr(reach: &JetDriverComptimeReach, expression: TExpr) Never! {
+fn jet_driver_comptime_reach_expr(reach: &JetDriverComptimeReach, tree: BodyTree, expression: Int) Never! {
     if reach.everything -> return
-    jet_driver_comptime_reach_type(&reach, expression.ty)
-    if expression.kind == {
+    jet_driver_comptime_reach_type(&reach, body_type(tree, expression))
+    if body_node(tree, expression).kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) -> {}
         .StrLit(parts) -> {
             loop part in parts {
@@ -1854,34 +1858,34 @@ fn jet_driver_comptime_reach_expr(reach: &JetDriverComptimeReach, expression: TE
                             .Display -> {}
                             else -> reach.everything = true
                         }
-                        jet_driver_comptime_reach_expr(&reach, value)
+                        jet_driver_comptime_reach_expr(&reach, tree, value)
                     }
                     else -> {}
                 }
             }
         }
         .Local(local) -> jet_driver_comptime_reach_local(&reach, local)
-        .Unary(_, operand) -> jet_driver_comptime_reach_expr(&reach, operand)
+        .Unary(_, operand) -> jet_driver_comptime_reach_expr(&reach, tree, operand)
         .Binary(_, _, _, lhs, rhs) -> {
-            jet_driver_comptime_reach_expr(&reach, lhs)
-            jet_driver_comptime_reach_expr(&reach, rhs)
+            jet_driver_comptime_reach_expr(&reach, tree, lhs)
+            jet_driver_comptime_reach_expr(&reach, tree, rhs)
         }
         .CompareChain(operands, _, hooks) -> {
             loop hook in hooks {
                 if hook -> reach.everything = true
             }
-            loop operand in operands -> jet_driver_comptime_reach_expr(&reach, operand)
+            loop operand in operands -> jet_driver_comptime_reach_expr(&reach, tree, operand)
         }
         .InlineBlock(body) -> {
-            loop statement in body -> jet_driver_comptime_reach_stmt(&reach, statement)
+            loop statement in body -> jet_driver_comptime_reach_stmt(&reach, tree, statement)
         }
         else -> reach.everything = true
     }
 }
 
-fn jet_driver_comptime_reach_stmt(reach: &JetDriverComptimeReach, statement: TStmt) Never! {
+fn jet_driver_comptime_reach_stmt(reach: &JetDriverComptimeReach, tree: BodyTree, statement: Int) Never! {
     if reach.everything -> return
-    if statement == {
+    if tree.stmts[statement] == {
         .Let(local, let_ty, init, gc_promotion, gc_transferred, _) -> {
             if let_ty == {
                 .Inferred -> {}
@@ -1889,9 +1893,9 @@ fn jet_driver_comptime_reach_stmt(reach: &JetDriverComptimeReach, statement: TSt
             }
             if gc_promotion != None || gc_transferred -> reach.everything = true
             jet_driver_comptime_reach_local(&reach, local)
-            jet_driver_comptime_reach_expr(&reach, init)
+            jet_driver_comptime_reach_expr(&reach, tree, init)
         }
-        .ExprStmt(value, _) -> jet_driver_comptime_reach_expr(&reach, value)
+        .ExprStmt(value, _) -> jet_driver_comptime_reach_expr(&reach, tree, value)
         else -> reach.everything = true
     }
 }
@@ -1903,7 +1907,7 @@ fn jet_driver_comptime_entry_bare(request: SemaComptimeItemRequest, function_key
     if request.dependencies.len() > 0 || function_keys.len() > 0 -> return false
     reach := JetDriverComptimeReach{everything: false, functions: [String]{}}
     if request.expected_type == .Val(expected) -> jet_driver_comptime_reach_type(&reach, expected)
-    jet_driver_comptime_reach_expr(&reach, request.expression)
+    jet_driver_comptime_reach_expr(&reach, request.expression.tree, request.expression.root)
     !reach.everything && reach.functions.len() == 0
 }
 
@@ -1929,16 +1933,17 @@ fn jet_driver_comptime_entry_bare(request: SemaComptimeItemRequest, function_key
 // type, a selected arm that stops (`panic`), a division or power, a call,
 // and any other shape is not folded: it is evaluated, and the evaluator
 // reports it.
-fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
-    if expression.kind == {
-        .IntLit(value, _) -> return jet_driver_comptime_fold_int(value, expression.ty)
+fn jet_driver_comptime_fold(tree: BodyTree, expression: Int, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    expression_ty :: body_type(tree, expression)
+    if body_node(tree, expression).kind == {
+        .IntLit(value, _) -> return jet_driver_comptime_fold_int(value, expression_ty)
         .FloatLit(value) -> {
-            if expression.ty == Type.Float -> return Val(TComptimeValue.Float{value: value, bits: 64})
+            if expression_ty == Type.Float -> return Val(TComptimeValue.Float{value: value, bits: 64})
         }
         .BoolLit(value) -> return Val(TComptimeValue.Bool{value: value})
         .CharLit(value) -> return Val(TComptimeValue.Char{value: value})
         .StrLit(parts) -> {
-            if expression.ty != Type.String -> return None
+            if expression_ty != Type.String -> return None
             if parts.len() == 0 -> return Val(TComptimeValue.String{value: ""})
             if parts.len() == 1 {
                 if parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
@@ -1951,7 +1956,7 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
             if jet_driver_comptime_data(value) -> return Val(value)
         }
         .Field(receiver, field) -> {
-            folded :: jet_driver_comptime_fold(receiver, values) ?? return None
+            folded :: jet_driver_comptime_fold(tree, receiver, values) ?? return None
             if folded == .Struct(_, fields) {
                 loop member in fields {
                     if member.name == field.name -> return Val(member.value)
@@ -1960,53 +1965,53 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
             if then_body.len() != 0 || else_body.len() != 0 -> return None
-            selected :: jet_driver_comptime_fold_condition(cond, values) ?? return None
-            return jet_driver_comptime_fold(if selected -> then_value else -> else_value, values)
+            selected :: jet_driver_comptime_fold_condition(tree, cond, values) ?? return None
+            return jet_driver_comptime_fold(tree, if selected -> then_value else -> else_value, values)
         }
         .ConstRef(symbol) -> return jet_driver_comptime_landed(values, symbol.key)
         // Copying a constant's value is that value.
-        .Clone(value, _) | .ExplicitCopy(value) -> return jet_driver_comptime_fold(value, values)
+        .Clone(value, _) | .ExplicitCopy(value) -> return jet_driver_comptime_fold(tree, value, values)
         .StructLit(fields) -> {
-            type_name :: jet_driver_comptime_type_name(expression.ty) ?? return None
+            type_name :: jet_driver_comptime_type_name(expression_ty) ?? return None
             folded := [TComptimeField]{}
-            loop field in fields -> &folded.push(TComptimeField{name: field.field.name, value: jet_driver_comptime_fold(field.value, values) ?? return None})
+            loop field in fields -> &folded.push(TComptimeField{name: field.field.name, value: jet_driver_comptime_fold(tree, field.value, values) ?? return None})
             return Val(TComptimeValue.Struct{type_name: type_name, fields: folded})
         }
         .EnumCtor(_, variant, payload) -> {
-            type_name :: jet_driver_comptime_type_name(expression.ty) ?? return None
+            type_name :: jet_driver_comptime_type_name(expression_ty) ?? return None
             parts :: variant.key.split(":").to_list()
-            return jet_driver_comptime_fold_enum(type_name, parts[parts.len() - 1], payload, values)
+            return jet_driver_comptime_fold_enum(tree, type_name, parts[parts.len() - 1], payload, values)
         }
-        .EnumLit(enum_type, variant, payload) -> return jet_driver_comptime_fold_enum(jet_driver_comptime_leaf_name(enum_type), variant, payload, values)
+        .EnumLit(enum_type, variant, payload) -> return jet_driver_comptime_fold_enum(tree, jet_driver_comptime_leaf_name(enum_type), variant, payload, values)
         .Present(value) -> {
-            if expression.ty == .Option(_) -> return Val(TComptimeValue.Present{value: jet_driver_comptime_fold(value, values) ?? return None})
+            if expression_ty == .Option(_) -> return Val(TComptimeValue.Present{value: jet_driver_comptime_fold(tree, value, values) ?? return None})
         }
         .Absent -> {
             // copy: `inner` is a payload of read parameter `expression`, which keeps the original; field `ty` of the new TComptimeReport.Clean owns this one
-            if expression.ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}})
+            if expression_ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}})
         }
         // `x ?? fallback`: a present value is itself, an absent one takes a
         // folded value fallback. `String.from_bytes([U8]{…})` is the
         // generators' spelling of a string holding a control character (no
         // escape spells NUL): present when the folded bytes are UTF-8.
         .OrFallback(value, fallback, _) -> {
-            subject :: jet_driver_comptime_fold(value, values) ?? jet_driver_comptime_fold_from_bytes(value, values) ?? return None
+            subject :: jet_driver_comptime_fold(tree, value, values) ?? jet_driver_comptime_fold_from_bytes(tree, value, values) ?? return None
             if subject == .Present(inner) -> return Val(inner)
             if subject == .Failed(_) {
-                if fallback == .Value(otherwise) -> return jet_driver_comptime_fold(otherwise, values)
+                if fallback == .Value(otherwise) -> return jet_driver_comptime_fold(tree, otherwise, values)
             }
         }
         .Unary(op, operand) -> {
-            folded :: jet_driver_comptime_fold(operand, values) ?? return None
+            folded :: jet_driver_comptime_fold(tree, operand, values) ?? return None
             if op == TUnaryOp.Neg {
-                if folded == .Int(number) -> return jet_driver_comptime_fold_int(0 - number, expression.ty)
+                if folded == .Int(number) -> return jet_driver_comptime_fold_int(0 - number, expression_ty)
                 // `-170141…728` checks as the negation of a BigInt literal.
-                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(0 - (Int.parse(decimal) ?? return None), expression.ty)
+                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(0 - (Int.parse(decimal) ?? return None), expression_ty)
                 if folded == .Float(number, bits) {
-                    if bits == 64 && expression.ty == Type.Float -> return Val(TComptimeValue.Float{value: number * -1.0, bits: 64})
+                    if bits == 64 && expression_ty == Type.Float -> return Val(TComptimeValue.Float{value: number * -1.0, bits: 64})
                 }
             }
-            if op == TUnaryOp.Not && expression.ty == Type.Bool {
+            if op == TUnaryOp.Not && expression_ty == Type.Bool {
                 if folded == .Bool(flag) -> return Val(TComptimeValue.Bool{value: !flag})
             }
         }
@@ -2014,25 +2019,25 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         // conversion of a literal, which traps exactly when n is outside.
         .NumericMethod(receiver, operation) -> {
             if operation == .CheckedIntToFixed(_, _) {
-                folded :: jet_driver_comptime_fold(receiver, values) ?? return None
-                if folded == .Int(number) -> return jet_driver_comptime_fold_int(number, expression.ty)
-                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(Int.parse(decimal) ?? return None, expression.ty)
+                folded :: jet_driver_comptime_fold(tree, receiver, values) ?? return None
+                if folded == .Int(number) -> return jet_driver_comptime_fold_int(number, expression_ty)
+                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(Int.parse(decimal) ?? return None, expression_ty)
             }
         }
         .Binary(op, _, _, lhs, rhs) -> {
-            left :: jet_driver_comptime_fold(lhs, values) ?? return None
-            right :: jet_driver_comptime_fold(rhs, values) ?? return None
-            return jet_driver_comptime_fold_binary(op, expression.ty, left, right)
+            left :: jet_driver_comptime_fold(tree, lhs, values) ?? return None
+            right :: jet_driver_comptime_fold(tree, rhs, values) ?? return None
+            return jet_driver_comptime_fold_binary(op, expression_ty, left, right)
         }
         .List(elements, coercion) -> {
-            if coercion == None -> return jet_driver_comptime_fold_list(elements, values)
+            if coercion == None -> return jet_driver_comptime_fold_list(tree, elements, values)
         }
-        .ListLit(elements) -> return jet_driver_comptime_fold_list(elements, values)
+        .ListLit(elements) -> return jet_driver_comptime_fold_list(tree, elements, values)
         // An unsuffixed decimal literal checks as `Decimal.from_str("…")`
         // (sema_expr_decimal_literal); its value is the Core Decimal record.
         .PreciseBuiltin(type_name, function, args) -> {
             if type_name == "Decimal" && function == "from_str" && args.len() == 1 {
-                folded :: jet_driver_comptime_fold(args[0], values) ?? return None
+                folded :: jet_driver_comptime_fold(tree, args[0], values) ?? return None
                 if folded == .String(text) -> return jet_driver_comptime_decimal(text)
             }
         }
@@ -2129,16 +2134,16 @@ fn jet_driver_comptime_data(value: TComptimeValue) -> Bool Never! {
 }
 
 // A value `if` condition: a folded Bool, or both halves of `&&`-joined ones.
-fn jet_driver_comptime_fold_condition(cond: TIfCond, values: [SemaComptimeItemValue]) -> Bool? Never! {
+fn jet_driver_comptime_fold_condition(tree: BodyTree, cond: BodyIfCond, values: [SemaComptimeItemValue]) -> Bool? Never! {
     if cond == {
         .Plain(value) -> {
-            folded :: jet_driver_comptime_fold(value, values) ?? return None
+            folded :: jet_driver_comptime_fold(tree, value, values) ?? return None
             if folded == .Bool(flag) -> return Val(flag)
             None
         }
         .And(left, right) -> {
-            if !(jet_driver_comptime_fold_condition(left, values) ?? return None) -> return Val(false)
-            jet_driver_comptime_fold_condition(right, values)
+            if !(jet_driver_comptime_fold_condition(tree, left, values) ?? return None) -> return Val(false)
+            jet_driver_comptime_fold_condition(tree, right, values)
         }
         else -> None
     }
@@ -2146,10 +2151,10 @@ fn jet_driver_comptime_fold_condition(cond: TIfCond, values: [SemaComptimeItemVa
 
 // `String.from_bytes(<folded [U8]>)` as its Result: the decoded text, or a
 // clean failure when the bytes are not UTF-8.
-fn jet_driver_comptime_fold_from_bytes(value: TExpr, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
-    if value.kind == .BuiltinMethod(receiver, operation, args) {
+fn jet_driver_comptime_fold_from_bytes(tree: BodyTree, value: Int, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    if body_node(tree, value).kind == .BuiltinMethod(receiver, operation, args) {
         if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
-        folded :: jet_driver_comptime_fold(receiver, values) ?? return None
+        folded :: jet_driver_comptime_fold(tree, receiver, values) ?? return None
         bytes := [U8]{}
         if folded == {
             // A checked `[U8]{"…"}` byte value folds to its bytes.
@@ -2167,18 +2172,18 @@ fn jet_driver_comptime_fold_from_bytes(value: TExpr, values: [SemaComptimeItemVa
     None
 }
 
-fn jet_driver_comptime_fold_list(elements: [TExpr], values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+fn jet_driver_comptime_fold_list(tree: BodyTree, elements: [Int], values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
     folded := [TComptimeValue]{}
-    loop element in elements -> &folded.push(jet_driver_comptime_fold(element, values) ?? return None)
+    loop element in elements -> &folded.push(jet_driver_comptime_fold(tree, element, values) ?? return None)
     Val(TComptimeValue.List{values: folded})
 }
 
-fn jet_driver_comptime_fold_enum(type_name: String, variant: String, payload: TEnumPayload, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+fn jet_driver_comptime_fold_enum(tree: BodyTree, type_name: String, variant: String, payload: BodyEnumPayload, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
     args := [TComptimeEnumArg]{}
     if payload == {
         .Unit -> {}
-        .Positional(positional) -> loop argument in positional -> &args.push(TComptimeEnumArg{name: None, value: jet_driver_comptime_fold(argument.value, values) ?? return None})
-        .Named(named) -> loop argument in named -> &args.push(TComptimeEnumArg{name: Val(argument.name), value: jet_driver_comptime_fold(argument.value.value, values) ?? return None})
+        .Positional(positional) -> loop argument in positional -> &args.push(TComptimeEnumArg{name: None, value: jet_driver_comptime_fold(tree, argument.value, values) ?? return None})
+        .Named(named) -> loop argument in named -> &args.push(TComptimeEnumArg{name: Val(argument.name), value: jet_driver_comptime_fold(tree, argument.value.value, values) ?? return None})
     }
     Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: args})
 }
@@ -2579,7 +2584,7 @@ fn jet_driver_test_modules(load: JetDriverLoadResult) -> [String:Bool] Never! {
 // named tests of `test_modules` whose bodies checked, and their selected Check
 // Outputs, in declaration order. A Check Output whose callable did not check
 // is an E0003.
-fn jet_driver_test_plan(test_modules: [String:Bool], graph: SemaGraphResult, functions: [TFunc], tests: &[TTestFact], output_checks: &[TOutputCheckFact], diagnostics: &[Diagnostic]) Never! {
+fn jet_driver_test_plan(test_modules: [String:Bool], graph: SemaGraphResult, functions: [FnBody], tests: &[TTestFact], output_checks: &[TOutputCheckFact], diagnostics: &[Diagnostic]) Never! {
     checked := [String:Int]{}
     loop (index, function) in functions -> checked[function.key] = index
     loop module_index in 0..<graph.modules.len() {
@@ -2801,18 +2806,26 @@ fn jet_driver_keep_going_skip_set(skip: [String]) -> [String:Bool] Never! {
 
 // A checked function whose body is one unreachable stop: its signature,
 // owner and identity are unchanged, so every caller still lowers.
-fn jet_driver_keep_going_tir_trap(function: TFunc, reason: String) -> TFunc Never! {
+fn jet_driver_keep_going_tir_trap(function: FnBody, reason: String) -> FnBody Never! {
     trapped := function
-    stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: reason}, span: function.source_span}
-    trapped.body = [TStmt]{TStmt.ExprStmt{value: stop, span: function.source_span}}
-    // The checked body's rows left with it: the trap files its own column.
-    _ := tir_function_seal(&trapped, TEXPR_FIRST_LOCAL_ID, true)
+    // The stop takes an id below every node of the tree, so the rows stay
+    // sorted by id with it first; the parameter defaults keep their nodes.
+    stop_id := TEXPR_FIRST_LOCAL_ID
+    if trapped.tree.nodes.len() > 0 && trapped.tree.nodes[0].id <= stop_id -> stop_id = trapped.tree.nodes[0].id - 1
+    nodes := [BodyNode]{BodyNode{id: stop_id, kind: NodeKind.Never{reason: reason}, span: function.source_span}}
+    loop node in trapped.tree.nodes -> &nodes.push(node)
+    types := [TExprType]{TExprType{id: stop_id, ty: Type.Named{name: "Never"}}}
+    loop row in trapped.tree.expr_types -> &types.push(row)
+    trapped.tree.nodes = ^nodes
+    trapped.tree.expr_types = ^types
+    &trapped.tree.stmts.push(StmtKind.ExprStmt{value: stop_id, span: function.source_span})
+    trapped.body = [Int]{trapped.tree.stmts.len() - 1}
     trapped
 }
 
 // `lower:<name>@<position>` skip entries: the function at that position of
 // the lowering list lowers as a trap.
-fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[TFunc]) {
+fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[FnBody]) {
     skip :: jet_driver_keep_going_skip_set(kg.skip)
     loop position in 0..<functions.len() {
         if skip.get("lower:{functions[position].name}@{position}") == None -> next
@@ -2826,7 +2839,7 @@ fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[
 // Records the census row for a function that lowers as a trap and builds the
 // trap. The caller writes the trap into the slot after this returns, when no
 // view of the row is live.
-fn jet_driver_keep_going_tir_trap_row(kg: &JetDriverKeepGoingLog, function: TFunc, reason: String, trap_text: String) -> TFunc {
+fn jet_driver_keep_going_tir_trap_row(kg: &JetDriverKeepGoingLog, function: FnBody, reason: String, trap_text: String) -> FnBody {
     jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", reason, "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
     jet_driver_keep_going_tir_trap(function, trap_text)
 }
@@ -2837,7 +2850,7 @@ fn jet_driver_keep_going_tir_trap_row(kg: &JetDriverKeepGoingLog, function: TFun
 // Under JET_KEEP_GOING a function whose check failed and whose own trap did
 // not check either (sema_keep_going_push_stub) is such a callee: each of its
 // callers lowers as a trap instead, and each is a census row.
-fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, functions: &[TFunc], modules: [SemaGraphModuleResult]) {
+fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult]) {
     targets := [String:Bool]{}
     loop function in functions -> targets[function.key] = true
     loop semantic_module in modules {
@@ -2856,14 +2869,14 @@ fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, funct
 // The first direct-call callee key in `function` (its parameter defaults,
 // then its body, each expression before the ones below it) that `targets`
 // does not hold.
-fn jet_driver_unresolved_direct_call(function: TFunc, targets: [String:Bool]) -> String? Never! {
+fn jet_driver_unresolved_direct_call(function: FnBody, targets: [String:Bool]) -> String? Never! {
     missing := String?{None}
     loop parameter in function.params {
-        if parameter.default == Val(value) -> jet_driver_unresolved_call_in(value, targets, &missing)
+        if parameter.default == Val(value) -> jet_driver_unresolved_call_in(function.tree, value, targets, &missing)
     }
     loop statement in function.body {
         if missing != None -> break
-        jet_driver_unresolved_call_statement(statement, targets, &missing)
+        jet_driver_unresolved_call_statement(function.tree, statement, targets, &missing)
     }
     missing
 }
@@ -2871,21 +2884,22 @@ fn jet_driver_unresolved_direct_call(function: TFunc, targets: [String:Bool]) ->
 // One statement's subtrees. Its own function so the visitor closure lends the
 // `missing` write parameter: the stage-0 Rust tier then lends `targets` to the
 // closure instead of copying it per statement.
-fn jet_driver_unresolved_call_statement(statement: TStmt, targets: [String:Bool], missing: &String?) Never! {
-    tir_each_stmt_child(statement, (child: TExpr) -> jet_driver_unresolved_call_in(child, targets, &missing))
+fn jet_driver_unresolved_call_statement(tree: BodyTree, statement: Int, targets: [String:Bool], missing: &String?) Never! {
+    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> jet_driver_unresolved_call_in(tree, child, targets, &missing))
 }
 
 // Records in `missing` (once) the first direct-call callee key in
 // `expression` or below it that `targets` does not hold, read in place.
-fn jet_driver_unresolved_call_in(expression: TExpr, targets: [String:Bool], missing: &String?) Never! {
+fn jet_driver_unresolved_call_in(tree: BodyTree, expression: Int, targets: [String:Bool], missing: &String?) Never! {
     if missing != None -> return
-    if expression.kind == .Call(callee, _, _) {
+    node :: body_node(tree, expression)
+    if node.kind == .Call(callee, _, _) {
         if targets.get(callee.key) == None {
             missing = Val(callee.key)
             return
         }
     }
-    tir_each_expr_child(expression, (child: TExpr) -> jet_driver_unresolved_call_in(child, targets, &missing))
+    body_each_expr_child(tree, node, (child: Int) -> jet_driver_unresolved_call_in(tree, child, targets, &missing))
 }
 
 // This retained input is not a RootMemo cache-eligibility proof. All checked
@@ -2916,7 +2930,7 @@ struct JetDriverCheckedProjectionCapture {
 // library. A Test compile has no entry: it carries the tests and Check
 // Outputs its harness runs (jet_driver_test_plan) instead.
 struct JetDriverLoweringInputs {
-    functions: [TFunc]
+    functions: [FnBody]
     modules: [SemaGraphModuleResult]
     sources: [String:String]
     entry_module_identity: String
@@ -3666,7 +3680,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // the checked TIR is resident once from here on: the rows return to their
     // modules after lowering for the entry and foreign lookups
     // (jet_driver_restore_checked_functions) and are released after those.
-    checked_functions := [TFunc]{}
+    checked_functions := [FnBody]{}
     // Per row of `checked_functions`: false for a repeated key that
     // JET_KEEP_GOING leaves unlowered.
     lowering_candidates := [Bool]{}
@@ -3680,8 +3694,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     failed_stage := JetDriverStage?{None}
     runtime_semantic_modules := [SemaGraphModuleResult]{}
     loop graph_module_index in 0..<checked_graph.modules.len() {
-        module_functions := [TFunc]{}
-        compiler_transfer_rows<TFunc>(&module_functions, &checked_graph.modules[graph_module_index].functions)
+        module_functions := [FnBody]{}
+        compiler_transfer_rows<FnBody>(&module_functions, &checked_graph.modules[graph_module_index].functions)
         // The module carries no functions now, so the runtime copy below
         // holds only its declarations.
         graph_module :: checked_graph.modules[graph_module_index]
@@ -3717,8 +3731,11 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
             }
             &lowering_candidates.push(true)
         }
-        compiler_transfer_rows<TFunc>(&checked_functions, &module_functions)
+        compiler_transfer_rows<FnBody>(&checked_functions, &module_functions)
     }
+    // The published bodies moved out above; the checker's own trees have no
+    // reader past here.
+    sema_graph_release_checked(&checked_graph)
     // Every checked function has its owner now.
     registered_function_keys = [String:[String:Bool]]{}
     loaded_identity_counts = [String:Int]{}
@@ -3761,8 +3778,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // TIR `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
     lowering_rows := ir_reachable_core_rows(&checked_functions, ^lowering_candidates, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules), request.compiler_threads)
-    sema_functions := [TFunc]{}
-    unlowered_functions := [TFunc]{}
+    sema_functions := [FnBody]{}
+    unlowered_functions := [FnBody]{}
     jet_driver_partition_checked_functions(&checked_functions, lowering_rows, &sema_functions, &unlowered_functions)
     if kg.enabled {
         jet_driver_keep_going_diagnostics(&kg, "sema", load.diagnostics)
@@ -3826,7 +3843,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 // call edges. The maximal row an open-world call (an unannotated function
 // value, an extern) seeds into `solved` is a ceiling fact (E0743), not a
 // required right, so it never widens the authority the application must hold.
-fn jet_driver_required_effects(functions: [TFunc], entry_key: String) -> [String] Never! {
+fn jet_driver_required_effects(functions: [FnBody], entry_key: String) -> [String] Never! {
     by_key := [String:Int]{}
     loop (index, function) in functions {
         if by_key.get(function.key) == None -> by_key[function.key] = index

@@ -7,7 +7,8 @@
 // file read is recorded with its SHA-256 for the comptime input lock.
 use jet_foundation.[
     Diagnostic,
-    TExpr,
+    BodyExpr,
+    body_node,
     Span,
     TComptimeValue,
     diagnostic_from_registry,
@@ -98,20 +99,21 @@ fn jet_driver_comptime_inputs_for(request: JetDriverCompileRequest, source_file:
 }
 
 // Whether a checked comptime value is exactly one comptime input.
-fn jet_driver_comptime_input_expression(expression: TExpr) -> Bool Never! {
-    if expression.kind == .HostCall(call) {
+fn jet_driver_comptime_input_expression(expression: BodyExpr) -> Bool Never! {
+    if body_node(expression.tree, expression.root).kind == .HostCall(call) {
         if call == .ComptimeInput(_, _) -> return true
     }
     false
 }
 
 // Reads the comptime input `expression` names for an item in `source_file`.
-fn jet_driver_comptime_read_input(request: JetDriverCompileRequest, source_file: String, expression: TExpr) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
-    if expression.kind == .HostCall(call) {
+fn jet_driver_comptime_read_input(request: JetDriverCompileRequest, source_file: String, expression: BodyExpr) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+    node :: body_node(expression.tree, expression.root)
+    if node.kind == .HostCall(call) {
         if call == .ComptimeInput(builtin, path) {
-            adapter :: jet_driver_comptime_inputs_for(request, source_file) ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0956", Val(expression.span), "`{builtin}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")})
-            return adapter.comptime_input(builtin, path, expression.span)
+            adapter :: jet_driver_comptime_inputs_for(request, source_file) ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0956", Val(node.span), "`{builtin}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")})
+            return adapter.comptime_input(builtin, path, node.span)
         }
     }
-    Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0003", Val(expression.span), "a comptime input lost its checked call", "the driver reads only a checked comptime input", "report this compiler bug")})
+    Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0003", Val(node.span), "a comptime input lost its checked call", "the driver reads only a checked comptime input", "report this compiler bug")})
 }

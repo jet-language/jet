@@ -18,18 +18,12 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TBuiltinOp,
-    TCallArg,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
-    TMapEntry,
     TMethodRef,
     TGenericParam,
     TNumericOp,
     TPreludeArg,
     TStaticOwner,
-    TStmt,
     Type,
     SemaNameCase,
     sema_casing_canonical,
@@ -549,8 +543,6 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
             reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
             Val(TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: rooted, path: path, generics: owner_args}, owner_type: None, method: reference, type_args: [Type]{}, args: call_args})
         }
-        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.HandleMethod owns this one
-        .ArgumentHandle(operation) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: operation.copy(), args: rest})
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
         // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.NumericMethod owns this one

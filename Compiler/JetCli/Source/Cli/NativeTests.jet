@@ -3,7 +3,7 @@
 // survive a fatal child. Only missing tests are rerun in individually selected
 // children, which attributes a process-fatal failure to its exact checked test.
 use core.files as native_test_files
-use jet_foundation.[TFunc, TTestFact]
+use jet_foundation.[FnBody, TTestFact]
 
 // One selected native unit test: `id` is the identity its outcome record
 // carries (`JET_NATIVE_TEST <id>`); `key` its checked function.
@@ -92,7 +92,7 @@ struct JetNativeTestRow { test: JetNativeTestCase, module_name: String, start: I
 // record identity is 1 + its plan position) the run selects: `filter` first,
 // then the canonical (module, source offset, name) order and the
 // SplitMix64/Fisher-Yates shuffle of `shuffle_seed`.
-fn jet_cli_native_test_selection(tests: [TTestFact], functions: [TFunc], filter: String?, shuffle_seed: String?) -> [JetNativeTestCase] Err! {
+fn jet_cli_native_test_selection(tests: [TTestFact], functions: [FnBody], filter: String?, shuffle_seed: String?) -> [JetNativeTestCase] Err! {
     modules := [String:String]{}
     loop function in functions -> modules[function.key.copy()] = function.module_name.copy()
     rows := [JetNativeTestRow]{}

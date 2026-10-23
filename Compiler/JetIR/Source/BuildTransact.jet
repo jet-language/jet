@@ -10,7 +10,7 @@
 // restores them, latest first, and drops the Stm and the handle before the
 // exit's own drops (ir_tx_unwind).
 
-use jet_foundation.[Span, SymbolID, TCallArg, TExpr, TExprKind, TLambda, TLocal, TMethodRef, TPlace, TStmt, TTransactionSnapshot, TTryConvert, Type, tir_generated_local]
+use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
@@ -95,7 +95,7 @@ fn ir_transaction_walk(m: &IRModule, a: &IRBuilder, head: Int, run: Bool) Never!
 // `#Transact(handle) { body }`: the handle and the Stm open, the snapshots
 // are taken, the body runs; its clean end commits the handle and the Stm,
 // and the scope's end drops them (the handle's drop runs the commit hooks).
-fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span) Never! {
+fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [Int], span: Span) Never! {
     ir_scope_open(&b)
     handle_slot := -1
     if handle == .Val(local) {
@@ -145,7 +145,7 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
 // session's nesting Shield depth, entered before it and left after its
 // bindings drop, or by an early exit (ir_tx_unwind); stop points inside it
 // are masked and leaving it delivers what arrived meanwhile.
-fn ir_shield(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [TStmt]) Never! {
+fn ir_shield(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _ :: ir_runtime(&m, &b, "jet_rt_session_shield_enter", [Int]{}, -1)
     &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true})
     ir_scope_open(&b)
@@ -173,13 +173,13 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
             ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
             return None
         }
-        call :: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [TCallArg]{}, span)
+        call :: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [BodyCallArg]{}, span)
         if ir_untag(ir_ty(p, b, call)) == .Result(ok, error) {
             saved_ty = ok.copy()
             // A `Never` failure is uninhabited whatever the enclosing rail.
             conversion :: if ir_never_type(ir_untag(error)) -> TTryConvert.Never else -> TTryConvert.NoConversion
             failure :: b.failure.copy()
-            checked :: ir_node(&b, ok, TExprKind.Try{value: call, conversion: conversion, failure: failure}, span)
+            checked :: ir_node(&b, ok, NodeKind.Try{value: call, conversion: conversion, failure: failure}, span)
             value = ir_expr(&m, p, &b, checked)
         } else {
             saved_ty = ir_ty(p, b, call).copy()
@@ -201,27 +201,28 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
 
 // `local.<method>(args)` of its Rollback implementation, typed by the
 // method's declared return.
-fn ir_tx_method_expr(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, method: TMethodRef, args: [TCallArg], span: Span) -> TExpr Never! {
+fn ir_tx_method_expr(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, method: TMethodRef, args: [BodyCallArg], span: Span) -> Int Never! {
     ret := Type.Named{name: "Unit"}
     if p.rows.get(method.symbol.key) == .Val(row) {
         ret = p.functions[row].ret ?? Type.Named{name: "Unit"}
     }
-    receiver :: ir_node(&b, owner, TExprKind.Local{local: local}, span)
-    ir_node(&b, ret, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span)
+    receiver :: ir_node(&b, owner, NodeKind.Local{local: local}, span)
+    ir_node(&b, ret, NodeKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span)
 }
 
 // Puts the saved value back (codegen jet_codegen_transaction_restore_snapshot).
 fn ir_tx_restore(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: IRTxSnapshot, span: Span) Never! {
-    saved :: ir_node(&b, snapshot.saved_ty, TExprKind.Local{local: snapshot.saved}, span)
+    saved :: ir_node(&b, snapshot.saved_ty, NodeKind.Local{local: snapshot.saved}, span)
     if snapshot.rollback == .Val(owner) {
         method :: snapshot.restore ?? return ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::restore")
-        argument :: TCallArg{value: saved, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-        call :: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [TCallArg]{argument}, span)
+        argument :: BodyCallArg{value: saved, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+        call :: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [BodyCallArg]{argument}, span)
         result :: ir_expr(&m, p, &b, call)
         ir_release(&m, &b, result)
         return
     }
-    ir_stmt(&m, p, &b, TStmt.Assign{place: TPlace.Local{local: snapshot.local}, op: None, value: saved, line: 0, span: span})
+    restore :: ir_stmt_node(&b, StmtKind.Assign{place: BodyPlace.Local{local: snapshot.local}, op: None, value: saved, line: 0, span: span})
+    ir_stmt(&m, p, &b, restore)
 }
 
 // An early exit leaving the transactions opened inside `loops` open loops
@@ -293,7 +294,7 @@ fn ir_tx_unwind_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span:
 
 // `name.on_commit(f)` / `name.on_rollback(f)` (Lower lower_transaction_hook):
 // the callback's closure box goes on the front of its list.
-fn ir_transaction_hook(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_name: String, executable: TLambda, commit: Bool, span: Span) -> Int Never! {
+fn ir_transaction_hook(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_name: String, executable: BodyLambda, commit: Bool, span: Span) -> Int Never! {
     binding :: ir_lookup_binding(b, handle_name) ?? return ir_fail_slot(&b, span, "transaction hook without the handle {handle_name}")
     closure_ty :: ir_lambda_function_type(executable)
     env :: ir_lambda(&m, p, &b, closure_ty, executable, span)

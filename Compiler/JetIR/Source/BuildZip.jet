@@ -4,14 +4,14 @@
 // through one runtime zip node, whose callback builds the next row tuple. A
 // padded zip hands the node the value each side stands in with once it ends.
 
-use jet_foundation.[Span, SymbolID, SymbolKind, TCapture, TCaptureFacts, TEffectFacts, TEffectSpan, TExpr, TExprKind, TFailureCarrier, TFieldRef, TLambda, TLambdaBody, TZipFillMode, TZipMode, Type, TypeTupleField, symbol_id, tir_generated_local]
+use jet_foundation.[Span, SymbolID, SymbolKind, TCapture, TCaptureFacts, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, TFieldRef, BodyLambda, BodyLambdaBody, TZipFillMode, TZipMode, Type, TypeTupleField, symbol_id, tir_generated_local]
 
-fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, args: [TExpr], mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type], span: Span) -> Int Never! {
+fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type], span: Span) -> Int Never! {
     fill_count :: if mode == .Pad && fill_mode != .DefaultNone -> 1 else -> 0
     if flatten || input_count < 2 || fields.len() != input_count || field_types.len() != input_count || args.len() != input_count - 1 + fill_count {
         return ir_fail_slot(&b, span, "builtin Zip with inconsistent column facts")
     }
-    inputs := [TExpr]{receiver}
+    inputs := [Int]{receiver}
     loop index in 0..<(input_count - 1) -> &inputs.push(args[index])
     elements := [Type]{}
     loop input in inputs {
@@ -47,7 +47,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, 
         if fill_mode == .DefaultNone {
             // Each element becomes Present; the ended side stands in Absent.
             local :: ir_zip_local(&b, "zip_0", elements[index], span)
-            present :: ir_node(&b, target, TExprKind.Present{value: local}, span)
+            present :: ir_node(&b, target, NodeKind.Present{value: local}, span)
             mapped :: ir_zip_adapter(&m, p, &b, "zip_fill_{index}", [Type]{elements[index]}, [String]{"zip_0"}, target, present, span)
             if mapped.closure < 0 -> return -1
             meta :: ir_lazy_meta(&m, p, &b, target, span)
@@ -57,7 +57,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, 
             source :: columns[index]
             columns[index] = ir_runtime(&m, &b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row)
             ir_lazy_consumed(&m, &b, source)
-            absent_node :: ir_node(&b, target, TExprKind.Absent, span)
+            absent_node :: ir_node(&b, target, NodeKind.Absent, span)
             absent :: ir_expr(&m, p, &b, absent_node)
             if ir_failed(b) || absent < 0 -> return -1
             &made.push(absent)
@@ -89,18 +89,18 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, 
         row_type :: Type.Tuple{fields: row_fields}
         right_type :: ir_subst(m, field_types[index])
         // The row so far and this column's value make the next row.
-        values := [TExpr]{}
+        values := [Int]{}
         prefix :: ir_zip_local(&b, "zip_0", left_type, span)
         if index == 1 {
             &values.push(prefix)
         } else {
             loop column in 0..<index {
                 field :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", "builtin-zip", fields[column]), name: fields[column], ty: row_fields[column].ty, boxed: false}
-                &values.push(ir_node(&b, row_fields[column].ty, TExprKind.Field{receiver: prefix, field: field}, span))
+                &values.push(ir_node(&b, row_fields[column].ty, NodeKind.Field{receiver: prefix, field: field}, span))
             }
         }
         &values.push(ir_zip_local(&b, "zip_1", right_type, span))
-        body :: ir_node(&b, row_type, TExprKind.Tuple{values: values}, span)
+        body :: ir_node(&b, row_type, NodeKind.Tuple{values: values}, span)
         joined :: ir_zip_adapter(&m, p, &b, "zip_{index}", [Type]{left_type, right_type}, [String]{"zip_0", "zip_1"}, row_type, body, span)
         if joined.closure < 0 -> return -1
         last :: index + 1 == input_count
@@ -166,7 +166,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, 
 // `rows.unzip()` (codegen jet_codegen_lower_builtin_unzip): one List per
 // row field, each row's fields pushed in order; an Iter is drained into a
 // List first.
-fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     columns_shape := [TypeTupleField]{}
     if ir_untag(result_ty) == .Tuple(fields) -> columns_shape = fields
@@ -237,8 +237,8 @@ fn ir_zip_tuple_field(ty: Type, name: String) -> Type? Never! {
     None
 }
 
-fn ir_zip_local(b: &IRBuilder, name: String, ty: Type, span: Span) -> TExpr Never! {
-    ir_node(&b, ty, TExprKind.Local{local: tir_generated_local(name, span)}, span)
+fn ir_zip_local(b: &IRBuilder, name: String, ty: Type, span: Span) -> Int Never! {
+    ir_node(&b, ty, NodeKind.Local{local: tir_generated_local(name, span)}, span)
 }
 
 struct IRZipAdapter {
@@ -250,15 +250,15 @@ struct IRZipAdapter {
 // jet_codegen_builtin_synthetic_lambda), built as its own function like a
 // source lambda (ir_lambda), and its lazy.callback. `role` keeps the
 // callbacks of one zip apart.
-fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, params: [Type], names: [String], ret: Type, body: TExpr, span: Span) -> IRZipAdapter Never! {
+fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, params: [Type], names: [String], ret: Type, body: Int, span: Span) -> IRZipAdapter Never! {
     failed :: IRZipAdapter{closure: -1, callback: -1}
     closure_ty :: Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     row :: ir_value_type(&m, p, closure_ty) ?? {
         _ :: ir_type_fail(&b, span, closure_ty)
         return failed
     }
-    lambda :: TLambda{
-        executable: TLambdaBody.Expr{value: body},
+    lambda :: BodyLambda{
+        executable: BodyLambdaBody.Expr{value: body},
         source_span: span,
         frame_schedule: None,
         frame_schedule_derivation: None,
@@ -286,7 +286,7 @@ fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, param
     id :: m.functions.len()
     key :: "{b.f.key}#{role}@{span.start}"
     &m.functions.push(ir_function_new("{b.f.name}.{role}@{span.start}", key, "{b.f.symbol}__{role}_{ir_key_hash(key)}", b.f.source_file, b.line))
-    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{}, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, nodes: b.nodes, next_node: b.next_node})
+    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{}, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)
     code :: ir_temp(&m, &b, pointer_row)

@@ -3,7 +3,7 @@
 // own goal types.
 use core.files as cli_files
 use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.[Func, Item, Span, TExpr, TFunc, TTypedGoal, diagnostic_line_at, diagnostic_render_all, tir_each_expr_child, tir_each_stmt_child, type_name]
+use jet_foundation.[BodyTree, FnBody, Func, Item, Span, TTypedGoal, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_line_at, diagnostic_render_all, type_name]
 
 struct JetCLIFillFunction {
     name: String
@@ -57,14 +57,15 @@ fn jet_cli_fill_card(rows: [TTypedGoal], span: Span) -> String Never! {
     card
 }
 
-fn jet_cli_fill_expr(expression: TExpr, rows: [TTypedGoal], goals: &[JetCLIFillGoal]) Never! {
-    if expression.kind == .Never(reason) && reason == "todo" {
-        &goals.push(JetCLIFillGoal{span: expression.span, expected: jet_cli_fill_card(rows, expression.span)})
+fn jet_cli_fill_expr(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals: &[JetCLIFillGoal]) Never! {
+    node :: body_node(tree, expression)
+    if node.kind == .Never(reason) && reason == "todo" {
+        &goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})
     }
-    tir_each_expr_child(expression, (child: TExpr) -> jet_cli_fill_expr(child, rows, &goals))
+    body_each_expr_child(tree, node, (child: Int) -> jet_cli_fill_expr(tree, child, rows, &goals))
 }
 
-fn jet_cli_fill_function_name(function: TFunc) -> String Never! {
+fn jet_cli_fill_function_name(function: FnBody) -> String Never! {
     if function.kind == {
         .Method(_, owner) | .TraitMethod(_, _, owner, _, _) -> {
             return "{type_name(owner)}.{function.name}"
@@ -74,7 +75,7 @@ fn jet_cli_fill_function_name(function: TFunc) -> String Never! {
     function.name
 }
 
-fn jet_cli_fill_effects(function: TFunc, alias: String, facts: [JetCLISemEffect]) -> String Never! {
+fn jet_cli_fill_effects(function: FnBody, alias: String, facts: [JetCLISemEffect]) -> String Never! {
     local :: jet_cli_fill_function_name(function).replace(".", "::")
     keys :: [String]{"{alias}::{local}", local, function.name}
     loop key in keys {
@@ -102,7 +103,7 @@ fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillG
     }
 }
 
-fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: TFunc, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] JetCLIReadError! {
+fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: FnBody, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] JetCLIReadError! {
     candidates := [String]{}
     loop parameter in function.params {
         if type_name(parameter.ty) == goal.expected -> &candidates.push(parameter.name)
@@ -146,7 +147,7 @@ fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?
             if function.synthetic -> next
             goals := [JetCLIFillGoal]{}
             loop statement in function.body {
-                tir_each_stmt_child(statement, (expression: TExpr) -> jet_cli_fill_expr(expression, function.typed_goals, &goals))
+                body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> jet_cli_fill_expr(function.tree, expression, function.typed_goals, &goals))
             }
             loop goal in goals {
                 goal_line :: diagnostic_line_at(unit.source, goal.span.start)

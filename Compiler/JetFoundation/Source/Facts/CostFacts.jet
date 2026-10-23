@@ -1,8 +1,13 @@
+
+
 // Frozen typed cost evidence, shared by lowering and its reporting consumers.
 // Mirrors Rust TIR::cost_fact_for_expr; never inspect generated adapter text.
 TCOST_I128_MIN :: -170141183460469231731687303715884105728
+
 TCOST_I128_MAX :: 170141183460469231731687303715884105727
+
 TCOST_INLINE_MIN :: -4611686018427387904
+
 TCOST_INLINE_MAX :: 4611686018427387903
 
 fn tir_cost_bounded(lo: Int, hi: Int) -> TIntegerBounds? Never! {
@@ -27,6 +32,7 @@ fn tir_cost_type_bounds(ty: Type) -> TIntegerBounds? Never! {
 }
 
 fn tir_cost_min(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
+
 fn tir_cost_max(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
 
 fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
@@ -63,81 +69,6 @@ fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerB
     }
 }
 
-// The exact value an integer literal node spells. A literal beyond i64 is a
-// BigInt constant.
-fn tir_expr_literal_integer(expression: TExpr) -> Int? Never! {
-    if expression.kind == {
-        .IntLit(value, _) -> return Val(value)
-        .CtLit(value) -> {
-            if value == .BigInt(decimal) -> return Val(Int.parse(decimal) ?? return None)
-        }
-        else -> {}
-    }
-    None
-}
-
-// The bounds a node states by itself: an integer literal, a negated literal
-// (a fixed-width operand crosses the checked Int-to-fixed conversion), or a
-// local, which carries its binding's bounds. No other node states bounds.
-fn tir_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
-    if expression.kind == {
-        .Local(local) -> return local.integer_bounds
-        .Unary(op, operand) -> {
-            if op != TUnaryOp.Neg -> return None
-            literal := tir_expr_literal_integer(operand)
-            if operand.kind == .NumericMethod(receiver, operation) {
-                if operation == .CheckedIntToFixed(_, _) -> literal = tir_expr_literal_integer(receiver)
-            }
-            number :: literal ?? return None
-            return Val(integer_bounds_exact(-number))
-        }
-        else -> {}
-    }
-    value :: tir_expr_literal_integer(expression) ?? return None
-    Val(integer_bounds_exact(value))
-}
-
-fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
-    known :: tir_expr_known_bounds(expression)
-    if known != None -> return known
-    bounds := TIntegerBounds?{None}
-    if expression.kind == {
-        .CtLit(value) -> {
-            if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
-        }
-        .NumericMethod(receiver, operation) -> {
-            if operation == {
-                .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi})
-                .CastAs(destination) -> {
-                    if destination == "i64" && tir_cost_integer_bounds(receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 -> bounds = Val(original)
-                }
-                else -> {}
-            }
-        }
-        .Unary(op, value) -> {
-            if op == TUnaryOp.Neg && tir_cost_integer_bounds(value) == .Val(operand) {
-                bounds = tir_cost_bounded(-operand.hi, -operand.lo)
-            }
-        }
-        .Binary(op, _, _, left, right) -> {
-            if tir_cost_integer_bounds(left) == .Val(lhs) && tir_cost_integer_bounds(right) == .Val(rhs) -> bounds = tir_cost_combine_bounds(op, lhs, rhs)
-        }
-        .OrFallback(value, fallback, _) -> {
-            success := TIntegerBounds?{None}
-            if value.ty == {
-                .Option(inner) -> success = tir_cost_type_bounds(inner)
-                .Result(ok, _) -> success = tir_cost_type_bounds(ok)
-                else -> {}
-            }
-            if fallback == .Value(alternative) {
-                if success == .Val(normal) && tir_cost_integer_bounds(alternative) == .Val(other) -> bounds = Val(TIntegerBounds{lo: tir_cost_min(normal.lo, other.lo), hi: tir_cost_max(normal.hi, other.hi)})
-            } else { bounds = success }
-        }
-        else -> {}
-    }
-    if bounds != None -> bounds else -> tir_cost_type_bounds(expression.ty)
-}
-
 fn tir_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
     bounds.lo >= TCOST_INLINE_MIN && bounds.hi <= TCOST_INLINE_MAX
 }
@@ -168,6 +99,7 @@ fn tir_cost_operation(kind: TCostKind) -> String Never! {
         .RepresentationFallback -> "using a generic collection representation"
     }
 }
+
 fn tir_cost_fix(kind: TCostKind) -> String Never! {
     if kind == {
         .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"

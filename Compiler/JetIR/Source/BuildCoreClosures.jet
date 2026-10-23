@@ -4,7 +4,7 @@
 // Closures.jet lower_scope_guard), with the owned runtime Task handle and the
 // ScopeGuard carrier they produce.
 
-use jet_foundation.[Span, TCoreClosureKind, TExpr, TLambda, Type, type_carrier_identity]
+use jet_foundation.[Span, BodyCoreClosureKind, BodyLambda, Type, type_carrier_identity]
 
 // The element of a `Task<T>` (Lower Tasks.jet lower_task_element).
 fn ir_task_element(ty: Type) -> Type? Never! {
@@ -82,7 +82,7 @@ fn ir_task_release_body(m: &IRModule, a: &IRBuilder) Never! {
 
 // A Core closure call by kind; the kinds other than `task`, `scope.guard`
 // and the transaction hooks are not built here.
-fn ir_core_closure_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: TCoreClosureKind, span: Span) -> Int Never! {
+fn ir_core_closure_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyCoreClosureKind, span: Span) -> Int Never! {
     if kind == {
         .Spawn(group, site, label, executable) -> return ir_task_spawn(&m, p, &b, ty, group, site, label ?? "", executable, span)
         .Guard(executable) -> return ir_scope_guard(&m, p, &b, ty, executable, span)
@@ -92,7 +92,7 @@ fn ir_core_closure_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kin
     }
 }
 
-fn ir_core_closure_name(kind: TCoreClosureKind) -> String Never! {
+fn ir_core_closure_name(kind: BodyCoreClosureKind) -> String Never! {
     text := "{kind}"
     separators :: [String]{"(", "{{", " "}
     loop separator in separators {
@@ -107,7 +107,7 @@ fn ir_core_closure_name(kind: TCoreClosureKind) -> String Never! {
 // 3698-3727); the runtime takes the box over with its task.body
 // (lazy.callback) and task.release helpers and the result's descriptor
 // (Lower Tasks.jet:316 lower_task_spawn). A grouped spawn joins its group.
-fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: TExpr?, site: Int, label: String, executable: TLambda, span: Span) -> Int Never! {
+fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: Int?, site: Int, label: String, executable: BodyLambda, span: Span) -> Int Never! {
     task_ty :: ir_subst(m, ty)
     element :: ir_task_element(task_ty) ?? return ir_fail_slot(&b, span, "spawn producing {ir_type_name(ty)}")
     task_row :: ir_value_type(&m, p, task_ty) ?? return ir_type_fail(&b, span, ty)
@@ -161,7 +161,7 @@ fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: TEx
 
 // `core.mem.scope.guard(callback)`: the callback's closure box, reowned as
 // the ScopeGuard whose scope-end drop runs it (Lower Closures.jet:517).
-fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: TLambda, span: Span) -> Int Never! {
+fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
     closure_ty :: ir_lambda_function_type(executable)
     env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return -1
@@ -174,7 +174,7 @@ fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executabl
 
 // `^task.detach()`: the runtime takes the handle over and lets the task run
 // on unsupervised (Lower Tasks.jet:446).
-fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, span: Span) -> Int Never! {
+fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
     handle :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
     _ :: ir_runtime(&m, &b, "jet_rt_native_task_detach", [Int]{handle}, -1)
@@ -185,7 +185,7 @@ fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, sp
 // `^task.join()`: the runtime takes the handle over, waits for the task
 // and writes the body's outcome into the Result box (Lower Tasks.jet:455,
 // jet_rt_native_task_join without flattening).
-fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     err_ty := Type.Int
     if ir_untag(result_ty) == .Result(_, failure) {

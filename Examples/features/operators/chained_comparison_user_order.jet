@@ -1,0 +1,21 @@
+// A relational chain over a user Comparable asks the type's own compare at
+// each link (#4979): Rev orders by descending v, so 1, 2, 3 is not ascending.
+struct Rev {
+    v: Int
+}
+
+impl Rev.Comparable {
+    fn compare(self, rhs: Rev) -> Ordering {
+        if self.v > rhs.v -> return Ordering.Less
+        if self.v < rhs.v -> return Ordering.Greater
+        return Ordering.Equal
+    }
+}
+
+fn run() {
+    a :: Rev{v: 1}
+    b :: Rev{v: 2}
+    c :: Rev{v: 3}
+    print(a < b < c)
+    print(c < b < a)
+}

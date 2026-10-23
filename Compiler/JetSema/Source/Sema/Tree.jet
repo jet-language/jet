@@ -1,131 +1,90 @@
-// Checked/typed IR shared between sema, lowering, ownership analysis and every
-// execution adapter. Nodes carry decisions already proved by sema; consumers
-// must not reconstruct those decisions from source spelling.
-
-TIR_SCHEMA_VERSION :: 8
-
-enum TAddressLifetime {
-    Stack
-    Heap
-    Static
-    Borrowed
-    Foreign
-    Unknown
-}
-
-struct TIntegerBounds {
-    lo: Int
-    hi: Int
-}
-
-fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
-    TIntegerBounds{lo: value, hi: value}
-}
-
-struct TLocal {
-    name: String
-    symbol_id: SymbolID?{None}
-    span: Span
-    generated: Bool
-    deref: Bool
-    address_lifetime: TAddressLifetime?
-    persist_key: String?
-    persist_ty: Type?
-    mutable: Bool
-    string_bytes_source: TLocal?
-    integer_bounds: TIntegerBounds?
-    uninit_scalar: Bool
-    uninit_fixed: Bool
-    // The checked `^p` of a match payload binding whose subject sema marked
-    // partially moved (sema_ownership_move_pattern_payload): lowering may
-    // take the payload out of the subject's storage instead of copying it.
-    payload_take: Bool{false}
-    // A read-only binding of a place (`x :: rows[i]`) that reads the place
-    // itself instead of a copy: sema proved neither the binding nor the
-    // variable the place reads is written, moved or captured while it lives
-    // (JetSema Ownership/PlaceBorrows.jet).
-    place_borrow: Bool{false}
-}
-
-fn tir_user_local(name: String, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
-}
-
-fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
-    local := tir_user_local(name, span)
-    local.symbol_id = Val(symbol_id)
-    local
-}
-
-fn tir_generated_local(name: String, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
-}
-
-fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
-}
-
-enum TBinaryOp {
-    Add
-    Sub
-    Mul
-    Div
-    FloorDiv
-    Mod
-    Rem
-    Pow
-    BitAnd
-    BitOr
-    BitXor
-    Shl
-    Shr
-    Eq
-    Ne
-    Lt
-    Gt
-    Le
-    Ge
-    Compare
-    And
-    Or
-}
-
-enum TUnaryOp {
-    Neg
-    Not
-}
-enum TIndexKind {
-    List
-    Range
-    FixedListProof
-    Map
-    Lane(name: String)
-    User(name: String)
-    LayoutField(name: String)
-    Pool
-}
-
-enum TStrFormat {
-    Display
-    Debug
-    Pretty
-    Fixed(digits: Int)
-    Grouped(digits: Int)
-    Hex(digits: Int)
-    Pad(width: Int, fill: String)
-    PadLeft(width: Int, fill: String)
-    Sci(digits: Int)
-    Percent(digits: Int)
-    Bin
-    Oct
-    Unit(format: TUnitFormat)
-}
-
-enum TUnitFormat {
-    Symbol
-    Name
-    Bare
-}
+// The checker's typed expression tree: JetSema-private. Sema publishes each
+// checked function as its flat FnBody (jet_foundation Facts/Body.jet), never
+// this tree (Sema/BodyFlatten.jet).
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    AutoVectorizationFacts,
+    BinMatchPart,
+    Call,
+    ComponentSignatureDescriptor,
+    CopyFact,
+    CoreCallRecord,
+    DerivationRef,
+    Expr,
+    Field,
+    FrameSchedule,
+    HTTPRouteMethod,
+    KernelProof,
+    Lambda,
+    Measure,
+    OrFallback,
+    ParamZone,
+    SharedLifetime,
+    Span,
+    StrMatchPart,
+    SymbolID,
+    TAddressLifetime,
+    TAllocCtor,
+    TBinaryOp,
+    TBinaryPatternPart,
+    TBranchClass,
+    TBuiltinOp,
+    TCanonicalField,
+    TCapture,
+    TCaptureFacts,
+    TClosureOp,
+    TComptimeValue,
+    TContractDisposition,
+    TContractKind,
+    TContractResult,
+    TDBQueryMetadata,
+    TDestructureBinding,
+    TEffectFacts,
+    TExprSeal,
+    TExprType,
+    TFailureCarrier,
+    TFieldRef,
+    TFnCoerce,
+    TForInMethod,
+    TForeignProvenance,
+    TFuncKind,
+    TGCPromotion,
+    TGenericParam,
+    THardwareCall,
+    TIndexKind,
+    TIntegerBounds,
+    TIntegerWidth,
+    TLetTy,
+    TListPatternRest,
+    TLocal,
+    TMethodRef,
+    TNumericOp,
+    TOptionProbe,
+    TOriginProjection,
+    TPanicLoc,
+    TPatternBindingFact,
+    TPatternPosition,
+    TStaticOwner,
+    TStrFormat,
+    TTargetApplicability,
+    TTextPatternPart,
+    TTransactionSnapshot,
+    TTryConvert,
+    TTypedGoal,
+    TTypedTextForm,
+    TUnaryOp,
+    TUnitRoundingMode,
+    TUnsafeGate,
+    TVisibility,
+    TWebParamReconstruction,
+    Type,
+    TypedHeadKind,
+    Variant,
+    ViewProvenanceMap,
+    WebBucket,
+    WebPartitionMarker,
+]
 
 enum TStrPart {
     Literal(text: String)
@@ -145,28 +104,8 @@ struct TCallArg {
     spread: Bool
 }
 
-struct TFnCoerce {
-    ty: Type
-    already_boxed: Bool
-}
-
-struct TFieldRef {
-    owner: SymbolID?
-    field: SymbolID
-    name: String
-    ty: Type
-    boxed: Bool
-}
-
 struct TEnumArg {
     value: TExpr
-}
-enum TAllocCtor {
-    Arena
-    Bump
-    Pool
-    Fixed(size: Int)
-    FixedOver
 }
 
 enum TEnumPayload {
@@ -202,18 +141,6 @@ struct TNestedPattern {
     enum_type: SymbolID?
 }
 
-enum TPatternPosition {
-    Binding
-    Arm
-}
-struct TPatternBindingFact {
-    name: String
-    span: Span
-    ty: Type
-    mutable: Bool
-    symbol_id: SymbolID?
-}
-
 struct TPattern {
     shape: TPatternShape
     bindings: [TPatternBindingFact]
@@ -235,11 +162,6 @@ enum TPatternField {
     Bind(field: String, local: String, span: Span)
     Value(field: String, value: TExpr, span: Span)
     Nested(field: String, pattern: TNestedPattern, span: Span)
-}
-
-struct TListPatternRest {
-    name: String?
-    span: Span
 }
 
 struct TMapPatternEntry {
@@ -274,17 +196,6 @@ fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
     }
 }
 
-enum TTextPatternPart {
-    Literal(value: String)
-    Hole(name: String, ty: Type, span: Span)
-}
-
-enum TBinaryPatternPart {
-    Literal(value: [U8])
-    Bits(name: String, width: Int, big_endian: Bool, ty: Type, span: Span)
-    Rest(name: String, ty: Type, span: Span)
-}
-
 struct TMatchArm {
     pattern: TPattern
     body: [TStmt]
@@ -296,35 +207,6 @@ enum TIfCond {
     IfLet(pattern: TPattern, subj: TExpr)
 }
 
-enum TLetWrapper {
-    Plain
-    AutomaticRoot
-}
-
-enum TLetTy {
-    Inferred
-    StrView
-    Annotated(ty: Type, wrapper: TLetWrapper)
-}
-
-struct TGCPromotion {
-    span: Span
-    scope: String
-    policy_provenance: String
-    reason: String
-    edges: [TGCPromotionEdge]
-    collection_len: Int?
-}
-
-struct TGCPromotionEdge {
-    binding: String
-    slot: String
-    group: Int
-}
-
-enum TContractKind { Pre Post }
-enum TContractDisposition { Check Proven Stripped }
-
 struct TContract {
     kind: TContractKind
     condition: TExpr
@@ -333,19 +215,6 @@ struct TContract {
     line: Int
     span: Span
     disposition: TContractDisposition
-}
-
-struct TContractResult {
-    carrier_ty: Type
-    binding_ty: Type
-    carrier_local: TLocal
-    binding_local: TLocal
-    mode: TContractResultMode
-}
-
-struct TDestructureBinding {
-    local: TLocal
-    field: String
 }
 
 enum TStmt {
@@ -408,27 +277,6 @@ struct TContextGuard {
     value: TExpr
 }
 
-struct TTransactionSnapshot {
-    local: TLocal
-    rollback_type: Type?
-    snapshot_method: TMethodRef?
-    restore_method: TMethodRef?
-}
-
-struct TUnsafeGate {
-    file: String
-    line: Int
-    reason: String
-    enabled: Bool
-    fenced: Bool
-}
-
-enum TUnitRoundingMode {
-    TowardZero
-    Floor
-    Ceiling
-    NearestEven
-}
 struct TUnitRounding { mode: TUnitRoundingMode, digits: TExpr }
 
 enum TExprKind {
@@ -548,24 +396,12 @@ struct TExpr {
     id: Int{-1}
 }
 
-// One row of a function's expression-type column: the type of the nodes
-// whose `id` is `id`.
-struct TExprType {
-    id: Int
-    ty: Type
-}
-
 // Gives `value` a type other than the one its column row files (a coercion
 // or wrapper retyping a checked node): the node leaves its row and takes a
 // function-local one of its own when the function is sealed.
 fn tir_expr_retype(value: &TExpr, ty: Type) Never! {
     value.ty = ty
     value.id = AST_NODE_GENERATED
-}
-
-struct TIntegerWidth {
-    signed: Bool
-    bits: Int
 }
 
 struct TStructFieldValue {
@@ -584,37 +420,12 @@ enum TListSpreadPart {
     Spread(value: TExpr)
 }
 
-enum TBranchClass {
-    Enum
-    DenseInt
-}
-
-enum TForInMethod {
-    Chars
-    LinesFile
-    LinesStdin
-    LinesProcessStream
-    ChannelReceiver
-    EncodingReader(reader_type: String)
-    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String, item_type: Type)
-}
-
 enum TScopeMemberKind {
     Setup
     ExpectFail(code: String?, message: String?)
     Timeout(duration: TExpr)
     Measure
     Skip
-}
-
-enum TPreludeArg {
-    Jet(ty: Type)
-    HostUsize
-}
-
-enum TStaticOwner {
-    User(name: String)
-    Prelude(rooted: Bool, path: String, generics: [TPreludeArg])
 }
 
 enum TOrFallback {
@@ -625,18 +436,6 @@ enum TOrFallback {
     Continue
     BreakLabel(label: String)
     ContinueLabel(label: String)
-}
-
-enum TOptionProbe {
-    Unwrap
-    Field(name: String)
-}
-
-enum TTypedTextForm {
-    SQLRaw
-    HTMLRaw
-    SQLTemplate
-    SQLParams
 }
 
 enum THostCall {
@@ -673,84 +472,6 @@ enum TFnValueKind {
     Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper_name: String?, captures: [TCapture], callee: TExpr)
     Call(callee: TExpr, args: [TCallArg])
     Send(value: TExpr)
-}
-
-enum TClosureOp {
-    EditDisjoint
-    Map
-    MapMut
-    TryMap
-    Filter
-    TryFilter
-    Each
-    EachMut
-    EachMap
-    MapAny
-    MapAll
-    MapFilter
-    MapMap
-    MapFold
-    MapFlatMap
-    ListBinarySearchBy
-    ListMinMaxBy
-    Find
-    Any
-    BagAny
-    All
-    CountWhere
-    SortBy
-    SortByDesc
-    TrySortBy
-    TrySortByDesc
-    SortByCompare
-    Reduce
-    TakeWhile
-    SkipWhile
-    FlatMap
-    Scan
-    Position
-    MinBy
-    MaxBy
-    Fold
-    GroupBy
-    CountBy
-    UpdateFirst
-    Partition
-    DedupBy
-    IsSortedBy
-    ChunkWhile
-    FilterMap
-    ParaMap
-    ParaFilter
-    ParaPartition
-    ParaFold
-    OptionMap
-    ViewFold
-    ViewMap
-}
-
-enum THardwareCall {
-    RegisterRead(profile_id: String, block: String, register: String, width: RegisterWidth)
-    RegisterWrite(profile_id: String, block: String, register: String, width: RegisterWidth)
-    DMAStart(profile_id: String, channel: String, buffer_ty: Type)
-    DMAWait(profile_id: String, channel: String, buffer_ty: Type)
-}
-struct TDBTableFact {
-    table_id: String
-    read: Bool
-    write: Bool
-}
-
-struct TDBQueryMetadata {
-    source_file: String
-    source_span: Span
-    statement_identity: String
-    table_facts: [TDBTableFact]
-}
-
-struct TCanonicalField {
-    name: String
-    ty: Type
 }
 
 enum THandleOp {
@@ -1069,303 +790,10 @@ enum THandleOp {
     ProcessLines
 }
 
-enum TListRemoveMode {
-    Value
-    Slot
-    Dynamic
-}
-
-enum TZipMode {
-    Strict
-    Short
-    Pad
-}
-
-enum TZipFillMode {
-    DefaultNone
-    Common
-    Columns
-}
-
-enum TBuiltinOp {
-    AtomicMethod(method: String)
-    LenString
-    LenList
-    IsEmpty
-    Push
-    ListTryNew
-    ListTryWithCapacity
-    TryPush
-    TryReserve
-    TryInsertMap
-    TryStringPush
-    Pop
-    PriorityQueuePop
-    InsertMap
-    AddNewMap
-    MapSetDefault
-    MapUpdate
-    MapMerge
-    MapMergeWith
-    InsertList
-    RemoveMap
-    RemoveList(line: Int, mode: TListRemoveMode)
-    CountList
-    Counts
-    ExtendList
-    ConcatList
-    GetMap
-    GetList
-    First
-    Last
-    Contains
-    IndexOf
-    Reverse
-    SwapList
-    Sort
-    SortDesc
-    OrderingThen
-    OrderingReverse
-    JoinSep
-    Sum(float: Bool, f32: Bool)
-    Product(float: Bool)
-    Min(float: Bool)
-    Max(float: Bool)
-    Flatten
-    Intersperse
-    Unzip
-    Clear
-    Chars
-    Bytes(owned: Bool)
-    StringFromBytes
-    StringFromBytesLossy
-    Trim
-    TrimStart
-    TrimEnd
-    PadStart
-    PadEnd
-    StringIndexOf
-    StringCount
-    StringIsAlphabetic
-    StringIsNumeric
-    StringIsWhitespace
-    StringIsASCII
-    StringToTitle
-    StringMethod(method: String)
-    StringSplitOnce
-    StringCutLast
-    Split
-    Lines
-    ParseInt
-    ParseFloat
-    IntToRadix
-    IntFromRadix
-    StartsWith
-    EndsWith
-    Replace
-    ToUpper
-    ToLower
-    ToASCIILower
-    ToASCIIUpper
-    Repeat
-    Slice(line: Int)
-    After
-    Before
-    TrimView
-    AfterView
-    BeforeView
-    Keys
-    Values
-    ContainsKey
-    ToString
-    Take
-    Skip
-    IterToList
-    IterCollect
-    ListLazy
-    StepBy
-    Dedup
-    Chunks
-    Windows
-    IterRepeat
-    IterCycle
-    IterDropLast
-    IterNext
-    IterShuffle
-    IterIsSorted
-    IterLastIndexOf
-    IterAverage(float: Bool)
-    IterCompare
-    IterSplit
-    ListSlice
-    ListEqual
-    ListBinarySearch
-    ListUnion
-    ListIntersection
-    ListDifference
-    ListRandom
-    ListMinMax
-    MapEqual
-    MapFirst
-    MapToList
-    MapTopN
-    MapMin
-    MapMax
-    MapIntersection
-    MapSliceKeys
-    MapFromKeys
-    MapContainsValue
-    MapPopFirst
-    ListReplace
-    Indexed
-    Indexes
-    Zip(mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type])
-    OptionZip(elem_ty: Type)
-    SetFrom
-    SetInsert
-    SetUpdate
-    SetDifferenceUpdate
-    SetIntersectionUpdate
-    SetSymmetricDifferenceUpdate
-    SetRemove
-    SetToList
-    SetUnion
-    SetIntersection
-    SetDifference
-    SetSymmetricDifference
-    SetIsSubset
-    SetIsSuperset
-    SetIsDisjoint
-    SetEqual
-    SetCapacity
-    SetFirst
-    SetValues
-    SetPop
-    SetReplace
-    SetSort
-    SetShuffle
-    SortedSetFrom
-    SortedSetInsert
-    SortedSetRemove
-    SortedSetToList
-    SortedSetUnion
-    SortedSetIntersection
-    SortedSetDifference
-    SortedSetSymmetricDifference
-    SortedSetIsSubset
-    SortedSetIsSuperset
-    SortedSetIsDisjoint
-    PriorityQueueFrom
-    PriorityQueuePeek
-    PriorityQueueToSortedList
-    PriorityQueueRemove(line: Int, mode: TListRemoveMode)
-    LRUPut
-    LRUAddNew
-    LRUGet
-    LRURemove
-    LRUCapacity
-    LRUKeys
-    BitSetAdd
-    BitSetRemove
-    BitSetCount
-    BitSetToList
-    ByteBufferFrom
-    ByteBufferWrite(method: String)
-    ByteBufferToBytes
-    ByteBufferMethod(method: String)
-    ByteBufferWithCapacity
-    BagAdd
-    BagRemove
-    BagHas
-    BagCount
-    DequePushFront
-    DequePushBack
-    DequePopFront
-    DequePopBack
-    DequePeekFront
-    DequePeekBack
-    DequeCapacity
-    DequeContains
-    DequeGet
-    DequeDelete
-    DequeToList
-    DequeJoin
-    DequeReverse
-    DequeSplit
-    DequeFrom
-    TryCollect
-    ViewNew(line: Int)
-    SplitWrite
-    GetDisjointWrite
-}
-
-struct TMethodRef {
-    symbol: SymbolID
-    name: String
-    mangled: Bool
-    trait_owner: SymbolID?
-    operator_identity: String?
-}
-
-enum TNumericOp {
-    Predicate(name: String)
-    BitCount(method: String, width: Int)
-    CastAs(dst_rust: String)
-    CheckedIntToFloat(source_signed: Bool, target_f32: Bool, line: Int)
-    CheckedIntToFixed(host_kind: Int, line: Int)
-    TryFrom(host_kind: Int)
-    FloatToInt(host_kind: Int)
-    FloatNarrow
-    InlineRange(lo: Int, hi: Int, fallible: Bool)
-    ToShow
-    EuclideanDiv
-    EuclideanRem
-}
-
 enum TRequireKind {
     Require(cond: TExpr, msg: TExpr?)
     RequireEq(left: TExpr, right: TExpr)
     Panic(msg: TExpr)
-}
-
-struct TPanicLoc {
-    file: String
-    source_line: String
-    line: Int
-    column: Int
-    caret: Int
-    function: String
-    locals: [TPanicLocal]
-}
-
-struct TPanicLocal {
-    display_name: String
-    local: TLocal
-}
-
-enum TTryConvert {
-    NoConversion
-    Never
-    DefaultErr
-    Typed(fn_name: String, source: Type, target: Type)
-    WidenUnion(enum_name: String, tag: String)
-}
-
-enum TFailureCarrier {
-    Infallible
-    Result(success: Type, error: Type)
-    Optional(value: Type)
-    Diverges(value: Type)
-}
-
-struct TCaptureFacts {
-    escapes: Bool
-    needs_fn_mut: Bool
-    mutable: [String]
-    cloned: [String]
-    frozen: [String]
-    materialized: [String]
-    moved: [String]
 }
 
 struct TLambda {
@@ -1393,38 +821,6 @@ struct TLambda {
 enum TLambdaBody {
     Expr(value: TExpr)
     Block(body: [TStmt])
-}
-
-struct TCapture {
-    source: String
-    local: TLocal
-    ty: Type
-}
-
-struct TWebParamReconstruction {
-    local: TLocal
-    ty: Type
-    fields: [TWebParamField]
-}
-
-struct TWebParamField {
-    field: String
-    parameter: String
-    ty: Type
-}
-
-struct TOriginProjection {
-    receiver: String?
-    span: Span
-    value: TComptimeValue
-}
-
-// A `todo` goal checked in a function body: its source and the card naming
-// the expected type, which is kept apart from the fallback type used to keep
-// checking an unconstrained `todo`.
-struct TTypedGoal {
-    span: Span
-    expected: String
 }
 
 struct TFunc {
@@ -1484,44 +880,9 @@ struct TParameter {
     variadic: Bool
 }
 
-enum TContractResultMode { Direct ResultPayload OptionPayload }
-enum TSerdeCodec { Encode Decode }
-
-enum TFuncKind {
-    TopLevel
-    Method(self_convention: AccessConvention?, owner_type: Type)
-    TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolID, serde_codec: TSerdeCodec?)
-}
-
 enum TPlace {
     Local(local: TLocal)
     Expr(value: TExpr)
-}
-
-enum TCostKind {
-    ViewMaterialization
-    CollectionCopyOnWrite
-    ExactIntSpill
-    OutcomeConstruction
-    RepresentationFallback
-}
-
-enum TCostState {
-    SemanticRemainder
-    OptimizerRemoved
-}
-
-enum TFactExclusivity {
-    Unknown
-    Shared
-    Exclusive
-    Move
-}
-
-enum TFactPurity {
-    Unknown
-    Pure
-    Impure
 }
 
 fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
@@ -1860,6 +1221,7 @@ fn tir_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Al
     }
 
 }
+
 fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if expression.kind == {
         .StrLit(parts) -> loop part in parts {
@@ -2043,15 +1405,6 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
     }
 }
 
-// The expression-type column under construction (tir_function_seal): the
-// rows filed so far, the next free function-local id, and whether every node
-// takes a fresh id (a function assembled from other functions' nodes).
-struct TExprSeal {
-    rows: [TExprType]
-    next: Int
-    renumber: Bool
-}
-
 // Gives every node of `function` that has no id yet (every node when
 // `renumber`) the next function-local id from `next` down and files its
 // type in the function's expression-type column. Returns the next free id.
@@ -2064,21 +1417,6 @@ fn tir_function_seal(function: &TFunc, next: Int, renumber: Bool) -> Int Never! 
     &function.expr_types.sort_by((left: TExprType, right: TExprType) -> left.id <=> right.id)
     seal.next
 }
-
-// The type a sealed column (tir_function_seal) files for node id `id`.
-fn tir_expr_type(rows: [TExprType], id: Int) -> Type? Never! {
-    low := 0
-    high := rows.len()
-    loop low < high {
-        middle :: (low + high) /% 2
-        if rows[middle].id < id -> low = middle + 1 else -> high = middle
-    }
-    if low < rows.len() && rows[low].id == id -> return Val(rows[low].ty)
-    None
-}
-
-// The first function-local id `tir_function_seal` hands out.
-TEXPR_FIRST_LOCAL_ID :: -2
 
 fn tir_seal_expr(value: &TExpr, seal: &TExprSeal) Never! {
     if value.id == AST_NODE_GENERATED || seal.renumber {

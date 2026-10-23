@@ -1,0 +1,87 @@
+// Cost facts read off the checker's tree (Sema/Tree.jet).
+use jet_foundation.[
+    OrFallback,
+    TIntegerBounds,
+    TUnaryOp,
+    integer_bounds_exact,
+    tir_cost_bounded,
+    tir_cost_combine_bounds,
+    tir_cost_max,
+    tir_cost_min,
+    tir_cost_type_bounds,
+]
+
+// The exact value an integer literal node spells. A literal beyond i64 is a
+// BigInt constant.
+fn tir_expr_literal_integer(expression: TExpr) -> Int? Never! {
+    if expression.kind == {
+        .IntLit(value, _) -> return Val(value)
+        .CtLit(value) -> {
+            if value == .BigInt(decimal) -> return Val(Int.parse(decimal) ?? return None)
+        }
+        else -> {}
+    }
+    None
+}
+
+// The bounds a node states by itself: an integer literal, a negated literal
+// (a fixed-width operand crosses the checked Int-to-fixed conversion), or a
+// local, which carries its binding's bounds. No other node states bounds.
+fn tir_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
+    if expression.kind == {
+        .Local(local) -> return local.integer_bounds
+        .Unary(op, operand) -> {
+            if op != TUnaryOp.Neg -> return None
+            literal := tir_expr_literal_integer(operand)
+            if operand.kind == .NumericMethod(receiver, operation) {
+                if operation == .CheckedIntToFixed(_, _) -> literal = tir_expr_literal_integer(receiver)
+            }
+            number :: literal ?? return None
+            return Val(integer_bounds_exact(-number))
+        }
+        else -> {}
+    }
+    value :: tir_expr_literal_integer(expression) ?? return None
+    Val(integer_bounds_exact(value))
+}
+
+fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
+    known :: tir_expr_known_bounds(expression)
+    if known != None -> return known
+    bounds := TIntegerBounds?{None}
+    if expression.kind == {
+        .CtLit(value) -> {
+            if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
+        }
+        .NumericMethod(receiver, operation) -> {
+            if operation == {
+                .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi})
+                .CastAs(destination) -> {
+                    if destination == "i64" && tir_cost_integer_bounds(receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 -> bounds = Val(original)
+                }
+                else -> {}
+            }
+        }
+        .Unary(op, value) -> {
+            if op == TUnaryOp.Neg && tir_cost_integer_bounds(value) == .Val(operand) {
+                bounds = tir_cost_bounded(-operand.hi, -operand.lo)
+            }
+        }
+        .Binary(op, _, _, left, right) -> {
+            if tir_cost_integer_bounds(left) == .Val(lhs) && tir_cost_integer_bounds(right) == .Val(rhs) -> bounds = tir_cost_combine_bounds(op, lhs, rhs)
+        }
+        .OrFallback(value, fallback, _) -> {
+            success := TIntegerBounds?{None}
+            if value.ty == {
+                .Option(inner) -> success = tir_cost_type_bounds(inner)
+                .Result(ok, _) -> success = tir_cost_type_bounds(ok)
+                else -> {}
+            }
+            if fallback == .Value(alternative) {
+                if success == .Val(normal) && tir_cost_integer_bounds(alternative) == .Val(other) -> bounds = Val(TIntegerBounds{lo: tir_cost_min(normal.lo, other.lo), hi: tir_cost_max(normal.hi, other.hi)})
+            } else { bounds = success }
+        }
+        else -> {}
+    }
+    if bounds != None -> bounds else -> tir_cost_type_bounds(expression.ty)
+}

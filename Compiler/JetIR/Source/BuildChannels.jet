@@ -3,7 +3,7 @@
 // one runtime channel into the tuple, the endpoint methods cross the native
 // channel exports, and `loop value in rx` walks the receiver as an Iter.
 
-use jet_foundation.[Span, TExpr, THandleOp, TLocal, TStmt, Type, type_carrier_identity]
+use jet_foundation.[Span, BodyHandleOp, TLocal, Type, type_carrier_identity]
 
 // The element of a `Sender<T>` / `Receiver<T>` endpoint (Lower Tasks.jet
 // lower_task_handle_element).
@@ -24,7 +24,7 @@ fn ir_channel_row(m: &IRModule, ty: Type, endpoint: String) -> Int Never! {
 // `channel<T>()` / `channel_bounded<T>(capacity)` (Lower Tasks.jet
 // lower_channel_call): both endpoints of one runtime channel, written into
 // the result tuple; the bound crosses as its exact Int.
-fn ir_channel_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, bounded: Bool, args: [TExpr], span: Span) -> Int Never! {
+fn ir_channel_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, bounded: Bool, args: [Int], span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     fields :: if ir_untag(result_ty) == .Tuple(items) -> items else -> { return ir_fail_slot(&b, span, "channel producing {ir_type_name(result_ty)}") }
     members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, result_ty)
@@ -84,7 +84,7 @@ fn ir_channel_capacity_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, capacity:
 // endpoint, send on a Sender (an owned copy of the value moves into the
 // channel), is_ready, try_receive and receive on a Receiver. None leaves any
 // other operation to ir_handle_method.
-fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: THandleOp, args: [TExpr], span: Span) -> Int? Never! {
+fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     receiver_ty :: ir_subst(m, ir_ty(p, b, receiver))
     sender :: ir_channel_element(receiver_ty, "Sender")
     receiving :: ir_channel_element(receiver_ty, "Receiver")
@@ -143,7 +143,7 @@ fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
 // receiver becomes a runtime Iter over the values it receives, which takes a
 // fresh endpoint over and adds one for a kept receiver; the Iter is then
 // walked as any other.
-fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, body: [TStmt], span: Span) Never! {
+fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, body: [Int], span: Span) Never! {
     collection_ty :: ir_ty(p, b, collection)
     element :: ir_channel_element(ir_subst(m, collection_ty), "Receiver") ?? return ir_fail(&b, span, "channel loop over {ir_type_name(collection_ty)}")
     iter_ty :: Type.Apply{name: "Iter", args: [Type]{element}}
@@ -164,14 +164,14 @@ fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, va
 // (exact nanoseconds) become two owned Lists, which the runtime empties, and
 // the runtime writes the ready arm and its payload (the received value's
 // box, or None for a timer) into the result tuple.
-fn ir_select_wait(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, table: TExpr, nonblocking: Bool, span: Span) -> Int Never! {
+fn ir_select_wait(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, table: Int, nonblocking: Bool, span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     fields :: if ir_untag(result_ty) == .Tuple(items) -> items else -> { return ir_fail_slot(&b, span, "select producing {ir_type_name(result_ty)}") }
     members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, result_ty)
     if members.len() != 2 -> return ir_fail_slot(&b, span, "select producing {ir_type_name(result_ty)}")
-    receivers := [TExpr]{}
-    durations := [TExpr]{}
-    if !ir_select_table(table, &receivers, &durations) -> return ir_fail_slot(&b, span, "select over a non-canonical readiness table")
+    receivers := [Int]{}
+    durations := [Int]{}
+    if !ir_select_table(p, b, table, &receivers, &durations) -> return ir_fail_slot(&b, span, "select over a non-canonical readiness table")
     payload :: ir_select_payload_type(result_ty)
     receiver_list_ty :: Type.List{element: Type.Apply{name: "Receiver", args: [Type]{payload}}}
     recvs :: ir_list_literal(&m, p, &b, receiver_list_ty, receivers, span)
@@ -213,17 +213,17 @@ fn ir_select_payload_type(ty: Type) -> Type Never! {
 
 // The receivers and timer durations of a readiness table, latest arm first
 // (codegen jet_codegen_lower_select_builder); false for any other builder.
-fn ir_select_table(table: TExpr, receivers: &[TExpr], durations: &[TExpr]) -> Bool Never! {
-    if table.kind == {
+fn ir_select_table(p: IRProgram, b: IRBuilder, table: Int, receivers: &[Int], durations: &[Int]) -> Bool Never! {
+    if ir_body_node(p, b, table).kind == {
         .SelectStart -> return true
         .SelectRecv(previous, channel) -> {
             &receivers.push(channel.copy())
-            return ir_select_table(previous, &receivers, &durations)
+            return ir_select_table(p, b, previous, &receivers, &durations)
         }
         .SelectAfter(previous, duration, value) -> {
             if value != None -> return false
             &durations.push(duration.copy())
-            return ir_select_table(previous, &receivers, &durations)
+            return ir_select_table(p, b, previous, &receivers, &durations)
         }
         else -> return false
     }

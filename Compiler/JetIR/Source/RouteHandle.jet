@@ -1,9 +1,9 @@
-// Closed Prelude routing and ordinary IR lowering for checked THandleOp nodes.
+// Closed Prelude routing and ordinary IR lowering for checked BodyHandleOp nodes.
 // Special expression families stay owned by their structural codegen paths.
 use jet_foundation.[
     Effect,
     TFailureCarrier,
-    THandleOp,
+    BodyHandleOp,
     Type,
     type_name,
 ]
@@ -755,7 +755,7 @@ fn ir_handle_civil_time_route(kind: String, method: String) -> IRHandleRoute? {
     Val(ir_handle_route(false, "core.time", member, "{prefix}::{symbol_method}", mask, None))
 }
 
-fn ir_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
+fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
     if operation == {
         .HTTPServerMethod(kind, method) -> {
             route :: ir_browser_handle_route(kind, method, argument_count, true)
@@ -876,7 +876,7 @@ fn ir_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count:
     }
 }
 
-fn ir_general_handle_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
+fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
     dynamic := ir_handle_dynamic_route(operation, receiver, argument_count, carrier)
     if dynamic != None -> return dynamic
     if operation == {

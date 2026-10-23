@@ -45,7 +45,7 @@ use jet_foundation.[
     Span,
     JET_COMPILER_TARGET_USIZE_MAX,
     PolicyKey,
-    TFunc,
+    FnBody,
     ast_comptime_value_json,
     ast_comptime_value_show,
     diagnostic_from_registry,
@@ -223,7 +223,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     entry_key :: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
     declarations := jet_driver_checked_declarations(&checked)
     // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
-    layouts :: ir_program_new([TFunc]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    layouts :: ir_program_new([FnBody]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     // A failure the evaluator reports points at `run`.
     span := Span{start: 0, end: 0}
     loop function in checked.functions {

@@ -20,7 +20,7 @@
 //   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
 //   after spawning; then, unfiltered, run each Check Output once.
 
-use jet_foundation.[Span, TConstantDef, TFunc, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type]
+use jet_foundation.[Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One test the harness runs: its checked function `key`, the identity `id`
@@ -36,7 +36,7 @@ struct IROutputCheck { name: String, key: String }
 struct IRTestHarness { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool }
 
 // Builds `harness` and every function it reaches.
-fn ir_build_tests(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness) -> IRBuildResult Never! {
+fn ir_build_tests(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
     m := ir_module_for(p)

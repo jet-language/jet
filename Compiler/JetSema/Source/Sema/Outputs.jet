@@ -547,8 +547,8 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegi
     }
     target :: fact.module_id
     if !indexed[target] {
-        loop function_index in 0..<modules[target].functions.len() {
-            key :: modules[target].functions[function_index].key
+        loop function_index in 0..<modules[target].checked.len() {
+            key :: modules[target].checked[function_index].key
             if rows[target].get(key) == None -> rows[target][key] = function_index
         }
         indexed[target] = true
@@ -564,9 +564,9 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegi
     }
     // copy: the published Output owns its return type, while the checked function row stays in
     // `modules` (a read parameter).
-    fact.return_type = modules[target].functions[function_index].ret.copy()
+    fact.return_type = modules[target].checked[function_index].ret.copy()
     fact.failure_contract = failure_contract_of_function(fact.return_type, declaration_span)
-    fact.effects = modules[target].functions[function_index].effects.solved.copy()
+    fact.effects = modules[target].checked[function_index].effects.solved.copy()
     &fact.effects.sort()
     fact
 }

@@ -3,19 +3,19 @@
 // the selector's Core/Text/Fmt.jet helper renders the value, called with the
 // selector's constants.
 
-use jet_foundation.[Span, TExpr, TStrFormat, Type]
+use jet_foundation.[Span, TStrFormat, Type]
 
 // The text `{value:format}` adds to the string: a fresh String. Pretty hands
 // the helper the Debug spelling (quotes on a String included); a String
 // parameter takes any other value's Display text; a numeric parameter takes
 // the value cast to its type.
-fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, format: TStrFormat, span: Span) -> Int Never! {
+fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, format: TStrFormat, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     concrete :: ir_subst(m, value_ty)
     member :: ir_string_format_member(concrete, format) ?? return ir_fail_slot(&b, span, "interpolation format {format}")
     row := -1
     loop (index, function) in p.functions {
-        if function.name == member && ir_string_format_source(function) && p.rows.get(function.key) == (Val(index)) {
+        if function.name == member && ir_string_format_source(function.module_identity, function.source_file, function.kind) && p.rows.get(function.key) == (Val(index)) {
             row = index
             break
         }

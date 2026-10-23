@@ -8,7 +8,7 @@
 // validated by signature here; ir_call builds each call of one as its
 // machine operation (ir_intrinsic_call).
 
-use jet_foundation.[AccessConvention, Span, TCallArg, TConstantDef, TFunc, TImplDef, TTypeDef, Type, foundation_json_quote]
+use jet_foundation.[AccessConvention, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One `#Export(c)` row of the entry module: its checked function's key and
@@ -94,7 +94,7 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
 // ir_build_program's. A row whose function does not satisfy the C export
 // law is not an export. `lifecycle_rows` are the lines of the lifecycle
 // list (ir_lifecycle_rows).
-fn ir_build_library(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
+fn ir_build_library(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     ir_foreign_index(&p, ^foreign)
     m := ir_module_for(p)
@@ -294,14 +294,14 @@ fn ir_c_primitive(ty: Type) -> String? Never! {
     None
 }
 
-fn ir_top_level(function: TFunc) -> Bool Never! {
+fn ir_top_level(function: FnBody) -> Bool Never! {
     if function.kind == {
         .TopLevel -> true
         else -> false
     }
 }
 
-fn ir_infallible(function: TFunc) -> Bool Never! {
+fn ir_infallible(function: FnBody) -> Bool Never! {
     if function.failure_carrier == {
         .Infallible -> true
         else -> false
@@ -311,7 +311,7 @@ fn ir_infallible(function: TFunc) -> Bool Never! {
 // Whether the value an export publishes exists: the
 // success value of a Result carrier or the plain return; an Optional or
 // diverging carrier has no C result.
-fn ir_c_export_has_result(function: TFunc) -> Bool Never! {
+fn ir_c_export_has_result(function: FnBody) -> Bool Never! {
     if function.failure_carrier == {
         .Infallible | .Result(_, _) -> true
         else -> false
@@ -320,7 +320,7 @@ fn ir_c_export_has_result(function: TFunc) -> Bool Never! {
 
 // That published value's type (a `T Never!` function publishes T, its
 // executable return); None for void (a unit result).
-fn ir_c_export_result(function: TFunc) -> Type? Never! {
+fn ir_c_export_result(function: FnBody) -> Type? Never! {
     if function.failure_carrier == {
         .Result(success, _) -> {
             if ir_unit_type(success) -> return None
@@ -335,7 +335,7 @@ fn ir_c_export_result(function: TFunc) -> Type? Never! {
 
 // The C export law: a monomorphic top-level
 // function whose every parameter and published result is one C primitive.
-fn ir_c_export_law(function: TFunc) -> Bool Never! {
+fn ir_c_export_law(function: FnBody) -> Bool Never! {
     if !ir_top_level(function) || function.generic_params.len() != 0 -> return false
     loop param in function.params {
         if ir_c_primitive(param.ty) == None -> return false
@@ -359,7 +359,7 @@ fn ir_export_native_type(ty: Type) -> String? Never! {
 // The native object has no generated boundary, so an export is an
 // infallible top-level C function: by-value primitive parameters and a
 // primitive or void result. Every problem of the signature is listed.
-fn ir_export_signature_problems(function: TFunc) -> [String] Never! {
+fn ir_export_signature_problems(function: FnBody) -> [String] Never! {
     problems := [String]{}
     if !ir_top_level(function) || function.generic_params.len() != 0 -> &problems.push("is not a monomorphic top-level function")
     if !ir_infallible(function) -> &problems.push("has a failure carrier; a native C export is infallible")
@@ -378,13 +378,13 @@ fn ir_export_signature_problems(function: TFunc) -> [String] Never! {
 }
 
 // A lifecycle hook: no parameters, no result.
-fn ir_void_hook(function: TFunc) -> Bool Never! {
+fn ir_void_hook(function: FnBody) -> Bool Never! {
     function.params.len() == 0 && ir_c_export_result(function) == None
 }
 
 // A runtime-only ordinary Jet reference function of `count` parameters
 // that an intrinsic may replace: never a mismatched declaration.
-fn ir_intrinsic_signature(function: TFunc, count: Int) -> Bool Never! {
+fn ir_intrinsic_signature(function: FnBody, count: Int) -> Bool Never! {
     function.foreign == None && ir_top_level(function) && function.generic_params.len() == 0 && ir_infallible(function) && function.params.len() == count
 }
 
@@ -404,7 +404,7 @@ fn ir_float_type(ty: Type?) -> Bool Never! {
 
 // rt_f64_bits reads a Float and returns I64 (`to_bits`); rt_f64_from_bits
 // the reverse.
-fn ir_bitcast_signature(function: TFunc, to_bits: Bool) -> Bool Never! {
+fn ir_bitcast_signature(function: FnBody, to_bits: Bool) -> Bool Never! {
     if !ir_intrinsic_signature(function, 1) || function.params[0].convention != AccessConvention.Read -> return false
     input :: function.params[0].ty
     if to_bits -> return ir_float_type(Val(input)) && ir_i64_type(ir_executable_return(function))
@@ -413,7 +413,7 @@ fn ir_bitcast_signature(function: TFunc, to_bits: Bool) -> Bool Never! {
 
 // The export an address intrinsic names: `arity` read I64 parameters and an
 // I64 result.
-fn ir_address_target_signature(function: TFunc, arity: Int) -> Bool Never! {
+fn ir_address_target_signature(function: FnBody, arity: Int) -> Bool Never! {
     if !ir_intrinsic_signature(function, arity) -> return false
     loop param in function.params {
         if param.convention != AccessConvention.Read || !ir_i64_type(Val(param.ty)) -> return false
@@ -426,20 +426,20 @@ fn ir_address_target_signature(function: TFunc, arity: Int) -> Bool Never! {
 // ConstText of its data row) as an I64; a bit cast stores its operand in a
 // frame word and loads it back in the other class; an address intrinsic is
 // the FunctionAddress of its export.
-fn ir_intrinsic_call(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, args: [TCallArg], span: Span) -> Int Never! {
+fn ir_intrinsic_call(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, args: [BodyCallArg], span: Span) -> Int Never! {
     word_row :: ir_word_row(&m)
     float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "type Float")
     if intrinsic == {
-        .StaticText -> ir_static_text_call(&m, &b, args, word_row, span)
+        .StaticText -> ir_static_text_call(&m, p, &b, args, word_row, span)
         .FloatBits -> ir_bitcast(&m, p, &b, args, float_row, word_row, span)
         .FloatFromBits -> ir_bitcast(&m, p, &b, args, word_row, float_row, span)
         .FunctionAddress(key) -> ir_address_call(&m, p, &b, key, args, word_row, span)
     }
 }
 
-fn ir_static_text_call(m: &IRModule, b: &IRBuilder, args: [TCallArg], word_row: Int, span: Span) -> Int Never! {
+fn ir_static_text_call(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "rt_static_text is literal-only")
-    parts :: if args[0].value.kind == {
+    parts :: if ir_body_node(p, b, args[0].value).kind == {
         .StrLit(written) -> written
         else -> { return ir_fail_slot(&b, span, "rt_static_text is literal-only") }
     }
@@ -455,7 +455,7 @@ fn ir_static_text_call(m: &IRModule, b: &IRBuilder, args: [TCallArg], word_row: 
     slot
 }
 
-fn ir_address_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args: [TCallArg], word_row: Int, span: Span) -> Int Never! {
+fn ir_address_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "a runtime address intrinsic takes no arguments")
     target :: ir_function_id(&m, p, key, [Type]{}) ?? return ir_fail_slot(&b, span, "runtime address target {key} is not among the checked functions")
     slot :: ir_temp(&m, &b, word_row)
@@ -465,7 +465,7 @@ fn ir_address_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args:
 
 // The bits of the one argument (of row `input`) as a value of row `output`:
 // stored in a frame word, loaded back.
-fn ir_bitcast(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [TCallArg], input: Int, output: Int, span: Span) -> Int Never! {
+fn ir_bitcast(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], input: Int, output: Int, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "a runtime bitcast reads one value")
     value :: ir_value_as(&m, p, &b, args[0].value, input, span)
     if ir_failed(b) -> return -1

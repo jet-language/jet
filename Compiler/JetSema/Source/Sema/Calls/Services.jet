@@ -14,22 +14,15 @@ use jet_foundation.[
     Span,
     SymbolID,
     SymbolKind,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
     TGenericParam,
-    TStmt,
     StrPart,
-    TStrPart,
     Type,
     core_source_owns_type,
     ast_empty_call_arg_flags,
     core_call,
     UnOp,
     expr_span,
-    tir_each_expr_child,
-    tir_each_stmt_child,
 ]
 
 struct SemaServiceCoreMethodContract {
@@ -615,8 +608,8 @@ struct SemaServiceFunctionRow { module_index: Int, function_index: Int }
 fn sema_services_function_rows(modules: [SemaGraphModuleResult]) -> [String:SemaServiceFunctionRow] Never! {
     rows := [String:SemaServiceFunctionRow]{}
     loop module_index in 0..<modules.len() {
-        loop function_index in 0..<modules[module_index].functions.len() {
-            key :: modules[module_index].functions[function_index].key
+        loop function_index in 0..<modules[module_index].checked.len() {
+            key :: modules[module_index].checked[function_index].key
             if rows.get(key) == None -> rows[key] = SemaServiceFunctionRow{module_index: module_index, function_index: function_index}
         }
     }
@@ -625,7 +618,7 @@ fn sema_services_function_rows(modules: [SemaGraphModuleResult]) -> [String:Sema
 
 fn sema_services_worker_reaches(start: String, target: String, modules: [SemaGraphModuleResult], rows: [String:SemaServiceFunctionRow]) -> Bool Never! {
     first :: rows.get(start) ?? return false
-    pending := modules[first.module_index].functions[first.function_index].effects.call_edges
+    pending := modules[first.module_index].checked[first.function_index].effects.call_edges
     visited := [String:Bool]{}
     loop pending.len() > 0 {
         current := &pending.pop() ?? break
@@ -633,7 +626,7 @@ fn sema_services_worker_reaches(start: String, target: String, modules: [SemaGra
         if visited.get(current) != None -> next
         visited[current] = true
         if rows.get(current) == .Val(row) {
-            loop edge in modules[row.module_index].functions[row.function_index].effects.call_edges {
+            loop edge in modules[row.module_index].checked[row.function_index].effects.call_edges {
                 if visited.get(edge) == None -> &pending.push(edge)
             }
         }
@@ -645,7 +638,7 @@ fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Dia
     diagnostics := [Diagnostic]{}
     handlers := [SemaServiceWorkerHandler]{}
     loop module_row in modules {
-        loop function in module_row.functions {
+        loop function in module_row.checked {
             loop statement in function.body -> sema_services_find_handlers_stmt(statement, &handlers)
         }
     }
@@ -658,7 +651,7 @@ fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Dia
             &diagnostics.push(sema_error("E0112", handler.span, "service worker handler `{handler.name}` has no checked function body", "service handlers must be known functions so their effect and recursion graphs can be validated", "provide a checked top-level function body"))
             next
         }
-        checked :: modules[row.module_index].functions[row.function_index]
+        checked :: modules[row.module_index].checked[row.function_index]
         if (checked.effects.maximal || (checked.effects.direct.len() > 0 && checked.effects.solved.len() == 0)) && reported_effects.get(handler.key) == None {
             reported_effects[handler.key] = true
             &diagnostics.push(sema_error("E0112", handler.span, "service worker handler `{handler.name}` has an open effect row", "service worker handlers must have a closed, checked effect summary", "remove open effects from the handler and its callees"))

@@ -2,8 +2,9 @@
 // Sema/Purity.rs e3401, adapted to checked TIR and the canonical effect facts.
 // No source-text name resolution or interpreter participates in this check.
 use jet_foundation.[
-    Diagnostic, Span, TExpr, TFunc, diagnostic_with_rights, tir_each_expr_child,
-    tir_each_stmt_child, TStmt,
+    Diagnostic,
+    Span,
+    diagnostic_with_rights,
 ]
 
 struct SemaPureRootPosition {
@@ -34,7 +35,7 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions
         }
         if key == "" && expression.kind == .Call(callee, _, _) -> key = callee.key
         if positions.get(key) == .Val(position) {
-            found :: sema_pure_root_function(root, modules, positions, calls, modules[position.module_index].functions[position.function_index], &visited, &path)
+            found :: sema_pure_root_function(root, modules, positions, calls, modules[position.module_index].checked[position.function_index], &visited, &path)
             if found != None -> return found
         } else {
             denied := false
@@ -103,14 +104,14 @@ fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResult]) 
     positions := [String:SemaPureRootPosition]{}
     node_by_key := [String:Int]{}
     loop module_index in 0..<modules.len() {
-        loop function_index in 0..<modules[module_index].functions.len() {
-            key :: modules[module_index].functions[function_index].key
+        loop function_index in 0..<modules[module_index].checked.len() {
+            key :: modules[module_index].checked[function_index].key
             positions[key] = SemaPureRootPosition{module_index: module_index, function_index: function_index}
             node_by_key[key] = node_by_key.len()
         }
     }
     position :: positions.get(entry_key) ?? return [Diagnostic]{}
-    root :: modules[position.module_index].functions[position.function_index]
+    root :: modules[position.module_index].checked[position.function_index]
     // One call index serves every module; each lookup names its module.
     calls :: SemaEffectCallIndex{modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key}
     visited := [String:Bool]{}

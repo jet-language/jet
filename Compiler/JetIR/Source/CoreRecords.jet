@@ -1,34 +1,5 @@
 // Complete checked top-level TIR functions into backend-neutral IR.
-use jet_foundation.[
-    AccessConvention,
-    CORE_CALLS,
-    CallablePolicy,
-    CallablePolicyChain,
-    CoreCallCompletion,
-    CoreCallRecord,
-    CoreCallResourceAccess,
-    CoreCapabilityContract,
-    CoreMarkerApplication,
-    FunctionCallMetadata,
-    FunctionDefaultRef,
-    AuthorityDecision,
-    Span,
-    TEffectFacts,
-    TEffectSpan,
-    TFailureCarrier,
-    TFunc,
-    TFuncKind,
-    TGenericParam,
-    TLambda,
-    TParameter,
-    TStmt,
-    TTargetApplicability,
-    TVisibility,
-    TWebParamReconstruction,
-    Type,
-    core_call_key,
-    type_identity_key,
-]
+use jet_foundation.[AccessConvention, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallCompletion, CoreCallRecord, CoreCallResourceAccess, CoreCapabilityContract, CoreMarkerApplication, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TTargetApplicability, TVisibility, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
 use jet_sema.[
     SemaComptimeItemRequest,
 ]
@@ -166,7 +137,7 @@ fn ir_canonical_core_record_in(rows: [CoreCallRecord], record: CoreCallRecord) -
     canonical
 }
 
-fn ir_lambda_function_type(lambda: TLambda) -> Type Never! {
+fn ir_lambda_function_type(lambda: BodyLambda) -> Type Never! {
     metadata := FunctionCallMetadata?{None}
     if lambda.host_param_conventions != None {
         conventions :: lambda.host_param_conventions ?? [AccessConvention]{}
@@ -181,9 +152,10 @@ fn ir_lambda_function_type(lambda: TLambda) -> Type Never! {
     Type.Fn{params: lambda.param_types, ret: lambda.ret, effect_bound: None, param_contract: None, call_metadata: metadata, return_view_provenance: None}
 }
 
-// The synthetic function a comptime item lowers as.
-fn ir_comptime_item_tfunc(module_identity: String, module_name: String, key: String, source_file: String, span: Span, result_type: Type) -> TFunc Never! {
-    TFunc{
+// The synthetic function a comptime item lowers as, with an empty body the
+// caller fills with the item's expression.
+fn ir_comptime_item_shell(module_identity: String, module_name: String, key: String, source_file: String, span: Span, result_type: Type) -> FnBody Never! {
+    FnBody{
         name: "__comptime_item",
         module_name: module_name,
         module_identity: module_identity,
@@ -197,7 +169,7 @@ fn ir_comptime_item_tfunc(module_identity: String, module_name: String, key: Str
         web_marker: None,
         visibility: TVisibility.Private,
         foreign: None,
-        params: [TParameter]{},
+        params: [BodyParameter]{},
         web_param_reconstructions: [TWebParamReconstruction]{},
         ret: Val(result_type),
         gc_return: false,
@@ -219,20 +191,21 @@ fn ir_comptime_item_tfunc(module_identity: String, module_name: String, key: Str
         is_scalar: false,
         kernel_proof: None,
         uses_stack_sentry: false,
-        body: [TStmt]{},
+        body: [Int]{},
         kind: TFuncKind.TopLevel,
+        tree: body_tree_new(),
     }
 }
 
 // `module_name` is the name of the item's module.
-fn ir_comptime_item_function(request: SemaComptimeItemRequest, module_name: String) -> TFunc {
-    result_type := request.expression.ty
+fn ir_comptime_item_function(request: SemaComptimeItemRequest, module_name: String) -> FnBody {
+    result_type := body_type(request.expression.tree, request.expression.root)
     if request.expected_type != None {
         expected :: request.expected_type ?? panic("checked comptime item lost its expected type")
         if type_identity_key(expected) != type_identity_key(result_type) -> panic("checked comptime item result disagrees with its expected type")
         result_type = expected
     }
-    ir_comptime_item_tfunc(request.module_identity, module_name, "{request.module_identity}::__comptime_item::{request.key}", request.source_file, request.span, result_type)
+    ir_comptime_item_shell(request.module_identity, module_name, "{request.module_identity}::__comptime_item::{request.key}", request.source_file, request.span, result_type)
 }
 
 // The next unclaimed part of a dynamically scheduled lowering.

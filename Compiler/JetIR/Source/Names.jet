@@ -3,14 +3,14 @@
 // metadata, view provenance) inside an expression or a type is very costly
 // to format, so no message interpolates a Type or an expression directly.
 
-use jet_foundation.[TBuiltinOp, TExprKind, THostCall, TPatternBinding, TPatternShape, TTryConvert, Type, type_carrier_identity]
+use jet_foundation.[TBuiltinOp, NodeKind, BodyHostCall, BodyPatternBinding, BodyPatternShape, TTryConvert, Type, type_carrier_identity]
 
 // A checked type's carrier spelling (function types without their metadata).
 fn ir_type_name(ty: Type) -> String Never! {
     type_carrier_identity(ty)
 }
 
-fn ir_expr_kind_name(kind: TExprKind) -> String Never! {
+fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
     if kind == {
         .IntLit(_, _) -> "IntLit"
         .FloatLit(_) -> "FloatLit"
@@ -116,7 +116,7 @@ fn ir_expr_kind_name(kind: TExprKind) -> String Never! {
     }
 }
 
-fn ir_shape_name(shape: TPatternShape) -> String Never! {
+fn ir_shape_name(shape: BodyPatternShape) -> String Never! {
     if shape == {
         .Variant(_, _, _, _) -> "Variant"
         .Present(_, _, _, _) -> "Present"
@@ -133,7 +133,7 @@ fn ir_shape_name(shape: TPatternShape) -> String Never! {
     }
 }
 
-fn ir_binding_name(binding: TPatternBinding) -> String Never! {
+fn ir_binding_name(binding: BodyPatternBinding) -> String Never! {
     if binding == {
         .Wildcard -> "Wildcard"
         .Bind(_, _) -> "Bind"
@@ -148,7 +148,7 @@ fn ir_conversion_name(conversion: TTryConvert) -> String Never! {
     "{conversion}"
 }
 
-fn ir_host_call_name(call: THostCall) -> String Never! {
+fn ir_host_call_name(call: BodyHostCall) -> String Never! {
     if call == {
         .Method(_, method, _) -> "Method {method}"
         .CellGuardProject(_, _, _, _, _) -> "CellGuardProject"

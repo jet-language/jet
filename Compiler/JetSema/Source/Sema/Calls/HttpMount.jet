@@ -14,18 +14,13 @@ use jet_foundation.[
     Span,
     Symbol,
     SymbolKind,
-    TExpr,
-    TExprKind,
     TLetTy,
-    TStmt,
     Type,
     ast_binding,
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
     symbol_id,
     tir_symbol_local,
-    tir_each_expr_child,
-    tir_each_stmt_list_child,
     type_name,
 ]
 
@@ -168,7 +163,7 @@ fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGrap
     mounted := [String]{}
     loop module_row in modules {
         identity :: module_row.module_identity
-        loop function in module_row.functions -> sema_http_collect_mounted_body(function.body, graph, identity, &mounted)
+        loop function in module_row.checked -> sema_http_collect_mounted_body(function.body, graph, identity, &mounted)
     }
     diagnostics := [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {

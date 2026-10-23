@@ -30,9 +30,7 @@ use jet_foundation.[
     TComptimeField,
     TComptimeReport,
     TComptimeValue,
-    TFunc,
     TLocal,
-    TStmt,
     TupleField,
     Type,
     ViewProvenance,
@@ -1576,7 +1574,7 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
 fn sema_compiler_index_function_views(graph: SemaGraphResult) -> [String:TComptimeValue] Never! {
     views := [String:TComptimeValue]{}
     loop checked_module in graph.modules {
-        loop function in checked_module.functions {
+        loop function in checked_module.checked {
             if views.get(function.key) == None -> views[function.key] = sema_compiler_index_view_provenance_values(function.return_view_provenance)
         }
     }
@@ -1672,7 +1670,7 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
             sema_compiler_index_append_definition(reference.symbol, target_module, function_views, &definitions, &definition_keys)
             &references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path))
         }
-        loop function in checked_module.functions {
+        loop function in checked_module.checked {
             &effects.push(sema_compiler_index_effect(function))
             loop parameter in function.params {
                 parameter_id :: parameter.local.symbol_id ?? next

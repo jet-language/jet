@@ -4,7 +4,7 @@
 // an `#FFI(asm)` function is a leaf whose code is its assembled template.
 
 use jet_backend.[x64_assemble_template]
-use jet_foundation.[AccessConvention, Span, TCallArg]
+use jet_foundation.[AccessConvention, Span, BodyCallArg]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // Indexes the checked foreign functions by the function key their calls
@@ -20,7 +20,7 @@ fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction]) Never
 // scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
 // packed NUL-terminated copy freed after the call; the C result converts
 // back.
-fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
+fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if foreign.language == "asm" -> return ir_asm_call(&m, p, &b, foreign, args, span)
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
         return ir_fail_slot(&b, span, "foreign import requires a checked direct C scalar signature")
@@ -103,7 +103,7 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
 // (ir_asm_leaf) on machine words. An exact Int crosses as its I64
 // (jet_int_owned_to_i64) and an Int result converts back
 // (jet_int_owned_from_i64), as for a C function.
-fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [TCallArg], span: Span) -> Int Never! {
+fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "inline asm argument count differs from its checked signature")
     word_row :: ir_word_row(&m)
     rows := [Int]{}

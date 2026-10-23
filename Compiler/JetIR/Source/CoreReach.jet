@@ -1,23 +1,29 @@
 // Core source-body reachability (Rust Codegen/TIR/mod.rs
 // `reachable_core_source_callables`, `should_lower_imported_core_body`).
 use jet_foundation.[
+    BodyLambda,
+    BodyNode,
+    BodyStrPart,
+    BodyTree,
     CompilerThreads,
-    TExpr,
-    TFunc,
+    FnBody,
+    NodeKind,
+    StmtKind,
+    TExprType,
     TFuncKind,
-    TStmt,
-    TLambda,
+    body_each_expr_child,
+    body_each_stmt_child,
+    body_node,
+    body_type,
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
     compiler_transfer_rows,
-    tir_each_expr_child,
-    tir_each_stmt_child,
     TStrFormat,
     core_identity_in_module,
 ]
-use jet_foundation.[Span, TExprKind, TStrPart, Type]
+use jet_foundation.[Span, Type]
 
 fn ir_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     if kind == {
@@ -53,8 +59,10 @@ fn ir_core_source_path(path: String, relative: String) -> Bool Never! {
     path == relative || path.ends_with("/{relative}")
 }
 
-fn ir_string_format_source(function: TFunc) -> Bool Never! {
-    function.module_identity.starts_with("<corelib>/") && ir_core_source_path(function.source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(function.kind)
+// Whether a function with these header fields is a Core/Text/Fmt.jet
+// selector helper (ir_string_format_member).
+fn ir_string_format_source(module_identity: String, source_file: String, kind: TFuncKind) -> Bool Never! {
+    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(kind)
 }
 
 fn ir_precise_source_family(name: String, owner: String, prefix: String) -> Bool Never! {
@@ -74,7 +82,7 @@ fn ir_precise_source_name(name: String) -> Bool Never! {
     ir_precise_source_family(name, "Fraction", "__fraction_") || ir_precise_source_family(name, "Decimal", "__decimal_") || ir_precise_source_family(name, "Complex", "__complex_")
 }
 
-fn ir_precise_source_target(function: TFunc) -> Bool Never! {
+fn ir_precise_source_target(function: FnBody) -> Bool Never! {
     function.module_identity.starts_with("<corelib>/") && ir_core_source_path(function.source_file, "Core/Math/Math.jet") && ir_core_reach_is_top_level(function.kind) && ir_precise_source_name(function.name)
 }
 
@@ -82,23 +90,23 @@ fn ir_core_reach_add(keys: &[String], key: String) Never! {
     if key != "" -> &keys.push(key)
 }
 
-fn ir_core_reach_lambda_keys(value: TLambda, functions: [TFunc], keys: &[String]) Never! {
+fn ir_core_reach_lambda_keys(tree: BodyTree, value: BodyLambda, functions: [FnBody], keys: &[String]) Never! {
     if value.executable == {
-        .Block(body) -> ir_core_reach_stmt_keys(body, functions, &keys)
+        .Block(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
         else -> {}
     }
 }
 
-// Implicit process loops have no keyed TExpr.Call. Resolve the authored Core
+// Implicit process loops have no keyed NodeKind.Call. Resolve the authored Core
 // helper from the checked function inventory, then retain its dependencies
 // with the ordinary reachability walk. Both streams share cursor mechanics.
-fn ir_core_reach_one_stmt_keys(statement: TStmt, functions: [TFunc], keys: &[String]) Never! {
-        if statement == {
+fn ir_core_reach_one_stmt_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String]) Never! {
+        if tree.stmts[statement] == {
             .ForIn(_, _, _, _, collection, _, method, _, _, _, body, _) -> {
                 if method == .Val(kind) && kind == .LinesProcessStream {
                     // Each nominal arm owns its binder; boolean alternatives
                     // do not introduce one shared value into their result.
-                    name :: if collection.ty == {
+                    name :: if body_type(tree, collection) == {
                         .Named(value) -> value
                         .Apply(value, _) -> value
                         else -> ""
@@ -108,47 +116,47 @@ fn ir_core_reach_one_stmt_keys(statement: TStmt, functions: [TFunc], keys: &[Str
                         if member != "" && helper.name == member && core_identity_in_module(helper.module_identity, "core.process") -> ir_core_reach_add(&keys, helper.key)
                     }
                 }
-                ir_core_reach_stmt_keys(body, functions, &keys)
+                ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
-            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(body, functions, &keys)
-            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(body, functions, &keys)
-            .RefutableBind(_, _, body, _) -> ir_core_reach_stmt_keys(body, functions, &keys)
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
+            .RefutableBind(_, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
             .If(_, then_body, else_body, _, _) -> {
-                ir_core_reach_stmt_keys(then_body, functions, &keys)
-                if else_body == .Val(body) -> ir_core_reach_stmt_keys(body, functions, &keys)
+                ir_core_reach_stmt_keys(tree, then_body, functions, &keys)
+                if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
             .CountedLoop(_, init, _, step, _, body, _) -> {
-                ir_core_reach_one_stmt_keys(init, functions, &keys)
-                if step == .Val(value) -> ir_core_reach_one_stmt_keys(value, functions, &keys)
-                ir_core_reach_stmt_keys(body, functions, &keys)
+                ir_core_reach_one_stmt_keys(tree, init, functions, &keys)
+                if step == .Val(value) -> ir_core_reach_one_stmt_keys(tree, value, functions, &keys)
+                ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
-            .Match(_, arms, _, _) -> loop arm in arms -> ir_core_reach_stmt_keys(arm.body, functions, &keys)
+            .Match(_, arms, _, _) -> loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, &keys)
             .EnumMatch(_, arms, else_body, _, _) -> {
-                loop arm in arms -> ir_core_reach_stmt_keys(arm.body, functions, &keys)
-                if else_body == .Val(body) -> ir_core_reach_stmt_keys(body, functions, &keys)
+                loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, &keys)
+                if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
             .MixedSwitch(_, _, arms, else_body, _) -> {
-                loop arm in arms -> ir_core_reach_stmt_keys(arm.body, functions, &keys)
-                if else_body == .Val(body) -> ir_core_reach_stmt_keys(body, functions, &keys)
+                loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, &keys)
+                if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
             .RangeSwitch(_, arms, body, _) -> {
-                loop arm in arms -> ir_core_reach_stmt_keys(arm.body, functions, &keys)
-                ir_core_reach_stmt_keys(body, functions, &keys)
+                loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, &keys)
+                ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
-            .Reactive(value, _) -> ir_core_reach_lambda_keys(value, functions, &keys)
-            .GCEdit(_, _, _, _, _, edited, _) -> ir_core_reach_one_stmt_keys(edited, functions, &keys)
+            .Reactive(value, _) -> ir_core_reach_lambda_keys(tree, value, functions, &keys)
+            .GCEdit(_, _, _, _, _, edited, _) -> ir_core_reach_one_stmt_keys(tree, edited, functions, &keys)
             else -> {}
         }
 }
 
-fn ir_core_reach_stmt_keys(statements: [TStmt], functions: [TFunc], keys: &[String]) Never! {
-    loop statement in statements -> ir_core_reach_one_stmt_keys(statement, functions, &keys)
+fn ir_core_reach_stmt_keys(tree: BodyTree, statements: [Int], functions: [FnBody], keys: &[String]) Never! {
+    loop statement in statements -> ir_core_reach_one_stmt_keys(tree, statement, functions, &keys)
 }
 
 // The function keys one checked expression names directly. Children are
 // walked by the caller.
-fn ir_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys: &[String], fmt_keys: [String:String]) Never! {
-    if expression.kind == {
+fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody], keys: &[String], fmt_keys: [String:String]) Never! {
+    if body_node(tree, expression).kind == {
         .Call(callee, _, args) -> {
             ir_core_reach_add(&keys, callee.key)
             loop argument in args {
@@ -182,17 +190,17 @@ fn ir_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys: &[String
         .StrLit(parts) -> {
             loop part in parts {
                 if part == .Interpolation(value, format) {
-                    member :: ir_string_format_member(value.ty, format) ?? next
+                    member :: ir_string_format_member(body_type(tree, value), format) ?? next
                     key :: fmt_keys.get(member) ?? next
                     ir_core_reach_add(&keys, key)
                 }
             }
         }
-        .InlineBlock(body) -> ir_core_reach_stmt_keys(body, functions, &keys)
-        .Lambda(value) -> ir_core_reach_lambda_keys(value, functions, &keys)
+        .InlineBlock(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
+        .Lambda(value) -> ir_core_reach_lambda_keys(tree, value, functions, &keys)
         .IfExpr(_, then_body, _, else_body, _) | .ResultHandler(_, _, then_body, _, _, else_body, _, _) -> {
-            ir_core_reach_stmt_keys(then_body, functions, &keys)
-            ir_core_reach_stmt_keys(else_body, functions, &keys)
+            ir_core_reach_stmt_keys(tree, then_body, functions, &keys)
+            ir_core_reach_stmt_keys(tree, else_body, functions, &keys)
         }
         .GlobalShared(initializer, _) -> ir_core_reach_add(&keys, initializer.key)
         else -> {}
@@ -201,34 +209,34 @@ fn ir_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys: &[String
 
 // Every function key one checked function body names, including its
 // parameter defaults, which call sites lower from the callee.
-fn ir_core_reach_function_keys(function: TFunc, functions: [TFunc], fmt_keys: [String:String]) -> [String] Never! {
+fn ir_core_reach_function_keys(function: FnBody, functions: [FnBody], fmt_keys: [String:String]) -> [String] Never! {
     keys := [String]{}
-    ir_core_reach_stmt_keys(function.body, functions, &keys)
+    ir_core_reach_stmt_keys(function.tree, function.body, functions, &keys)
     loop parameter in function.params {
-        if parameter.default == Val(value) -> ir_core_reach_tree_keys(value, functions, &keys, fmt_keys)
+        if parameter.default == Val(value) -> ir_core_reach_tree_keys(function.tree, value, functions, &keys, fmt_keys)
     }
-    loop statement in function.body -> ir_core_reach_statement_keys(statement, functions, &keys, fmt_keys)
+    loop statement in function.body -> ir_core_reach_statement_keys(function.tree, statement, functions, &keys, fmt_keys)
     keys
 }
 
 // One statement's subtrees. Its own function so the visitor closure lends the
 // `keys` write parameter: the stage-0 Rust tier then lends `functions` and
 // `fmt_keys` to the closure instead of copying them per statement.
-fn ir_core_reach_statement_keys(statement: TStmt, functions: [TFunc], keys: &[String], fmt_keys: [String:String]) Never! {
-    tir_each_stmt_child(statement, (child: TExpr) -> ir_core_reach_tree_keys(child, functions, &keys, fmt_keys))
+fn ir_core_reach_statement_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String], fmt_keys: [String:String]) Never! {
+    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_core_reach_tree_keys(tree, child, functions, &keys, fmt_keys))
 }
 
 // The keys one checked expression and every expression below it name, read
-// in place (tir_each_expr_child).
-fn ir_core_reach_tree_keys(expression: TExpr, functions: [TFunc], keys: &[String], fmt_keys: [String:String]) Never! {
-    ir_core_reach_expr_keys(expression, functions, &keys, fmt_keys)
-    tir_each_expr_child(expression, (child: TExpr) -> ir_core_reach_tree_keys(child, functions, &keys, fmt_keys))
+// in place (body_each_expr_child).
+fn ir_core_reach_tree_keys(tree: BodyTree, expression: Int, functions: [FnBody], keys: &[String], fmt_keys: [String:String]) Never! {
+    ir_core_reach_expr_keys(tree, expression, functions, &keys, fmt_keys)
+    body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> ir_core_reach_tree_keys(tree, child, functions, &keys, fmt_keys))
 }
 
 // The `Core/Math/Math.jet` helper one checked expression lowers to by name
 // (`jet_codegen_lower_precise_builtin`): a precise operation, `Int.abs`, or a
 // registered `core.math.fraction`/`decimal` constructor.
-fn ir_precise_expr_helper(expression: TExpr) -> String? Never! {
+fn ir_precise_expr_helper(expression: BodyNode) -> String? Never! {
     if expression.kind == {
         .PreciseBuiltin(owner, operation, _) -> ir_precise_source_helper(owner, operation)
         .MathBuiltin(owner, operation, _) -> if owner == "Int" -> ir_precise_source_helper(owner, operation) else -> None
@@ -246,42 +254,44 @@ fn ir_precise_expr_helper(expression: TExpr) -> String? Never! {
 // The distinct precise source helpers a checked body and its root expressions
 // lower to by name. A comptime closure holds only explicitly called functions,
 // so it adds these (`jet_driver_comptime_function_closure`).
-fn ir_precise_helper_names(roots: [TExpr], body: [TStmt]) -> [String] Never! {
+fn ir_precise_helper_names(tree: BodyTree, roots: [Int], body: [Int]) -> [String] Never! {
     names := [String]{}
-    loop root in roots -> ir_precise_tree_names(root, &names)
+    loop root in roots -> ir_precise_tree_names(tree, root, &names)
     loop statement in body {
-        tir_each_stmt_child(statement, (child: TExpr) -> ir_precise_tree_names(child, &names))
+        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_precise_tree_names(tree, child, &names))
     }
     names
 }
 
 // The precise helpers one checked expression and every expression below it
-// lower to, each added once, read in place (tir_each_expr_child).
+// lower to, each added once, read in place (body_each_expr_child).
 // Functions an expression tree names as values (`probe: pkg_lua_render_probe`), not
 // calls: Sema records call facts only, so a compile-time body that stores a function
 // value must queue it for lowering itself. Each key once, in tree order.
-fn ir_function_value_keys(roots: [TExpr], body: [TStmt]) -> [String] Never! {
+fn ir_function_value_keys(tree: BodyTree, roots: [Int], body: [Int]) -> [String] Never! {
     keys := [String]{}
-    loop root in roots -> ir_function_value_tree(root, &keys)
+    loop root in roots -> ir_function_value_tree(tree, root, &keys)
     loop statement in body {
-        tir_each_stmt_child(statement, (child: TExpr) -> ir_function_value_tree(child, &keys))
+        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_function_value_tree(tree, child, &keys))
     }
     keys
 }
 
-fn ir_function_value_tree(expression: TExpr, keys: &[String]) Never! {
-    if expression.kind == .ConstRef(symbol) {
+fn ir_function_value_tree(tree: BodyTree, expression: Int, keys: &[String]) Never! {
+    node :: body_node(tree, expression)
+    if node.kind == .ConstRef(symbol) {
         if symbol.key.starts_with("function:") && !keys.contains(symbol.key) -> &keys.push(symbol.key)
     }
-    tir_each_expr_child(expression, (child: TExpr) -> ir_function_value_tree(child, &keys))
+    body_each_expr_child(tree, node, (child: Int) -> ir_function_value_tree(tree, child, &keys))
 }
 
-fn ir_precise_tree_names(expression: TExpr, names: &[String]) Never! {
-    helper :: ir_precise_expr_helper(expression)
+fn ir_precise_tree_names(tree: BodyTree, expression: Int, names: &[String]) Never! {
+    node :: body_node(tree, expression)
+    helper :: ir_precise_expr_helper(node)
     if helper == .Val(name) {
         if !names.contains(name) -> &names.push(name)
     }
-    tir_each_expr_child(expression, (child: TExpr) -> ir_precise_tree_names(child, &names))
+    body_each_expr_child(tree, node, (child: Int) -> ir_precise_tree_names(tree, child, &names))
 }
 
 // Reachability precedes concrete instance lowering. A checked generic/operator
@@ -312,7 +322,7 @@ fn ir_core_reach_template_key(key: String) -> String Never! {
 // `display`, index hooks, trait dispatch) by owner type rather than by a key
 // in the caller's body. The closed precise-operation source registry
 // (`ir_precise_source_target`) is rooted as in Rust. A
-// compiler-generated Core method (`TFunc.synthetic`: a Prelude/Derives.jet
+// compiler-generated Core method (`FnBody.synthetic`: a Prelude/Derives.jet
 // `Equatable`/`Comparable` body) is not a root: as in
 // Rust `reachable_core_source_callables`, it is kept only when a kept body
 // names it (sema rewrites `==`/`<` on its owner into a keyed method call). An
@@ -325,7 +335,7 @@ fn ir_core_reach_template_key(key: String) -> String Never! {
 // reach, and the rows those reach, are then read on the calling thread.
 // Reachability is a closure, so the flags are the same for any thread
 // count. `functions` leaves for the threads and comes back unchanged.
-fn ir_reachable_core_rows(functions: &[TFunc], candidates: ^[Bool], core_module_identities: [String], threads: CompilerThreads) -> [Bool] {
+fn ir_reachable_core_rows(functions: &[FnBody], candidates: ^[Bool], core_module_identities: [String], threads: CompilerThreads) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [String:Bool]{}
     loop identity in core_module_identities -> core_modules[identity] = true
@@ -340,7 +350,7 @@ fn ir_reachable_core_rows(functions: &[TFunc], candidates: ^[Bool], core_module_
             next
         }
         _ := &by_key.add(function.key, index)
-        if ir_string_format_source(function) -> fmt_keys[function.name] = function.key
+        if ir_string_format_source(function.module_identity, function.source_file, function.kind) -> fmt_keys[function.name] = function.key
         rooted :: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_precise_source_target(function)
         &reachable.push(rooted)
         if rooted {
@@ -348,7 +358,7 @@ fn ir_reachable_core_rows(functions: &[TFunc], candidates: ^[Bool], core_module_
             &weights.push(function.source_span.end - function.source_span.start)
         }
     }
-    slot :: shared IRReachShared{functions: [[TFunc]]{compiler_take_rows<TFunc>(&functions)}, by_key: [[String:Int]]{^by_key}, fmt_keys: [[String:String]]{^fmt_keys}, roots: ^roots}
+    slot :: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(&functions)}, by_key: [[String:Int]]{^by_key}, fmt_keys: [[String:String]]{^fmt_keys}, roots: ^roots}
     pending := [Int]{}
     loop target in ir_core_reach_root_targets(slot, weights, threads) {
         if !reachable[target] {
@@ -370,7 +380,7 @@ fn ir_reachable_core_rows(functions: &[TFunc], candidates: ^[Bool], core_module_
         }
     }
     back := &permit.value.functions.pop() ?? panic("the checked functions left the reachability state")
-    compiler_transfer_rows<TFunc>(&functions, &back)
+    compiler_transfer_rows<FnBody>(&functions, &back)
     reachable
 }
 
@@ -378,7 +388,7 @@ fn ir_reachable_core_rows(functions: &[TFunc], candidates: ^[Bool], core_module_
 // key and the format helpers' keys, each the one row of its list, and the
 // rooted rows.
 struct IRReachShared {
-    functions: [[TFunc]]
+    functions: [[FnBody]]
     by_key: [[String:Int]]
     fmt_keys: [[String:String]]
     roots: [Int]
@@ -455,7 +465,7 @@ fn ir_core_reach_part_targets(slot: Shared<IRReachShared>, first: Int, last: Int
 
 // The rows checked function row `row` names (resolved by key, or by its
 // generic declaration's key), appended to `targets`.
-fn ir_core_reach_row_targets(functions: [TFunc], by_key: [String:Int], fmt_keys: [String:String], row: Int, targets: &[Int]) Never! {
+fn ir_core_reach_row_targets(functions: [FnBody], by_key: [String:Int], fmt_keys: [String:String], row: Int, targets: &[Int]) Never! {
     loop key in ir_core_reach_function_keys(functions[row], functions, fmt_keys) {
         target :: by_key.get(key) ?? by_key.get(ir_core_reach_template_key(key)) ?? next
         &targets.push(target)
@@ -476,10 +486,12 @@ fn ir_core_reach_row_targets(functions: [TFunc], by_key: [String:Int], fmt_keys:
 }
 
 #Test("A comptime closure finds the precise helper a nested literal lowers to") {
-    spelling :: TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "9007199254740992.0"}}}, span: Span{start: 0, end: 1}}
-    decimal :: TExpr{ty: Type.Named{name: "Decimal"}, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span: Span{start: 0, end: 1}}
-    converted :: TExpr{ty: Type.Float, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "to_float", args: [TExpr]{decimal}}, span: Span{start: 0, end: 1}}
-    names :: ir_precise_helper_names([TExpr]{converted}, [TStmt]{})
+    span :: Span{start: 0, end: 1}
+    spelling :: BodyNode{id: 0, kind: NodeKind.StrLit{parts: [BodyStrPart]{BodyStrPart.Literal{text: "9007199254740992.0"}}}, span: span}
+    decimal :: BodyNode{id: 1, kind: NodeKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [Int]{0}}, span: span}
+    converted :: BodyNode{id: 2, kind: NodeKind.PreciseBuiltin{type_name: "Decimal", function: "to_float", args: [Int]{1}}, span: span}
+    tree :: BodyTree{nodes: [BodyNode]{spelling, decimal, converted}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
+    names :: ir_precise_helper_names(tree, [Int]{2}, [Int]{})
     assert_eq(names.len(), 2)
     assert(names.contains("__decimal_to_float"))
     assert(names.contains("__decimal_from_str"))
