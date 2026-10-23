@@ -206,7 +206,9 @@ struct IRAsmLeaf {
 struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 
 // The program: interned types and names, read-only data rows, functions.
-// `type_keys[row]` is type row `row`'s intern key (ir_row_key).
+// `type_keys[row]` is type row `row`'s intern key (ir_row_key);
+// `key_rows` lists the rows ir_intern_type gave each display key (they
+// differ in layout), so a repeated intern compares layouts, not keys.
 // `data_relocs` names the data rows that are static objects (8-byte
 // aligned; BuildStatic.jet) and the words in them that hold an address;
 // `constant_rows` maps "<constant key>|<type key>" to the static object
@@ -244,6 +246,7 @@ struct IRModule {
     types: [IRType]
     type_keys: [String]
     type_rows: [String:Int]
+    key_rows: [String:[Int]]
     names: [String]
     name_rows: [String:Int]
     data: [[U8]]
@@ -276,7 +279,7 @@ struct IRModule {
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, nominal_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, helper_errors: [String:String]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
+    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, key_rows: [String:[Int]]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, nominal_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, helper_errors: [String:String]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {
@@ -296,14 +299,22 @@ fn ir_kind_name(kind: IRTypeKind) -> String Never! {
 
 // The row of `row`'s type, interned by its kind, layout and display key.
 fn ir_intern_type(m: &IRModule, key: String, row: IRType) -> Int Never! {
+    known :: m.key_rows.get(key) ?? [Int]{}
+    loop index in known {
+        if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed -> return index
+    }
     full :: "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
-    found :: m.type_rows.get(full) ?? -1
-    if found >= 0 -> return found
-    id :: m.types.len()
-    &m.types.push(row)
-    &m.type_keys.push(full.copy())
-    m.type_rows[full] = id
-    id
+    found := m.type_rows.get(full) ?? -1
+    if found < 0 {
+        found = m.types.len()
+        &m.types.push(row)
+        &m.type_keys.push(full.copy())
+        m.type_rows[full] = found
+    }
+    listed := m.key_rows.get(key) ?? [Int]{}
+    &listed.push(found)
+    m.key_rows[key.copy()] = listed
+    found
 }
 
 // A type row's identity by content (its ir_intern_type key): the same in
