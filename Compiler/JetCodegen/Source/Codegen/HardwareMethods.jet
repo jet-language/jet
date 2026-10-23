@@ -18,7 +18,6 @@ use jet_foundation.[
 fn jet_codegen_lower_special_handle_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
     return if operation == {
         .Hardware(hardware_operation) -> jet_codegen_lower_hardware_handle_method(&builder, program, expression, receiver, hardware_operation, args)
-        .ReceiptAttach -> jet_codegen_lower_receipt_attach(&builder, program, expression, args)
         else -> panic("checked THandleOp is not a hardware or receipt-attach operation")
     }
 }
@@ -68,18 +67,3 @@ fn jet_codegen_lower_hardware_handle_method(builder: &JetCodegenBuilder, program
     return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HardwareCall{call: call, op: mir_hardware_operation, receiver: lowered_receiver, args: lowered_args}})
 }
 
-fn jet_codegen_lower_receipt_attach(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, args: [TExpr]) -> MIRValueID {
-    record :: core_receiver_method(String.from_bytes([U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{46}, U8{104}, U8{97}, U8{110}, U8{100}, U8{108}, U8{101}}) ?? "", "attach") ?? panic("receipt.attach Core row is not registered")
-    if args.len() != 4 -> panic("receipt.attach MIR projection requires payload and three metadata operands")
-
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_core_call(&builder, program, record)
-    route := jet_codegen_intern_core_route(&builder, program, record, carrier)
-    fallibility := jet_codegen_core_call_fallibility(carrier, builder, program)
-    lowered_args := [MIRCallArg]{}
-    loop (index, argument) in args {
-        &lowered_args.push(jet_codegen_lower_core_call_arg(&builder, program, argument, index, record, false))
-    }
-    payload_type := jet_codegen_lower_type_for_function(args[0].ty, builder, program)
-    return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: [MIRType]{payload_type}, fallibility: fallibility, data_plan: None})
-}

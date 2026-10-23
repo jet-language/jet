@@ -3185,7 +3185,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
     if pattern == {
         .Struct(_, _, _, _, _) -> Val(TStmt.StructDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
         .Tuple(_, _) -> Val(TStmt.TupleDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
-        .List(_, _) -> Val(TStmt.ListDestructure{temp: temp, init: init, count: names.len(), file: environment.source_file, line: sema_source_line_at(environment.source_segments, span) ?? 0, elements: locals, span: span})
+        .List(_, _) -> Val(TStmt.ListDestructure{temp: temp, init: init, count: names.len(), line: sema_source_line_at(environment.source_segments, span) ?? 0, elements: locals, span: span})
         .Refutable(_, _, _, _) -> None
     }
 }
@@ -3962,7 +3962,6 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool Never! {
                     // A capture inside a transaction snapshots through the STM.
                     if method == "capture" && receiver.ty == .Shared(_) -> return true
                 }
-                .CCallback(_, _, _, _, _, _) -> return false
                 else -> {}
             }
         }
@@ -3986,19 +3985,9 @@ fn sema_stmt_tir_core_closure_touches_shared(kind: TCoreClosureKind) -> Bool Nev
             false
         }
         .Realtime(rate, frames, _) -> sema_stmt_tir_expr_touches_shared(rate) || sema_stmt_tir_expr_touches_shared(frames)
-        .Serve(address, _) -> sema_stmt_tir_expr_touches_shared(address)
-        .OnInterrupt(callback) -> sema_stmt_tir_expr_touches_shared(callback)
-        .UIButtonOnClick(label, shortcut, accessible_label, _, _) -> sema_stmt_tir_expr_touches_shared(label) || sema_stmt_tir_expr_touches_shared(shortcut) || sema_stmt_tir_expr_touches_shared(accessible_label)
-        .UITextInputOnDrop(state, ime, _, _) -> sema_stmt_tir_expr_touches_shared(state) || sema_stmt_tir_expr_touches_shared(ime)
-        .UIPreview(name, viewport, _, _, _, _, _, _, _, _, _, _, _) -> {
-            if sema_stmt_tir_expr_touches_shared(name) -> return true
-            if viewport != None {
-                value :: viewport
-                if sema_stmt_tir_expr_touches_shared(value) -> return true
-            }
-            false
-        }
-        .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_, _) | .ReactiveEffect(_, _) | .UIReactiveRender(_, _) -> false
+        .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_tir_expr_touches_shared(label) || sema_stmt_tir_expr_touches_shared(shortcut) || sema_stmt_tir_expr_touches_shared(accessible_label)
+        .UITextInputOnDrop(state, ime, _) -> sema_stmt_tir_expr_touches_shared(state) || sema_stmt_tir_expr_touches_shared(ime)
+        .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
     }
 }
 
@@ -4214,7 +4203,7 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
                 }
                 if !sema_stmt_move_direct(argument.expr, &state, scopes, "the deferred `close`", &diagnostics) || !close_valid -> return None
                 closed := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
-                return Val(TStmt.DeferClose{close: closed, resource: resource_id, scope_id: scopes.current, span: span})
+                return Val(TStmt.DeferClose{close: closed, resource: resource_id, span: span})
             }
             None
         }

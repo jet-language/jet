@@ -134,7 +134,7 @@ fn sema_place_borrow_root(place: TExpr) -> SemaPlaceBorrowRoot Never! {
         .Local(local) -> SemaPlaceBorrowRoot{key: if local.symbol_id == .Val(id) -> id.key else -> "", name: local.name}
         .Field(receiver, _) -> sema_place_borrow_root(receiver)
         .Index(base, _, _, _, _, _) | .Slice(base, _, _, _, _) | .OptField(base, _, _) -> sema_place_borrow_root(base)
-        .Borrow(inner, _) | .Deref(inner) | .Move(inner) | .SharedGuardValue(inner, _) -> sema_place_borrow_root(inner)
+        .Borrow(inner, _) | .Deref(inner) | .Move(inner) | .SharedGuardValue(inner) -> sema_place_borrow_root(inner)
         else -> SemaPlaceBorrowRoot{key: "", name: ""}
     }
 }
@@ -173,7 +173,7 @@ fn sema_place_borrow_census_optional_list(body: [TStmt]?, census: &SemaPlaceBorr
 // nested bodies walks its head expressions here and each body as statements.
 fn sema_place_borrow_census_stmt(statement: TStmt, census: &SemaPlaceBorrowCensus) Never! {
     if statement == {
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> sema_place_borrow_note_place(&census, init)
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_place(&census, init)
         .RefutableBind(pattern, init, fallback, _) -> {
             sema_place_borrow_note_place(&census, init)
             sema_place_borrow_census_expr(init, &census)
@@ -263,18 +263,14 @@ fn sema_place_borrow_census_stmt(statement: TStmt, census: &SemaPlaceBorrowCensu
 
 fn sema_place_borrow_census_cond(condition: TIfCond, census: &SemaPlaceBorrowCensus) Never! {
     if condition == {
-        .Plain(value) | .IsNone(value) -> sema_place_borrow_census_expr(value, &census)
+        .Plain(value) -> sema_place_borrow_census_expr(value, &census)
         .And(left, right) -> {
             sema_place_borrow_census_cond(left, &census)
             sema_place_borrow_census_cond(right, &census)
         }
-        .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
+        .IfLet(pattern, subject) -> {
             sema_place_borrow_census_pattern(pattern, &census)
             sema_place_borrow_census_expr(subject, &census)
-        }
-        .WithPrelude(prelude, inner) -> {
-            sema_place_borrow_census_list(prelude, &census)
-            sema_place_borrow_census_cond(inner, &census)
         }
     }
 }

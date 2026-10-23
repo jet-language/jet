@@ -18,7 +18,6 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     type_identity_equal,
-    type_tuple_struct_name,
 ]
 
 fn sema_call_concurrency_label(argument: CallArg) -> String? {
@@ -238,7 +237,7 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
         result_type = Type.Tuple{fields: fields}
         sema_call_concurrency_reject_parallel_type("item", element, span, environment, program, scopes, context, &diagnostics)
         sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, program, scopes, context, &diagnostics)
-        operation := TClosureOp.ParaPartition{tuple_struct: type_tuple_struct_name(fields)}
+        operation := TClosureOp.ParaPartition
         tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
         checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}

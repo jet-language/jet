@@ -28,7 +28,6 @@ use jet_foundation.[
     builtin_method_row,
     expr_span,
     type_name,
-    type_tuple_struct_name,
     TUnaryOp,
 ]
 
@@ -88,17 +87,6 @@ fn sema_value_method_bit_width(receiver: Type) -> Int Never! {
     }
 }
 
-// The named tuple inside an optional split result.
-fn sema_value_method_tuple_struct(result: Type) -> String Never! {
-    if result == {
-        .Option(inner) -> if inner == {
-            .Tuple(fields) -> type_tuple_struct_name(fields)
-            else -> ""
-        }
-        else -> ""
-    }
-}
-
 fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExprKind {
     if row.lowering == {
         // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
@@ -109,9 +97,9 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
             zero_end := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             TExprKind.Slice{base: receiver_value, start: ^zero_start, end: ^zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
         }
-        .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
-        .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
-        .IntToRadix -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IntToRadix{line: line}, args: typed}
+        .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce, args: typed}
+        .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast, args: typed}
+        .IntToRadix -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IntToRadix, args: typed}
         .Show -> {
             if sema_value_method_is_float_or_integer(receiver_value.ty) -> return TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.ToShow}
             TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ToString, args: typed}
@@ -120,8 +108,8 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
         .BitCount -> TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.BitCount{method: method, width: sema_value_method_bit_width(receiver_value.ty)}}
         .Arithmetic(operation) -> TExprKind.Binary{op: operation, overflow: false, line: line, lhs: receiver_value, rhs: typed[0]}
         .BitNot -> TExprKind.Unary{op: TUnaryOp.Not, operand: receiver_value}
-        .Euclidean(remainder) -> TExprKind.NumericBinaryMethod{receiver: receiver_value, operation: if remainder -> TNumericOp.EuclideanRem{line: line} else -> TNumericOp.EuclideanDiv{line: line}, argument: typed[0]}
-        .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, policy: None, lhs: receiver_value, rhs: typed[0]}
+        .Euclidean(remainder) -> TExprKind.NumericBinaryMethod{receiver: receiver_value, operation: if remainder -> TNumericOp.EuclideanRem else -> TNumericOp.EuclideanDiv, argument: typed[0]}
+        .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, lhs: receiver_value, rhs: typed[0]}
         .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}
     }
 }

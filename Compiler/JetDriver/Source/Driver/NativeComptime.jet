@@ -128,7 +128,7 @@ fn jet_driver_native_value(value: X64NativeValue, host: JetDriverExecutionHost) 
         }
         if lambda.executable == {
             .Expr(expression) -> &body.push(TStmt.Return{value: Val(expression), span: expression.span})
-            .Block(statements) | .SharedBlock(statements) -> loop statement in statements -> &body.push(statement)
+            .Block(statements) -> loop statement in statements -> &body.push(statement)
         }
         lambda.executable = TLambdaBody.Block{body: body}
         &lambda.captures.clear()

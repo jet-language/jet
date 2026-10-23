@@ -246,34 +246,6 @@ fn jet_codegen_handle_event_route(receiver: Type, method: String, carrier: TFail
     Val(jet_codegen_handle_route(MIRPreludeFamily.ClosureMethod, "core.event", method, symbol, mask, None, MIRPreludeABI.Value))
 }
 
-fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> JetCodegenHandleRoute? {
-    name := if jet_codegen_handle_type_without_tags(receiver) == {
-        .Named(value) -> value
-        else -> {
-            return None
-        }
-    }
-    if name == "WatchHandle" {
-        if method == {
-            "poll" | "events" -> return Val(jet_codegen_handle_h("watch.poll", "jet_jit_watch_poll", [Bool]{true}, Val(Effect.IO)))
-            "cancel" -> return Val(jet_codegen_handle_h("watch.cancel", "jet_jit_watch_cancel", [Bool]{true}, Val(Effect.IO)))
-            "is_active" -> return Val(jet_codegen_handle_h("watch.is_active", "jet_jit_watch_is_active", [Bool]{true}, None))
-            "summary" -> return Val(jet_codegen_handle_h("watch.summary", "jet_jit_watch_summary", [Bool]{true}, None))
-            "on" | "once" -> return Val(jet_codegen_handle_route(MIRPreludeFamily.ClosureMethod, "core.watcher", method, "jet_jit_watch_{method}", [Bool]{true, true, false}, Val(Effect.IO), MIRPreludeABI.Value))
-            else -> return None
-        }
-    }
-    if name == "WatchSet" {
-        if method == {
-            "add" -> return Val(jet_codegen_handle_h("watchset.add", "jet_jit_watchset_add", [Bool]{true, true}, Val(Effect.IO)))
-            "poll" | "events" -> return Val(jet_codegen_handle_h("watchset.poll", "jet_jit_watchset_poll", [Bool]{true}, Val(Effect.IO)))
-            "summary" -> return Val(jet_codegen_handle_h("watchset.summary", "jet_jit_watchset_summary", [Bool]{true}, None))
-            else -> return None
-        }
-    }
-    None
-}
-
 fn jet_codegen_handle_reactive_name(ty: Type) -> String? {
     return if ty == {
         .Tagged(_, inner) -> jet_codegen_handle_reactive_name(inner)
@@ -506,14 +478,6 @@ fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHan
         }
     }
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
-}
-
-fn jet_codegen_handle_devserver_route(method: String) -> JetCodegenHandleRoute? {
-    if method == {
-        "html" | "port" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_{method}", [Bool]{true, false}, None))
-        "serve" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_serve", [Bool]{true}, Val(Effect.Net)))
-        else -> return None
-    }
 }
 
 fn jet_codegen_handle_app_route(method: String, source_arg_count: Int) -> JetCodegenHandleRoute? {
@@ -857,13 +821,11 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         .PreciseMethod(type_name, method) -> return jet_codegen_handle_precise_route(type_name, method)
         .MathMethod(type_name, method, reduce_op) -> return jet_codegen_handle_math_route(type_name, method, reduce_op)
         .EventMethod(method) -> return jet_codegen_handle_event_route(receiver, method, carrier)
-        .WatchMethod(method, _) -> return jet_codegen_handle_watch_route(receiver, method)
         .LayoutMethod(method) -> return jet_codegen_handle_layout_route(method)
         .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
         .UIBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
         .CivilTimeMethod(kind, method) -> return jet_codegen_handle_civil_time_route(kind, method)
         .RegexMethod(kind, method) -> return jet_codegen_handle_regex_route(kind, method)
-        .DevServerMethod(method) -> return jet_codegen_handle_devserver_route(method)
         .AppMethod(method, source_arg_count) -> return jet_codegen_handle_app_route(method, source_arg_count)
         .ProcessChildMethod(method) -> {
             if method == {
@@ -973,10 +935,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .JSONLWriterFlush -> return Val(jet_codegen_handle_h("jsonl_writer.flush", "jet_enc_jsonl_writer_flush", [Bool]{true}, Val(Effect.IO)))
         .JSONLWriterFinish -> return Val(jet_codegen_handle_h("jsonl_writer.finish", "jet_enc_jsonl_writer_finish", [Bool]{true}, Val(Effect.IO)))
         .DataStreamNext -> return Val(jet_codegen_handle_h("data_stream.next", "jet_data_stream_next", [Bool]{true}, Val(Effect.IO)))
-        .StreamWithEventTime -> return Val(jet_codegen_handle_h("stream.with_event_time", "jet_stream_with_event_time", [Bool]{false, false}, Val(Effect.IO)))
-        .StreamWithEventTimeNs -> return Val(jet_codegen_handle_h("stream.with_event_time.datetime", "jet_stream_with_event_time_ns", [Bool]{false, false}, Val(Effect.IO)))
-        .StreamKeyBy -> return Val(jet_codegen_handle_h("stream.key_by", "jet_stream_key_by", [Bool]{false, false}, Val(Effect.IO)))
-        .StreamWindow -> return Val(jet_codegen_handle_h("stream.window", "jet_keyed_stream_window", [Bool]{false, false, false, false}, Val(Effect.IO)))
         .XMLReaderNext -> return Val(jet_codegen_handle_h("xml_reader.next", "jet_enc_xml_reader_next", [Bool]{true}, Val(Effect.IO)))
         .XMLWriterWrite -> return Val(jet_codegen_handle_h("xml_writer.write", "jet_enc_xml_writer_write", [Bool]{true, false}, Val(Effect.IO)))
         .XMLWriterFlush -> return Val(jet_codegen_handle_h("xml_writer.flush", "jet_enc_xml_writer_flush", [Bool]{true}, Val(Effect.IO)))
@@ -996,7 +954,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .StderrWriteBytes -> return Val(jet_codegen_handle_h("stderr.write_bytes", "jet_std_io_stderr_write_bytes", [Bool]{true, true}, Val(Effect.IO)))
         .StderrFlush -> return Val(jet_codegen_handle_h("stderr.flush", "jet_std_io_stderr_flush", [Bool]{true}, Val(Effect.IO)))
         .StderrIsTTY -> return Val(jet_codegen_handle_h("stderr.is_tty", "jet_std_io_stderr_is_tty", [Bool]{true}, Val(Effect.IO)))
-        .StopwatchElapsedMillis -> return Val(jet_codegen_handle_h("stopwatch.elapsed_millis", "jet_stopwatch_elapsed_millis", [Bool]{true}, Val(Effect.Time)))
         .TestSuiteRun -> return Val(jet_codegen_handle_h("test_suite.run", "jet_test_suite_run", [Bool]{true}, None))
         .WorldNow -> return Val(jet_codegen_handle_h("deterministic_world.now", "jet_world_now", [Bool]{true}, Val(Effect.Time)))
         .WorldAdvance -> return Val(jet_codegen_handle_h("deterministic_world.advance", "jet_world_advance", [Bool]{true, true}, Val(Effect.Time)))
@@ -1033,7 +990,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .GameAssetsSound -> return Val(jet_codegen_handle_h("game.assets_sound", "jet_game_assets_sound", [Bool]{true, true}, Val(Effect.FS)))
         .GameInputBind -> return Val(jet_codegen_handle_h("game.input_bind", "jet_game_input_bind", [Bool]{true, true, true}, None))
         .GameInputPressed -> return Val(jet_codegen_handle_h("game.input_pressed", "jet_game_input_pressed", [Bool]{true, true}, None))
-        .DurationIn(_) -> return Val(jet_codegen_handle_h("duration.in", "jet_duration_in", [Bool]{true, true}, None))
+        .DurationIn -> return Val(jet_codegen_handle_h("duration.in", "jet_duration_in", [Bool]{true, true}, None))
         .DurationIsZero -> return Val(jet_codegen_handle_h("duration.is_zero", "jet_duration_is_zero", [Bool]{true}, None))
         .DurationTotalSeconds -> return Val(jet_codegen_handle_h("duration.total_seconds", "jet_duration_total_seconds", [Bool]{true}, None))
         .DurationDifference -> return Val(jet_codegen_handle_h("duration.difference", "jet_duration_difference", [Bool]{true, true}, None))
@@ -1048,7 +1005,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .TCPListenerAcceptDeadline -> return Val(jet_codegen_handle_h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", [Bool]{true, true}, Val(Effect.Net)))
         .TCPListenerLocalAddr -> return Val(jet_codegen_handle_h("tcp_listener.local_addr", "jet_net_listener_local_addr", [Bool]{true}, Val(Effect.Net)))
         .TCPStreamRead -> return Val(jet_codegen_handle_h("tcp_stream.read", "jet_net_tcp_read", [Bool]{true}, Val(Effect.Net)))
-        .TCPStreamWrite -> return Val(jet_codegen_handle_h("tcp_stream.write", "jet_net_tcp_write", [Bool]{true, true}, Val(Effect.Net)))
         .TCPStreamPeerAddr -> return Val(jet_codegen_handle_h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", [Bool]{true}, Val(Effect.Net)))
         .TCPStreamLocalAddr -> return Val(jet_codegen_handle_h("tcp_stream.local_addr", "jet_net_tcp_local_addr", [Bool]{true}, Val(Effect.Net)))
         .TCPStreamClose -> return Val(jet_codegen_handle_h("tcp_stream.close", "jet_net_tcp_close", [Bool]{true}, Val(Effect.Net)))
@@ -1183,7 +1139,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .ReflectValueFields -> return Val(jet_codegen_handle_core("core.reflect", "value.fields", "jet_jit_reflect_fields", [Bool]{true}, None))
         .ReflectFieldName -> return Val(jet_codegen_handle_core("core.reflect", "field.name", "jet_jit_reflect_field_name", [Bool]{true}, None))
         .ReflectFieldValue -> return Val(jet_codegen_handle_core("core.reflect", "field.value", "jet_jit_reflect_field_value", [Bool]{true}, None))
-        .FFICallbackEventStop -> return Val(jet_codegen_handle_core("core.ffi", "callback_event_stop", "jet_ffi_callback_event_stop_unit", [Bool]{}, Val(Effect.FFI)))
         .TaskDetach -> return Val(jet_codegen_handle_core("core.tasks", "detach", "jet_std::JetTask::detach", [Bool]{false}, None))
         .TaskPause -> return Val(jet_codegen_handle_h("task.pause", "jet_std::JetTask::pause", [Bool]{true}, None))
         .TaskResume -> return Val(jet_codegen_handle_h("task.resume", "jet_std::JetTask::resume", [Bool]{true}, None))
@@ -1204,7 +1159,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
             if sender_receiver -> return Val(jet_codegen_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
             return Val(jet_codegen_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
-        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) | .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod(_) | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ModOnTick | .Method(_) | .ReceiptAttach -> return None
+        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) | .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
         else -> return None
     }
 }
@@ -1268,7 +1223,7 @@ fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, program: Jet
     location := jet_codegen_source_location_at(&builder, program, value.span, false)
     converted := TExpr{
         ty: Type.IntN{signed: true, bits: 64},
-        kind: TExprKind.NumericMethod{receiver: value, operation: TNumericOp.CheckedIntToFixed{host_kind: 3, dst_rust: "i64", dst_spelling: "I64", line: location.line}},
+        kind: TExprKind.NumericMethod{receiver: value, operation: TNumericOp.CheckedIntToFixed{host_kind: 3, line: location.line}},
         span: value.span,
     }
     jet_codegen_lower_expr(&builder, program, converted)
@@ -1327,7 +1282,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
     }
     if operation == {
         .StdinReadLine -> true
-        .FileReaderReadLine | .FileReaderRead | .FileReaderSeek | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .FileReaderRead | .FileReaderSeek | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .TCPStreamRead | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }

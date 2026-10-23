@@ -22,7 +22,6 @@ cheap.push(start('compiler-packages', [node, '--test', 'Tools/agent/compiler-pac
 cheap.push(start('mir-schema-grammar', [node, '--test', 'Compiler/JetBackend/Tests/mir-schema.test.mjs']));
 cheap.push(start('proof-source-guard', [node, '--test', 'Tools/agent/proof-source.test.mjs']));
 cheap.push(start('core-type-references', [node, '--test', 'Tools/agent/core-type-references.test.mjs']));
-cheap.push(start('core-data-event-projection', [node, '--test', 'Tools/agent/core-data-event-projection.test.mjs']));
 cheap.push(start('core-runtime-wrapper', [node, '--test', 'Tools/agent/core-runtime-wrapper.test.mjs']));
 cheap.push(start('native-cli-transport', [node, '--test', 'Tools/agent/compiler-native-transport.test.mjs']));
 cheap.push(start('s5-completion-receipts', [node, '--test', 'Tools/agent/s5/receipts.test.mjs']));

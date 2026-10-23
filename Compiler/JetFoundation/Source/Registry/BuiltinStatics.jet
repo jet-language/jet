@@ -229,40 +229,19 @@ fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int Never! {
     offset + step
 }
 
-fn builtin_numeric_float_lower(kind: BuiltinNumericKind) -> String Never! {
-    if !kind.signed -> return "0.0"
-    if kind.bits == 8 -> return "-128.0"
-    if kind.bits == 16 -> return "-32768.0"
-    if kind.bits == 32 -> return "-2147483648.0"
-    "-9223372036854775808.0"
-}
-
-fn builtin_numeric_float_upper_exclusive(kind: BuiltinNumericKind) -> String Never! {
-    if kind.signed {
-        if kind.bits == 8 -> return "128.0"
-        if kind.bits == 16 -> return "32768.0"
-        if kind.bits == 32 -> return "2147483648.0"
-        return "9223372036854775808.0"
-    }
-    if kind.bits == 8 -> return "256.0"
-    if kind.bits == 16 -> return "65536.0"
-    if kind.bits == 32 -> return "4294967296.0"
-    "18446744073709551616.0"
-}
-
 fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp Never! {
     if !target.integer {
-        if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow{dst_spelling: target.name}
+        if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow
         return TNumericOp.CastAs{dst_rust: target.rust}
     }
     // `U64` rides an i64 word; `Int.from_u64` stays on the exact CastAs adapter.
     if target.name == "Int" && source.integer && !source.signed -> return TNumericOp.CastAs{dst_rust: target.rust}
-    if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target), dst_rust: target.rust, dst_spelling: target.name}
+    if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
     if source.integer {
         if builtin_numeric_widening(source, target) -> return TNumericOp.CastAs{dst_rust: target.rust}
-        return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target), dst_rust: target.rust, dst_spelling: target.name}
+        return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
     }
-    TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target), dst_rust: target.rust, dst_spelling: target.name, lower: builtin_numeric_float_lower(target), upper_exclusive: builtin_numeric_float_upper_exclusive(target)}
+    TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target)}
 }
 
 fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow? {

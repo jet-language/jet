@@ -136,7 +136,6 @@ use jet_foundation.[
     TStmt,
     TStrFormat,
     TStrPart,
-    TStructExtra,
     TStructFieldValue,
     TTextPatternPart,
     TTraitMethod,
@@ -435,7 +434,7 @@ fn jet_codegen_reads_container_element(expression: TExpr) -> Bool Never! {
 // move place.
 fn jet_codegen_move_place_root(expression: TExpr) -> Bool Never! {
     if expression.kind == {
-        .Local(_) | .Borrow(_, _) | .SharedGuardValue(_, _) -> true
+        .Local(_) | .Borrow(_, _) | .SharedGuardValue(_) -> true
         .Field(receiver, _) -> jet_codegen_move_place_root(receiver)
         else -> false
     }
@@ -1103,26 +1102,6 @@ fn jet_codegen_index_kind(base: Type, kind: TIndexKind) -> MIRIndexKind Never! {
         .Map -> MIRIndexKind.Map
         .Pool -> MIRIndexKind.Pool
         .Lane(_) -> MIRIndexKind.Lane
-        .Unknown -> {
-            if base == {
-                .Map(_, _, _) -> {
-                    return MIRIndexKind.Map
-                }
-                .Apply(name, _) -> {
-                    if name == "Pool" {
-                        return MIRIndexKind.Pool
-                    }
-                }
-                else -> {}
-            }
-            if base == {
-                .FixedList(_, _) -> {
-                    return MIRIndexKind.FixedListProof
-                }
-                else -> {}
-            }
-            MIRIndexKind.List
-        }
         .Range | .User(_) | .LayoutField(_) -> panic("checked non-place index kind reached place lowering")
     }
 }
@@ -1558,7 +1537,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
             range_value := jet_codegen_lower_expr(&builder, program, range_expr)
             return Val(jet_codegen_project_range_place(&builder, program, base_place, range_value, location, expression.span))
         }
-        .SharedGuardValue(guard, _) -> {
+        .SharedGuardValue(guard) -> {
             base := jet_codegen_lower_expression_place(&builder, program, guard, access)
             base_place := if base == {
                 None -> {
@@ -1757,7 +1736,7 @@ fn jet_codegen_is_field_read_chain(builder: JetCodegenBuilder, program: JetCodeg
         else -> {}
     }
     if expression.kind == {
-        .Local(_) | .SharedGuardValue(_, _) -> true
+        .Local(_) | .SharedGuardValue(_) -> true
         .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Index(base, _, kind, access, checked_call, _) -> {
             if checked_call != None || access != AccessConvention.Read -> return false
@@ -1918,7 +1897,7 @@ fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: 
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
 
-fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?) -> MIRValueID {
+fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue]) -> MIRValueID {
     owner :: jet_codegen_mir_type_id_for_type(program.nominals, builder.function.module_identity, builder.generic_type_names, expression.ty)
     lowered_fields := [MIRFieldValue]{}
     boxed_fields := [MIRFieldID]{}
@@ -1928,13 +1907,7 @@ fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCod
         &lowered_fields.push(MIRFieldValue{field: field_id, value: value})
         if field.boxed -> &boxed_fields.push(field_id)
     }
-    extra_fact := if extra == {
-        None -> None
-        Val(value) -> if value == {
-            .HTTPRequestParams -> Val(MIRStructExtra.HTTPRequestParams)
-        }
-    }
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: owner, fields: lowered_fields, extra: extra_fact, boxed_fields: boxed_fields}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: owner, fields: lowered_fields, extra: None, boxed_fields: boxed_fields}})
 }
 
 fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
@@ -2421,13 +2394,11 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
                     host_param_conventions: None,
                     source_params: source_params,
                     source_param_symbols: source_symbols,
-                    jit_name: "policy@{expression.span.start}",
                     param_types: params,
                     ret: Val(return_type),
                     is_move: true,
                     boxed: false,
                     rc: false,
-                    arc: false,
                     captures: captures,
                     materialized_captures: [String]{},
                     frozen_captures: [String]{},
@@ -3187,13 +3158,11 @@ fn jet_codegen_plain_named_function_value(builder: &JetCodegenBuilder, program: 
         host_param_conventions: None,
         source_params: source_params,
         source_param_symbols: source_symbols,
-        jit_name: "plain_fn@{expression.span.start}",
         param_types: params,
         ret: Val(carrier),
         is_move: false,
         boxed: false,
         rc: false,
-        arc: false,
         captures: [TCapture]{},
         materialized_captures: [String]{},
         frozen_captures: [String]{},
@@ -3371,14 +3340,14 @@ fn jet_codegen_numeric_conversion_route(builder: &JetCodegenBuilder, program: Je
             if jet_codegen_numeric_plain_int(source) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_std::jet_int_checked_widen", 4, [Bool]{false, false, true, false}, None, carrier, MIRPreludeABI.Value)
             return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_numeric_checked_widen_at", 5, [Bool]{false, false, false, true, false}, None, carrier, MIRPreludeABI.Value)
         }
-        .TryFrom(_, _, _) -> {
+        .TryFrom(_) -> {
             if jet_codegen_numeric_plain_int(source) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "int_try_from", "jet_std::jet_int_try_from_checked", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)
             return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "fixed_try_from", "jet_numeric_try_from_fixed", 3, [Bool]{false, false, false}, None, carrier, MIRPreludeABI.Value)
         }
         .InlineRange(_, _, _) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "inline_range", "jet_inline_range_from_int", 3, [Bool]{false, false, false}, None, carrier, MIRPreludeABI.Value)
-        .CheckedIntToFixed(_, _, _, _) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, [Bool]{false, false, true, false}, None, carrier, MIRPreludeABI.Value)
-        .FloatToInt(_, _, _, _, _) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "float_to_int", "jet_numeric_float_to_int", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)
-        .FloatNarrow(_) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "float_narrow", "jet_numeric_float_narrow", 1, [Bool]{false}, None, carrier, MIRPreludeABI.Value)
+        .CheckedIntToFixed(_, _) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, [Bool]{false, false, true, false}, None, carrier, MIRPreludeABI.Value)
+        .FloatToInt(_) -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "float_to_int", "jet_numeric_float_to_int", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)
+        .FloatNarrow -> return jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "float_narrow", "jet_numeric_float_narrow", 1, [Bool]{false}, None, carrier, MIRPreludeABI.Value)
         else -> panic("checked numeric operation is not a prelude conversion")
     }
 }
@@ -3390,12 +3359,12 @@ fn jet_codegen_numeric_conversion_parameters(builder: &JetCodegenBuilder, progra
             if !jet_codegen_numeric_plain_int(source) -> &params.push(jet_codegen_numeric_constant_bool(&builder, program, span, source_signed))
             &params.push(jet_codegen_numeric_constant_bool(&builder, program, span, target_f32))
         }
-        .CheckedIntToFixed(host_kind, _, _, _) -> &params.push(jet_codegen_numeric_constant_int(&builder, program, span, host_kind))
-        .TryFrom(host_kind, _, _) -> {
+        .CheckedIntToFixed(host_kind, _) -> &params.push(jet_codegen_numeric_constant_int(&builder, program, span, host_kind))
+        .TryFrom(host_kind) -> {
             if !jet_codegen_numeric_plain_int(source) -> &params.push(jet_codegen_numeric_constant_bool(&builder, program, span, jet_codegen_numeric_signed_fixed(source)))
             &params.push(jet_codegen_numeric_constant_int(&builder, program, span, host_kind))
         }
-        .FloatToInt(host_kind, _, _, _, _) -> &params.push(jet_codegen_numeric_constant_int(&builder, program, span, host_kind))
+        .FloatToInt(host_kind) -> &params.push(jet_codegen_numeric_constant_int(&builder, program, span, host_kind))
         .InlineRange(lo, hi, _) -> {
             &params.push(jet_codegen_numeric_constant_int(&builder, program, span, lo))
             &params.push(jet_codegen_numeric_constant_int(&builder, program, span, hi))
@@ -3457,10 +3426,10 @@ fn jet_codegen_lower_numeric_method(builder: &JetCodegenBuilder, program: JetCod
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Copy{value: receiver, fact: MIRCopyFact.Materialize})
         }
         .CheckedIntToFloat(_, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
-        .CheckedIntToFixed(_, _, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
-        .TryFrom(_, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
-        .FloatToInt(_, _, _, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
-        .FloatNarrow(_) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
+        .CheckedIntToFixed(_, _) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
+        .TryFrom(_) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
+        .FloatToInt(_) -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
+        .FloatNarrow -> return jet_codegen_lower_numeric_conversion(&builder, program, expression, receiver, receiver_expr.ty, operation)
         .Predicate(method) -> {
             member := if method == {
                 "is_nan" -> "is_nan"
@@ -3476,7 +3445,7 @@ fn jet_codegen_lower_numeric_method(builder: &JetCodegenBuilder, program: JetCod
             call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, "core.math", member, symbol, 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.NumericMethod{call: call, receiver: receiver}})
         }
-        .EuclideanDiv(_) | .EuclideanRem(_) -> panic("checked Euclidean numeric operation requires a binary numeric-method node")
+        .EuclideanDiv | .EuclideanRem -> panic("checked Euclidean numeric operation requires a binary numeric-method node")
     }
 }
 
@@ -3484,8 +3453,8 @@ fn jet_codegen_lower_numeric_binary_method(builder: &JetCodegenBuilder, program:
     receiver := jet_codegen_lower_expr(&builder, program, receiver_expr)
     argument := jet_codegen_lower_expr(&builder, program, argument_expr)
     member := if operation == {
-        .EuclideanDiv(_) -> "div_euclid"
-        .EuclideanRem(_) -> "rem_euclid"
+        .EuclideanDiv -> "div_euclid"
+        .EuclideanRem -> "rem_euclid"
         else -> panic("checked binary numeric operation is unsupported by Source Codegen")
     }
     symbol := if member == "div_euclid" -> "jet_std::jet_int_div_euclid" else -> "jet_std::jet_int_rem_euclid"
@@ -3559,49 +3528,6 @@ fn jet_codegen_lower_overflow_opt(builder: &JetCodegenBuilder, program: JetCodeg
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.OverflowOption{call: call, left: left, right: right, location: location}})
 }
 
-fn jet_codegen_lower_callback_adapter(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, symbol: String, lambda: TLambda, ret: Type?, managed: Bool, plan_digest: String?, callback_identity: String?) -> MIRValueID {
-    lowered_lambda := jet_codegen_lower_lambda(&builder, program, lambda, false, "direct")
-    params := [MIRParam]{}
-    index := 0
-    loop name in lambda.source_params {
-        ty := lambda.param_types[index]
-        &params.push(MIRParam{
-            index: index,
-            name: name,
-            span: lambda.source_span,
-            ty: jet_codegen_lower_type_for_function(ty, builder, program),
-            access: MIRAccess.Read,
-            ownership: mir_ownership_from_access(MIRAccess.Read),
-            public_label: name,
-            variadic: false,
-            default_present: false,
-        })
-        index += 1
-    }
-    adapter := MIRCallbackAdapter{
-        id: MIRCallbackID{value: stable_id("mir-callback", "{symbol}|{lowered_lambda.function.value}")},
-        symbol: symbol,
-        function: lowered_lambda.function,
-        params: params,
-        return_type: if ret == { None -> None Val(ty) -> Val(jet_codegen_lower_type_for_function(ty, builder, program)) },
-        abi: MIRForeignABI.C,
-        managed: managed,
-        plan_digest: plan_digest,
-        callback_identity: callback_identity,
-    }
-    duplicate := false
-    loop existing in builder.callbacks {
-        if existing.id == adapter.id {
-            if !jet_codegen_same_callback(existing, adapter) -> panic("conflicting C callback adapter identity")
-            duplicate = true
-        }
-    }
-    if !duplicate -> &builder.callbacks.push(adapter)
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.ffi", "callback_boundary", "jet_ffi_callback_boundary", 1, [Bool]{false}, Val(Effect.FFI), carrier, MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.CCallback{call: call, callback: adapter.id, lambda: lowered_lambda.value}})
-}
-
 fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, kind: TCoreClosureKind) -> MIRValueID {
     values := [MIRValueID]{}
     closure := MIRValueID?{None}
@@ -3645,15 +3571,6 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, false, "direct").value)
             mir_kind = MIRCoreClosureKind.Realtime
         }
-        .Serve(address, executable) -> {
-            &values.push(jet_codegen_lower_expr(&builder, program, address))
-            closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
-            mir_kind = MIRCoreClosureKind.Serve
-        }
-        .OnInterrupt(callback) -> {
-            &values.push(jet_codegen_lower_expr(&builder, program, callback))
-            mir_kind = MIRCoreClosureKind.OnInterrupt
-        }
         .Guard(executable) -> {
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, false, "direct").value)
             mir_kind = MIRCoreClosureKind.Guard
@@ -3672,37 +3589,28 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
                 }
             }
         }
-        .UIButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
+        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> {
             &values.push(jet_codegen_lower_expr(&builder, program, label))
             &values.push(jet_codegen_lower_expr(&builder, program, shortcut))
             &values.push(jet_codegen_lower_expr(&builder, program, accessible_label))
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
             mir_kind = MIRCoreClosureKind.UIAction
         }
-        .UITextInputOnDrop(state, ime, executable, _) -> {
+        .UITextInputOnDrop(state, ime, executable) -> {
             &values.push(jet_codegen_lower_expr(&builder, program, state))
             &values.push(jet_codegen_lower_expr(&builder, program, ime))
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
             mir_kind = MIRCoreClosureKind.UITextInputOnDrop
         }
-        .UIPreview(name, viewport, executable, _, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
-            &values.push(jet_codegen_lower_expr(&builder, program, name))
-            if viewport == {
-                None -> {}
-                Val(viewport_value) -> &values.push(jet_codegen_lower_expr(&builder, program, viewport_value))
-            }
-            closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
-            mir_kind = MIRCoreClosureKind.UIPreview{playground: playground, source_file: source_file, source_span: source_span, source_start_line: source_start_line, source_start_column: source_start_column, source_end_line: source_end_line, source_end_column: source_end_column, build_id: build_id, revision: revision}
-        }
-        .ReactiveDerived(executable, _) -> {
+        .ReactiveDerived(executable) -> {
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
             mir_kind = MIRCoreClosureKind.ReactiveDerived
         }
-        .ReactiveEffect(executable, _) -> {
+        .ReactiveEffect(executable) -> {
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
             mir_kind = MIRCoreClosureKind.ReactiveEffect
         }
-        .UIReactiveRender(executable, _) -> {
+        .UIReactiveRender(executable) -> {
             closure = Val(jet_codegen_lower_lambda(&builder, program, executable, true, "direct").value)
             mir_kind = MIRCoreClosureKind.UIMount
         }
@@ -4216,7 +4124,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
             identity :: union_type.identity ?? panic("checked union widening target has no MIR identity")
             return jet_codegen_emit_value(&builder, program, span, target, MIROperation.Enum{type_id: identity, variant: variant, args: [MIREnumArg]{MIREnumArg{field: None, value: error, boxed: false}}})
         }
-        .Never | .ProtocolExit -> panic("diverging try conversion was lowered through the value conversion path")
+        .Never -> panic("diverging try conversion was lowered through the value conversion path")
     }
 }
 
@@ -4364,13 +4272,6 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
     }
     if convert == {
         .Never -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked try conversion is unreachable"})
-        .ProtocolExit -> {
-            if !is_result -> panic("checked protocol-exit try does not consume a Result")
-            error := jet_codegen_emit_value(&builder, program, input_span, source_error, MIROperation.ResultValue{subject: input, ok: false})
-            route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.errors", "entry_error_exit", "jet_entry_error_exit_jet", 1, [Bool]{false}, Val(Effect.Panic), TFailureCarrier.Diverges{value: Type.Named{name: "Never"}}, MIRPreludeABI.Control)
-            _ := jet_codegen_emit_value(&builder, program, expression.span, Type.Named{name: "Never"}, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: [MIRCallArg]{jet_codegen_numeric_call_arg(error, input_span)}, type_args: [MIRType]{}})
-            jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "protocol error exit diverges"})
-        }
         else -> if carrier == {
             .Result(success_type, error_type) -> {
                 if !is_result -> panic("checked try Result propagation consumes an Option without a conversion")
@@ -4835,7 +4736,7 @@ fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, program: JetCode
             if args.len() != 0 -> panic("checked Serde encode has unexpected arguments")
             jet_codegen_lower_serde_encode(&builder, program, expression, receiver)
         }
-        .Hardware(_) | .ReceiptAttach -> jet_codegen_lower_special_handle_method(&builder, program, expression, receiver, operation, args)
+        .Hardware(_) -> jet_codegen_lower_special_handle_method(&builder, program, expression, receiver, operation, args)
         .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) -> jet_codegen_lower_take_pattern(&builder, program, expression, receiver, operation, args)
         .EmailMethod(_) -> jet_codegen_lower_email_method(&builder, program, expression, receiver, operation, args)
         .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) -> jet_codegen_lower_http_handle_method(&builder, program, expression, receiver, operation, args)
@@ -4852,7 +4753,7 @@ fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, program: JetCode
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
-        .DurationNsValue | .DurationSecondsValue -> {
+        .DurationNsValue -> {
             if args.len() != 0 -> panic("checked Duration value projection has unexpected arguments")
             nanoseconds := operation == THandleOp.DurationNsValue
             member := if nanoseconds -> "duration.ns_value" else -> "duration.seconds_value"
@@ -4925,10 +4826,8 @@ fn jet_codegen_lower_typed_text_projection(builder: &JetCodegenBuilder, program:
     member := if kind == {
         .SQLRaw -> "sql_raw"
         .HTMLRaw -> "html_raw"
-        .ShRaw -> "sh_raw"
         .SQLTemplate -> "sql_template"
         .SQLParams -> "sql_params"
-        .HTMLText -> "html_text"
     }
     borrowed := kind == TTypedTextForm.SQLTemplate || kind == TTypedTextForm.SQLParams
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
@@ -4936,28 +4835,9 @@ fn jet_codegen_lower_typed_text_projection(builder: &JetCodegenBuilder, program:
     jet_codegen_emit_static_prelude_call(&builder, program, expression.span, expression.ty, call, [MIRValueID]{value})
 }
 
-fn jet_codegen_lower_carrier_fact(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, field: String, notes: Bool) -> MIRValueID {
-    unwrapped_type := jet_codegen_unwrap_pattern_tags(receiver.ty)
-    report_type := if unwrapped_type == {
-        .Result(_, error) -> error
-        else -> unwrapped_type
-    }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
-    value := jet_codegen_lower_expr(&builder, program, receiver)
-    carrier := jet_codegen_failure_carrier_for_type(receiver.ty)
-    member := if notes -> "notes" else -> "partial"
-    symbol := if notes -> "jet_notes" else -> "jet_partial"
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.outcome", member, symbol, 1, [Bool]{true}, None, carrier, MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.CarrierFact{call: call, receiver: value, field: jet_codegen_mir_field_id(resolved), notes: notes}})
-}
-
 fn jet_codegen_lower_option_probe(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, inner: TExpr, probe: TOptionProbe) -> MIRValueID {
     if probe == {
         .Field(name) -> jet_codegen_lower_optional_field(&builder, program, expression, inner, name, false)
-        .IsSome -> {
-            subject := jet_codegen_lower_expr(&builder, program, inner)
-            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.OptionIsSome{subject: subject})
-        }
         .Unwrap -> {
             subject := jet_codegen_lower_expr(&builder, program, inner)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.OptionValue{subject: subject})
@@ -4976,13 +4856,6 @@ fn jet_codegen_lower_tuple_index(builder: &JetCodegenBuilder, program: JetCodege
     field := jet_codegen_host_field_id(builder, program, base.ty, member)
     value := jet_codegen_lower_expr(&builder, program, base)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: value, field: field})
-}
-
-fn jet_codegen_lower_fixed_list_index(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, index: TExpr, line: Int) -> MIRValueID {
-    location := jet_codegen_assignment_panic_location(&builder, program, expression.span, false)
-    location.line = line
-    place := jet_codegen_index_place(&builder, program, base, index, TIndexKind.FixedListProof, expression.ty, MIRAccess.Read, location, expression.span)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
 }
 
 fn jet_codegen_lower_yield_send(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, value: TExpr) -> MIRValueID {
@@ -5013,13 +4886,6 @@ fn jet_codegen_apply_host_route_access(builder: JetCodegenBuilder, program: JetC
         }
         index += 1
     }
-}
-
-fn jet_codegen_emit_host_route_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, call: MIRPreludeCallID, args: ^[MIRCallArg], borrow_mask: [Bool]) -> MIRValueID Never! {
-    if args.len() != borrow_mask.len() -> panic("checked host operation arity disagrees with its Prelude route")
-    routed_args := args
-    jet_codegen_apply_host_route_access(builder, program, &routed_args, borrow_mask)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HostCall{call: call, args: routed_args}})
 }
 
 fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
@@ -5129,10 +4995,6 @@ fn jet_codegen_direct_render_function(builder: JetCodegenBuilder, program: JetCo
         }
     }
     selected
-}
-
-fn jet_codegen_lower_direct_display(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, value_type: Type, span: Span) -> MIRValueID Never! {
-    jet_codegen_lower_direct_render(&builder, program, value, value_type, "Display", "display", "jet_fmt_display", span)
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_direct_string_format
@@ -5285,19 +5147,6 @@ fn jet_codegen_lower_comptime_input(builder: &JetCodegenBuilder, program: JetCod
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: args, type_args: [MIRType]{}})
 }
 
-fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: String) -> MIRValueID Never! {
-    function :: jet_codegen_function_id_for_name(builder, program, name)
-    name_value := jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "{function.value}"}})
-    bound_value := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(-1, None, None)})
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.memo", "stats", "jet_memo_stats", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)
-    args := [MIRCallArg]{
-        jet_codegen_numeric_call_arg(name_value, expression.span),
-        jet_codegen_numeric_call_arg(bound_value, expression.span),
-    }
-    jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false, false})
-}
-
 fn jet_codegen_lower_cell_guard_project(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, recv: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool) -> MIRValueID {
     guard := jet_codegen_lower_expr(&builder, program, recv)
     field_paths := [[MIRFieldID]]{}
@@ -5319,28 +5168,6 @@ fn jet_codegen_lower_cell_guard_project(builder: &JetCodegenBuilder, program: Je
         split_call = Val(jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.cell_guard", split_member, "jet_cell_guard_split", 3, [Bool]{true, false, false}, None, carrier, MIRPreludeABI.Value))
     }
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: guard, paths: field_paths, editable: editable, edit_paths_disjoint: edit_paths_disjoint}})
-}
-
-fn jet_codegen_lower_gc_read(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, root: TLocal) -> MIRValueID {
-    root_value := jet_codegen_lower_gc_local(&builder, program, root, expression.span)
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.gc", "read", "jet_gc_read", 1, [Bool]{true}, Val(Effect.Mem), carrier, MIRPreludeABI.Value)
-    args := [MIRCallArg]{jet_codegen_numeric_call_arg(root_value, expression.span)}
-    jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{true})
-}
-
-fn jet_codegen_lower_expect_snapshot(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, value: TExpr, snap_path: String) -> MIRValueID {
-    value_type := value.ty
-    shown_value := jet_codegen_lower_expr(&builder, program, value)
-    shown := jet_codegen_lower_direct_display(&builder, program, shown_value, value_type, expression.span)
-    path := jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: snap_path}})
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.test", "expect_snapshot", "jet_expect_snapshot", 2, [Bool]{false, false}, Val(Effect.FS), carrier, MIRPreludeABI.Value)
-    args := [MIRCallArg]{
-        jet_codegen_numeric_call_arg(shown, expression.span),
-        jet_codegen_numeric_call_arg(path, expression.span),
-    }
-    jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false, false})
 }
 
 fn jet_codegen_lower_ambient_input(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, prompt: TExpr?) -> MIRValueID {
@@ -5462,29 +5289,18 @@ fn jet_codegen_lower_close(builder: &JetCodegenBuilder, program: JetCodegenProgr
 
 fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, call: THostCall) -> MIRValueID {
     if call == {
-        .CCallback(symbol, lambda, ret, managed, plan_digest, callback_identity) -> return jet_codegen_lower_callback_adapter(&builder, program, expression, symbol, lambda, ret, managed, plan_digest, callback_identity)
         .Method(receiver, method, args) -> return jet_codegen_lower_host_method(&builder, program, expression, receiver, method, args)
         .TypedText(kind, argument) -> return jet_codegen_lower_typed_text_projection(&builder, program, expression, kind, argument)
         .TypedTextInterp(kind, literals, holes, trusted_html) -> return jet_codegen_lower_typed_text_interpolation(&builder, program, expression, kind, literals, holes, trusted_html)
-        .CarrierFact(receiver, field, notes) -> return jet_codegen_lower_carrier_fact(&builder, program, expression, receiver, field, notes)
         .OptionProbe(inner, probe) -> return jet_codegen_lower_option_probe(&builder, program, expression, inner, probe)
         .TupleIndex(base, index) -> return jet_codegen_lower_tuple_index(&builder, program, expression, base, index)
-        .FixedListIndex(base, index, line) -> return jet_codegen_lower_fixed_list_index(&builder, program, expression, base, index, line)
         .YieldSend(value) -> return jet_codegen_lower_yield_send(&builder, program, expression, value)
-        .MemoStats(name) -> return jet_codegen_lower_memo_stats(&builder, program, expression, name)
         .ComptimeInput(builtin, path) -> return jet_codegen_lower_comptime_input(&builder, program, expression, builtin, path)
         .CellGuardProject(recv, paths, result_type, editable, edit_paths_disjoint) -> return jet_codegen_lower_cell_guard_project(&builder, program, expression, recv, paths, result_type, editable, edit_paths_disjoint)
-        .GCRead(root) -> return jet_codegen_lower_gc_read(&builder, program, expression, root)
-        .ExpectSnapshot(value, snap_path) -> return jet_codegen_lower_expect_snapshot(&builder, program, expression, value, snap_path)
         .NumericBounds(ty, member) -> {
             constant :: jet_codegen_numeric_bound_constant(ty, member) ?? panic("unsupported numeric bound `{member}` on {type_name(ty)}")
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
-        .StrMatchScan(subject, parts, probe) -> return jet_codegen_lower_string_match_scan(&builder, program, expression, subject, parts, probe)
-        .BinMatchScan(subject, parts, probe) -> return jet_codegen_lower_binary_match_scan(&builder, program, expression, subject, parts, probe)
-        .EnvSet(name, value, _) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value)
-        .GCEdit(root, _, edges, edit, index_temp, kind) -> return jet_codegen_lower_gc_edit(&builder, program, expression, root, edges, edit, index_temp, kind)
-        .SwitchSubjectField(field) -> return jet_codegen_lower_switch_subject(&builder, program, expression, Val(field))
         .SwitchSubjectValue -> return jet_codegen_lower_switch_subject(&builder, program, expression, None)
         else -> panic("checked host call lies outside the current Jet codegen contract")
     }
@@ -5517,7 +5333,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             loop part in parts -> &lowered_parts.push(jet_codegen_lower_string_part(&builder, program, part))
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildString{parts: lowered_parts})
         }
-        .StructLit(fields, extra) -> jet_codegen_lower_struct_literal(&builder, program, expression, fields, extra)
+        .StructLit(fields) -> jet_codegen_lower_struct_literal(&builder, program, expression, fields)
         .EnumLit(enum_type, variant, payload) -> jet_codegen_lower_enum_literal(&builder, program, expression, enum_type, variant, payload)
         .EnumCtor(owner, variant, payload) -> jet_codegen_lower_enum_constructor(&builder, program, expression, owner, variant, payload)
         .Local(local) -> {
@@ -5557,7 +5373,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             constant :: jet_codegen_lower_comptime_value(value, program.nominals, builder.function.module_identity, builder.generic_type_names) ?? panic("checked comptime closure cannot lower as a MIR constant")
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
-        .DistinctCtor(_, argument, _) -> {
+        .DistinctCtor(argument) -> {
             value := jet_codegen_lower_expr(&builder, program, argument)
             target := jet_codegen_lower_type_for_function(expression.ty, builder, program)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.Transparent})
@@ -5585,7 +5401,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             target := jet_codegen_lower_type_for_function(expression.ty, builder, program)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.Transparent})
         }
-        .UnitConvert(_, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line) -> jet_codegen_lower_unit_convert(&builder, program, expression, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line)
+        .UnitConvert(argument, scale, offset, rounding, fallible, relative_uncertainty, file, line) -> jet_codegen_lower_unit_convert(&builder, program, expression, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line)
         .PreciseBuiltin(type_name, function, args) -> jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
         .MathBuiltin(type_name, function, args) -> jet_codegen_lower_math_builtin(&builder, program, expression, type_name, function, args)
         .CoreCall(record, args, _, type_args, widen_to_vec, data_plan, failure) -> {
@@ -5669,7 +5485,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .MethodCall(receiver, method, type_args, args) -> jet_codegen_lower_method_call(&builder, program, expression, receiver, method, type_args, args)
         .NumericMethod(receiver, operation) -> jet_codegen_lower_numeric_method(&builder, program, expression, receiver, operation)
         .NumericBinaryMethod(receiver, operation, argument) -> jet_codegen_lower_numeric_binary_method(&builder, program, expression, receiver, operation, argument)
-        .OverflowOpt(prefix, operation, line, _, lhs, rhs) -> jet_codegen_lower_overflow_opt(&builder, program, expression, prefix, operation, line, lhs, rhs)
+        .OverflowOpt(prefix, operation, line, lhs, rhs) -> jet_codegen_lower_overflow_opt(&builder, program, expression, prefix, operation, line, lhs, rhs)
         .Unary(op, operand) -> {
             value := jet_codegen_lower_expr(&builder, program, operand)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Unary{op: jet_codegen_lower_unary(op), value: value})
@@ -5843,7 +5659,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, expression, condition, then_body, then_value, else_body, else_value, None)
         .StaticCall(owner, owner_type, method, type_args, args) -> jet_codegen_lower_static_call(&builder, program, expression, owner, owner_type, method, type_args, args)
         .ListLit(_) | .MapLit(_) -> jet_codegen_lower_collection_expression(&builder, program, expression)
-        .SharedGuardValue(_, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .Print(_) -> jet_codegen_lower_guard_expression(&builder, program, expression)
+        .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .Print(_) -> jet_codegen_lower_guard_expression(&builder, program, expression)
         .InvariantViolation(construct, span) -> panic(jet_codegen_lowering_error_message(builder.function, span, construct))
         else -> panic(jet_codegen_lowering_error_message(builder.function, expression.span, "checked TIR expression lies outside the current Jet codegen contract"))
     }
@@ -6365,10 +6181,7 @@ fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCo
         .Field(receiver, reference) -> jet_codegen_is_element_place_chain(builder, program, receiver) && jet_codegen_is_stored_struct_field(builder, program, receiver.ty, reference)
         .Index(base, _, kind, access, checked_call, _) -> {
             if access != AccessConvention.Read || checked_call != None -> return false
-            if kind == {
-                .List | .Unknown -> {}
-                else -> return false
-            }
+            if kind != .List -> return false
             if base.ty == {
                 .List(_) -> {}
                 else -> return false
@@ -6798,7 +6611,7 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
         }
         .Range(lo, hi, span) -> JetCodegenPatternTest{value: jet_codegen_lower_numeric_pattern_range(&builder, program, subject_value, subject.ty, lo, hi, span), matched: None}
         .Or(_, _) -> panic("or-pattern tests must use the ordered alternative lowerer")
-        .Struct(fields, _, span) -> {
+        .Struct(fields, span) -> {
             tests := [MIRValueID]{}
             loop field in fields {
                 if field == {
@@ -6933,7 +6746,7 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, program: JetCodeg
             }
         }
         .Or(_, _) -> panic("or-pattern bindings must use the ordered alternative lowerer")
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _) -> {
             loop field in fields {
                 if field == {
                     .Bind(field_name, name, _) -> {
@@ -7080,7 +6893,7 @@ fn jet_codegen_or_borrow_shape(builder: JetCodegenBuilder, program: JetCodegenPr
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> return inner == None
         .Absent(_) | .Range(_, _, _) -> return true
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _) -> {
             loop field in fields {
                 if field == .Nested(_, _, _) -> return false
             }
@@ -7133,7 +6946,7 @@ fn jet_codegen_bind_or_borrowed(builder: &JetCodegenBuilder, program: JetCodegen
             slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Result{ok: ok}, fact.ty, binding_span)
             jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _) -> {
             loop field in fields {
                 if field == .Bind(field_name, name, _) {
                     if name == "" || name == "_" -> next
@@ -7686,13 +7499,11 @@ fn jet_codegen_lower_layout_field_index(builder: &JetCodegenBuilder, program: Je
         host_param_conventions: None,
         source_params: [String]{parameter.name},
         source_param_symbols: [SymbolID]{parameter_symbol},
-        jit_name: "",
         param_types: [Type]{field_type},
         ret: Val(Type.Bool),
         is_move: true,
         boxed: false,
         rc: false,
-        arc: false,
         captures: [TCapture]{},
         materialized_captures: [String]{},
         frozen_captures: [String]{},

@@ -592,7 +592,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
     if program.registration_graph == .Val(graph) {
     nominal_row :: sema_pattern_nominal_row(graph, env.module_identity, subject_ty) ?? {
         &diagnostics.push(sema_error("E0313", span, "`{{ … }}` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))
-        return SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, rest: rest, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
+        return SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     is_struct :: nominal.kind == SemaRegistrationNominalKind.Struct
@@ -675,10 +675,10 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
             complete = false
         }
     }
-    return SemaPatternValidation{shape: TPatternShape.Struct{fields: tir_fields, rest: rest, span: span}, enum_type: None, bindings: facts, complete: complete}
+    return SemaPatternValidation{shape: TPatternShape.Struct{fields: tir_fields, span: span}, enum_type: None, bindings: facts, complete: complete}
     }
     &diagnostics.push(sema_error("E0313", span, "a struct pattern needs the declaration graph", "struct patterns read registered fields", "resolve the subject declaration before matching it"))
-    SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, rest: rest, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
+    SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
 }
 
 fn sema_pattern_list(subject_ty: Type, items: [PatSlot], rest: ListPatRest?, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaPatternValidation {

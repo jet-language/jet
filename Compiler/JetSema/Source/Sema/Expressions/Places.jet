@@ -311,7 +311,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     if member == "value" {
         guard :: sema_expression_shared_guard_value(base.ty)
         if guard == .Val(held) {
-            value :: sema_tir_node(held.value_type, TExprKind.SharedGuardValue{guard: base, editable: held.editable}, span)
+            value :: sema_tir_node(held.value_type, TExprKind.SharedGuardValue{guard: base}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }

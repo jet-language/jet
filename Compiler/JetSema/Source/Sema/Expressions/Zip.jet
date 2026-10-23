@@ -16,7 +16,6 @@ use jet_foundation.[
     TypeTupleField,
     expr_span,
     type_name,
-    type_tuple_struct_name,
 ]
 
 fn sema_expression_zip_family_name(name: String) -> Bool Never! {
@@ -193,8 +192,7 @@ fn sema_expression_zip_family(method: String, inputs: [TExpr], fields: [String],
     mode := TZipMode.Strict
     if method == "zip_short" -> mode = TZipMode.Short
     if method == "zip_pad" -> mode = TZipMode.Pad
-    tuple_struct := type_tuple_struct_name(tuple_fields)
-    operation := TBuiltinOp.Zip{tuple_struct: tuple_struct, mode: mode, fields: names, flatten: false, input_count: inputs.len(), fill_mode: fill_mode, field_types: field_types}
+    operation := TBuiltinOp.Zip{mode: mode, fields: names, flatten: false, input_count: inputs.len(), fill_mode: fill_mode, field_types: field_types}
     lowered_args := [TExpr]{}
     loop index in 1..<inputs.len() -> &lowered_args.push(inputs[index])
     loop fill in fill_args -> &lowered_args.push(fill)
@@ -323,10 +321,9 @@ fn sema_expression_option_zip(receiver_value: TExpr, args: [CallArg], span: Span
         &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`.zip()` needs an optional argument, got {sema_type_show(other.ty)}", "`.zip(other)` combines two optionals into one paired optional", "pass a `T?` value"))
         return failed
     }
-    tuple_struct :: type_tuple_struct_name(fields)
     pair :: Type.Tuple{fields: fields}
     // copy: the operation names the pair type the result's Option also owns
-    operation :: TBuiltinOp.OptionZip{tuple_struct: tuple_struct, elem_ty: pair.copy()}
+    operation :: TBuiltinOp.OptionZip{elem_ty: pair.copy()}
     value :: sema_tir_node(Type.Option{inner: pair}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: [TExpr]{other}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
 }

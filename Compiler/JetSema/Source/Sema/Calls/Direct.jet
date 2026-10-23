@@ -86,9 +86,8 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
-    policy :: argument.flags.arithmetic_policy
     result_ty :: if call.name == "checked" -> Type.Option{inner: lhs_value.ty} else -> lhs_value.ty
-    value :: sema_tir_node(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, policy: policy, lhs: lhs_value, rhs: rhs_value}, call.name_span)
+    value :: sema_tir_node(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, lhs: lhs_value, rhs: rhs_value}, call.name_span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }

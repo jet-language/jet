@@ -2209,7 +2209,6 @@ fn ir_compiler_owned_def(module_identity: String, name: String, kind: ^TTypeDefK
         layout_alignment: None,
         serde: [TSerdeAttribute]{},
         cli_bindings: [TCLIBinding]{},
-        cli: None,
         ownership: TDeclarationOwnership.Owned,
         boxed_edges: [String]{},
         compiler_builtin: None,
@@ -2611,7 +2610,7 @@ fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> 
 
 fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, span: Span) -> Int Never! {
     target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    if operation == .CheckedIntToFixed(_, _, _, _) {
+    if operation == .CheckedIntToFixed(_, _) {
         // A sized literal that fits is the fixed word itself (Lower
         // lower_fixed_literal_word): no exact Int is built, nothing runs. A
         // U64 above I64 range is its bit pattern. This is also what keeps
@@ -2630,7 +2629,7 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             if checked -> return ir_fail_slot(&b, span, "checked inline-range conversion")
             return ir_copy_value(&m, p, &b, value, span)
         }
-        .CheckedIntToFixed(host_kind, _, _, line) -> {
+        .CheckedIntToFixed(host_kind, line) -> {
             if ir_kind_of(m, b, value) != .Int || m.types[target].kind != .Word -> return ir_fail_slot(&b, span, "checked fixed conversion of {ir_type_name(receiver.ty)}")
             int_row :: ir_type_row(&m, Type.Int) ?? 0
             kind_word :: ir_int_constant(&m, &b, int_row, host_kind)
@@ -2647,9 +2646,9 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             ir_release(&m, &b, value)
             return result
         }
-        .FloatToInt(_, _, _, _, _) -> return ir_float_to_int(&m, p, &b, value, ty, span)
-        .FloatNarrow(_) -> return ir_float_narrow(&m, p, &b, value, ty, span)
-        .TryFrom(_, _, _) -> {
+        .FloatToInt(_) -> return ir_float_to_int(&m, p, &b, value, ty, span)
+        .FloatNarrow -> return ir_float_narrow(&m, p, &b, value, ty, span)
+        .TryFrom(_) -> {
             result :: ir_try_from(&m, p, &b, value, ty, span)
             ir_release(&m, &b, value)
             return result

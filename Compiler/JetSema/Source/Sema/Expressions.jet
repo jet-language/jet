@@ -101,9 +101,6 @@ fn sema_tir_expr(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
 // negation lowers through that mode's overflow route; `Checked` is the
 // trapping policy route.
 fn sema_expr_arithmetic_policy_value(policy: ArithmeticPolicyFact, operation: ArithmeticOperation, ty: Type, span: Span, line: Int, lhs: TExpr, rhs: TExpr) -> TExpr Never! {
-    fact := policy
-    fact.operation_span = span
-    fact.operation = Val(operation)
     prefix :: if policy.mode == {
         .Checked -> "checked_policy"
         .Wrapping -> "wrapping"
@@ -115,7 +112,7 @@ fn sema_expr_arithmetic_policy_value(policy: ArithmeticPolicyFact, operation: Ar
         .Mul -> "mul"
         .Pow -> "pow"
     }
-    sema_tir_node(ty, TExprKind.OverflowOpt{prefix: prefix, operation: name, line: line, policy: Val(fact), lhs: lhs, rhs: rhs}, span)
+    sema_tir_node(ty, TExprKind.OverflowOpt{prefix: prefix, operation: name, line: line, lhs: lhs, rhs: rhs}, span)
 }
 
 fn sema_expr_unwrap_tag(ty: Type) -> Type Never! {
@@ -335,13 +332,12 @@ fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: In
     destination_is_fixed := if destination == {.IntN(_, _) -> true else -> false}
     if destination_is_fixed && source == Type.Int {
         host_kind :: sema_expr_numeric_host_kind(destination) ?? return None
-        rust_type :: sema_expr_numeric_rust_type(destination) ?? return None
-        operation = Val(TNumericOp.CheckedIntToFixed{host_kind: host_kind, dst_rust: rust_type, dst_spelling: type_name(destination), line: line})
+        operation = Val(TNumericOp.CheckedIntToFixed{host_kind: host_kind, line: line})
     }
     if operation == None {
         if {
             destination == Type.Float32 && source == Type.Float -> {
-                operation = Val(TNumericOp.FloatNarrow{dst_spelling: type_name(destination)})
+                operation = Val(TNumericOp.FloatNarrow)
             }
             else -> {
                 rust_type :: sema_expr_numeric_rust_type(destination) ?? return None
@@ -1600,7 +1596,7 @@ fn sema_expr_unit_concrete_value(value: TExpr) -> Float? {
                 return Val(-concrete)
             }
         }
-        .UnitConvert(_, argument, _, _, _, _, _, _, _) -> return sema_expr_unit_concrete_value(argument)
+        .UnitConvert(argument, _, _, _, _, _, _, _) -> return sema_expr_unit_concrete_value(argument)
         .MethodCall(_, method, _, args) -> {
             if method.name == "from_float" && args.len() == 1 {
                 argument := args[0].value
@@ -1755,9 +1751,8 @@ fn sema_expr_unit_conversion(value: TExpr, source: SemaRegistrationUnitFact, des
     if source.name == destination.name -> return value.copy()
     scale :: sema_expr_unit_ratio_div(source.scale, destination.scale) ?? UnitRatio{numerator: 1, denominator: 1}
     offset := sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source.offset, destination.offset), destination.scale) ?? UnitRatio{numerator: 0, denominator: 1}
-    destination_symbol := symbol_id(SymbolKind.Type, destination.package, "", destination.name)
     relative_uncertainty := sema_expr_unit_relative_uncertainty(source, destination)
-    sema_tir_node(Type.Named{name: destination.name}, TExprKind.UnitConvert{destination: destination_symbol, argument: value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
+    sema_tir_node(Type.Named{name: destination.name}, TExprKind.UnitConvert{argument: value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
 }
 
 fn sema_expr_unit_arithmetic_mismatch(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
@@ -1788,9 +1783,8 @@ fn sema_expr_unit_binary_result(op: BinOp, lhs: TExpr, rhs: TExpr, left_fact: Se
 }
 
 fn sema_expr_unit_wrap_raw(value: TExpr, fact: SemaRegistrationUnitFact, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
-    destination_symbol := symbol_id(SymbolKind.Type, fact.package, "", fact.name)
     relative_uncertainty := sema_expr_unit_measured_relative_uncertainty(fact)
-    sema_tir_node(Type.Named{name: fact.name}, TExprKind.UnitConvert{destination: destination_symbol, argument: value, scale: "1/1", offset: "0/1", rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
+    sema_tir_node(Type.Named{name: fact.name}, TExprKind.UnitConvert{argument: value, scale: "1/1", offset: "0/1", rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
 }
 
 fn sema_expr_unit_dimensions_equal(left: Dimension?, right: Dimension?) -> Bool Never! {
@@ -2775,11 +2769,10 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     offset :: sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source_fact.offset, destination_fact.offset), destination_fact.scale) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     converted := if measured_crossing -> Type.Apply{name: "Measurement", args: [Type]{Type.Float}} else -> Type.Named{name: destination_name}
     result_ty := Type.Result{ok: converted, err: Type.String}
-    destination_symbol := symbol_id(SymbolKind.Type, destination_fact.package, "", destination_fact.name)
     relative_uncertainty := sema_expr_unit_relative_uncertainty(source_fact, destination_fact)
     line := sema_source_line_at(environment.source_segments, conversion_span) ?? 0
     scalar_ty :: if measured_crossing -> Type.Result{ok: Type.Float, err: Type.String} else -> result_ty
-    value := sema_tir_node(scalar_ty, TExprKind.UnitConvert{destination: destination_symbol, argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
+    value := sema_tir_node(scalar_ty, TExprKind.UnitConvert{argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
     if measured_crossing {
         relative :: sema_tir_node(Type.Float, TExprKind.FloatLit{value: relative_uncertainty ?? 0.0}, conversion_span)
         value = sema_expression_measurement_source_call("__measurement_result", [TExpr]{value, relative}, result_ty, conversion_span, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}

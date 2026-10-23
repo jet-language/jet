@@ -50,7 +50,7 @@ fn sema_coverage_shape_keys(shape: TPatternShape, keys: &[String], ranges: &[Sem
         .Err(_, _, _, _) -> &keys.push("Err")
         .Range(lo, hi, _) -> &ranges.push(SemaIntegerRange{lo: lo, hi: hi})
         .Or(alternatives, _) -> loop alternative in alternatives -> sema_coverage_shape_keys(alternative, &keys, &ranges)
-        .Struct(_, _, _) | .List(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
+        .Struct(_, _) | .List(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
     }
 }
 
@@ -465,7 +465,7 @@ fn sema_coverage_shape_span(shape: TPatternShape) -> Span Never! {
     if shape == {
         .Variant(_, _, _, span) | .Present(_, _, _, span) | .Ok(_, _, _, span) | .Err(_, _, _, span) -> span
         .Absent(span) -> span
-        .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span) | .List(_, _, span) | .Map(_, _, span) | .Text(_, span) | .Binary(_, span) -> span
+        .Range(_, _, span) | .Or(_, span) | .Struct(_, span) | .List(_, _, span) | .Map(_, _, span) | .Text(_, span) | .Binary(_, span) -> span
     }
 }
 
@@ -871,7 +871,7 @@ fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [
             loop row in rows {
                 if row.cells.len() == 0 -> next
                 cells := (loop _ in field_types -> SemaPatternCoverageCell.Any)
-                if row.cells[0] == .Shape(shape) && shape == .Struct(written, _, _) {
+                if row.cells[0] == .Shape(shape) && shape == .Struct(written, _) {
                     loop (index, declared) in nominal.fields {
                         loop field in written {
                         if field == {
@@ -915,7 +915,7 @@ fn sema_pattern_collection_witness(ty: Type, rows: [SemaPatternCoverageRow], env
 
 fn sema_pattern_matrix_needed(shape: TPatternShape) -> Bool Never! {
     if shape == {
-        .Struct(_, _, _) | .List(_, _, _) | .Map(_, _, _) -> true
+        .Struct(_, _) | .List(_, _, _) | .Map(_, _, _) -> true
         .Variant(_, slots, _, _) -> {
             loop slot in slots {
                 if slot == .Nested(inner) && sema_pattern_matrix_needed(inner.shape) -> return true

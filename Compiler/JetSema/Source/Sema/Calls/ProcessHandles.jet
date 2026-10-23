@@ -484,7 +484,7 @@ fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: Str
         operation :: if stream_name == "ProcessStderrStream" -> THandleOp.ProcessStderrRead else -> THandleOp.ProcessStdoutRead
         return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
     }
-    sema_process_finish(receiver_value, THandleOp.Method{name: "lines"}, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
+    sema_process_finish(receiver_value, THandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 // Projects the public ProcessChild handle fields using the compiler's builtin

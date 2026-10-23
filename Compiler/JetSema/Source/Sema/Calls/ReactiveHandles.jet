@@ -133,7 +133,7 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
 }
 
 fn sema_reactive_direct_closure(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, type_args: [Type], diagnostics: &[Diagnostic]) -> TExpr? {
-    closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda, site: span.start} else -> TCoreClosureKind.ReactiveDerived{executable: lambda, site: span.start}
+    closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
     value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return None
     if !sema_reactive_call_fact(environment, program, &scopes, &context, "core.reactive.{kind}", span, result_type, type_args, "", &diagnostics) -> return None
@@ -272,7 +272,7 @@ fn sema_call_try_reactive_handle_method(receiver: Expr, receiver_value: TExpr, m
     result_type := sema_reactive_handle_result(owner, method, receiver_value.ty)
     checked_args :: sema_reactive_checked_handle_args(owner, method, args, receiver, receiver_value.ty, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     operation :: if {
-        owner == "Effect" -> THandleOp.ReactiveEffectMethod{method: method}
+        owner == "Effect" -> THandleOp.ReactiveEffectMethod
         method == "set" -> THandleOp.ReactiveSet
         else -> THandleOp.ReactiveGet
     }

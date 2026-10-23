@@ -311,7 +311,7 @@ fn sema_atomic_field_initializer(field_ty: Type, value: TExpr, source: Expr) -> 
     row :: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
     argument :: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     bindings :: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
-    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{^argument}, bindings, 0, value.span) ?? return None
+    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{^argument}, bindings, value.span) ?? return None
     Val(sema_tir_expr(field_ty, kind, value.span))
 }
 
@@ -427,7 +427,7 @@ fn sema_expression_core_record_literal(owner_name: String, fields: [ExprField], 
             break
         }
     }
-    value :: sema_tir_node(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values, extra: None}, span)
+    value :: sema_tir_node(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
@@ -508,7 +508,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         checked :: sema_expression_struct_field_default(field, default_value, span, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &values.push(checked)
     }
-    value := sema_tir_node(result_ty, TExprKind.StructLit{fields: values, extra: None}, span)
+    value := sema_tir_node(result_ty, TExprKind.StructLit{fields: values}, span)
     if as_trait == .Val(trait_name) {
         trait_symbol_index :: sema_scope_resolve_index(scopes, trait_name)
         if trait_symbol_index == None || scopes.bindings[trait_symbol_index ?? 0].symbol.kind != SymbolKind.Trait {
@@ -1131,7 +1131,7 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
     checker :: checker_call ?? return None
     nominal :: Type.Named{name: type_name}
     result_type :: Type.Result{ok: nominal, err: error_type}
-    wrapped :: sema_tir_node(nominal, TExprKind.DistinctCtor{owner: target.owner.id, argument: sema_tir_node(Type.String, TExprKind.Move{value: source_value}, span), base: Type.String}, span)
+    wrapped :: sema_tir_node(nominal, TExprKind.DistinctCtor{argument: sema_tir_node(Type.String, TExprKind.Move{value: source_value}, span)}, span)
     ok_pattern :: TPattern{
         shape: TPatternShape.Ok{binding: "_", binding_span: span, inner: None, span: span},
         bindings: [TPatternBindingFact]{},
@@ -1187,7 +1187,7 @@ fn sema_expression_checked_text_raw(target: SemaExpressionCheckedTextTarget, typ
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    constructed :: sema_tir_node(Type.Named{name: type_name}, TExprKind.DistinctCtor{owner: target.owner.id, argument: argument, base: Type.String}, method_span)
+    constructed :: sema_tir_node(Type.Named{name: type_name}, TExprKind.DistinctCtor{argument: argument}, method_span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(constructed, expected, environment, program, &diagnostics)}
 }
 
@@ -1308,7 +1308,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         checked_text: Val(evaluation),
     })
     value :: text
-    result := sema_tir_node(head, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, span)
+    result := sema_tir_node(head, TExprKind.DistinctCtor{argument: value}, span)
     return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
     }
     SemaExpressionCheckedTextLiteral{handled: true, value: None}

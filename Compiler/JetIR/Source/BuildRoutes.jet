@@ -407,7 +407,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TEx
     if operation == .IterNext -> return ir_lazy_next(&m, p, &b, ty, receiver, span)
     if operation == .ListTryWithCapacity -> return ir_list_try_with_capacity(&m, p, &b, ty, args, span)
     if operation == .ViewNew(line) -> return ir_view_new(&m, p, &b, ty, receiver, args, line, span)
-    if operation == .OptionZip(_, _) -> return ir_option_zip(&m, p, &b, ty, receiver, args, span)
+    if operation == .OptionZip(_) -> return ir_option_zip(&m, p, &b, ty, receiver, args, span)
     // A write through the receiver reaches it as a write place: each List or
     // Map on a path through an element (`&rows[0].cells.push(x)`) is made its
     // own first, so the write never lands in a buffer another holder shares.
@@ -545,8 +545,8 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TEx
 // jet_codegen_builtin_route_plan, Lower lower_route_call).
 fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, operands: [Int], span: Span) -> Int Never! {
     if operation == {
-        .Zip(_, _, _, _, _, _, _) | .Unzip(_) | .ListMinMax(_) | .Indexed(_) | .MapToList(_) | .IterSplit(_) | .ToString
-        | .RemoveList(_, _) | .MapNew | .SetCopy | .BitSetNew | .ByteBufferNew | .BagLen | .AtomicMethod(_) | .ViewMutNew(_) | .ComputeViewNew(_) | .ComputeViewMutNew(_) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
+        .Zip(_, _, _, _, _, _) | .Unzip | .ListMinMax | .Indexed | .MapToList | .IterSplit | .ToString
+        | .RemoveList(_, _) | .AtomicMethod(_) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
         else -> {}
     }
     if tir_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
@@ -598,7 +598,7 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     result_row :: if ir_unit_type(ty) -> -1 else -> ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if operation == {
-        .Each | .EachRef -> {
+        .Each -> {
             walk :: ir_walk_open(&m, &b, list, element)
             _ :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, -1)
             ir_walk_close(&m, &b, walk)

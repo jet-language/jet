@@ -208,7 +208,6 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
             // (codegen only marks the root, which Lower never reads); codegen
             // rejects a Resource wrapper outright.
             if let_ty == .Annotated(_, wrapper) {
-                if wrapper == .Resource -> return ir_fail(&b, span, "resource binding")
             }
             if init.kind == .Uninit -> return ir_bind_uninit(&m, p, &b, local, init.ty, span)
             value :: ir_expr(&m, p, &b, init)
@@ -371,7 +370,7 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
         .ContractScope(pre, body, post, result, span) -> ir_contract_scope(&m, p, &b, pre, body, post, result, span)
         .RefutableBind(pattern, init, fallback, span) -> ir_refutable_bind(&m, p, &b, pattern, init, fallback, span)
         .TupleDestructure(_, init, _, binds, span) | .StructDestructure(_, init, _, binds, span) -> ir_field_destructure(&m, p, &b, init, binds, span)
-        .ListDestructure(_, init, count, _, line, elements, span) -> {
+        .ListDestructure(_, init, count, line, elements, span) -> {
             if line > 0 -> b.line = line
             ir_list_destructure(&m, p, &b, init, count, elements, span)
         }
@@ -396,7 +395,7 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: TStmt) Never! {
             ir_scope_close(&m, &b)
         }
         .TaskGroup(group, limit, body, span) -> ir_task_group(&m, p, &b, group, limit, body, span)
-        .DeferClose(close, _, _, span) -> ir_defer_close(&m, p, &b, close, span)
+        .DeferClose(close, _, span) -> ir_defer_close(&m, p, &b, close, span)
         .BreakValue(label, value, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
             if frame.value < 0 -> return ir_fail(&b, span, "break with a value out of a statement loop")
@@ -560,7 +559,7 @@ fn ir_task_group(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limit
     args := [Int]{}
     symbol := "jet_rt_native_task_group_new"
     if limit == .Val(count) {
-        operation :: TNumericOp.CheckedIntToFixed{host_kind: 3, dst_rust: "i64", dst_spelling: "I64", line: b.line}
+        operation :: TNumericOp.CheckedIntToFixed{host_kind: 3, line: b.line}
         converted :: TExpr{ty: Type.IntN{signed: true, bits: 64}, kind: TExprKind.NumericMethod{receiver: count, operation: operation}, span: count.span}
         value :: ir_expr(&m, p, &b, converted)
         if ir_failed(b) || value < 0 -> return
@@ -960,16 +959,7 @@ fn ir_condition(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: TIfCond, s
             ir_end(&b.f, b.line)
             return result
         }
-        .WithPrelude(prelude, inner) -> {
-            loop statement in prelude {
-                if ir_failed(b) -> return -1
-                ir_stmt(&m, p, &b, statement)
-            }
-            return ir_condition(&m, p, &b, inner, span)
-        }
         .IfLet(pattern, subject) -> return ir_option_test(&m, p, &b, pattern.shape, subject, span)
-        .IsNone(subject) -> return ir_option_test(&m, p, &b, TPatternShape.Absent{span: span}, subject, span)
-        .Matches(pattern, subject) -> return ir_option_test(&m, p, &b, pattern.shape, subject, span)
     }
     -1
 }
@@ -1150,8 +1140,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             return ir_copy_value(&m, p, &b, slot, span)
         }
         .MaterializeView(value) -> return ir_materialize_view(&m, p, &b, expression.ty, value, span)
-        .StructLit(fields, extra) -> {
-            if extra != None -> return ir_fail_slot(&b, span, "struct literal with host extras")
+        .StructLit(fields) -> {
             if ir_default_err(p, expression.ty) -> return ir_default_err_literal(&m, p, &b, expression.ty, fields, span)
             ty :: ir_value_type(&m, p, expression.ty) ?? return ir_type_fail(&b, span, expression.ty)
             if ir_word_record(m, p, ty) == .Val(record) {
@@ -1194,18 +1183,12 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
             member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "field {field.name} of {ir_type_name(receiver.ty)}")
             return ir_member_read(&m, &b, base, member)
         }
-        .SharedGuardValue(guard, _) -> return ir_shared_guard_value(&m, p, &b, expression.ty, guard, span)
+        .SharedGuardValue(guard) -> return ir_shared_guard_value(&m, p, &b, expression.ty, guard, span)
         .HostCall(call) -> {
             if call == .SwitchSubjectValue {
                 subject :: if b.subjects.len() > 0 -> b.subjects[b.subjects.len() - 1] else -> -1
                 if subject < 0 -> return ir_fail_slot(&b, span, "switch subject outside a switch")
                 return subject
-            }
-            if call == .SwitchSubjectField(name) {
-                subject :: if b.subjects.len() > 0 -> b.subjects[b.subjects.len() - 1] else -> -1
-                if subject < 0 || ir_kind_of(m, b, subject) != .Aggregate -> return ir_fail_slot(&b, span, "switch subject field {name} outside a struct switch")
-                member :: ir_member_of(&m, p, b, subject, name) ?? return ir_fail_slot(&b, span, "switch subject field {name}")
-                return ir_member_read(&m, &b, subject, member)
             }
             if call == .ComptimeInput(builtin, path) {
                 // A comptime input (embed_file, embed_bytes, find) the checked
@@ -1306,7 +1289,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: TExpr) -> Int 
         .Slice(base, start, end, range, location) -> return ir_slice(&m, p, &b, expression.ty, base, start, end, range, location, span)
         .Range(start, end, exclusive) -> return ir_range_value(&m, p, &b, expression.ty, start, end, exclusive, span)
         .Borrow(value, access) -> return ir_borrow(&m, p, &b, expression.ty, value, access, span)
-        .OverflowOpt(prefix, operation, line, _, lhs, rhs) -> return ir_overflow_opt(&m, p, &b, expression.ty, prefix, operation, line, lhs, rhs, span)
+        .OverflowOpt(prefix, operation, line, lhs, rhs) -> return ir_overflow_opt(&m, p, &b, expression.ty, prefix, operation, line, lhs, rhs, span)
         .NumericBinaryMethod(receiver, operation, argument) -> return ir_numeric_euclid(&m, p, &b, expression.ty, receiver, operation, argument, span)
         .HandleMethod(receiver, operation, args) -> return ir_handle_method(&m, p, &b, expression.ty, receiver, operation, args, span)
         .CoreClosureCall(kind) -> return ir_core_closure_call(&m, p, &b, expression.ty, kind, span)
@@ -1402,7 +1385,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     // Encoding a Dyn is the Dyn itself (codegen jet_codegen_lower_serde_encode).
     if operation == .SerdeEncode && (ir_nominal_name(ir_untag(ir_subst(m, receiver.ty))) ?? "") == "Dyn" -> return ir_expr(&m, p, &b, receiver)
     dedicated :: if operation == {
-        .SerdeEncode | .Hardware(_) | .ReceiptAttach | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
+        .SerdeEncode | .Hardware(_) | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
         .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
         // Their Err is a List of FieldError records, which no route here
@@ -1490,8 +1473,8 @@ fn ir_handle_op_name(operation: THandleOp) -> String Never! {
 // computes the same value).
 fn ir_numeric_euclid(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, argument: TExpr, span: Span) -> Int Never! {
     remainder :: if operation == {
-        .EuclideanDiv(_) -> false
-        .EuclideanRem(_) -> true
+        .EuclideanDiv -> false
+        .EuclideanRem -> true
         else -> { return ir_fail_slot(&b, span, "binary numeric operation other than div_euclid/rem_euclid") }
     }
     left :: ir_expr(&m, p, &b, receiver)
@@ -2156,7 +2139,7 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: TExpr, bac
         ir_emit(&b.f, IROp.Offset, address, element, 0, -1, b.line)
         return address
     }
-    if place.kind == .SharedGuardValue(guard, _) {
+    if place.kind == .SharedGuardValue(guard) {
         // `&guard.value`: the cell's slot itself, written in place.
         payload :: ir_shared_guard_payload(&m, p, &b, guard, span)
         if payload < 0 -> return -1
@@ -2435,7 +2418,7 @@ fn ir_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, shap
             return result
         }
         .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) -> return ir_carrier_shape_test(&m, p, &b, subject, shape, span)
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _) -> {
             if ir_kind_of(m, b, subject) != .Aggregate -> return ir_fail_slot(&b, span, "struct pattern on {m.types[b.f.slot_type[subject]].ty}")
             result :: ir_temp(&m, &b, bool_row)
             ir_emit(&b.f, IROp.Const, result, 1, -1, -1, b.line)
@@ -3113,7 +3096,7 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
     }
     // An infallible or diverging function's failure edge is dead (codegen
     // jet_codegen_lower_try_value `.Infallible` / `.Diverges`).
-    if conversion != .ProtocolExit && (b.failure == .Infallible || b.failure == .Diverges(_)) {
+    if b.failure == .Infallible || b.failure == .Diverges(_) {
         ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
         return
     }
@@ -3673,7 +3656,6 @@ fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TExpr, 
 // cell from the closure's creation on.
 
 fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: TLambda, span: Span) -> Int Never! {
-    if lambda.executable == .SharedBlock(_) -> return ir_fail_slot(&b, span, "shared-block lambda")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     captures := [IRCaptureSlot]{}
     offset := 24
@@ -3766,7 +3748,7 @@ fn ir_build_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) 
             ir_collect_mutable_captures(value, &names)
             b.cells = names
         }
-        .Block(body) | .SharedBlock(body) -> b.cells = ir_mutable_captures(body)
+        .Block(body) -> b.cells = ir_mutable_captures(body)
     }
     b.failure = lambda.failure_carrier
     b.ret = lambda.ret
@@ -3782,7 +3764,6 @@ fn ir_build_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) 
             ir_stmts(&m, p, &b, body)
             if !ir_failed(b) -> ir_return_fallthrough(&m, p, &b)
         }
-        .SharedBlock(_) -> ir_fail(&b, span, "shared-block lambda")
     }
 }
 

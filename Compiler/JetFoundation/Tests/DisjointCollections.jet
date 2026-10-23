@@ -24,9 +24,9 @@ use jet_foundation.[
             result :: sema_collection_method_result_type(contract, None, None) ?? panic("result {method}")
             success :: if method == { "split_write" -> pair "get_disjoint_write" -> Type.List{element: view} else -> Type.Tuple{fields: [TypeTupleField]{}} }
             assert_eq(result, Type.Result{ok: success, err: Type.String})
-            operation :: sema_collection_method_operation(contract, contract.minimum_arity, None, 0, None, false, false, "checked_pair")
+            operation :: sema_collection_method_operation(contract, contract.minimum_arity, None, 0, None, false, false)
             if method == {
-                "split_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite{tuple_struct: "checked_pair"}})
+                "split_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite})
                 "get_disjoint_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.GetDisjointWrite})
                 else -> {
                     assert_eq(operation, SemaCollectionOperation.Closure{operation: TClosureOp.EditDisjoint})

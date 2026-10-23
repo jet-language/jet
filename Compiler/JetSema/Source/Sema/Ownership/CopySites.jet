@@ -86,7 +86,7 @@ fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: 
 // of syntax so temporary, named, mapped and edit guards obey the same rule.
 fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
     if value.kind == {
-        .SharedGuardValue(_, _) -> true
+        .SharedGuardValue(_) -> true
         .Field(base, _) | .Index(base, _, _, _, _, _) | .OptField(base, _, _) -> sema_copy_site_guard_projection(base)
         else -> false
     }

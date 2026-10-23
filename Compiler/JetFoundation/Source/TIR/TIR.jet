@@ -36,7 +36,6 @@ struct TLocal {
     integer_bounds: TIntegerBounds?
     uninit_scalar: Bool
     uninit_fixed: Bool
-    direct_closure: Bool
     // The checked `^p` of a match payload binding whose subject sema marked
     // partially moved (sema_ownership_move_pattern_payload): lowering may
     // take the payload out of the subject's storage instead of copying it.
@@ -49,7 +48,7 @@ struct TLocal {
 }
 
 fn tir_user_local(name: String, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
+    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
 fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
@@ -59,11 +58,11 @@ fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Nev
 }
 
 fn tir_generated_local(name: String, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
+    TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
 fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
+    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
 enum TBinaryOp {
@@ -96,7 +95,6 @@ enum TUnaryOp {
     Not
 }
 enum TIndexKind {
-    Unknown
     List
     Range
     FixedListProof
@@ -191,7 +189,7 @@ enum TPatternShape {
     Err(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [TPatternShape], span: Span)
-    Struct(fields: [TPatternField], rest: Span?, span: Span)
+    Struct(fields: [TPatternField], span: Span)
     List(items: [TPatternBinding], rest: TListPatternRest?, span: Span)
     Map(entries: [TMapPatternEntry], rest: Bool, span: Span)
     Text(parts: [TTextPatternPart], span: Span)
@@ -206,9 +204,7 @@ struct TNestedPattern {
 
 enum TPatternPosition {
     Binding
-    OptionBinding
     Arm
-    VariantPath
 }
 struct TPatternBindingFact {
     name: String
@@ -298,14 +294,10 @@ enum TIfCond {
     Plain(value: TExpr)
     And(left: TIfCond, right: TIfCond)
     IfLet(pattern: TPattern, subj: TExpr)
-    IsNone(subj: TExpr)
-    Matches(pattern: TPattern, subj: TExpr)
-    WithPrelude(prelude: [TStmt], cond: TIfCond)
 }
 
 enum TLetWrapper {
     Plain
-    Resource
     AutomaticRoot
 }
 
@@ -313,8 +305,6 @@ enum TLetTy {
     Inferred
     StrView
     Annotated(ty: Type, wrapper: TLetWrapper)
-    Tuple(types: [Type])
-    SendFn(ty: Type)
 }
 
 struct TGCPromotion {
@@ -365,7 +355,7 @@ enum TStmt {
     RefutableBind(pattern: TPattern, init: TExpr, fallback: [TStmt], span: Span)
     TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
     StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
-    ListDestructure(temp: TLocal, init: TExpr, count: Int, file: String, line: Int, elements: [TLocal], span: Span)
+    ListDestructure(temp: TLocal, init: TExpr, count: Int, line: Int, elements: [TLocal], span: Span)
     Assign(place: TPlace, op: TBinaryOp?, value: TExpr, line: Int, span: Span)
     CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
     ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span)
@@ -373,7 +363,7 @@ enum TStmt {
     ExprStmt(value: TExpr, span: Span)
     Return(value: TExpr?, span: Span)
     TaskGroup(group: TLocal, limit: TExpr?, body: [TStmt], span: Span)
-    DeferClose(close: TExpr, resource: SymbolID, scope_id: Int, span: Span)
+    DeferClose(close: TExpr, resource: SymbolID, span: Span)
     If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span)
     Loop(label: String?, body: [TStmt], span: Span)
     While(label: String?, condition: TExpr, body: [TStmt], span: Span)
@@ -518,10 +508,10 @@ enum TExprKind {
     Call(callee: SymbolID, type_args: [Type], args: [TCallArg])
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
-    DistinctCtor(owner: SymbolID, argument: TExpr, base: Type)
+    DistinctCtor(argument: TExpr)
     DistinctConvert(owner: SymbolID, argument: TExpr, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
     TraitBox(value: TExpr, target: Type)
-    UnitConvert(destination: SymbolID, argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
+    UnitConvert(argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
     MathBuiltin(type_name: String, function: String, args: [TExpr])
     PreciseBuiltin(type_name: String, function: String, args: [TExpr])
     Print(value: TExpr)
@@ -533,7 +523,7 @@ enum TExprKind {
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
     CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
     Unary(op: TUnaryOp, operand: TExpr)
-    StructLit(fields: [TStructFieldValue], extra: TStructExtra?)
+    StructLit(fields: [TStructFieldValue])
     Field(receiver: TExpr, field: TFieldRef)
     Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
     Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
@@ -551,7 +541,7 @@ enum TExprKind {
     PtrFromAddr(address: TExpr, element: Type)
     LayoutLiteral(value: TExpr)
     LayoutCompare(op: TBinaryOp, lhs: TExpr, rhs: TExpr)
-    SharedGuardValue(guard: TExpr, editable: Bool)
+    SharedGuardValue(guard: TExpr)
     SharedGuardMap(guard: TExpr, path: [TFieldRef], editable: Bool)
     SharedGuardSplit(guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool)
     SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
@@ -593,7 +583,7 @@ enum TExprKind {
     HostBorrowCallback(callable: TExpr, params: [Type])
     NumericMethod(receiver: TExpr, operation: TNumericOp)
     NumericBinaryMethod(receiver: TExpr, operation: TNumericOp, argument: TExpr)
-    OverflowOpt(prefix: String, operation: String, line: Int, policy: ArithmeticPolicyFact?, lhs: TExpr, rhs: TExpr)
+    OverflowOpt(prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr)
     HandleMethod(receiver: TExpr, operation: THandleOp, args: [TExpr])
     CoreClosureCall(kind: TCoreClosureKind)
     TaskGroupAll(tasks: TExpr)
@@ -635,12 +625,8 @@ enum TListSpreadPart {
 }
 
 enum TBranchClass {
-    Bool2
     Enum
     DenseInt
-    SparseInt
-    Ordered
-    Mixed
 }
 
 enum TForInMethod {
@@ -681,13 +667,7 @@ enum TOrFallback {
     ContinueLabel(label: String)
 }
 
-enum TMatchProbe {
-    IsSome
-    Unwrap
-}
-
 enum TOptionProbe {
-    IsSome
     Unwrap
     Field(name: String)
 }
@@ -695,45 +675,20 @@ enum TOptionProbe {
 enum TTypedTextForm {
     SQLRaw
     HTMLRaw
-    ShRaw
     SQLTemplate
     SQLParams
-    HTMLText
-}
-
-enum TGCEditKind {
-    Clear
-    Pop
-    RemoveIndex
-    InsertIndex
-    Prepend
-    Additive
-    Plain
-    EdgeSlot
 }
 
 enum THostCall {
     Method(receiver: TExpr, method: String, args: [TExpr])
-    CarrierFact(receiver: TExpr, field: String, notes: Bool)
     CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
-    FixedListIndex(base: TExpr, index: TExpr, line: Int)
     TypedText(kind: TTypedTextForm, argument: TExpr)
-    FnName(name: String)
-    MemoStats(name: String)
-    GCEdit(root: TLocal, method_span_start: Int, edges: [TLocal], edit: TExpr, index_temp: TExpr?, kind: TGCEditKind)
-    GCRead(root: TLocal)
     OptionProbe(inner: TExpr, kind: TOptionProbe)
-    StrMatchScan(subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe)
-    BinMatchScan(subject: TExpr, parts: [BinMatchPart], probe: TMatchProbe)
     TupleIndex(base: TExpr, index: Int)
-    SwitchSubjectField(field: String)
     SwitchSubjectValue
     YieldSend(value: TExpr)
     TypedTextInterp(kind: MIRTypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool])
-    ExpectSnapshot(value: TExpr, snap_path: String)
-    EnvSet(name: TExpr, value: TExpr, location: TPanicLoc)
     NumericBounds(ty: Type, member: String)
-    CCallback(symbol: String, lambda: TLambda, ret: Type?, managed: Bool, plan_digest: String?, callback_identity: String?)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
     // checked literal path or glob, relative to the source file being
     // compiled. The compiler reads and records it; it never runs at runtime.
@@ -743,17 +698,14 @@ enum THostCall {
 enum TCoreClosureKind {
     Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
     Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
-    Serve(address: TExpr, executable: TLambda)
-    OnInterrupt(callback: TExpr)
     Guard(executable: TLambda)
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
-    UIButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda, site: Int)
-    UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda, site: Int)
-    UIPreview(name: TExpr, viewport: TExpr?, executable: TLambda, site: Int, playground: Bool, source_file: String, source_span: Span, source_start_line: Int, source_start_column: Int, source_end_line: Int, source_end_column: Int, build_id: String, revision: String)
-    ReactiveDerived(executable: TLambda, site: Int)
-    ReactiveEffect(executable: TLambda, site: Int)
-    UIReactiveRender(executable: TLambda, site: Int)
+    UIButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda)
+    UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda)
+    ReactiveDerived(executable: TLambda)
+    ReactiveEffect(executable: TLambda)
+    UIReactiveRender(executable: TLambda)
 }
 
 enum TFnValueKind {
@@ -772,7 +724,6 @@ enum TClosureOp {
     TryFilter
     Each
     EachMut
-    EachRef
     EachMap
     MapAny
     MapAll
@@ -781,7 +732,7 @@ enum TClosureOp {
     MapFold
     MapFlatMap
     ListBinarySearchBy
-    ListMinMaxBy(tuple_struct: String)
+    ListMinMaxBy
     Find
     Any
     BagAny
@@ -800,20 +751,18 @@ enum TClosureOp {
     Position
     MinBy
     MaxBy
-    FloatAddFold(f32: Bool)
-    FloatAddParaFold(f32: Bool)
     Fold
     GroupBy
     CountBy
     UpdateFirst
-    Partition(tuple_struct: String)
+    Partition
     DedupBy
     IsSortedBy
     ChunkWhile
     FilterMap
     ParaMap
     ParaFilter
-    ParaPartition(tuple_struct: String)
+    ParaPartition
     ParaFold
     OptionMap
     ViewFold
@@ -846,8 +795,6 @@ struct TCanonicalField {
 
 enum THandleOp {
     Hardware(operation: THardwareCall)
-    DevServerMethod(method: String)
-    ReceiptAttach
     DurationNew(unit: String, float: Bool)
     FileReaderReadLine
     FileReaderRead
@@ -872,10 +819,6 @@ enum THandleOp {
     JSONLWriterFlush
     JSONLWriterFinish
     DataStreamNext
-    StreamWithEventTime
-    StreamWithEventTimeNs
-    StreamKeyBy
-    StreamWindow
     XMLReaderNext
     XMLWriterWrite
     XMLWriterFlush
@@ -930,18 +873,16 @@ enum THandleOp {
     RNGWeightedPick
     RNGSample
     RNGShuffle
-    DurationIn(unit: String?)
+    DurationIn
     DurationIsZero
     DurationTotalSeconds
     DurationDifference
-    StopwatchElapsedMillis
     TestSuiteRun
     DurationAbs
     DurationNegated
     DurationSign
     DurationTotalIn
     DurationRound
-    DurationSecondsValue
     DurationNsValue
     DurationScale
     DurationDivide
@@ -953,7 +894,6 @@ enum THandleOp {
     TCPListenerAcceptDeadline
     TCPListenerLocalAddr
     TCPStreamRead
-    TCPStreamWrite
     TCPStreamPeerAddr
     TCPStreamLocalAddr
     TCPStreamClose
@@ -1058,10 +998,8 @@ enum THandleOp {
     MathMethod(type_name: String, method: String, reduce_op: String?)
     ReactiveGet
     ReactiveSet
-    ReactiveEffectMethod(method: String)
+    ReactiveEffectMethod
     EventMethod(method: String)
-    FFICallbackEventStop
-    WatchMethod(method: String, callback_index: Int?)
     LayoutMethod(method: String)
     LoadableMethod(method: String)
     CivilTimeMethod(kind: String, method: String)
@@ -1138,7 +1076,6 @@ enum THandleOp {
     DBValueBlob
     DBValueIsNull
     PluginInvoke(export_name: String, signature: MIRComponentSignatureDescriptor)
-    ModOnTick
     ReaderOver(owned: Bool)
     ReaderReadU8
     ReaderReadI8
@@ -1169,7 +1106,7 @@ enum THandleOp {
     CursorSkipWs
     CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField])
     ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField])
-    Method(name: String)
+    ProcessLines
 }
 
 enum TListRemoveMode {
@@ -1236,7 +1173,7 @@ enum TBuiltinOp {
     Max(float: Bool)
     Flatten
     Intersperse
-    Unzip(tuple_struct: String)
+    Unzip
     Clear
     Chars
     Bytes(owned: Bool)
@@ -1255,14 +1192,14 @@ enum TBuiltinOp {
     StringIsASCII
     StringToTitle
     StringMethod(method: String)
-    StringSplitOnce(tuple_struct: String)
-    StringCutLast(tuple_struct: String)
+    StringSplitOnce
+    StringCutLast
     Split
     Lines
     ParseInt
     ParseFloat
-    IntToRadix(line: Int)
-    IntFromRadix(line: Int)
+    IntToRadix
+    IntFromRadix
     StartsWith
     EndsWith
     Replace
@@ -1281,7 +1218,6 @@ enum TBuiltinOp {
     Values
     ContainsKey
     ToString
-    MatchGroup
     Take
     Skip
     IterToList
@@ -1300,7 +1236,7 @@ enum TBuiltinOp {
     IterLastIndexOf
     IterAverage(float: Bool)
     IterCompare
-    IterSplit(tuple_struct: String)
+    IterSplit
     ListSlice
     ListEqual
     ListBinarySearch
@@ -1308,24 +1244,23 @@ enum TBuiltinOp {
     ListIntersection
     ListDifference
     ListRandom
-    ListMinMax(tuple_struct: String)
+    ListMinMax
     MapEqual
     MapFirst
-    MapToList(tuple_struct: String)
-    MapTopN(tuple_struct: String)
+    MapToList
+    MapTopN
     MapMin
     MapMax
     MapIntersection
     MapSliceKeys
-    MapNew
     MapFromKeys
     MapContainsValue
     MapPopFirst
     ListReplace
-    Indexed(tuple_struct: String)
+    Indexed
     Indexes
-    Zip(tuple_struct: String, mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type])
-    OptionZip(tuple_struct: String, elem_ty: Type)
+    Zip(mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type])
+    OptionZip(elem_ty: Type)
     SetFrom
     SetInsert
     SetUpdate
@@ -1341,7 +1276,6 @@ enum TBuiltinOp {
     SetIsSubset
     SetIsSuperset
     SetIsDisjoint
-    SetCopy
     SetEqual
     SetCapacity
     SetFirst
@@ -1375,8 +1309,6 @@ enum TBuiltinOp {
     BitSetRemove
     BitSetCount
     BitSetToList
-    BitSetNew
-    ByteBufferNew
     ByteBufferFrom
     ByteBufferWrite(method: String)
     ByteBufferToBytes
@@ -1386,7 +1318,6 @@ enum TBuiltinOp {
     BagRemove
     BagHas
     BagCount
-    BagLen
     DequePushFront
     DequePushBack
     DequePopFront
@@ -1404,15 +1335,8 @@ enum TBuiltinOp {
     DequeFrom
     TryCollect
     ViewNew(line: Int)
-    ViewMutNew(line: Int)
-    ComputeViewNew(line: Int)
-    ComputeViewMutNew(line: Int)
-    SplitWrite(tuple_struct: String)
+    SplitWrite
     GetDisjointWrite
-}
-
-enum TStructExtra {
-    HTTPRequestParams
 }
 
 struct TMethodRef {
@@ -1428,14 +1352,14 @@ enum TNumericOp {
     BitCount(method: String, width: Int)
     CastAs(dst_rust: String)
     CheckedIntToFloat(source_signed: Bool, target_f32: Bool, line: Int)
-    CheckedIntToFixed(host_kind: Int, dst_rust: String, dst_spelling: String, line: Int)
-    TryFrom(host_kind: Int, dst_rust: String, dst_spelling: String)
-    FloatToInt(host_kind: Int, dst_rust: String, dst_spelling: String, lower: String, upper_exclusive: String)
-    FloatNarrow(dst_spelling: String)
+    CheckedIntToFixed(host_kind: Int, line: Int)
+    TryFrom(host_kind: Int)
+    FloatToInt(host_kind: Int)
+    FloatNarrow
     InlineRange(lo: Int, hi: Int, fallible: Bool)
     ToShow
-    EuclideanDiv(line: Int)
-    EuclideanRem(line: Int)
+    EuclideanDiv
+    EuclideanRem
 }
 
 enum TRequireKind {
@@ -1461,7 +1385,6 @@ struct TPanicLocal {
 
 enum TTryConvert {
     NoConversion
-    ProtocolExit
     Never
     DefaultErr
     Typed(fn_name: String, source: Type, target: Type)
@@ -1593,25 +1516,6 @@ struct TSerdeAttribute {
     span: Span
 }
 
-enum TCLIValueKind {
-    Bool
-    Int
-    Float
-    String
-    Path
-}
-
-enum TCLIDefault {
-    TypeDefault
-    Value(value: TComptimeValue)
-    Recorded(value: String)
-}
-
-enum TCLIInputShape {
-    Flag
-    Value(kind: TCLIValueKind, optional: Bool, default: TCLIDefault?)
-}
-
 struct TFunctionRef {
     key: String
     module_identity: String
@@ -1624,35 +1528,6 @@ struct TCLIBinding {
     span: Span
     function_key: String
     markers: [String]
-}
-
-struct TCLIInput {
-    field: String
-    flag: String
-    short: String?
-    env: String?
-    help: String
-    metavar: String?
-    shape: TCLIInputShape
-    positional: Int?
-    variadic: Bool
-}
-
-struct TCLICommand {
-    name: String
-    description: String?
-    function: TFunctionRef?
-    receiver: String?
-    inputs: [TCLIInput]
-}
-
-struct TCLIEntry {
-    record_inputs: Bool
-    description: String?
-    inputs: [TCLIInput]
-    commands: [TCLICommand]
-    standard: Bool
-    version: String?
 }
 
 struct TField {
@@ -1711,7 +1586,6 @@ struct TTypeDef {
     layout_alignment: TLayoutAlignmentFact?
     serde: [TSerdeAttribute]
     cli_bindings: [TCLIBinding]
-    cli: TCLIEntry?
     ownership: TDeclarationOwnership
     boxed_edges: [String]
     compiler_builtin: TCompilerBuiltin?
@@ -1827,13 +1701,11 @@ struct TLambda {
     host_param_conventions: [AccessConvention]?
     source_params: [String]
     source_param_symbols: [SymbolID]
-    jit_name: String
     param_types: [Type]
     ret: Type?
     is_move: Bool
     boxed: Bool
     rc: Bool
-    arc: Bool
     captures: [TCapture]
     materialized_captures: [String]
     frozen_captures: [String]
@@ -1843,7 +1715,6 @@ struct TLambda {
 enum TLambdaBody {
     Expr(value: TExpr)
     Block(body: [TStmt])
-    SharedBlock(body: [TStmt])
 }
 
 struct TCapture {
@@ -1899,7 +1770,6 @@ struct TFunc {
     gc_scope: Bool
     return_view_provenance: ViewProvenanceMap?
     generic_params: [TGenericParam]
-    clone_types: [Type]
     is_main: Bool
     line: Int
     synthetic: Bool
@@ -1914,7 +1784,6 @@ struct TFunc {
     is_inline_always: Bool
     is_scalar: Bool
     kernel_proof: KernelProof?
-    memo_field: String?
     uses_stack_sentry: Bool
     body: [TStmt]
     kind: TFuncKind
@@ -2038,7 +1907,7 @@ fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
         .PoolSlot(_, _, _, _, _, _) -> return TAddressLifetime.Heap
         .Borrow(_, _) -> return TAddressLifetime.Borrowed
         .RawAddressOf(_) | .RawOf(_) | .Deref(_) | .PtrFromAddr(_, _) -> return TAddressLifetime.Foreign
-        .DistinctCtor(_, argument, _) | .DistinctRaw(argument) -> return tir_expr_address_lifetime(argument)
+        .DistinctCtor(argument) | .DistinctRaw(argument) -> return tir_expr_address_lifetime(argument)
         else -> {}
     }
     TAddressLifetime.Unknown
@@ -2067,7 +1936,7 @@ fn tir_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.All
                 tir_each_pattern_shape_child(alternative, visit)
             }
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _) -> {
             loop field in fields {
                 if field == {
                     .Value(_, value, _) -> visit(value)
@@ -2095,16 +1964,9 @@ fn tir_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.
             tir_each_if_cond_child(left, visit)
             tir_each_if_cond_child(right, visit)
         }
-        .IfLet(pattern, subj) | .Matches(pattern, subj) -> {
+        .IfLet(pattern, subj) -> {
             tir_each_pattern_child(pattern, visit)
             visit(subj)
-        }
-        .IsNone(subj) -> visit(subj)
-        .WithPrelude(prelude, cond) -> {
-            loop statement in prelude {
-                tir_each_stmt_child(statement, visit)
-            }
-            tir_each_if_cond_child(cond, visit)
         }
     }
 }
@@ -2112,7 +1974,7 @@ fn tir_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.
 fn tir_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if lambda.executable == {
         .Expr(value) -> visit(value)
-        .Block(body) | .SharedBlock(body) -> {
+        .Block(body) -> {
             loop statement in body {
                 tir_each_stmt_child(statement, visit)
             }
@@ -2175,7 +2037,7 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
             visit(init)
             tir_each_stmt_list_child(fallback, visit)
         }
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> visit(init)
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> visit(init)
         .Assign(place, _, value, _, _) -> {
             if place == {
                 .Expr(place_value) -> visit(place_value)
@@ -2191,7 +2053,7 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
             if limit == Val(nested) -> visit(nested)
             tir_each_stmt_list_child(body, visit)
         }
-        .DeferClose(close, _, _, _) -> visit(close)
+        .DeferClose(close, _, _) -> visit(close)
         .If(condition, then_body, else_body, _, _) -> {
             tir_each_if_cond_child(condition, visit)
             tir_each_stmt_list_child(then_body, visit)
@@ -2329,28 +2191,12 @@ fn tir_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.R
             visit(receiver)
             loop value in args -> visit(value)
         }
-        .CarrierFact(receiver, _, _) -> visit(receiver)
         .CellGuardProject(receiver, _, _, _, _) -> visit(receiver)
-        .FixedListIndex(base, index, _) -> {
-            visit(base)
-            visit(index)
-        }
         .TypedText(_, argument) -> visit(argument)
-        .GCEdit(_, _, _, edit, index_temp, _) -> {
-            visit(edit)
-            if index_temp == Val(index_value) -> visit(index_value)
-        }
         .OptionProbe(inner, _) -> visit(inner)
         .TupleIndex(base, _) -> visit(base)
-        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> visit(subject)
         .YieldSend(value) -> visit(value)
         .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> visit(hole)
-        .ExpectSnapshot(value, _) -> visit(value)
-        .EnvSet(name, value, _) -> {
-            visit(name)
-            visit(value)
-        }
-        .CCallback(_, lambda, _, _, _, _) -> tir_each_lambda_child(lambda, visit)
         else -> {}
     }
 }
@@ -2366,38 +2212,18 @@ fn tir_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Al
             visit(frames)
             tir_each_lambda_child(executable, visit)
         }
-        .UITextInputOnDrop(state, ime, executable, _) -> {
+        .UITextInputOnDrop(state, ime, executable) -> {
             visit(state)
             visit(ime)
             tir_each_lambda_child(executable, visit)
         }
-        .Serve(address, executable) -> {
-            visit(address)
-            tir_each_lambda_child(executable, visit)
-        }
-        .OnInterrupt(callback) -> visit(callback)
         .Guard(executable) -> tir_each_lambda_child(executable, visit)
-        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> tir_each_lambda_child(executable, visit)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> tir_each_lambda_child(executable, visit)
         .OnCommit(_, executable) | .OnRollback(_, executable) -> tir_each_lambda_child(executable, visit)
-        .UIButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
+        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> {
             visit(label)
             visit(shortcut)
             visit(accessible_label)
-            tir_each_lambda_child(executable, visit)
-        }
-        .UIPreview(name, viewport, executable, site, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
-            _ := site
-            _ := playground
-            _ := source_file
-            _ := source_span
-            _ := source_start_line
-            _ := source_start_column
-            _ := source_end_line
-            _ := source_end_column
-            _ := build_id
-            _ := revision
-            visit(name)
-            if viewport == Val(viewport_value) -> visit(viewport_value)
             tir_each_lambda_child(executable, visit)
         }
     }
@@ -2421,8 +2247,8 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(receiver)
             loop argument in args -> visit(argument.value)
         }
-        .DistinctCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> visit(argument)
-        .UnitConvert(_, argument, _, _, rounding, _, _, _, _) -> {
+        .DistinctCtor(argument) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> visit(argument)
+        .UnitConvert(argument, _, _, rounding, _, _, _, _) -> {
             visit(argument)
             if rounding == Val(rounding_value) -> visit(rounding_value.digits)
         }
@@ -2438,7 +2264,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         }
         .CompareChain(operands, _, _) -> loop value in operands -> visit(value)
         .Unary(_, operand) -> visit(operand)
-        .StructLit(fields, _) -> loop field in fields -> visit(field.value)
+        .StructLit(fields) -> loop field in fields -> visit(field.value)
         .Field(receiver, _) -> visit(receiver)
         .Index(base, index, _, _, _, _) -> {
             visit(base)
@@ -2480,7 +2306,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(lhs)
             visit(rhs)
         }
-        .SharedGuardValue(guard, _) -> visit(guard)
+        .SharedGuardValue(guard) -> visit(guard)
         .SharedGuardMap(guard, _, _) -> visit(guard)
         .SharedGuardSplit(guard, _, _, _) -> visit(guard)
         .SharedGuardWait(guard, condition, predicate) -> {
@@ -2561,7 +2387,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(receiver)
             visit(argument)
         }
-        .OverflowOpt(_, _, _, _, lhs, rhs) -> {
+        .OverflowOpt(_, _, _, lhs, rhs) -> {
             visit(lhs)
             visit(rhs)
         }

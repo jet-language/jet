@@ -86,7 +86,7 @@ fn tir_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
             if op != TUnaryOp.Neg -> return None
             literal := tir_expr_literal_integer(operand)
             if operand.kind == .NumericMethod(receiver, operation) {
-                if operation == .CheckedIntToFixed(_, _, _, _) -> literal = tir_expr_literal_integer(receiver)
+                if operation == .CheckedIntToFixed(_, _) -> literal = tir_expr_literal_integer(receiver)
             }
             number :: literal ?? return None
             return Val(integer_bounds_exact(-number))
@@ -182,7 +182,7 @@ fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
         | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) | .CoreCall(_, _, _, _, _, _, _) | .HostCall(_) | .DecodeUnder(_, _) | .OptionLift2(_, _, _)
         | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) -> true
         .DistinctConvert(_, _, _, _, fallible) -> fallible
-        .UnitConvert(_, _, _, _, _, fallible, _, _, _) -> fallible
+        .UnitConvert(_, _, _, _, fallible, _, _, _) -> fallible
         else -> false
     }
     if construction -> Val(TCostFact{kind: TCostKind.OutcomeConstruction, state: TCostState.SemanticRemainder}) else -> None
@@ -197,8 +197,8 @@ fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
         | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert
         | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut
         | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront
-        | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite(_) | .GetDisjointWrite
-        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .ViewMutNew(_) | .IterNext -> return true
+        | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite | .GetDisjointWrite
+        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .IterNext -> return true
         .ByteBufferWrite(_) -> return true
         .ByteBufferMethod(method) -> return method == "clear" || method == "seek" || method == "rewind" || method == "next" || method == "read" || method == "read_byte" || method == "read_bytes" || method == "read_string" || method == "flush" || method == "close" || method == "shutdown" || method == "copy_to" || method == "write_to"
         else -> return false

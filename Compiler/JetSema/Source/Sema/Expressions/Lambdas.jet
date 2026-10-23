@@ -1039,11 +1039,7 @@ fn sema_expression_lambda_collect_tir_condition(condition: TIfCond, frame: Int, 
             sema_expression_lambda_collect_tir_condition(left, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_condition(right, frame, &scopes, &keys)
         }
-        .IfLet(_, subject) | .Matches(_, subject) | .IsNone(subject) -> sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
-        .WithPrelude(prelude, inner) -> {
-            sema_expression_lambda_collect_tir_statements(prelude, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_condition(inner, frame, &scopes, &keys)
-        }
+        .IfLet(_, subject) -> sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
     }
 }
 
@@ -1054,7 +1050,6 @@ fn sema_expression_lambda_collect_tir_lambda(lambda: TLambda, frame: Int, scopes
     if lambda.executable == {
         .Expr(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
         .Block(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
-        .SharedBlock(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
     }
 }
 
@@ -1092,30 +1087,20 @@ fn sema_expression_lambda_collect_tir_core_closure(kind: TCoreClosureKind, frame
             sema_expression_lambda_collect_tir_expr(frames, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
         }
-        .Serve(address, executable) -> {
-            sema_expression_lambda_collect_tir_expr(address, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
-        }
-        .OnInterrupt(callback) -> sema_expression_lambda_collect_tir_expr(callback, frame, &scopes, &keys)
         .Guard(executable) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
         .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
-        .UIButtonOnClick(label, shortcut, accessible, executable, _) -> {
+        .UIButtonOnClick(label, shortcut, accessible, executable) -> {
             sema_expression_lambda_collect_tir_expr(label, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_expr(shortcut, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_expr(accessible, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
         }
-        .UITextInputOnDrop(state, ime, executable, _) -> {
+        .UITextInputOnDrop(state, ime, executable) -> {
             sema_expression_lambda_collect_tir_expr(state, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_expr(ime, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
         }
-        .UIPreview(name, viewport, executable, _, _, _, _, _, _, _, _, _, _) -> {
-            sema_expression_lambda_collect_tir_expr(name, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_optional_expr(viewport, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
-        }
-        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
     }
 }
 
@@ -2019,7 +2004,6 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     if executable_value == {
         .Expr(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &lambda_scopes, &capture_keys)
         .Block(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &lambda_scopes, &capture_keys)
-        .SharedBlock(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &lambda_scopes, &capture_keys)
     }
     lambda_work.meta.cloned_captures = [String]{}
     lambda_work.meta.frozen_captures = [String]{}
@@ -2210,13 +2194,11 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         host_param_conventions: host_param_conventions,
         source_params: param_names,
         source_param_symbols: param_symbols,
-        jit_name: lambda_owner,
         param_types: param_types,
         ret: ret_slot,
         is_move: false,
         boxed: false,
         rc: false,
-        arc: false,
         captures: captures,
         materialized_captures: lambda_work.meta.materialized_captures,
         frozen_captures: lambda_work.meta.frozen_captures,
@@ -2308,7 +2290,6 @@ fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -
         }
         // copy: the lifted body is a new owned TLambdaBody. A shared block equals `executable`, the
         // caller's checked body (a read parameter), which the caller keeps.
-        .SharedBlock(_) -> executable.copy()
     }
 }
 

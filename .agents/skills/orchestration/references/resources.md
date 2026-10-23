@@ -126,10 +126,12 @@ the immutable export, not the shared worktree, and require 18/18 before moving
 the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
-Core catalog changes also require the canonical structure registry and enum/
-record payload projections. Regenerate them with `gen-core-tables --write`
-(the structure registry is edited directly); refreshing the surface ledger alone
-does not keep the assembled compiler's catalog or source hashes current.
+Core catalog changes also require the canonical structure registry and Core
+row projections. Regenerate them with `gen-core-tables --write` (the structure
+registry is edited directly); the enum payload and record rows
+(`CoreEnumPayloadRows.jet`, `CoreRecordRows.jet`) are authored by hand.
+Refreshing the surface ledger alone does not keep the assembled compiler's
+catalog or source hashes current.
 Before releasing a producer, pin every live compiler target and read-only
 snapshot in an active `proofq/*plan*` document: the disk guard reads these plans
 as live references. Historic receipts and `disk-protect.txt` are not live pins.

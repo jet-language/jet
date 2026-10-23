@@ -153,7 +153,6 @@ fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -
 fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute Never! {
     if operation == {
         .EditDisjoint -> return jet_codegen_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None, MIRPreludeABI.Value)
-        .EachRef -> return jet_codegen_closure_route_row("core.collections", "each_ref", "jet_list_each_ref", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .EachMap -> return jet_codegen_closure_route_row("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         .MapAny -> return jet_codegen_closure_route_row("core.map", "any", "jet_map_any", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         .MapAll -> return jet_codegen_closure_route_row("core.map", "all", "jet_map_all", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
@@ -162,26 +161,16 @@ fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodege
         .MapFold -> return jet_codegen_closure_route_row("core.map", "fold", "jet_map_fold", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
         .MapFlatMap -> return jet_codegen_closure_route_row("core.map", "flat_map", "jet_map_flat_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         .ListBinarySearchBy -> return jet_codegen_closure_route_row("core.list", "binary_search_by", "jet_list_binary_search_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .ListMinMaxBy(_) -> return jet_codegen_closure_route_row("core.list", "min_max_by", "jet_list_min_max_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Aggregate)
+        .ListMinMaxBy -> return jet_codegen_closure_route_row("core.list", "min_max_by", "jet_list_min_max_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Aggregate)
         .CountWhere -> return jet_codegen_closure_route_row("core.list", "count_where", "jet_list_count_where", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .SortBy -> return jet_codegen_closure_route_row("core.list", "sort_by", "jet_list_sort_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .SortByDesc -> return jet_codegen_closure_route_row("core.list", "sort_by_desc", "jet_list_sort_by_desc", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .TrySortBy -> return jet_codegen_closure_route_row("core.list", "try_sort_by", "jet_list_try_sort_by", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .TrySortByDesc -> return jet_codegen_closure_route_row("core.list", "try_sort_by_desc", "jet_list_try_sort_by_desc", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .SortByCompare -> return jet_codegen_closure_route_row("core.list", "sort_by_compare", "jet_list_sort_by_compare", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
-        .FloatAddFold(f32) -> {
-            member := if f32 -> "fold_add_fixed_f32" else -> "fold_add_fixed_f64"
-            symbol := if f32 -> "jet_list_fold_add_fixed_f32" else -> "jet_list_fold_add_fixed_f64"
-            return jet_codegen_closure_route_row("core.list", member, symbol, 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        }
-        .FloatAddParaFold(f32) -> {
-            member := if f32 -> "para_fold_add_fixed_f32" else -> "para_fold_add_fixed_f64"
-            symbol := if f32 -> "jet_list_para_fold_add_fixed_f32" else -> "jet_list_para_fold_add_fixed_f64"
-            return jet_codegen_closure_route_row("core.list", member, symbol, 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        }
         .ParaMap -> return jet_codegen_closure_route_row("core.list", "para_map", "jet_list_para_map", 3, [Bool]{false, false, false}, None, MIRPreludeABI.Value)
         .ParaFilter -> return jet_codegen_closure_route_row("core.list", "para_filter", "jet_list_para_filter", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
-        .ParaPartition(_) -> return jet_codegen_closure_route_row("core.list", "para_partition", "jet_list_para_partition", 2, [Bool]{false, false}, None, MIRPreludeABI.Aggregate)
+        .ParaPartition -> return jet_codegen_closure_route_row("core.list", "para_partition", "jet_list_para_partition", 2, [Bool]{false, false}, None, MIRPreludeABI.Aggregate)
         .ParaFold -> return jet_codegen_closure_route_row("core.list", "para_fold", "jet_list_para_fold", 4, [Bool]{false, false, false, false}, None, MIRPreludeABI.Value)
         .DedupBy -> return jet_codegen_closure_route_row("core.iter", "dedup_by", "jet_iter_dedup_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         .IsSortedBy -> return jet_codegen_closure_route_row("core.iter", "is_sorted_by", "jet_iter_is_sorted_by", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
@@ -190,7 +179,7 @@ fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodege
         .ViewFold -> return jet_codegen_closure_route_row("core.view", "fold", "jet_view_fold", 3, [Bool]{true, false, false}, None, MIRPreludeABI.Value)
         .ViewMap -> return jet_codegen_closure_route_row("core.view", "map", "jet_view_map", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
         .UpdateFirst -> return jet_codegen_closure_route_row("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem), MIRPreludeABI.Value)
-        .Partition(_) -> return jet_codegen_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None, MIRPreludeABI.Aggregate)
+        .Partition -> return jet_codegen_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None, MIRPreludeABI.Aggregate)
         .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .FilterMap | .Scan | .OptionMap -> return jet_codegen_collection_closure_route(operation, receiver)
         else -> panic("checked TClosureOp has no canonical Prelude route")
     }
@@ -271,7 +260,7 @@ fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, program: JetC
         // copy: the callback argument is a new owned TExpr. For these operations it equals
         // `argument`, the caller's checked callback (a read parameter), which stays in the closure
         // op's TIR.
-        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return argument.copy()
+        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc -> return argument.copy()
         else -> {}
     }
     named := if argument.kind == {

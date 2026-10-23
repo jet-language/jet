@@ -25,7 +25,6 @@ use jet_foundation.[
     sema_collection_method_result_type,
     sema_collection_receiver_element,
     type_name,
-    type_tuple_struct_name,
 ]
 
 fn sema_call_collections_arity_error(method: String, expected: SemaCollectionMethodContract, actual: Int, span: Span) -> Diagnostic {
@@ -91,22 +90,6 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     }
     &diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
     return None
-}
-
-fn sema_call_collections_tuple_struct(ty: Type) -> String Never! {
-    return if ty == {
-        .Tuple(fields) -> type_tuple_struct_name(fields)
-        .Result(ok, _) -> sema_call_collections_tuple_struct(ok)
-        .Option(inner) -> if inner == {
-            .Tuple(fields) -> type_tuple_struct_name(fields)
-            else -> ""
-        }
-        .List(inner) -> if inner == {
-            .Tuple(fields) -> type_tuple_struct_name(fields)
-            else -> ""
-        }
-        else -> ""
-    }
 }
 
 fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
@@ -320,9 +303,8 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         &diagnostics.push(sema_error("E0108", span, "the callback result is not valid for `.{method}`", "the collection result type must follow the callback's checked return type", "return the item shape required by this collection adapter"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    tuple_struct := sema_call_collections_tuple_struct(result_type)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
-    operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator, tuple_struct)
+    operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
     // Rust builtin_methods.rs runs no convention check on a collection
     // argument: `^` on one (`&to.push(^item)`) is neither rejected (E0203)
     // nor recorded as a move here, so the ownership walk reads it like an

@@ -1653,7 +1653,7 @@ fn sema_expression_pattern_binding_sources(shape: TPatternShape, subject_ty: Typ
                 sema_expression_pattern_binding_sources(nested.shape, ty, source, name, environment, program, &sources, &diagnostics)
             } else if binding == name -> &sources.push(source)
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _) -> {
             loop field in fields {
                 if field == {
                     .Bind(member, local, span) -> if local == name -> &sources.push(Expr.Field{base: source, member: member, span: span})

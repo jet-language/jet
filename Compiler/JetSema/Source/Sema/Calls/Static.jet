@@ -528,7 +528,7 @@ fn sema_call_builtin_static_call_arg(value: TExpr, argument: CallArg) -> TCallAr
 }
 
 // CoreCall rows lower through the registered Core route in the caller.
-fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], line: Int, span: Span) -> TExprKind? {
+fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span) -> TExprKind? {
     rest := [TExpr]{}
     loop index in 0..<values.len() {
         if index > 0 -> &rest.push(values[index])
@@ -536,7 +536,7 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
     if row.lowering == {
         // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
         .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation.copy(), args: rest})
-        .IntFromRadix -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: TBuiltinOp.IntFromRadix{line: line}, args: rest})
+        .IntFromRadix -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: TBuiltinOp.IntFromRadix, args: rest})
         // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
         .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation.copy(), args: values})
         .PreludeStatic(rooted, path, generics) -> {
@@ -653,8 +653,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, None, result, fallibility, expected, environment, program, &diagnostics)}
     }
 
-    line := sema_source_line_at(environment.source_segments, span) ?? 0
-    kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, line, span) ?? {
+    kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span) ?? {
         &diagnostics.push(sema_error("E0104", span, "static method call `{callee}` could not be lowered", "the built-in static row has no TIR construction", "use a registered built-in static method"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -984,7 +983,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
     success :: Type.Named{name: display_name}
     row :: numeric_row ?? {
-        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{owner: owner.id, argument: argument, base: facts.base}, span)
+        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{argument: argument}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, &diagnostics)}
     }
     operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()

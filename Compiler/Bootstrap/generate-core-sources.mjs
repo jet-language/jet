@@ -115,7 +115,7 @@ const ownership = [
 const output = [
   ...header,
   "",
-  "// The canonical effect source the Rust host embeds as `Effects::EFFECT_SOURCE`.",
+  "// The canonical effect source, Compiler/Prelude/Effects.jet.",
   `JET_CLI_EFFECT_SOURCE :: prep { ${jetStringLiteral(effectSource, effectSourceDisplay)} }`,
   "",
   "",

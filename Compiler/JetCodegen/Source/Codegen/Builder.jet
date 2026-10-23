@@ -1887,7 +1887,6 @@ fn jet_codegen_partial_move_expression(expression: TExpr, roots: &[String:Bool])
             return
         }
         .HostCall(call) -> if call == {
-            .CCallback(_, _, _, _, _, _) -> return
             else -> {}
         }
         .CoreClosureCall(kind) -> {
@@ -1899,20 +1898,14 @@ fn jet_codegen_partial_move_expression(expression: TExpr, roots: &[String:Bool])
                     jet_codegen_partial_move_expression(rate, &roots)
                     jet_codegen_partial_move_expression(frames, &roots)
                 }
-                .Serve(address, _) -> jet_codegen_partial_move_expression(address, &roots)
-                .OnInterrupt(callback) -> jet_codegen_partial_move_expression(callback, &roots)
-                .UITextInputOnDrop(state, ime, _, _) -> {
+                .UITextInputOnDrop(state, ime, _) -> {
                     jet_codegen_partial_move_expression(state, &roots)
                     jet_codegen_partial_move_expression(ime, &roots)
                 }
-                .UIButtonOnClick(label, shortcut, accessible_label, _, _) -> {
+                .UIButtonOnClick(label, shortcut, accessible_label, _) -> {
                     jet_codegen_partial_move_expression(label, &roots)
                     jet_codegen_partial_move_expression(shortcut, &roots)
                     jet_codegen_partial_move_expression(accessible_label, &roots)
-                }
-                .UIPreview(name, viewport, _, _, _, _, _, _, _, _, _, _, _) -> {
-                    jet_codegen_partial_move_expression(name, &roots)
-                    if viewport == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
                 }
                 else -> {}
             }
@@ -1928,10 +1921,6 @@ fn jet_codegen_partial_move_expression(expression: TExpr, roots: &[String:Bool])
 
 fn jet_codegen_partial_move_condition(condition: TIfCond, roots: &[String:Bool]) Never! {
     if condition == {
-        .WithPrelude(prelude, nested) -> {
-            jet_codegen_partial_move_statements(prelude, &roots)
-            jet_codegen_partial_move_condition(nested, &roots)
-        }
         .And(left, right) -> {
             jet_codegen_partial_move_condition(left, &roots)
             jet_codegen_partial_move_condition(right, &roots)

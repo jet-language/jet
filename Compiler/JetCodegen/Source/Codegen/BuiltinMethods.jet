@@ -102,8 +102,8 @@ fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
         | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert
         | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut
         | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront
-        | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite(_) | .GetDisjointWrite
-        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .ViewMutNew(_) | .IterNext -> return true
+        | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite | .GetDisjointWrite
+        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .IterNext -> return true
         .ByteBufferWrite(_) -> return true
         .ByteBufferMethod(method) -> return method == "clear" || method == "seek" || method == "rewind" || method == "next" || method == "read" || method == "read_byte" || method == "read_bytes" || method == "read_string" || method == "flush" || method == "close" || method == "shutdown" || method == "copy_to" || method == "write_to"
         else -> return false
@@ -562,8 +562,8 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .Chars -> return jet_codegen_builtin_route("string_chars", "jet_string_chars", 1, [Bool]{true}, None)
         .ParseInt -> return jet_codegen_builtin_route("int_parse", "jet_std::jet_int_parse", 1, [Bool]{true}, None)
         .ParseFloat -> return jet_codegen_builtin_route("float_parse", "jet_std::jet_float_parse", 1, [Bool]{true}, None)
-        .IntToRadix(_) -> return jet_codegen_builtin_route("int_to_radix", "jet_std::jet_int_to_radix", 2, [Bool]{false, false}, None)
-        .IntFromRadix(_) -> return jet_codegen_builtin_route("int_from_radix", "jet_std::jet_int_from_radix", 2, [Bool]{true, false}, None)
+        .IntToRadix -> return jet_codegen_builtin_route("int_to_radix", "jet_std::jet_int_to_radix", 2, [Bool]{false, false}, None)
+        .IntFromRadix -> return jet_codegen_builtin_route("int_from_radix", "jet_std::jet_int_from_radix", 2, [Bool]{true, false}, None)
         .ToUpper -> return jet_codegen_builtin_route("string_upper", "jet_unicode_upper", 1, [Bool]{true}, None)
         .ToLower -> return jet_codegen_builtin_route("string_lower", "jet_unicode_lower", 1, [Bool]{true}, None)
         .ToASCIILower -> return jet_codegen_builtin_route("string_ascii_lower", "jet_text_ascii_lower", 1, [Bool]{true}, None)
@@ -576,8 +576,8 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .BeforeView -> return jet_codegen_builtin_route("string_before_view", "jet_string_before_view", 2, [Bool]{true, true}, None)
         .Keys -> return jet_codegen_builtin_route("map_keys", "jet_map_keys", 1, [Bool]{true}, None)
         .Values -> return jet_codegen_builtin_route("map_values", "jet_map_values", 1, [Bool]{true}, None)
-        .MapTopN(_) -> return jet_codegen_builtin_route("map_top_n", "jet_map_top_n", 2, [Bool]{true, false}, None)
-        .MapToList(_) -> return jet_codegen_builtin_route_row("core.map", "to_list", "jet_map_to_list", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
+        .MapTopN -> return jet_codegen_builtin_route("map_top_n", "jet_map_top_n", 2, [Bool]{true, false}, None)
+        .MapToList -> return jet_codegen_builtin_route_row("core.map", "to_list", "jet_map_to_list", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
         .MapMin -> return jet_codegen_builtin_route("map_min", "jet_map_min_value_kernel", 1, [Bool]{true}, None)
         .MapMax -> return jet_codegen_builtin_route("map_max", "jet_map_max_value_kernel", 1, [Bool]{true}, None)
         .MapPopFirst -> return jet_codegen_builtin_route("map_pop_first", "jet_map_pop_first", 1, [Bool]{true}, Val(Effect.Mem))
@@ -587,18 +587,17 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .MapSliceKeys -> return jet_codegen_builtin_route("map_slice", "jet_map_slice_keys_kernel", 2, [Bool]{true, false}, None)
         .MapContainsValue -> return jet_codegen_builtin_route("map_contains_value", "jet_map_contains_value", 2, [Bool]{true, true}, None)
         .DequeGet -> return jet_codegen_builtin_route("deque_get", "jet_deque_get", 2, [Bool]{true, false}, None)
-        .StringSplitOnce(_) -> return jet_codegen_builtin_route("string_split_once", "jet_unicode_split_once", 2, [Bool]{true, true}, None)
-        .StringCutLast(_) -> return jet_codegen_builtin_route("string_cut_last", "jet_unicode_cut_last", 2, [Bool]{true, true}, None)
-        .SplitWrite(_) -> return jet_codegen_builtin_route("split_write", "jet_split_write", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .StringSplitOnce -> return jet_codegen_builtin_route("string_split_once", "jet_unicode_split_once", 2, [Bool]{true, true}, None)
+        .StringCutLast -> return jet_codegen_builtin_route("string_cut_last", "jet_unicode_cut_last", 2, [Bool]{true, true}, None)
+        .SplitWrite -> return jet_codegen_builtin_route("split_write", "jet_split_write", 2, [Bool]{true, false}, Val(Effect.Mem))
         .GetDisjointWrite -> return jet_codegen_builtin_route("get_disjoint_write", "jet_get_disjoint_write", 2, [Bool]{true, true}, Val(Effect.Mem))
         .ViewNew(_) -> return jet_codegen_builtin_route("view_new", "jet_view_new", 4, [Bool]{true, false, false, false}, Val(Effect.Mem))
-        .ViewMutNew(_) -> return jet_codegen_builtin_route("view_mut_new", "jet_view_mut_new", 4, [Bool]{true, false, false, false}, Val(Effect.Mem))
-        .ListMinMax(_) -> return jet_codegen_builtin_route_row("core.list", "min_max", "jet_list_min_max", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
+        .ListMinMax -> return jet_codegen_builtin_route_row("core.list", "min_max", "jet_list_min_max", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
         .Indexes -> return jet_codegen_builtin_route("indexes", "jet_iter_indexes", 1, [Bool]{false}, None)
-        .Indexed(_) -> return jet_codegen_builtin_route("iter_enumerate", "jet_iter_enumerate", 2, [Bool]{false, false}, None)
-        .IterSplit(_) -> return jet_codegen_builtin_route("iter_split", "jet_iter_split_at", 3, [Bool]{false, false, false}, None)
-        .SetFrom | .SetToList | .SetSort | .SetEqual | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SortedSetFrom | .SortedSetToList | .SortedSetInsert | .SortedSetRemove | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .BagAdd | .BagRemove | .BagHas | .BagCount | .BagLen | .DequeFrom | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeContains | .DequeDelete | .DequeGet | .DequeToList | .DequeJoin | .DequeSplit | .DequeReverse | .DequeCapacity -> return jet_codegen_builtin_container_route(operation)
-        .OptionZip(_, _) | .Zip(_, _, _, _, _, _, _) | .Unzip(_) -> panic("checked structural builtin requires its dedicated non-route lowering")
+        .Indexed -> return jet_codegen_builtin_route("iter_enumerate", "jet_iter_enumerate", 2, [Bool]{false, false}, None)
+        .IterSplit -> return jet_codegen_builtin_route("iter_split", "jet_iter_split_at", 3, [Bool]{false, false, false}, None)
+        .SetFrom | .SetToList | .SetSort | .SetEqual | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SortedSetFrom | .SortedSetToList | .SortedSetInsert | .SortedSetRemove | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequeFrom | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeContains | .DequeDelete | .DequeGet | .DequeToList | .DequeJoin | .DequeSplit | .DequeReverse | .DequeCapacity -> return jet_codegen_builtin_container_route(operation)
+        .OptionZip(_) | .Zip(_, _, _, _, _, _) | .Unzip -> panic("checked structural builtin requires its dedicated non-route lowering")
         .TryCollect | .IterToList | .IterCollect | .ListLazy | .Take | .Skip | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> return jet_codegen_builtin_iter_route(operation, receiver, carrier)
         .StringMethod(method) -> return jet_codegen_builtin_string_method_route(method, result, carrier)
         .ByteBufferMethod(method) -> return jet_codegen_builtin_byte_buffer_method_route(method)
@@ -606,13 +605,11 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .ByteBufferToBytes -> return jet_codegen_builtin_route("byte_buffer_to_bytes", "JetByteBuffer::to_bytes", 1, [Bool]{true}, None)
         .ByteBufferFrom -> return jet_codegen_builtin_route("byte_buffer_from", "JetByteBuffer::from", 1, [Bool]{true}, None)
         .ByteBufferWithCapacity -> return jet_codegen_builtin_route("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, [Bool]{false}, None)
-        .MatchGroup -> return jet_codegen_builtin_route("match_group", "jet_std::JetRegexMatch::group", 2, [Bool]{true, false}, None)
         .Repeat -> return jet_codegen_builtin_route("string_repeat", "jet_string_repeat", 2, [Bool]{true, false}, None)
         .ListSlice -> return jet_codegen_builtin_route("list_slice", "jet_list_slice", 3, [Bool]{true, false, false}, None)
         .ListBinarySearch -> return jet_codegen_builtin_route("list_binary_search", "jet_list_binary_search", 2, [Bool]{true, true}, None)
         .ListEqual -> return jet_codegen_builtin_route("list_equal", "jet_list_equal", 2, [Bool]{true, true}, None)
         .ListReplace -> return jet_codegen_builtin_route("list_replace", "jet_list_replace", 3, [Bool]{true, false, false}, None)
-        .MapNew | .SetCopy | .BitSetNew | .ByteBufferNew | .BagLen -> panic("checked primitive or receiver-only builtin has no generic route")
         else -> {}
     }
     jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
@@ -768,14 +765,14 @@ fn jet_codegen_builtin_native_int(builder: &JetCodegenBuilder, program: JetCodeg
 
 fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: TBuiltinOp, args: [TExpr]) -> MIRValueID {
     if operation == {
-        .OptionZip(_, elem_ty) -> return jet_codegen_lower_builtin_option_zip(&builder, program, expression, receiver, args, elem_ty)
-        .Unzip(_) -> return jet_codegen_lower_builtin_unzip(&builder, program, expression, receiver)
+        .OptionZip(elem_ty) -> return jet_codegen_lower_builtin_option_zip(&builder, program, expression, receiver, args, elem_ty)
+        .Unzip -> return jet_codegen_lower_builtin_unzip(&builder, program, expression, receiver)
         .Indexes -> return jet_codegen_lower_builtin_indexes(&builder, program, expression, receiver, args)
-        .ListMinMax(_) -> return jet_codegen_lower_builtin_list_min_max(&builder, program, expression, receiver, operation, args)
-        .Indexed(_) -> return jet_codegen_lower_builtin_tuple_projection(&builder, program, expression, receiver, operation, args)
-        .MapToList(_) -> return jet_codegen_lower_builtin_map_to_list(&builder, program, expression, receiver, operation, args)
-        .IterSplit(_) -> return jet_codegen_lower_builtin_tuple_projection(&builder, program, expression, receiver, operation, args)
-        .Zip(_, mode, fields, flatten, input_count, fill_mode, field_types) -> return jet_codegen_lower_builtin_zip(&builder, program, expression, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types)
+        .ListMinMax -> return jet_codegen_lower_builtin_list_min_max(&builder, program, expression, receiver, operation, args)
+        .Indexed -> return jet_codegen_lower_builtin_tuple_projection(&builder, program, expression, receiver, operation, args)
+        .MapToList -> return jet_codegen_lower_builtin_map_to_list(&builder, program, expression, receiver, operation, args)
+        .IterSplit -> return jet_codegen_lower_builtin_tuple_projection(&builder, program, expression, receiver, operation, args)
+        .Zip(mode, fields, flatten, input_count, fill_mode, field_types) -> return jet_codegen_lower_builtin_zip(&builder, program, expression, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types)
         // `to_string` on a String, Bool, Char or inline range shows the value (Rust `jet_show`).
         .ToString -> {
             shown := jet_codegen_lower_expr(&builder, program, receiver)
@@ -833,7 +830,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, program: JetCod
         if args.len() == 0 -> panic("checked builtin requires an index operand")
         lowered_args[0] = jet_codegen_builtin_native_int(&builder, program, lowered_args[0], args[0].ty, args[0].span)
     } else -> {} }
-    if operation == { .ListReplace | .MatchGroup -> {
+    if operation == { .ListReplace -> {
         if args.len() == 0 -> panic("checked builtin requires an index operand")
         lowered_args[0] = jet_codegen_builtin_native_int(&builder, program, lowered_args[0], args[0].ty, args[0].span)
     } else -> {} }
@@ -852,7 +849,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, program: JetCod
         .ByteBufferWithCapacity -> {}
         else -> {}
     }
-    view_range := if operation == { .ViewNew(_) | .ViewMutNew(_) | .ComputeViewNew(_) | .ComputeViewMutNew(_) -> true else -> false }
+    view_range := if operation == { .ViewNew(_) -> true else -> false }
     if !view_range && lowered_args.len() + 1 != route.arity -> panic("checked builtin operand count disagrees with its canonical route")
     if route.borrow_mask.len() != route.arity -> panic("canonical builtin borrow mask disagrees with its route arity")
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, jet_codegen_failure_carrier_for_type(expression.ty), route.abi)
@@ -1194,13 +1191,11 @@ fn jet_codegen_builtin_synthetic_lambda(builder: &JetCodegenBuilder, program: Je
         host_param_conventions: None,
         source_params: source_params,
         source_param_symbols: source_symbols,
-        jit_name: jit_name,
         param_types: params,
         ret: Val(result_type),
         is_move: true,
         boxed: false,
         rc: false,
-        arc: false,
         captures: [TCapture]{},
         materialized_captures: [String]{},
         frozen_captures: [String]{},
@@ -1484,7 +1479,7 @@ fn jet_codegen_lower_builtin_zip(builder: &JetCodegenBuilder, program: JetCodege
 }
 
 fn jet_codegen_lower_builtin_tuple_projection(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: TBuiltinOp, args: [TExpr]) -> MIRValueID {
-    indexed := if operation == { .Indexed(_) -> true else -> false }
+    indexed := if operation == { .Indexed -> true else -> false }
     result_type := jet_codegen_builtin_untag(expression.ty)
     row_type := if {
         indexed -> {

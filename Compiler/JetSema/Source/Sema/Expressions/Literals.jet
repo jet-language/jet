@@ -150,8 +150,7 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
                 return None
             }
             numeric :: if float_value != None -> sema_tir_node(Type.Float, TExprKind.FloatLit{value: float_value}, span) else -> sema_tir_node(Type.Float, TExprKind.FloatLit{value: Float.from_int(int_value ?? 0)}, span)
-            destination_symbol :: symbol_id(SymbolKind.Type, unit.package, "", unit.name)
-            value :: sema_tir_node(Type.Named{name: unit.name}, TExprKind.DistinctCtor{owner: destination_symbol, argument: numeric, base: Type.Float}, span)
+            value :: sema_tir_node(Type.Named{name: unit.name}, TExprKind.DistinctCtor{argument: numeric}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         if suffix == "i" {

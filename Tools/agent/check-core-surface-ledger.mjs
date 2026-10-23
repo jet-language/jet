@@ -41,35 +41,20 @@ const TOWER_PATH = (function () {
   }
   return join(ROOT, "Tools/tower/.tower/tower.json");
 })();
-const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs";
-const CORE_CALLS_PATH = "crates/jet-foundation/src/Syntax/core_calls.rs";
 const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
-const ENCODING_TYPES_PATH = "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs";
-const TIR_CORE_CALLS_PATH = "crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs";
+// The Core rows with no Core.jet declaration: typed fixed-signature members,
+// built-in receiver methods, and the lowering-owned extension calls.
+const CORE_SURFACE_INVENTORY_PATH = "Compiler/Prelude/CoreSurfaceInventory.jet";
+const CORE_CALL_EXTENSIONS_PATH = "Compiler/Prelude/CoreCallExtensions.jet";
 const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet";
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_ENUM_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet";
-const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
-const CORE_SOURCE_TEXTS_PATH = "crates/jet-sema/src/CoreSourceTexts.rs";
 const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
-const RING_LAYER_PATH = "crates/jet-foundation/src/RingLayer.rs";
-const CORE_PARTS_PATH = "crates/jet-foundation/src/CoreSourceParts.rs";
-const CORE_RUNTIME_PARTS_BEGIN = "// BEGIN GENERATED CORE RUNTIME PARTS";
-const CORE_RUNTIME_PARTS_END = "// END GENERATED CORE RUNTIME PARTS";
-const CORE_CALLS_BEGIN = "// BEGIN GENERATED CORE CALLS";
-const CORE_CALLS_END = "// END GENERATED CORE CALLS";
-const ENCODING_FORMAT_BEGIN = "// BEGIN GENERATED CORE ENCODING FORMATS";
-const ENCODING_FORMAT_END = "// END GENERATED CORE ENCODING FORMATS";
-const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
-const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
-const NUMERIC_PATH = "crates/jet-foundation/src/Numeric.rs";
-const NET_TEXT_TIME_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs";
-const CORE_TYPES_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
-const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
-const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
-const MARKERS_PATH = "Compiler/Prelude/Markers.jet";
-const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
+// The owner-controlled syntax registry: every Syntax string constant a Core.jet
+// dispatcher row or the core.mem tier map names.
+const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
+const CORE_SURFACE_SYNTAX_PATH = SYNTAX_DIR + "/CoreSurface.jet";
 const CORE_API_LAWS_PATH = "Docs/spec/stdlib-api-laws.md";
 const SYNTAX_REFERENCE_PATH = "Docs/spec/reference/syntax-surface.jet";
 const AGENT_MANIFEST_PATH = "tests/agent_workloads/manifest.tsv";
@@ -79,9 +64,20 @@ const AGENT_CORPUS_ROOT = "tests/agent_workloads";
 const AGENT_DOMAIN_CONTRACT_PATH = "tests/agent_workloads/domain_contract.tsv";
 const AGENT_WORKLOAD_POLICY_PATH = "tests/agent_workloads/policy.tsv";
 const AGENT_CHECKSUMS_PATH = "tests/agent_workloads/SHA256SUMS";
-const AGENT_RUNNER_SOURCE_PATH = "tests/agent_workloads.rs";
-const CORE_API_REVIEW_TEST_PATH = "tests/core_surface_ledger.rs";
-const CORE_API_REVIEW_TEST = CORE_API_REVIEW_TEST_PATH + "::core_surface_ledger_matches_its_sources";
+// The Jet ports of the corpus runner: the equivalent-adapter case and the
+// reviewed manifest and baseline guards.
+const AGENT_RUNNER_SOURCE_PATHS = [
+  "tests/cases/agent_workloads/equivalent_adapters_complete_declared_tasks.case",
+  "tests/guards/agent_workloads_reviewed.jet",
+];
+const CORE_API_REVIEW_TEST_PATH = "tests/guards/core_surface_ledger_reviewed.jet";
+const CORE_API_REVIEW_TEST = CORE_API_REVIEW_TEST_PATH + "::Core surface ledger teaches the same ratified API layering";
+// The Jet ports of the editor tests that teach the Core gate forms.
+const EDITOR_COVERAGE_PATHS = [
+  "tests/cases/lsp/lsp_completion_returns_items.case",
+  "tests/cases/lsp/lsp_signature_help_returns_active_parameter.case",
+  "tests/cases/lsp/lsp_hover_returns_signature.case",
+];
 const CORE_CONFORMANCE_PATH = "Tools/agent/core-conformance.mjs";
 const CORE_CONFORMANCE_FIXTURE_ROOT = "tests/conformance/corpus";
 const CORE_CONFORMANCE_FIXTURE_PATHS = Array.from(new Set(
@@ -91,17 +87,17 @@ const CORE_CONFORMANCE_FIXTURE_PATHS = Array.from(new Set(
 ));
 const AGENT_BASELINE_ADAPTERS = ["bash", "python", "node"];
 const AGENT_RUNNER_MARKERS = [
-  "fn manifest_is_complete_frozen_and_non_vacuous()",
-  "fn recorded_baselines_cover_frozen_tasks()",
-  "fn equivalent_adapters_complete_declared_tasks()",
-  "let cold = run_bounded(",
-  "let warm = run_bounded(",
-  "cold.output.stdout, expected",
-  "warm.output.stdout, cold.output.stdout",
-  "input_hashes(&input), before",
-  "scratch_output_violations(",
-  "fn pinned_adapter_versions()",
-  "is not the committed pinned shipped tool",
+  "#Test(\"manifest_is_complete_frozen_and_non_vacuous\")",
+  "#Test(\"recorded_baselines_cover_frozen_tasks\")",
+  "fixture: equivalent_adapters_complete_declared_tasks.fixture",
+  "step jet_cold: jet run --release",
+  "step jet_warm: jet run --release",
+  "stdout: = \"{cap:expected}\"",
+  "stdout: == jet_cold",
+  "cap:after: = \"{cap:before}\"",
+  "entries: run_jet name != \".jet\" = 0",
+  "copy: {root}/tests/agent_workloads/baselines/receipt.tsv pins.tsv",
+  "cap:pin_version: = \"{cap:version_bash}\"",
 ];
 const CORE_API_REVIEW_CHECKS = [
   "workflow-closure",
@@ -120,15 +116,10 @@ const CORE_API_SYNTAX_MARKERS = [
   "wrap(call)",
   "#Policy(",
 ];
+// The frozen corpus manifest's evidence label for the equivalent-adapter run.
+// It stays data; its Jet port is AGENT_RUNNER_SOURCE_PATHS.
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-// ViewIter shares Iter's scored operations. Keep dispatch discovery strict
-// without scoring the internal table as a separate Core container.
-const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["view_iter_method_return"]);
-// Internal Prelude helpers may be present in the compiler dispatcher without
-// being public module members. Core.jet declares these adapter-only rows
-// alongside ordinary dispatcher rows; there is no second handwritten key list.
-const PRIVATE_CORE_TYPES = new Set(["Fake"]);
 
 // Every language the owner named on 2026-08-03, each with a recorded surface
 // read from that language's own primary source. Python keeps its interpreter
@@ -554,137 +545,6 @@ const MATCH_DOMAIN = {
   "core.text": "text",
 };
 
-// A Rust type token, or the value of the Syntax constant naming it, mapped to
-// the ledger container that owns it. Used for the tables that mix types in one
-// match: builtin_static_return and the arms written inline in
-// builtin_method_return.
-const TYPE_CONTAINER = {
-  Int: "core.math",
-  // D-CMP3WAY1=B: Comparable returns the shared three-way numeric result.
-  Ordering: "core.math",
-  Float: "core.math",
-  Float32: "core.math",
-  Decimal: "core.math",
-  Complex: "core.math",
-  String: "String",
-  Range: "Iter",
-  TypeInfo: "core.reflect",
-  ProgramInfo: "core.reflect",
-  FunctionInfo: "core.reflect",
-  FieldInfo: "core.reflect",
-  MethodInfo: "core.reflect",
-  PackageInfo: "core.reflect",
-  CompilerLexed: "core.compiler",
-  CompilerChecked: "core.compiler",
-  CompilerSourceMap: "core.compiler",
-  CompilerPackageError: "core.compiler",
-  CompilerDependency: "core.compiler",
-  CompilerPackageTarget: "core.compiler",
-  CompilerPackageOutput: "core.compiler",
-  CompilerBuildProfile: "core.compiler",
-  CompilerManifest: "core.compiler",
-  CompilerPackage: "core.compiler",
-  CompilerLockedPackage: "core.compiler",
-  CompilerLock: "core.compiler",
-  CompilerKeyValue: "core.compiler",
-  CompilerProfile: "core.compiler",
-  CompilerProfileSet: "core.compiler",
-  EffectInfo: "core.reflect",
-  Effect: "core.reflect",
-  CompilerSyntaxTree: "core.compiler",
-  CompilerNode: "core.compiler",
-  BuildContext: "core.compiler",
-  Authority: "core.process",
-  Clock: "core.time",
-  Duration: "core.time",
-  Path: "core.files",
-  Date: "core.time",
-  LocalDate: "core.time",
-  LocalTime: "core.time",
-  DateTime: "core.time",
-  Instant: "core.time",
-  Period: "core.time",
-  Zone: "core.time",
-  ZonedDateTime: "core.time",
-  // Exact Rust type names harvested from regex_method_return. `URL` and `MIME`
-  // are `core.net.url`/`core.net.mime` source records: their methods come from
-  // the declarations.
-  Regex: "core.regex",
-  Match: "core.regex",
-  ExpiringValue: "core.time.expiring",
-  Condition: "core.sync",
-  WrappedVaultKey: "core.crypto.vault",
-  KeyUnlock: "core.crypto.vault",
-  Test: "core.testing",
-  Bytes: "Bytes",
-  Queue: "Queue",
-  Set: "Set",
-  Rank: "Rank",
-  Map: "Map",
-  TLSPeerIdentity: "core.net.tls",
-};
-
-const COLLECTION_METHOD_FUNCTIONS = {
-  list_method_return: "List",
-  iter_method_return: "Iter",
-  view_iter_method_return: "Iter",
-  view_method_return: "View",
-  option_method_return: "Option",
-  // Result is a language carrier, not a scored Core container. Its methods
-  // are still discovered so the ledger cannot silently miss the dispatch.
-  result_method_return: null,
-  map_method_return: "Map",
-  string_method_return: "String",
-  clock_method_return: "Clock",
-  deterministic_world_method_return: "DeterministicWorld",
-  rng_method_return: "Rng",
-  history_rng_method_return: "HistoryRng",
-  duration_method_return: "Duration",
-  task_method_return: "Task",
-  receiver_method_return: "Receiver",
-  sender_method_return: "Sender",
-  pool_method_return: "Pool",
-  shared_method_return: "Shared",
-  shared_snapshot_method_return: "SharedSnapshot",
-  shared_weak_method_return: "SharedWeak",
-  shared_guard_method_return: "SharedGuard",
-  condition_method_return: "Condition",
-  cell_method_return: "Cell",
-  cell_guard_method_return: "CellGuard",
-  signal_method_return: "Signal",
-  derived_method_return: "Derived",
-  event_method_return: "Event",
-  async_event_method_return: "AsyncEvent",
-  hook_method_return: "Hook",
-  decision_hook_method_return: "DecisionHook",
-  subscription_method_return: "Subscription",
-  event_scope_method_return: "EventScope",
-  event_trace_method_return: "EventTrace",
-  dispatch_report_method_return: "DispatchReport",
-  watch_handle_method_return: "WatchHandle",
-  watch_set_method_return: "WatchSet",
-  set_method_return: "Set",
-  sorted_set_method_return: "Rank",
-  priority_queue_method_return: "PriorityQueue",
-  lru_method_return: "Cache",
-  bit_set_method_return: "Bits",
-  byte_buffer_method_return: "Bytes",
-  bag_method_return: "Tally",
-  deque_method_return: "Queue",
-  numeric_method_return: "core.math",
-  numeric_conversion_return: "core.math",
-  decimal_method_return: "core.math",
-  fraction_method_return: "core.math",
-  is_closure_method: "Iter",
-  is_lazy_adapter: "Iter",
-  is_iter_terminal: "Iter",
-  build_context_method_return: "core.compiler",
-  compiler_package_method_return: "core.compiler",
-  // builtin_static_return mixes types in one match, so its arms are attributed
-  // one at a time through TYPE_CONTAINER rather than to a single container.
-  builtin_static_return: null,
-};
-
 // The card that owns a container's losses. --check rejects a reference to a
 // card that is closed or missing, which is how a stale owner surfaces instead
 // of quietly reading as covered.
@@ -931,196 +791,62 @@ function lineAt(text, offset) {
   return text.slice(0, offset).split(/\r?\n/).length;
 }
 
-function functionBody(text, name) {
-  const start = text.indexOf("fn " + name + "(");
-  if (start < 0) throw new Error("function not found: " + name);
-  const open = text.indexOf("{", start);
-  let depth = 0;
-  let state = "code";
-  let escaped = false;
-  let blockDepth = 0;
-  for (let index = open; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (state === "line") {
-      if (char === "\n") state = "code";
-      continue;
-    }
-    if (state === "block") {
-      if (char === "/" && next === "*") { blockDepth += 1; index += 1; }
-      else if (char === "*" && next === "/") {
-        blockDepth -= 1;
-        index += 1;
-        if (blockDepth === 0) state = "code";
-      }
-      continue;
-    }
-    if (state === "string") {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === "\"") state = "code";
-      continue;
-    }
-    if (char === "/" && next === "/") { state = "line"; index += 1; continue; }
-    if (char === "/" && next === "*") { state = "block"; blockDepth = 1; index += 1; continue; }
-    if (char === "\"") { state = "string"; continue; }
-    if (char === "{") depth += 1;
-    else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) return text.slice(open + 1, index);
-    }
-  }
-  throw new Error("unterminated function: " + name);
-}
-
-/*
- * Parse one Rust match. The returned arms are exact top-level arms; nested
- * matches, strings, comments, and commas inside expressions are ignored.
- */
-function matchArms(source, needle) {
-  const matchAt = source.indexOf(needle);
-  if (matchAt < 0) throw new Error("match not found: " + needle);
-  const open = source.indexOf("{", matchAt);
-  let brace = 0;
-  let paren = 0;
-  let bracket = 0;
-  let state = "code";
-  let escaped = false;
-  let blockDepth = 0;
-  let armStart = open + 1;
-  let arrow = -1;
-  const arms = [];
-
-  function push(end) {
-    if (arrow >= 0) {
-      arms.push({
-        lhs: source.slice(armStart, arrow),
-        rhs: source.slice(arrow + 2, end),
-      });
-    }
-    armStart = end + 1;
-    arrow = -1;
-  }
-
-  for (let index = open; index < source.length; index += 1) {
-    const char = source[index];
-    const next = source[index + 1];
-    if (state === "line") {
-      if (char === "\n") state = "code";
-      continue;
-    }
-    if (state === "block") {
-      if (char === "/" && next === "*") { blockDepth += 1; index += 1; }
-      else if (char === "*" && next === "/") {
-        blockDepth -= 1;
-        index += 1;
-        if (blockDepth === 0) state = "code";
-      }
-      continue;
-    }
-    if (state === "string") {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === "\"") state = "code";
-      continue;
-    }
-    if (char === "/" && next === "/") { state = "line"; index += 1; continue; }
-    if (char === "/" && next === "*") { state = "block"; blockDepth = 1; index += 1; continue; }
-    if (char === "\"") { state = "string"; continue; }
-    if (char === "{") { brace += 1; continue; }
-    if (char === "}") {
-      brace -= 1;
-      // A block-bodied arm ends at its own closing brace, not at a comma. The
-      // old order only pushed when the whole match closed, so `=> { ... }`
-      // never ended its arm: `arrow` stayed set, the next arm's `=>` was
-      // skipped by the arrow guard, and that arm was swallowed into this rhs.
-      // Set.is_subset, is_superset and is_disjoint were lost exactly this way,
-      // and the ledger then scored capabilities Jet already ships as missing.
-      if (arrow >= 0 && brace <= 1) push(index);
-      if (brace === 0) break;
-      continue;
-    }
-    if (brace !== 1) continue;
-    if (char === "(") paren += 1;
-    else if (char === ")") paren -= 1;
-    else if (char === "[") bracket += 1;
-    else if (char === "]") bracket -= 1;
-    else if (char === "=" && next === ">" && paren === 0 && bracket === 0 && arrow < 0) {
-      arrow = index;
-      index += 1;
-    } else if (char === "," && paren === 0 && bracket === 0 && arrow >= 0) {
-      push(index);
-    }
-  }
-  return arms;
-}
-
-function allMatchArms(source, needle) {
-  const arms = [];
-  let offset = 0;
-  while (offset < source.length) {
-    const matchAt = source.indexOf(needle, offset);
-    if (matchAt < 0) break;
-    arms.push(...matchArms(source.slice(matchAt), needle));
-    offset = matchAt + needle.length;
-  }
-  return arms;
-}
-
+// Every Syntax string constant, read from the owner-controlled registry
+// (Compiler/JetFoundation/Data/Syntax/*.jet). A value is a Jet string literal or,
+// for a compiler-private name that starts with NUL, `String.from_bytes([U8]{…})`.
+let SYNTAX_CONSTANTS = null;
 function syntaxConstants() {
+  if (SYNTAX_CONSTANTS) return SYNTAX_CONSTANTS;
   const values = new Map();
-  // Every Syntax module, not two of them. TYPE_RANGE lives in math_layout.rs,
-  // so naming files by hand left it unresolved and the arm that uses it
-  // unattributed.
-  const dir = "crates/jet-foundation/src/Syntax";
-  const files = ["crates/jet-foundation/src/Syntax.rs"].concat(
-    readdirSync(join(ROOT, dir))
-      .filter(function (name) { return name.endsWith(".rs"); })
-      .map(function (name) { return dir + "/" + name; })
-      .sort()
-  );
+  const files = readdirSync(join(ROOT, SYNTAX_DIR))
+    .filter(function (name) { return name.endsWith(".jet"); })
+    .sort()
+    .map(function (name) { return SYNTAX_DIR + "/" + name; });
   for (const file of files) {
     const source = read(file);
-    for (const match of source.matchAll(/pub const ([A-Z][A-Z0-9_]*):\s*&str\s*=\s*"((?:\\.|[^"\\])*)"/g)) {
-      values.set(match[1], decodeRustStringContent(match[2], file + " " + match[1]));
+    for (const match of source.matchAll(/^([A-Z][A-Z0-9_]*) :: "((?:\\.|[^"\\])*)"/gm)) {
+      values.set(match[1], decodeJetStringContent(match[2], file + " " + match[1]));
+    }
+    for (const match of source.matchAll(/^([A-Z][A-Z0-9_]*) :: String\.from_bytes\(\[U8\]\{([0-9, ]*)\}\)$/gm)) {
+      const bytes = match[2].split(",").map(function (byte) { return Number(byte.trim()); });
+      values.set(match[1], Buffer.from(bytes).toString("utf8"));
     }
   }
+  SYNTAX_CONSTANTS = values;
   return values;
 }
 
-// Some tables name their methods through a constant array rather than inline:
-// numeric_conversion_return reads NUMERIC_CONVERSION_SOURCES, and the duration
-// constructors come from DURATION_CONSTRUCTORS. A table that yields nothing is
-// a reader that cannot read it, so those lists are resolved too.
-function syntaxSourceFiles() {
-  const dir = "crates/jet-foundation/src/Syntax";
-  return ["crates/jet-foundation/src/Syntax.rs"].concat(
-    readdirSync(join(ROOT, dir))
-      .filter(function (name) { return name.endsWith(".rs"); })
-      .map(function (name) { return dir + "/" + name; })
-      .sort()
-  );
-}
-
-function constantLists() {
-  const lists = new Map();
-  const files = syntaxSourceFiles();
-  for (const file of files) {
-    const text = read(file);
-    for (const hit of text.matchAll(/pub const ([A-Z][A-Z0-9_]*)\s*:\s*[^=]*=\s*&?\[([\s\S]*?)\];/g)) {
-      const body = hit[2];
-      const names = [];
-      // A tuple list pairs a method with something else; the method is first.
-      const tuples = Array.from(body.matchAll(/\(\s*"([^"]+)"\s*,/g));
-      if (tuples.length) {
-        for (const tuple of tuples) names.push(tuple[1]);
-      } else {
-        for (const value of quoted(body)) names.push(value);
+function decodeJetStringContent(content, context) {
+  let decoded = "";
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (character === "{" || character === "}") {
+      if (content[index + 1] !== character) {
+        throw new Error("interpolating Jet string in " + context);
       }
-      if (names.length) lists.set(hit[1], names);
+      decoded += character;
+      index += 1;
+      continue;
+    }
+    if (character !== "\\") {
+      decoded += character;
+      continue;
+    }
+    index += 1;
+    const escape = content[index];
+    if (escape === "n") decoded += "\n";
+    else if (escape === "r") decoded += "\r";
+    else if (escape === "t") decoded += "\t";
+    else if (escape === "\\") decoded += "\\";
+    else if (escape === "\"") decoded += "\"";
+    else if (escape === "u" && /^[0-9a-fA-F]{4}$/.test(content.slice(index + 1, index + 5))) {
+      decoded += String.fromCharCode(parseInt(content.slice(index + 1, index + 5), 16));
+      index += 4;
+    } else {
+      throw new Error("unsupported Jet string escape `\\" + escape + "` in " + context);
     }
   }
-  return lists;
+  return decoded;
 }
 
 function resolveItems(body, constants) {
@@ -1131,10 +857,6 @@ function resolveItems(body, constants) {
   return Array.from(result).sort();
 }
 
-function canonicalModule(name) {
-  if (name.startsWith("jet.")) return "core." + name.slice(4);
-  return name;
-}
 // ---------------------------------------------------------------------------
 // Core declarations. `Prelude/Core.jet` is the one readable twin for the
 // compiler-owned module/member inventory. The parser is intentionally smaller
@@ -2059,20 +1781,6 @@ function translateCoreCallExpression(expression, context) {
   return coreCallRecordLiteral(coreCallRecordFromRust(expression, context));
 }
 
-function rustArrayEntries(source, startToken) {
-  const body = rustValueBody(source, startToken);
-  const start = source.indexOf(startToken);
-  const equals = source.indexOf("=", start);
-  const open = source.indexOf("[", equals);
-  if (open < 0) throw new Error("Rust list value disappeared: " + startToken);
-  return splitRustTopLevelWithOffsets(body, startToken).map(function (part) {
-    return {
-      expression: part.value,
-      sourceLine: lineAt(source, open + 1 + part.offset),
-    };
-  });
-}
-
 function coreDispatcherExpression(row, ambientKeys) {
   let expression = row.expression.replace(/,\s*$/, "");
   const key = row.module + "." + row.member;
@@ -2669,29 +2377,32 @@ function coreModuleInventory() {
 }
 
 
-// `CORE_CALLS` is the generated Core dispatcher. Keep every constructor and
+// `CORE_CALLS` holds Core.jet's dispatcher rows. Keep every constructor and
 // web-call adapter accountable to the same module inventory that feeds the
 // ledger; otherwise a stale adapter spelling can become user-visible without
 // a source declaration.
-function publicDispatcherRows() {
-  const source = read(CORE_CALLS_PATH);
-  const start = source.indexOf("pub static CORE_CALLS");
-  const end = source.indexOf("\n];", start);
-  if (start < 0 || end < 0) {
-    throw new Error("CoreCall dispatcher table is missing its bounded source");
-  }
-  const body = source.slice(start, end);
+function publicDispatcherRows(declarations = coreSourceFacts()) {
+  const ambientKeys = new Set(declarations.ambientRoutes.map(function (route) {
+    return route.module + "." + route.member;
+  }));
+  // One body line per dispatcher row, in Core.jet order.
+  const body = declarations.dispatcherRows.map(function (row) {
+    return "    " + coreDispatcherExpression(row, ambientKeys) + ",";
+  }).join("\n");
+  const sourceLineAt = function (offset) {
+    return declarations.dispatcherRows[lineAt(body, offset) - 1].sourceLine;
+  };
   const rows = [];
   const seen = new Map();
   const register = (module, member, sourceLine) => {
     if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(module) ||
         !/^(?:[A-Za-z_][A-Za-z0-9_!?]*|(?:\\0|\0)[A-Za-z_][A-Za-z0-9_.]*)$/.test(member)) {
-      throw new Error("malformed CoreCall dispatcher row at line " + sourceLine +
+      throw new Error("malformed CoreCall dispatcher row at Core.jet line " + sourceLine +
         ": invalid module/member");
     }
     const key = module + "." + member;
     if (seen.has(key)) {
-      throw new Error("duplicate public dispatcher row `" + key + "` at lines " +
+      throw new Error("duplicate public dispatcher row `" + key + "` at Core.jet lines " +
         seen.get(key) + " and " + sourceLine);
     }
     seen.set(key, sourceLine);
@@ -2701,7 +2412,7 @@ function publicDispatcherRows() {
     body.matchAll(/\bCoreCallRecord::(?:new_with_coverage|new)\s*\(/g),
   );
   for (const match of constructors) {
-    const sourceLine = lineAt(source, start + match.index);
+    const sourceLine = sourceLineAt(match.index);
     const row = coreCallIdentity(body.slice(match.index), sourceLine);
     register(row.module, row.member, sourceLine);
   }
@@ -2709,7 +2420,7 @@ function publicDispatcherRows() {
     body.matchAll(/\bsema_web_call\s*\(\s*"([^"\\]*)"\s*,\s*"([^"\\]*)"/g),
   );
   for (const match of webCalls) {
-    register(match[1], match[2], lineAt(source, start + match.index));
+    register(match[1], match[2], sourceLineAt(match.index));
   }
   if (!constructors.length && !webCalls.length) {
     throw new Error("CoreCall dispatcher table has no public rows");
@@ -2751,79 +2462,28 @@ function validatePublicDispatcher(sourceOrModules, rows, options = {}) {
 }
 
 
-function moduleToken(name) {
-  return name === "app" || name.startsWith("core.") || name.startsWith("jet.");
+// Core.jet's core.mem exports are exactly the named items of the core.mem
+// gate-tier map in the syntax registry.
+function validateCoreMemModule(declarations) {
+  const source = read(CORE_SURFACE_SYNTAX_PATH);
+  const tiers = resolveItems(jetListBody(source, "CORE_MEM_GATE_TIERS ::", CORE_SURFACE_SYNTAX_PATH), syntaxConstants());
+  const module = declarations.modules.find(function (entry) { return entry.module === "core.mem"; });
+  if (!module) throw new Error("Core.jet declares no core.mem module");
+  const declared = module.members.slice().sort();
+  if (stable(declared) !== stable(tiers)) {
+    const missing = tiers.filter(function (name) { return !declared.includes(name); });
+    const extra = declared.filter(function (name) { return !tiers.includes(name); });
+    throw new Error("Core.jet core.mem exports drift from CORE_MEM_GATE_TIERS: missing=" +
+      missing.join(",") + " extra=" + extra.join(","));
+  }
 }
 
-function executableModuleInventory() {
-  const source = read(CORE_EXPORTS_PATH);
-  const constants = syntaxConstants();
-  const entries = new Map();
-  const declarations = rustValueBody(source, "pub const CORE_MODULE_DECLARATIONS");
-  for (const row of declarations.matchAll(
-    /CoreModuleDeclaration\s*\{\s*module:\s*"([^"]+)",\s*members:\s*([A-Z][A-Z0-9_]*)/g,
-  )) {
-    if (entries.has(row[1])) throw new Error("duplicate generated Core module: " + row[1]);
-    entries.set(row[1], {
-      module: row[1],
-      rawModules: [row[1] + " (CoreModuleDeclaration)"],
-      members: new Set(quoted(rustValueBody(source, "const " + row[2]))),
-      sourceLine: lineAt(source, source.indexOf(row[0])),
-    });
-  }
-  if (!entries.size) throw new Error("generated Core module declarations are empty");
-
-  const policy = read(POLICY_PATH);
-  const menus = new Set(matchArms(
-    functionBody(policy, "canonical_rule_arg_variants"), "match name",
-  ).flatMap(function (arm) { return quoted(arm.lhs); }));
-  const seed = policy.match(
-    /pub static RULE_ARG_DECLARATIONS[\s\S]*?BTreeSet::from\(\[([^\]]*)\]\)/,
-  );
-  if (!seed) throw new Error("policy argument declaration seed disappeared");
-  const langMembers = new Set(quoted(seed[1]));
-  // TaintKind is a Core type in its own right (the taint tags), not only a marker argument menu.
-  langMembers.add("TaintKind");
-  for (const line of read(MARKERS_PATH).split("\n")) {
-    if (!line.trim().startsWith("marker ")) continue;
-    for (const parameter of line.matchAll(
-      /\b[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?:\.\.\.)?([A-Za-z_][A-Za-z0-9_]*)\s*(?=[{,)])/g,
-    )) {
-      if (menus.has(parameter[1])) langMembers.add(parameter[1]);
-    }
-  }
-  entries.set("core.compiler.lang", {
-    module: "core.compiler.lang",
-    rawModules: ["core.compiler.lang (Policy::RULE_ARG_DECLARATIONS)"],
-    members: new Set(Array.from(langMembers).filter(function (name) { return menus.has(name); })),
-    sourceLine: lineAt(policy, policy.indexOf("pub static RULE_ARG_DECLARATIONS")),
-  });
-
-  const syntaxSource = read(SYNTAX_PATH);
-  entries.set("core.mem", {
-    module: "core.mem",
-    rawModules: ["core.mem (CORE_MEM_GATE_TIERS)"],
-    members: new Set(resolveItems(
-      rustValueBody(syntaxSource, "pub const CORE_MEM_GATE_TIERS"), constants,
-    )),
-    sourceLine: lineAt(syntaxSource, syntaxSource.indexOf("pub const CORE_MEM_GATE_TIERS")),
-  });
-
-  return Array.from(entries.values()).map(function (entry) {
-    return {
-      module: entry.module,
-      rawModules: entry.rawModules,
-      members: Array.from(entry.members).sort(),
-      sourceLine: entry.sourceLine,
-    };
-  }).sort(function (left, right) { return left.module.localeCompare(right.module); });
-}
-function rustValueBody(source, startToken) {
-  const start = source.indexOf(startToken);
-  if (start < 0) throw new Error("Rust source anchor disappeared: " + startToken);
-  const equals = source.indexOf("=", start);
-  const open = source.indexOf("[", equals);
-  if (equals < 0 || open < 0) throw new Error("Rust list value disappeared: " + startToken);
+// The `{ … }` body of the Jet list literal declared at `anchor`.
+function jetListBody(source, anchor, path) {
+  const start = source.indexOf(anchor);
+  if (start < 0) throw new Error(path + " has no `" + anchor + "`");
+  const open = source.indexOf("{", start);
+  if (open < 0) throw new Error(path + ": `" + anchor + "` has no list body");
   let depth = 0;
   let quotedString = false;
   let escaped = false;
@@ -2839,174 +2499,17 @@ function rustValueBody(source, startToken) {
       quotedString = true;
       continue;
     }
-    if (char === "[") depth += 1;
-    else if (char === "]") {
+    if (char === "{") depth += 1;
+    else if (char === "}") {
       depth -= 1;
       if (depth === 0) return source.slice(open + 1, index);
     }
   }
-  throw new Error("unterminated Rust list: " + startToken);
+  throw new Error(path + ": unterminated `" + anchor + "` list");
 }
-
-
-
 
 function coreSourceFacts() {
   return parseCoreSource(read(CORE_SOURCE_PATH));
-}
-
-function compareCoreModuleSets(sourceModules, executableModules) {
-  const expected = new Map(executableModules.map(function (entry) {
-    return [entry.module, entry.members.slice().sort()];
-  }));
-  const actual = new Map(sourceModules.map(function (entry) {
-    return [entry.module, entry.members.slice().sort()];
-  }));
-  const missing = Array.from(expected.keys()).filter(function (module) {
-    return !actual.has(module);
-  });
-  const extra = Array.from(actual.keys()).filter(function (module) {
-    return !expected.has(module);
-  });
-  const changed = Array.from(expected.keys()).filter(function (module) {
-    return actual.has(module) &&
-      stable(expected.get(module)) !== stable(actual.get(module));
-  });
-  if (missing.length || extra.length || changed.length) {
-    throw new Error("Core.jet/executable Core inventory drift: missing=" + missing.join(",") +
-      " extra=" + extra.join(",") + " changed=" + changed.join(","));
-  }
-}
-
-
-function generatedCoreExports(source, declarations) {
-  const lines = [
-    "// BEGIN GENERATED CORE DECLARATIONS",
-    "// Source: " + CORE_SOURCE_PATH,
-    "// Source SHA-256: " + sha256(source),
-    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
-    "pub struct CoreModuleDeclaration {",
-    "    pub module: &'static str,",
-    "    pub members: &'static [&'static str],",
-    "    pub type_exports: &'static [(&'static str, CoreLeafKind)],",
-    "    pub dependencies: &'static [&'static str],",
-    "}",
-    "",
-    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
-    "pub struct CoreSourceModule {",
-    "    pub module: &'static str,",
-    "    pub alias: &'static str,",
-    "    pub path: &'static str,",
-    "    pub owned_members: &'static [&'static str],",
-    "    pub impl_types: &'static [&'static str],",
-    "}",
-    "",
-    "/// One source-owned Core nominal: `name` is declared by the Core source at",
-    "/// `path` and no tier projects it onto a native carrier.",
-    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
-    "pub struct CoreSourceOwnedType {",
-    "    pub path: &'static str,",
-    "    pub name: &'static str,",
-    "}",
-    "",
-    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
-    "pub struct CoreBootstrapStep {",
-    "    pub name: &'static str,",
-    "    pub dependencies: &'static [&'static str],",
-    "}",
-    "",
-    "pub const CORE_BOOTSTRAP_ORDER: &[CoreBootstrapStep] = &[",
-  ];
-  for (const step of declarations.bootstraps) {
-    lines.push("    CoreBootstrapStep { name: \"" + step.name + "\", dependencies: &[" +
-      step.dependencies.map(function (dependency) { return "\"" + dependency + "\""; }).join(", ") +
-      "] },");
-  }
-  lines.push("];", "");
-
-  const moduleNames = declarations.modules.map(function (entry) { return entry.module; });
-  lines.push("pub const CORE_MODULE_NAMES: &[&str] = &[");
-  for (const module of moduleNames) {
-    lines.push("    \"" + module + "\",");
-  }
-  lines.push("];", "");
-  for (const [index, entry] of declarations.modules.entries()) {
-    const stem = "CORE_MODULE_" + index;
-    lines.push("const " + stem + "_MEMBERS: &[&str] = &[" +
-      entry.members.map(function (member) { return "\"" + member + "\""; }).join(", ") + "];");
-    lines.push("const " + stem + "_TYPES: &[(&str, CoreLeafKind)] = &[" +
-      entry.types.map(function (type) {
-        const kind = type.genericArity
-          ? "Generic(" + type.genericArity + ")"
-          : (type.variants && type.variants.length
-            ? "Enum(&[" + type.variants.map(function (variant) { return "\"" + variant + "\""; }).join(", ") + "])"
-            : (type.kind === "crypto_nominal" ? "CryptoNominal" : "Plain"));
-        return "(\"" + type.name + "\", CoreLeafKind::" + kind + ")";
-      }).join(", ") + "];");
-    lines.push("const " + stem + "_DEPENDENCIES: &[&str] = &[" +
-      entry.dependencies.map(function (dependency) { return "\"" + dependency + "\""; }).join(", ") + "];");
-    lines.push("");
-  }
-  lines.push("pub const CORE_MODULE_DECLARATIONS: &[CoreModuleDeclaration] = &[");
-  for (const [index, entry] of declarations.modules.entries()) {
-    const stem = "CORE_MODULE_" + index;
-    lines.push("    CoreModuleDeclaration { module: \"" + entry.module +
-      "\", members: " + stem + "_MEMBERS, type_exports: " + stem + "_TYPES, dependencies: " +
-      stem + "_DEPENDENCIES },");
-  }
-  lines.push("];", "");
-  lines.push("pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[");
-  for (const entry of declarations.sourceModules) {
-    lines.push("    CoreSourceModule { module: \"" + entry.module +
-      "\", alias: \"" + entry.alias +
-      "\", path: \"" + entry.path +
-      "\", owned_members: &[" +
-      entry.ownedMembers.map(function (member) { return "\"" + member + "\""; }).join(", ") +
-      "], impl_types: &[" + entry.implTypes.map(type => "\"" + type + "\"").join(", ") + "] },");
-  }
-  lines.push("];", "");
-  lines.push("pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[");
-  for (const entry of declarations.sourceModules) {
-    for (const type of entry.ownedTypes) {
-      lines.push("    CoreSourceOwnedType { path: \"" + entry.path + "\", name: \"" + type + "\" },");
-    }
-  }
-  lines.push("];", "");
-  lines.push("pub const CORE_ROOT_TYPES: &[&str] = &[" +
-    declarations.rootTypes.map(function (type) { return "\"" + type + "\""; }).join(", ") + "];");
-  lines.push("// END GENERATED CORE DECLARATIONS");
-  return lines.join("\n");
-}
-// Core module bodies live in jet-sema, the first crate that reads them, so a
-// Core body edit rebuilds jet-sema and its dependents but never
-// jet-foundation, the lexer, the parser or comptime. The table rows above
-// carry only metadata; this view changes only when the source-module set does.
-function generatedCoreSourceTexts(declarations) {
-  const lines = [
-    "// Generated by Tools/agent/check-core-surface-ledger.mjs --write; do not edit.",
-    "// Body text of every public source-owned Core module, keyed by",
-    "// `jet_foundation::CoreModuleExports::CoreSourceModule::module`.",
-    "const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[",
-  ];
-  for (const entry of declarations.sourceModules) {
-    if (!existsSync(join(ROOT, entry.path))) throw new Error("missing source: " + entry.path);
-    lines.push("    (\"" + entry.module + "\", include_str!(\"../../../" + entry.path + "\")),");
-  }
-  lines.push("];", "");
-  lines.push(
-    "// Body text of every runtime unit in",
-    "// `jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS`, keyed by its module.",
-    "const CORE_RUNTIME_SOURCE_TEXTS: &[(&str, &str)] = &[",
-  );
-  for (const part of coreRuntimeParts()) {
-    lines.push("    (\"" + part.module + "\", include_str!(\"../../../" + part.path + "\")),");
-  }
-  lines.push("];", "");
-  return lines.join("\n");
-}
-
-function writeCoreSourceTexts(declarations) {
-  writeFileSync(join(ROOT, CORE_SOURCE_TEXTS_PATH), generatedCoreSourceTexts(declarations));
 }
 
 // Compiler-private runtime units come straight from the directory: every
@@ -3057,147 +2560,35 @@ function coreRuntimeParts() {
   return parts;
 }
 
-function generatedCoreRuntimeParts() {
-  const lines = [
-    CORE_RUNTIME_PARTS_BEGIN,
-    "// Generated by Tools/agent/check-core-surface-ledger.mjs --write from Core/*/Runtime/**/*.jet; do not edit.",
-    "pub const CORE_RUNTIME_PARTS: &[CoreSourceModule] = &[",
-  ];
-  for (const part of coreRuntimeParts()) {
-    lines.push("    CoreSourceModule { module: \"" + part.module + "\", alias: \"" + part.alias +
-      "\", path: \"" + part.path + "\", owned_members: &[], impl_types: &[] },");
+// The extension rows of CoreCallExtensions.jet's CORE_CALL_EXTENSIONS list:
+// one CoreCallRecord literal per line, already in the CoreCallRows.jet spelling.
+const CORE_CALL_EXTENSIONS_HEAD = "CORE_CALL_EXTENSIONS :: [CoreCallRecord]{";
+function coreCallExtensionRows(source) {
+  const rows = [];
+  let state = "head";
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const context = CORE_CALL_EXTENSIONS_PATH + " line " + (index + 1);
+    if (state === "head") {
+      if (raw === CORE_CALL_EXTENSIONS_HEAD) state = "rows";
+      else if (raw && !raw.startsWith("//")) throw new Error(context + " precedes `" + CORE_CALL_EXTENSIONS_HEAD + "`");
+    } else if (state === "rows") {
+      if (raw === "}") {
+        state = "done";
+        continue;
+      }
+      const row = raw.match(/^    (CoreCallRecord\{.*\}),$/);
+      if (!row) throw new Error(context + " is not one CoreCallRecord literal row");
+      rows.push(row[1]);
+    } else if (raw) {
+      throw new Error(context + " follows the CORE_CALL_EXTENSIONS list");
+    }
   }
-  lines.push("];", CORE_RUNTIME_PARTS_END);
-  return lines.join("\n");
+  if (state !== "done") throw new Error(CORE_CALL_EXTENSIONS_PATH + " has no closed CORE_CALL_EXTENSIONS list");
+  if (!rows.length) throw new Error(CORE_CALL_EXTENSIONS_PATH + " has no rows");
+  return rows;
 }
 
-function writeCoreRuntimeParts() {
-  writeFileSync(join(ROOT, CORE_PARTS_PATH), replaceGeneratedSection(
-    read(CORE_PARTS_PATH),
-    CORE_RUNTIME_PARTS_BEGIN,
-    CORE_RUNTIME_PARTS_END,
-    generatedCoreRuntimeParts(),
-  ));
-}
-function generatedEncodingFormats(source, declarations) {
-  if (!declarations.formatRows.length) {
-    throw new Error("Core.jet has no encoding format rows");
-  }
-  const lines = [
-    ENCODING_FORMAT_BEGIN,
-    "// Source: " + CORE_SOURCE_PATH,
-    "// Source SHA-256: " + sha256(source),
-    "#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]",
-    "pub enum EncodingFormat {",
-  ];
-  for (const row of declarations.formatRows) {
-    lines.push("    " + row.variant + ",");
-  }
-  lines.push(
-    "}",
-    "impl EncodingFormat {",
-    "    pub const fn as_str(self) -> &'static str {",
-    "        match self {",
-  );
-  for (const row of declarations.formatRows) {
-    lines.push("            Self::" + row.variant + " => \"" + row.label + "\",");
-  }
-  lines.push(
-    "        }",
-    "    }",
-    "}",
-    ENCODING_FORMAT_END,
-  );
-  return lines.join("\n");
-}
-
-
-function writeEncodingFormatTable(source, declarations) {
-  const path = join(ROOT, ENCODING_TYPES_PATH);
-  const current = read(ENCODING_TYPES_PATH);
-  writeFileSync(path, replaceGeneratedSection(
-    current,
-    ENCODING_FORMAT_BEGIN,
-    ENCODING_FORMAT_END,
-    generatedEncodingFormats(source, declarations),
-  ));
-}
-
-function replaceGeneratedSection(source, begin, end, block) {
-  const start = source.indexOf(begin);
-  const finish = source.indexOf(end, start < 0 ? 0 : start);
-  if (start < 0 || finish < 0) {
-    throw new Error("generated section markers are missing: " + begin);
-  }
-  return source.slice(0, start) + block + source.slice(finish + end.length);
-}
-
-
-
-function writeCoreExportTable(source, declarations) {
-  const path = join(ROOT, CORE_EXPORTS_PATH);
-  const current = read(CORE_EXPORTS_PATH);
-  const block = generatedCoreExports(source, declarations);
-  writeFileSync(path, replaceGeneratedSection(
-    current,
-    "// BEGIN GENERATED CORE DECLARATIONS",
-    "// END GENERATED CORE DECLARATIONS",
-    block,
-  ));
-}
-
-
-function generatedRingDependencies(source, declarations) {
-  const lines = [
-    "// BEGIN GENERATED CORE DEPENDENCIES",
-    "// Source: " + CORE_SOURCE_PATH,
-    "// Source SHA-256: " + sha256(source),
-    "const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[",
-  ];
-  for (const entry of declarations.modules) {
-    if (!entry.dependencies.length) continue;
-    lines.push("    (\"" + entry.module + "\", &[" +
-      entry.dependencies.map(function (dependency) { return "\"" + dependency + "\""; }).join(", ") +
-      "]),");
-  }
-  lines.push("];", "");
-  lines.push("const PRELUDE_NAMESPACE_ONLY: &[&str] = &[");
-  for (const module of declarations.namespaceOnly) lines.push("    \"" + module + "\",");
-  lines.push("];", "// END GENERATED CORE DEPENDENCIES");
-  return lines.join("\n");
-}
-
-function generatedCoreCalls(source, declarations) {
-  const ambientKeys = new Set(
-    declarations.ambientRoutes.map(function (route) {
-      return route.module + "." + route.member;
-    }),
-  );
-  const lines = [
-    CORE_CALLS_BEGIN,
-    "// Source: " + CORE_SOURCE_PATH,
-    "// Source SHA-256: " + sha256(source),
-    "// Dispatcher rows and ambient routes are generated from Core.jet.",
-    "pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[",
-  ];
-  for (const route of declarations.ambientRoutes) {
-    lines.push("    (\"" + route.module + "\", \"" + route.member + "\"),");
-  }
-  lines.push(
-    "];",
-    "",
-    "// Evaluate the immutable bootstrap registry once, not in every consuming crate.",
-    "#[allow(long_running_const_eval)]",
-    "pub static CORE_CALLS: &[CoreCallRecord] = &[",
-  );
-  for (const row of declarations.dispatcherRows) {
-    lines.push("    " + coreDispatcherExpression(row, ambientKeys) + ",");
-  }
-  lines.push("];", CORE_CALLS_END);
-  return lines.join("\n");
-}
-
-function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
+function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
   const ambientKeys = new Set(
     declarations.ambientRoutes.map(function (route) {
       return route.module + "." + route.member;
@@ -3207,11 +2598,11 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     CORE_CALL_ROWS_BEGIN,
     "// Source: " + CORE_SOURCE_PATH,
     "// Source SHA-256: " + sha256(coreSource),
-    "// Source: " + TIR_CORE_CALLS_PATH + " (TIR_CORE_CALL_RECORDS, appended in declaration order)",
-    "// Source SHA-256: " + sha256(tirSource),
-    "// Core ABI rows keep Core.jet order followed by the TIR extension order.",
-    "// Each row is the evaluated CoreCallRecord literal of its Rust builder chain,",
-    "// so the table lands without a compile-time execution host.",
+    "// Source: " + CORE_CALL_EXTENSIONS_PATH + " (appended in declaration order)",
+    "// Source SHA-256: " + sha256(extensionSource),
+    "// Core ABI rows keep Core.jet order followed by the CoreCallExtensions.jet order.",
+    "// Each row is an evaluated CoreCallRecord literal, so the table lands without",
+    "// a compile-time execution host.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
     "CORE_CALLS :: prep { [CoreCallRecord]{",
   ];
@@ -3221,15 +2612,7 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
       "    " + translateCoreCallExpression(expression, "Core.jet line " + row.sourceLine) + ",",
     );
   }
-  const tirRows = rustArrayEntries(tirSource, "const TIR_CORE_CALL_RECORDS");
-  for (const row of tirRows) {
-    lines.push(
-      "    " + translateCoreCallExpression(
-        row.expression,
-        TIR_CORE_CALLS_PATH + " line " + row.sourceLine,
-      ) + ",",
-    );
-  }
+  for (const row of coreCallExtensionRows(extensionSource)) lines.push("    " + row + ",");
   lines.push(
     "} }",
     "",
@@ -3253,22 +2636,10 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
   return lines.join("\n");
 }
 
-
-function writeCoreCallTable(source, declarations) {
-  const path = join(ROOT, CORE_CALLS_PATH);
-  const current = read(CORE_CALLS_PATH);
-  writeFileSync(path, replaceGeneratedSection(
-    current,
-    CORE_CALLS_BEGIN,
-    CORE_CALLS_END,
-    generatedCoreCalls(source, declarations),
-  ));
-}
 function writeCoreCallRegistry(source, declarations) {
-  const tirSource = read(TIR_CORE_CALLS_PATH);
   writeFileSync(
     join(ROOT, CORE_CALL_ROWS_PATH),
-    generatedCoreCallRegistry(source, tirSource, declarations),
+    generatedCoreCallRegistry(source, read(CORE_CALL_EXTENSIONS_PATH), declarations),
   );
 }
 // Core enum leaves for the Jet compiler's `core_enum_variants` (the Rust
@@ -3321,328 +2692,17 @@ function generatedCoreEnumRows(source, declarations) {
 function writeCoreEnumRows(source, declarations) {
   writeFileSync(join(ROOT, CORE_ENUM_ROWS_PATH), generatedCoreEnumRows(source, declarations));
 }
-// Compiler-owned Core enum families with payload shapes, projected from the
-// Rust checker's variant tables (`resolve_enum_variants_cloned`). A family
-// whose enum Core.jet also declares is omitted: Rust resolves the Core.jet
-// declaration (`core_declared_enum_variants`) before these tables.
-const CORE_TYPES_RS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
-const CHECKER_ITEMS_RS_PATH = "crates/jet-sema/src/Sema/CheckerItems.rs";
-const SYNTAX_RS_DIR = "crates/jet-foundation/src/Syntax";
+
+// CoreEnumPayloadRows.jet authors the compiler-owned Core enum families; its
+// JET_CORE_OWNER_ANNOTATION_SUFFIXES tail is derived. Owning an opaque impl or
+// a compiler enum menu does not create an export, so the qualified-annotation
+// gate's suffixes are the CORE_SOURCE_OWNED_ROWS impl types, then the
+// CORE_ENUM_PAYLOAD_ROWS enum names, each once in first-occurrence order.
 const CORE_ENUM_PAYLOAD_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet";
 const CORE_SOURCE_OWNED_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet";
+const CORE_ENUM_PAYLOAD_ROWS_HEAD = "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{\n";
 
-function rustSyntaxConstants() {
-  const strings = new Map();
-  const lists = new Map();
-  for (const name of readdirSync(join(ROOT, SYNTAX_RS_DIR)).sort()) {
-    if (!name.endsWith(".rs")) continue;
-    const text = read(SYNTAX_RS_DIR + "/" + name);
-    for (const match of text.matchAll(/pub const (\w+): &str = "([^"]*)";/g)) strings.set(match[1], match[2]);
-    for (const match of text.matchAll(/pub const (\w+): &\[&str\] =\s*&\[([^\]]*)\];/g)) {
-      lists.set(match[1], Array.from(match[2].matchAll(/"([^"]*)"/g), (item) => item[1]));
-    }
-  }
-  return { strings, lists };
-}
-
-function rustFunctionBody(source, name, rel) {
-  const start = source.indexOf("fn " + name + "(");
-  if (start < 0) throw new Error(rel + " has no fn " + name);
-  const open = source.indexOf("{", source.indexOf(")", start));
-  let depth = 0;
-  for (let index = open; index < source.length; index += 1) {
-    if (source[index] === "{") depth += 1;
-    if (source[index] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(open + 1, index).replace(/\/\/[^\n]*/g, "");
-    }
-  }
-  throw new Error(rel + " fn " + name + " has no closing brace");
-}
-
-function rustSyntaxString(expression, constants, rel) {
-  const text = expression.trim();
-  const literal = /^"([^"]*)"$/.exec(text);
-  if (literal) return literal[1];
-  const constant = /^(?:crate::)?Syntax::(\w+)$/.exec(text);
-  if (constant && constants.strings.has(constant[1])) return constants.strings.get(constant[1]);
-  throw new Error(rel + ": unsupported enum or type name expression `" + text + "`");
-}
-
-function rustSyntaxList(name, constants, rel) {
-  if (!constants.lists.has(name)) throw new Error(rel + ": unknown Syntax list " + name);
-  return constants.lists.get(name);
-}
-
-// Rust `Type` payload expressions as Jet `Type` row expressions.
-function rustPayloadType(expression, constants, rel) {
-  const text = expression.replace(/\s+/g, "").replace(/,\)/g, ")");
-  const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
-  if (scalar[text]) return scalar[text];
-  if (text === "u8_ty()") {
-    const body = rustFunctionBody(read(CORE_TYPES_RS_PATH), "u8_ty", CORE_TYPES_RS_PATH);
-    const integer = /Type::IntN\s*\{\s*signed:\s*(true|false),\s*bits:\s*(\d+),?\s*\}/.exec(body);
-    if (!integer) throw new Error(rel + ": u8_ty payload factory changed shape");
-    return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
-  }
-  const named = /^Type::Named\((.+)\.to_string\(\)\)$/.exec(text);
-  if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
-  const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
-  if (list) return "Type.List{element: " + rustPayloadType(list[1], constants, rel) + "}";
-  const option = /^Type::Option\(Box::new\((.+)\)\)$/.exec(text);
-  if (option) return "Type.Option{inner: " + rustPayloadType(option[1], constants, rel) + "}";
-  const integer = /^Type::IntN\{signed:(true|false),bits:(\d+),?\}$/.exec(text);
-  if (integer) return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
-  const nominal = /^crate::Sema::Diagnostics::core_crypto_nominal\((.+)\)$/.exec(text);
-  if (nominal) {
-    return "Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: " +
-      rustPayloadType(nominal[1], constants, rel) + "}";
-  }
-  throw new Error(rel + ": unsupported payload type `" + text + "`");
-}
-
-// A nullary variant-table function: unit name lists (`[..]` literals or
-// `Syntax::*_VARIANTS`) plus explicit `"Name".to_string(), (zero,
-// VariantPayload::Single(T, zero))` inserts.
-function rustNullaryVariantRows(body, constants, rel, name) {
-  if (/VariantPayload::Named/.test(body)) throw new Error(rel + " fn " + name + ": named payloads are not projected");
-  const rows = [];
-  const singles = Array.from(body.matchAll(/"(\w+)"\.to_string\(\),\s*\(\s*zero,\s*VariantPayload::Single\(\s*([\s\S]+?),\s*zero\s*\)/g));
-  if (singles.length !== (body.match(/VariantPayload::Single/g) || []).length) {
-    throw new Error(rel + " fn " + name + ": unrecognized single-payload shape");
-  }
-  const units = [];
-  for (const match of body.matchAll(/&?\[((?:\s*"[^"]*"\s*,?)+)\]|Syntax::(\w+_VARIANTS)/g)) {
-    if (match[2]) units.push(...rustSyntaxList(match[2], constants, rel));
-    else units.push(...Array.from(match[1].matchAll(/"([^"]*)"/g), (item) => item[1]));
-  }
-  if (units.length && !/VariantPayload::Unit/.test(body)) throw new Error(rel + " fn " + name + ": name list without a unit payload");
-  if (/if \*name ==/.test(body)) throw new Error(rel + " fn " + name + ": per-name payload branch is not projected");
-  for (const variant of units) rows.push({ variant, payload: [] });
-  for (const match of singles) rows.push({ variant: match[1], payload: [rustPayloadType(match[2], constants, rel)] });
-  return rows;
-}
-
-// `core_io_variants`: the unit `IOOperation` menu and the `IOError` tree whose
-// one named variant carries its own payload and every other carries the
-// shared context record.
-function rustIOVariantFamilies(source, constants) {
-  const body = rustFunctionBody(source, "core_io_variants", CORE_TYPES_RS_PATH);
-  const operation = /if enum_name == (Syntax::\w+) \{\s*for name in Syntax::(\w+) \{\s*variants\.insert\(\(\*name\)\.to_string\(\), \(zero, VariantPayload::Unit\)\);/.exec(body);
-  const error = /if !is_io_error_type_name\(enum_name\)[\s\S]*?for name in Syntax::(\w+) \{\s*let payload = if \*name == "(\w+)" \{\s*VariantPayload::Single\(\s*([\s\S]+?),\s*zero,?\s*\)\s*\} else \{\s*VariantPayload::Single\(([\s\S]+?), zero\)\s*\};/.exec(body);
-  const errorName = /fn is_io_error_type_name\(name: &str\) -> bool \{\s*name == (Syntax::\w+)/.exec(source);
-  if (!operation || !error || !errorName) throw new Error(CORE_TYPES_RS_PATH + ": core_io_variants changed shape; update the payload-row projection");
-  const special = rustPayloadType(error[3], constants, CORE_TYPES_RS_PATH);
-  const context = rustPayloadType(error[4], constants, CORE_TYPES_RS_PATH);
-  return [
-    {
-      name: rustSyntaxString(operation[1], constants, CORE_TYPES_RS_PATH),
-      rows: rustSyntaxList(operation[2], constants, CORE_TYPES_RS_PATH).map((variant) => ({ variant, payload: [] })),
-    },
-    {
-      name: rustSyntaxString(errorName[1], constants, CORE_TYPES_RS_PATH),
-      rows: rustSyntaxList(error[1], constants, CORE_TYPES_RS_PATH).map((variant) => ({
-        variant,
-        payload: [variant === error[2] ? special : context],
-      })),
-    },
-  ];
-}
-
-// D-PLUGIN-FAILURE1=A: read fault payloads from the Rust checker table.
-function rustPluginVariantFamilies(source, constants) {
-  const body = rustFunctionBody(source, "core_plugin_variants", CORE_TYPES_RS_PATH);
-  const families = [];
-  for (const arm of body.matchAll(/"(\w+)" => \{([\s\S]*?)\n        \}/g)) {
-    const rows = [];
-    const menu = /for name in \[([^\]]*)\] \{([\s\S]*?)\n            \}/.exec(arm[2]);
-    if (!menu) throw new Error(CORE_TYPES_RS_PATH + ": plugin variant menu changed shape");
-    const names = Array.from(menu[1].matchAll(/"([^"]*)"/g), (match) => match[1]);
-    const single = /VariantPayload::Single\(([\s\S]*?), span\)/.exec(menu[2]);
-    const payload = single ? [rustPayloadType(single[1], constants, CORE_TYPES_RS_PATH)] : [];
-    if (!single && !menu[2].includes("VariantPayload::Unit")) throw new Error(CORE_TYPES_RS_PATH + ": plugin payload changed shape");
-    for (const variant of names) rows.push({ variant, payload });
-    for (const named of arm[2].matchAll(/variants\.insert\("(\w+)"\.to_string\(\), \(span, VariantPayload::Named\(vec!\[([\s\S]*?)\]\)\)\);/g)) {
-      const fields = Array.from(named[2].matchAll(/VariantField \{ name: "(\w+)"\.to_string\(\), [\s\S]*?ty: ([\s\S]*?), ty_span: span \}/g));
-      if (!fields.length) throw new Error(CORE_TYPES_RS_PATH + ": plugin named payload changed shape");
-      rows.push({
-        variant: named[1],
-        payload: fields.map((field) => rustPayloadType(field[2], constants, CORE_TYPES_RS_PATH)),
-        labels: fields.map((field) => field[1]),
-      });
-    }
-    families.push({ name: arm[1], rows });
-  }
-  if (families.length !== 2) throw new Error(CORE_TYPES_RS_PATH + ": plugin enum families changed shape");
-  return families;
-}
-
-// The top-level `( … )` groups of a Rust tuple-list literal, without their parentheses.
-function rustTupleItems(text) {
-  const items = [];
-  let depth = 0;
-  let start = -1;
-  for (let index = 0; index < text.length; index++) {
-    if (text[index] === "(" && depth++ === 0) start = index + 1;
-    if (text[index] === ")" && --depth === 0) items.push(text.slice(start, index));
-  }
-  if (depth !== 0) throw new Error("unbalanced Rust tuple list");
-  return items;
-}
-
-// `core_email_variants`: per-enum unit menus, EmailError's cases sharing one
-// named field list, and explicit SMTPAuth/TLSTrust inserts in source order.
-function rustEmailVariantFamilies(source, constants) {
-  const rel = CORE_TYPES_RS_PATH;
-  const body = rustFunctionBody(source, "core_email_variants", rel);
-  const menu = /let units: &\[&str\] = match enum_name \{([\s\S]*?)\n\s*_ => return None,\s*\};/.exec(body);
-  if (!menu) throw new Error(rel + ": core_email_variants unit menu changed shape");
-  const families = [];
-  for (const arm of menu[1].matchAll(/((?:"\w+"\s*\|?\s*)+)=> &\[([^\]]*)\],/g)) {
-    const units = Array.from(arm[2].matchAll(/"(\w+)"/g), (unit) => ({ variant: unit[1], payload: [], labels: [] }));
-    for (const name of arm[1].matchAll(/"(\w+)"/g)) families.push({ name: name[1], rows: units.slice() });
-  }
-  const blocks = Array.from(body.matchAll(/if enum_name == "(\w+)" \{/g));
-  const tail = body.lastIndexOf("Some(variants)");
-  if (!blocks.length || tail < 0) throw new Error(rel + ": core_email_variants payload blocks changed shape");
-  blocks.forEach((block, index) => {
-    const text = body.slice(block.index, index + 1 < blocks.length ? blocks[index + 1].index : tail);
-    const family = families.find((candidate) => candidate.name === block[1]);
-    if (!family) throw new Error(rel + ": core_email_variants has a payload block for unmenued " + block[1]);
-    const shared = /for name in \[([^\]]*)\] \{\s*let fields = \[([\s\S]*?)\]\s*\.into_iter\(\)/.exec(text);
-    if (shared) {
-      const fields = rustTupleItems(shared[2]).map((item) => {
-        const field = /^\s*"(\w+)",\s*([\s\S]+?)\s*$/.exec(item);
-        if (!field) throw new Error(rel + ": core_email_variants shared field `" + item + "` changed shape");
-        return field;
-      });
-      for (const name of shared[1].matchAll(/"(\w+)"/g)) {
-        family.rows.push({
-          variant: name[1],
-          payload: fields.map((field) => rustPayloadType(field[2], constants, rel)),
-          labels: fields.map((field) => field[1]),
-        });
-      }
-      return;
-    }
-    const inserts = Array.from(text.matchAll(/variants\.insert\(\s*"(\w+)"\.to_string\(\),\s*\(\s*zero,\s*VariantPayload::(Unit|Named\(vec!\[([\s\S]*?)\]\))/g));
-    if (!inserts.length) throw new Error(rel + ": core_email_variants " + block[1] + " block changed shape");
-    for (const insert of inserts) {
-      const fields = insert[2] === "Unit" ? [] : Array.from(insert[3].matchAll(/VariantField \{\s*name: "(\w+)"\.to_string\(\),\s*name_span: zero,\s*ty: ([\s\S]*?),\s*ty_span: zero,?\s*\}/g));
-      if (insert[2] !== "Unit" && !fields.length) throw new Error(rel + ": core_email_variants " + insert[1] + " named payload changed shape");
-      family.rows.push({
-        variant: insert[1],
-        payload: fields.map((field) => rustPayloadType(field[2], constants, rel)),
-        labels: fields.map((field) => field[1]),
-      });
-    }
-  });
-  return families;
-}
-
-// D-CONC-FAIL1=A: `core_task_failure_variants` guards one enum name and
-// lists each variant as its own `(name, (zero, payload))` row.
-function rustTaskFailureVariantFamily(source, constants) {
-  const body = rustFunctionBody(source, "core_task_failure_variants", CORE_TYPES_RS_PATH);
-  const guard = /if enum_name != (Syntax::\w+) \{\s*return None;\s*\}/.exec(body);
-  const rows = Array.from(
-    body.matchAll(/\(\s*"(\w+)"\.to_string\(\),\s*\(\s*zero,\s*VariantPayload::(?:Unit|Single\(\s*([\s\S]+?),\s*zero\s*\))\s*\)/g),
-    (match) => ({ variant: match[1], payload: match[2] ? [rustPayloadType(match[2], constants, CORE_TYPES_RS_PATH)] : [] }),
-  );
-  if (!guard || rows.length !== (body.match(/VariantPayload::/g) || []).length) {
-    throw new Error(CORE_TYPES_RS_PATH + ": core_task_failure_variants changed shape; update the payload-row projection");
-  }
-  // `Syntax::TYPE_TASK_FAILURE` is declared through the type-name macro the
-  // constant reader does not expand; its spelling is the Core type name.
-  if (guard[1] !== "Syntax::TYPE_TASK_FAILURE") {
-    throw new Error(CORE_TYPES_RS_PATH + ": core_task_failure_variants guards " + guard[1] + ", not Syntax::TYPE_TASK_FAILURE");
-  }
-  return { name: "TaskFailure", rows };
-}
-
-function rustDataEventVariantFamily(source, constants) {
-  const body = rustFunctionBody(source, "core_encoding_variants", CORE_TYPES_RS_PATH);
-  const table = /pub const DATA_EVENT_VARIANTS: \[&str;\s*(\d+)\]\s*=\s*\[([^\]]*)\];/.exec(source);
-  if (!table || !/for name in DATA_EVENT_VARIANTS\s*\{/.test(body) ||
-      !/match data_event_payload\(name\)/.test(body)) {
-    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table changed shape");
-  }
-  const variants = table[2].split(",").map((value) => value.trim()).filter(Boolean)
-    .map((value) => rustSyntaxString(value, constants, CORE_TYPES_RS_PATH));
-  if (variants.length !== Number(table[1]) || new Set(variants).size !== variants.length) {
-    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table is incomplete or duplicated");
-  }
-  const payloadBody = rustFunctionBody(source, "data_event_payload", CORE_TYPES_RS_PATH);
-  const arms = /^\s*match variant\s*\{([\s\S]*)\}\s*$/.exec(payloadBody);
-  if (!arms) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload table changed shape");
-  const payloads = new Map();
-  const lines = arms[1].split("\n").map((line) => line.trim()).filter(Boolean);
-  if (lines.pop() !== "_ => None,") {
-    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload table has no closed default");
-  }
-  for (const line of lines) {
-    const arm = /^(.+?)\s*=>\s*Some\((None|Some\((.+)\))\),$/.exec(line);
-    if (!arm) throw new Error(CORE_TYPES_RS_PATH + ": unrecognized DataEvent payload arm `" + line + "`");
-    const payload = arm[2] === "None" ? [] : [rustPayloadType(arm[3], constants, CORE_TYPES_RS_PATH)];
-    for (const name of arm[1].split("|")) {
-      const variant = rustSyntaxString(name, constants, CORE_TYPES_RS_PATH);
-      if (payloads.has(variant)) throw new Error(CORE_TYPES_RS_PATH + ": duplicate DataEvent payload `" + variant + "`");
-      payloads.set(variant, payload);
-    }
-  }
-  if (payloads.size !== variants.length || variants.some((variant) => !payloads.has(variant))) {
-    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
-  }
-  return {name: "DataEvent", rows: variants.map((variant) => ({variant, payload: payloads.get(variant)}))};
-}
-
-// D-REDUCE-VALUE1=A: `core_reduce_op_variants` guards one enum name and maps
-// one literal name list to unit variants.
-function rustGuardedUnitVariantFamily(source, constants, name) {
-  const body = rustFunctionBody(source, name, CORE_TYPES_RS_PATH);
-  const guard = /if enum_name != ((?:crate::)?Syntax::\w+|"\w+") \{\s*return None;\s*\}/.exec(body);
-  if (!guard) throw new Error(CORE_TYPES_RS_PATH + ": " + name + " changed shape; update the payload-row projection");
-  const rows = rustNullaryVariantRows(body, constants, CORE_TYPES_RS_PATH, name);
-  if (!rows.length || rows.some((row) => row.payload.length)) throw new Error(CORE_TYPES_RS_PATH + ": " + name + " is not one unit name list");
-  return { name: rustSyntaxString(guard[1], constants, CORE_TYPES_RS_PATH), rows };
-}
-
-function coreEnumPayloadFamilies(declarations) {
-  const constants = rustSyntaxConstants();
-  const coreTypes = read(CORE_TYPES_RS_PATH);
-  const resolver = rustFunctionBody(read(CHECKER_ITEMS_RS_PATH), "resolve_enum_variants_cloned", CHECKER_ITEMS_RS_PATH);
-  const families = [];
-  for (const match of resolver.matchAll(/if enum_name == ([^{]+?) \{\s*return Some\((core_\w+_variants)\(\)\);\s*\}/g)) {
-    families.push({
-      name: rustSyntaxString(match[1], constants, CHECKER_ITEMS_RS_PATH),
-      rows: rustNullaryVariantRows(rustFunctionBody(coreTypes, match[2], CORE_TYPES_RS_PATH), constants, CORE_TYPES_RS_PATH, match[2]),
-    });
-  }
-  if (!/core_task_failure_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_task_failure_variants");
-  families.push(rustTaskFailureVariantFamily(coreTypes, constants));
-  if (!/core_io_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_io_variants");
-  families.push(...rustIOVariantFamilies(coreTypes, constants));
-  if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
-  families.push(...rustPluginVariantFamilies(coreTypes, constants));
-  if (!/core_email_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": email enum resolver is missing");
-  families.push(...rustEmailVariantFamilies(coreTypes, constants));
-  families.push(rustDataEventVariantFamily(coreTypes, constants));
-  if (!/core_reduce_op_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_reduce_op_variants");
-  families.push(rustGuardedUnitVariantFamily(coreTypes, constants, "core_reduce_op_variants"));
-  const declared = new Set();
-  for (const module of declarations.modules) {
-    for (const type of module.types) {
-      if (!type.genericArity && type.variants && type.variants.length) declared.add(type.name);
-    }
-  }
-  return families.filter((family) => !declared.has(family.name) || family.rows.some((row) => row.payload.length));
-}
-
-// Owning an opaque impl or a compiler enum menu does not create an export.
-// The qualified-annotation gate's suffixes come from the same generated
-// ownership rows: CORE_SOURCE_OWNED_ROWS impl types, then the
-// CORE_ENUM_PAYLOAD_ROWS enum names, each once in first-occurrence order.
-function coreOwnerAnnotationSuffixes(families) {
+function coreOwnerAnnotationSuffixes(enumNames) {
   const owned = read(CORE_SOURCE_OWNED_ROWS_PATH);
   const head = "CORE_SOURCE_OWNED_ROWS :: prep { [CoreSourceOwnedRow]{";
   const start = owned.indexOf(head);
@@ -3660,141 +2720,53 @@ function coreOwnerAnnotationSuffixes(families) {
       add(name[1]);
     }
   }
-  for (const family of families) {
-    for (const _row of family.rows) add(family.name);
-  }
+  for (const name of enumNames) add(name);
   return suffixes;
 }
 
-function generatedCoreEnumPayloadRows(declarations) {
-  const sources = [CHECKER_ITEMS_RS_PATH, CORE_TYPES_RS_PATH];
-  const syntax = readdirSync(join(ROOT, SYNTAX_RS_DIR)).filter((name) => name.endsWith(".rs")).sort()
-    .map((name) => read(SYNTAX_RS_DIR + "/" + name)).join("");
-  const families = coreEnumPayloadFamilies(declarations);
-  const lines = [
-    "// BEGIN GENERATED CORE ENUM PAYLOAD ROWS",
-    "// Source: " + sources.join(", ") + ", " + SYNTAX_RS_DIR,
-    "// Source SHA-256: " + sha256(sources.map(read).join("") + syntax),
-    "// Compiler-owned Core enum families without a Core.jet declaration, in",
-    "// Rust `resolve_enum_variants_cloned` order; each row is one variant, its",
-    "// payload types in slot order (none for a unit variant) and, for a named",
-    "// payload, the slots' field labels (none for a positional payload).",
-    "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
-  ];
-  for (const family of families) {
-    for (const row of family.rows) {
-      lines.push(
-        "    CoreEnumPayloadRow{enum_name: " + jetStringExpression(family.name) +
-        ", variant: " + jetStringExpression(row.variant) +
-        ", payload: [Type]{" + row.payload.join(", ") + "}" +
-        ", labels: [String]{" + (row.labels ?? []).map(jetStringExpression).join(", ") + "}},",
-      );
-    }
+// The authored rows of CoreEnumPayloadRows.jet followed by the derived suffix list.
+function generatedCoreEnumPayloadRows() {
+  const current = read(CORE_ENUM_PAYLOAD_ROWS_PATH);
+  const start = current.indexOf(CORE_ENUM_PAYLOAD_ROWS_HEAD);
+  const end = current.indexOf("\n}\n", start);
+  if (start < 0 || end < 0) throw new Error(CORE_ENUM_PAYLOAD_ROWS_PATH + " has no CORE_ENUM_PAYLOAD_ROWS table");
+  const enumNames = [];
+  for (const raw of current.slice(start + CORE_ENUM_PAYLOAD_ROWS_HEAD.length, end).split("\n")) {
+    const row = raw.match(/^    CoreEnumPayloadRow\{enum_name: "([A-Za-z_][A-Za-z0-9_]*)", variant: "[A-Za-z_][A-Za-z0-9_]*", payload: \[Type\]\{.*\}\},$/);
+    if (!row) throw new Error(CORE_ENUM_PAYLOAD_ROWS_PATH + ": unreadable CoreEnumPayloadRow line: " + raw);
+    enumNames.push(row[1]);
   }
-  lines.push(
-    "}",
-    "",
+  return [
+    current.slice(0, end + "\n}\n".length),
     "// Owning an opaque impl or a compiler enum menu does not create an export.",
     "// Qualified-annotation suffixes: " + CORE_SOURCE_OWNED_ROWS_PATH + " impl types,",
     "// then the enum names above, each once in first-occurrence order.",
     "JET_CORE_OWNER_ANNOTATION_SUFFIXES :: [String]{",
-    ...coreOwnerAnnotationSuffixes(families).map((suffix) => "    " + jetStringExpression(suffix) + ","),
+    ...coreOwnerAnnotationSuffixes(enumNames).map((suffix) => "    " + jetStringExpression(suffix) + ","),
     "}",
-    "// END GENERATED CORE ENUM PAYLOAD ROWS",
     "",
-  );
-  return lines.join("\n");
+  ].join("\n");
 }
-function writeCoreEnumPayloadRows(declarations) {
-  writeFileSync(join(ROOT, CORE_ENUM_PAYLOAD_ROWS_PATH), generatedCoreEnumPayloadRows(declarations));
-}
-
-
-function writeRingDependencyTable(source, declarations) {
-  const path = join(ROOT, RING_LAYER_PATH);
-  const current = read(RING_LAYER_PATH);
-  writeFileSync(path, replaceGeneratedSection(
-    current,
-    "// BEGIN GENERATED CORE DEPENDENCIES",
-    "// END GENERATED CORE DEPENDENCIES",
-    generatedRingDependencies(source, declarations),
-  ));
+function writeCoreEnumPayloadRows() {
+  writeFileSync(join(ROOT, CORE_ENUM_PAYLOAD_ROWS_PATH), generatedCoreEnumPayloadRows());
 }
 function validateCoreCallRegistry(source, declarations) {
-  const tirSource = read(TIR_CORE_CALLS_PATH);
-  const expected = generatedCoreCallRegistry(source, tirSource, declarations);
+  const expected = generatedCoreCallRegistry(source, read(CORE_CALL_EXTENSIONS_PATH), declarations);
   if (!existsSync(join(ROOT, CORE_CALL_ROWS_PATH)) ||
       read(CORE_CALL_ROWS_PATH) !== expected) {
-    throw new Error("CoreCallRows.jet is stale; run gen-core-tables.mjs --write-core-call-registry");
+    throw new Error("CoreCallRows.jet is stale; run check-core-surface-ledger.mjs --write-core-call-registry");
   }
 }
 
 function validateGeneratedViews(source, declarations) {
-  const exportsSource = read(CORE_EXPORTS_PATH);
-  const expectedExports = generatedCoreExports(source, declarations);
-  const actualExports = exportsSource.slice(
-    exportsSource.indexOf("// BEGIN GENERATED CORE DECLARATIONS"),
-    exportsSource.indexOf("// END GENERATED CORE DECLARATIONS") +
-      "// END GENERATED CORE DECLARATIONS".length,
-  );
-  if (actualExports !== expectedExports) {
-    throw new Error("CoreModuleExports.rs is stale; run --write to regenerate from Core.jet");
-  }
-  const ringSource = read(RING_LAYER_PATH);
-  const expectedRing = generatedRingDependencies(source, declarations);
-  const actualRing = ringSource.slice(
-    ringSource.indexOf("// BEGIN GENERATED CORE DEPENDENCIES"),
-    ringSource.indexOf("// END GENERATED CORE DEPENDENCIES") +
-      "// END GENERATED CORE DEPENDENCIES".length,
-  );
-  if (actualRing !== expectedRing) {
-    throw new Error("RingLayer.rs is stale; run --write to regenerate from Core.jet");
-  }
-  const callsSource = read(CORE_CALLS_PATH);
-  const callsStart = callsSource.indexOf(CORE_CALLS_BEGIN);
-  const callsEnd = callsSource.indexOf(CORE_CALLS_END, callsStart);
-  if (callsStart < 0 || callsEnd < callsStart) {
-    throw new Error("core_calls.rs has no generated dispatcher section");
-  }
-  const actualCalls = callsSource.slice(callsStart, callsEnd + CORE_CALLS_END.length);
-  const expectedCalls = generatedCoreCalls(source, declarations);
-  if (actualCalls !== expectedCalls) {
-    throw new Error("core_calls.rs is stale; run --write to regenerate from Core.jet");
-  }
-  const encodingSource = read(ENCODING_TYPES_PATH);
-  const encodingStart = encodingSource.indexOf(ENCODING_FORMAT_BEGIN);
-  const encodingEnd = encodingSource.indexOf(ENCODING_FORMAT_END, encodingStart);
-  if (encodingStart < 0 || encodingEnd < encodingStart) {
-    throw new Error("EncodingTypes.rs has no generated EncodingFormat section");
-  }
-  const actualEncoding = encodingSource.slice(
-    encodingStart,
-    encodingEnd + ENCODING_FORMAT_END.length,
-  );
-  const expectedEncoding = generatedEncodingFormats(source, declarations);
-  if (actualEncoding !== expectedEncoding) {
-    throw new Error("EncodingTypes.rs is stale; run --write to regenerate from Core.jet");
-  }
-  if (!existsSync(join(ROOT, CORE_SOURCE_TEXTS_PATH)) ||
-      read(CORE_SOURCE_TEXTS_PATH) !== generatedCoreSourceTexts(declarations)) {
-    throw new Error("CoreSourceTexts.rs is stale; run --write to regenerate from Core.jet");
-  }
-  const partsSource = read(CORE_PARTS_PATH);
-  const partsStart = partsSource.indexOf(CORE_RUNTIME_PARTS_BEGIN);
-  const partsEnd = partsSource.indexOf(CORE_RUNTIME_PARTS_END, partsStart);
-  if (partsStart < 0 || partsEnd < partsStart ||
-      partsSource.slice(partsStart, partsEnd + CORE_RUNTIME_PARTS_END.length) !== generatedCoreRuntimeParts()) {
-    throw new Error("CoreSourceParts.rs runtime parts are stale; run --write to regenerate from Core/*/runtime");
-  }
-  // The Jet-hosted CLI's Core row table is generated from the export table.
+  // The Jet-hosted CLI's Core row table is generated from the same declarations.
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
     throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
   }
-  if (!existsSync(join(ROOT, CORE_ENUM_PAYLOAD_ROWS_PATH)) ||
-      read(CORE_ENUM_PAYLOAD_ROWS_PATH) !== generatedCoreEnumPayloadRows(declarations)) {
-    throw new Error("CoreEnumPayloadRows.jet is stale; run --write to regenerate from the Rust checker tables");
+  if (read(CORE_ENUM_PAYLOAD_ROWS_PATH) !== generatedCoreEnumPayloadRows()) {
+    throw new Error("CoreEnumPayloadRows.jet owner-annotation suffixes are stale; run --write to rederive them");
   }
   validateCoreCallRegistry(source, declarations);
 }
@@ -3802,17 +2774,11 @@ function validateGeneratedViews(source, declarations) {
 function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
-  writeCoreExportTable(source, declarations);
-  writeCoreRuntimeParts();
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH)], { cwd: ROOT, stdio: "inherit" });
-  writeCoreSourceTexts(declarations);
-  writeRingDependencyTable(source, declarations);
-  writeEncodingFormatTable(source, declarations);
-  writeCoreCallTable(source, declarations);
   writeCoreCallRegistry(source, declarations);
   writeCoreEnumRows(source, declarations);
-  writeCoreEnumPayloadRows(declarations);
-  process.stdout.write("wrote generated Core views, dispatcher, and Jet CoreCall registry\n");
+  writeCoreEnumPayloadRows();
+  process.stdout.write("wrote generated Core views and the Jet CoreCall registry\n");
   return { source, declarations };
 }
 function writeCoreCallRegistryOnly() {
@@ -3831,405 +2797,49 @@ function checkCoreCallRegistryOnly() {
 }
 
 
-function fixedSignaturePairs(modules) {
-  const source = read(FIXED_SIGS_PATH);
+// The Core surface beyond Core.jet's module exports, from its one authored
+// home: `fixed_sig <module> { … }` and `methods <Container> { … }` lines.
+function coreSurfaceInventory(modules) {
+  const source = read(CORE_SURFACE_INVENTORY_PATH);
   const knownModules = new Set(modules.map(function (entry) { return entry.module; }));
-  // The public signature and tuple-normalization entry points delegate here;
-  // only the canonical raw table contains the module/member match arms.
-  const arms = matchArms(functionBody(source, "core_fixed_sig_raw"), "match (module, name)");
   const pairs = new Set();
-  for (const arm of arms) {
-    const strings = quoted(arm.lhs);
-    const moduleIndexes = strings.map(function (value, index) {
-      return moduleToken(value) ? index : -1;
-    }).filter(function (index) { return index >= 0; });
-    if (moduleIndexes.length === 0) continue;
-    const lastModule = moduleIndexes[moduleIndexes.length - 1];
-    const methods = strings.slice(lastModule + 1).filter(function (value) {
-      return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !moduleToken(value);
-    });
-    for (const raw of moduleIndexes.map(function (index) { return strings[index]; })) {
-      const module = containerFor(canonicalModule(raw));
-      if (!knownModules.has(module)) {
-        throw new Error("fixed_sigs names an unknown Core module: " + raw);
+  const fixedModules = new Set();
+  const collections = new Map();
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (!line || line.startsWith("//")) continue;
+    const context = CORE_SURFACE_INVENTORY_PATH + " line " + (index + 1);
+    const row = line.match(/^(fixed_sig|methods)\s+(\S+)\s+\{\s*([^{}]*?)\s*\}$/);
+    if (!row) throw new Error(context + " is not a fixed_sig or methods row");
+    const items = row[3].split(",").map(function (item) { return item.trim(); });
+    if (items.some(function (item) { return !item; }) || new Set(items).size !== items.length) {
+      throw new Error(context + " has an empty or repeated name");
+    }
+    if (row[1] === "fixed_sig") {
+      if (!knownModules.has(row[2])) throw new Error(context + " names an unknown Core module: " + row[2]);
+      if (fixedModules.has(row[2])) throw new Error(context + " repeats module " + row[2]);
+      fixedModules.add(row[2]);
+      for (const member of items) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(member)) throw new Error(context + " has an invalid member: " + member);
+        pairs.add(row[2] + "." + member);
       }
-      for (const method of methods) pairs.add(module + "." + method);
+      continue;
     }
+    if (collections.has(row[2])) throw new Error(context + " repeats container " + row[2]);
+    collections.set(row[2], {
+      function: CORE_SURFACE_INVENTORY_PATH,
+      type: row[2],
+      methods: items.slice().sort(),
+      sourceLine: index + 1,
+    });
   }
-  return Array.from(pairs).sort();
-}
-
-// Every method name a table decides. Collections.rs writes a table five ways:
-// a match on (method, nargs), an `if let "a" | "b" = method`, a bare
-// `method == "x"`, a `matches!(method, "a" | "b")`, and a name given as a
-// Syntax constant. Reading only string literals returned nothing at all for
-// duration_method_return and task_list_method_return, whose arms are entirely
-// constants, so Duration and TaskList vanished from the inventory while the
-// compiler shipped them.
-function methodNames(body, constants) {
-  const methods = new Set();
-  const lists = constantLists();
-  const addResolved = function (text) {
-    for (const name of quoted(text)) methods.add(name);
-    for (const hit of text.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
-      if (constants.has(hit[1])) methods.add(constants.get(hit[1]));
-    }
+  if (!pairs.size || !collections.size) throw new Error(CORE_SURFACE_INVENTORY_PATH + " has an empty table");
+  return {
+    fixedPairs: Array.from(pairs).sort(),
+    collections: Array.from(collections.values()).sort(function (left, right) {
+      return left.type.localeCompare(right.type);
+    }),
   };
-  const harvest = function (text) {
-    for (const hit of text.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
-      if (lists.has(hit[1])) {
-        for (const name of lists.get(hit[1])) methods.add(name);
-      }
-    }
-  };
-  harvest(body);
-  // A table can reach its names through a helper rather than naming the list:
-  // numeric_conversion_return calls Syntax::numeric_conversion_source(method).
-  for (const hit of body.matchAll(/\b(?:crate::)?Syntax::([a-z_][a-z0-9_]*)\s*\(/g)) {
-    for (const file of syntaxSourceFiles()) {
-      try {
-        harvest(functionBody(read(file), hit[1]));
-        break;
-      } catch (error) {
-        // Not in this file.
-      }
-    }
-  }
-  try {
-    for (const arm of matchArms(body, "match (")) {
-      // A guard names types, not methods: `(Type::Named(n), "x", 1) if n == "Secret"`.
-      addResolved(arm.lhs.split(" if ")[0]);
-    }
-  } catch (error) {
-    // Not every table is written as a match.
-  }
-  for (const hit of body.matchAll(/if let ((?:(?:"[^"]+"|[A-Za-z_:]+)\s*\|\s*)*(?:"[^"]+"|[A-Za-z_:]+))\s*=\s*method/g)) {
-    addResolved(hit[1]);
-  }
-  for (const hit of body.matchAll(/method\s*==\s*("([^"]+)"|(?:crate::)?Syntax::[A-Z][A-Z0-9_]*)/g)) {
-    addResolved(hit[1]);
-  }
-  for (const hit of body.matchAll(/matches!\s*\(\s*method\s*,([\s\S]*?)\)\s*\n/g)) {
-    addResolved(hit[1]);
-  }
-  // Front-end package values use one nested `match method` per type. Read
-  // every nested match instead of stopping at the first type's methods.
-  for (const arm of allMatchArms(body, "match method")) {
-    addResolved(arm.lhs.split(" if ")[0]);
-  }
-  // Reserved embedded-Core storage seams are not user collection APIs.
-  return new Set(Array.from(methods).filter(name => !name.startsWith("__")));
-}
-
-// Discovery keyed on dispatch, not on a name. A name-suffix scan cannot see a
-// `pub fn` table, a table in another module, or a table called anything else,
-// and all three ship: Numeric.rs holds the real exact-Int, Decimal, and
-// Fraction tables. This
-// walks out from builtin_method_return, follows every call it dispatches, and
-// keeps following tail calls, so a new reader cannot be missed by forgetting to
-// name it.
-function tableBody(name, sources) {
-  for (const source of sources) {
-    try {
-      return functionBody(source.text, name);
-    } catch (error) {
-      // Not in this file.
-    }
-  }
-  return null;
-}
-
-function discoverTables(sources) {
-  const entry = sources[0].text;
-  const found = new Set();
-  const unknown = [];
-  const queue = [];
-
-  // The static path is dispatched before the match.
-  queue.push("builtin_static_return");
-
-  const inlineArms = [];
-  for (const arm of matchArms(functionBody(entry, "builtin_method_return"), "match recv_ty")) {
-    const rhs = arm.rhs.trim();
-    const lhs = arm.lhs.replace(/\/\/[^\n]*/g, "").trim();
-    if (lhs === "_" || rhs === "None") continue;
-    if (
-      rhs.includes("match (method")
-      || lhs.includes('"Test"')
-    ) {
-      inlineArms.push({ lhs: lhs, rhs: arm.rhs });
-      continue;
-    }
-    // Anchored: an unanchored scan matched "ome" inside Some(...).
-    const inner = rhs.replace(/^\{\s*/, "").trim();
-    const call = /^(?:crate::)?(?:[A-Za-z_][A-Za-z0-9_]*::)*([a-z_][a-z0-9_]*)\s*\(/.exec(inner);
-    if (call && call[1] !== "builtin_method_return") { queue.push(call[1]); continue; }
-    const nestedCalls = rhs
-      .replace(/\/\/[^\n]*/g, "")
-      .matchAll(/\b([a-z_][a-z0-9_]*_return)\s*\(/g);
-    let queuedNested = false;
-    for (const nested of nestedCalls) {
-      if (nested[1] !== "builtin_method_return") {
-        queue.push(nested[1]);
-        queuedNested = true;
-      }
-    }
-    if (queuedNested) continue;
-    if (call || /^Some\s*\(/.test(inner)) continue;
-    unknown.push(lhs.slice(0, 60));
-  }
-  if (unknown.length) {
-    throw new Error("builtin_method_return dispatches somewhere this reader does not follow: " +
-      unknown.join(", "));
-  }
-
-  while (queue.length) {
-    const name = queue.shift();
-    if (found.has(name)) continue;
-    const body = tableBody(name, sources);
-    if (body === null) {
-      throw new Error("builtin_method_return dispatches to a table this reader cannot find: " + name);
-    }
-    found.add(name);
-    // A table can fall through to another: builtin_static_return ends in
-    // numeric_conversion_return.
-    for (const hit of body.matchAll(/=>\s*(?:crate::)?(?:[A-Za-z_][A-Za-z0-9_]*::)?([a-z_][a-z0-9_]*_return)\s*\(/g)) {
-      queue.push(hit[1]);
-    }
-  }
-  return { functions: Array.from(found).sort(), inlineArms: inlineArms };
-}
-
-// Arms of builtin_method_return that hold their own table instead of calling
-// one. Each names its type, so each is attributed on its own.
-function inlineTables(arms, source, constants) {
-  const tables = [];
-  const unknown = [];
-  for (const arm of arms) {
-    const names = new Set();
-    for (const name of quoted(arm.lhs)) names.add(name);
-    for (const hit of arm.lhs.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
-      if (constants.has(hit[1])) names.add(constants.get(hit[1]));
-    }
-    const type = Array.from(names).find(function (name) { return TYPE_CONTAINER[name]; });
-    if (!type) {
-      if (Array.from(names).some(function (name) { return PRIVATE_CORE_TYPES.has(name); })) continue;
-      unknown.push(Array.from(names).join("/") || arm.lhs.trim().slice(0, 60));
-      continue;
-    }
-    tables.push({
-      function: "builtin_method_return:" + type,
-      type: TYPE_CONTAINER[type],
-      methods: Array.from(methodNames(arm.rhs, constants)).sort(),
-      sourceLine: lineAt(source, source.indexOf(arm.lhs.trim().slice(0, 40))),
-    });
-  }
-  if (unknown.length) {
-    throw new Error("builtin_method_return arms name types with no container: " + unknown.join(", "));
-  }
-  return tables;
-}
-
-function collectionInventory() {
-  const source = read(COLLECTIONS_PATH);
-  const numeric = read(NUMERIC_PATH);
-  const constants = syntaxConstants();
-  const lists = constantLists();
-  const sources = [{ path: COLLECTIONS_PATH, text: source }, { path: NUMERIC_PATH, text: numeric }];
-  const dispatch = discoverTables(sources);
-
-  // Every table the compiler dispatches must be one the ledger reads.
-  const unmapped = dispatch.functions.filter(function (name) {
-    return !Object.prototype.hasOwnProperty.call(COLLECTION_METHOD_FUNCTIONS, name);
-  });
-  if (unmapped.length) {
-    throw new Error("Collections.rs ships a table the ledger does not read: " + unmapped.join(", "));
-  }
-  const mapped = Object.keys(COLLECTION_METHOD_FUNCTIONS);
-  const missing = mapped.filter(function (name) {
-    return tableBody(name, sources) === null;
-  });
-  if (missing.length) {
-    throw new Error("the ledger reads a table Collections.rs no longer ships: " + missing.join(", "));
-  }
-
-  const tables = [];
-  for (const name of mapped) {
-    const container = COLLECTION_METHOD_FUNCTIONS[name];
-    const body = tableBody(name, sources);
-    const sourceLine = lineAt(source, source.indexOf("fn " + name + "("));
-    if (name === "result_method_return") continue;
-    if (PRIVATE_COLLECTION_METHOD_FUNCTIONS.has(name)) continue;
-    if (container !== null) {
-      const methods = Array.from(methodNames(body, constants)).sort();
-      // A table that yields nothing is a reader that cannot read it. This is
-      // the state that shipped while every fixture passed: duration and
-      // task_list spell their methods as constants and returned zero.
-      if (methods.length === 0) {
-        throw new Error("the ledger reads no methods from " + name +
-          "; the compiler ships that table, so the reader is wrong");
-      }
-      tables.push({ function: name, type: container, methods: methods, sourceLine: sourceLine });
-      continue;
-    }
-    const byContainer = new Map();
-    for (const arm of matchArms(body, "match (")) {
-      const names = new Set(quoted(arm.lhs));
-      for (const hit of arm.lhs.matchAll(/Type::([A-Z][A-Za-z0-9_]*)/g)) names.add(hit[1]);
-      for (const hit of arm.lhs.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
-        if (constants.has(hit[1])) names.add(constants.get(hit[1]));
-      }
-      let owner = null;
-      for (const candidate of names) {
-        if (TYPE_CONTAINER[candidate]) { owner = TYPE_CONTAINER[candidate]; break; }
-      }
-      if (!owner) continue;
-      if (!byContainer.has(owner)) byContainer.set(owner, new Set());
-      // A bare arm pattern is not a match body, so it is resolved directly:
-      // methodNames only reads text it recognises as a table.
-      const pattern = arm.lhs.split(" if ")[0];
-      const direct = new Set(quoted(pattern));
-      for (const hit of pattern.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
-        if (constants.has(hit[1])) direct.add(constants.get(hit[1]));
-      }
-      // A guard can name the whole method set: DURATION_CONSTRUCTORS.
-      for (const hit of arm.lhs.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
-        if (lists.has(hit[1])) {
-          for (const name of lists.get(hit[1])) direct.add(name);
-        }
-      }
-      for (const method of direct) {
-        if (!TYPE_CONTAINER[method]) byContainer.get(owner).add(method);
-      }
-    }
-    if (byContainer.size === 0) {
-      throw new Error("the ledger reads no methods from the mixed table " + name);
-    }
-    for (const [owner, methods] of byContainer) {
-      tables.push({
-        function: name + ":" + owner,
-        type: owner,
-        methods: Array.from(methods).sort(),
-        sourceLine: sourceLine,
-      });
-    }
-  }
-  for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
-
-  // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
-  // URL and MIME are `core.net.url`/`core.net.mime` source records: their
-  // methods come from the declarations.
-  {
-    const civilText = read(NET_TEXT_TIME_PATH);
-    const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
-    for (const tableName of ["civil_time_method_return", "regex_method_return"]) {
-      const civilBody = tableBody(tableName, civilSources);
-      if (!civilBody) {
-        throw new Error(tableName + " missing from net_text_time.rs");
-      }
-      const civilLine = lineAt(civilText, civilText.indexOf("fn " + tableName + "("));
-      for (const arm of matchArms(civilBody, "match ty")) {
-        const types = new Set();
-        for (const hit of arm.lhs.matchAll(/n\s*==\s*"([A-Za-z][A-Za-z0-9_]*)"/g)) {
-          types.add(hit[1]);
-        }
-        if (types.size === 0) continue;
-        const methods = new Set(
-          quoted(arm.rhs).filter(function (name) {
-            return /^[a-z][a-z0-9_]*$/.test(name);
-          })
-        );
-        for (const typeName of types) {
-          const owner = TYPE_CONTAINER[typeName] || CONTAINER_ALIASES[typeName];
-          if (!owner) continue;
-          tables.push({
-            function: tableName + ":" + typeName,
-            type: owner,
-            methods: Array.from(methods).sort(),
-            sourceLine: civilLine,
-          });
-        }
-      }
-    }
-    const pathBody = tableBody("path_method_return", civilSources);
-    if (!pathBody) {
-      throw new Error("path_method_return missing from net_text_time.rs");
-    }
-    const pathLine = lineAt(civilText, civilText.indexOf("fn path_method_return("));
-    tables.push({
-      function: "path_method_return:Path",
-      type: TYPE_CONTAINER.Path,
-      methods: Array.from(new Set(
-        quoted(pathBody).filter(function (name) {
-          return /^[a-z][a-z0-9_]*$/.test(name);
-        })
-      )).sort(),
-      sourceLine: pathLine,
-    });
-  }
-
-  // #1593: negotiated cipher suite and protocol version are TLSPeerIdentity
-  // fields, typed in core_struct_field rather than a method table.
-  {
-    const coreTypes = read(CORE_TYPES_PATH);
-    const fieldBody = functionBody(coreTypes, "core_struct_field");
-    const marker = "type_name == \"TLSPeerIdentity\"";
-    const start = fieldBody.indexOf(marker);
-    if (start < 0) {
-      throw new Error("TLSPeerIdentity fields missing from core_struct_field");
-    }
-    const next = fieldBody.indexOf("if type_name == \"TLSCertificate\"", start);
-    const arm = fieldBody.slice(start, next < 0 ? fieldBody.length : next);
-    const methods = quoted(arm).filter(function (name) {
-      return /^[a-z][a-z0-9_]*$/.test(name);
-    });
-    if (!methods.includes("cipher_suite") || !methods.includes("tls_version")) {
-      throw new Error("TLSPeerIdentity field harvest missed cipher_suite/tls_version");
-    }
-    tables.push({
-      function: "core_struct_field:TLSPeerIdentity",
-      type: TYPE_CONTAINER.TLSPeerIdentity,
-      methods: Array.from(new Set(methods)).sort(),
-      sourceLine: lineAt(coreTypes, coreTypes.indexOf(marker)),
-    });
-  }
-
-  // Several tables can own one container: core.compiler is spread across
-  // CompilerLexed, CompilerChecked, CompilerSyntaxTree and CompilerSourceMap,
-  // which share source and diagnostics. One container is one row set, so they
-  // merge and keep every table they came from as provenance.
-  const byContainer = new Map();
-  for (const table of tables) {
-    if (table.methods.length === 0) continue;
-    if (!byContainer.has(table.type)) {
-      byContainer.set(table.type, {
-        type: table.type,
-        functions: [],
-        methods: new Set(),
-        sourceLine: table.sourceLine,
-      });
-    }
-    const entry = byContainer.get(table.type);
-    entry.functions.push(table.function);
-    for (const method of table.methods) entry.methods.add(method);
-  }
-
-  // Every container the maps name must actually receive methods.
-  const declared = new Set(Object.values(COLLECTION_METHOD_FUNCTIONS).filter(Boolean)
-    .concat(Object.values(TYPE_CONTAINER)));
-  const empty = Array.from(declared).filter(function (name) { return !byContainer.has(name); });
-  if (empty.length) {
-    throw new Error("a declared Jet container received no methods: " + empty.join(", "));
-  }
-
-  return Array.from(byContainer.values()).map(function (entry) {
-    return {
-      function: entry.functions.sort().join(" + "),
-      type: entry.type,
-      methods: Array.from(entry.methods).sort(),
-      sourceLine: entry.sourceLine,
-    };
-  }).sort(function (left, right) { return left.type.localeCompare(right.type); });
 }
 
 // ---------------------------------------------------------------------------
@@ -4509,7 +3119,7 @@ function rowForModule(entry, member, fixedOnly, surfaces, keys, qualifiedBy) {
       : "Core module workflow for " + container,
     verdict: isTypeItem(member) ? "type_item" : verdictFor(cells),
     competitors: cells,
-    evidence: ["source:" + MODULE_ITEMS_PATH, "source:" + FIXED_SIGS_PATH],
+    evidence: ["source:" + CORE_SOURCE_PATH, "source:" + CORE_SURFACE_INVENTORY_PATH],
   };
 }
 
@@ -4535,7 +3145,7 @@ function rowForCollection(entry, method, surfaces, keys, qualifiedBy) {
       : "Core type workflow for " + container,
     verdict: isTypeItem(method) ? "type_item" : verdictFor(cells),
     competitors: cells,
-    evidence: ["source:" + COLLECTIONS_PATH].concat(
+    evidence: ["source:" + CORE_SURFACE_INVENTORY_PATH].concat(
       fixture ? fixture.sources.map(function (path) { return "fixture:" + path; }) : [],
     ),
   };
@@ -4846,18 +3456,13 @@ function uncomparedDomains(modules, containers) {
 
 function sourceFiles() {
   return [
-    MODULE_ITEMS_PATH,
     CORE_SOURCE_PATH,
-    CORE_CALLS_PATH,
-    FIXED_SIGS_PATH,
-    COLLECTIONS_PATH,
-    PREDICATES_PATH,
-    POLICY_PATH,
-    MARKERS_PATH,
-    "crates/jet-foundation/src/Syntax.rs",
-    SYNTAX_PATH,
-    NUMERIC_PATH,
-    CORE_TYPES_PATH,
+    CORE_SURFACE_INVENTORY_PATH,
+    CORE_CALL_EXTENSIONS_PATH,
+    ...readdirSync(join(ROOT, SYNTAX_DIR))
+      .filter(function (name) { return name.endsWith(".jet"); })
+      .sort()
+      .map(function (name) { return SYNTAX_DIR + "/" + name; }),
     "Docs/spec/reference/python-surface.json",
     CORE_API_LAWS_PATH,
     SYNTAX_REFERENCE_PATH,
@@ -4867,11 +3472,11 @@ function sourceFiles() {
     AGENT_DOMAIN_CONTRACT_PATH,
     AGENT_WORKLOAD_POLICY_PATH,
     AGENT_CHECKSUMS_PATH,
-    AGENT_RUNNER_SOURCE_PATH,
+    ...AGENT_RUNNER_SOURCE_PATHS,
     CORE_API_REVIEW_TEST_PATH,
     CORE_CONFORMANCE_PATH,
     ...CORE_CONFORMANCE_FIXTURE_PATHS,
-    "tests/lsp.rs",
+    ...EDITOR_COVERAGE_PATHS,
     "tests/lsp/02_hover.json",
     "tests/ui/variadic_not_last.stderr",
     "tests/ui/spread_bad_call.stderr",
@@ -5148,10 +3753,10 @@ function coreApiFixtureContract() {
     runner: AGENT_RUNNER,
     scoring: AGENT_SCORING,
     execution: {
-      source: AGENT_RUNNER_SOURCE_PATH,
+      source: AGENT_RUNNER_SOURCE_PATHS,
       test: AGENT_RUNNER,
       checksumManifest: AGENT_CHECKSUMS_PATH,
-      runnerDigest: sha256(read(AGENT_RUNNER_SOURCE_PATH)),
+      runnerDigest: fixtureSourceDigest(AGENT_RUNNER_SOURCE_PATHS),
       checksumDigest: sha256(read(AGENT_CHECKSUMS_PATH)),
       domainContract: AGENT_DOMAIN_CONTRACT_PATH,
       domainContractDigest: sha256(read(AGENT_DOMAIN_CONTRACT_PATH)),
@@ -5467,13 +4072,14 @@ function buildLedger() {
   const containers = canonicalContainers(surfaces);
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
-  compareCoreModuleSets(declarations.modules, executableModuleInventory());
+  validateCoreMemModule(declarations);
   validateGeneratedViews(source, declarations);
   const modules = coreModuleInventory();
-  const dispatcherRows = publicDispatcherRows();
+  const dispatcherRows = publicDispatcherRows(declarations);
   const unregisteredDispatcherRows = validatePublicDispatcher(declarations, dispatcherRows);
-  const fixedPairs = fixedSignaturePairs(modules);
-  const collections = collectionInventory();
+  const inventory = coreSurfaceInventory(modules);
+  const fixedPairs = inventory.fixedPairs;
+  const collections = inventory.collections;
   const jetRows = buildRows(modules, fixedPairs, collections, surfaces);
   const rows = jetRows.concat(competitorRows(surfaces, jetRows));
   applyRatifiedDeclines(rows);
@@ -5698,9 +4304,9 @@ function validateMeasuredEvidence(workflow) {
 
 function validateCoreApiFixtureExecution(fixture) {
   const execution = fixture.execution;
-  if (!execution || execution.source !== AGENT_RUNNER_SOURCE_PATH ||
+  if (!execution || stable(execution.source) !== stable(AGENT_RUNNER_SOURCE_PATHS) ||
       execution.test !== AGENT_RUNNER || execution.checksumManifest !== AGENT_CHECKSUMS_PATH ||
-      execution.runnerDigest !== sha256(read(AGENT_RUNNER_SOURCE_PATH)) ||
+      execution.runnerDigest !== fixtureSourceDigest(AGENT_RUNNER_SOURCE_PATHS) ||
       execution.checksumDigest !== sha256(read(AGENT_CHECKSUMS_PATH)) ||
       execution.domainContract !== AGENT_DOMAIN_CONTRACT_PATH ||
       execution.domainContractDigest !== sha256(read(AGENT_DOMAIN_CONTRACT_PATH)) ||
@@ -5714,7 +4320,7 @@ function validateCoreApiFixtureExecution(fixture) {
       ]) || stable(execution.runnerMarkers) !== stable(AGENT_RUNNER_MARKERS)) {
     throw new Error("Core API fixture execution contract drifted");
   }
-  const runner = read(AGENT_RUNNER_SOURCE_PATH);
+  const runner = AGENT_RUNNER_SOURCE_PATHS.map(read).join("\n");
   for (const marker of AGENT_RUNNER_MARKERS) {
     if (!runner.includes(marker)) {
       throw new Error("Core API fixture runner lost deterministic check: " + marker);
@@ -5865,7 +4471,7 @@ function validateCoreApiSyntaxCoverage() {
       throw new Error("syntax reference does not teach Core gate form: " + marker);
     }
   }
-  const editor = read("tests/lsp.rs");
+  const editor = EDITOR_COVERAGE_PATHS.map(read).join("\n");
   for (const marker of [
     "lsp_completion_returns_items",
     "lsp_signature_help_returns_active_parameter",
@@ -6715,26 +5321,6 @@ function hostileFixtures() {
     validateCoreApiGate(broken);
   }));
 
-  results.push(holds("match parser keeps the arm after a block-bodied arm", function () {
-    const sample = 'match (name, arity) {\n' +
-      '  ("a" | "b", 0) => Some(One),\n' +
-      '  ("c", 1) => {\n' +
-      '      Some(Two)\n' +
-      '  }\n' +
-      '  ("d" | "e", 1) => Some(Three),\n' +
-      '  _ => None,\n' +
-      '}';
-    const found = new Set();
-    for (const arm of matchArms(sample, "match (name, arity)")) {
-      for (const value of quoted(arm.lhs)) found.add(value);
-    }
-    for (const name of ["a", "b", "c", "d", "e"]) {
-      if (!found.has(name)) {
-        throw new Error("the match parser lost an arm after a block-bodied arm: " + name);
-      }
-    }
-  }));
-
   // A recurring name that nobody classified must stop the run. Without this,
   // a refresh that introduces one would silently keep per-domain scoring, and
   // per-domain scoring is exactly what can hold a real gap at one witness
@@ -6772,80 +5358,6 @@ function hostileFixtures() {
     } finally {
       if (pooled) CROSS_DOMAIN_POOLED.add(name);
       if (distinct) CROSS_DOMAIN_DISTINCT.add(name);
-    }
-  }));
-
-  // The defect that got through twice. Deleting set_method_return removed a
-  // whole Jet collection type and every fixture still passed, because nothing
-  // compared the tables the compiler ships against the tables the ledger reads.
-  results.push(rejects("a Jet method table is dropped from the ledger",
-    "Collections.rs ships a table the ledger does not read", function () {
-    const saved = COLLECTION_METHOD_FUNCTIONS.set_method_return;
-    delete COLLECTION_METHOD_FUNCTIONS.set_method_return;
-    try {
-      collectionInventory();
-    } finally {
-      COLLECTION_METHOD_FUNCTIONS.set_method_return = saved;
-    }
-  }));
-
-  results.push(rejects("the ledger reads a table the compiler no longer ships",
-    "the ledger reads a table Collections.rs no longer ships", function () {
-    COLLECTION_METHOD_FUNCTIONS.ledger_fixture_method_return = "LedgerFixture";
-    try {
-      collectionInventory();
-    } finally {
-      delete COLLECTION_METHOD_FUNCTIONS.ledger_fixture_method_return;
-    }
-  }));
-
-  results.push(rejects("a mapped table the reader cannot read",
-    "the ledger reads no methods from", function () {
-    // build_result is a helper with no method names. Mapping it stands in for
-    // the shipped state this gate was blind to: duration_method_return and
-    // task_list_method_return spell every method as a constant and returned
-    // nothing at all while every fixture passed.
-    COLLECTION_METHOD_FUNCTIONS.build_result = "LedgerFixture";
-    try {
-      collectionInventory();
-    } finally {
-      delete COLLECTION_METHOD_FUNCTIONS.build_result;
-    }
-  }));
-
-  results.push(holds("reserved Core storage seams are not public collection methods", function () {
-    const names = methodNames('match (method, nargs) { ("__swap", 2) => Some(None), ("get", 1) => Some(None) }', new Map());
-    if (names.has("__swap") || !names.has("get")) {
-      throw new Error("reserved method filtering hid a public method or exposed __swap");
-    }
-  }));
-
-  results.push(holds("discovery reaches a pub fn table in another module", function () {
-    const sources = [
-      { path: COLLECTIONS_PATH, text: read(COLLECTIONS_PATH) },
-      { path: NUMERIC_PATH, text: read(NUMERIC_PATH) },
-    ];
-    const found = discoverTables(sources).functions;
-    for (const name of ["decimal_method_return", "fraction_method_return", "builtin_static_return"]) {
-      if (!found.includes(name)) {
-        throw new Error("dispatch discovery missed " + name);
-      }
-    }
-  }));
-
-  results.push(holds("every dispatched Jet method table is mapped to a container", function () {
-    const sources = [
-      { path: COLLECTIONS_PATH, text: read(COLLECTIONS_PATH) },
-      { path: NUMERIC_PATH, text: read(NUMERIC_PATH) },
-    ];
-    const discovered = discoverTables(sources).functions;
-    if (discovered.length < 40) {
-      throw new Error("only " + discovered.length + " method tables were reached by dispatch");
-    }
-    for (const name of discovered) {
-      if (!Object.prototype.hasOwnProperty.call(COLLECTION_METHOD_FUNCTIONS, name)) {
-        throw new Error("unmapped Jet method table: " + name);
-      }
     }
   }));
 
@@ -7048,22 +5560,13 @@ export {
   parseCoreSource,
   coreSourceFacts,
   coreRuntimeParts,
-  rustDataEventVariantFamily,
   ownedWrapperRuntimeUnit,
   publicDispatcherRows,
   validatePublicDispatcher,
-  generatedCoreExports,
-  generatedRingDependencies,
-  generatedCoreCalls,
   validateGeneratedViews,
-  writeCoreExportTable,
-  writeRingDependencyTable,
-  writeCoreCallTable,
   writeCoreViews,
   writeCoreCallRegistryOnly,
   checkCoreCallRegistryOnly,
-  generatedEncodingFormats,
-  writeEncodingFormatTable,
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

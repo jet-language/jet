@@ -1386,7 +1386,7 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
             }
         }
     }
-    entry :: jet_driver_entry_selection(load) ?? return jet_driver_default_run_key(load, functions, modules)
+    entry :: jet_driver_entry_selection(load) ?? return jet_driver_default_run_key(load, functions)
     target_module_identity := load.entry_module_identity
     if entry.module_alias != None {
         alias :: entry.module_alias ?? return None
@@ -1427,23 +1427,12 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
 }
 
 // jet_driver_default_run_entry over the checked functions: the entry
-// module's `fn run`, when it takes no parameter or one `#CLI` record (a
-// declared type with a CLI schema).
-fn jet_driver_default_run_key(load: JetDriverLoadResult, functions: [TFunc], modules: [SemaGraphModuleResult]) -> String? Never! {
+// module's `fn run`, when it takes no parameter.
+fn jet_driver_default_run_key(load: JetDriverLoadResult, functions: [TFunc]) -> String? Never! {
     key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "run").key
     loop function in functions {
         if function.key != key -> next
         if function.params.len() == 0 -> return Val(key)
-        if function.params.len() != 1 -> return None
-        record :: if function.params[0].ty == {
-            .Named(name) -> name
-            else -> { return None }
-        }
-        loop source_module in modules {
-            loop definition in source_module.declarations.type_defs {
-                if definition.key == record && definition.cli != None -> return Val(key)
-            }
-        }
         return None
     }
     None
@@ -4292,8 +4281,7 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         .ConstRef(symbol) -> return jet_driver_comptime_landed(values, symbol.key)
         // Copying a constant's value is that value.
         .Clone(value, _) | .ExplicitCopy(value) -> return jet_driver_comptime_fold(value, values)
-        .StructLit(fields, extra) -> {
-            if extra != None -> return None
+        .StructLit(fields) -> {
             type_name :: jet_driver_comptime_type_name(expression.ty) ?? return None
             folded := [TComptimeField]{}
             loop field in fields -> &folded.push(TComptimeField{name: field.field.name, value: jet_driver_comptime_fold(field.value, values) ?? return None})
@@ -4340,7 +4328,7 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         // `I64{n}` checked without its head: the checked Int-to-fixed
         // conversion of a literal, which traps exactly when n is outside.
         .NumericMethod(receiver, operation) -> {
-            if operation == .CheckedIntToFixed(_, _, _, _) {
+            if operation == .CheckedIntToFixed(_, _) {
                 folded :: jet_driver_comptime_fold(receiver, values) ?? return None
                 if folded == .Int(number) -> return jet_driver_comptime_fold_int(number, expression.ty)
                 if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(Int.parse(decimal) ?? return None, expression.ty)

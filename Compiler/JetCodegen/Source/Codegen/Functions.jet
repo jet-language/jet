@@ -133,10 +133,6 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TCEnumTag,
-    TCLIDefault,
-    TCLIEntry,
-    TCLIInput,
-    TCLIValueKind,
     TCompilerBuiltin,
     TComptimeValue,
     TConstantDef,
@@ -331,117 +327,6 @@ fn jet_codegen_lower_declaration_generic_params(params: [TGenericParam], modules
     return lowered
 }
 
-fn jet_codegen_lower_cli_value_kind(kind: TCLIValueKind) -> MIRCLIValueKind Never! {
-    return if kind == {
-        .Bool -> MIRCLIValueKind.Bool
-        .Int -> MIRCLIValueKind.Int
-        .Float -> MIRCLIValueKind.Float
-        .String -> MIRCLIValueKind.String
-        .Path -> MIRCLIValueKind.Path
-    }
-}
-
-fn jet_codegen_lower_cli_default(default: TCLIDefault, nominals: JetCodegenNominalIndex, module_identity: String) -> MIRCLIDefault? {
-    return if default == {
-        .TypeDefault -> Val(MIRCLIDefault.TypeDefault)
-        .Value(value) -> {
-            lowered :: jet_codegen_lower_comptime_value(value, nominals, module_identity, [String]{}) ?? return None
-            Val(MIRCLIDefault.Value{value: lowered})
-        }
-        .Recorded(value) -> Val(MIRCLIDefault.Value{value: MIRConstant.String{value: value}})
-    }
-}
-
-fn jet_codegen_lower_cli_input(input: TCLIInput, ordinal: Int, nominals: JetCodegenNominalIndex, module_identity: String) -> MIRCLIInput {
-    shape := MIRCLIInputShape.Flag
-    scalar_type := Type.Bool
-    optional := false
-    _ := if input.shape == {
-        .Flag -> ()
-        .Value(kind, is_optional, default) -> {
-            lowered_kind := jet_codegen_lower_cli_value_kind(kind)
-            scalar_type = if lowered_kind == {
-                .Bool -> Type.Bool
-                .Int -> Type.Int
-                .Float -> Type.Float
-                .String -> Type.String
-                .Path -> Type.String
-            }
-            lowered_default := MIRCLIDefault?{None}
-            if default != None {
-                value :: default
-                lowered_default = jet_codegen_lower_cli_default(value, nominals, module_identity)
-            }
-            shape = MIRCLIInputShape.Value{kind: lowered_kind, optional: is_optional, default: lowered_default}
-            optional = is_optional
-            ()
-        }
-    }
-    ty := scalar_type
-    if {
-        input.variadic -> {
-            ty = Type.List{element: scalar_type}
-        }
-        optional -> {
-            ty = Type.Option{inner: scalar_type}
-        }
-    }
-    return MIRCLIInput{
-        parameter: ordinal,
-        name: input.field,
-        label: input.field,
-        ty: jet_codegen_lower_type_with_nominals(ty, nominals, module_identity, [String]{}),
-        zone: ParamZone.Either,
-        flag: input.flag,
-        short: input.short,
-        env: input.env,
-        help: input.help,
-        metavar: input.metavar,
-        shape: shape,
-        positional: input.positional,
-        variadic: input.variadic,
-    }
-}
-
-fn jet_codegen_lower_cli_inputs(inputs: [TCLIInput], nominals: JetCodegenNominalIndex, module_identity: String) -> [MIRCLIInput] {
-    lowered := [MIRCLIInput]{}
-    index := 0
-    loop input in inputs {
-        &lowered.push(jet_codegen_lower_cli_input(input, index, nominals, module_identity))
-        index += 1
-    }
-    return lowered
-}
-
-fn jet_codegen_lower_cli_entry(entry: TCLIEntry, functions: JetCodegenFunctionIndex, nominals: JetCodegenNominalIndex, module_identity: String) -> MIRCLIEntry {
-    commands := [MIRCLICommand]{}
-    loop command in entry.commands {
-        if command.function != None {
-            reference :: command.function ?? panic("checked CLI command function reference disappeared")
-            inputs := jet_codegen_lower_cli_inputs(command.inputs, nominals, module_identity)
-            receiver := if command.receiver == {
-                None -> None
-                Val(name) -> Val(mir_type_id(name))
-            }
-            &commands.push(MIRCLICommand{
-                name: command.name,
-                description: command.description,
-                function: jet_codegen_declaration_function_id(functions, reference.key, reference.module_identity),
-                receiver: receiver,
-                inputs: inputs,
-            })
-        }
-    }
-    return MIRCLIEntry{
-        record_inputs: entry.record_inputs,
-        description: entry.description,
-        inputs: jet_codegen_lower_cli_inputs(entry.inputs, nominals, module_identity),
-        commands: commands,
-        standard: entry.standard,
-        version: entry.version,
-    }
-}
-
 fn jet_codegen_lower_c_enum_tag(enum_tag: TCEnumTag) -> MIRCEnumTag Never! {
     return if enum_tag == {
         .CInt -> MIRCEnumTag.CInt
@@ -531,10 +416,6 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: JetCodegen
             markers: binding.markers,
         })
     }
-    cli := if definition.cli == {
-        None -> None
-        Val(entry) -> Val(jet_codegen_lower_cli_entry(entry, functions, nominals, definition.module_identity))
-    }
     alignment := if definition.layout_alignment == {
         None -> None
         Val(value) -> Val(MIRLayoutAlignmentFact{
@@ -570,7 +451,7 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: JetCodegen
         c_layout_tag: c_layout_tag,
         enum_layout: definition.enum_layout,
         layout_alignment: alignment,
-        cli: cli,
+        cli: None,
         serde: serde,
         cli_bindings: cli_bindings,
         ownership: jet_codegen_lower_declaration_ownership_mode(definition.ownership),
@@ -1697,7 +1578,6 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, program: JetCodegenPr
         integer_bounds: None,
         uninit_scalar: false,
         uninit_fixed: false,
-        direct_closure: false,
     }
     _ := jet_codegen_bind_local(&builder, program, local, owner_type, local.mutable, Val(value), Val(access), false)
     &builder.params.push(MIRParam{
@@ -2235,7 +2115,6 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
         gc_scope: false,
         return_view_provenance: None,
         generic_params: [TGenericParam]{},
-        clone_types: [Type]{},
         is_main: false,
         line: builder.function.line,
         synthetic: true,
@@ -2250,7 +2129,6 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
         is_inline_always: false,
         is_scalar: false,
         kernel_proof: None,
-        memo_field: None,
         uses_stack_sentry: lambda.uses_stack_sentry,
         body: [TStmt]{},
         kind: TFuncKind.TopLevel,
@@ -2260,7 +2138,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
     if lambda.executable == {
         // copy: `value` is a payload of read parameter `lambda`, which keeps the original; the Val carrier owns this one
         .Expr(value) -> expression = Val(value.copy())
-        .Block(body) | .SharedBlock(body) -> statements = body
+        .Block(body) -> statements = body
     }
     // The nested function lowers on the same builder (no program copy); the
     // enclosing function's state is saved around it.
@@ -2382,7 +2260,6 @@ fn jet_codegen_comptime_item_tfunc(module_identity: String, module_name: String,
         gc_scope: false,
         return_view_provenance: None,
         generic_params: [TGenericParam]{},
-        clone_types: [Type]{},
         is_main: false,
         line: 0,
         synthetic: true,
@@ -2397,7 +2274,6 @@ fn jet_codegen_comptime_item_tfunc(module_identity: String, module_name: String,
         is_inline_always: false,
         is_scalar: false,
         kernel_proof: None,
-        memo_field: None,
         uses_stack_sentry: false,
         body: [TStmt]{},
         kind: TFuncKind.TopLevel,
@@ -3915,7 +3791,7 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
             if !definition.key.starts_with("<corelib>/") -> program_type_names[definition.name] = true
             if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
             row := MIRTypeDef?{None}
-            if !defer_cli || (definition.cli == None && definition.cli_bindings.len() == 0) -> row = Val(jet_codegen_lower_type_definition(definition, function_index, modules, nominals, closure_only))
+            if !defer_cli || definition.cli_bindings.len() == 0 -> row = Val(jet_codegen_lower_type_definition(definition, function_index, modules, nominals, closure_only))
             &slots.push(JetCodegenTypeSlot{row: ^row, module_index: module_index, definition_index: definition_index})
         }
     }

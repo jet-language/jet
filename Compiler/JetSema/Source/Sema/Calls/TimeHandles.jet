@@ -498,17 +498,9 @@ fn sema_time_duration_args(method: String) -> [Type] Never! {
     }
 }
 
-// Rust `handle_method_op`: a written `.Unit` argument of `.in(…)` names its
-// unit on the operation.
-fn sema_time_duration_op(method: String, args: [CallArg]) -> THandleOp Never! {
+fn sema_time_duration_op(method: String) -> THandleOp Never! {
     return if {
-        method == "in" -> {
-            unit := String?{None}
-            // The argument has already checked as a `DurationUnit`, so a
-            // written `.Unit` is one of its variants.
-            if args[0].expr == .EnumLit(_, variant, _, _, _, _) -> unit = Val(variant)
-            THandleOp.DurationIn{unit: unit}
-        }
+        method == "in" -> THandleOp.DurationIn
         method == "is_zero" -> THandleOp.DurationIsZero
         method == "total_seconds" -> THandleOp.DurationTotalSeconds
         method == "difference" -> THandleOp.DurationDifference
@@ -524,5 +516,5 @@ fn sema_time_duration_method(receiver: Expr, receiver_value: TExpr, method: Stri
     required :: sema_time_duration_args(method)
     values :: sema_time_check_values(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_time_check_method_ownership(receiver, method, args, required, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_time_finish_handle(receiver_value, sema_time_duration_op(method, args), values, result, "", "Duration.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    sema_time_finish_handle(receiver_value, sema_time_duration_op(method), values, result, "", "Duration.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
