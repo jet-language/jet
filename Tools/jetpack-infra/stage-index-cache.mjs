@@ -103,9 +103,7 @@ function parseArgs(argv) {
       ? absoluteFilePath(values.get("--manifest"), "manifest")
       : path.join(path.resolve(indexRoot), "manifest.json"),
     manifestIsDefault,
-    jetpack: values.get("--jetpack")
-      ? absoluteFilePath(values.get("--jetpack"), "jetpack binary")
-      : path.join(repo, "target/debug/jetpack"),
+    jetpack: absoluteFilePath(values.get("--jetpack") ?? process.env.JETPACK ?? "", "jetpack binary (--jetpack or JETPACK)"),
   };
   rejectOverlap(options.output, options.indexRoot, "output and index root overlap");
   rejectOverlap(options.output, options.hangarRoot, "output and Hangar root overlap");

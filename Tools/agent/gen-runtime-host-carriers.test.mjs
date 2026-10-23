@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const script = 'Tools/agent/gen-runtime-host-carriers.mjs';
 const rows = 'Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet';
-const outputs = ['Compiler/JetRuntime/Source/HostEnums.jet', 'crates/jet-codegen/src/Prelude/Core/CAbiHost.rs'];
+const outputs = ['Compiler/JetRuntime/Source/HostEnums.jet'];
 function fixture(body) {
   const tree = mkdtempSync(join(tmpdir(), 'jet-host-carriers-'));
   try {
@@ -37,37 +37,23 @@ test('unchanged canonical outputs retain bytes and timestamps', () => fixture((t
   });
 }));
 
-test('check rejects either stale output without rewriting either file', () => {
-  for (const stale of outputs) fixture((tree, run) => {
-    success(run());
-    writeFileSync(join(tree, stale), 'stale\n');
-    const before = outputs.map(path => readFileSync(join(tree, path)));
-    const result = run('--check');
-    assert.notEqual(result.status, 0);
-    assert.ok(result.stderr.includes(`${stale}: stale host carrier output`));
-    outputs.forEach((path, index) => assert.deepEqual(readFileSync(join(tree, path)), before[index]));
-  });
-});
-
-test('regeneration replaces only changed bytes and preserves the other output', () => {
-  for (const stale of outputs) fixture((tree, run) => {
-    success(run());
-    const canonical = outputs.map(path => readFileSync(join(tree, path)));
-    const unchanged = outputs.find(path => path !== stale);
-    const old = new Date('2001-01-01T00:00:00Z');
-    utimesSync(join(tree, unchanged), old, old);
-    writeFileSync(join(tree, stale), 'stale\n');
-    success(run());
-    outputs.forEach((path, index) => assert.deepEqual(readFileSync(join(tree, path)), canonical[index]));
-    assert.equal(statSync(join(tree, unchanged)).mtimeMs, old.getTime());
-  });
-});
-
-// The Root source packet is authorized to change HostEnums, not CAbiHost.
-// Compute both outputs in the fixture before touching the real checkout.
-test('Root carrier regeneration leaves the selected Rust output byte-identical', () => fixture((tree, run) => {
+test('check rejects a stale output without rewriting it', () => fixture((tree, run) => {
+  const [stale] = outputs;
   success(run());
-  assert.deepEqual(readFileSync(join(tree, outputs[1])), readFileSync(join(root, outputs[1])));
+  writeFileSync(join(tree, stale), 'stale\n');
+  const result = run('--check');
+  assert.notEqual(result.status, 0);
+  assert.ok(result.stderr.includes(`${stale}: stale host carrier output`));
+  assert.equal(readFileSync(join(tree, stale), 'utf8'), 'stale\n');
+}));
+
+test('regeneration restores the canonical output bytes', () => fixture((tree, run) => {
+  const [stale] = outputs;
+  success(run());
+  const canonical = readFileSync(join(tree, stale));
+  writeFileSync(join(tree, stale), 'stale\n');
+  success(run());
+  assert.deepEqual(readFileSync(join(tree, stale)), canonical);
 }));
 
 test('generated Jet helpers have one declaration per function', () => fixture((tree, run) => {
@@ -76,42 +62,6 @@ test('generated Jet helpers have one declaration per function', () => fixture((t
   const names = [...source.matchAll(/\bfn\s+([A-Za-z_]\w*)\s*\(/g)].map(match => match[1]);
   assert.equal(new Set(names).size, names.length);
   assert.equal(names.filter(name => name === 'host_arguments_refused').length, 1);
-}));
-
-test('generated Rust retains the TaskFailure16 carrier and paired ownership helpers', () => fixture((tree, run) => {
-  success(run());
-  const source = readFileSync(join(tree, outputs[1]), 'utf8');
-  assert.match(source, /struct JetCTaskFailure \{\s*pub\(crate\) tag: i64,\s*pub\(crate\) reason: JetCString,\s*\}/);
-  assert.match(source, /jet_rt_alloc\(16, 8\)/);
-  assert.match(source, /jet_rt_free\(pointer\.cast\(\), 16, 8\)/);
-  for (const helper of ['failure_handle', 'failure_view', 'failure_drop', 'failure_take']) {
-    assert.equal([...source.matchAll(new RegExp(`fn ${helper}\\(`, 'g'))].length, 1);
-  }
-}));
-
-test('borrowed IP and socket projections use allocation-free canonical value carriers', () => fixture((tree, run) => {
-  success(run());
-  success(run('--check'));
-  const source = readFileSync(join(tree, outputs[1]), 'utf8');
-  for (const [stem, type, carrier] of [
-    ['ip', 'JetIpAddr', 'JetCIpAddr'],
-    ['socket', 'JetSocketAddr', 'JetCSocketAddr'],
-  ]) {
-    const signature = new RegExp(`fn ${stem}_borrow_carrier\\(value: &crate::${type}\\) -> ${carrier} \\{`);
-    const start = source.search(signature);
-    assert.ok(start >= 0, `missing borrowed ${stem} conversion`);
-    let depth = 1;
-    let end = source.indexOf('{', start) + 1;
-    const begin = end;
-    for (; depth > 0 && end < source.length; end++) {
-      if (source[end] === '{') depth++;
-      if (source[end] === '}') depth--;
-    }
-    assert.equal(depth, 0);
-    const body = source.slice(begin, end - 1);
-    assert.doesNotMatch(body, /alloc|Box::|clone\(|drop\(|free\(|take\(|_handle\(/);
-  }
-  assert.match(source, /socket_carrier\(value: crate::JetSocketAddr\)[\s\S]*?socket_borrow_carrier\(&value\)/);
 }));
 
 test('borrowed C-field lowering supplies stack storage and retains its borrow flag', () => {

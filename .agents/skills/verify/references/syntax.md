@@ -6,11 +6,11 @@ authoritative; this reference replaces a generic in-skill checklist.
 
 - Before changing a keyword or sigil, confirm the owner-ratified decision in
   `Docs/spec/syntax-decisions.md`. Register every user-typeable spelling in
-  `crates/jet-foundation/src/Syntax.rs` under I7; do not add a provisional
-  entry without an approved decision ID.
+  the syntax registry `Compiler/JetFoundation/Data/Syntax/` under I7; do not
+  add a provisional entry without an approved decision ID.
 - For grammar or parser changes, inspect the relevant grammar and parser source,
-  then run the named narrow grammar/devtool command:
-  `Tools/agent/jet-env jet self devtools grammars`. Do not treat that command
+  then regenerate and check the editor grammar sections:
+  `node Tools/agent/editor-grammars.mjs --write`. Do not treat that command
   as runtime or tier evidence.
 - For diagnostics caused by syntax, use the canonical row in
   `Compiler/Prelude/Diagnostics.jet`, matching UI snapshot, and

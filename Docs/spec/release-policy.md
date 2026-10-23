@@ -3,7 +3,7 @@
 This page is the contract for package authors, toolchain maintainers, and registry
 operators. It covers the pre-1.0 boundary, the owner-declared post-1.0 rules,
 and release-facing CLI behavior. Executable truth lives in
-`crates/jet-pkg-model/src/Manifest.rs`, `crates/jet-foundation/src/ExitCodes.rs`,
+`Jetpack/PackageModel/Source/Manifest/Manifest.jet`, `Jetpack/Foundation/Source/ExitCodes.jet`,
 and the release fixtures under `tests/release/`.
 
 ## Compatibility boundary
@@ -15,8 +15,8 @@ owner makes that declaration. The rules below are the ratified policy that
 applies after that declaration, not evidence that a release is ready.
 
 The executable banner reports the release disposition from
-`manifest::current_release_status` in
-`crates/jet-pkg-model/src/Manifest.rs`. A version string, command existence, or
+`pkg_current_release_status` in
+`Jetpack/PackageModel/Source/Manifest/Manifest.jet`. A version string, command existence, or
 local telemetry observation cannot promote a capability or make the post-1.0
 promise active.
 
@@ -175,7 +175,7 @@ unqualified rows. Telemetry reports observations only.
 
 `jet` returns stable documented exit codes so shells and CI can branch without
 parsing text. The single source of truth is
-`crates/jet-foundation/src/ExitCodes.rs`.
+`Jetpack/Foundation/Source/ExitCodes.jet`.
 
 | Code | Name | Meaning |
 |---:|---|---|
@@ -183,20 +183,22 @@ parsing text. The single source of truth is
 | 1 | `USER_ERROR` | An unhandled entry error report or a driver-reported user problem. |
 | 2 | `USAGE` | The command line was wrong: an unknown command or a missing, invalid, or unknown argument/flag. |
 | 70 | `RUNTIME_PANIC` | A built program stopped at runtime through `panic`, `require`, an index fault, or another program-side fault; emitted by the Prelude boundary. |
-| 101 | `ICE` | Jet's own compiler defect: rustc rejected generated code or the compiler reached an impossible state (invariant I2), never a user-program exit. |
+| 101 | `ICE` | Jet's own compiler defect: the compiler reached an impossible state (invariant I2), never a user-program exit. |
 
 `USER_ERROR` (1) and `USAGE` (2) stay distinct: the former means the program
 or its inputs failed, while the latter means the `jet` invocation was wrong.
 
 ## Enforcement map
 
-- `edition:` is parsed in `crates/jet-pkg-model/src/Manifest.rs`, surfaced on
-  `manifest::PackageMeta`, and recorded in `crates/jet-foundation/src/Syntax.rs`
-  as `MANIFEST_FIELD_EDITION` (D-REL3).
-- Supported editions are `manifest::SUPPORTED_EDITIONS`; E2001 comes from
-  `manifest::check_edition_support`, called by `crates/jet-driver/src/Loader.rs`.
-- The banner is `manifest::version_banner`; release status is
-  `manifest::current_release_status` in `crates/jet-pkg-model/src/Manifest.rs`.
+- `edition:` is parsed in `Jetpack/PackageModel/Source/Manifest/Manifest.jet`
+  and recorded in the syntax registry
+  (`Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet`) as
+  `MANIFEST_FIELD_EDITION` (D-REL3).
+- Supported editions are `SUPPORTED_EDITIONS` in `Manifest.jet`; E2001 comes
+  from `pkg_check_edition_support` there and from the compiler loader in
+  `Compiler/JetDriver/Source/Driver/Loader.jet`.
+- The banner is `pkg_version_banner`; release status is
+  `pkg_current_release_status` in `Manifest.jet`.
 - E2001, E2002, and L2001 are registered in
   `Compiler/Prelude/Diagnostics.jet` and the Foundation
   diagnostic registry, with release snapshots under `tests/release/`.

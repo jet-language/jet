@@ -4,7 +4,7 @@ This page defines the static toolchain channel consumed by `jet self update`.
 The executable contract is the
 [`toolchain-channel-v1` schema](../../site/dist/dl/toolchain-channel-v1.schema.json),
 the verifier is in
-[`ToolchainUpdate.rs`](../../../crates/jetpack/src/ToolchainUpdate.rs), and the
+[`Jetpack/Recipe/Source/Toolchain/`](../../../Jetpack/Recipe/Source/Toolchain/), and the
 staging and update checks are
 [`stage-toolchain.mjs`](../../../Tools/jetpack-infra/stage-toolchain.mjs) and
 [`test-toolchain-update.sh`](../../../Tools/jetpack-infra/test-toolchain-update.sh).

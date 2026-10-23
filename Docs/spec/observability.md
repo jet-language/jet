@@ -8,9 +8,9 @@ jet ? why is my program slow
 
 This page is the terminal guide for package authors and toolchain maintainers.
 It covers live runtime facts, GC evidence, wall-clock traces, browser rows, and
-recorded runs. Executable truth is in `crates/jet-foundation/src/Devtools.rs`,
-`crates/jet-devserver/src/LiveInspect.rs`, `Source/CmdGc.rs`, and
-`Source/CmdPerf.rs`. The observation terms follow `Docs/spec/vocabulary.md`;
+recorded runs. Executable truth is in `Compiler/JetFoundation/Source/Devtools/`,
+`Compiler/JetDevserver/Source/LiveInspect.jet`, `Compiler/JetCli/Source/Cli/GcReport.jet`,
+and `Compiler/JetCli/Source/Cli/Perf/`. The observation terms follow `Docs/spec/vocabulary.md`;
 an observation event is not a private payload channel.
 
 The table is the single vocabulary for observation. Choose a surface by the
@@ -45,7 +45,7 @@ projection. `--pprof` and `--otel` remain Jet JSON projections, not wire-format
 exports.
 
 The canonical trace wrapper is `jet.trace` version 1, verified by
-`crates/jet-foundation/src/JetTrace.rs`. A trace's identity, toolchain, and
+`Compiler/JetFoundation/Source/Trace/JetTrace.jet`. A trace's identity, toolchain, and
 hardware facts stay bound to that artifact; `jet perf view`, `compare`,
 `attach`, and `export` use the same verification seam.
 
@@ -175,11 +175,11 @@ the program through time, or keep a standing per-variable history buffer.
 
 ## Implementation homes
 
-- Live scheduler: `crates/jet-devserver/src/LiveInspect.rs`
-- GC promotions: `Source/CmdGc.rs`
-- Wall-clock session: `Source/CmdPerf.rs` and `crates/jet-foundation/src/JetTrace.rs`
-- Browser rows: `crates/jet-devserver/src/BrowserTrace.rs`, merged by `Source/CmdPerf.rs`
-- Devtools protocol and panel policy: `crates/jet-foundation/src/Devtools.rs` and `crates/jet-codegen/src/Prelude/Core/DevtoolsPanelCatalog.rs`
+- Live scheduler: `Compiler/JetDevserver/Source/LiveInspect.jet`
+- GC promotions: `Compiler/JetCli/Source/Cli/GcReport.jet`
+- Wall-clock session: `Compiler/JetCli/Source/Cli/Perf/` and `Compiler/JetFoundation/Source/Trace/JetTrace.jet`
+- Browser rows: `Compiler/JetDevserver/Source/BrowserTrace.jet`, merged by `Compiler/JetCli/Source/Cli/Perf/BrowserCapture.jet`
+- Devtools protocol and panel policy: `Compiler/JetFoundation/Source/Devtools/` and the panel catalog projection in `Compiler/JetDevserver/Source/Session.jet`
 
 The `jet ? why is my program slow` route prints this file verbatim. The guide
 and the CLI output therefore have one home.

@@ -20,6 +20,4 @@ use core.text.parse as parse
     breadth :: files.read("tests/fixtures/nix-compat/breadth.json") ?? panic("breadth fixture")
     fields :: [String]{"\"fuzz_seeds\"", "\"locks\"", "\"output_identities\"", "\"memory_bytes\": 16777216", "\"latency_micros\": 1000000"}
     loop field in fields -> assert(breadth.contains(field), "breadth lost {field}")
-    stopline :: files.read("Tools/agent/verify-nix-eval-stopline.sh") ?? panic("stop-line")
-    assert(stopline.contains("breadth.json"))
 }

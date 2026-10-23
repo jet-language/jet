@@ -96,12 +96,6 @@ fi
 source_manifest="$ROOT/Cargo.lock"
 workflow="$ROOT/.github/workflows/ci.yml"
 if ! {
-  echo '=== rustc ==='
-  if command -v rustc >/dev/null 2>&1; then rustc -vV; else echo '(unavailable)'; fi
-  echo
-  echo '=== cargo ==='
-  if command -v cargo >/dev/null 2>&1; then cargo -vV; else echo '(unavailable)'; fi
-  echo
   echo '=== nix ==='
   if command -v nix >/dev/null 2>&1; then nix --version; else echo '(unavailable)'; fi
 } >"$toolchain"; then

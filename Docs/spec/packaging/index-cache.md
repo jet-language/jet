@@ -2,7 +2,7 @@
 
 This page defines the static publication trees consumed by Jetpack. The
 producer and verifier own the index format in
-[`NixIndex.rs`](../../../crates/jetpack/src/NixIndex.rs); the stage and publish
+[`Jetpack/Nix/Source/Index/`](../../../Jetpack/Nix/Source/Index/); the stage and publish
 implementation is
 [`stage-index-cache.mjs`](../../../Tools/jetpack-infra/stage-index-cache.mjs),
 and its local proof is

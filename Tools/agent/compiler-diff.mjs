@@ -39,7 +39,7 @@ const UI_DIR = join(ROOT, "tests/ui");
 const DIFFERENTIAL_DIR = join(ROOT, "tests/fuzz/sema/differential");
 const CANARY_DIR = join(ROOT, "tests/compiler-diff/canary");
 const CANARY_CANDIDATE = join(ROOT, "tests/compiler-diff/canary-candidate.mjs");
-const EXAMPLE_STDIN_SOURCE = join(ROOT, "tests/common/mod.rs");
+const EXAMPLE_STDIN_DIR = join(FEATURES, "expected");
 const EXT = "jet";
 const WORKSPACE_FILE = "workspace.jet";
 
@@ -245,20 +245,22 @@ export function collectGoldenEntries(exDir = FEATURES) {
   return entries.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0));
 }
 
-// The interactive-example answers live in one place: `example_stdin` in
-// tests/common/mod.rs. Read that table instead of restating it.
-export function loadExampleStdin(source = readFileSync(EXAMPLE_STDIN_SOURCE, "utf8")) {
-  const consts = new Map();
-  for (const match of source.matchAll(/const (\w+): ExampleStdin = ExampleStdin \{\s*piped: ("(?:[^"\\]|\\.)*")/gu)) {
-    consts.set(match[1], JSON.parse(match[2]));
-  }
-  const body = source.split("pub fn example_stdin(")[1]?.split("\n}\n")[0] ?? "";
+// The interactive-example answers live in one place: the `<stem>.stdin`
+// goldens under Examples/features/expected, the same files the native testkit
+// pipes. Read them instead of restating them.
+export function loadExampleStdin(directory = EXAMPLE_STDIN_DIR) {
   const table = new Map();
-  for (const match of body.matchAll(/"([^"]+)" => Some\(&(\w+)\)/gu)) {
-    if (!consts.has(match[2])) throw new Error(`example_stdin names ${match[2]} but its piped answers were not found`);
-    table.set(match[1], consts.get(match[2]));
-  }
-  if (table.size === 0) throw new Error(`no example_stdin rows found in ${relative(ROOT, EXAMPLE_STDIN_SOURCE)}`);
+  const visit = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile() && entry.name.endsWith(".stdin")) {
+        table.set(relative(directory, child).split(sep).join("/").slice(0, -".stdin".length), readFileSync(child, "utf8"));
+      }
+    }
+  };
+  visit(directory);
+  if (table.size === 0) throw new Error(`no example .stdin goldens found under ${relative(ROOT, directory)}`);
   return table;
 }
 

@@ -6,7 +6,7 @@ not a compatibility promise. Executable truth is in the
 [syntax decisions](../syntax-decisions.md), the
 [metaprogramming reference](metaprogramming.md), the
 [Jetpack reference](jetpack-epoch5.md), the
-[foundation syntax ledger](../../../crates/jet-foundation/src/Syntax.rs), and
+[syntax registry](../../../Compiler/JetFoundation/Data/Syntax/), and
 the checked examples under `Examples/`.
 
 ## How to read the comparison
@@ -997,11 +997,11 @@ Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths
 - quarto-widgets — https://quarto.org/docs/interactive/widgets/jupyter.html
 - quarto-publishing — https://quarto.org/docs/publishing/
 - jupyter-source-registry — https://jupyter.org/
-- jet-data-stats — crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs
+- jet-data-stats — Core/Data/Data.jet
 - jet-data-tests — tests/dataflow_stream.rs
-- jet-data-evaluator — crates/jet-codegen/src/Codegen/TIR/eval/data_calls.rs
-- jet-notebook — crates/jet-repl/src/Notebook/document.rs
-- jet-notebook-trust — crates/jet-repl/src/Notebook/kernel.rs
+- jet-data-evaluator — Compiler/JetEval/Source/Evaluator.jet
+- jet-notebook — Compiler/JetRepl/Console/Notebook/Document.jet
+- jet-notebook-trust — Compiler/JetRepl/Console/Notebook/Trust.jet
 
 ### cli (31 sources)
 

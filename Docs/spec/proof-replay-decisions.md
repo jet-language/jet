@@ -3,9 +3,10 @@
 This record preserves the rationale and ratified contracts for `jet prove`,
 `.jetproof` evidence, `.jetproof-replay` capture, the opt-in solver, and proof
 lenses. It is for compiler, CLI, artifact, and test authors. The executable
-spellings and receipt boundaries are in [`Source/CmdProve.rs`](../../Source/CmdProve.rs),
-[`Source/ProveReplay.rs`](../../Source/ProveReplay.rs), and
-[`Source/ProveSolver.rs`](../../Source/ProveSolver.rs); exercised command
+spellings are registered in
+[`CLICommands.jet`](../../Compiler/JetFoundation/Source/Registry/CLICommands.jet), and the
+replay artifact path check is in
+[`Inspect.jet`](../../Compiler/JetCli/Source/Cli/Inspect.jet); exercised command
 contracts are in [`tests/prove.rs`](../../tests/prove.rs), and diagnostic copy
 is in [`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet).
 Use the [Jet vocabulary](vocabulary.md) for domain terms.

@@ -4,8 +4,7 @@ The web backend partitions checked TIR between JavaScript for browser/DOM work
 and WebAssembly for eligible logic. This page is for web application authors
 and compiler contributors choosing a target, reading partition diagnostics, and
 checking the source-backed examples. The executable boundary is implemented by
-[`Source/CmdCompile.rs`](../../../Source/CmdCompile.rs) and
-[`crates/jet-foundation/src/WebPartition.rs`](../../../crates/jet-foundation/src/WebPartition.rs);
+[`Compiler/JetCodegen/Source/Emit/Web`](../../../Compiler/JetCodegen/Source/Emit/Web/);
 web diagnostics are registered in
 [`Compiler/Prelude/Diagnostics.jet`](../../../Compiler/Prelude/Diagnostics.jet).
 

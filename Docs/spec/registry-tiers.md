@@ -2,9 +2,10 @@
 
 This page defines the trust and publish gates for Core and Community registry
 packages. It covers receipts, names, signatures, maintainer liveness, and user
-projections. The executable publish/index paths are `Source/Publish/Tier.rs`,
-`Source/Publish/NamePolicy.rs`, `Source/Publish/Index.rs`, and
-`Source/CmdSupply.rs`.
+projections. The executable publish/index paths are
+`Jetpack/Publication/Source/Tier.jet`, `Jetpack/Publication/Source/NamePolicy.jet`,
+`Jetpack/Publication/Source/Index.jet`, `Jetpack/Publication/Source/Policy.jet`,
+and `Compiler/JetCli/Commands/Supply.jet`.
 
 ## Core tier
 
@@ -27,7 +28,7 @@ decision=approved
 
 `jet registry publish` refuses a Core release when the receipt is missing,
 malformed, names a different package or version, has an empty reviewer, or does
-not say `decision=approved`. `Source/Publish/Tier.rs::require_core_review`
+not say `decision=approved`. `Tier.jet::publication_require_core_review`
 reads and validates this file before the index can be changed.
 
 ## Community tier
@@ -48,8 +49,8 @@ each version, with the fields `signature`, `audit`, `name`, `liveness`, and
 `review`. Community acceptance requires all four Community fields to be
 `passed`; `review` is `not-required` for Community. A blocked gate stops the
 publish before artifact or index mutation. The gate computation is in
-`Source/Publish/Tier.rs::community_gate_status`, and the publish ordering is
-in `Source/CmdSupply.rs`.
+`Policy.jet::publication_community_gate_status`, and the publish ordering is
+in `Compiler/JetCli/Commands/Supply.jet`.
 
 D-REGCURATE1=C is the owner-ratified Community trust model. The gate is
 fail-closed: a missing required feed, key, name result, or liveness result is
@@ -61,7 +62,7 @@ for signing-key takeovers.
 ### Mechanical checks
 
 At publish time, Jet compares the candidate with every existing index name.
-`Source/Publish/NamePolicy.rs` first builds a case-folded confusable skeleton
+`NamePolicy.jet` first builds a case-folded confusable skeleton
 for selected Latin, Greek, Cyrillic, and diacritic lookalikes, then computes
 Levenshtein distance on that skeleton. The policy reserves names ending in:
 
@@ -110,7 +111,7 @@ A non-empty `public_key` different from the first non-empty key pinned for a
 package is a maintainer takeover, not an ordinary rotation. The new key must
 sign `content_hash`, and
 `reviews/<package>/<version>.review` must contain the approved receipt above.
-`Source/Publish/Index.rs::validate_takeover` enforces both requirements before
+`Index.jet::publication_validate_takeover` enforces both requirements before
 an immutable index line is written; fetch verification applies the same
 signature and tier checks. A normal later release leaves `public_key` empty and
 uses the pinned key.
@@ -127,4 +128,4 @@ and `jet inspect info` prints the same fields from the package record. JSON
 discovery carries `tier` and `gate_status`; package hovers display the tier and
 the maintainer-liveness value from that local record. The lock projection is
 implemented in the package-resolution path, and the discovery projection is
-in `crates/jetpack/src/Discovery.rs`.
+in `Jetpack/CLI/Source/Commands/DiscoveryCommands.jet`.

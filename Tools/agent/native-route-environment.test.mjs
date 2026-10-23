@@ -7,9 +7,9 @@ import { runtimeExportSignatures } from './runtime-route-abi.mjs';
 import { nativeEnvironmentRoutes, emitNativeEnvironmentRoutes } from './native-route-environment.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const registry = readFileSync(`${root}/crates/jet-foundation/src/Syntax/core_calls.rs`, 'utf8');
+const registry = readFileSync(`${root}/Compiler/JetFoundation/Source/Registry/CoreCallRows.jet`, 'utf8');
 const routes = new Map();
-for (const match of registry.matchAll(/CoreCallRecord::new\(\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"/g)) {
+for (const match of registry.matchAll(/module_name: "([^"]+)", member: "([^"]+)".*symbol: CoreCallSymbol\.Prelude\{name: "([^"]+)"\}/g)) {
   const [, module, member, symbol] = match;
   const route = routes.get(symbol) ?? { rows: [] };
   route.rows.push(`${module}.${member}`);

@@ -28,7 +28,7 @@ SCALE_CORPUS="$PERF_DIR/construct-scale.tsv"
 BASELINE="$PERF_DIR/baseline.json"
 TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}
 JET_ENV="$ROOT/Tools/agent/jet-env"
-JET_BIN="$ROOT/target/debug/jet"
+JET_BIN="${JET:?JET must name the admitted native jet compiler}"
 
 # Materialize the core toolchain once. Re-entering `jet-env` for every AOT
 # sample adds an environment-launch measurement to the compiler stage and
@@ -93,9 +93,9 @@ OUTLIER_TOTAL=0
 [ -x "$FLOCK_BIN" ] || { echo "missing flock helper: $FLOCK_BIN" >&2; exit 1; }
 [ -f "$CORPUS" ] || { echo "missing compiler-speed corpus: $CORPUS" >&2; exit 1; }
 [ -f "$FIXTURE_PACKAGE" ] || { echo "missing compiler-speed fixture package: $FIXTURE_PACKAGE" >&2; exit 1; }
-[ -x "$ROOT/target/debug/jet" ] || {
-    echo "missing fresh compiler binary: $ROOT/target/debug/jet" >&2
-    echo "build Jet before running the compiler-speed dashboard" >&2
+[ -x "$JET_BIN" ] || {
+    echo "missing compiler binary: $JET_BIN" >&2
+    echo "set JET to the admitted native jet before running the compiler-speed dashboard" >&2
     exit 1
 }
 case "$SAMPLES:$WARMUPS" in
@@ -372,10 +372,9 @@ else
     esac
 fi
 
-machine_allocator='JetHostProgramAllocator->std::alloc::System'
-machine_allocator_source_sha256=$(printf 'ProgramAllocator.rs=%s\nSource/main.rs=%s\n' \
-    "$(sha256 "$ROOT/crates/jet-codegen/src/Prelude/ProgramAllocator.rs")" \
-    "$(sha256 "$ROOT/Source/main.rs")" | sha256_text)
+machine_allocator='JetRuntimeAlloc->mmap'
+machine_allocator_source_sha256=$(printf 'Alloc.jet=%s\n' \
+    "$(sha256 "$ROOT/Compiler/JetRuntime/Source/Alloc.jet")" | sha256_text)
 machine_allocator_environment=$(env | awk -F= '
     $1 == "LD_PRELOAD" || $1 == "GLIBC_TUNABLES" || $1 == "MALLOC_CONF" ||
     $1 ~ /^MALLOC_/ || $1 ~ /^JEMALLOC_/ || $1 ~ /^MIMALLOC_/ { print }

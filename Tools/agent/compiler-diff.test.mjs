@@ -145,7 +145,7 @@ test("golden failure rejects different stderr with correct stdout and exit", () 
   assert.match(detail, /stderr differs/u);
 });
 
-test("interactive answers come from the example_stdin table", () => {
+test("interactive answers come from the example .stdin goldens", () => {
   const table = loadExampleStdin();
   assert.equal(table.get("io/stdin_input"), "alpha\nbeta\n");
   assert.equal(table.get("io/terminal"), "h");

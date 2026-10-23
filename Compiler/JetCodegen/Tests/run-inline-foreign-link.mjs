@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Compile and execute the production Rust/Jet inline-bridge build-script templates.
+// Compile and execute the production Jet inline-bridge build-script templates
+// (the RustBridge package template and the codegen native build script).
 // Usage: node Compiler/JetCodegen/Tests/run-inline-foreign-link.mjs OUTDIR [SELFHOST.JET]
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -21,15 +22,13 @@ function command(label,exe,args,cwd,env={}){
 }
 const version=command('rust-version',rustc,['-vV'],root);
 assert.equal(version.status,0);const target=version.stdout.match(/^host: (.+)$/m)?.[1];assert(target);
-const rustSource=readFileSync(join(root,'crates/jet-pkg-model/src/FFI.rs'),'utf8');
 const pkgSource=readFileSync(join(root,'Jetpack/Integrations/Source/Foreign/RustBridge/WrapperEmit.jet'),'utf8');
 const codegenSource=readFileSync(join(root,'Compiler/JetCodegen/Source/Codegen/ForeignFunctions.jet'),'utf8');
-const rustTemplate=rustSource.split('fn emit_inline_build_rs(')[1].match(/r#"([\s\S]*?)"#/)[1];
 const pkgTemplate=pkgSource.split('fn pkg_ffi_emit_inline_build_rs(')[1].match(/\n    """\n([\s\S]*?)\n[ \t]*"""/)[1];
 const codegenBody=codegenSource.split('fn jet_codegen_inline_native_build_script(')[1].split('fn jet_codegen_prepare_inline_native_artifacts(')[0];
 function render(kind,files){
  const cpp=files.some(row=>row.cpp),fileRows=files.map(row=>`(${JSON.stringify(row.name)}, ${JSON.stringify(row.cpp?cxx:cc)}, ${row.cpp}, "")`).join(', ');
- let text=kind==='rust'?rustTemplate:kind==='package'?pkgTemplate:codegenBody.split('\n').flatMap(line=>{
+ let text=kind==='package'?pkgTemplate:codegenBody.split('\n').flatMap(line=>{
   if(line.includes('if config.has_cpp')&&!cpp)return [];
   const match=line.match(/&lines\.push\("((?:\\.|[^"\\])*)"\)/);return match?[JSON.parse('"'+match[1]+'"')]:[];
  }).join('\n');
@@ -46,7 +45,7 @@ const cases=[
  {name:'mixed-cpp',files:[{name:'owner.c',source:'#include <stdint.h>\nint64_t inline_shared_word=40;',cpp:false},{name:'read.cpp',source:'#include <stdint.h>\n#include <string>\nextern "C" { extern int64_t inline_shared_word; int64_t inline_read(void){return inline_shared_word+(int64_t)std::string("a").size();}}',cpp:true}],main:'#include <stdint.h>\nint64_t inline_read(void); int main(void){return inline_read()!=41;}'},
  {name:'missing-definition',files:[{name:'missing.c',source:'#include <stdint.h>\nextern int64_t inline_missing_definition; int64_t inline_read(void){return inline_missing_definition;}',cpp:false}],reject:true},
 ];
-for(const kind of ['rust','package','codegen'])for(const fixture of cases){
+for(const kind of ['package','codegen'])for(const fixture of cases){
  const label=kind+'-'+fixture.name,folder=join(out,label);mkdirSync(folder,{recursive:true});mkdirSync(join(folder,'objects'),{recursive:true});
  try{
   for(const file of fixture.files)writeFileSync(join(folder,file.name),file.source);

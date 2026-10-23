@@ -2487,7 +2487,7 @@ export function addDecision(s, p) {
   return { ...d, cardNum: card.num };
 }
 
-const SYNTAX_RATIFY_CHORES = ['Syntax.rs entry updated', 'syntax-decisions.md log entry', 'jet devtools grammars regenerated', 'snapshots re-blessed'];
+const SYNTAX_RATIFY_CHORES = ['Data/Syntax registry entry updated', 'syntax-decisions.md log entry', 'editor grammars regenerated (editor-grammars.mjs --write)', 'snapshots re-blessed'];
 
 // D-TWRGUARD1=C (#458): ratifying a syntax-group decision auto-appends the
 // standard post-ratification chores to the card's exit-criteria checklist

@@ -4,23 +4,24 @@
 # Why this exists: workers are source-only so that one agent owns the build
 # lane and the disk. That rule was costing more than it saved — nine separate
 # integration breaks in one session (unclosed `impl`, stale module paths after a
-# split, wrong visibility, borrow errors, a renamed enum variant, a mismatched
-# delimiter). Every one of them is what `cargo check` prints in seconds.
+# split, wrong visibility, a renamed enum variant, a mismatched delimiter).
+# Every one of them is what `jet check` prints in one keep-going pass.
 #
-# So a worker now type-checks its own patch, in the main checkout, against the
-# warm shared target dir. Cargo serializes concurrent invocations on its own
-# build lock, so explicitly approved disjoint workers may call this at once;
-# they queue, they do not corrupt the shared target.
+# So a worker type-checks its own patch with the admitted native compiler named
+# by $JET. The default run checks the whole compiler project (Compiler/, the
+# unit the native self-host builds) with JET_KEEP_GOING=1, so every error in
+# every item is reported at once. A path argument checks that file or project
+# instead.
 #
 # What this is NOT: it does not run tests, does not run formatters, does not
-# regenerate artifacts, does not build a release binary. Those stay with the
+# regenerate artifacts, does not build a compiler. Those stay with the
 # orchestrator.
 #
 # Usage:
-#   Tools/agent/lane-check.sh                 # whole workspace, all targets
-#   Tools/agent/lane-check.sh -p jet-sema     # one crate while iterating
+#   JET=/path/to/jet Tools/agent/lane-check.sh            # the whole compiler
+#   JET=/path/to/jet Tools/agent/lane-check.sh <path>     # one file or project
 #   Tools/agent/lane-check.sh --runtime-generators
-#     Runtime-only freshness gate (no Cargo); invoke through cheap.sh.
+#     Runtime-only freshness gate (no compiler); invoke through cheap.sh.
 #
 # Reading the output: errors are grouped by file. An error in a file YOU did not
 # touch belongs to another worker editing the same checkout — report it in your
@@ -28,6 +29,7 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
+repo="$PWD"
 
 if [ "${1:-}" = "--runtime-generators" ]; then
   if [ "$#" -ne 1 ]; then
@@ -44,37 +46,38 @@ if [ "${1:-}" = "--runtime-generators" ]; then
   exit "$code"
 fi
 
-# The default run also checks the feature-gated bootstrap host
-# (Compiler/Bootstrap/Host), so drift against the Jet compiler fails here (#3874).
-if [ "$#" -eq 0 ]; then
-  set -- --workspace --all-targets --features jet/compiler-bootstrap-host
+if [ "$#" -gt 1 ]; then
+  echo "usage: JET=/path/to/jet lane-check.sh [path]" >&2
+  exit 64
+fi
+if [ -z "${JET:-}" ] || [ ! -x "$JET" ]; then
+  echo "lane-check: JET must name the admitted native jet compiler binary" >&2
+  exit 64
 fi
 
-# Independent Cargo targets must all report their errors in one check.
-keep_going=0
-for arg in "$@"; do
-  if [ "$arg" = --keep-going ]; then keep_going=1; break; fi
-done
-if [ "$keep_going" -eq 0 ]; then set -- --keep-going "$@"; fi
-
-# /tmp is RAM-backed here, and a check can fork rustc: keep scratch on disk and
-# skip incremental artifacts, which reached 24G in one target dir.
+# /tmp is RAM-backed here: keep scratch, the assembled unit and logs on disk.
 scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-dev/scratch}"
 mkdir -p "$scratch"
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
-export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
-# One rustc per hardware thread put this machine into swap on a cold build.
-# Four keeps a single holder near ~8G peak while staying fast on a warm target
-# dir, while the slot gate below bounds shared resource pressure.
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+tmp="$(mktemp "$scratch/jet-lane-check.XXXXXX")"
+
+if [ "$#" -eq 1 ]; then
+  target="$(realpath -- "$1")"
+else
+  target="$repo/Compiler"
+fi
+check_dir="$repo"
 
 # A memory floor alone is not enough: concurrent callers can read "plenty free"
-# in the same instant and then all fork together. The floor has to be paired
-# with a hard limit on how many checks may run at once. `flock` gives us that: at most
-# JET_CHECK_SLOTS lanes hold a slot, the rest block until one frees.
+# in the same instant and then all start together. The floor has to be paired
+# with a hard limit on how many checks may run at once. `flock` gives us that: at
+# most JET_CHECK_SLOTS lanes hold a slot, the rest block until one frees. Each
+# check runs in its own memory-capped user scope (JET_CHECK_MEM, default 20G:
+# the whole-compiler check measured 15.4G). A host without a systemd user
+# session (hosted CI) sets JET_CHECK_MEM=off and relies on its own VM limit.
 floor_mb="${JET_MIN_FREE_MB:-8000}"
-slots="${JET_CHECK_SLOTS:-3}"
+slots="${JET_CHECK_SLOTS:-2}"
 lockdir="${TMPDIR}/jet-check-slots"
 mkdir -p "$lockdir"
 
@@ -85,13 +88,17 @@ run_check() {
     echo "lane-check: waiting for memory (${avail}MB < ${floor_mb}MB floor)" >&2
     sleep 10
   done
-  timeout 1800 Tools/agent/jet-env cargo check "$@" >"$tmp" 2>&1
+  local scope=(systemd-run --user --scope -q -p MemoryMax="${JET_CHECK_MEM:-20G}" -p MemorySwapMax=0)
+  [ "${JET_CHECK_MEM:-}" = off ] && scope=()
+  (
+    cd "$check_dir" || exit 1
+    JET_KEEP_GOING=1 timeout 1800 "${scope[@]}" "$repo/Tools/agent/jet-env" jet check "$target"
+  ) >"$tmp" 2>&1
 }
 
-tmp="$(mktemp "$scratch/jet-lane-check.XXXXXX")"
 # Keep the complete stream even when the caller interrupts the check. A
 # missing .rc after SIGKILL means incomplete evidence, never success.
-trap 'status=$?; printf "%s\n" "$status" > "$tmp.rc"; printf "lane-check: complete Cargo log: %s\n" "$tmp" >&2' EXIT
+trap 'status=$?; printf "%s\n" "$status" > "$tmp.rc"; printf "lane-check: complete compiler log: %s\n" "$tmp" >&2' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -103,7 +110,7 @@ for slot in $(seq 1 "$slots"); do
   exec 9>"$lockdir/$slot"
   if flock -n 9; then
     got_slot=1
-    run_check "$@"
+    run_check
     code=$?
     flock -u 9
     break
@@ -113,7 +120,7 @@ done
 if [ "$got_slot" -eq 0 ]; then
   exec 9>"$lockdir/1"
   flock 9
-  run_check "$@"
+  run_check
   code=$?
   flock -u 9
 fi
@@ -140,7 +147,7 @@ if (errors.length === 0 && code === 0) {
   process.exit(0);
 }
 if (errors.length === 0) {
-  console.log(`CHECK FAILED — cargo check exited ${code} without a compiler diagnostic`);
+  console.log(`CHECK FAILED — jet check exited ${code} without a compiler diagnostic`);
   process.stdout.write(text);
   process.exit(0);
 }

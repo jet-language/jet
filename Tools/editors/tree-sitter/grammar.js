@@ -1,7 +1,7 @@
 // tree-sitter grammar for Jet.
 //
-// Tracks the canonical syntax in Source/Syntax.rs (keyword/sigil/marker
-// constants, each with a decision ID — invariant I7) plus the real code in
+// Tracks the canonical syntax registry in Compiler/JetFoundation/Data/Syntax/
+// (keyword/sigil/marker constants, each with a decision ID — invariant I7) plus the real code in
 // Examples/features/*.jet. This grammar exists for editor syntax highlighting
 // (Zed), not full compilation: it is permissive where the real parser is
 // strict, but every keyword/sigil/marker it names is a *current* one. Retired

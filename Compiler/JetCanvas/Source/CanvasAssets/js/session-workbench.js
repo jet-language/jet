@@ -524,14 +524,13 @@
   };
   // D-DX-DEVTOOLS-UX1=D / card #2429: Canvas renders the canonical
   // BrowserWebAdapter panel/view projection published by Session and the
-  // first-party DevtoolsPanelCatalog (crates/jet-codegen/src/Prelude/Core/
-  // DevtoolsPanelCatalog.rs). Panel identity, order, availability, and
+  // first-party devtools panel catalog. Panel identity, order, availability, and
   // event-to-panel membership are decided once, server-side; this layer
   // only displays the published panels/nodes and reflects selection back.
   const JET_DEVTOOLS_PROTOCOL = "jet.devtools.v1";
   // BrowserSessionState is a closed six-value UX state, not a panel
   // catalog. `token` matches the frozen pill/lens CSS in
-  // crates/jet-canvas/src/html.rs (which still spells these with
+  // CanvasAssets/Html.jet (which still spells these with
   // underscores); `label` is the human-readable text.
   const DEVTOOLS_STATES = {
     idle: { token: "idle", label: "Idle" },
@@ -578,7 +577,7 @@
   }
 
   // Resolve a panel by its canonical id or its canonical title. Static pill
-  // markup (crates/jet-canvas/src/html.rs) still spells a few panels by
+  // markup (CanvasAssets/Html.jet) still spells a few panels by
   // title; id and title are both canonical fields already on the panel, so
   // this never invents panel identity or a fallback panel list.
   function devtoolsPanel(idOrTitle) {

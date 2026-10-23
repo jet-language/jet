@@ -4,12 +4,11 @@ This matrix maps the Jet AST surface to Canvas projection and editing
 responsibilities. It is for Canvas clients and compiler contributors who need to
 know whether a construct has graph semantics, source-backed editing, or only a
 read-only fact view. The enum names are checked against the AST definitions in
-[`items.rs`](../../../crates/jet-foundation/src/AST/items.rs),
-[`statements.rs`](../../../crates/jet-foundation/src/AST/statements.rs),
-[`expressions.rs`](../../../crates/jet-foundation/src/AST/expressions.rs),
-[`types.rs`](../../../crates/jet-foundation/src/AST/types.rs),
-[`patterns.rs`](../../../crates/jet-foundation/src/AST/patterns.rs), and
-[`lvalues.rs`](../../../crates/jet-foundation/src/AST/lvalues.rs). The Canvas
+[`Items.jet`](../../../Compiler/JetFoundation/Source/AST/Items.jet),
+[`Statements.jet`](../../../Compiler/JetFoundation/Source/AST/Statements.jet) (including `LValue`),
+[`Expressions.jet`](../../../Compiler/JetFoundation/Source/AST/Expressions.jet),
+[`Patterns.jet`](../../../Compiler/JetFoundation/Source/AST/Patterns.jet), and
+[`Types.jet`](../../../Compiler/JetFoundation/Source/Types/Types.jet). The Canvas
 projection and transaction tests live in
 [`tests/canvas.rs`](../../../tests/canvas.rs); the wire contract is
 [`canvas-protocol.md`](canvas-protocol.md). Terms such as stream follow the

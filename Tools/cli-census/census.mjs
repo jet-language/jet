@@ -28,21 +28,13 @@ const SCAN_ROOTS = ["Docs", "Examples", "tests", "Tools"];
 // man, and completion snapshots are renderings of the registry itself and
 // would feed the census its own output.
 const EXCLUDED_PREFIXES = ["Tools/tower/.tower/", "Tools/cli-census/", "tests/cli/"];
-// The Jet table is the source (D-JETCLI-HOST1=A); the Rust host keeps a
-// frozen copy that `node Compiler/Bootstrap/check-command-table.mjs` holds
-// equal, so both carry the same ranks.
+// The Jet table is the one command source (D-JETCLI-HOST1=A).
 const TABLES = [
   {
     path: join(ROOT, "Compiler/JetFoundation/Source/Registry/CLICommands.jet"),
     open: "JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{\n",
     close: "\n} }\n",
     rowPattern: /^ {4}(?:JetCLICommandSpec)?\{\n[\s\S]*?^ {4}\},?$/gm,
-  },
-  {
-    path: join(ROOT, "crates/jet-foundation/src/CLICommands.rs"),
-    open: "pub const COMMANDS: &[CommandSpec] = &[\n",
-    close: "\n];\n",
-    rowPattern: /^ {4}CommandSpec \{\n[\s\S]*?^ {4}\},?$/gm,
   },
 ];
 

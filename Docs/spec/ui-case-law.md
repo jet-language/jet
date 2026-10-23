@@ -3,7 +3,7 @@
 This page defines capitalization for human-readable Jet UI text. It covers CLI
 help, diagnostics, status rows, and interactive controls; machine-parsed data
 is excluded. The renderer and help schemas are in
-`crates/jet-foundation/src/Diagnostics.rs` and `crates/jet-cli/src/CLI.rs`,
+`Compiler/JetFoundation/Source/Diagnostics/Render.jet` and `Compiler/JetCli/Source/Cli/Help.jet`,
 with byte-sensitive examples in the CLI and diagnostic snapshots.
 
 D-CASE-CHROME1=C and D-CASE-PROSE1=A were ratified on 2026-08-25 on card

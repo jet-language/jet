@@ -1,10 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { goldenVerdict, normalizeUi, renderedOnly, snapshotVerdict, uiEntries, uiInvocation } from './test-corpora.mjs';
-import { rustCode, inventory } from './test-harness-inventory.mjs';
-import { safeGolden, stripVetted } from './golden-safety.mjs';
 
 const entry = { stem: 'basics/hello', path: '/source/hello.jet' };
 const expected = { out: 'hello\n', err: null, stderrOut: null };
@@ -72,32 +68,4 @@ test('UI discovery excludes fixed sources and chooses canonical directory entrie
   assert.ok(entries.length > 0);
   assert.ok(entries.every((e) => !e.shown.includes('.fixed.')));
   assert.ok(entries.every((e) => e.expected.endsWith('.stderr') || e.expected.endsWith('/stderr')));
-});
-test('Rust census ignores embedded programs, nested comments and raw strings', () => {
-  const code = rustCode('jet::compile(); /* /* jetpack::fake() */ comment */ let a = r###"jet_sema::fake()"###; let b = "jet::fake()"; let c: &\'a str;');
-  assert.match(code, /jet::compile/u);
-  assert.doesNotMatch(code, /fake|comment/u);
-  assert.match(code, /&'a str/u);
-});
-test('inventory is complete, unique, and retains the mixed golden/UI targets', () => {
-  const rows = inventory();
-  const files = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((item) => item.isDirectory() ? files(`${directory}/${item.name}`) : item.isFile() && item.name.endsWith('.rs') ? [`${directory}/${item.name}`] : []);
-  const root = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/u, '');
-  assert.deepEqual(rows.map((r) => r.file), files(`${root}/tests`).map((file) => file.slice(root.length + 1)).sort());
-  assert.equal(new Set(rows.map((r) => r.file)).size, rows.length);
-  for (const file of ['tests/golden.rs', 'tests/diagnostic_snapshots.rs']) {
-    const row = rows.find((r) => r.file === file);
-    assert.equal(row.class, 'c');
-    assert.match(row.dependencies, /jet/u);
-  }
-});
-
-test('I1 removes only registered modules/regions and reads keywords as code', () => {
-  const fixture = 'mod jet_mem { /* outer /* nested */ end */ unsafe { ffi() } }\nfn main() { print(\"unsafe\"); }\n';
-  assert.equal(safeGolden(fixture, 'basics/hello'), null);
-  assert.match(safeGolden(fixture + 'fn user() { unsafe { pointer() } }\n', 'basics/hello'), /I1/u);
-  const marker = '// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe\nunsafe { ffi() }\n// JET_VETTED_UNSAFE_END: jet_watch_process_probe\nfn main() {}\nunsafe { user() }\n';
-  const stripped = stripVetted(marker);
-  assert.doesNotMatch(stripped, /ffi/u);
-  assert.match(stripped, /user/u);
 });

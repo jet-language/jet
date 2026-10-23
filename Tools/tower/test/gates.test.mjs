@@ -867,9 +867,9 @@ test('ratifying a syntax-group decision appends the standard chores to criteria'
   st.mutate((s) => db.ratify(s, 'D-SYN1', 'A', null, 'owner'));
   const texts = st.load().cards[0].criteria.map(i => i.text);
   assert.deepEqual(texts, [
-    'Syntax.rs entry updated',
+    'Data/Syntax registry entry updated',
     'syntax-decisions.md log entry',
-    'jet devtools grammars regenerated',
+    'editor grammars regenerated (editor-grammars.mjs --write)',
     'snapshots re-blessed',
   ]);
 });

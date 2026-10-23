@@ -5,7 +5,7 @@ naming, failure, ownership, effects, allocation, diagnostics, and evidence
 rules for a public function, method, or type. The executable surface lives in
 [`Core.jet`](../../Compiler/Prelude/Core.jet) and the Jet source
 under [`Core/`](../../Core/); accepted syntax and compiler-owned names live in
-[`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs). The
+the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/). The
 [Core surface ledger test](../../tests/core_surface_ledger.rs) and its
 [checker](../../Tools/agent/check-core-surface-ledger.mjs) provide focused
 machine checks; runnable examples live under

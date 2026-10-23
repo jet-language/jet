@@ -8,16 +8,15 @@ inventory or a progress log.
 [Ratified syntax decisions](syntax-decisions.md) are the rationale and decision
 record for this contract. A decision ID is a citation, not an implementation
 status: only ratified decisions define the language. The canonical lexical ledger
-is [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs), and
+is the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/), and
 [`tests/decisions.rs`](../../tests/decisions.rs) checks that the ratified decision
 surface and ledger agree. The parser and semantic checker are the executable
-language rules; the reference implementation is in
-[`crates/jet-parser`](../../crates/jet-parser/) and
-[`crates/jet-sema`](../../crates/jet-sema/). The Prelude's Jet declarations are
+language rules; the implementation is in
+[`Compiler/JetParser`](../../Compiler/JetParser/) and
+[`Compiler/JetSema`](../../Compiler/JetSema/). The Prelude's Jet declarations are
 under [`Compiler/Prelude`](../../Compiler/Prelude/) and
-the core library under [`Core/`](../../Core/). The Rust-hosted compiler is the
-reference implementation while the compiler is ported to Jet; this document
-states the contract, not where it is implemented.
+the core library under [`Core/`](../../Core/). This document states the
+contract, not where it is implemented.
 
 The [`Examples/`](../../Examples/) tree is the executable form of the examples in
 this document. Prefer a feature example under `Examples/features/` when checking
@@ -150,7 +149,7 @@ vocabulary](vocabulary.md).
 ## Core grammar
 
 The following compact grammar shows the surface that the rules below rely on;
-the parser and [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs) own the
+the parser and the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/) own the
 complete token ledger. `;` is shown only as the internal terminator `NL`, not as
 source syntax.
 
@@ -1535,9 +1534,9 @@ This section defines effect inference, authority, and the checked tooling that
 exposes those facts. It is for authors of functions and packages, and for tools
 that consume checked programs. Executable truth lives in the [effect
 table](../../Compiler/Prelude/Effects.jet), [syntax
-tables](../../crates/jet-foundation/src/Syntax/), [sema effect
-checker](../../crates/jet-sema/src/Sema/Effects.rs), [inspect
-projections](../../Source/CmdExpand.rs), and [expand
+tables](../../Compiler/JetFoundation/Data/Syntax/), [sema effect
+checker](../../Compiler/JetSema/Source/Effects/), [inspect
+projections](../../Compiler/JetCli/Source/Cli/Expand.jet), and [expand
 tests](../../tests/cli_parts/expand.rs).
 
 Every function has an **effect set**: the ambient powers exercised by its body,
@@ -3258,7 +3257,8 @@ source. Regeneration is explicit. Writing the default destination with a
 different recorded command is E2104, an unreadable input or unwritable output
 is E2105, and an invalid schema or input with no record is E3208. The generic
 binder implementation and CLI dispatch live in
-[`Source/CmdDevTools.rs`](../../Source/CmdDevTools.rs). (D-BOUND-BIND1, D-NAME-FILES1)
+[`Bindings.jet`](../../Compiler/JetCli/Source/Cli/Bindings.jet) and
+[`InspectB.jet`](../../Compiler/JetCli/Source/Cli/InspectB.jet). (D-BOUND-BIND1, D-NAME-FILES1)
 
 ## Browser effects and web values
 
@@ -3317,8 +3317,7 @@ queued payloads and invalidation targets under
 `$HOME/.local/state/jet/web-query-queue.v1`; it uses a temporary file and atomic
 rename and reports a durability error when no usable state directory or queue
 file is available. Query state and queue transitions are defined by
-[`Core/Web/Query.jet`](../../Core/Web/Query.jet) and
-[`CoreLib/Top/WebQuery.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs). (D-WEBQUERY1)
+[`Core/Web/Query.jet`](../../Core/Web/Query.jet). (D-WEBQUERY1)
 
 ### Events and hooks
 
@@ -3535,8 +3534,9 @@ or the print-only entry plus the commented command homes
 name is E2104. `--annotated` includes commented example dependencies.
 The same command family also provides `jet new service|route|job|migration` for
 backend source scaffolds; those subcommands have their own `--path`, `--route`,
-`--model`, SQL, risk, lock, and preview/apply options. The scaffold source is
-the command implementation in [`Source/CmdCompile.rs`](../../Source/CmdCompile.rs).
+`--model`, SQL, risk, lock, and preview/apply options. The `new` command
+implementation is in [`Front.jet`](../../Compiler/JetCli/Source/Cli/Front.jet);
+the backend scaffold subcommands are not yet ported and report that.
 (D-CLI-RECIPE1, D-ILE1, D-CLI-BARE1, D-VERDICT-678-1)
 
 Inside a package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
@@ -3762,7 +3762,7 @@ retains the stable `effect roles` header and grouped lens lines including
 are skipped in the bare form. In JSON, a usage error starts with the
 `jet.status/v1` envelope and an unknown lens carries `"code":"E2941"`.
 
-Lenses live in one static registry in `Source/CmdExpand.rs`. A future ratified
+Lenses live in one static registry in `Compiler/JetCli/Source/Cli/Expand.jet`. A future ratified
 projection adds a row rather than a new subcommand or mechanism-specific flag
 (D-EXPANDCLI1).
 
@@ -3989,8 +3989,8 @@ completion, and typo suggestions. Daily commands such as `jet run`, `jet build`,
 actions use `jet inspect`; among them are `semindex`, `output`, `expand`,
 `schema`, `codemod`, `compiler`, `graph`, and `outdated`. A bare moved word is
 E2101 and names its canonical route; it is not a compatibility alias. The
-registry source is `crates/jet-cli/src/CLI.rs` and the runtime dispatch is in
-`Source/` (D-SHAPE6, D-CLI-ONE1).
+registry source is `Compiler/JetFoundation/Source/Registry/CLICommands.jet` and the runtime
+dispatch is in `Compiler/JetCli/Source/Cli/` (D-SHAPE6, D-CLI-ONE1).
 
 ### Typed entry signatures
 

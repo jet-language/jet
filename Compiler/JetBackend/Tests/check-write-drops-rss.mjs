@@ -13,10 +13,21 @@
 // usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]
 // Exits 1 when any shape fails to build or run, or its peak RSS grows by more
 // than 8 MB from the small to the large round count (default 25 and 200).
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { gnuTime, peakRss } from '../../../Tools/agent/stage1/native-factory.mjs';
+
+// GNU time, never the shell keyword.
+function gnuTime() {
+  const found = spawnSync('bash', ['-c', 'type -P time'], { encoding: 'utf8' }).stdout.trim();
+  if (!found || !spawnSync(found, ['--version'], { encoding: 'utf8' }).stdout.includes('GNU')) throw Error('GNU time is required to measure native stages');
+  return found;
+}
+function peakRss(timing) {
+  const text = fs.existsSync(timing) ? fs.readFileSync(timing, 'utf8') : '';
+  const match = /Maximum resident set size \(kbytes\): (\d+)/.exec(text);
+  return match ? Number(match[1]) : null;
+}
 
 const [jet, work, smallArg, largeArg] = process.argv.slice(2);
 if (!jet || !work) { console.error('usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]'); process.exit(64); }

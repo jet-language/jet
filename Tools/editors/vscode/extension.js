@@ -3,9 +3,8 @@
 // Server discovery, in order:
 //   1. jet.executablePath setting (supports ${workspaceFolder} and ~)
 //   2. legacy jet.languageServerPath setting
-//   3. <workspaceFolder>/target/debug/jet   (developing the compiler itself, trusted workspaces only)
-//   4. `jet` on PATH                        (installed, or editor launched from dev shell)
-// `jet self lsp` does not invoke rustc, so the plain cargo binary is enough.
+//   3. `jet` on PATH                        (installed, or editor launched from dev shell)
+// `jet self lsp` does not invoke a host compiler, so the plain jet executable is enough.
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -59,13 +58,6 @@ function findServer(workspaceFolder) {
     vscode.window.showWarningMessage(
       `${configuredName} is set to "${expanded}" but nothing exists there; falling back to auto-discovery.`
     );
-  }
-
-  if (vscode.workspace.isTrusted && workspaceFolder) {
-    const debugBin = path.join(workspaceFolder, "target", "debug", "jet");
-    if (fs.existsSync(debugBin)) {
-      return debugBin;
-    }
   }
 
   // Bare command: the OS resolves it from PATH when the server spawns.
@@ -873,8 +865,7 @@ function activate(context) {
     client.start().catch(() => {
       vscode.window.showErrorMessage(
         `Jet language server failed to start (tried: ${serverPath}). ` +
-          `Build it with \`nix develop -c cargo build\` in the jet repo, ` +
-          `or set jet.languageServerPath to a jet binary.`
+          `Point jet.executablePath at a jet executable, or put \`jet\` on PATH.`
       );
     });
   }

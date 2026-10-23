@@ -1818,10 +1818,8 @@ redact the rejected value.
 
 `core.process` is the process-boundary reference for application and tool
 authors who launch or supervise child processes. Its executable contract is
-defined by [`Core/Process/Process.jet`](../../../Core/Process/Process.jet), the
-process checks in
-[`process_ui.rs`](../../../crates/jet-sema/src/Sema/CheckerCoreLib/process_ui.rs),
-and tests such as
+defined by [`Core/Process/Process.jet`](../../../Core/Process/Process.jet) and
+tests such as
 [`tests/corelib_parts/system.rs`](../../../tests/corelib_parts/system.rs).
 The export registry is
 [`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
@@ -4442,7 +4440,7 @@ targets; arbitrary function values or string-selected jobs are not admitted.
 ## `core` — built Core modules
 
 The canonical module registry is [`Core.jet`](../../../Compiler/Prelude/Core.jet),
-and the loader's exported list is [`CoreModuleExports.rs`](../../../crates/jet-foundation/src/CoreModuleExports.rs).
+and the loader's exported list is the generated [`CoreCallRows.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet).
 The list below is the source-facing module inventory. A module may be a
 namespace-only provider boundary; its presence in the registry does not imply
 that every provider operation is available on every target.

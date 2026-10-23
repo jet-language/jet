@@ -2,7 +2,7 @@
 
 Jet sends no telemetry. This is the durable policy identified by
 `D-TELEMETRY1=A`. This page is for users deciding when a command may dial out.
-The executable policy is in [`Source/Doctor.rs`](../../../Source/Doctor.rs),
+The executable policy is in [`Doctor.jet`](../../../Compiler/JetCli/Source/Cli/Doctor.jet),
 and [`tests/report.rs`](../../../tests/report.rs) audits it.
 
 The compiler and package tools do not collect or transmit command use, build

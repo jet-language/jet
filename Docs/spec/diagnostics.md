@@ -155,21 +155,22 @@ More: jet-lang.dev/e/E3301
 `tests/cross.rs` compiles the same `fs.read` fixture with
 `compile_no_os`, checks E3301 and the `no-OS` wording, and compares the
 byte-exact rendered output. The registry row is E3301 in
-`Compiler/Prelude/Diagnostics.jet`; the no-OS compilation path is
-`Source/lib.rs::compile_no_os`. Hosted and no-OS behavior therefore share the
-same diagnostic renderer while the target rule remains explicit.
+`Compiler/Prelude/Diagnostics.jet`; the checker raises it from the no-OS target
+environment in `Compiler/JetSema/Source/Sema/Calls/Core.jet`. Hosted and no-OS
+behavior therefore share the same diagnostic renderer while the target rule
+remains explicit.
 
 ## Explain and website output
 
 `jet explain <CODE>` resolves the same registry rows offline through
-[`Explain`](../../crates/jet-cli/src/Explain.rs). The website is another
+[`Explain.jet`](../../Compiler/JetCli/Source/Cli/Explain.jet). The website is another
 projection of that data: [`Docs/site/generate.jet`](../site/generate.jet) writes
 the error index and [`tests/diagnostic_pages.rs`](../../tests/diagnostic_pages.rs)
 renders each code page from registry rows and snapshots. Neither CLI help nor a
 website page is an alternate diagnostic catalog.
 
 `jet explain <token>` answers a sigil or operator from the syntax dictionary
-([`dictionary.rs`](../../crates/jet-foundation/src/Syntax/dictionary.rs)) in
+([`SyntaxDictionaryData.jet`](../../Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet)) in
 plain words: every meaning by position (`^` before a name moves it; between two
 numbers it raises to a power), an example for each, what happens afterwards, and
 related codes. The REPL `?` and LSP hover show the same text. The registry

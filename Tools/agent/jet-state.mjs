@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { canonicalDataDir, dataFile, findDataDir, historyFile, readJSON } from '../tower/app/paths.mjs';
 import { clearanceOf, laneOf, normalize, validateStoredHistory } from '../tower/app/store.mjs';
 import { hasPendingRepair } from '../tower/app/repair-journal.mjs';
-import { readLedger } from './lexical-ledger.mjs';
+import { readLedger, SYNTAX } from './lexical-ledger.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -311,10 +311,10 @@ export function collectDigest({ root = ROOT, subject, devRef = 'dev', baseRef = 
     providers.tower = provider('available', { revision: state.meta.rev, path: relative(root, boardPath) });
   } catch (error) { providers.tower = provider('unknown', errorText(error)); state = null; }
   let syntax = [];
-  const syntaxBefore = stamp(resolve(root, 'crates/jet-foundation/src/Syntax.rs'));
+  const syntaxBefore = stamp(resolve(root, SYNTAX));
   try {
     syntax = readLedger(root);
-    inputs.push({ path: 'crates/jet-foundation/src/Syntax.rs::LEXICAL_LEDGER',
+    inputs.push({ path: `${SYNTAX}::LEXICAL_LEDGER`,
       sha256: hash(JSON.stringify(syntax)), identity_kind: 'parsed-registry-rows' });
     providers.syntax = provider('available');
   }
@@ -346,10 +346,10 @@ export function collectDigest({ root = ROOT, subject, devRef = 'dev', baseRef = 
     dirty: gitData?.identity.dirty ?? true, receipts, witnesses }) : { decisions: [], cards: [], open_ballots: [], historical_context: [] };
   const refs = new Set(rows.decisions.map(d => d.ref));
   const idioms = syntax.filter(row => match(row).length || refs.has(row.decision)).map(row => ({ ...row,
-    authoritative_ref: 'crates/jet-foundation/src/Syntax.rs::LEXICAL_LEDGER', observed: 'registry-declaration-present',
+    authoritative_ref: `${SYNTAX}::LEXICAL_LEDGER`, observed: 'registry-declaration-present',
     runtime_proof: 'unknown' }));
   const consistency = [];
-  if (stamp(resolve(root, 'crates/jet-foundation/src/Syntax.rs')) !== syntaxBefore
+  if (stamp(resolve(root, SYNTAX)) !== syntaxBefore
     || inputs.some(input => input.observed_stamp && stamp(resolve(root, input.path)) !== input.observed_stamp)) {
     consistency.push('Source/registry/receipt identity changed during collection');
   }

@@ -5,9 +5,9 @@ seams around it. It is for the devserver, Canvas client, and Jetpack
 contributors who need one model for single files, packages, and workspaces. The
 wire shape is defined by [`canvas-protocol.md`](canvas-protocol.md); vocabulary
 is in [Jet vocabulary](../vocabulary.md). The executable boundary is in
-[`schema_api.rs`](../../../crates/jet-devserver/src/Canvas/schema_api.rs),
-[`project_scan.rs`](../../../crates/jet-devserver/src/Canvas/project_scan.rs),
-[`project_transactions.rs`](../../../crates/jet-devserver/src/Canvas/project_transactions.rs),
+[`SchemaApi.jet`](../../../Compiler/JetDevserver/Source/Canvas/SchemaApi.jet),
+[`ProjectScan.jet`](../../../Compiler/JetDevserver/Source/Canvas/ProjectScan.jet),
+[`ProjectTransactions.jet`](../../../Compiler/JetDevserver/Source/Canvas/ProjectTransactions.jet),
 and the graph/editor seams are linked below.
 
 Canvas projects source; it does not introduce a semantic project database. Jet
@@ -201,14 +201,14 @@ contract.
 
 ### Data-graph model
 
-[`graph_projection.rs`](../../../crates/jet-devserver/src/Canvas/graph_projection.rs)
-and [`graph_json.rs`](../../../crates/jet-devserver/src/Canvas/graph_json.rs) map
+[`GraphProjection.jet`](../../../Compiler/JetDevserver/Source/Canvas/GraphProjection.jet)
+and [`GraphJson.jet`](../../../Compiler/JetDevserver/Source/Canvas/GraphJson.jet) map
 source to graph facts. A stable `node_descriptor_id` lets the render layer use
 descriptor metadata instead of re-deriving style from `kind` string matching.
 
 ### Semantic node descriptors
 
-[`node_catalog.rs`](../../../crates/jet-devserver/src/Canvas/node_catalog.rs) owns
+[`NodeCatalog.jet`](../../../Compiler/JetDevserver/Source/Canvas/NodeCatalog.jet) owns
 presentation, palette, transaction, and default-editor metadata for each node
 kind. The descriptor shape is conceptually:
 
@@ -265,7 +265,7 @@ Unknown or stale source revisions refuse the operation without mutating source.
 
 ### Source-sync bus
 
-[`edit_actions.rs`](../../../crates/jet-devserver/src/Canvas/edit_actions.rs)
+[`EditActions.jet`](../../../Compiler/JetDevserver/Source/Canvas/EditActions.jet)
 keeps the edit transaction boundary. Each operation validates the requested
 revision, produces ordinary Jet source, formats and checks it, then publishes
 through the shared source seam. Undo, redo, source-backed paste, comment hints,

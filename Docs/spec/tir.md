@@ -2,19 +2,17 @@
 
 This page is the compiler contract at the boundary between semantic analysis and
 executable lenses. It covers totality, the read-only fact channel, lowering,
-and coverage obligations. The current host implementation is
-`crates/jet-codegen/src/Codegen/TIR/mod.rs` and its exhaustive matches; the
-staged self-host port under `Compiler/JetFoundation/Source/TIR/TIR.jet` must
-preserve the same contract.
+and coverage obligations. The implementation is
+`Compiler/JetFoundation/Source/TIR/TIR.jet` and the exhaustive matches of
+its consumers.
 
-TIR is a semantic contract, not a commitment to Rust as a permanent
-implementation and not a claim that the self-host port is already the active
-compiler. A port may change representation, but it may not move semantic
+TIR is a semantic contract, not a commitment to one permanent
+representation. A port may change representation, but it may not move semantic
 choices into an executable lens or create a second meaning.
 
 ## One semantic core (R12 / D-ONECORE1=A)
 
-There is one structured semantic core. Every executable lens—Rust AOT emit,
+There is one structured semantic core. Every executable lens—native AOT,
 interpreter, and web—consumes that core exhaustively. Surface sugar
 expands during lowering or an earlier sema rewrite into core nodes that those
 lenses already handle. A coverage miss is an internal compiler error, never a

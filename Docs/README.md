@@ -43,15 +43,14 @@ strategic guidance document.
 
 | Question | Source of truth |
 |---|---|
-| Keywords, sigils, and names | [Syntax registry](../crates/jet-foundation/src/Syntax.rs) and [examples](../Examples/features/) |
-| Language checks | The semantic checker ([`crates/jet-sema/`](../crates/jet-sema/src/)) and [tests](../tests/) |
-| Core APIs and runtime meaning | [Core library sources](../Core/) and the [Prelude](../crates/jet-codegen/src/Prelude/) |
+| Keywords, sigils, and names | [Syntax registry](../Compiler/JetFoundation/Data/Syntax/) and [examples](../Examples/features/) |
+| Language checks | The semantic checker ([`Compiler/JetSema/`](../Compiler/JetSema/Source/)) and [tests](../tests/) |
+| Core APIs and runtime meaning | [Core library sources](../Core/) and the [Prelude](../Compiler/Prelude/) |
 | Diagnostic text | [Diagnostic registry](../Compiler/Prelude/Diagnostics.jet), [UI snapshots](../tests/ui/), and `jet explain <CODE>` |
-| Commands and flags | `jet help` and the [CLI implementation](../crates/jet-cli/src/) |
+| Commands and flags | `jet help` and the [command registry](../Compiler/JetFoundation/Source/Registry/CLICommands.jet) |
 
-The Rust-hosted compiler is the production and reference implementation; the
-Jet-authored compiler under `Compiler/` is staged work that becomes
-authoritative only through its bootstrap gates. See
+The Jet-authored compiler under `Compiler/` is the production implementation;
+it builds itself from an admitted seed compiler. See
 [architecture](spec/architecture.md) for the compiler-hosting boundary.
 
 ## Evidence and proposals

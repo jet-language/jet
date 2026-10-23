@@ -72,19 +72,15 @@ Program-side require, panic, and index-miss producers run registered cleanup
 before the call only when they cannot emit a real Propagate (plain mode,
 cleanup-masked code, transactions, or a closed block). Otherwise the Poll stop
 edge owns that cleanup exactly once, and an unconditional stop's impossible
-resume seals `Stopped`. This minimal runtime-port seam is mirrored in
-`crates/jet-codegen/src/Codegen/TIR/{mir,tir_to_mir_expr}.rs`; that seed and
-verification mirror dies at the Rust cutover.
-The Rust seed's plain `TOrFallback::Panic` path in `tir_to_mir_expr.rs`
-emits RequireStop then Unreachable without pre-call cleanup, unlike the Jet
-`jet_codegen_lower_fallback_panic` path in `Statements.jet`. This seam preserves
-that pre-existing plain-mode divergence rather than changing seed semantics.
+resume seals `Stopped`. The Jet `jet_codegen_lower_fallback_panic` path in
+`Statements.jet` runs that pre-call cleanup on the plain `TOrFallback::Panic`
+path too.
 
 The factory selects `jet_driver_compile_mir` for both native programs and
 runtime-library objects. `JetDriverCompileRequest.native_stop_points` selects
 returning-stop MIR before the shared `lower_functions` lowers functions and
 closures; runtime-library objects leave it false. It does not enable comptime
-budgets. This matches the Rust task
+budgets. This matches the task
 boundary's panic-to-TaskFailure catch rather than letting an ordinary native
 task panic abort its whole process. Plain/no-task MIR production uses the
 same false-mode implementation; its output is expected to remain byte-identical.
@@ -96,8 +92,7 @@ owned Stop stays in the control slot, while Check/Propagate delivery of it is
 masked even inside deferred thunks and resource closes. Cancellation and
 deadlines do not interrupt those
 closes. A new panic during cleanup with a pending Stop is process-fatal (70),
-matching the Rust seed's panic-during-unwinding abort semantics
-(`crates/jet-codegen/src/Prelude/Scheduler.rs:234–244`). No additional TLS state
+the same abort a panic during unwinding gets. No additional TLS state
 or specialized plain cleanup call graph is introduced.
 The Source acceptance runner
 `Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
@@ -213,32 +208,13 @@ secret with the same leaf spelling. The SMTP provider adapter supplies the
 runtime's TLS, wiping, signing, cancellation, and deadline callbacks. Optional
 native fields cross the checked `JetOutcome` boundary on both value and place
 reads, including borrowed payload projections.
-The generated Rust tables are projections, not a second API catalog. Never
-hand-edit them. The main generated views are
-[`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
-[`core_calls.rs`](../../crates/jet-foundation/src/Syntax/core_calls.rs), and the
-corresponding generated projections in the Prelude. Rust implementation files
-such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
-[`PortableCore.rs`](../../crates/jet-codegen/src/Prelude/PortableCore.rs), and
-[`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
-leaves and adapters; they do not become an independent public API registry.
-
-### Borrowed UI-host callback scopes
-
-The seed `HostServices.rs` adapter exposes borrowed hosts only through the
-lexical `jet_ui_with_host` callback. Its lifetime-bound restoration guard and
-unsafe installer are private: safe callers cannot retain, forget, or reorder a
-guard while leaving a borrowed host in thread-local storage. The stored thin
-pointer addresses the wrapper's live stack-held host reference; no trait-object
-lifetime is transmuted. Unwinding restores the predecessor before that reference
-or the host borrow ends.
-
-Current-host access holds its mutable thread-local borrow throughout the host
-callback. Re-entry is refused with a diagnostic panic before a second mutable
-host reference can be created; nested host installation during that callback
-is likewise refused. Ordinary nested lexical host scopes remain valid.
-`crates/jet-codegen/tests/ui_host_scope.rs` covers the rejected dangling guard
-and recursive-callback rejection with subsequent access and unwind recovery.
+The generated registry tables are projections, not a second API catalog. Never
+hand-edit them. The main generated view is
+[`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
+with the corresponding generated projections in the Prelude. Native runtime
+files under [`Compiler/JetRuntime`](../../Compiler/JetRuntime/) provide
+registered leaves and adapters; they do not become an independent public API
+registry.
 
 ## Jet semantics and native leaves
 

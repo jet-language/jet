@@ -6,7 +6,7 @@ reproducible automation and maintainers passing explicit state to child
 processes. Command-line flags remain the normal user interface. The executable
 name checks are in [`tests/syntax_reconciliation.rs`](../../../tests/syntax_reconciliation.rs),
 the effect surface is
-[`crates/jet-foundation/src/Syntax/effects_surface.rs`](../../../crates/jet-foundation/src/Syntax/effects_surface.rs),
+[`EffectsSurface.jet`](../../../Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet),
 and the verification defaults are in
 [`Tools/agent/verify-full.sh`](../../../Tools/agent/verify-full.sh).
 

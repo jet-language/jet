@@ -50,7 +50,7 @@
           export JET_RUST_MUSL_AR="${jetMuslAR}"
         '';
 
-        # jet build/run shells out to rustc; keep this path in one place.
+        # Tools `jet build`/`jet run` shell out to; rustc only builds user `extern rust`.
         jetRuntimePath = pkgs.lib.makeBinPath [
           pkgs.rustc
           pkgs.stdenv.cc
@@ -72,12 +72,11 @@
         jetRuntimeLibraryHook = ''
           export ${jetRuntimeLibraryVariable}="${jetRuntimeLibraryPath}:''${${jetRuntimeLibraryVariable}:-}"
         '';
-        # Cargo builds in the dev shells link through lld: GNU ld links the
-        # multi-hundred-MB debug `jet` (and every integration test binary)
-        # single-threaded. The wrapped lld keeps Nix's dynamic-linker and
-        # rpath handling; bare `pkgs.lld` would emit binaries that cannot find
-        # libgcc_s. Set per shell, not in .cargo/config.toml, so `nix build`
-        # and plain cargo outside the shell keep the stdenv linker.
+        # Foreign helper Cargo builds in the dev shells (user Rust FFI, measured
+        # Rust peers) link through lld. The wrapped lld keeps Nix's
+        # dynamic-linker and rpath handling; bare `pkgs.lld` would emit binaries
+        # that cannot find libgcc_s. Set per shell, not in .cargo/config.toml,
+        # so plain cargo outside the shell keeps the stdenv linker.
         jetCargoLinker = pkgs.writeShellScript "jet-cargo-linker" ''
           exec ${pkgs.stdenv.cc}/bin/cc -B${pkgs.llvmPackages.bintools}/bin/ -fuse-ld=lld "$@"
         '';
@@ -90,72 +89,24 @@
           fetchPnpmDeps = args: pkgs.fetchPnpmDeps (args // { pnpm = pkgs.pnpm_10; });
         };
 
-        jet = pkgs.rustPlatform.buildRustPackage {
-          pname = "jet";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = [ pkgs.rustc ];
-
-          doCheck = true;
-
-          postInstall = ''
-            mv $out/bin/jet-cxx $out/bin/jet-c++
-            # Ship the runtime rlib for the default build facts beside `jet`
-            # (jet-runtime/<key>/), so a first `jet build` links it instead of
-            # compiling the ~130k-line runtime (crates/jet-store/src/runtime.rs).
-            PATH="${jetRuntimePath}:$PATH" bash Tools/packaging/prebuild-runtime.sh $out/bin/jet
-            wrapProgram $out/bin/jet \
-              --prefix PATH : "${jetRuntimePath}" \
-              --prefix ${jetRuntimeLibraryVariable} : "${jetRuntimeLibraryPath}" \
-              --set-default TZDIR "${jetTzdb}" \
-              ${pkgs.lib.optionalString jetHasMuslHelpers ''
-                --set JET_RUST_MUSL_TOOLCHAIN "${jetRustToolchain}" \
-                --set JET_RUST_MUSL_LINKER "${jetMuslLinker}" \
-                --set JET_RUST_MUSL_AR "${jetMuslAR}" \
-              ''}
-          '';
-
-          meta = with pkgs.lib; {
-            description = "Compiler for the Jet programming language";
-            homepage = "https://github.com/jet-language/jet";
-            mainProgram = "jet";
-            platforms = platforms.unix;
-          };
-        };
-        # `jet` in the dev shell: run the cargo-built debug binary from anywhere
-        # in the repo, with rustc + cc on PATH for `jet build`/`jet run`.
+        # `jet` / `jetpack` in the dev shell: run the admitted native binaries
+        # named by $JET / $JETPACK from anywhere, with the runtime tools on PATH.
         mkJetDevBin =
-          name:
+          name: variable:
           pkgs.writeShellScriptBin name ''
             set -euo pipefail
-            root="''${JET_ROOT:-}"
-            if [ -z "$root" ]; then
-              dir="$PWD"
-              while [ "$dir" != "/" ]; do
-                if [ -f "$dir/Cargo.toml" ] && [ -f "$dir/flake.nix" ]; then
-                  root="$dir"
-                  break
-                fi
-                dir=$(dirname "$dir")
-              done
-            fi
-            root="''${root:-$PWD}"
-            bin="$root/target/debug/${name}"
+            bin="''${${variable}:-}"
             export PATH="${jetRuntimePath}:$PATH"
             ${jetRustHelperHook}
             ${jetRuntimeLibraryHook}
-            if [ ! -x "$bin" ]; then
-              echo "jet: no debug binary at $bin" >&2
-              echo "fix: cargo build" >&2
+            if [ -z "$bin" ] || [ ! -x "$bin" ]; then
+              echo "${name}: ${variable} must name the admitted native ${name} binary" >&2
               exit 1
             fi
             exec "$bin" "$@"
           '';
-        jetDev = mkJetDevBin "jet";
-        jetpackDev = mkJetDevBin "jetpack";
+        jetDev = mkJetDevBin "jet" "JET";
+        jetpackDev = mkJetDevBin "jetpack" "JETPACK";
         # D-COMPILER-PROOF-TOOLS1=A: keep Lean development-only. The exact
         # output path is recorded in tests/compiler-proof/toolchain/manifest.json;
         # ordinary compiler/runtime shells must not inherit this closure.
@@ -182,22 +133,10 @@
       in
       {
         packages = {
-          default = jet;
-          inherit jet;
-          jetpack = jet;
           proof-toolchain = proofToolchain;
           rust-musl-toolchain = jetRustToolchain;
         } // pkgs.lib.optionalAttrs jetHasMuslHelpers {
           musl-linker = jetMuslCC;
-        };
-
-        apps.default = {
-          type = "app";
-          program = "${jet}/bin/jet";
-        };
-        apps.jetpack = {
-          type = "app";
-          program = "${jet}/bin/jetpack";
         };
 
         # Fast everyday shell. Keep normal compiler work independent from the
@@ -205,10 +144,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.cargo
-            pkgs.sccache
-            pkgs.clippy
             pkgs.rustc
-            pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
             pkgs.lld
@@ -276,12 +212,8 @@
         devShells.full = pkgs.mkShell {
           packages = [
             pkgs.cargo
-            pkgs.sccache
-            # E4-JP9: resolved-symbol native evaluator authority stop-line.
-            pkgs.clippy
             pkgs.rustc
             pkgs.rustup
-            pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
             # D-FFI-ADA1=A: provision GNAT for C-ABI Ada binder compilation.
@@ -391,15 +323,14 @@
             # grepping/capture (agents misread results otherwise)
             {
               echo "Jet dev shell"
-              echo "  build:    cargo build"
+              echo "  compiler: JET=<admitted native jet>  (built by Tools/agent/native-compiler.mjs)"
               echo "  run:      jet run Examples/features/basics/hello.jet"
-              echo "  package:  jetpack help"
-              echo "  search:   rg \"pattern\" Docs Source tests"
-              echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
+              echo "  package:  jetpack help        (JETPACK=<native jetpack>)"
+              echo "  search:   rg \"pattern\" Docs Compiler Core Jetpack tests"
+              echo "  LSP:      jet lsp"
               echo "  editor:   Tools/editors/vscode/install.sh   (Cursor/VS Code)"
               echo "            Tools/editors/zed/install.sh        (Zed dev extension)"
-              echo "  debug:    jet debug <file.jet>  (native lldb backend: tests/debug.rs)"
-              echo "  release:  nix build .#jet"
+              echo "  debug:    jet debug <file.jet>  (native lldb backend)"
             } >&2
           '';
         };

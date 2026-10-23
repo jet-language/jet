@@ -5,16 +5,14 @@ contracts. It defines the shared `Dyn` and bounded reader/writer model,
 then the selected wire formats and decoder policies. Executable names and
 carriers are registered in [`Core.jet`](../../Compiler/Prelude/Core.jet)
 and sourced from [`Core/Encoding`](../../Core/Encoding/Encoding.jet); the
-shared Prelude ABI is in
-[`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
+native raw leaves are in
+[`RouteAEncoding.jet`](../../Compiler/JetRuntime/Source/RouteAEncoding.jet)
 and source stream policy is in
 [`stream.jet`](../../Core/Encoding/Stream.jet). The native file handle
-constructors remain in
-[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs)
-until the owned-callback holder cutover (#4739) is proven.
-The owned byte/String raw leaves transfer the same allocation on the Rust tier.
+constructors are in
+[`FilesStreams.jet`](../../Compiler/JetRuntime/Source/FilesStreams.jet).
 Native byte Lists currently use word slots, so their C-ABI boundary narrows or
-widens storage instead; packed small-scalar List layout is tracked separately
+widens storage rather than transferring one allocation; packed small-scalar List layout is tracked separately
 in #4749. Borrowed Object-entry views preserve their original ordered backing
 and freeze the input owner through declared return provenance (#4737).
 Source handle protocol methods preserve the shipped `IO` effect. They do not

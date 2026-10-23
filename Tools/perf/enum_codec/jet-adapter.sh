@@ -2,14 +2,14 @@
 # Jet adapter for Tools/perf/enum_codec_bench.py (#3151).
 #   jet-adapter.sh --build   builds adapter.jet once (canonical core.encoding.json codec)
 #   jet-adapter.sh <protocol options>   execs the prebuilt AOT binary; never compiles.
-# JET must name a jet compiler binary (default: the checkout's target/release/jet),
-# never a wrapper script that itself takes a jet slot.
+# JET must name the admitted native jet compiler binary, never a wrapper script
+# that itself takes a jet slot.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 work=${ENUM_CODEC_JET_WORK:-$HOME/.cache/jet-dev/enum-codec-jet}
 bin=$work/.jet/build/adapter
 if [ "${1:-}" = "--build" ]; then
-  jet=${JET:-$root/target/release/jet}
+  jet=${JET:?JET must name the admitted native jet compiler}
   mkdir -p "$work"
   cp "$root/Tools/perf/enum_codec/adapter.jet" "$work/adapter.jet"
   cp "$root/Tools/perf/enum_codec/package.jet" "$work/package.jet"

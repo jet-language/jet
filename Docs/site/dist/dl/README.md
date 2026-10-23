@@ -3,7 +3,7 @@
 This directory is the static publication root for `dl.jet-lang.dev`. The
 channel protocol is defined by
 [`toolchain-channel-v1.schema.json`](toolchain-channel-v1.schema.json) and
-consumed by [`ToolchainUpdate.rs`](../../../../crates/jetpack/src/ToolchainUpdate.rs).
+consumed by [`Jetpack/Recipe/Source/Toolchain/`](../../../../Jetpack/Recipe/Source/Toolchain/).
 
 ## Manifest and artifact contract
 

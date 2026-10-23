@@ -4,11 +4,10 @@ This is the interaction contract for Jet-facing terminal surfaces: help, REPL,
 dev/live inspect, test, build, run, diagnostics, explain, inspect, debug,
 notebook clients, and future TUIs. It is for CLI and TUI authors who need one
 policy for input, output, color, width, cancellation, and terminal ownership.
-The executable seams are [`Terminal.rs`](../../../crates/jet-foundation/src/Terminal.rs),
-[`Outcome.rs`](../../../crates/jet-foundation/src/Outcome.rs),
-[`OutputProfile.rs`](../../../crates/jet-cli/src/OutputProfile.rs), and the
-interactive help implementation under
-[`jet-cli/src/Help`](../../../crates/jet-cli/src/Help). TUI fixtures and
+The executable seams are [`Terminal.jet`](../../../Jetpack/Foundation/Source/Terminal.jet),
+[`OutputProfile.jet`](../../../Compiler/JetCli/Source/Cli/OutputProfile.jet), and the
+interactive help implementation in
+[`Help.jet`](../../../Compiler/JetCli/Source/Cli/Help.jet). TUI fixtures and
 surface-specific checks belong beside their implementation; this document
 states the shared behavior they must exercise.
 
@@ -56,7 +55,7 @@ shape rather than inventing a second navigation model.
 
 Terminal color is semantic, not decorative. All color decisions use the shared
 `ColorChoice` and `Theme` policy in
-[`Terminal.rs`](../../../crates/jet-foundation/src/Terminal.rs). The CLI accepts
+[`Terminal.jet`](../../../Jetpack/Foundation/Source/Terminal.jet). The CLI accepts
 `--color=auto`, `--color=always`, and `--color=never`.
 
 Resolution order is:

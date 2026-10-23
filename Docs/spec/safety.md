@@ -2,9 +2,9 @@
 
 This specification defines Jet's default safety boundary and its audited
 expert escape. It is for Jet users, library authors, and reviewers. The
-executable spelling lives in [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs);
+executable spelling lives in the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/);
 sema checks the gate and its obligations in
-[`UnsafeObligations.rs`](../../crates/jet-sema/src/Sema/UnsafeObligations.rs).
+[`UnsafeObligations.jet`](../../Compiler/JetSema/Source/Sema/UnsafeObligations.jet).
 The focused [`unsafe_ratchet` tests](../../tests/unsafe_ratchet.rs), the
 [`golden` safety checks](../../tests/golden.rs), and the
 [`ratchet checker`](../../Tools/agent/check-unsafe-ratchet.mjs) provide the
@@ -178,10 +178,9 @@ still relies on sema alone for that rule.
 The repository records every user-written semantic unsafe region in the
 baseline below. Each row records its owner, source file, marker position, and
 reason. The owner is the region's top-level repository directory (`Compiler`,
-`Core`, `Jetpack`, `Tools`, `Examples`, `tests`, …) or, under `crates/`, its
-Cargo crate; the per-owner counts are what the ratchet compares. The JSON data
-and Markdown tables are one generated registry; do not edit either
-representation by hand.
+`Core`, `Jetpack`, `Tools`, `Examples`, `tests`, …); the per-owner counts are
+what the ratchet compares. The JSON data and Markdown tables are one generated
+registry; do not edit either representation by hand.
 
 [`check-unsafe-ratchet.mjs`](../../Tools/agent/check-unsafe-ratchet.mjs)
 recursively scans `.jet` files while excluding its configured generated and
@@ -226,14 +225,13 @@ example retains the negative unsafe-outside-vetted scan.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1125,
+  "total": 1124,
   "counts": {
     "Compiler": 510,
     "Core": 204,
     "Examples": 38,
     "Jetpack": 9,
     "Tools": 4,
-    "jetpack": 1,
     "tests": 359
   },
   "regions": [
@@ -5593,13 +5591,6 @@ example retains the negative unsafe-outside-vetted scan.
       "reason": "the case explicitly authorizes signalling its own spawned child"
     },
     {
-      "package": "jetpack",
-      "file": "crates/jetpack/batteries/embedded/embedded.jet",
-      "line": 181,
-      "column": 9,
-      "reason": "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address"
-    },
-    {
       "package": "tests",
       "file": "tests/cases/cffi_native_matrix/fixtures/required_native_c_abi_matrix/default/matrix.jet",
       "line": 44,
@@ -8125,9 +8116,8 @@ example retains the negative unsafe-outside-vetted scan.
 | Examples | 38 |
 | Jetpack | 9 |
 | Tools | 4 |
-| jetpack | 1 |
 | tests | 359 |
-| **total** | **1125** |
+| **total** | **1124** |
 
 ### Regions
 
@@ -8898,7 +8888,6 @@ example retains the negative unsafe-outside-vetted scan.
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/testkit/StepsControl.jet | 134:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Tools | Tools/testkit/StepsSessions.jet | 118:5 | "the case explicitly authorizes signalling its own spawned child" |
-| jetpack | crates/jetpack/batteries/embedded/embedded.jet | 181:9 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
 | tests | tests/cases/cffi_native_matrix/fixtures/required_native_c_abi_matrix/default/matrix.jet | 44:5 | "live non-null out slot; read only after status zero" |
 | tests | tests/cases/cffi_native_matrix/fixtures/required_native_c_abi_matrix/sysv64/matrix.jet | 44:5 | "live non-null out slot; read only after status zero" |
 | tests | tests/cases/cli_parts_core/fixtures/gate_policy/main.jet | 2:5 | "org refusal" |

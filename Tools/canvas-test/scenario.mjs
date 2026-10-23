@@ -1887,8 +1887,9 @@ export const scenarios = {
     await ctx.waitFor(async () => await ctx.driver.evaluate(`document.getElementById("run-hud")?.textContent.includes("passed")`), "CLI receipt in run state", 15000);
 
     const projectRoot = project.project_root;
-    const jet = process.env.JET_BIN || join(process.cwd(), "target/debug/jet");
-    const jetpack = process.env.JETPACK_BIN || join(process.cwd(), "target/debug/jetpack");
+    const jet = process.env.JET;
+    const jetpack = process.env.JETPACK;
+    if (!jet || !jetpack) throw new Error("JET and JETPACK must name the admitted native jet and jetpack binaries");
     const runJetpack = async (args) => {
       try {
         const result = await execFileAsync(jetpack, args, {

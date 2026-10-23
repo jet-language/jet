@@ -145,14 +145,6 @@ function testkitInventory() {
     return { sources: sources.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })),
         cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), retiredCases, pendingProductInterop, rustToolRequirements };
 }
-function retiredBootstrapTests() {
-    const path = 'Compiler/Bootstrap/Tests.rs';
-    if (!existsSync(join(repo, path))) return [];
-    const text = readFileSync(join(repo, path), 'utf8');
-    return [...text.matchAll(/^#\[test\]\r?\n(?:#\[[^\n]*\]\r?\n)*fn ([A-Za-z0-9_]+)\(/gm)]
-        .map(match => ({ name: match[1], location: `${path}:${text.slice(0, match.index).split('\n').length}`,
-            coverage: match[1].replaceAll('_', ' '), disposition: 'retired-with-Rust (not a Jet registry or cutover blocker)' }));
-}
 function environment() {
     const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_TEST_JSON: '1', NO_COLOR: '1', TERM: 'dumb' };
     delete env.JET_RUNTIME_PACK;
@@ -241,9 +233,8 @@ function generate() {
     const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceProof, sourceManifests: manifests,
         inventory: census, testkit: kit, entries,
         retiredWithRust: { testkitCases: kit.retiredCases,
-            compilerRegistries: retirements().filter(row => row.path.startsWith('Compiler/')), bootstrapTests: retiredBootstrapTests() } };
+            compilerRegistries: retirements().filter(row => row.path.startsWith('Compiler/')) } };
     json(join(out, 'manifest.json'), manifest);
-    json(join(out, 'retired-with-Rust.json'), retiredBootstrapTests());
     console.log(JSON.stringify(manifest, null, 2));
 }
 async function run() {

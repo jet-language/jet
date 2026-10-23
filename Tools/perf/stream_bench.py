@@ -9,7 +9,7 @@ The output is JSON. Timings are host-specific; the workload and metric names
 are fixed so repeated runs can be compared. Set
 JET_STREAM_BENCH_COMMAND to override the Jet command, for example:
 
-    JET_STREAM_BENCH_COMMAND='Tools/agent/jet-env target/debug/jet' \
+    JET_STREAM_BENCH_COMMAND='Tools/agent/jet-env /path/to/jet' \
         python3 Tools/perf/stream_bench.py
 """
 
@@ -131,7 +131,7 @@ def python_worker(case: str, size: int) -> None:
 
 def jet_command() -> list[str]:
     configured = os.environ.get("JET_STREAM_BENCH_COMMAND")
-    return shlex.split(configured) if configured else ["Tools/agent/jet-env", "target/debug/jet"]
+    return shlex.split(configured) if configured else ["Tools/agent/jet-env", "jet"]
 
 
 def jet_worker(case: str, size: int, source: Path) -> None:

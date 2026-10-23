@@ -8,13 +8,13 @@ Canvas clients, devserver contributors, and tools that consume the project,
 graph, debug, query, action, and source-control documents.
 
 The executable schema and transaction paths are in
-[`schema_api.rs`](../../../crates/jet-devserver/src/Canvas/schema_api.rs),
-[`graph_projection.rs`](../../../crates/jet-devserver/src/Canvas/graph_projection.rs),
-and [`edit_actions.rs`](../../../crates/jet-devserver/src/Canvas/edit_actions.rs).
+[`SchemaApi.jet`](../../../Compiler/JetDevserver/Source/Canvas/SchemaApi.jet),
+[`GraphProjection.jet`](../../../Compiler/JetDevserver/Source/Canvas/GraphProjection.jet),
+and [`EditActions.jet`](../../../Compiler/JetDevserver/Source/Canvas/EditActions.jet).
 The source write seam is covered by
-[`source_model.rs`](../../../crates/jet-devserver/src/Canvas/source_model.rs) and
+[`SourceModel.jet`](../../../Compiler/JetDevserver/Source/Canvas/SourceModel.jet) and
 project writes by
-[`project_transactions.rs`](../../../crates/jet-devserver/src/Canvas/project_transactions.rs).
+[`ProjectTransactions.jet`](../../../Compiler/JetDevserver/Source/Canvas/ProjectTransactions.jet).
 Vocabulary is in [Jet vocabulary](../vocabulary.md).
 
 ## Envelope and routes

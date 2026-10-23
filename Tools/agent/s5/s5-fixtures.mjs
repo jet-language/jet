@@ -40,7 +40,7 @@ for (const line of fs.readFileSync(path.join(driverDirectory, 'parked-modes.tsv'
 if (!P.ready) {
   blocked('fixtures-prerequisites', 'successful same-pin build/runtime/golden receipts are required');
   const helpers = new Set(['report-literals.mjs', 'golden-results.mjs']);
-  const retiredOnly = new Set(['freeze-ed25519-fixtures.mjs', 'freeze-entropy-fixtures.mjs', 'freeze-hash-fixtures.mjs', 'freeze-os-entropy-fixtures.mjs', 'freeze-pbkdf2-fixtures.mjs', 'freeze-sha3-fixtures.mjs', 'run-utf8-corpus.mjs']);
+  const retiredOnly = new Set(['run-utf8-corpus.mjs']);
   for (const file of fs.readdirSync(path.join(W, T)).filter(file => file.endsWith('.mjs') && !helpers.has(file))) P.runner(file, retiredOnly.has(file) ? [] : ['fixtures-prerequisites'], parked.get(file) ?? []);
   P.runner('Compiler/JetBackend/Tests/test-native-test-host.mjs', ['fixtures-prerequisites'], parked.get('Compiler/JetBackend/Tests/test-native-test-host.mjs') ?? []);
   P.finish(); process.exit(process.exitCode);
@@ -84,7 +84,7 @@ for (const runner of ['run-cabi-driver','run-alloc-parity','run-compiler-needed-
 add('run-main-fixtures', ['link','run'].map(mode => r('run-main-fixtures', out('main-fixtures'), mode, object)), runtime);
 add('check-object', [r('check-object', object, out('object-audit'))], runtime);
 add('check-runtime', [r('check-runtime', out('check-runtime'), '--assemble-only'), r('check-runtime', out('check-runtime-full'))], front);
-for (const runner of ['check-lists-native','check-collections-census','check-int-hazard-cutover','test-route-abi','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
+for (const runner of ['check-lists-native','check-collections-census','test-route-abi','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
 for (const runner of ['run-text-goldens','run-collections-goldens','run-trap-goldens']) add(runner, [r(runner, out(runner), baseline, '--results', results)], nativeGoldens);
 for (const runner of ['run-int-goldens','run-unicode-goldens']) add(runner, [r(runner, out(runner), '--results', results)], nativeGoldens);
 add('run-host-goldens', [{prepared: 'host', directory: out('host-goldens')}, r('run-host-goldens', out('host-goldens'), 'native', '--results', results)], nativeGoldens);
@@ -133,7 +133,7 @@ const official = JSON.parse(fs.readFileSync(path.join(W,T,'Ed25519OfficialVector
 await start('official-rfc8032-input',[node,'--input-type=module','-e',`import fs from 'node:fs';import crypto from 'node:crypto';const response=await fetch('https://www.rfc-editor.org/rfc/rfc8032.txt');if(!response.ok)throw Error('RFC8032 fetch '+response.status);const bytes=Buffer.from(await response.arrayBuffer());if(crypto.createHash('sha256').update(bytes).digest('hex')!==${JSON.stringify(official.sourceSha256)})throw Error('official RFC8032 bytes changed');fs.writeFileSync(${JSON.stringify(out('rfc8032.txt'))},bytes);`]);
 add('freeze-age-fixtures',[r('freeze-age-fixtures',inputs?path.join(inputs,'age-rust'):out('absent-age-rust'),out('absent-age-testkit'),out('age-generated.json'))]);
 registry.get('freeze-age-fixtures.mjs').missingOracle = true;
-for (const runner of ['freeze-ed25519-fixtures','freeze-entropy-fixtures','freeze-hash-fixtures','freeze-os-entropy-fixtures','freeze-pbkdf2-fixtures','freeze-sha3-fixtures','run-utf8-corpus']) add(runner,[]);
+add('run-utf8-corpus',[]);
 for (const file of fs.readdirSync(path.join(W,T)).filter(file=>file.endsWith('.test.mjs'))) registry.set(file,{commands:[[node,'--test',`${T}/${file}`]],needs:[],extra:{}});
 // Follow-ups depend on actual binaries/results of earlier runners.
 add('run-http-body-perf',[r('run-http-body-perf',out('http-body-perf'),path.join(out('run-http-body'),'http-body.hosted'))],[path.join(out('run-http-body'),'http-body.hosted')]);

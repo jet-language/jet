@@ -142,23 +142,6 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
     assert(!out.status.success())
 }
 
-// Rust: tests/notebook.rs:18
-#Test("notebook_token_generation_has_no_zero_entropy_fallback") {
-    // Original source-level guard reads the reference peer, not a fake entropy provider.
-    source :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Source/CmdNotebook.rs")).unwrap()
-    mint_token := source.split_once("fn mint_token()")
-        .and_then((pair) -> pair._1.split_once("fn is_loopback"))
-        .map((pair) -> pair._0).expect("notebook token minting must remain a distinct function") // #4303
-    assert(mint_token.contains("read_exact(&mut bytes)"))
-    assert(mint_token.contains("map_err(|error| error.to_string())"))
-    assert(!mint_token.contains("unwrap_or"), "entropy read errors must not become a deterministic token")
-    startup := source.split_once("let token = match explicit_token")
-        .and_then((pair) -> pair._1.split_once("let auto_open"))
-        .map((pair) -> pair._0).expect("notebook startup must handle token creation explicitly") // #4303
-    assert(startup.contains("exit(ExitCodes::ICE)"))
-    assert(!startup.contains("unwrap_or_default"), "token creation failure must stop startup")
-}
-
 // Rust: tests/notebook.rs:45
 #Test("notebook_declarations_are_file_wide_but_state_cells_stay_ordered") {
     kernel := Kernel.open(None, "entry-order-test").expect("open entry-order notebook kernel")

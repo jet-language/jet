@@ -3,9 +3,8 @@
 This page is for Jet programmers who need compile-time values, typed facts, or
 build-time generation. It separates source forms exercised by the feature
 examples from metadata and diagnostic contracts defined by the compiler.
-The executable surface is registered in [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs);
-shared contract records live in
-[`AST/metaprogramming.rs`](../../../crates/jet-foundation/src/AST/metaprogramming.rs).
+The executable surface is registered in the
+[syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 The runnable examples are the best guide to accepted source forms:
 [`Examples/features/comptime`](../../../Examples/features/comptime) and
 [`Examples/features/reflection`](../../../Examples/features/reflection).
@@ -127,7 +126,7 @@ gate, not a blanket host permission. Keep declarations, grants, and resulting
 inputs in the package and lock records rather than relying on ambient process
 state. The executable policy is defined at the compiler boundary; the
 source-facing effect names are registered through
-[`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs).
+the [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 
 ## Build entries and typed generation
 
@@ -180,7 +179,7 @@ silently rewrite an existing declaration.
 The source registry reserves typed item-template generation. `derive T.Trait {
 ... }` and `b.generate(name) { ... }` carry ordinary Jet item and statement
 grammar, and neither form accepts a source string or re-lexes generated text.
-This is the `D-META-CODE1` / `D-META-BODY1` rule in [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs).
+This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
 ## Typed reflection
 
@@ -261,9 +260,8 @@ variants are:
 `SourceSpan`. A missing fact is therefore distinguishable from a checked empty
 collection. Opaque `SnapshotId`, `TypeId`, `DeclarationHandle`, `ScopeId`,
 `NodeId`, and `ValueHandle` values are compiler-issued identities; source names
-and casts cannot manufacture them. The canonical names and fields live in
-[`AST/metaprogramming.rs`](../../../crates/jet-foundation/src/AST/metaprogramming.rs),
-not in a prose catalog.
+and casts cannot manufacture them. The compiler defines the canonical names
+and fields; this page is not a catalog of them.
 
 Root inputs and scopes are also part of the contract. A root may accept a type
 expression, callable selection, method name, method handle, authorized
