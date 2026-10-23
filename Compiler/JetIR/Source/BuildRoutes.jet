@@ -40,12 +40,7 @@ fn ir_list_push(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, 
 // The List bounds stop for `index` outside 0..<length (0...length when
 // `inclusive`): jet_rt_panic_list_bounds(length, index).
 fn ir_list_bounds(m: &IRModule, b: &IRBuilder, index: Int, length: Int, inclusive: Bool) Never! {
-    bad :: ir_bool_op(&m, &b, if inclusive -> IROp.Gt else -> IROp.Ge, index, length)
-    zero :: ir_word_const(&m, &b, 0)
-    negative :: ir_bool_op(&m, &b, IROp.Lt, index, zero)
-    ir_open_if(&b.f, negative, b.line)
-    ir_emit(&b.f, IROp.Const, bad, 1, -1, -1, b.line)
-    ir_end(&b.f, b.line)
+    bad :: ir_index_order(&m, &b, if inclusive -> IROp.Gt else -> IROp.Ge, index, length)
     ir_open_if(&b.f, bad, b.line)
     _ :: ir_runtime(&m, &b, "jet_rt_panic_list_bounds", [Int]{length, index}, -1)
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
@@ -2126,12 +2121,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
         }
         if ir_failed(b) -> return -1
         length :: ir_load_word(&m, &b, list, 0)
-        inside :: ir_bool_op(&m, &b, IROp.Lt, index, length)
-        zero :: ir_word_const(&m, &b, 0)
-        negative :: ir_bool_op(&m, &b, IROp.Lt, index, zero)
-        ir_open_if(&b.f, negative, b.line)
-        ir_emit(&b.f, IROp.Const, inside, 0, -1, -1, b.line)
-        ir_end(&b.f, b.line)
+        inside :: ir_index_order(&m, &b, IROp.Lt, index, length)
         ir_open_if(&b.f, inside, b.line)
         elements :: ir_load_word(&m, &b, list, 16)
         address :: ir_element_address(&m, &b, elements, index, stride)
@@ -2366,12 +2356,7 @@ fn ir_list_replace(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     owned :: ir_own(&m, p, &b, value)
     replica :: ir_list_clone(&m, p, &b, list, row, result_row)
     length :: ir_load_word(&m, &b, replica, 0)
-    inside :: ir_bool_op(&m, &b, IROp.Lt, index, length)
-    zero :: ir_word_const(&m, &b, 0)
-    negative :: ir_bool_op(&m, &b, IROp.Lt, index, zero)
-    ir_open_if(&b.f, negative, b.line)
-    ir_emit(&b.f, IROp.Const, inside, 0, -1, -1, b.line)
-    ir_end(&b.f, b.line)
+    inside :: ir_index_order(&m, &b, IROp.Lt, index, length)
     drops :: m.types[row].drop != ""
     ir_open_if(&b.f, inside, b.line)
     data :: ir_load_word(&m, &b, replica, 16)
