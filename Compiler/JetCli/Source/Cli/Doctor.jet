@@ -1,6 +1,6 @@
-// `jet self doctor` (Source/Doctor.rs, CmdDevTools.rs `run_doctor`): environment
-// self-diagnosis. Offline by default; `--online` adds the registry check and
-// `--fix` applies the auto-fixable problems, then reports again. A real
+// `jet self doctor`: environment self-diagnosis. Offline by default; `--online`
+// adds the registry check and `--fix` applies the auto-fixable problems, then
+// reports again. `--target <machine>` adds the declared target machine. A real
 // problem ends with the L2101 advisory and exit 1.
 use core.files as doctor_files
 use core.process as doctor_process
@@ -19,15 +19,7 @@ use jet_pkg_model.[
     publication_resolve_publish_registry,
 ]
 use jetpack_artifact_store.[ArtifactStore]
-use jetpack_foundation.[HANGAR_DIR, TARGET_SANDBOX]
-
-// Exact rustc release owned by the current Jet build (Doctor.rs `RUSTC_VERSION_PIN`).
-JET_CLI_DOCTOR_RUSTC_PIN :: "1.97.1"
-// The Rust target used by Jet's backend aliases (Doctor.rs `WASM_TARGET`).
-JET_CLI_DOCTOR_WASM_TARGET :: "wasm32-unknown-unknown"
-// Syntax `BUILD_TARGET_WEB` and `BUILD_TARGET_WASI_SERVER`.
-JET_CLI_DOCTOR_TARGET_WEB :: "web"
-JET_CLI_DOCTOR_TARGET_WASI_SERVER :: "wasm32-wasip2"
+use jetpack_foundation.[HANGAR_DIR]
 
 // Health of one checked thing.
 enum JetCLIDoctorHealth {
@@ -64,7 +56,6 @@ fn jet_cli_doctor_problem(section: String, label: String, detail: String, fix: S
 // Every check in report order.
 fn jet_cli_doctor_run(online: Bool, cross_target: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
-    &out.push(jet_cli_doctor_check_rustc())
     &out.push(jet_cli_doctor_check_native_linker())
     &out.push(jet_cli_doctor_artifact_store())
     &out.push(jet_cli_doctor_cache_dir("ffi cache", jet_cli_doctor_ffi_cache_dir()))
@@ -77,7 +68,7 @@ fn jet_cli_doctor_run(online: Bool, cross_target: String?) -[FS, Env, Exec, Time
         &out.push(jet_cli_doctor_note("registry", "registry", "skipped (offline; pass --online to check)"))
     }
     loop check in jet_cli_doctor_check_ffi() -> &out.push(check)
-    if cross_target == .Val(triple) -> &out.push(jet_cli_doctor_check_cross_target(triple))
+    if cross_target == .Val(name) -> &out.push(jet_cli_doctor_check_cross_target(name))
     out
 }
 
@@ -101,25 +92,6 @@ fn jet_cli_doctor_stdout(argv: [String]) -[Exec, Time.Wait]> String? Never! {
 
 fn jet_cli_doctor_command_ok(argv: [String]) -[Exec, Time.Wait]> Bool Never! {
     jet_cli_doctor_stdout(argv) != None
-}
-
-fn jet_cli_doctor_check_rustc() -[Exec, Time.Wait]> JetCLIDoctorCheck Never! {
-    output :: jet_cli_doctor_stdout([String]{"rustc", "--version"}) ?? {
-        return jet_cli_doctor_problem("toolchain", "rustc", "not found on PATH (Jet pin: rustc {JET_CLI_DOCTOR_RUSTC_PIN})", "install Rust {JET_CLI_DOCTOR_RUSTC_PIN} from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend", false)
-    }
-    version :: output.trim()
-    actual := String?{None}
-    if version.starts_with("rustc ") {
-        loop word in version.removeprefix("rustc ").split(" ") {
-            if word.trim() == "" -> next
-            actual = Val(word.trim())
-            break
-        }
-    }
-    if actual == .Val(found) && found == JET_CLI_DOCTOR_RUSTC_PIN {
-        return jet_cli_doctor_ok("toolchain", "rustc", "{version} (Jet pin: rustc {JET_CLI_DOCTOR_RUSTC_PIN})")
-    }
-    jet_cli_doctor_problem("toolchain", "rustc", "{version} (Jet requires rustc {JET_CLI_DOCTOR_RUSTC_PIN})", "use rustc {JET_CLI_DOCTOR_RUSTC_PIN} from the project toolchain, then re-run `jet self doctor`", false)
 }
 
 fn jet_cli_doctor_check_native_linker() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
@@ -202,12 +174,6 @@ fn jet_cli_doctor_check_ffi() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] N
     } else {
         &out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
     }
-    // cargo builds the hidden FFI bridge crate.
-    if jet_cli_doctor_command_ok([String]{"cargo", "--version"}) {
-        &out.push(jet_cli_doctor_ok("c-ffi", "cargo", "found (builds the FFI bridge crate)"))
-    } else {
-        &out.push(jet_cli_doctor_note("c-ffi", "cargo", "not found (only needed for C FFI builds)"))
-    }
     // The user-owned C-library store, inspected without following a final link.
     hangar :: pkg_resolve_roots().hangar_dir()
     if doctor_files.stat(hangar) == {
@@ -235,6 +201,12 @@ fn jet_cli_doctor_check_ffi() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] N
                 &out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} cannot be inspected ({jet_cli_doctor_io_kind(error)})", "restore access to the resolved user Hangar path", false))
             }
         }
+    }
+    // cargo builds the bridge crate of an `extern rust` import.
+    if jet_cli_doctor_command_ok([String]{"cargo", "--version"}) {
+        &out.push(jet_cli_doctor_ok("rust-ffi", "cargo", "found (builds `extern rust` bridge crates)"))
+    } else {
+        &out.push(jet_cli_doctor_note("rust-ffi", "cargo", "not found (only needed for `extern rust` imports)"))
     }
     out
 }
@@ -271,90 +243,16 @@ fn jet_cli_doctor_ffi_cache_dir() -[Env]> String Never! {
     doctor_files.join(doctor_files.join(doctor_files.join(jet_cli_doctor_home(), ".cache"), "jet"), "ffi")
 }
 
-// Why the target-component probe could not prove readiness.
-#Error
-enum JetCLIDoctorProbeError {
-    // The target-list command could not provide usable output.
-    TargetListUnavailable
-    // Rustc ran, but did not report the requested target.
-    TargetNotKnown
-    // The sysroot command could not provide a usable path.
-    SysrootUnavailable
-    // The target lib directory is absent, inaccessible, or empty.
-    LibraryUnavailable(path: String)
-
-    fn message(self) -> String Never! {
-        if self == {
-            .TargetListUnavailable -> "could not run the rustc target metadata probe"
-            .TargetNotKnown -> "not a recognised rustc target triple"
-            .SysrootUnavailable -> "could not determine the rustc sysroot"
-            .LibraryUnavailable(path) -> "target-specific standard-library component is missing or empty ({path})"
-        }
+// A `--target` machine: the plan admitted only declared target machines.
+fn jet_cli_doctor_check_cross_target(name: String) -> JetCLIDoctorCheck Never! {
+    machine :: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
+        return jet_cli_doctor_problem("cross", name, "not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", false)
     }
+    jet_cli_doctor_ok("cross", machine.name, "declared target machine ({machine.triple})")
 }
 
-// Actionable remediation in Jet terms: the hidden backend's commands and tool
-// names never reach the user.
-fn jet_cli_doctor_probe_fix(error: JetCLIDoctorProbeError, requested: String) -> String Never! {
-    if error == {
-        .TargetNotKnown -> "`{requested}` is not a target this Jet toolchain can build; choose a supported target such as `web`, `sandbox`, or the host target"
-        .TargetListUnavailable | .SysrootUnavailable -> "the Jet toolchain's code generator is unavailable; run `jet doctor` to see the missing component, then re-run the build"
-        .LibraryUnavailable(_) -> "this Jet toolchain has no standard library for `{requested}`; install a Jet toolchain that includes this target (`jet doctor` reports it), or build for the host target"
-    }
-}
-
-// The Rust target whose installed component a Jet backend target invokes.
-fn jet_cli_doctor_rustc_triple(triple: String) -> String Never! {
-    if triple == JET_CLI_DOCTOR_TARGET_WEB || triple == TARGET_SANDBOX -> return JET_CLI_DOCTOR_WASM_TARGET
-    triple.copy()
-}
-
-// The Rust component a Jet target needs is installed: rustc knows the triple
-// and the target's `lib` directory holds non-empty regular files (an
-// interrupted install can leave the directory behind).
-fn jet_cli_doctor_probe_target(triple: String) -[FS, Exec, Time.Wait]> String JetCLIDoctorProbeError! {
-    rust_triple :: jet_cli_doctor_rustc_triple(triple)
-    targets :: jet_cli_doctor_stdout([String]{"rustc", "--print", "target-list"}) ?? return Err(.TargetListUnavailable)
-    known := false
-    loop line in targets.split("\n") {
-        if line.trim() == rust_triple {
-            known = true
-            break
-        }
-    }
-    if !known -> return Err(.TargetNotKnown)
-    sysroot :: jet_cli_doctor_stdout([String]{"rustc", "--print", "sysroot"}) ?? return Err(.SysrootUnavailable)
-    root :: sysroot.trim()
-    if root == "" -> return Err(.SysrootUnavailable)
-    target_lib :: doctor_files.join(doctor_files.join(doctor_files.join(doctor_files.join(root, "lib"), "rustlib"), rust_triple), "lib")
-    entries :: doctor_files.list_dir(target_lib) ?? return Err(.LibraryUnavailable{path: target_lib})
-    loop entry in entries {
-        if doctor_files.stat(doctor_files.join(target_lib, entry.name)) == .Ok(metadata) && metadata.is_file && metadata.size > 0 -> return Ok(target_lib)
-    }
-    Err(.LibraryUnavailable{path: target_lib})
-}
-
-// A cross-compilation target is installed. A sandbox also needs `wasm-tools`
-// to lift the core module into a Component, checked before the component probe.
-fn jet_cli_doctor_check_cross_target(triple: String) -[FS, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
-    if triple == TARGET_SANDBOX && !jet_cli_doctor_command_ok([String]{"wasm-tools", "--version"}) {
-        return jet_cli_doctor_problem("cross", triple, "`wasm-tools` isn't on PATH (needed to build a sandbox's Component)", "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH", false)
-    }
-    if jet_cli_doctor_probe_target(triple) == {
-        .Ok(target_lib) -> {
-            description :: if {
-                triple == JET_CLI_DOCTOR_TARGET_WEB -> "Jet web backend target (WASM + JS; installed ({target_lib}))"
-                triple == JET_CLI_DOCTOR_TARGET_WASI_SERVER -> "Jet WASI Preview 2 server Component target ({target_lib})"
-                else -> "installed ({target_lib})"
-            }
-            jet_cli_doctor_ok("cross", triple, description)
-        }
-        .Err(error) -> jet_cli_doctor_problem("cross", triple, error.message(), jet_cli_doctor_probe_fix(error, triple), false)
-    }
-}
-
-// The report (CmdDevTools.rs `run_doctor`); `apply` first prints what `--fix`
-// changed, then the report of the world after the fixes.
+// The report; `apply` first prints what `--fix` changed, then the report of
+// the world after the fixes.
 fn jet_cli_doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool) -[FS, Env, Exec, Time, Time.Wait, Rand]> JetDriverVerbOutput Never! {
     prefix := ""
     if apply {
@@ -389,20 +287,18 @@ fn jet_cli_doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
     JetDriverVerbOutput{stdout: "{out}everything looks good.\n", stderr: "", exit_code: 0}
 }
 
-// `jet self doctor [--online] [--fix] [--target <triple|machine>]`: a declared
-// machine supplies its own triple; an unknown `board.*` name is refused.
+// `jet self doctor [--online] [--fix] [--target <machine>]`: a name that is not a
+// declared target machine is refused.
 fn jet_cli_doctor_plan(raw: [String], jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
     cross_target := String?{None}
     if jet_cli_target_flag(jet_argv) == {
         .Absent -> {}
-        .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<triple>` or `--target <triple>` before the source file", color, JET_DRIVER_EXIT_USAGE)
+        .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<machine>` or `--target <machine>`", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            if jet_driver_target_machine_by_name(name, JET_CLI_VERSION) == .Val(machine) {
-                cross_target = Val(machine.triple)
-            } else {
-                if name.starts_with("board.") -> return jet_cli_fail("E3302", "target `{name}` is not available", "the name is neither a declared target machine nor a recognized target triple", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}, or a rustc target triple", color, JET_DRIVER_EXIT_USAGE)
-                cross_target = Val(name)
+            machine :: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
+                return jet_cli_fail("E3302", "target `{name}` is not available", "the name is not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", color, JET_DRIVER_EXIT_USAGE)
             }
+            cross_target = Val(machine.name)
         }
     }
     JetCLIPlan.Doctor{online: raw.contains("--online"), apply: raw.contains("--fix"), cross_target: cross_target, color: color}
