@@ -1,0 +1,71 @@
+// Compile-time values: what comptime evaluation hands to the checker, the
+// evaluator and the backends. They hold no checked-tree nodes.
+
+struct TComptimeMapEntry {
+    key: TComptimeKey
+    value: TComptimeValue
+}
+
+enum TComptimeKey {
+    Int(value: Int)
+    BigInt(decimal: String)
+    String(value: String)
+    Bool(value: Bool)
+    Char(value: Int)
+    Tuple(fields: [TComptimeKeyField])
+    Struct(type_name: String, fields: [TComptimeKeyField])
+    Enum(type_name: String, variant: String)
+}
+
+fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
+    if mir_integer_constant(number, None, None) == {
+        .Int(value, _, _) -> TComptimeKey.Int{value: value}
+        .BigInt(decimal) -> TComptimeKey.BigInt{decimal: decimal}
+        else -> panic("integer key materialization is not an integer")
+    }
+}
+
+struct TComptimeKeyField {
+    name: String
+    key: TComptimeKey
+}
+
+struct TComptimeField {
+    name: String
+    value: TComptimeValue
+}
+
+struct TComptimeEnumArg {
+    name: String?
+    value: TComptimeValue
+}
+
+enum TComptimeReport {
+    Clean(ty: Type)
+    Told(value: TComptimeValue)
+}
+
+enum TComptimeValue {
+    Int(value: Int)
+    Float(value: Float, bits: Int)
+    Bool(value: Bool)
+    Char(value: Int)
+    String(value: String)
+    BigInt(decimal: String)
+    Bytes(value: [U8])
+    List(values: [TComptimeValue])
+    Map(entries: [TComptimeMapEntry])
+    Struct(type_name: String, fields: [TComptimeField])
+    Enum(type_name: String, variant: String, args: [TComptimeEnumArg])
+    Present(value: TComptimeValue)
+    Failed(report: TComptimeReport)
+    Unit
+    Closure(value: TComptimeClosure)
+}
+
+// A closure a comptime run produced: its checked function and the detached
+// values of its captures, in capture order.
+struct TComptimeClosure {
+    function: MIRFunctionID
+    captures: [TComptimeValue]
+}

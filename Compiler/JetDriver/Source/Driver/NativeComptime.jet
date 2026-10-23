@@ -3,7 +3,7 @@
 // (Pipeline jet_driver_comptime_machine_eval) until native in-memory O0 lands.
 use core.math as native_comptime_math
 use jet_backend.[X64NativeValue]
-use jet_foundation.[MIRFunctionID, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, TExpr, TExprKind, TStmt, TLetTy, TLambdaBody, Type]
+use jet_foundation.[MIRFunctionID, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, TComptimeClosure, Type]
 
 fn jet_driver_native_value_key(value: TComptimeValue) -> TComptimeKey? Never! {
     if value == {
@@ -116,30 +116,15 @@ fn jet_driver_native_value(value: X64NativeValue, host: JetDriverExecutionHost) 
         if value.attributes.len() != value.children.len() + 2 -> return None
         identity :: Int.parse(value.attributes[1]) ?? return None
         if identity < 0 || identity > 18446744073709551615 -> return None
-        source :: host.closure_source(value.attributes[0], MIRFunctionID{value: U64{identity}}) ?? return None
-        lambda := source.lambda
-        if lambda.captures.len() != value.children.len() -> return None
-        body := [TStmt]{}
-        loop (index, capture) in lambda.captures {
+        function :: MIRFunctionID{value: U64{identity}}
+        source :: host.closure_source(value.attributes[0], function) ?? return None
+        if source.lambda.captures.len() != value.children.len() -> return None
+        captures := [TComptimeValue]{}
+        loop (index, capture) in source.lambda.captures {
             if capture.source != value.attributes[index + 2] -> return None
-            detached :: jet_driver_native_value(value.children[index], host) ?? return None
-            init :: TExpr{ty: capture.ty, kind: TExprKind.CtLit{value: detached}, span: capture.local.span}
-            &body.push(TStmt.Let{local: capture.local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: capture.local.span})
+            &captures.push(jet_driver_native_value(value.children[index], host) ?? return None)
         }
-        if lambda.executable == {
-            .Expr(expression) -> &body.push(TStmt.Return{value: Val(expression), span: expression.span})
-            .Block(statements) -> loop statement in statements -> &body.push(statement)
-        }
-        lambda.executable = TLambdaBody.Block{body: body}
-        &lambda.captures.clear()
-        &lambda.materialized_captures.clear()
-        &lambda.frozen_captures.clear()
-        &lambda.capture_facts.mutable.clear()
-        &lambda.capture_facts.cloned.clear()
-        &lambda.capture_facts.frozen.clear()
-        &lambda.capture_facts.materialized.clear()
-        &lambda.capture_facts.moved.clear()
-        return Val(TComptimeValue.Closure{value: lambda})
+        return Val(TComptimeValue.Closure{value: TComptimeClosure{function: function, captures: captures}})
     }
     None
 }
