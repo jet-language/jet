@@ -1113,8 +1113,8 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
         return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
     }
     if slot < 0 -> return ir_fail_slot(&b, span, "display of {ir_type_name(ty)} without a value")
-    // A top-level Debug render (`{value:Debug}`, `.debug()`) calls the
-    // user's Debug implementation; members keep the structural render.
+    // A Debug render (`{value:Debug}`, `.debug()`) calls the user's Debug
+    // implementation, at the top level and for nested values alike.
     selected :: if mode == .Debug -> ir_render_debug_impl(&m, p, &b, slot) else -> ir_render_impl(&m, p, &b, slot, mode)
     if selected >= 0 -> return selected
     // A Dyn shows its scalar leaf bare and a container as its tree text
@@ -1260,7 +1260,9 @@ fn ir_render_handle_symbol(p: IRProgram, ty: Type, mode: IRRender) -> String? Ne
 fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
     kind :: ir_kind_of(m, b, slot)
     ty :: m.types[b.f.slot_type[slot]].ty
-    selected :: ir_render_impl(&m, p, &b, slot, mode)
+    // Under Debug a nested value calls its user Debug implementation too
+    // (`[debug-only]` for a List of a Debug-implementing owner).
+    selected :: if mode == .Debug -> ir_render_debug_impl(&m, p, &b, slot) else -> ir_render_impl(&m, p, &b, slot, mode)
     if selected >= 0 {
         _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, selected}, -1)
         ir_release(&m, &b, selected)
@@ -1310,6 +1312,20 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
     if ir_native_carrier(ty) -> return ir_fail(&b, span, "display of {ir_type_name(ty)}")
     if kind == .Aggregate && ir_untag(ty) == .Tuple(fields) {
         members :: ir_tuple_members(&m, p, fields) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+        // A named tuple renders as the record its sorted names spell:
+        // `(tag,value) { tag: "tuple", value: 1 }`.
+        if fields.len() > 0 && fields[0].name != "" {
+            names := [String]{}
+            loop field in fields -> &names.push(field.name)
+            ir_push_static(&m, &b, builder, "({names.join(",")}) {{")
+            loop (index, field) in members {
+                ir_push_static(&m, &b, builder, "{if index == 0 -> " " else -> ", "}{fields[index].name}: ")
+                value :: ir_member_read(&m, &b, slot, field)
+                ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+            }
+            ir_push_static(&m, &b, builder, " }}")
+            return
+        }
         ir_push_static(&m, &b, builder, "(")
         loop (index, field) in members {
             if index > 0 -> ir_push_static(&m, &b, builder, ", ")
@@ -1405,7 +1421,7 @@ fn ir_render_nominal(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, sl
                     .Single(_) -> {
                         value :: ir_member_value(&m, &b, slot, members[0])
                         if held {
-                            if value < 0 -> ir_push_static(&m, &b, builder, "()") else -> ir_render_push(&m, p, &b, builder, value, mode, false, span)
+                            ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
                         } else {
                             ir_push_static(&m, &b, builder, "{ir_render_name(variant.name)}(")
                             ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
@@ -2328,6 +2344,20 @@ fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_
     boxed
 }
 
+// The spelling an error conversion reports for `ty`: a nominal type's
+// declared name (`StoreErr`, `IOError`), never the owner-qualified key
+// (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it; any
+// other type's own spelling.
+fn ir_error_spelling(p: IRProgram, ty: Type) -> String Never! {
+    plain :: ir_untag(ty)
+    if plain == .Named(name) {
+        if ir_type_def(p, name) == .Val(row) -> return p.types[row].name.copy()
+        parts :: name.split("::").to_list()
+        return parts[parts.len() - 1].copy()
+    }
+    type_name(ty)
+}
+
 // The Err box the failure edge of `?` returns for the Err box `subject`
 // under the function carrier `success ! error`, its error converted as
 // `conversion` asks (codegen jet_codegen_lower_try_failure_conversion), then
@@ -2389,15 +2419,9 @@ fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conve
                 ir_release(&m, &b, returned)
             }
             if ir_default_err(p, target) {
-                // A source-owned Core error reports under its user spelling.
-                source_spelling := type_name(source)
-                if source_spelling.starts_with("<corelib>/") {
-                    owner_parts :: source_spelling.split("::").to_list()
-                    source_spelling = owner_parts[owner_parts.len() - 1]
-                }
                 string_row :: ir_string_row(&m)
-                source_text :: ir_intern_text(&m, source_spelling)
-                target_text :: ir_intern_text(&m, type_name(target))
+                source_text :: ir_intern_text(&m, ir_error_spelling(p, source))
+                target_text :: ir_intern_text(&m, ir_error_spelling(p, target))
                 source_name :: ir_temp(&m, &b, string_row)
                 ir_emit(&b.f, IROp.ConstText, source_name, source_text, -1, -1, b.line)
                 target_name :: ir_temp(&m, &b, string_row)
@@ -2629,11 +2653,12 @@ fn ir_enum_box_size(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? 
     Val(size)
 }
 
-// A member of a record, tuple or variant (Lower lower_render_member_push:
-// a String member renders quoted).
+// A member of a record, tuple or variant: a String member renders quoted
+// under Debug and as itself otherwise (`HexError { reason: odd-length ... }`,
+// `BadDigit("x")` under Debug).
 fn ir_render_push_value_member(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, value: Int, mode: IRRender, span: Span) Never! {
     if value < 0 -> return ir_push_static(&m, &b, builder, "()")
-    ir_render_push(&m, p, &b, builder, value, mode, true, span)
+    ir_render_push(&m, p, &b, builder, value, mode, mode == .Debug, span)
 }
 
 // `Name { a: 1, b: "x" }` (Lower lower_render_record; Debug redacts).

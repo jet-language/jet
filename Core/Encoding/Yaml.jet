@@ -433,7 +433,9 @@ fn yaml_leaf(value: Dyn) -> String Never! {
             .Bool(v) -> "{v}"
             .Int(n) -> "{n}"
             .Float(n) -> "{n:Debug}"
-            .Number(_) -> panic("internal JSON carrier escaped typed decode")
+            // A JSON-shaped document parses through json.parse, which keeps
+            // each number's exact lexeme (#4602); that text is a YAML number.
+            .Number(text) -> text.copy()
             .Text(s) -> yaml_scalar(s)
             .Bytes(bytes) -> {
                 out := "["

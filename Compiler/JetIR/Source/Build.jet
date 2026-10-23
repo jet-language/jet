@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, tir_expr_type, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt]
+use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, tir_expr_type, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -329,6 +329,7 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
 // The declarations stay, so one declared program serves many builds.
 fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
     owned := ^functions
+    ir_declared_owners(&owned, p.types)
     ir_add_signature_union_types(&p.types, &p.type_rows, owned)
     rows := [String:Int]{}
     loop (index, function) in owned {
@@ -377,6 +378,50 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
     p.rows = rows
     p.render_impls = render_impls
     p.close_methods = close_methods
+}
+
+// A method's owner arrives spelled as its module names it (`Parser`), while
+// every other type the checked program names is its declaration key
+// (`<module>::Parser`). Each owner becomes the key of the type of that name
+// declared in the method's own module, so same-named types of two modules
+// keep their own methods, layouts and Display, Close and codec rows. An owner
+// declared elsewhere (an implementation of another module's type) is already
+// spelled by its key or alias and stays as it is.
+fn ir_declared_owners(functions: &[FnBody], types: [TTypeDef]) Never! {
+    declared := [String:String]{}
+    loop definition in types {
+        scoped :: "{definition.module_identity}|{definition.name}"
+        if declared.get(scoped) == None -> declared[scoped] = definition.key.copy()
+    }
+    loop index in 0..<functions.len() {
+        if functions[index].kind == {
+            .Method(convention, owner_type) -> {
+                owner :: ir_declared_owner(declared, functions[index].module_identity, owner_type) ?? next
+                functions[index].kind = TFuncKind.Method{self_convention: convention, owner_type: owner}
+            }
+            .TraitMethod(is_unsafe, convention, owner_type, trait_name, codec) -> {
+                owner :: ir_declared_owner(declared, functions[index].module_identity, owner_type) ?? next
+                functions[index].kind = TFuncKind.TraitMethod{is_unsafe: is_unsafe, self_convention: convention, owner_type: owner, trait_name: trait_name, serde_codec: codec}
+            }
+            .TopLevel -> {}
+        }
+    }
+}
+
+// `owner` named by the key of its declaration in `module_identity`, or None
+// when that module declares no type of its name.
+fn ir_declared_owner(declared: [String:String], module_identity: String, owner: Type) -> Type? Never! {
+    if owner == {
+        .Named(name) -> {
+            key :: declared.get("{module_identity}|{name}") ?? return None
+            return Val(Type.Named{name: key.copy()})
+        }
+        .Apply(name, args) -> {
+            key :: declared.get("{module_identity}|{name}") ?? return None
+            return Val(Type.Apply{name: key.copy(), args: args.copy()})
+        }
+        else -> return None
+    }
 }
 
 // IRProgram.spawn_sites of `functions`: the reports number a file's spawn

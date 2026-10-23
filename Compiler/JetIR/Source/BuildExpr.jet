@@ -57,7 +57,9 @@ fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Boo
 
 // The variables a body owns from its start close what they still own when
 // the body ends: a move parameter and a move receiver, and the receiver of
-// a type's own close method, which closes only its parts.
+// a type's own close method, which closes only its parts. That receiver is
+// not the body's to drop: the close glue lends it, and the scope that closed
+// the value drops it once the method returns (ir_drop_bindings).
 fn ir_arm_params(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
     receiver :: ir_receiver_access(function.kind)
     at := 0
@@ -71,6 +73,7 @@ fn ir_arm_params(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Ne
         }
         if own_close {
             ir_close_arm(&m, p, &b, self_slot, true, function.source_span)
+            ir_disown(&b, self_slot)
         } else if receiver == "move" && b.bindings[0].indirect < 0 {
             ir_close_arm(&m, p, &b, self_slot, false, function.source_span)
         }

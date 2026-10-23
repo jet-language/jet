@@ -183,11 +183,12 @@ fn text_claim(fields: encoding.Dyn, name: String) -> String? AuthError! {
 }
 
 /// A NumericDate claim. The value is read back from its source lexeme so `-0`
-/// and values outside the signed 64-bit range are rejected exactly.
+/// and values outside the signed 64-bit range are rejected exactly; the
+/// strict parse keeps every number as its `Dyn.Number` lexeme (#4602).
 fn int_claim(fields: encoding.Dyn, text: String, name: String) -> Int? AuthError! {
     value :: member(fields, name) ?? return Ok(None)
     if value == {
-        .Int(_) -> {
+        .Int(_) | .Number(_) -> {
             lexeme :: number_lexeme(text, name) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
             number :: json_i64(lexeme) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
             Val(number)

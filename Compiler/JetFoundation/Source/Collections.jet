@@ -810,7 +810,7 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         .AllocOptionValue -> Val(Type.Result{ok: Type.Option{inner: element}, err: Type.Named{name: "AllocError"}})
         .Lazy -> Val(sema_collection_output_iter(contract, element))
         .LazyChunks -> Val(sema_collection_output_iter(contract, Type.List{element: element}))
-        .LazyIndexed -> Val(sema_collection_output_iter(contract, Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "index", ty: Type.Int}, TypeTupleField{name: "item", ty: element}}}))
+        .LazyIndexed -> Val(sema_collection_output_iter(contract, Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "idx", ty: Type.Int}, TypeTupleField{name: "item", ty: element}}}))
         .LazyIndexes -> Val(sema_collection_output_iter(contract, Type.Int))
         .LazyScan -> Val(sema_collection_output_iter(contract, callback))
         .LazyFilterMap -> {

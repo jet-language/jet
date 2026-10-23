@@ -84,7 +84,8 @@ fn safe_limits() -> EncodingLimits Never! {
         max_expansion_bytes: 8388608,
     }
 }
-/// Strict JSON → `Dyn`.
+/// Strict JSON → `Dyn`. Every number keeps its exact lexeme as `Dyn.Number`
+/// until a typed read range-checks it (#4602).
 fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false, safe_limits()) }
 
 /// Strict JSON → `Dyn` under caller limits: `max_item_bytes` bounds the input
@@ -309,6 +310,8 @@ struct Parser {
     recording: Bool
     allow_duplicates: Bool
     typed_numbers: Bool
+    // Numbers parse as their validated `Dyn.Number` lexemes (parse_json).
+    exact_numbers: Bool
 }
 
 impl Parser {
@@ -327,6 +330,7 @@ impl Parser {
             recording: recording,
             allow_duplicates: allow_duplicates,
             typed_numbers: false,
+            exact_numbers: false,
         }
     }
 
@@ -413,7 +417,8 @@ impl Parser {
                         s :: &self.parse_string()
                         value = if self.typed_numbers -> stream.typed_string(^s) else -> Dyn.Text(s)
                     } else {
-                        if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
+                        // The typed rail keeps the shared typed-decode vocabulary (Rust EncodingErrors.rs).
+                        if n != 45 && (n < 48 || n > 57) -> return Err(self.err(if self.typed_numbers -> "expected a JSON value" else -> "expected a JSON value (object, array, string, number, true, false, or null)"))
                         value = &self.parse_number()
                     }
                 }
@@ -574,7 +579,7 @@ impl Parser {
             }
         }
         token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("invalid number token"))
-        if self.typed_numbers -> return Ok(stream.typed_number(^token))
+        if self.typed_numbers || self.exact_numbers -> return Ok(stream.typed_number(^token))
         if fractional || exp {
             f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
             if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
@@ -700,6 +705,7 @@ fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> D
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({limits.max_item_bytes})"))
     }
     p := Parser.new(raw, allow_duplicates, false)
+    p.exact_numbers = true
     p.max_depth = limits.max_depth
     value :: &p.parse_value()
     &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
@@ -714,7 +720,7 @@ fn __parse_typed(text: String) -> Dyn EncodingError! {
     parser.typed_numbers = true
     value :: &parser.parse_value()
     &parser.skip_ws() ?? return Err(parser.err("failed while scanning JSON whitespace"))
-    if !parser.eof() -> return Err(parser.err("unexpected trailing data after the JSON value"))
+    if !parser.eof() -> return Err(parser.err("extra text after JSON value"))
     Ok(value)
 }
 
@@ -851,11 +857,20 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
             write_ascii(&out, stream.jcs_number(n))
         }
         .Number(s) -> {
-            f :: Float.parse(s) ?? return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode number {s}"))
-            if !math.is_finite(f) {
-                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires a number within IEEE 754 binary64; {s} is out of range"))
+            // An integer lexeme follows the Int rule: exact in binary64 or rejected.
+            integral :: !s.contains(".") && !s.contains("e") && !s.contains("E")
+            if integral && Int.parse(s) == .Ok(n) {
+                if !stream.int_is_binary64(n) {
+                    return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+                }
+                write_ascii(&out, stream.jcs_number(Float{n}))
+            } else {
+                f :: Float.parse(s) ?? return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode number {s}"))
+                if !math.is_finite(f) {
+                    return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires a number within IEEE 754 binary64; {s} is out of range"))
+                }
+                write_ascii(&out, stream.jcs_number(f))
             }
-            write_ascii(&out, stream.jcs_number(f))
         }
         .Text(s) -> write_json_string(&out, s)
         .DateTime(_) -> write_json_string(&out, value.to_text() ?? "")

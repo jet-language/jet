@@ -8,6 +8,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  symlinkSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
@@ -25,19 +26,24 @@ export function usage() {
   return [
     "Usage: run-feature-examples.mjs [filter ...] [options]",
     "  filter             keep examples whose path contains this substring",
-    "  --jobs N           concurrent jet run processes (default 4)",
-    "  --timeout SEC      per-example timeout (default 90)",
+    "  --tier run|build   run: `jet run` each example (default); build: `jet build` it, then",
+    "                     run the binary with the same stdin and arguments",
+    "  --jobs N           concurrent examples (default 4)",
+    "  --timeout SEC      per-step timeout (default 90)",
     "  --list             print discovered examples and exit",
     "  --json             machine-readable summary",
     "  --no-env           do not wrap execution in jet-env",
   ].join("\n");
 }
 
+export const TIERS = ["run", "build"];
+
 export function parseArgs(argv) {
-  const options = { jobs: 4, timeoutSec: 90, list: false, json: false, noEnv: false, filters: [] };
+  const options = { tier: "run", jobs: 4, timeoutSec: 90, list: false, json: false, noEnv: false, filters: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--jobs") options.jobs = positive(argv[++i], "--jobs");
+    if (arg === "--tier") options.tier = tier(argv[++i]);
+    else if (arg === "--jobs") options.jobs = positive(argv[++i], "--jobs");
     else if (arg === "--timeout") options.timeoutSec = positive(argv[++i], "--timeout");
     else if (arg === "--list") options.list = true;
     else if (arg === "--json") options.json = true;
@@ -46,6 +52,11 @@ export function parseArgs(argv) {
     else options.filters.push(arg);
   }
   return options;
+}
+
+function tier(value) {
+  if (!TIERS.includes(value)) throw new Error(`--tier expects one of ${TIERS.join(", ")}`);
+  return value;
 }
 
 function positive(value, flag) {
@@ -108,23 +119,41 @@ function readExpected(stem) {
   };
 }
 
-// The `jet run` argv of an example, as testkit Golden.jet's direct tier runs
-// its `<stem>.case`. A case whose only run step is `step: jet run [FLAGS...]
-// <file>` runs the example with those flags; one whose only run step (after
-// any `step: build`) is `step: built [ARGS...]` runs it as `jet run <example>
-// -- ARGS...`. Without a case, or for any other case, the example runs as
-// `jet run <example>`.
-export function runArgs(entry, caseText) {
-  const fallback = ["run", entry.shown];
-  if (caseText === null) return fallback;
+// The run flags and program arguments of an example's `<stem>.case`, as
+// testkit Golden.jet's direct tier runs it. A case whose only run step is
+// `step: jet run [FLAGS...] <file>` supplies those flags; one whose only run
+// step (after any `step: build`) is `step: built [ARGS...]` supplies the
+// program arguments. Without a case, or for any other case, neither.
+export function caseInvocation(entry, caseText) {
+  const none = { flags: [], args: [] };
+  if (caseText === null) return none;
   const steps = caseText.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("step:"))
     .map((line) => line.slice("step:".length).trim().split(/\s+/u))
     .filter((words) => !(words.length === 1 && words[0] === "build"));
-  if (steps.length !== 1) return fallback;
+  if (steps.length !== 1) return none;
   const words = steps[0];
-  if (words[0] === "built") return words.length > 1 ? ["run", entry.shown, "--", ...words.slice(1)] : fallback;
-  if (words.length < 3 || words[0] !== "jet" || words[1] !== "run" || words.at(-1) !== basename(entry.path)) return fallback;
-  return ["run", ...words.slice(2, -1), entry.shown];
+  if (words[0] === "built") return { flags: [], args: words.slice(1) };
+  if (words.length < 3 || words[0] !== "jet" || words[1] !== "run" || words.at(-1) !== basename(entry.path)) return none;
+  return { flags: words.slice(2, -1), args: [] };
+}
+
+// The run tier's argv: `jet run [FLAGS...] <example> [-- ARGS...]`.
+export function runArgs(entry, caseText) {
+  const { flags, args } = caseInvocation(entry, caseText);
+  return ["run", ...flags, entry.shown, ...(args.length ? ["--", ...args] : [])];
+}
+
+// The build tier's argv: `jet build [FLAGS...] <example>`; the built binary
+// then runs with the case's program arguments.
+export function buildArgs(entry, caseText) {
+  return ["build", ...caseInvocation(entry, caseText).flags, entry.shown];
+}
+
+// A compile-time diagnostic names the command that hit it (E1803's Fix: run
+// `jet build --allow=FS <file>`); the goldens spell it as `jet run`, so the
+// build tier compares its diagnostics with that command word.
+export function asRunCommand(stderr) {
+  return stderr.replaceAll("`jet build ", "`jet run ");
 }
 
 function readCase(stem) {
@@ -260,9 +289,56 @@ function stageFeatureProject(entry, scratch, slot) {
   return { cwd: stageRoot };
 }
 
+// The build tier's copy of a single-file example: its directory's files
+// (subdirectories linked), so `jet build` writes its `.jet/build` outputs
+// into scratch, never into the repository.
+function stageExampleDirectory(entry, scratch, slot) {
+  const stageRoot = join(scratch, "projects", `${slot}-${entry.stem.replaceAll("/", "_")}`);
+  const source = dirname(entry.path);
+  const destination = join(stageRoot, relative(ROOT, source));
+  mkdirSync(destination, { recursive: true });
+  for (const item of readdirSync(source, { withFileTypes: true })) {
+    if (item.name === ".jet") continue;
+    const from = join(source, item.name);
+    const to = join(destination, item.name);
+    if (item.isDirectory()) symlinkSync(from, to);
+    else if (item.isFile()) copyFileSync(from, to);
+  }
+  return { cwd: stageRoot };
+}
+
+// The binary `jet build <entry>` writes: `<root>/.jet/build/<file stem>`,
+// where root is the entry's package root (CmdCompile's bin_path) or, outside
+// a package, the entry's directory.
+function builtArtifact(entryPath, stageRoot) {
+  let root = dirname(entryPath);
+  for (let candidate = root; isWithin(stageRoot, candidate); candidate = dirname(candidate)) {
+    if (existsSync(join(candidate, "package.jet"))) { root = candidate; break; }
+    if (candidate === stageRoot) break;
+  }
+  return join(root, ".jet/build", basename(entryPath, ".jet").replaceAll(".", "_"));
+}
+
+// The build tier: `jet build` the staged example, then run the binary it
+// wrote with the run tier's stdin, arguments and working directory. A
+// failed build is the verdict's run (its compile-time diagnostics).
+async function runBuilt(entry, caseText, staged, programCwd, options) {
+  const built = await runJet(buildArgs(entry, caseText), { ...options, cwd: staged.cwd, stdin: null });
+  if (built.timedOut || built.code !== 0) return built;
+  const artifact = builtArtifact(join(staged.cwd, entry.shown), staged.cwd);
+  if (!existsSync(artifact)) {
+    return { ...built, code: null, stderr: `${built.stderr}jet build succeeded without writing ${artifact}\n` };
+  }
+  return runProcess(artifact, caseInvocation(entry, caseText).args, { ...options, cwd: programCwd });
+}
+
 function runJet(args, options) {
+  return runProcess(JET, args, options);
+}
+
+function runProcess(command, args, options) {
   return new Promise((resolveRun) => {
-    const child = spawn(JET, args, {
+    const child = spawn(command, args, {
       cwd: options.cwd ?? ROOT,
       env: {
         ...process.env,
@@ -299,16 +375,17 @@ function runJet(args, options) {
   });
 }
 
-export function classifyRun(entry, run, expected) {
+export function classifyRun(entry, run, expected, tier = "run") {
   if (run.timedOut) return { status: "timeout", detail: `timeout ${run.timeoutSec}s` };
   if (entry.stem === "ui/ui_native_linux" && run.code !== 0 && gtkLoaderUnavailable(run.stderr)) {
     return { status: "skipped", detail: "gtk4 runtime loader unavailable" };
   }
   if (expected.err !== null) {
     if (!EXPECTED_FAIL_EXITS.has(run.code)) return { status: "failed", detail: `exit ${run.code} (expected 70 or 1)`, stderr: run.stderr };
-    const actualStderr = normalize(withoutWarningDiagnostics(run.stderr));
+    const stderr = tier === "build" ? asRunCommand(run.stderr) : run.stderr;
+    const actualStderr = normalize(withoutWarningDiagnostics(stderr));
     if (actualStderr !== normalize(expected.err)) {
-      return { status: "no-match", detail: "stderr", expected: expected.err, actual: run.stderr };
+      return { status: "no-match", detail: "stderr", expected: expected.err, actual: stderr };
     }
     return { status: "passed", detail: "expected failure" };
   }
@@ -386,28 +463,38 @@ async function main() {
       const expected = readExpected(entry.stem);
       const skipped = skipReason(entry, expected);
       if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
-      const staged = stageFeatureProject(entry, scratch, slot);
+      const caseText = readCase(entry.stem);
       const runOptions = {
-        cwd: staged?.cwd,
         store: join(scratch, "store", String(slot)),
         scratch,
         timeoutMs: options.timeoutSec * 1000,
         stdin: readStdin(entry.stem),
       };
-      const run = await runJet(runArgs(entry, readCase(entry.stem)), runOptions);
+      if (options.tier === "build") {
+        const project = stageFeatureProject(entry, scratch, slot);
+        const staged = project ?? stageExampleDirectory(entry, scratch, slot);
+        try {
+          const run = await runBuilt(entry, caseText, staged, project ? project.cwd : ROOT, runOptions);
+          return { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected, "build"), stderr: run.stderr, stdout: run.stdout };
+        } finally {
+          rmSync(staged.cwd, { recursive: true, force: true });
+        }
+      }
+      const staged = stageFeatureProject(entry, scratch, slot);
+      const run = await runJet(runArgs(entry, caseText), { ...runOptions, cwd: staged?.cwd });
       const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
       if (result.status !== "passed") return result;
-      for (const tier of EMIT_TIERS) {
-        if (expected.emit[tier] === null) continue;
-        const emitted = await runJet(["emit", `--${tier}`, entry.shown], { ...runOptions, stdin: null });
-        const verdict = classifyEmit(tier, emitted, expected.emit[tier]);
+      for (const emitTier of EMIT_TIERS) {
+        if (expected.emit[emitTier] === null) continue;
+        const emitted = await runJet(["emit", `--${emitTier}`, entry.shown], { ...runOptions, cwd: staged?.cwd, stdin: null });
+        const verdict = classifyEmit(emitTier, emitted, expected.emit[emitTier]);
         if (verdict) return { stem: entry.stem, shown: entry.shown, ...verdict, stderr: emitted.stderr, stdout: emitted.stdout };
       }
       return result;
     });
     const counts = summarize(results);
     if (options.json) {
-      console.log(JSON.stringify({ counts, results }, null, 2));
+      console.log(JSON.stringify({ tier: options.tier, counts, results }, null, 2));
     } else {
       for (const result of results) console.log(`${result.status.padEnd(8)} ${result.shown}${result.detail ? `  ${result.detail}` : ""}`);
       console.log(`summary: ${results.length} examples  passed ${counts.passed}  failed ${counts.failed}  no-match ${counts["no-match"]}  timeout ${counts.timeout}  skipped ${counts.skipped}`);

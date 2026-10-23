@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  asRunCommand,
+  buildArgs,
   classifyEmit,
   classifyRun,
   collectFeatureExamples,
@@ -67,10 +69,12 @@ test("timeouts are distinct from failures", () => {
   }, { out: "", err: null, stderrOut: null }).status, "timeout");
 });
 
-test("argument filters and concurrency options parse", () => {
+test("argument filters, tier and concurrency options parse", () => {
   assert.deepEqual(parseArgs(["net", "--jobs", "2", "--timeout", "60", "--no-env", "--json"]), {
-    filters: ["net"], jobs: 2, timeoutSec: 60, list: false, json: true, noEnv: true,
+    filters: ["net"], tier: "run", jobs: 2, timeoutSec: 60, list: false, json: true, noEnv: true,
   });
+  assert.equal(parseArgs(["--tier", "build"]).tier, "build");
+  assert.throws(() => parseArgs(["--tier", "emit"]), /--tier expects one of run, build/u);
 });
 
 test("feature discovery excludes expected and hidden trees", () => {
@@ -98,4 +102,21 @@ test("a single `jet run` or `built` case step supplies the run flags or program 
   assert.deepEqual(runArgs(entry, "step: jet run --allow=Env other.jet\n"), ["run", shown]);
   assert.deepEqual(runArgs(entry, "step: build\nstep: jet run -A authority_allow_flag.jet\n"), ["run", "-A", shown]);
   assert.deepEqual(runArgs(entry, "step: built a\nstep: built b\n"), ["run", shown]);
+});
+
+test("the build tier builds with the case's run flags", () => {
+  const entry = { stem: "effects/authority_allow_flag", shown: "Examples/features/effects/authority_allow_flag.jet", path: "/repo/Examples/features/effects/authority_allow_flag.jet" };
+  assert.deepEqual(buildArgs(entry, null), ["build", entry.shown]);
+  assert.deepEqual(buildArgs(entry, "step: jet run --allow=Env,Time authority_allow_flag.jet\n"), ["build", "--allow=Env,Time", entry.shown]);
+  assert.deepEqual(buildArgs(entry, "step: built alpha beta\n"), ["build", entry.shown]);
+});
+
+test("the build tier compares compile-time diagnostics with the `jet run` command word", () => {
+  const fix = (command) => `Error [E1803]: Application authority is undecided for \`FS\`\n Fix: run \`${command} --allow=FS example.jet\` to allow it for this run\n`;
+  assert.equal(asRunCommand(fix("jet build")), fix("jet run"));
+  const entry = { stem: "example", path: "example.jet" };
+  const built = { code: 1, stdout: "", stderr: fix("jet build"), timedOut: false, timeoutSec: 60 };
+  const expected = { out: null, err: fix("jet run"), stderrOut: null };
+  assert.equal(classifyRun(entry, built, expected, "build").status, "passed");
+  assert.equal(classifyRun(entry, built, expected).status, "no-match");
 });

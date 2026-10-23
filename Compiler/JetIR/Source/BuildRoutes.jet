@@ -533,6 +533,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
                 return -1
             }
             .Sort -> return ir_list_sort(&m, p, &b, subject, element, false, span)
+            .Indexed -> return ir_list_indexed(&m, p, &b, ty, subject, element, span)
             .SortDesc -> return ir_list_sort(&m, p, &b, subject, element, true, span)
             .RemoveList(_, mode) -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "remove without an operand")
@@ -578,6 +579,41 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
         }
     }
     ir_builtin_route(&m, p, &b, ty, receiver_ty, operation, operands, span)
+}
+
+// `list.indexed()`: an Iter over the (index, item) pair of each element, in
+// order. A List is finite and each pair owns a copy of its item either way,
+// so the pairs gather into a fresh List the Iter takes over.
+fn ir_list_indexed(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, span: Span) -> Int Never! {
+    iter_ty :: ir_subst(m, ty)
+    result_row :: ir_value_type(&m, p, iter_ty) ?? return ir_type_fail(&b, span, iter_ty)
+    pair_ty :: ir_iter_element(iter_ty) ?? return ir_fail_slot(&b, span, "indexed producing {ir_type_name(iter_ty)}")
+    fields :: if ir_untag(pair_ty) == .Tuple(checked) -> checked else -> { return ir_fail_slot(&b, span, "indexed pair {ir_type_name(pair_ty)}") }
+    members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, pair_ty)
+    if members.len() != 2 -> return ir_fail_slot(&b, span, "indexed pair {ir_type_name(pair_ty)}")
+    index_member := members[0]
+    item_member := members[1]
+    loop member in members {
+        if member.name == "idx" -> index_member = member
+        if member.name == "item" -> item_member = member
+    }
+    pair_row :: ir_value_type(&m, p, pair_ty) ?? return ir_type_fail(&b, span, pair_ty)
+    pairs_ty :: Type.List{element: pair_ty}
+    pairs_row :: ir_value_type(&m, p, pairs_ty) ?? return ir_type_fail(&b, span, pairs_ty)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    pairs :: ir_list_empty(&m, &b, pairs_row)
+    walk :: ir_walk_open(&m, &b, list, element)
+    position :: ir_temp(&m, &b, int_row)
+    ir_emit(&b.f, IROp.Copy, position, walk.index, -1, -1, b.line)
+    item :: ir_copy_value(&m, p, &b, walk.item, span)
+    pair :: ir_fresh_temp(&m, &b, pair_row)
+    ir_emit(&b.f, IROp.StackAddress, pair, m.types[pair_row].size, 8, -1, b.line)
+    ir_store_at(&m, p, &b, pair, index_member.offset, position)
+    ir_store_at(&m, p, &b, pair, item_member.offset, item)
+    ir_list_push(&m, p, &b, pairs, pair_row, pair)
+    ir_walk_close(&m, &b, walk)
+    ir_release(&m, &b, list)
+    ir_lazy_from_list(&m, p, &b, pairs, result_row, span)
 }
 
 // A builtin method through its canonical route (codegen

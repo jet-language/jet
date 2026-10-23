@@ -20,6 +20,10 @@ command, result, and output for each project:
 node Tools/agent/run-feature-examples.mjs
 ```
 
+`--tier build` checks the same goldens through `jet build` and the built
+binary (same stdin, arguments and working directory); a compile-time
+diagnostic is compared with its command word spelled `jet run`.
+
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 
