@@ -65,8 +65,8 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
 
 // Rust: tests/dev_schedule_wave_a.rs:11
 #Test("local_schedule_restart_does_not_replay_a_missed_window") {
-    DAY :: prep { U64{86400} }
-    THREE_AM :: prep { U64{3 * 3600} }
+    DAY :: comptime { U64{86400} }
+    THREE_AM :: comptime { U64{3 * 3600} }
     schedule :: [(_0: "nightly", _1: JetJobSchedule.WallClockTime{hour: 3, minute: 0})]
     missed :: DAY + THREE_AM + 61
     before_restart := JetJobClock.new()
@@ -146,7 +146,7 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
 #Test("notebook_declarations_are_file_wide_but_state_cells_stay_ordered") {
     kernel := Kernel.open(None, "entry-order-test").expect("open entry-order notebook kernel")
     comptime_reader :: &kernel.notebook.add_cell(CellKind.Jet, "fn comptime_reader() -> Int {{ return FUTURE_ANSWER }}").id.clone()
-    comptime_answer :: &kernel.notebook.add_cell(CellKind.Jet, "FUTURE_ANSWER :: prep {{ 42 }}").id.clone()
+    comptime_answer :: &kernel.notebook.add_cell(CellKind.Jet, "FUTURE_ANSWER :: comptime {{ 42 }}").id.clone()
     caller :: &kernel.notebook.add_cell(CellKind.Jet, "fn caller() -> Int {{ return helper().value }}").id.clone()
     helper :: &kernel.notebook.add_cell(CellKind.Jet, "fn helper() -> Answer {{ return Answer{{ value: 42 }} }}").id.clone()
     answer_type :: &kernel.notebook.add_cell(CellKind.Jet, "struct Answer {{ value: Int }}").id.clone()

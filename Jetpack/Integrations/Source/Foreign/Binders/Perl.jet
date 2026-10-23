@@ -15,7 +15,7 @@ use jet_pkg_model.[
 ]
 
 // The persistent worker. Hole: `allowed`, one `'Name' => 1` row per sub.
-PKG_PERL_WORKER :: prep { ```use strict;
+PKG_PERL_WORKER :: comptime { ```use strict;
 use warnings;
 use JSON::PP ();
 use IO::Handle ();
@@ -74,7 +74,7 @@ while (1) {
 }
 ``` }
 
-PKG_PERL_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "PerlError"} }
+PKG_PERL_RESERVED :: comptime { [String]{"open", "cancel", "close", "decode_response", "Session", "PerlError"} }
 
 // A discovered sub: its Perl name (the worker's lookup key) and its
 // snake-cased Jet name.

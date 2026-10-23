@@ -8,29 +8,29 @@ use std.fmt
 use jet_foundation.[Record, Variant, foundation_json_escape, type_name]
 
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:15
-PAUSED_EVALUATE_PROTOCOL :: prep { String{"jet.devtools.v1"} }
+PAUSED_EVALUATE_PROTOCOL :: comptime { String{"jet.devtools.v1"} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:16
-PAUSED_EVALUATE_SCHEMA_VERSION :: prep { U32{1} }
+PAUSED_EVALUATE_SCHEMA_VERSION :: comptime { U32{1} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:17
-INSPECT_AUTHORITY :: prep { String{"devtools.inspect"} }
+INSPECT_AUTHORITY :: comptime { String{"devtools.inspect"} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:18
-EVALUATE_AUTHORITY :: prep { String{"devtools.evaluate"} }
+EVALUATE_AUTHORITY :: comptime { String{"devtools.evaluate"} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:19
-MUTATE_AUTHORITY :: prep { String{"devtools.mutate"} }
+MUTATE_AUTHORITY :: comptime { String{"devtools.mutate"} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:21
-MAX_REQUEST_BYTES :: prep { USize{64 * 1024} }
+MAX_REQUEST_BYTES :: comptime { USize{64 * 1024} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:22
-MAX_EXPRESSION_BYTES :: prep { USize{16 * 1024} }
+MAX_EXPRESSION_BYTES :: comptime { USize{16 * 1024} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:23
-MAX_SCOPES :: prep { USize{256} }
+MAX_SCOPES :: comptime { USize{256} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:24
-MAX_VALUE_DEPTH :: prep { U32{64} }
+MAX_VALUE_DEPTH :: comptime { U32{64} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:25
-MAX_VALUE_NODES :: prep { U64{4096} }
+MAX_VALUE_NODES :: comptime { U64{4096} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:26
-MAX_VALUE_BYTES :: prep { U64{1024 * 1024} }
+MAX_VALUE_BYTES :: comptime { U64{1024 * 1024} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:27
-MAX_EVALUATION_STEPS :: prep { U64{1_000_000} }
+MAX_EVALUATION_STEPS :: comptime { U64{1_000_000} }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:30
 enum SessionState { Running; Paused; Finished; Stale; Cancelled }
 impl SessionState {
@@ -204,7 +204,7 @@ impl AuthoritySet {
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:353
 struct EvaluationBudget { max_depth: U32; max_nodes: U64; max_bytes: U64; max_steps: U64 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:360
-DEFAULT_EVALUATION_BUDGET :: prep { EvaluationBudget { max_depth: 32, max_nodes: 1024, max_bytes: 256 * 1024, max_steps: 100_000 } }
+DEFAULT_EVALUATION_BUDGET :: comptime { EvaluationBudget { max_depth: 32, max_nodes: 1024, max_bytes: 256 * 1024, max_steps: 100_000 } }
 impl EvaluationBudget {
     // Rust: crates/jet-devserver/src/PausedEvaluate.rs:368
     fn new(max_depth: U32, max_nodes: U64, max_bytes: U64, max_steps: U64) -> Self Err! {

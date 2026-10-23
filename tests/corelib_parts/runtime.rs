@@ -1871,7 +1871,7 @@ fn tracked_origin_is_a_folded_optional_fact() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let name = "origin_fact";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    speed_origin :: prep { speed.$origin }\n    plain_origin :: prep { plain.$origin }\n    copied_origin :: prep { copied.$origin }\n    print(speed_origin?.tracked ?? false)\n    print(speed_origin?.source ?? \"missing\")\n    print(speed_origin?.line ?? 0)\n    print(speed_origin?.column ?? 0)\n    print(plain_origin == None)\n    print(copied_origin == None)\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    speed_origin :: comptime { speed.$origin }\n    plain_origin :: comptime { plain.$origin }\n    copied_origin :: comptime { copied.$origin }\n    print(speed_origin?.tracked ?? false)\n    print(speed_origin?.source ?? \"missing\")\n    print(speed_origin?.line ?? 0)\n    print(speed_origin?.column ?? 0)\n    print(plain_origin == None)\n    print(copied_origin == None)\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 

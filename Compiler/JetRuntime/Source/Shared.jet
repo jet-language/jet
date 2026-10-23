@@ -52,8 +52,8 @@ fn shared_borrow_unpin(cell: I64) {
 // compensated and nothing about ordering or deadlock-freedom changes (the
 // mutex is never held while pausing). Returns false when the caller should
 // block.
-SHARED_SPIN_ROUNDS :: prep { I64{64} }
-SHARED_SPIN_PAUSES :: prep { I64{32} }
+SHARED_SPIN_ROUNDS :: comptime { I64{64} }
+SHARED_SPIN_PAUSES :: comptime { I64{32} }
 
 fn shared_spin(mutex: I64, round: I64) -> Bool {
     if (round >= SHARED_SPIN_ROUNDS) -> return false

@@ -39,7 +39,7 @@ struct IRCompilerOwnedRecord {
 // carry no `MarkerArgInfo.value` (its type is computed from the policy rule
 // argument declarations), so neither does this table.
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_CORE_RECORDS
-IR_COMPILER_OWNED_CORE_RECORDS :: prep { [IRCompilerOwnedRecord]{
+IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "PluginFrame", fields: [String]{"function", "component", "offset"}},
     {name: "PluginFault", fields: [String]{"export", "message", "frames"}},
     {name: "RangeError", fields: [String]{"reason"}},
@@ -256,14 +256,14 @@ fn ir_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
 
 // The non-generic geometry carriers (Rust COMPILER_OWNED_GEOMETRY_RECORDS
 // rows without type parameters); their `x`/`y` types are Core record rows.
-IR_COMPILER_OWNED_GEOMETRY_POINTS :: prep { [String]{
+IR_COMPILER_OWNED_GEOMETRY_POINTS :: comptime { [String]{
     "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
     "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta",
 } }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_MATH_RECORDS
 // (each field is the type's scalar, Rust `math_scalar_ty`).
-IR_COMPILER_OWNED_MATH_RECORDS :: prep { [IRCompilerOwnedRecord]{
+IR_COMPILER_OWNED_MATH_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "F32x4", fields: [String]{"x", "y", "z", "w"}},
     {name: "F64x2", fields: [String]{"x", "y"}},
     {name: "Vec2", fields: [String]{"x", "y"}},
@@ -274,7 +274,7 @@ IR_COMPILER_OWNED_MATH_RECORDS :: prep { [IRCompilerOwnedRecord]{
 // The carrier record rows of Rust compiler_owned_type_defs between `Range`
 // and the Core records (generic Core carriers, geometry, keyed vault,
 // data summaries, `AllocError`, `VJPRun`), in program order.
-IR_COMPILER_OWNED_CARRIER_RECORDS :: prep { [String]{
+IR_COMPILER_OWNED_CARRIER_RECORDS :: comptime { [String]{
     "DataJoin", "Group", "DataSnapshot",
     "Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
     "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
@@ -305,7 +305,7 @@ struct IRCompilerOwnedEnum {
 // are checked values with no Jet declaration. Each joins every program as one
 // row under its bare canonical key, so an enum literal, a variant pattern and
 // the backends name the same IR type as the Rust runtime does.
-IR_COMPILER_OWNED_ENUMS :: prep { [IRCompilerOwnedEnum]{
+IR_COMPILER_OWNED_ENUMS :: comptime { [IRCompilerOwnedEnum]{
     {name: "Overflow", variants: [String]{"Block", "DropNewest", "DropOldest"}},
     {name: "FailurePolicy", variants: [String]{"StopFirst", "Collect", "Log", "Ignore"}},
     {name: "HookPolicy", variants: [String]{"FirstCancelElseTransform"}},

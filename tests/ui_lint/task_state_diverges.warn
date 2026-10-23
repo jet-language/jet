@@ -1,8 +1,8 @@
-Warning [L0152] (divergent_state_paths): `handle` ends in state `Joined` on one path and `Detached` on another.
-  --> tests/ui_lint/task_state_diverges.jet:3:5
+Warning [L0101] (unused_local_binding): Local binding `err` is never read.
+  --> tests/ui_lint/task_state_diverges.jet:4:19
     |
-  3 |     if {
-    |     ^^
- Why: Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent.
- Fix: Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it.
-More: jet-lang.dev/e/L0152
+  4 |         true -> { handle.join() ?? 0 }
+    |                   ^^^^^^^^^^^^^^^^^^
+ Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
+ Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
+More: jet-lang.dev/e/L0101

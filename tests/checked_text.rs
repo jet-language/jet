@@ -57,8 +57,8 @@ fn accepts(text: String) -[]> Bool {
     result ? value -> return true ! error -> return false
 }
 
-COMPTIME_GOOD :: prep { accepts("ok") }
-COMPTIME_BAD :: prep { accepts("") }
+COMPTIME_GOOD :: comptime { accepts("ok") }
+COMPTIME_BAD :: comptime { accepts("") }
 
 fn run() {
     literal :: Pattern{"hello {1}"}

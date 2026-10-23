@@ -3,18 +3,18 @@
 // resulting constants; it never receives a filesystem capability.
 use core.compiler as compiler
 
-MANIFEST :: prep { compiler.manifest() ?? panic("manifest view failed") }
-PACKAGE :: prep { compiler.package() ?? panic("package view failed") }
-LOCK :: prep { compiler.lock() ?? panic("lock view failed") }
-PROFILES :: prep { compiler.profiles() ?? panic("profile view failed") }
+MANIFEST :: comptime { compiler.manifest() ?? panic("manifest view failed") }
+PACKAGE :: comptime { compiler.package() ?? panic("package view failed") }
+LOCK :: comptime { compiler.lock() ?? panic("lock view failed") }
+PROFILES :: comptime { compiler.profiles() ?? panic("profile view failed") }
 
-MANIFEST_OUTPUTS :: prep { MANIFEST.outputs().len() }
-PACKAGE_OUTPUTS :: prep { PACKAGE.outputs().len() }
-LOCK_VERSION :: prep { LOCK.version() }
-LOCK_PACKAGES :: prep { LOCK.packages().len() }
-PROFILE_COUNT :: prep { PROFILES.profiles().len() }
-PACKAGE_NAME :: prep { $package.name }
-PACKAGE_VERSION :: prep { $package.version }
+MANIFEST_OUTPUTS :: comptime { MANIFEST.outputs().len() }
+PACKAGE_OUTPUTS :: comptime { PACKAGE.outputs().len() }
+LOCK_VERSION :: comptime { LOCK.version() }
+LOCK_PACKAGES :: comptime { LOCK.packages().len() }
+PROFILE_COUNT :: comptime { PROFILES.profiles().len() }
+PACKAGE_NAME :: comptime { $package.name }
+PACKAGE_VERSION :: comptime { $package.version }
 
 fn build(b: Build) {
     if MANIFEST_OUTPUTS != 0 -> panic("manifest view must stay uncomposed")

@@ -113,7 +113,7 @@ fn power_result_types_follow_the_operands() {
 #[test]
 fn exact_int_power_stays_exact_across_tiers() {
     let src = r#"
-FOLDED :: prep { (2).pow(200) }
+FOLDED :: comptime { (2).pow(200) }
 
 fn show_exact(value: Int) {
     print(value)

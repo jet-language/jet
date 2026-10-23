@@ -59,7 +59,7 @@ fn pkg_cffi_validate_generated_artifact(provenance_path: String, archive: String
     pkg_cffi_validate_provenance_archive_inputs(provenance, provenance_path, lib)
 }
 
-CFFI_PROVENANCE_SOURCE_ROLES :: prep { [String]{"source", "runtime", "declaration", "worker", "link"} }
+CFFI_PROVENANCE_SOURCE_ROLES :: comptime { [String]{"source", "runtime", "declaration", "worker", "link"} }
 
 // Every recorded source role still hashes to its recorded digest.
 fn pkg_cffi_validate_provenance_source_inputs(provenance: ForeignProvenance, provenance_path: String, lib: String) CFFIError! -[FS]> {
@@ -238,9 +238,9 @@ fn pkg_cffi_normalize_nm_symbol(symbol: String) -> String Never! {
     symbol.removeprefix("_")
 }
 
-CFFI_IGNORABLE_CPP_PREFIXES :: prep { [String]{"ZSt", "ZNSt", "ZNKSt", "ZNS", "ZNKS", "ZTI", "ZTV", "ZTS", "ZTT", "Zda", "Zdl", "Zna", "Znw", "atomic_", "dynamic_cast", "errno_location", "gthread", "pthread", "dl", "sched_", "stack_chk", "__"} }
-CFFI_IGNORABLE_CPP_FRAGMENTS :: prep { [String]{"cxa", "gxx_personality", "Unwind"} }
-CFFI_IGNORABLE_CPP_NAMES :: prep { [String]{"abort", "free", "malloc", "memcpy", "memmove", "memset", "strlen"} }
+CFFI_IGNORABLE_CPP_PREFIXES :: comptime { [String]{"ZSt", "ZNSt", "ZNKSt", "ZNS", "ZNKS", "ZTI", "ZTV", "ZTS", "ZTT", "Zda", "Zdl", "Zna", "Znw", "atomic_", "dynamic_cast", "errno_location", "gthread", "pthread", "dl", "sched_", "stack_chk", "__"} }
+CFFI_IGNORABLE_CPP_FRAGMENTS :: comptime { [String]{"cxa", "gxx_personality", "Unwind"} }
+CFFI_IGNORABLE_CPP_NAMES :: comptime { [String]{"abort", "free", "malloc", "memcpy", "memmove", "memset", "strlen"} }
 
 // C++ runtime, standard-library, and libc symbols a generated archive may
 // leave undefined for the platform to supply.

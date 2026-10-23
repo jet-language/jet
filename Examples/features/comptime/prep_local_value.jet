@@ -1,10 +1,10 @@
-// `name :: prep { value }` inside a function body is a build-time value:
+// `name :: comptime { value }` inside a function body is a build-time value:
 // the block runs while building, and every later read of `lanes` is the
 // prepared value, so the program emits no call to `calculate_lanes`.
 fn calculate_lanes() -> Int { 8 }
 
 fn run() {
-    lanes :: prep { calculate_lanes() + 0 }
+    lanes :: comptime { calculate_lanes() + 0 }
     print(lanes)
 }
 // --- expected output --------------------------------------------------

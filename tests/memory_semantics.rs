@@ -12,7 +12,7 @@ fn run() -[!Mem.Alloc]> {
 "#;
 
 const MEMORY_COMPTIME_SOURCE: &str = r#"
-ANSWER :: prep { "memory denial" }
+ANSWER :: comptime { "memory denial" }
 
 fn run() -[!Mem.Alloc]> {
     print(ANSWER)

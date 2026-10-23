@@ -238,7 +238,7 @@ fn jet_cli_emit_ast_item(item: Item) -> JetCLIEmitNode Never! {
             jet_cli_emit_node("protocol", "protocol {value.name}", children)
         }
         .UserDerive(value) -> jet_cli_emit_leaf("derive", "derive {value.trait_name}<{value.type_param}>")
-        .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "prep loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.source)})
+        .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "comptime loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.source)})
         .GenericModule(value) -> jet_cli_emit_ast_items("generic-module", "generic module {value.name}", value.body)
         .ModuleAlias(value) -> jet_cli_emit_leaf("module-alias", "module {value.name} = {value.target}")
         .MarkerDecl(value) -> jet_cli_emit_leaf("marker", "marker {value.name}")
@@ -377,14 +377,14 @@ fn jet_cli_emit_ast_stmt(statement: Stmt) -> JetCLIEmitNode Never! {
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(cond), jet_cli_emit_ast_body("body", "then", then_body)}
             if else_body == .Val(body) -> &children.push(jet_cli_emit_ast_body("else", "else", body))
-            jet_cli_emit_node("comptime-if", "prep if", children)
+            jet_cli_emit_node("comptime-if", "comptime if", children)
         }
         .ComptimeSwitch(subject, arms, else_body, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject)}
             jet_cli_emit_ast_arms(arms, else_body, &children)
-            jet_cli_emit_node("comptime-switch", "prep switch", children)
+            jet_cli_emit_node("comptime-switch", "comptime switch", children)
         }
-        .ComptimeBlock(body, _, _) -> jet_cli_emit_ast_body("comptime-block", "prep", body)
+        .ComptimeBlock(body, _, _) -> jet_cli_emit_ast_body("comptime-block", "comptime", body)
         .ContextBlock(fields, body, _) -> {
             children := [JetCLIEmitNode]{}
             loop field in fields -> &children.push(jet_cli_emit_node("context-field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(field.value)}))
@@ -578,7 +578,7 @@ fn jet_cli_emit_ast_expr(expression: Expr) -> JetCLIEmitNode Never! {
             jet_cli_emit_node("CallValue", "call value", children)
         }
         .PtrFromAddr(alias, _, elem, address, _, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
-        .ComptimeName(name, _, _, _) -> jet_cli_emit_leaf("ComptimeName", "prep name {name}")
+        .ComptimeName(name, _, _, _) -> jet_cli_emit_leaf("ComptimeName", "comptime name {name}")
         .Paren(value, _, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
     }
 }

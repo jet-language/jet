@@ -871,7 +871,7 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-#Static LIMIT :: prep { 10 }
+#Static LIMIT :: comptime { 10 }
 
 fn show(n: Int) {
     print(n)

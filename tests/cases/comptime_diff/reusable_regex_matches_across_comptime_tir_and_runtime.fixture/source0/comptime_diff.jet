@@ -1,8 +1,8 @@
 use core.encoding.hex as comptime_diff_hex
 
-CT_REGEX :: prep { Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"} }
-CT_MATCH :: prep { CT_REGEX.match("xx Jet_2026 yy") ?? panic("missing comptime match") }
-COMPTIME_VALUE :: prep { "{CT_MATCH.group(2) ?? "none"}|{CT_MATCH.name("word") ?? "none"}|{CT_MATCH.start}|{CT_MATCH.end}|{CT_MATCH.group_start(1) ?? -1}|{CT_MATCH.group_end(1) ?? -1}|{CT_REGEX.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{CT_REGEX.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}" }
+CT_REGEX :: comptime { Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"} }
+CT_MATCH :: comptime { CT_REGEX.match("xx Jet_2026 yy") ?? panic("missing comptime match") }
+COMPTIME_VALUE :: comptime { "{CT_MATCH.group(2) ?? "none"}|{CT_MATCH.name("word") ?? "none"}|{CT_MATCH.start}|{CT_MATCH.end}|{CT_MATCH.group_start(1) ?? -1}|{CT_MATCH.group_end(1) ?? -1}|{CT_REGEX.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{CT_REGEX.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}" }
 
 fn run() {
     rt_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}

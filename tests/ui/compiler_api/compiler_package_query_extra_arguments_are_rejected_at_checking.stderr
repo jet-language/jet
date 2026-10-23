@@ -1,8 +1,8 @@
 Error [E0104]: `manifest` expects 0 arguments, got 1
   --> compiler_package_query_extra_arguments_are_rejected_at_checking.jet:2:26
     |
-  2 | VALUE :: prep { compiler.manifest("extra") }
-    |                          ^^^^^^^^
+  2 | VALUE :: comptime { compiler.manifest("extra") }
+    |                              ^^^^^^^^
  Why: Every argument must match a parameter
  Fix: Check the definition of `manifest` in the imported file
 More: jet-lang.dev/e/E0104
@@ -10,8 +10,8 @@ More: jet-lang.dev/e/E0104
 Error [E2402]: This implicit fallible call can't convert `CompilerPackageError` into `Err` — no declared conversion exists
   --> compiler_package_query_extra_arguments_are_rejected_at_checking.jet:2:26
     |
-  2 | VALUE :: prep { compiler.manifest("extra") }
-    |                          ^^^^^^^^
+  2 | VALUE :: comptime { compiler.manifest("extra") }
+    |                              ^^^^^^^^
  Why: Ordinary fallible calls propagate automatically; `CompilerPackageError` can reach `Err` only through `impl CompilerPackageError -> Err`
  Fix: Handle this call locally with `??`, add `impl CompilerPackageError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402

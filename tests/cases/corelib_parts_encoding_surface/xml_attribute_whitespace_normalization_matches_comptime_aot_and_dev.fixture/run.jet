@@ -14,10 +14,10 @@ fn summarize(source: String) -> String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-CR :: prep { String.from_bytes([13]) ?? panic("CR") }
-CLOSE :: prep { "/>" }
-SOURCE :: prep { "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}" }
-NORMALIZED :: prep { summarize(SOURCE) }
+CR :: comptime { String.from_bytes([13]) ?? panic("CR") }
+CLOSE :: comptime { "/>" }
+SOURCE :: comptime { "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}" }
+NORMALIZED :: comptime { summarize(SOURCE) }
 
 fn run() {
     runtime := summarize(SOURCE)

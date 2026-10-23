@@ -81,7 +81,7 @@ function pinnedSource(path) {
   return { path, handle: fileObject(join(root, path)), text: bytes.toString('utf8') };
 }
 function literal(source, name) {
-  const match = new RegExp(`^${name}\\s*::\\s*prep\\s*\\{\\s*I64\\{(\\d+)\\}\\s*\\}`, 'm').exec(source.text);
+  const match = new RegExp(`^${name}\\s*::\\s*comptime\\s*\\{\\s*I64\\{(\\d+)\\}\\s*\\}`, 'm').exec(source.text);
   if (!match) throw Error(`missing canonical native ABI literal ${name}`);
   return Number(match[1]);
 }

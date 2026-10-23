@@ -219,7 +219,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
     params
 }
 
-// Rust `derive_body_items`: the body is a template, so nested `prep loop`
+// Rust `derive_body_items`: the body is a template, so nested `comptime loop`
 // statements are template loops.
 fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a marker body")
@@ -268,14 +268,14 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
     }
 }
 
-// A declaration loop is `prep loop`, in marker bodies and at the root.
+// A declaration loop is `comptime loop`, in marker bodies and at the root.
 fn parser_template_loop_ahead(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP)
 }
 
 fn parser_parse_template_loop(state: &JetParserState) -> ItemTemplateLoop {
     start :: parser_bump(&state)
-    parser_expect(&state, TOKEN_KW_LOOP, "after `prep` in a declaration loop")
+    parser_expect(&state, TOKEN_KW_LOOP, "after `comptime` in a declaration loop")
     variable :: parser_expect_name(&state, "for a declaration loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a declaration loop binding and source")
     // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens

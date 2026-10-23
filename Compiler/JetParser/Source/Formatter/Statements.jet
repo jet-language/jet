@@ -839,14 +839,14 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
         }
         // `#FX(Net, DB) { … }` effect-restriction region.
         .AuthorityScope(_, _, _, body, _) -> jfmt_fmt_body(&f, body)
-        // `prep { … }` shared-preparation block.
+        // `comptime { … }` shared-preparation block.
         .ComptimeBlock(body, is_template_loop, _) -> {
-            // A template loop prints as `prep loop …`.
+            // A template loop prints as `comptime loop …`.
             if is_template_loop && body.len() == 1 {
-                jfmt_write(&f, "prep ")
+                jfmt_write(&f, "comptime ")
                 jfmt_fmt_stmt(&f, body[0])
             } else {
-                jfmt_write(&f, "prep {{")
+                jfmt_write(&f, "comptime {{")
                 jfmt_newline(&f)
                 f.indent += 1
                 jfmt_fmt_block_stmts(&f, body)
@@ -854,9 +854,9 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // Format like `if` with a `prep` lead.
+        // Format like `if` with a `comptime` lead.
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
-            jfmt_write(&f, "prep if ")
+            jfmt_write(&f, "comptime if ")
             jfmt_fmt_cond(&f, cond)
             jfmt_write(&f, " {{")
             jfmt_newline(&f)
@@ -873,11 +873,11 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // `prep if $build.os == { … }` — the OS-dispatch
+        // `comptime if $build.os == { … }` — the OS-dispatch
         // switch. Formats exactly like a `Stmt::Switch` (arm grammar)
-        // with a `prep if` lead.
+        // with a `comptime if` lead.
         .ComptimeSwitch(subject, arms, else_body, _) -> {
-            jfmt_write(&f, "prep if ")
+            jfmt_write(&f, "comptime if ")
             jfmt_fmt_dispatch(&f, subject, arms, else_body, true)
         }
         // `#Context(field: value, …) { … }`.
@@ -1064,7 +1064,7 @@ fn jfmt_fmt_effect_loop_body(f: &JetFmt, body: [Stmt], header_end: Int, arrow_bo
 
 // Render a dispatch body
 // `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
-// `prep if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
+// `comptime if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
 fn jfmt_fmt_dispatch(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool) {
     table_op :: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     jfmt_fmt_expr(&f, subject, JFMT_PREC_OR_FALLBACK)
@@ -1530,7 +1530,7 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
     }
     loop marker in b.markers -> jfmt_write(&f, "#{marker.name} ")
     // Compile time is always the explicit
-    // `name :: prep { value }`.
+    // `name :: comptime { value }`.
     if b.is_comptime {
         jfmt_write(&f, b.name)
         jfmt_write(&f, " :: ")
@@ -1576,9 +1576,9 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
 }
 
 // The prepared value of a compile-time binding,
-// `prep { value }`.
+// `comptime { value }`.
 fn jfmt_fmt_prepared_value(f: &JetFmt, value: Expr) {
-    jfmt_write(&f, "prep {{ ")
+    jfmt_write(&f, "comptime {{ ")
     jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " }}")
 }

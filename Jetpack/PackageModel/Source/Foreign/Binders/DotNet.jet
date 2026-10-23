@@ -7,19 +7,19 @@
 use core.files as files
 use core.sys as sys
 
-DOTNET_BIND_SCHEMA :: prep { "jet-dotnet-bind-v1" }
-DOTNET_TOOL_ACTION :: prep { "rejected the .NET binding input" }
+DOTNET_BIND_SCHEMA :: comptime { "jet-dotnet-bind-v1" }
+DOTNET_TOOL_ACTION :: comptime { "rejected the .NET binding input" }
 
-DOTNET_PROJECT :: prep { `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>@OUTPUT@</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources></PropertyGroup></Project>` }
-DOTNET_RUNTIME_CONFIG :: prep { `{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"},"rollForward":"LatestPatch"}}` }
-DOTNET_INSPECTOR :: prep { `using System.Reflection;
+DOTNET_PROJECT :: comptime { `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>@OUTPUT@</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources></PropertyGroup></Project>` }
+DOTNET_RUNTIME_CONFIG :: comptime { `{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"},"rollForward":"LatestPatch"}}` }
+DOTNET_INSPECTOR :: comptime { `using System.Reflection;
 var wanted=args[0];var type=Assembly.GetExecutingAssembly().GetTypes().SingleOrDefault(t=>t.IsPublic&&t.Name==wanted)??throw new Exception("public class not found");
 static string K(Type t)=>t==typeof(long)?"int":t==typeof(double)?"float":"unsupported";
 Console.WriteLine($"CLASS\t{type.FullName}");
 foreach(var c in type.GetConstructors(BindingFlags.Public|BindingFlags.Instance)){Console.Write("CTOR");foreach(var p in c.GetParameters())Console.Write($"\t{K(p.ParameterType)}");Console.WriteLine();}
 foreach(var m in type.GetMethods(BindingFlags.Public|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly)){Console.Write($"METHOD\t{m.Name}\t{(m.IsStatic?"S":"I")}\t{K(m.ReturnType)}");foreach(var p in m.GetParameters())Console.Write($"\t{K(p.ParameterType)}");Console.WriteLine();}
 ` }
-DOTNET_NATIVE_C :: prep { `#include <stdint.h>
+DOTNET_NATIVE_C :: comptime { `#include <stdint.h>
 #include <pthread.h>
 #include <dlfcn.h>
 typedef void* hostfxr_handle;

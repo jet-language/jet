@@ -2604,7 +2604,7 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
     "// Each row is an evaluated CoreCallRecord literal, so the table lands without",
     "// a compile-time execution host.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
-    "CORE_CALLS :: prep { [CoreCallRecord]{",
+    "CORE_CALLS :: comptime { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
     const expression = coreDispatcherExpression(row, ambientKeys);
@@ -2704,7 +2704,7 @@ const CORE_ENUM_PAYLOAD_ROWS_HEAD = "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadR
 
 function coreOwnerAnnotationSuffixes(enumNames) {
   const owned = read(CORE_SOURCE_OWNED_ROWS_PATH);
-  const head = "CORE_SOURCE_OWNED_ROWS :: prep { [CoreSourceOwnedRow]{";
+  const head = "CORE_SOURCE_OWNED_ROWS :: comptime { [CoreSourceOwnedRow]{";
   const start = owned.indexOf(head);
   const end = owned.indexOf("\n} }", start);
   if (start < 0 || end < 0) throw new Error(CORE_SOURCE_OWNED_ROWS_PATH + " has no CORE_SOURCE_OWNED_ROWS table");

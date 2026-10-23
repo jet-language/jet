@@ -1,17 +1,17 @@
 Error [E0104]: `source_map` expects 1 argument, got 2
-  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_8.jet:2:26
+  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_8.jet:2:30
     |
-  2 | VALUE :: prep { compiler.source_map("source", "extra") }
-    |                          ^^^^^^^^^^
+  2 | VALUE :: comptime { compiler.source_map("source", "extra") }
+    |                              ^^^^^^^^^^
  Why: Every argument must match a parameter
  Fix: Check the definition of `source_map` in the imported file
 More: jet-lang.dev/e/E0104
 
 Error [E2402]: This implicit fallible call can't convert `CompilerError` into `Err` — no declared conversion exists
-  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_8.jet:2:26
+  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_8.jet:2:30
     |
-  2 | VALUE :: prep { compiler.source_map("source", "extra") }
-    |                          ^^^^^^^^^^
+  2 | VALUE :: comptime { compiler.source_map("source", "extra") }
+    |                              ^^^^^^^^^^
  Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl CompilerError -> Err`
  Fix: Handle this call locally with `??`, add `impl CompilerError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402

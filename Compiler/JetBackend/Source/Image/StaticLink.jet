@@ -38,77 +38,77 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 
-LINK_BASE :: prep { 0x400000 }
-LINK_RUN_BASE :: prep { 0x200000000000 }
-LINK_PAGE :: prep { 0x1000 }
-LINK_EHDR_SIZE :: prep { 64 }
-LINK_PHDR_SIZE :: prep { 56 }
+LINK_BASE :: comptime { 0x400000 }
+LINK_RUN_BASE :: comptime { 0x200000000000 }
+LINK_PAGE :: comptime { 0x1000 }
+LINK_EHDR_SIZE :: comptime { 64 }
+LINK_PHDR_SIZE :: comptime { 56 }
 
 // Output classes, in image order. LINK_DROP sections never reach the image;
 // LINK_DISCARD sections belong to a COMDAT group loaded earlier.
-LINK_DISCARD :: prep { -2 }
-LINK_DROP :: prep { -1 }
-LINK_RODATA :: prep { 0 }
-LINK_EH :: prep { 1 }
-LINK_TEXT :: prep { 2 }
-LINK_TDATA :: prep { 3 }
-LINK_TBSS :: prep { 4 }
-LINK_PREINIT :: prep { 5 }
-LINK_INIT :: prep { 6 }
-LINK_FINI :: prep { 7 }
-LINK_RELRO :: prep { 8 }
-LINK_DATA :: prep { 9 }
-LINK_BSS :: prep { 10 }
-LINK_CLASSES :: prep { 11 }
+LINK_DISCARD :: comptime { -2 }
+LINK_DROP :: comptime { -1 }
+LINK_RODATA :: comptime { 0 }
+LINK_EH :: comptime { 1 }
+LINK_TEXT :: comptime { 2 }
+LINK_TDATA :: comptime { 3 }
+LINK_TBSS :: comptime { 4 }
+LINK_PREINIT :: comptime { 5 }
+LINK_INIT :: comptime { 6 }
+LINK_FINI :: comptime { 7 }
+LINK_RELRO :: comptime { 8 }
+LINK_DATA :: comptime { 9 }
+LINK_BSS :: comptime { 10 }
+LINK_CLASSES :: comptime { 11 }
 
 // Where a symbol is defined, when not in a section.
-LINK_UNDEF :: prep { -1 }
-LINK_ABS :: prep { -2 }
-LINK_COMMON :: prep { -3 }
+LINK_UNDEF :: comptime { -1 }
+LINK_ABS :: comptime { -2 }
+LINK_COMMON :: comptime { -3 }
 
 // How a global symbol is defined.
-LINK_G_NONE :: prep { 0 }
-LINK_G_FILE :: prep { 1 }
-LINK_G_COMMON :: prep { 2 }
-LINK_G_LINKER :: prep { 3 }
+LINK_G_NONE :: comptime { 0 }
+LINK_G_FILE :: comptime { 1 }
+LINK_G_COMMON :: comptime { 2 }
+LINK_G_LINKER :: comptime { 3 }
 
 // ELF section types.
-LINK_SHT_PROGBITS :: prep { 1 }
-LINK_SHT_SYMTAB :: prep { 2 }
-LINK_SHT_RELA :: prep { 4 }
-LINK_SHT_NOTE :: prep { 7 }
-LINK_SHT_NOBITS :: prep { 8 }
-LINK_SHT_INIT_ARRAY :: prep { 14 }
-LINK_SHT_FINI_ARRAY :: prep { 15 }
-LINK_SHT_PREINIT_ARRAY :: prep { 16 }
-LINK_SHT_GROUP :: prep { 17 }
-LINK_SHT_SYMTAB_SHNDX :: prep { 18 }
-LINK_SHT_X86_64_UNWIND :: prep { 0x70000001 }
+LINK_SHT_PROGBITS :: comptime { 1 }
+LINK_SHT_SYMTAB :: comptime { 2 }
+LINK_SHT_RELA :: comptime { 4 }
+LINK_SHT_NOTE :: comptime { 7 }
+LINK_SHT_NOBITS :: comptime { 8 }
+LINK_SHT_INIT_ARRAY :: comptime { 14 }
+LINK_SHT_FINI_ARRAY :: comptime { 15 }
+LINK_SHT_PREINIT_ARRAY :: comptime { 16 }
+LINK_SHT_GROUP :: comptime { 17 }
+LINK_SHT_SYMTAB_SHNDX :: comptime { 18 }
+LINK_SHT_X86_64_UNWIND :: comptime { 0x70000001 }
 
 // x86-64 relocation types (psABI).
-LINK_R_NONE :: prep { 0 }
-LINK_R_64 :: prep { 1 }
-LINK_R_PC32 :: prep { 2 }
-LINK_R_PLT32 :: prep { 4 }
-LINK_R_GOTPCREL :: prep { 9 }
-LINK_R_32 :: prep { 10 }
-LINK_R_32S :: prep { 11 }
-LINK_R_DTPOFF64 :: prep { 17 }
-LINK_R_TPOFF64 :: prep { 18 }
-LINK_R_TLSGD :: prep { 19 }
-LINK_R_TLSLD :: prep { 20 }
-LINK_R_DTPOFF32 :: prep { 21 }
-LINK_R_GOTTPOFF :: prep { 22 }
-LINK_R_TPOFF32 :: prep { 23 }
-LINK_R_PC64 :: prep { 24 }
-LINK_R_GOTOFF64 :: prep { 25 }
-LINK_R_GOTPC32 :: prep { 26 }
-LINK_R_SIZE32 :: prep { 32 }
-LINK_R_SIZE64 :: prep { 33 }
-LINK_R_GOTPCRELX :: prep { 41 }
-LINK_R_REX_GOTPCRELX :: prep { 42 }
+LINK_R_NONE :: comptime { 0 }
+LINK_R_64 :: comptime { 1 }
+LINK_R_PC32 :: comptime { 2 }
+LINK_R_PLT32 :: comptime { 4 }
+LINK_R_GOTPCREL :: comptime { 9 }
+LINK_R_32 :: comptime { 10 }
+LINK_R_32S :: comptime { 11 }
+LINK_R_DTPOFF64 :: comptime { 17 }
+LINK_R_TPOFF64 :: comptime { 18 }
+LINK_R_TLSGD :: comptime { 19 }
+LINK_R_TLSLD :: comptime { 20 }
+LINK_R_DTPOFF32 :: comptime { 21 }
+LINK_R_GOTTPOFF :: comptime { 22 }
+LINK_R_TPOFF32 :: comptime { 23 }
+LINK_R_PC64 :: comptime { 24 }
+LINK_R_GOTOFF64 :: comptime { 25 }
+LINK_R_GOTPC32 :: comptime { 26 }
+LINK_R_SIZE32 :: comptime { 32 }
+LINK_R_SIZE64 :: comptime { 33 }
+LINK_R_GOTPCRELX :: comptime { 41 }
+LINK_R_REX_GOTPCRELX :: comptime { 42 }
 
-LINK_MEMBER_SCALE :: prep { 16777216 }
+LINK_MEMBER_SCALE :: comptime { 16777216 }
 
 struct LinkContext {
     bufs: [[U8]]
@@ -1767,7 +1767,7 @@ fn link_got_local(c: LinkContext, fsym: Int) -> Int Never! {
 // Not a layout class: the row of a `.debug_*` section, whose address is its
 // offset in the output section of its name. Added after layout, so it is in
 // no layout order list.
-LINK_DEBUG :: prep { -3 }
+LINK_DEBUG :: comptime { -3 }
 
 // Output `.debug_*` sections: names in first-seen order, and per name the
 // rows of its input sections in input order and its size.

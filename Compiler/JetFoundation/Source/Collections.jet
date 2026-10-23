@@ -290,7 +290,7 @@ struct SemaCollectionMethodContract {
 }
 
 // BEGIN COLLECTION LAWS
-COLLECTION_LAWS :: prep { [CollectionLawFacts]{
+COLLECTION_LAWS :: comptime { [CollectionLawFacts]{
     {law: CollectionLaw.Measure, timing: "eager", result: "a fresh scalar", callbacks: "none", stop: "an iterator receiver is consumed whole", failure: "none", buffering: "none"},
     {law: CollectionLaw.Lookup, timing: "eager", result: "an optional copy of the found item or index", callbacks: "none", stop: "an iterator receiver is consumed and cannot be resumed", failure: "absence is None", buffering: "none"},
     {law: CollectionLaw.Mutate, timing: "eager, in place", result: "Unit, a Bool, or the displaced item", callbacks: "none", stop: "not applicable", failure: "absence is None; no error channel", buffering: "the receiver's own storage"},
@@ -316,7 +316,7 @@ COLLECTION_LAWS :: prep { [CollectionLawFacts]{
 // END COLLECTION LAWS
 
 // BEGIN COLLECTION OPERATIONS
-COLLECTION_OPERATIONS :: prep { [CollectionOperationRow]{
+COLLECTION_OPERATIONS :: comptime { [CollectionOperationRow]{
     {receivers: CollectionReceivers.Set, name: "map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.ListMapped, op: CollectionOp.SetMap, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "filter", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.ListFiltered, op: CollectionOp.SetFilter, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "each", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Unit, op: CollectionOp.SetEach, law: CollectionLaw.Each, empty: "Unit", status: CollectionStatus.Current},

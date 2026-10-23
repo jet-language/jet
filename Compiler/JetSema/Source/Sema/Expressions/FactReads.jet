@@ -902,7 +902,7 @@ fn sema_fact_read_no_value(member: String, span: Span, diagnostics: &[Diagnostic
 fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     read :: sema_fact_read_kind(member) ?? return sema_fact_read_unhandled()
     if scopes.comptime_execution_depth == 0 {
-        fix :: if sema_fact_path_text(base, member) == .Val(path) -> "Write `FACT :: prep {{ {path} }}`, then use `FACT` in this expression" else -> "Move the read into a prepared value `NAME :: prep {{ … }}` or a `prep {{ … }}` block"
+        fix :: if sema_fact_path_text(base, member) == .Val(path) -> "Write `FACT :: comptime {{ {path} }}`, then use `FACT` in this expression" else -> "Move the read into a prepared value `NAME :: comptime {{ … }}` or a `comptime {{ … }}` block"
         &diagnostics.push(sema_error("E0302", span, "fact read `{member}` is compile-time only", "a fact is a value known before code generation; it never selects runtime behavior", fix))
         return sema_fact_read_failed()
     }

@@ -10,7 +10,7 @@
 // `tests/cross.rs` proves this by inspecting the generated Rust per triple.
 //
 // Ungated `main` reaches the surviving
-// OS-gated `impl` through a `prep if $build.os == { … }` dispatch. `$build.os`
+// OS-gated `impl` through a `comptime if $build.os == { … }` dispatch. `$build.os`
 // is a compiler-known comptime value; the dispatch folds to the arm matching the
 // build's target OS *before* any OS-gating check runs, discarding the others —
 // so constructing an OS-gated type inside the taken arm is legal, and the dead
@@ -48,7 +48,7 @@ impl WindowsBackend.Backend {
 }
 
 fn run() {
-    prep if $build.os == {
+    comptime if $build.os == {
         .Linux -> {
             b :: LinuxBackend{name: "gtk"}
             print(b.label())

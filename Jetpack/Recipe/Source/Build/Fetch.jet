@@ -1,17 +1,17 @@
 // Retained recipe transport/provenance carriers and pure URL/digest checks.
 // The hosted runner refuses before graph admission; no fetch step is executed.
 
-RECIPE_MAX_READ_BYTES :: prep { 536870912 }
+RECIPE_MAX_READ_BYTES :: comptime { 536870912 }
 
 // The credential field names a build-hook fetch URL may never carry.
-RECIPE_CREDENTIAL_KEYS :: prep { [String]{
+RECIPE_CREDENTIAL_KEYS :: comptime { [String]{
     "auth", "authorization", "api_key", "apikey", "credential", "credentials", "password",
     "passwd", "secret", "sig", "signature", "token", "access_token", "refresh_token",
     "oauth_token", "client_secret", "private_key", "x_amz_credential", "x_amz_signature"
 } }
 
 // Credential-shaped suffixes of a field name.
-RECIPE_CREDENTIAL_SUFFIXES :: prep { [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"} }
+RECIPE_CREDENTIAL_SUFFIXES :: comptime { [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"} }
 
 // A caller-injected remote transport: given a URL, the fetched bytes.
 struct RecipeTransport {

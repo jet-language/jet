@@ -14,7 +14,7 @@ impl Pattern.CheckedText {
 fn run() {}
 
 REFLECTION_APP :: Output.Executable{ name: "reflection", entry: reflection_probe }
-REFLECTION_BASE :: prep { Pattern.reflect().base }
+REFLECTION_BASE :: comptime { Pattern.reflect().base }
 fn reflection_implements() -> Bool {
     found := false
     loop name in Pattern.reflect().implements {
@@ -22,7 +22,7 @@ fn reflection_implements() -> Bool {
     }
     return found
 }
-REFLECTION_IMPLEMENTS :: prep { reflection_implements() }
+REFLECTION_IMPLEMENTS :: comptime { reflection_implements() }
 fn reflection_contract() -> [Bool] {
     found := false
     error_type := false
@@ -43,7 +43,7 @@ fn reflection_contract() -> [Bool] {
     }
     return [found, error_type, check_method, encode_method]
 }
-REFLECTION_CONTRACT :: prep { reflection_contract() }
+REFLECTION_CONTRACT :: comptime { reflection_contract() }
 fn reflection_probe() {
     
     // Original tests/reflect.rs:126-129 base String.

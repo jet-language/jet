@@ -1003,15 +1003,15 @@ fn check_inputs_are_all_declared() {
         ("plain.jet", "fn run() { print(\"plain\") }\n"),
         (
             "embed.jet",
-            "MOTD :: prep { embed_file(\"assets/motd.txt\") }\nfn run() { print(MOTD) }\n",
+            "MOTD :: comptime { embed_file(\"assets/motd.txt\") }\nfn run() { print(MOTD) }\n",
         ),
         (
             "bytes.jet",
-            "LOGO :: prep { embed_bytes(\"assets/logo.bin\") }\nSIZE :: prep { byte_count(LOGO) }\nfn byte_count(bytes: [U8]) -> Int { bytes.len() }\nfn run() { print(\"{SIZE}\") }\n",
+            "LOGO :: comptime { embed_bytes(\"assets/logo.bin\") }\nSIZE :: comptime { byte_count(LOGO) }\nfn byte_count(bytes: [U8]) -> Int { bytes.len() }\nfn run() { print(\"{SIZE}\") }\n",
         ),
         (
             "find.jet",
-            "PATHS :: prep { find(\"assets/inputs/**/*.txt\") }\nfn run() { print(PATHS.join(\"|\")) }\n",
+            "PATHS :: comptime { find(\"assets/inputs/**/*.txt\") }\nfn run() { print(PATHS.join(\"|\")) }\n",
         ),
     ];
     for (name, source) in corpus {
@@ -1303,7 +1303,7 @@ fn body_edit_reevaluates_the_constants_that_read_it() {
     let lib = root.join("lib.jet");
     let source = |size: &str| {
         format!(
-            "fn size() -> Int {{\n    {size}\n}}\n\nfn check_size(n: Int) -> Bool {{\n    assert((n == 4), \"size must stay 4\")\n    true\n}}\n\nSIZE :: prep {{ size() }}\n\nOK :: prep {{ check_size(SIZE) }}\n"
+            "fn size() -> Int {{\n    {size}\n}}\n\nfn check_size(n: Int) -> Bool {{\n    assert((n == 4), \"size must stay 4\")\n    true\n}}\n\nSIZE :: comptime {{ size() }}\n\nOK :: comptime {{ check_size(SIZE) }}\n"
         )
     };
     let check = |store: &Path| {

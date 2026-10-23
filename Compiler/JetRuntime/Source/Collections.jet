@@ -4,7 +4,7 @@
 // Only initialized payload bytes are read (Bool is one byte; Unit is empty).
 // The native List<U8> carrier is packed, matching checked StorageLayout(U8)
 // and the generated C ABI's u8 elements. Every host byte-list seam shares it.
-RT_HOST_U8_STRIDE :: prep { I64{1} }
+RT_HOST_U8_STRIDE :: comptime { I64{1} }
 fn host_u8_get(data: I64, index: I64) -> I64 {
     #Unsafe("data lends index's initialized packed native U8 element") {
         return os_load_u8(wrapping(data + index * RT_HOST_U8_STRIDE))

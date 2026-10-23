@@ -37,7 +37,7 @@ export function emitNativeEnvironmentRoutes(rows) {
   return [
     'enum IREnvironmentOp { Bytes Set Remove Columns Compare Seed Text }',
     'struct IREnvironmentRoute { symbol: String, export: String, op: IREnvironmentOp, arity: Int }',
-    'IR_ENVIRONMENT_ROUTES :: prep { [IREnvironmentRoute]{',
+    'IR_ENVIRONMENT_ROUTES :: comptime { [IREnvironmentRoute]{',
     ...rows.map(row => `    IREnvironmentRoute{symbol: "${row.symbol}", export: "${row.name}", op: IREnvironmentOp.${row.op}, arity: ${row.arity}},`),
     '} }',
     'fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {',

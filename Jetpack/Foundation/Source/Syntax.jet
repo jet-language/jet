@@ -5,51 +5,51 @@
 // ── Package refs (Syntax/effects_surface.rs, Syntax/jetpack_config.rs) ──
 
 // `package@source`; the package precedes the source.
-REF_PROVIDER_AT :: prep { "@" }
+REF_PROVIDER_AT :: comptime { "@" }
 // 15: the `<source>:<package/path>` separator of the internal
 // provider-first upstream form.
-REF_SEPARATOR :: prep { ":" }
+REF_SEPARATOR :: comptime { ":" }
 // This rule amended by channel policy markers follow
 // `@source`. `#latest` is the manual moving tier; `#auto` opts a source into
 // automatic movement. A source with no marker is pinned.
-REF_CHANNEL_MARKER :: prep { "#" }
-REF_CHANNEL_LATEST :: prep { "latest" }
-REF_CHANNEL_MAIN :: prep { "main" }
-REF_CHANNEL_AUTO :: prep { "auto" }
+REF_CHANNEL_MARKER :: comptime { "#" }
+REF_CHANNEL_LATEST :: comptime { "latest" }
+REF_CHANNEL_MAIN :: comptime { "main" }
+REF_CHANNEL_AUTO :: comptime { "auto" }
 
 // Jetpack is the canonical package source.
-REF_SOURCE_JETPACK :: prep { "jetpack" }
+REF_SOURCE_JETPACK :: comptime { "jetpack" }
 // 15: legacy nixpkgs source token, retained for migration/provenance.
-REF_SOURCE_NIXPKGS :: prep { "nixpkgs" }
-REF_SOURCE_GITHUB :: prep { "github" }
-REF_SOURCE_PATH :: prep { "path" }
+REF_SOURCE_NIXPKGS :: comptime { "nixpkgs" }
+REF_SOURCE_GITHUB :: comptime { "github" }
+REF_SOURCE_PATH :: comptime { "path" }
 // Direct CRAN ecosystem root.
-REF_SOURCE_CRAN :: prep { "cran" }
+REF_SOURCE_CRAN :: comptime { "cran" }
 // Direct LuaRocks ecosystem root.
-REF_SOURCE_LUAROCKS :: prep { "luarocks" }
+REF_SOURCE_LUAROCKS :: comptime { "luarocks" }
 // Direct RubyGems ecosystem root.
-REF_SOURCE_RUBY :: prep { "ruby" }
+REF_SOURCE_RUBY :: comptime { "ruby" }
 // Direct CPAN ecosystem root.
-REF_SOURCE_PERL :: prep { "perl" }
+REF_SOURCE_PERL :: comptime { "perl" }
 // Direct Packagist ecosystem root.
-REF_SOURCE_PHP :: prep { "php" }
+REF_SOURCE_PHP :: comptime { "php" }
 // The first-party Jet registry root.
-REF_SOURCE_JET_REGISTRY :: prep { "jet-registry" }
+REF_SOURCE_JET_REGISTRY :: comptime { "jet-registry" }
 // Direct npm ecosystem root.
-REF_SOURCE_NPM :: prep { "npm" }
+REF_SOURCE_NPM :: comptime { "npm" }
 // Direct Cargo ecosystem root.
-REF_SOURCE_CARGO :: prep { "cargo" }
+REF_SOURCE_CARGO :: comptime { "cargo" }
 // Direct PyPI ecosystem root.
-REF_SOURCE_PYPI :: prep { "pypi" }
+REF_SOURCE_PYPI :: comptime { "pypi" }
 // Direct SwiftPM ecosystem root.
-REF_SOURCE_SWIFTPM :: prep { "swiftpm" }
+REF_SOURCE_SWIFTPM :: comptime { "swiftpm" }
 // Card #2166: the native release-artifact source.
-REF_SOURCE_RELEASES :: prep { "releases" }
+REF_SOURCE_RELEASES :: comptime { "releases" }
 
 // The one home for "which source tokens are built-in providers", in the order
 // a ref may not put them (`target@provider`, never
 // `provider@target`).
-REF_SOURCE_PROVIDERS :: prep { [String]{
+REF_SOURCE_PROVIDERS :: comptime { [String]{
     REF_SOURCE_JETPACK,
     REF_SOURCE_NIXPKGS,
     REF_SOURCE_GITHUB,
@@ -70,69 +70,69 @@ REF_SOURCE_PROVIDERS :: prep { [String]{
 // ── Module and workspace manifests (Syntax/jetpack_config.rs) ──
 
 // U3: module declaration keyword — `module name { … }`.
-KW_MODULE :: prep { "module" }
+KW_MODULE :: comptime { "module" }
 // The workspace module namespace — `module workspace { … }`.
-NS_WORKSPACE :: prep { "workspace" }
+NS_WORKSPACE :: comptime { "workspace" }
 // Reviewed workspace overlay blocks.
-WORKSPACE_OVERLAY :: prep { "overlay" }
+WORKSPACE_OVERLAY :: comptime { "overlay" }
 
 // ── Policy and effect-budget manifest keys (Syntax/predicates.rs) ──
 
 // Effect names the whole dependency graph may use.
-EFFECTS_FIELD_ALLOW :: prep { "allow" }
+EFFECTS_FIELD_ALLOW :: comptime { "allow" }
 // Effect names the dependency graph must never use.
-EFFECTS_FIELD_DENY :: prep { "deny" }
+EFFECTS_FIELD_DENY :: comptime { "deny" }
 // The audited per-dependency `grants` escape.
-MANIFEST_BLOCK_GRANTS :: prep { "grants" }
+MANIFEST_BLOCK_GRANTS :: comptime { "grants" }
 // The `policy: { … }` manifest block.
-MANIFEST_BLOCK_POLICY :: prep { "policy" }
+MANIFEST_BLOCK_POLICY :: comptime { "policy" }
 
 // ── EnvModel Environment/Workspace (jet_foundation::Syntax, Syntax/jetpack_config.rs) ──
 
 // The canonical package manifest filename.
-PACKAGE_FILE :: prep { "package.jet" }
+PACKAGE_FILE :: comptime { "package.jet" }
 // The monorepo index filename.
-WORKSPACE_FILE :: prep { "workspace.jet" }
+WORKSPACE_FILE :: comptime { "workspace.jet" }
 // The payload adapter filename.
-PAYLOAD_FILE :: prep { "pkg.jet" }
+PAYLOAD_FILE :: comptime { "pkg.jet" }
 // The workspace `members: find("./dir")` discovery builtin.
-BUILTIN_FIND :: prep { "find" }
+BUILTIN_FIND :: comptime { "find" }
 // First-party integration call names.
-ENV_INTEGRATION_ANDROID :: prep { "env.platform.android" }
-ENV_INTEGRATION_APPLE :: prep { "env.platform.apple" }
-ENV_INTEGRATION_CERTIFICATES :: prep { "env.security.certificates" }
-ENV_INTEGRATION_HOSTS :: prep { "env.network.hosts" }
-ENV_INTEGRATION_CODEX :: prep { "env.agent.codex" }
-ENV_INTEGRATION_EDITOR :: prep { "env.editor.vscode" }
-ENV_INTEGRATION_CLOUD :: prep { "env.cloud.credentials" }
-ENV_INTEGRATION_VAULT :: prep { "env.security.vault" }
+ENV_INTEGRATION_ANDROID :: comptime { "env.platform.android" }
+ENV_INTEGRATION_APPLE :: comptime { "env.platform.apple" }
+ENV_INTEGRATION_CERTIFICATES :: comptime { "env.security.certificates" }
+ENV_INTEGRATION_HOSTS :: comptime { "env.network.hosts" }
+ENV_INTEGRATION_CODEX :: comptime { "env.agent.codex" }
+ENV_INTEGRATION_EDITOR :: comptime { "env.editor.vscode" }
+ENV_INTEGRATION_CLOUD :: comptime { "env.cloud.credentials" }
+ENV_INTEGRATION_VAULT :: comptime { "env.security.vault" }
 // The typed environment's Git hook directory field.
-ENV_FIELD_GIT_HOOKS_PATH :: prep { "git_hooks_path" }
+ENV_FIELD_GIT_HOOKS_PATH :: comptime { "git_hooks_path" }
 // The typed environment formatter package field.
-ENV_FIELD_FORMATTER :: prep { "formatter" }
+ENV_FIELD_FORMATTER :: comptime { "formatter" }
 
 // ── PackageModel Lock/Workspace/Scripts (jet_foundation::Syntax) ──
 
 // U2: the single project lockfile inside the `.jet/` managed folder.
-UNIFIED_LOCK_FILE :: prep { ".jet/lock" }
+UNIFIED_LOCK_FILE :: comptime { ".jet/lock" }
 // N1: compiler binary name.
-BINARY_NAME :: prep { "jet" }
+BINARY_NAME :: comptime { "jet" }
 // 9: the Jetpack package-manager binary name.
-JETPACK_BINARY_NAME :: prep { "jetpack" }
+JETPACK_BINARY_NAME :: comptime { "jetpack" }
 // Module-internal name prefix.
-MODULE_INTERNAL_PREFIX :: prep { "_" }
+MODULE_INTERNAL_PREFIX :: comptime { "_" }
 // The `members:` field of a workspace module.
-MODULE_FIELD_MEMBERS :: prep { "members" }
+MODULE_FIELD_MEMBERS :: comptime { "members" }
 
 // ── Store Explain/Why (jet_foundation::Syntax, Syntax/jetpack_config.rs) ──
 
 // The project environment filename `jetpack why` reports as the requesting file.
-ENV_FILE :: prep { "env.jet" }
+ENV_FILE :: comptime { "env.jet" }
 
 // ── PackageModel Foreign binders (jet_foundation::Syntax, Syntax/package_files.rs) ──
 
 // Canonical list of real Jet keywords; generated binder names may not use them.
-JET_KEYWORD_LIST :: prep { [String]{
+JET_KEYWORD_LIST :: comptime { [String]{
     "fn", "pub", "priv", "use", "as", "extern", "module", "if", "else", "loop", "in", "break",
     "return", "defer", "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag",
     "effect", "derive", "distinct", "migration", "rename", "add", "remove", "change", "via",
@@ -141,7 +141,7 @@ JET_KEYWORD_LIST :: prep { [String]{
     "check", "true", "false", "None", "it"
 } }
 // Canonical list of built-in type names a user writes.
-JET_TYPE_LIST :: prep { [String]{
+JET_TYPE_LIST :: comptime { [String]{
     "Int", "Float", "Bool", "String", "()", "Char", "Err", "Shared", "SharedSnapshot",
     "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition", "Task", "Receiver", "Sender",
     "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank", "PriorityQueue", "Cache",
@@ -149,417 +149,417 @@ JET_TYPE_LIST :: prep { [String]{
     "F32", "F64"
 } }
 // The Prelude error type spelling a foreign name may still project to.
-TYPE_ERR :: prep { "Err" }
+TYPE_ERR :: comptime { "Err" }
 
 // ── Recipe Toolchain (jet_foundation::Syntax, Syntax/predicates.rs) ──
 
 // The env var naming a realized
 // toolchain object directory (`<dir>/cargo`, `<dir>/version`, `<dir>/ring/<name>`).
-TOOLCHAIN_OBJECT_ENV :: prep { "JET_TOOLCHAIN_FIXTURE" }
+TOOLCHAIN_OBJECT_ENV :: comptime { "JET_TOOLCHAIN_FIXTURE" }
 
 // ── PackageModel Authority/Store (jet_foundation::Syntax, Syntax/core_surface.rs, effects_surface.rs, jetpack_config.rs) ──
 
 // N2 (ratified): source file extension (without the dot).
-FILE_EXT :: prep { "jet" }
+FILE_EXT :: comptime { "jet" }
 // S52 (ratified M12): package source root directory inside a project.
-SOURCE_ROOT_DIR :: prep { ".jet" }
+SOURCE_ROOT_DIR :: comptime { ".jet" }
 
 // ── Environment Shell/Activation/EnvFile (jet_foundation::Syntax, jetpack_config.rs, effects_surface.rs) ──
 
 // The default prompt label; names jetpack rather than the compiler.
-JETPACK_PROMPT_LABEL :: prep { "jetpack" }
+JETPACK_PROMPT_LABEL :: comptime { "jetpack" }
 // Shell marker env var set inside a Jetpack shell.
-JETPACK_ENV_MARKER :: prep { "JETPACK_ENV" }
+JETPACK_ENV_MARKER :: comptime { "JETPACK_ENV" }
 // Env var carrying the realized package refs inside a Jetpack shell.
-JETPACK_REF_VAR :: prep { "JETPACK_REF" }
+JETPACK_REF_VAR :: comptime { "JETPACK_REF" }
 // Prompt hook activation identity.
-ENV_HOOK_ACTIVE_HASH_VAR :: prep { "JETPACK_ENV_HASH" }
+ENV_HOOK_ACTIVE_HASH_VAR :: comptime { "JETPACK_ENV_HASH" }
 // The root of the env the prompt hook currently has loaded.
-ENV_HOOK_ACTIVE_DIR_VAR :: prep { "JETPACK_ENV_DIR" }
+ENV_HOOK_ACTIVE_DIR_VAR :: comptime { "JETPACK_ENV_DIR" }
 // The pre-activation `PATH`, restored verbatim on unload.
-ENV_HOOK_OLD_PATH_VAR :: prep { "JETPACK_ENV_OLD_PATH" }
+ENV_HOOK_OLD_PATH_VAR :: comptime { "JETPACK_ENV_OLD_PATH" }
 // The private per-prompt callback verb (`jet env export <shell>`).
-ENV_EXPORT_VERB :: prep { "export" }
+ENV_EXPORT_VERB :: comptime { "export" }
 // Current-repo/external-root config directory.
-CONFIG_DEFAULT_DIR :: prep { ".jet" }
+CONFIG_DEFAULT_DIR :: comptime { ".jet" }
 // The `env.jet` directive calls.
-PACK_DIRECTIVE_SOURCE :: prep { "pkg.source" }
-PACK_DIRECTIVE_PACKAGES :: prep { "pkg.packages" }
-PACK_DIRECTIVE_PROMPT :: prep { "pkg.prompt" }
+PACK_DIRECTIVE_SOURCE :: comptime { "pkg.source" }
+PACK_DIRECTIVE_PACKAGES :: comptime { "pkg.packages" }
+PACK_DIRECTIVE_PROMPT :: comptime { "pkg.prompt" }
 
 // ── Environment fingerprint bounds (jet_foundation::SHA256 tree limits) ──
 
-MAX_TREE_FILE_BYTES :: prep { 536870912 }
-MAX_TREE_TOTAL_BYTES :: prep { 4294967296 }
-MAX_TREE_FILES :: prep { 1000000 }
-MAX_TREE_DEPTH :: prep { 256 }
+MAX_TREE_FILE_BYTES :: comptime { 536870912 }
+MAX_TREE_TOTAL_BYTES :: comptime { 4294967296 }
+MAX_TREE_FILES :: comptime { 1000000 }
+MAX_TREE_DEPTH :: comptime { 256 }
 
 // ── PackageModel Foreign bridge (jet_foundation::Syntax, Syntax/math_layout.rs) ──
 
 // S50: the `extern rust` language keyword, also the Rust foreign root.
-KW_RUST :: prep { "rust" }
+KW_RUST :: comptime { "rust" }
 // S59: C FFI module path root — `c.<lib>`.
-C_MODULE_ROOT :: prep { "c" }
+C_MODULE_ROOT :: comptime { "c" }
 // The `cpp.<lib>` namespace root.
-CPP_MODULE_ROOT :: prep { "cpp" }
-PY_MODULE_ROOT :: prep { "py" }
-JS_MODULE_ROOT :: prep { "js" }
-SWIFT_MODULE_ROOT :: prep { "swift" }
-GO_MODULE_ROOT :: prep { "go" }
-JAVA_MODULE_ROOT :: prep { "java" }
-CS_MODULE_ROOT :: prep { "cs" }
-TCL_MODULE_ROOT :: prep { "tcl" }
-LUA_MODULE_ROOT :: prep { "lua" }
-FORTRAN_MODULE_ROOT :: prep { "fortran" }
-COBOL_MODULE_ROOT :: prep { "cobol" }
-ADA_MODULE_ROOT :: prep { "ada" }
-PASCAL_MODULE_ROOT :: prep { "pascal" }
-DART_MODULE_ROOT :: prep { "dart" }
-PWSH_MODULE_ROOT :: prep { "pwsh" }
-PERL_MODULE_ROOT :: prep { "perl" }
-RUBY_MODULE_ROOT :: prep { "ruby" }
-PHP_MODULE_ROOT :: prep { "php" }
-R_MODULE_ROOT :: prep { "r" }
-OCTAVE_MODULE_ROOT :: prep { "octave" }
-COM_MODULE_ROOT :: prep { "com" }
+CPP_MODULE_ROOT :: comptime { "cpp" }
+PY_MODULE_ROOT :: comptime { "py" }
+JS_MODULE_ROOT :: comptime { "js" }
+SWIFT_MODULE_ROOT :: comptime { "swift" }
+GO_MODULE_ROOT :: comptime { "go" }
+JAVA_MODULE_ROOT :: comptime { "java" }
+CS_MODULE_ROOT :: comptime { "cs" }
+TCL_MODULE_ROOT :: comptime { "tcl" }
+LUA_MODULE_ROOT :: comptime { "lua" }
+FORTRAN_MODULE_ROOT :: comptime { "fortran" }
+COBOL_MODULE_ROOT :: comptime { "cobol" }
+ADA_MODULE_ROOT :: comptime { "ada" }
+PASCAL_MODULE_ROOT :: comptime { "pascal" }
+DART_MODULE_ROOT :: comptime { "dart" }
+PWSH_MODULE_ROOT :: comptime { "pwsh" }
+PERL_MODULE_ROOT :: comptime { "perl" }
+RUBY_MODULE_ROOT :: comptime { "ruby" }
+PHP_MODULE_ROOT :: comptime { "php" }
+R_MODULE_ROOT :: comptime { "r" }
+OCTAVE_MODULE_ROOT :: comptime { "octave" }
+COM_MODULE_ROOT :: comptime { "com" }
 // Generated foreign bindings live under `.jet/bindings/<lang>/`.
-BINDINGS_ROOT_SUBDIR :: prep { "bindings" }
+BINDINGS_ROOT_SUBDIR :: comptime { "bindings" }
 // Repository-relative homes of the hidden Rust bridge's path-dependency
 // crates, joined onto foundation_jet_source_root().
-FFI_JET_FOUNDATION_CRATE_PATH :: prep { "Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-foundation" }
-FFI_JET_UNICODE_CRATE_PATH :: prep { "Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-unicode" }
+FFI_JET_FOUNDATION_CRATE_PATH :: comptime { "Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-foundation" }
+FFI_JET_UNICODE_CRATE_PATH :: comptime { "Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-unicode" }
 // S59 the `c@<target>` system-library target (`lib: c@system`).
-SYSTEM_LIB_TARGET :: prep { "system" }
+SYSTEM_LIB_TARGET :: comptime { "system" }
 
 // ── CLI profile/tool/services/secrets/config (jet_foundation::Syntax, effects_surface.rs, jetpack_config.rs, package_files.rs) ──
 
 // `jetpack tool install|list|uninstall` persistent PATH management.
-TOOL_SUBCOMMAND :: prep { "tool" }
-TOOL_VERB_INSTALL :: prep { "install" }
-TOOL_VERB_LIST :: prep { "list" }
-TOOL_VERB_UNINSTALL :: prep { "uninstall" }
-TOOL_VERBS :: prep { [String]{TOOL_VERB_INSTALL, TOOL_VERB_LIST, TOOL_VERB_UNINSTALL} }
+TOOL_SUBCOMMAND :: comptime { "tool" }
+TOOL_VERB_INSTALL :: comptime { "install" }
+TOOL_VERB_LIST :: comptime { "list" }
+TOOL_VERB_UNINSTALL :: comptime { "uninstall" }
+TOOL_VERBS :: comptime { [String]{TOOL_VERB_INSTALL, TOOL_VERB_LIST, TOOL_VERB_UNINSTALL} }
 // Install under a different on-PATH bin name (avoids JPK-TOOL-COLLIDE / E1297).
-TOOL_FLAG_AS :: prep { "--as" }
+TOOL_FLAG_AS :: comptime { "--as" }
 // Default profile name for `jetpack tool install` PATH projections.
-TOOL_PROFILE_NAME :: prep { "tools" }
+TOOL_PROFILE_NAME :: comptime { "tools" }
 // On-PATH projection directory under `~/.jet/` (`bin/`).
-TOOL_BIN_DIR :: prep { "bin" }
+TOOL_BIN_DIR :: comptime { "bin" }
 // Generation + metadata root under `~/.jet/` (`tools/`).
-TOOL_STATE_DIR :: prep { "tools" }
+TOOL_STATE_DIR :: comptime { "tools" }
 // External tool-provider prefixes recognized but not yet realizable as hangar providers (E1298).
-TOOL_EXTERNAL_PROVIDERS :: prep { [String]{"npm", "pypi", "cargo", "crates", "brew", "go", "gem"} }
+TOOL_EXTERNAL_PROVIDERS :: comptime { [String]{"npm", "pypi", "cargo", "crates", "brew", "go", "gem"} }
 // JPK-TOOL-COLLIDE (E1297): install bin shadows a `#Job fn`.
-TOOL_DIAG_COLLIDE :: prep { "E1297" }
+TOOL_DIAG_COLLIDE :: comptime { "E1297" }
 // JPK-TOOL-PROVIDER (E1298): external provider not available.
-TOOL_DIAG_PROVIDER :: prep { "E1298" }
+TOOL_DIAG_PROVIDER :: comptime { "E1298" }
 
 // One source-backed package generation engine.
-PROFILE_SUBCOMMAND :: prep { "profile" }
-PROFILE_VERB_PLAN :: prep { "plan" }
-PROFILE_VERB_BUILD :: prep { "build" }
-PROFILE_VERB_SWITCH :: prep { "switch" }
-PROFILE_VERB_ROLLBACK :: prep { "rollback" }
-PROFILE_VERB_GENERATIONS :: prep { "generations" }
-PROFILE_VERBS :: prep { [String]{PROFILE_VERB_PLAN, PROFILE_VERB_BUILD, PROFILE_VERB_SWITCH, PROFILE_VERB_ROLLBACK, PROFILE_VERB_GENERATIONS} }
+PROFILE_SUBCOMMAND :: comptime { "profile" }
+PROFILE_VERB_PLAN :: comptime { "plan" }
+PROFILE_VERB_BUILD :: comptime { "build" }
+PROFILE_VERB_SWITCH :: comptime { "switch" }
+PROFILE_VERB_ROLLBACK :: comptime { "rollback" }
+PROFILE_VERB_GENERATIONS :: comptime { "generations" }
+PROFILE_VERBS :: comptime { [String]{PROFILE_VERB_PLAN, PROFILE_VERB_BUILD, PROFILE_VERB_SWITCH, PROFILE_VERB_ROLLBACK, PROFILE_VERB_GENERATIONS} }
 
 // U12: `jet os services <verb>`.
-SERVICES_VERB_UP :: prep { "up" }
-SERVICES_VERB_DOWN :: prep { "down" }
-SERVICES_VERB_HEALTH :: prep { "health" }
-SERVICES_VERB_LOGS :: prep { "logs" }
-SERVICES_VERB_RESTART :: prep { "restart" }
-SERVICES_VERB_WAIT :: prep { "wait" }
-SERVICES_VERB_WATCH :: prep { "watch" }
-SERVICES_VERBS :: prep { [String]{SERVICES_VERB_UP, SERVICES_VERB_DOWN, SERVICES_VERB_HEALTH, SERVICES_VERB_LOGS, SERVICES_VERB_RESTART, SERVICES_VERB_WAIT, SERVICES_VERB_WATCH} }
+SERVICES_VERB_UP :: comptime { "up" }
+SERVICES_VERB_DOWN :: comptime { "down" }
+SERVICES_VERB_HEALTH :: comptime { "health" }
+SERVICES_VERB_LOGS :: comptime { "logs" }
+SERVICES_VERB_RESTART :: comptime { "restart" }
+SERVICES_VERB_WAIT :: comptime { "wait" }
+SERVICES_VERB_WATCH :: comptime { "watch" }
+SERVICES_VERBS :: comptime { [String]{SERVICES_VERB_UP, SERVICES_VERB_DOWN, SERVICES_VERB_HEALTH, SERVICES_VERB_LOGS, SERVICES_VERB_RESTART, SERVICES_VERB_WAIT, SERVICES_VERB_WATCH} }
 
 // U13 `jetpack secrets <verb>`.
-SECRETS_SUBCOMMAND :: prep { "secrets" }
-SECRETS_VERB_KEYGEN :: prep { "keygen" }
-SECRETS_VERB_SET :: prep { "set" }
-SECRETS_VERB_GET :: prep { "get" }
-SECRETS_VERB_UNSET :: prep { "unset" }
-SECRETS_VERB_LIST :: prep { "list" }
-SECRETS_VERB_IMPORT :: prep { "import" }
-SECRETS_VERB_RECIPIENTS :: prep { "recipients" }
-SECRETS_VERBS :: prep { [String]{SECRETS_VERB_KEYGEN, SECRETS_VERB_SET, SECRETS_VERB_GET, SECRETS_VERB_UNSET, SECRETS_VERB_LIST, SECRETS_VERB_IMPORT, SECRETS_VERB_RECIPIENTS} }
-SECRETS_RECIPIENTS_VERB_ADD :: prep { "add" }
-SECRETS_RECIPIENTS_VERB_LIST :: prep { "list" }
-SECRETS_RECIPIENTS_VERBS :: prep { [String]{SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST} }
+SECRETS_SUBCOMMAND :: comptime { "secrets" }
+SECRETS_VERB_KEYGEN :: comptime { "keygen" }
+SECRETS_VERB_SET :: comptime { "set" }
+SECRETS_VERB_GET :: comptime { "get" }
+SECRETS_VERB_UNSET :: comptime { "unset" }
+SECRETS_VERB_LIST :: comptime { "list" }
+SECRETS_VERB_IMPORT :: comptime { "import" }
+SECRETS_VERB_RECIPIENTS :: comptime { "recipients" }
+SECRETS_VERBS :: comptime { [String]{SECRETS_VERB_KEYGEN, SECRETS_VERB_SET, SECRETS_VERB_GET, SECRETS_VERB_UNSET, SECRETS_VERB_LIST, SECRETS_VERB_IMPORT, SECRETS_VERB_RECIPIENTS} }
+SECRETS_RECIPIENTS_VERB_ADD :: comptime { "add" }
+SECRETS_RECIPIENTS_VERB_LIST :: comptime { "list" }
+SECRETS_RECIPIENTS_VERBS :: comptime { [String]{SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST} }
 // U13: `jetpack secrets keygen --force` overwrites an existing identity.
-SECRETS_FLAG_FORCE :: prep { "--force" }
+SECRETS_FLAG_FORCE :: comptime { "--force" }
 // SecretSpec 0.18 parity: `jetpack secrets import` default source.
-SECRETS_DEFAULT_IMPORT_FILE :: prep { ".env" }
+SECRETS_DEFAULT_IMPORT_FILE :: comptime { ".env" }
 
 // U19 / U28: `jet os config trust|sandbox <verb>`.
-CONFIG_SUBCOMMAND :: prep { "config" }
-CONFIG_VERB_TRUST :: prep { "trust" }
-CONFIG_VERB_SANDBOX :: prep { "sandbox" }
-CONFIG_TRUST_VERB_ADD :: prep { "add" }
-CONFIG_TRUST_VERB_LIST :: prep { "list" }
-CONFIG_TRUST_VERB_REMOVE :: prep { "remove" }
-CONFIG_TRUST_VERBS :: prep { [String]{CONFIG_TRUST_VERB_ADD, CONFIG_TRUST_VERB_LIST, CONFIG_TRUST_VERB_REMOVE} }
-CONFIG_SANDBOX_VERB_REQUIRE :: prep { "require" }
-CONFIG_SANDBOX_VERB_ALLOW :: prep { "allow" }
-CONFIG_SANDBOX_VERB_STATUS :: prep { "status" }
-CONFIG_SANDBOX_VERBS :: prep { [String]{CONFIG_SANDBOX_VERB_REQUIRE, CONFIG_SANDBOX_VERB_ALLOW, CONFIG_SANDBOX_VERB_STATUS} }
+CONFIG_SUBCOMMAND :: comptime { "config" }
+CONFIG_VERB_TRUST :: comptime { "trust" }
+CONFIG_VERB_SANDBOX :: comptime { "sandbox" }
+CONFIG_TRUST_VERB_ADD :: comptime { "add" }
+CONFIG_TRUST_VERB_LIST :: comptime { "list" }
+CONFIG_TRUST_VERB_REMOVE :: comptime { "remove" }
+CONFIG_TRUST_VERBS :: comptime { [String]{CONFIG_TRUST_VERB_ADD, CONFIG_TRUST_VERB_LIST, CONFIG_TRUST_VERB_REMOVE} }
+CONFIG_SANDBOX_VERB_REQUIRE :: comptime { "require" }
+CONFIG_SANDBOX_VERB_ALLOW :: comptime { "allow" }
+CONFIG_SANDBOX_VERB_STATUS :: comptime { "status" }
+CONFIG_SANDBOX_VERBS :: comptime { [String]{CONFIG_SANDBOX_VERB_REQUIRE, CONFIG_SANDBOX_VERB_ALLOW, CONFIG_SANDBOX_VERB_STATUS} }
 
 // The reserved default source token (`jetpack` falls back to it).
-DEFAULT_SOURCE :: prep { "default" }
+DEFAULT_SOURCE :: comptime { "default" }
 // The default run entry file (`@run.jet`).
-DEFAULT_ENTRY_FILE :: prep { "run.jet" }
+DEFAULT_ENTRY_FILE :: comptime { "run.jet" }
 
 // ── EnvModel ModuleEval (jet_foundation::Syntax, jetpack_config.rs, core_surface.rs, package_files.rs, predicates.rs, math_layout.rs) ──
 
 // The comptime/environment mark (`$NAME` in config
 // surfaces; jet-foundation Syntax `COMPTIME_MARK`).
-COMPTIME_MARK :: prep { "$" }
+COMPTIME_MARK :: comptime { "$" }
 // The compiler-generated name prefix.
-GENERATED_NAME_PREFIX :: prep { "__jet_" }
-TYPE_STRING :: prep { "String" }
+GENERATED_NAME_PREFIX :: comptime { "__jet_" }
+TYPE_STRING :: comptime { "String" }
 // U3: the type matching each reserved namespace.
-TYPE_ENV :: prep { "Env" }
-TYPE_PROFILE :: prep { "Profile" }
-TYPE_PROMPT :: prep { "Prompt" }
-TYPE_SYSTEM :: prep { "System" }
-TYPE_IMAGE :: prep { "Image" }
-TYPE_BUDGET :: prep { "Budget" }
+TYPE_ENV :: comptime { "Env" }
+TYPE_PROFILE :: comptime { "Profile" }
+TYPE_PROMPT :: comptime { "Prompt" }
+TYPE_SYSTEM :: comptime { "System" }
+TYPE_IMAGE :: comptime { "Image" }
+TYPE_BUDGET :: comptime { "Budget" }
 // The typed secret-map grammar.
-ENV_FIELD_SECRETS :: prep { "secrets" }
-SECRET_COMPOSE :: prep { "compose" }
-SECRET_COMPOSE_FIELD_TEMPLATE :: prep { "template" }
-SECRET_COMPOSE_FIELD_FROM :: prep { "from" }
-SECRET_META_FIELD_DESCRIPTION :: prep { "description" }
-SECRET_META_FIELD_REQUIRED :: prep { "required" }
-SECRET_META_FIELD_ALLOWED_ENVIRONMENTS :: prep { "allowed_environments" }
-SECRET_META_FIELD_ROTATION :: prep { "rotation" }
-SECRET_META_FIELD_DEFAULT :: prep { "default" }
-SECRET_META_FIELD_GENERATE :: prep { "generate" }
-SECRET_NONE :: prep { "none" }
-SECRET_ROTATION_MAX_AGE :: prep { "max_age" }
-SECRET_GENERATOR_RANDOM :: prep { "random" }
-SECRET_GENERATOR_FIELD_LENGTH :: prep { "length" }
+ENV_FIELD_SECRETS :: comptime { "secrets" }
+SECRET_COMPOSE :: comptime { "compose" }
+SECRET_COMPOSE_FIELD_TEMPLATE :: comptime { "template" }
+SECRET_COMPOSE_FIELD_FROM :: comptime { "from" }
+SECRET_META_FIELD_DESCRIPTION :: comptime { "description" }
+SECRET_META_FIELD_REQUIRED :: comptime { "required" }
+SECRET_META_FIELD_ALLOWED_ENVIRONMENTS :: comptime { "allowed_environments" }
+SECRET_META_FIELD_ROTATION :: comptime { "rotation" }
+SECRET_META_FIELD_DEFAULT :: comptime { "default" }
+SECRET_META_FIELD_GENERATE :: comptime { "generate" }
+SECRET_NONE :: comptime { "none" }
+SECRET_ROTATION_MAX_AGE :: comptime { "max_age" }
+SECRET_GENERATOR_RANDOM :: comptime { "random" }
+SECRET_GENERATOR_FIELD_LENGTH :: comptime { "length" }
 // U11/U14: record fields shared by `System` and `Image` contributions.
-SYSTEM_FIELD_TARGET :: prep { "target" }
-SYSTEM_FIELD_PACKAGES :: prep { "packages" }
+SYSTEM_FIELD_TARGET :: comptime { "target" }
+SYSTEM_FIELD_PACKAGES :: comptime { "packages" }
 // Package-generation fields.
-PROFILE_FIELD_EXTENDS :: prep { "extends" }
-PROFILE_FIELD_PACKAGES :: prep { "packages" }
-PROFILE_FIELD_COLLISIONS :: prep { "collisions" }
+PROFILE_FIELD_EXTENDS :: comptime { "extends" }
+PROFILE_FIELD_PACKAGES :: comptime { "packages" }
+PROFILE_FIELD_COLLISIONS :: comptime { "collisions" }
 // The required first field of every `Service` record.
-SERVICE_FIELD_ENABLE :: prep { "enable" }
+SERVICE_FIELD_ENABLE :: comptime { "enable" }
 // The recognized fields of a dev-supervised `Service`.
-DEV_SERVICE_FIELD_PORTS :: prep { "ports" }
-DEV_SERVICE_FIELD_RUN :: prep { "run" }
-DEV_SERVICE_FIELD_SHUTDOWN :: prep { "shutdown" }
-DEV_SERVICE_FIELD_DATA_DIR :: prep { "data_dir" }
-DEV_SERVICE_FIELD_READY :: prep { "ready" }
-DEV_SERVICE_FIELD_RESTART :: prep { "restart" }
-DEV_SERVICE_FIELD_WATCH :: prep { "watch" }
-DEV_SERVICE_FIELD_AFTER :: prep { "after" }
-DEV_SERVICE_FIELD_BEFORE_START :: prep { "before_start" }
-DEV_SERVICE_FIELD_SOCKETS :: prep { "sockets" }
+DEV_SERVICE_FIELD_PORTS :: comptime { "ports" }
+DEV_SERVICE_FIELD_RUN :: comptime { "run" }
+DEV_SERVICE_FIELD_SHUTDOWN :: comptime { "shutdown" }
+DEV_SERVICE_FIELD_DATA_DIR :: comptime { "data_dir" }
+DEV_SERVICE_FIELD_READY :: comptime { "ready" }
+DEV_SERVICE_FIELD_RESTART :: comptime { "restart" }
+DEV_SERVICE_FIELD_WATCH :: comptime { "watch" }
+DEV_SERVICE_FIELD_AFTER :: comptime { "after" }
+DEV_SERVICE_FIELD_BEFORE_START :: comptime { "before_start" }
+DEV_SERVICE_FIELD_SOCKETS :: comptime { "sockets" }
 // The typed platform values an image `target` may hold.
-PLATFORM_OS_LINUX :: prep { "linux" }
-PLATFORM_ARCH_X64 :: prep { "x64" }
-PLATFORM_ARCH_ARM64 :: prep { "arm64" }
+PLATFORM_OS_LINUX :: comptime { "linux" }
+PLATFORM_ARCH_X64 :: comptime { "x64" }
+PLATFORM_ARCH_ARM64 :: comptime { "arm64" }
 // `Image` record fields and the OCI kind word.
-IMAGE_FIELD_FROM :: prep { "from" }
-IMAGE_FIELD_FORMAT :: prep { "format" }
-IMAGE_KIND_OCI :: prep { "Oci" }
-IMAGE_KIND_ISO :: prep { "Iso" }
+IMAGE_FIELD_FROM :: comptime { "from" }
+IMAGE_FIELD_FORMAT :: comptime { "format" }
+IMAGE_KIND_OCI :: comptime { "Oci" }
+IMAGE_KIND_ISO :: comptime { "Iso" }
 // U14: the disk-image formats an `.Iso` image's `format:` may name.
-IMAGE_FORMAT_ISO :: prep { "iso" }
-IMAGE_FORMAT_QCOW :: prep { "qcow" }
-IMAGE_FORMAT_RAW :: prep { "raw" }
-IMAGE_FIELD_KIND :: prep { "kind" }
-IMAGE_FIELD_EXPOSE :: prep { "expose" }
-IMAGE_FIELD_ENV_VARS :: prep { "env_vars" }
-IMAGE_FIELD_FILES :: prep { "files" }
-IMAGE_FIELD_BASE :: prep { "base" }
+IMAGE_FORMAT_ISO :: comptime { "iso" }
+IMAGE_FORMAT_QCOW :: comptime { "qcow" }
+IMAGE_FORMAT_RAW :: comptime { "raw" }
+IMAGE_FIELD_KIND :: comptime { "kind" }
+IMAGE_FIELD_EXPOSE :: comptime { "expose" }
+IMAGE_FIELD_ENV_VARS :: comptime { "env_vars" }
+IMAGE_FIELD_FILES :: comptime { "files" }
+IMAGE_FIELD_BASE :: comptime { "base" }
 // Optional environment-image projection controls.
-IMAGE_FIELD_SERVICES :: prep { "services" }
-IMAGE_FIELD_HEALTH :: prep { "health" }
-IMAGE_FIELD_ENTRYPOINT :: prep { "entrypoint" }
-IMAGE_FIELD_USER :: prep { "user" }
+IMAGE_FIELD_SERVICES :: comptime { "services" }
+IMAGE_FIELD_HEALTH :: comptime { "health" }
+IMAGE_FIELD_ENTRYPOINT :: comptime { "entrypoint" }
+IMAGE_FIELD_USER :: comptime { "user" }
 // The `oci(...)` call name inside `base: oci("<ref>")`.
-IMAGE_BASE_FN :: prep { "oci" }
+IMAGE_BASE_FN :: comptime { "oci" }
 // U3/U8: the `Env` contribution field carrying the shell prompt label.
-ENV_FIELD_PROMPT :: prep { "prompt" }
+ENV_FIELD_PROMPT :: comptime { "prompt" }
 // Typed environment lifecycle fields.
-ENV_FIELD_DOTENV :: prep { "dotenv" }
-ENV_FIELD_UNSET :: prep { "unset" }
-ENV_FIELD_ON_ENTER :: prep { "on_enter" }
-ENV_FIELD_CHECKS :: prep { "checks" }
-ENV_FIELD_RELOAD :: prep { "reload" }
+ENV_FIELD_DOTENV :: comptime { "dotenv" }
+ENV_FIELD_UNSET :: comptime { "unset" }
+ENV_FIELD_ON_ENTER :: comptime { "on_enter" }
+ENV_FIELD_CHECKS :: comptime { "checks" }
+ENV_FIELD_RELOAD :: comptime { "reload" }
 // Environment composition fields.
-ENV_FIELD_PRESETS :: prep { "presets" }
-ENV_FIELD_LANGUAGES :: prep { "languages" }
+ENV_FIELD_PRESETS :: comptime { "presets" }
+ENV_FIELD_LANGUAGES :: comptime { "languages" }
 // Managed project-relative file declarations.
-ENV_FIELD_FILES :: prep { "files" }
+ENV_FIELD_FILES :: comptime { "files" }
 // `Prompt{ label: "...", path: .Short, strip: .On }`.
-PROMPT_FIELD_LABEL :: prep { "label" }
-PROMPT_FIELD_PATH :: prep { "path" }
-PROMPT_FIELD_STRIP :: prep { "strip" }
-PROMPT_SETTING_PATH :: prep { "prompt.path" }
-PROMPT_SETTING_STRIP :: prep { "prompt.strip" }
-PROMPT_PATH_SHORT :: prep { "Short" }
-PROMPT_PATH_FULL :: prep { "Full" }
-PROMPT_STRIP_ON :: prep { "On" }
-PROMPT_STRIP_OFF :: prep { "Off" }
+PROMPT_FIELD_LABEL :: comptime { "label" }
+PROMPT_FIELD_PATH :: comptime { "path" }
+PROMPT_FIELD_STRIP :: comptime { "strip" }
+PROMPT_SETTING_PATH :: comptime { "prompt.path" }
+PROMPT_SETTING_STRIP :: comptime { "prompt.strip" }
+PROMPT_PATH_SHORT :: comptime { "Short" }
+PROMPT_PATH_FULL :: comptime { "Full" }
+PROMPT_STRIP_ON :: comptime { "On" }
+PROMPT_STRIP_OFF :: comptime { "Off" }
 // U20: `Pkg.adapt(...)` adapter packages and their recipes.
-PKG_ADAPT :: prep { "Pkg.adapt" }
-ADAPTER_FIELD_NAME :: prep { "name" }
-ADAPTER_FIELD_SOURCE :: prep { "source" }
-ADAPTER_FIELD_DEPS :: prep { "deps" }
-ADAPTER_FIELD_RECIPE :: prep { "recipe" }
-RECIPE_COPY :: prep { "Recipe.copy" }
-RECIPE_PREBUILT :: prep { "Recipe.prebuilt" }
-RECIPE_FIELD_BIN :: prep { "bin" }
-RECIPE_FIELD_AS :: prep { "as" }
-RECIPE_FIELD_AS_NAME :: prep { "as_name" }
+PKG_ADAPT :: comptime { "Pkg.adapt" }
+ADAPTER_FIELD_NAME :: comptime { "name" }
+ADAPTER_FIELD_SOURCE :: comptime { "source" }
+ADAPTER_FIELD_DEPS :: comptime { "deps" }
+ADAPTER_FIELD_RECIPE :: comptime { "recipe" }
+RECIPE_COPY :: comptime { "Recipe.copy" }
+RECIPE_PREBUILT :: comptime { "Recipe.prebuilt" }
+RECIPE_FIELD_BIN :: comptime { "bin" }
+RECIPE_FIELD_AS :: comptime { "as" }
+RECIPE_FIELD_AS_NAME :: comptime { "as_name" }
 // Finite executable adapter recipe and step spellings.
-RECIPE_BUILD :: prep { "Recipe.build" }
-RECIPE_FIELD_STEPS :: prep { "steps" }
-RECIPE_STEP_FETCH :: prep { ".fetch" }
-RECIPE_STEP_EXEC :: prep { ".exec" }
-RECIPE_STEP_INSTALL :: prep { ".install" }
-RECIPE_STEP_INSTALL_TREE :: prep { ".install_tree" }
-RECIPE_STEP_FIELD_URL :: prep { "url" }
-RECIPE_STEP_FIELD_SHA256 :: prep { "sha256" }
-RECIPE_STEP_FIELD_TOOL :: prep { "tool" }
-RECIPE_STEP_FIELD_ARGS :: prep { "args" }
-RECIPE_STEP_FIELD_SRC :: prep { "src" }
-RECIPE_STEP_FIELD_DEST :: prep { "dest" }
+RECIPE_BUILD :: comptime { "Recipe.build" }
+RECIPE_FIELD_STEPS :: comptime { "steps" }
+RECIPE_STEP_FETCH :: comptime { ".fetch" }
+RECIPE_STEP_EXEC :: comptime { ".exec" }
+RECIPE_STEP_INSTALL :: comptime { ".install" }
+RECIPE_STEP_INSTALL_TREE :: comptime { ".install_tree" }
+RECIPE_STEP_FIELD_URL :: comptime { "url" }
+RECIPE_STEP_FIELD_SHA256 :: comptime { "sha256" }
+RECIPE_STEP_FIELD_TOOL :: comptime { "tool" }
+RECIPE_STEP_FIELD_ARGS :: comptime { "args" }
+RECIPE_STEP_FIELD_SRC :: comptime { "src" }
+RECIPE_STEP_FIELD_DEST :: comptime { "dest" }
 // S31: string escape markers and their decoded characters, index for index
 // (`{{`/`}}` are literal braces).
-ESCAPE_MARKERS :: prep { [String]{"n", "t", "\"", "\\"} }
-ESCAPE_DECODED :: prep { [String]{"\n", "\t", "\"", "\\"} }
+ESCAPE_MARKERS :: comptime { [String]{"n", "t", "\"", "\\"} }
+ESCAPE_DECODED :: comptime { [String]{"\n", "\t", "\"", "\\"} }
 
 // ── CLI env/use/jobs (jet_foundation::Syntax, Syntax/effects_surface.rs) ──
 
 // Reserved first-positional subverbs of `jet env`.
-ENV_HOOK_VERB :: prep { "hook" }
-ENV_TEST_VERB :: prep { "test" }
-ENV_SYNC_VERB :: prep { "sync" }
-ENV_INFO_VERB :: prep { "info" }
+ENV_HOOK_VERB :: comptime { "hook" }
+ENV_TEST_VERB :: comptime { "test" }
+ENV_SYNC_VERB :: comptime { "sync" }
+ENV_INFO_VERB :: comptime { "info" }
 // Shells the auto-activation hook supports.
-ENV_HOOK_SHELLS :: prep { [String]{"bash", "zsh", "fish"} }
+ENV_HOOK_SHELLS :: comptime { [String]{"bash", "zsh", "fish"} }
 // A non-empty value disables prompt-hook activation.
-ENV_DISABLE_VAR :: prep { "JET_ENV_DISABLE" }
+ENV_DISABLE_VAR :: comptime { "JET_ENV_DISABLE" }
 // U16: foreign shell files the env fallback projects natively.
-FOREIGN_FLAKE_FILE :: prep { "flake.nix" }
-FOREIGN_DEVENV_FILE :: prep { "devenv.nix" }
+FOREIGN_FLAKE_FILE :: comptime { "flake.nix" }
+FOREIGN_DEVENV_FILE :: comptime { "devenv.nix" }
 // The `env info` report's split job/check keys.
-ENV_REPORT_JOBS_KEY :: prep { "jobs" }
-ENV_REPORT_CHECKS_KEY :: prep { "checks" }
+ENV_REPORT_JOBS_KEY :: comptime { "jobs" }
+ENV_REPORT_CHECKS_KEY :: comptime { "checks" }
 
 // ── PackageModel Manifest/Package (jet_foundation::Syntax, jetpack_config.rs, package_files.rs, predicates.rs, core_calls.rs) ──
 
 // N1: the language display name.
-LANG_NAME :: prep { "Jet" }
+LANG_NAME :: comptime { "Jet" }
 // U1 bare identity fields and typed manifest blocks.
-MANIFEST_FIELD_NAME :: prep { "name" }
-MANIFEST_FIELD_VERSION :: prep { "version" }
-MANIFEST_FIELD_EDITION :: prep { "edition" }
-MANIFEST_BLOCK_DEPS :: prep { "deps" }
-MANIFEST_BLOCK_PACKAGES :: prep { "packages" }
-MANIFEST_BLOCK_OUTPUTS :: prep { "outputs" }
-MANIFEST_BLOCK_SETTINGS :: prep { "settings" }
-MANIFEST_BLOCK_MEMBERS :: prep { "members" }
-MANIFEST_BLOCK_BUILD :: prep { "build" }
-MANIFEST_BLOCK_EFFECTS :: prep { "effects" }
-MANIFEST_BLOCK_AUTHORITY :: prep { "authority" }
-MANIFEST_BLOCK_BOUNDARIES :: prep { "boundaries" }
+MANIFEST_FIELD_NAME :: comptime { "name" }
+MANIFEST_FIELD_VERSION :: comptime { "version" }
+MANIFEST_FIELD_EDITION :: comptime { "edition" }
+MANIFEST_BLOCK_DEPS :: comptime { "deps" }
+MANIFEST_BLOCK_PACKAGES :: comptime { "packages" }
+MANIFEST_BLOCK_OUTPUTS :: comptime { "outputs" }
+MANIFEST_BLOCK_SETTINGS :: comptime { "settings" }
+MANIFEST_BLOCK_MEMBERS :: comptime { "members" }
+MANIFEST_BLOCK_BUILD :: comptime { "build" }
+MANIFEST_BLOCK_EFFECTS :: comptime { "effects" }
+MANIFEST_BLOCK_AUTHORITY :: comptime { "authority" }
+MANIFEST_BLOCK_BOUNDARIES :: comptime { "boundaries" }
 // The one authority block vocabulary.
-AUTHORITY_FIELD_HOLDS :: prep { "holds" }
-AUTHORITY_FIELD_NEEDS :: prep { "needs" }
-AUTHORITY_FIELD_GRANTS :: prep { "grants" }
-AUTHORITY_FIELD_TRUST :: prep { "trust" }
-AUTHORITY_FIELD_PROVIDERS :: prep { "providers" }
-AUTHORITY_HOLDS_FIELD_ALLOW :: prep { "allow" }
-AUTHORITY_HOLDS_FIELD_DENY :: prep { "deny" }
-AUTHORITY_TRUST_FIELD_DEFAULT :: prep { "default" }
-AUTHORITY_TRUST_FIELD_CI :: prep { "ci" }
-AUTHORITY_TRUST_FIELD_SERVICES :: prep { "services" }
-AUTHORITY_TRUST_FIELD_REQUIRE :: prep { "require" }
-AUTHORITY_TRUST_FIELD_PROMPT :: prep { "prompt" }
-AUTHORITY_TRUST_DECISION_ALLOW :: prep { "allow" }
-AUTHORITY_TRUST_DECISION_PROMPT :: prep { "prompt" }
-AUTHORITY_TRUST_DECISION_DENY :: prep { "deny" }
-AUTHORITY_TRUST_REQUIRE_NONE :: prep { "none" }
-AUTHORITY_TRUST_REQUIRE_LOGGED :: prep { "logged" }
-AUTHORITY_TRUST_REQUIRE_ATTESTED :: prep { "attested" }
+AUTHORITY_FIELD_HOLDS :: comptime { "holds" }
+AUTHORITY_FIELD_NEEDS :: comptime { "needs" }
+AUTHORITY_FIELD_GRANTS :: comptime { "grants" }
+AUTHORITY_FIELD_TRUST :: comptime { "trust" }
+AUTHORITY_FIELD_PROVIDERS :: comptime { "providers" }
+AUTHORITY_HOLDS_FIELD_ALLOW :: comptime { "allow" }
+AUTHORITY_HOLDS_FIELD_DENY :: comptime { "deny" }
+AUTHORITY_TRUST_FIELD_DEFAULT :: comptime { "default" }
+AUTHORITY_TRUST_FIELD_CI :: comptime { "ci" }
+AUTHORITY_TRUST_FIELD_SERVICES :: comptime { "services" }
+AUTHORITY_TRUST_FIELD_REQUIRE :: comptime { "require" }
+AUTHORITY_TRUST_FIELD_PROMPT :: comptime { "prompt" }
+AUTHORITY_TRUST_DECISION_ALLOW :: comptime { "allow" }
+AUTHORITY_TRUST_DECISION_PROMPT :: comptime { "prompt" }
+AUTHORITY_TRUST_DECISION_DENY :: comptime { "deny" }
+AUTHORITY_TRUST_REQUIRE_NONE :: comptime { "none" }
+AUTHORITY_TRUST_REQUIRE_LOGGED :: comptime { "logged" }
+AUTHORITY_TRUST_REQUIRE_ATTESTED :: comptime { "attested" }
 // Provider authority record fields.
-PROVIDER_FIELD_REGISTRY :: prep { "registry" }
-PROVIDER_FIELD_ALLOW :: prep { "allow" }
-PROVIDER_FIELD_DENY :: prep { "deny" }
+PROVIDER_FIELD_REGISTRY :: comptime { "registry" }
+PROVIDER_FIELD_ALLOW :: comptime { "allow" }
+PROVIDER_FIELD_DENY :: comptime { "deny" }
 // `build:` profile vocabulary.
-BUILD_CTOR :: prep { "Build" }
-BUILD_FIELD_ALLOW :: prep { "allow" }
-BUILD_FIELD_OPTIMIZE :: prep { "optimize" }
-BUILD_FIELD_DEBUG_INFO :: prep { "debug_info" }
-BUILD_FIELD_SMALL :: prep { "small" }
-BUILD_FIELD_PANIC :: prep { "panic" }
-BUILD_FIELD_SETTINGS :: prep { "settings" }
-BUILD_OPTIMIZE_NONE :: prep { "none" }
-BUILD_OPTIMIZE_BASIC :: prep { "basic" }
-BUILD_OPTIMIZE_FULL :: prep { "full" }
-BUILD_PANIC_ABORT :: prep { "abort" }
-BUILD_PANIC_UNWIND :: prep { "unwind" }
-BUILD_PROFILE_RELEASE :: prep { "release" }
+BUILD_CTOR :: comptime { "Build" }
+BUILD_FIELD_ALLOW :: comptime { "allow" }
+BUILD_FIELD_OPTIMIZE :: comptime { "optimize" }
+BUILD_FIELD_DEBUG_INFO :: comptime { "debug_info" }
+BUILD_FIELD_SMALL :: comptime { "small" }
+BUILD_FIELD_PANIC :: comptime { "panic" }
+BUILD_FIELD_SETTINGS :: comptime { "settings" }
+BUILD_OPTIMIZE_NONE :: comptime { "none" }
+BUILD_OPTIMIZE_BASIC :: comptime { "basic" }
+BUILD_OPTIMIZE_FULL :: comptime { "full" }
+BUILD_PANIC_ABORT :: comptime { "abort" }
+BUILD_PANIC_UNWIND :: comptime { "unwind" }
+BUILD_PROFILE_RELEASE :: comptime { "release" }
 // U10.. Package target vocabulary.
-TARGET_LIBRARY :: prep { "library" }
-TARGET_EXECUTABLE :: prep { "executable" }
-TARGET_TEST :: prep { "test" }
-TARGET_EXAMPLE :: prep { "example" }
-TARGET_SANDBOX :: prep { "sandbox" }
+TARGET_LIBRARY :: comptime { "library" }
+TARGET_EXECUTABLE :: comptime { "executable" }
+TARGET_TEST :: comptime { "test" }
+TARGET_EXAMPLE :: comptime { "example" }
+TARGET_SANDBOX :: comptime { "sandbox" }
 TARGET_RESERVED :: [String]{}
-TARGET_FIELD_ENTRY :: prep { "entry" }
-TARGET_FIELD_NAME :: prep { "name" }
-TARGET_FIELD_EXPORT :: prep { "export" }
-PACKAGE_FIELD_TARGETS :: prep { "targets" }
-PACKAGE_FIELD_KIND_REMOVED :: prep { "kind" }
+TARGET_FIELD_ENTRY :: comptime { "entry" }
+TARGET_FIELD_NAME :: comptime { "name" }
+TARGET_FIELD_EXPORT :: comptime { "export" }
+PACKAGE_FIELD_TARGETS :: comptime { "targets" }
+PACKAGE_FIELD_KIND_REMOVED :: comptime { "kind" }
 // S59 the native C-library dependency provider.
-DEP_PROVIDER_C :: prep { "c" }
+DEP_PROVIDER_C :: comptime { "c" }
 // Library output fields.
-OUTPUT_FIELD_LOADABLE :: prep { "loadable" }
-OUTPUT_FIELD_NATIVE :: prep { "native" }
-OUTPUT_FIELD_BINDINGS :: prep { "bindings" }
+OUTPUT_FIELD_LOADABLE :: comptime { "loadable" }
+OUTPUT_FIELD_NATIVE :: comptime { "native" }
+OUTPUT_FIELD_BINDINGS :: comptime { "bindings" }
 // Package policy fields.
-POLICY_FIELD_LINTS :: prep { "lints" }
+POLICY_FIELD_LINTS :: comptime { "lints" }
 // The one `policy.lints` field (Syntax/predicates.rs).
-LINTS_FIELD_DENY :: prep { "deny" }
-POLICY_FIELD_EFFECTS :: prep { "effects" }
-POLICY_FIELD_UNSAFE :: prep { "unsafe" }
-POLICY_FIELD_EXPERT :: prep { "expert" }
-POLICY_FIELD_DEPS :: prep { "deps" }
-POLICY_FIELD_CLAIMS :: prep { "claims" }
-POLICY_FIELD_CONTAIN :: prep { "contain" }
-POLICY_FIELD_HARDEN :: prep { "harden" }
-POLICY_FIELD_LICENSES :: prep { "licenses" }
-POLICY_FIELD_SOURCES :: prep { "sources" }
-POLICY_FIELD_EXCEPTIONS :: prep { "exceptions" }
-POLICY_EXCEPTION_TYPE :: prep { "PolicyException" }
-POLICY_EXCEPTION_FIELD_ID :: prep { "id" }
-POLICY_EXCEPTION_FIELD_SCOPE :: prep { "scope" }
-POLICY_EXCEPTION_FIELD_REASON :: prep { "reason" }
-POLICY_EXCEPTION_FIELD_EXPIRES :: prep { "expires" }
+LINTS_FIELD_DENY :: comptime { "deny" }
+POLICY_FIELD_EFFECTS :: comptime { "effects" }
+POLICY_FIELD_UNSAFE :: comptime { "unsafe" }
+POLICY_FIELD_EXPERT :: comptime { "expert" }
+POLICY_FIELD_DEPS :: comptime { "deps" }
+POLICY_FIELD_CLAIMS :: comptime { "claims" }
+POLICY_FIELD_CONTAIN :: comptime { "contain" }
+POLICY_FIELD_HARDEN :: comptime { "harden" }
+POLICY_FIELD_LICENSES :: comptime { "licenses" }
+POLICY_FIELD_SOURCES :: comptime { "sources" }
+POLICY_FIELD_EXCEPTIONS :: comptime { "exceptions" }
+POLICY_EXCEPTION_TYPE :: comptime { "PolicyException" }
+POLICY_EXCEPTION_FIELD_ID :: comptime { "id" }
+POLICY_EXCEPTION_FIELD_SCOPE :: comptime { "scope" }
+POLICY_EXCEPTION_FIELD_REASON :: comptime { "reason" }
+POLICY_EXCEPTION_FIELD_EXPIRES :: comptime { "expires" }
 // The contextual leading package carrier word.
-INLINE_PACKAGE_DECL :: prep { "package" }
+INLINE_PACKAGE_DECL :: comptime { "package" }
 // The retired file-backed Config filename.
-CONFIG_FILE :: prep { "config.jet" }
+CONFIG_FILE :: comptime { "config.jet" }
 // Package-root command role homes.
-COMMAND_FILE_RUN :: prep { "@run.jet" }
-COMMAND_FILE_BUILD :: prep { "@build.jet" }
-COMMAND_FILE_DEV :: prep { "@dev.jet" }
-COMMAND_FILE_TEST :: prep { "@test.jet" }
-COMMAND_ROLE_FILES :: prep { [String]{COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST} }
+COMMAND_FILE_RUN :: comptime { "@run.jet" }
+COMMAND_FILE_BUILD :: comptime { "@build.jet" }
+COMMAND_FILE_DEV :: comptime { "@dev.jet" }
+COMMAND_FILE_TEST :: comptime { "@test.jet" }
+COMMAND_ROLE_FILES :: comptime { [String]{COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST} }
 // The package build entry and its compiler-owned parameter type.
-BUILD_ENTRY_FN :: prep { "build" }
-TYPE_BUILD_CONTEXT :: prep { "Build" }
+BUILD_ENTRY_FN :: comptime { "build" }
+TYPE_BUILD_CONTEXT :: comptime { "Build" }
 // UI capability rights accepted by `authority.needs`.
-UI_CAPABILITY_NAMES :: prep { [String]{"UI.FileDialog", "UI.Clipboard", "UI.IME", "UI.DragDrop", "UI.Shortcuts", "UI.Accessibility", "UI.FontShaping"} }
+UI_CAPABILITY_NAMES :: comptime { [String]{"UI.FileDialog", "UI.Clipboard", "UI.IME", "UI.DragDrop", "UI.Shortcuts", "UI.Accessibility", "UI.FontShaping"} }
 
 // The role home a bare command resolves to (`command_role_file`).
 fn syntax_command_role_file(command: String) -> String? Never! {
@@ -581,50 +581,50 @@ fn syntax_is_ui_capability(name: String) -> Bool Never! {
 
 // The pre-resolver machine Hangar path, read only as a
 // legacy migration source.
-HANGAR_DIR :: prep { "/etc/jet/hangar" }
+HANGAR_DIR :: comptime { "/etc/jet/hangar" }
 
 // ── Trust (jet_foundation::Syntax, jetpack_config.rs, effects_surface.rs, predicates.rs) ──
 
 // U19: the trust store file under `~/.jet` (`CONFIG_DEFAULT_DIR`).
-TRUST_FILE :: prep { "trust" }
+TRUST_FILE :: comptime { "trust" }
 // `jet trust grant --scope user|repo`.
-TRUST_SCOPE_USER :: prep { "user" }
-TRUST_SCOPE_REPO :: prep { "repo" }
+TRUST_SCOPE_USER :: comptime { "user" }
+TRUST_SCOPE_REPO :: comptime { "repo" }
 // (#179): re-exec guard marker set to the pinned version.
-TOOLCHAIN_EXEC_MARKER_ENV :: prep { "JET_TOOLCHAIN_EXEC" }
+TOOLCHAIN_EXEC_MARKER_ENV :: comptime { "JET_TOOLCHAIN_EXEC" }
 
 // ── Provider (jet_foundation::Syntax, effects_surface.rs) ──
 
 // Legacy Nix shell expressions accepted by `jetpack import`.
-FOREIGN_SHELL_FILE :: prep { "shell.nix" }
-FOREIGN_DEFAULT_FILE :: prep { "default.nix" }
+FOREIGN_SHELL_FILE :: comptime { "shell.nix" }
+FOREIGN_DEFAULT_FILE :: comptime { "default.nix" }
 
 // ── Environment RuntimePolicy/Locks (jet_foundation::Syntax, effects_surface.rs) ──
 
 // Card #2216: answer one package's dependent questions without dumping the
 // full dependency graph.
-JETPACK_WHY :: prep { "why" }
+JETPACK_WHY :: comptime { "why" }
 // Import a foreign environment into canonical Jet source.
-JETPACK_IMPORT_VERB :: prep { "import" }
+JETPACK_IMPORT_VERB :: comptime { "import" }
 // Card #2218: read-only changelog view over the unified `.jet/lock`.
-JETPACK_LOCK_VERB :: prep { "lock" }
+JETPACK_LOCK_VERB :: comptime { "lock" }
 // `jet trust <verb>`.
-TRUST_SUBCOMMAND :: prep { "trust" }
+TRUST_SUBCOMMAND :: comptime { "trust" }
 // U16: `jetpack bridge <verb>`, translators from a foreign ecosystem descriptor.
-BRIDGE_SUBCOMMAND :: prep { "bridge" }
+BRIDGE_SUBCOMMAND :: comptime { "bridge" }
 // U12: `jetpack services <verb>` supervises the project's dev `services:`.
-SERVICES_SUBCOMMAND :: prep { "services" }
+SERVICES_SUBCOMMAND :: comptime { "services" }
 // `jet image <name>`.
-IMAGE_SUBCOMMAND :: prep { "image" }
+IMAGE_SUBCOMMAND :: comptime { "image" }
 // Standalone user-profile management entrypoint.
-USER_SUBCOMMAND :: prep { "user" }
+USER_SUBCOMMAND :: comptime { "user" }
 // (#1187): `jetpack browser lock|provision|resolve|list`.
-BROWSER_SUBCOMMAND :: prep { "browser" }
-BROWSER_ENGINES :: prep { [String]{"chromium", "firefox", "webkit"} }
-BROWSER_DEFAULT_PROTOCOL :: prep { "bidi-2025.5" }
+BROWSER_SUBCOMMAND :: comptime { "browser" }
+BROWSER_ENGINES :: comptime { [String]{"chromium", "firefox", "webkit"} }
+BROWSER_DEFAULT_PROTOCOL :: comptime { "bidi-2025.5" }
 // Every Jetpack verb, in dispatch order. JetOS's `os` verb is out of scope for
 // this port and is not listed.
-JETPACK_VERBS :: prep { [String]{
+JETPACK_VERBS :: comptime { [String]{
     "doctor",
     "env",
     "use",
@@ -659,68 +659,68 @@ JETPACK_VERBS :: prep { [String]{
 
 // `jet` probes this hidden flag before every engine
 // dispatch; the engine answers with its version.
-ENGINE_PROTOCOL_FLAG :: prep { "--engine-protocol" }
+ENGINE_PROTOCOL_FLAG :: comptime { "--engine-protocol" }
 // Both spellings bypass mutation confirmation gates.
-CLI_FLAG_YES_SHORT :: prep { "-y" }
-CLI_FLAG_YES_LONG :: prep { "--yes" }
+CLI_FLAG_YES_SHORT :: comptime { "-y" }
+CLI_FLAG_YES_LONG :: comptime { "--yes" }
 // `jetpack update` scope selectors.
-UPDATE_FLAG_DEPS :: prep { "--deps" }
-UPDATE_FLAG_TOOLS :: prep { "--tools" }
+UPDATE_FLAG_DEPS :: comptime { "--deps" }
+UPDATE_FLAG_TOOLS :: comptime { "--tools" }
 // Card #2218: `jetpack lock diff [--against <rev>]`.
-LOCK_DIFF_VERB :: prep { "diff" }
-LOCK_DIFF_FLAG_AGAINST :: prep { "--against" }
+LOCK_DIFF_VERB :: comptime { "diff" }
+LOCK_DIFF_FLAG_AGAINST :: comptime { "--against" }
 // U19: the one-shot trust-gate bypass; it never persists a grant.
-TRUST_BYPASS_FLAG :: prep { "--trust" }
+TRUST_BYPASS_FLAG :: comptime { "--trust" }
 // U16: force foreign-flake/devenv detection over declared `env.*` modules.
-ENV_FLAG_FLAKE :: prep { "--flake" }
+ENV_FLAG_FLAKE :: comptime { "--flake" }
 // U16: isolate the foreign projected shell from host variables.
-ENV_FLAG_PURE :: prep { "--pure" }
+ENV_FLAG_PURE :: comptime { "--pure" }
 // U16 ad-hoc packages on env/use, exact workspace
 // members on build/test/run.
-ENV_FLAG_PACKAGE :: prep { "-p" }
+ENV_FLAG_PACKAGE :: comptime { "-p" }
 // Materialize without entering.
-ENV_FLAG_PREP :: prep { "--prep" }
-ENV_FLAG_PREP_UNKNOWN :: prep { "--prepare" }
+ENV_FLAG_PREP :: comptime { "--prep" }
+ENV_FLAG_PREP_UNKNOWN :: comptime { "--prepare" }
 // Card #2214: expand environment acquisition plans to per-package facts.
-ENV_FLAG_EXPLAIN :: prep { "--explain" }
+ENV_FLAG_EXPLAIN :: comptime { "--explain" }
 // Select a declared environment preset.
-ENV_FLAG_PRESET :: prep { "--preset" }
-ENV_FLAG_PROFILE_UNKNOWN :: prep { "--profile" }
+ENV_FLAG_PRESET :: comptime { "--preset" }
+ENV_FLAG_PROFILE_UNKNOWN :: comptime { "--profile" }
 // Select one `env.<name>` module.
-ENV_FLAG_ENV :: prep { "--env" }
-ENV_FLAG_ENV_UNKNOWN :: prep { "--env-profile" }
+ENV_FLAG_ENV :: comptime { "--env" }
+ENV_FLAG_ENV_UNKNOWN :: comptime { "--env-profile" }
 // The environment formatter language for `jet fmt`.
-FMT_FLAG_LANG :: prep { "--lang" }
+FMT_FLAG_LANG :: comptime { "--lang" }
 // U27 open a shell in preserved failed build scratch.
-BUILD_FLAG_SHELL_ON_FAIL :: prep { "--shell-on-fail" }
+BUILD_FLAG_SHELL_ON_FAIL :: comptime { "--shell-on-fail" }
 // `jet trust <verb>` and `--scope user|repo`.
-TRUST_FLAG_SCOPE :: prep { "--scope" }
-TRUST_VERB_GRANT :: prep { "grant" }
-TRUST_VERB_LIST :: prep { "list" }
-TRUST_VERB_EXPLAIN :: prep { "explain" }
-TRUST_VERB_REVOKE :: prep { "revoke" }
-TRUST_VERBS :: prep { [String]{TRUST_VERB_GRANT, TRUST_VERB_LIST, TRUST_VERB_EXPLAIN, TRUST_VERB_REVOKE} }
+TRUST_FLAG_SCOPE :: comptime { "--scope" }
+TRUST_VERB_GRANT :: comptime { "grant" }
+TRUST_VERB_LIST :: comptime { "list" }
+TRUST_VERB_EXPLAIN :: comptime { "explain" }
+TRUST_VERB_REVOKE :: comptime { "revoke" }
+TRUST_VERBS :: comptime { [String]{TRUST_VERB_GRANT, TRUST_VERB_LIST, TRUST_VERB_EXPLAIN, TRUST_VERB_REVOKE} }
 // `jet image <name> --push <ref>`.
-IMAGE_FLAG_PUSH :: prep { "--push" }
+IMAGE_FLAG_PUSH :: comptime { "--push" }
 // The generic `--name <name>` flag (`hangar ingest`).
-OS_FLAG_NAME :: prep { "--name" }
+OS_FLAG_NAME :: comptime { "--name" }
 // U16: `jetpack bridge flake`.
-BRIDGE_VERB_FLAKE :: prep { "flake" }
+BRIDGE_VERB_FLAKE :: comptime { "flake" }
 // (#1187): browser verbs and flags.
-BROWSER_VERB_LOCK :: prep { "lock" }
-BROWSER_VERB_PROVISION :: prep { "provision" }
-BROWSER_VERB_RESOLVE :: prep { "resolve" }
-BROWSER_VERB_LIST :: prep { "list" }
-BROWSER_VERBS :: prep { [String]{BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, BROWSER_VERB_RESOLVE, BROWSER_VERB_LIST} }
-BROWSER_FLAG_BINARY :: prep { "--binary" }
-BROWSER_FLAG_VERSION :: prep { "--version" }
-BROWSER_FLAG_PROTOCOL :: prep { "--protocol" }
+BROWSER_VERB_LOCK :: comptime { "lock" }
+BROWSER_VERB_PROVISION :: comptime { "provision" }
+BROWSER_VERB_RESOLVE :: comptime { "resolve" }
+BROWSER_VERB_LIST :: comptime { "list" }
+BROWSER_VERBS :: comptime { [String]{BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, BROWSER_VERB_RESOLVE, BROWSER_VERB_LIST} }
+BROWSER_FLAG_BINARY :: comptime { "--binary" }
+BROWSER_FLAG_VERSION :: comptime { "--version" }
+BROWSER_FLAG_PROTOCOL :: comptime { "--protocol" }
 // Members with changed input hashes (plus dependents),
 // or changed since a git ref.
-WS_FLAG_AFFECTED :: prep { "--affected" }
-WS_FLAG_AFFECTED_SINCE :: prep { "--affected-since" }
+WS_FLAG_AFFECTED :: comptime { "--affected" }
+WS_FLAG_AFFECTED_SINCE :: comptime { "--affected-since" }
 // The retired TOML config name, a migration sentinel only.
 
 // ── Services (jet_foundation::Syntax) ──
 // U12: per-service runtime state lives under `.jet/services/<name>/`.
-SERVICES_STATE_DIR :: prep { "services" }
+SERVICES_STATE_DIR :: comptime { "services" }

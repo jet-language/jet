@@ -31,7 +31,7 @@ struct CRawRecord {
 
 // The callback typedef marker the catalog stores as an alias target:
 // `__jet_callback__<ret>|<param>|<param>...`.
-CBIND_CALLBACK_MARKER :: prep { "__jet_callback__" }
+CBIND_CALLBACK_MARKER :: comptime { "__jet_callback__" }
 
 // Header type facts shared by prototype rendering and generated C records.
 struct CTypeCatalog {
@@ -543,8 +543,8 @@ fn pkg_cbind_callback_scalar_type(c_type: String) -> String? Never! {
     }
 }
 
-CBIND_LENGTH_SUFFIXES :: prep { [String]{"_len", "_length", "_count", "_size", "_num", "_number"} }
-CBIND_LENGTH_PREFIXES :: prep { [String]{"len_", "length_", "count_", "size_", "num_", "number_"} }
+CBIND_LENGTH_SUFFIXES :: comptime { [String]{"_len", "_length", "_count", "_size", "_num", "_number"} }
+CBIND_LENGTH_PREFIXES :: comptime { [String]{"len_", "length_", "count_", "size_", "num_", "number_"} }
 
 // Parameter names that may carry an element count.
 fn pkg_cbind_is_length_name(name: String) -> Bool Never! {

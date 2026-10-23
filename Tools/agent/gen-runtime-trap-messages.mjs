@@ -117,8 +117,8 @@ if (!boundaries) throw new Error("missing Rust Debug scalar interval table");
 const values = boundaries[1].match(/\d+/gu).map(Number);
 if (values.length % 2 || values.some((value, i) => i && value < values[i - 1])) throw new Error("invalid Rust Debug intervals");
 source += "\n// Canonical Text/RustDebug.jet intervals, retyped to machine words.\n";
-source += `TRAP_DEBUG_RANGE_COUNT :: prep { I64{${values.length / 2}} }\n`;
-source += "TRAP_DEBUG_RANGES :: prep { [I64]{\n";
+source += `TRAP_DEBUG_RANGE_COUNT :: comptime { I64{${values.length / 2}} }\n`;
+source += "TRAP_DEBUG_RANGES :: comptime { [I64]{\n";
 for (let i = 0; i < values.length; i += 12) source += `    ${values.slice(i, i + 12).map((n) => `I64{${n}}`).join(", ")},\n`;
 source += "} }\n";
 // Both projections use the same canonical facts. Scoped private generation

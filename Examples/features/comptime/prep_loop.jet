@@ -1,8 +1,8 @@
-// D-PREP-BRANCH1=A (respelling D-STRUCT-ONCE1=A): `prep loop` repeats
+// D-PREP-BRANCH1=A (respelling D-STRUCT-ONCE1=A): `comptime loop` repeats
 // declarations while building. One typed loop reaches derive bodies, marker
 // bodies, root impl items, and test declarations over closed lists.
 derive T.FieldNames {
-    prep loop field in T.$fields {
+    comptime loop field in T.$fields {
         method :: "field_{field.$name}"
         fn $method(self) -> String { field.$name }
     }
@@ -10,7 +10,7 @@ derive T.FieldNames {
 
 marker AddMarkerFields($sites: [.Type]) {
     type_name :: target.$name
-    prep loop field in target.$fields {
+    comptime loop field in target.$fields {
         method :: "marked_{field.$name}"
         impl $type_name {
             fn $method(self) -> String { field.$name }
@@ -32,16 +32,16 @@ struct Case {
     n: Int
 }
 
-CASES :: prep { [Case]{Case{n: 1}, Case{n: 2}} }
+CASES :: comptime { [Case]{Case{n: 1}, Case{n: 2}} }
 
 // One loop over a closed type list generates a method on each type.
-prep loop T in [Point, Size] {
+comptime loop T in [Point, Size] {
     impl T {
         fn kind(self) -> String { "generated" }
     }
 }
 
-prep loop case in CASES {
+comptime loop case in CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }

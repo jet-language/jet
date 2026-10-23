@@ -115,8 +115,8 @@ fn mem_address_of_known_binding_is_a_compile_error_not_a_silent_bake() {
     let src = "\
 use core.mem
 fn run() {
-    cell_value :: prep { 1337 }
-    address :: prep { mem.address_of(cell_value) }
+    cell_value :: comptime { 1337 }
+    address :: comptime { mem.address_of(cell_value) }
     print(address)
 }
 ";

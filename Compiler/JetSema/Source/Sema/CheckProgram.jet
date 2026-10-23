@@ -2382,7 +2382,7 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     source :: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
     // Any function a compile-time body reaches runs while building; the
     // evaluator's effect gate (E3401) rejects an effectful call, as in the
-    // Rust interpreter. No `prep fn` or `pure` marker is required.
+    // Rust interpreter. No `comptime fn` or `pure` marker is required.
     // Retarget module-local scope facts while reading the retained graph
     // from its single owner in `program`.
     // copy: a handle copy (Shared facts plus length and frontier ints): this check reads a frozen
@@ -6120,7 +6120,7 @@ fn sema_comptime_find_function_source_by_key(graph: SemaRegistrationGraph, funct
 // Every registered function a compile-time body calls runs while building,
 // wherever it is declared: the callee's own file resolves its names, and the
 // evaluator's effect gate (E3401) rejects an effectful call. A function need
-// not be marked `prep fn` or `pure` to be reached.
+// not be marked `comptime fn` or `pure` to be reached.
 fn sema_comptime_reachable_function_keys(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     keys := [String]{}
     seen := [String:Bool]{}

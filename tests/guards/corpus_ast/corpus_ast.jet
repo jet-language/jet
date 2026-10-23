@@ -7,11 +7,11 @@ use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT,
 use core.files as policy_ast_files
 use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
 
-POLICY_TASK_INTERNAL_PREFIX :: prep { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
-POLICY_TASK_INTERNAL_RECEIVER :: prep { "{POLICY_TASK_INTERNAL_PREFIX}jet.task" }
-POLICY_TASK_INTERNAL_ALL :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.all" }
-POLICY_TASK_INTERNAL_RACE :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.race" }
-POLICY_TASK_INTERNAL_ANY :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.any" }
+POLICY_TASK_INTERNAL_PREFIX :: comptime { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
+POLICY_TASK_INTERNAL_RECEIVER :: comptime { "{POLICY_TASK_INTERNAL_PREFIX}jet.task" }
+POLICY_TASK_INTERNAL_ALL :: comptime { "{POLICY_TASK_INTERNAL_RECEIVER}.all" }
+POLICY_TASK_INTERNAL_RACE :: comptime { "{POLICY_TASK_INTERNAL_RECEIVER}.race" }
+POLICY_TASK_INTERNAL_ANY :: comptime { "{POLICY_TASK_INTERNAL_RECEIVER}.any" }
 // The dependency contract is exercised on a real parser result, never a text
 // substitute. A build failure in the compiler packages blocks this guard port.
 fn policy_parse_program(source_label: String, source: String) -> Program PolicyError! {

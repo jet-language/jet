@@ -12,7 +12,7 @@ const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]");
 // The marker declarations are the raw text of jet_foundation's MARKER_SOURCE.
 const markerFile = readFileSync(join(repo, "Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet"), "utf8");
-const source = markerFile.match(/^MARKER_SOURCE :: prep \{ ```([\s\S]*?)``` \}$/m)?.[1];
+const source = markerFile.match(/^MARKER_SOURCE :: comptime \{ ```([\s\S]*?)``` \}$/m)?.[1];
 if (source === undefined) throw new Error("PreludeMarkers.jet has no MARKER_SOURCE raw text");
 const literal = (value) => JSON.stringify(value).replaceAll("{", "{{").replaceAll("}", "}}");
 const rows = source.split("\n").filter((line) => line.startsWith("marker ")).map((line) => {
@@ -27,7 +27,7 @@ const unit = compilerFixtureUnit(repo, ["Compiler/JetParser"]);
 const fixturePath = process.argv[3] ? resolve(repo, process.argv[3]) : join(repo, "Compiler/JetParser/Tests/ContractFixtures.fixture/ContractFixtures.jet");
 const fixtures = readFileSync(fixturePath, "utf8");
 const runtimeSource = readFileSync(join(repo, "tests/fixtures/fmt_import_c_bindings.jet"), "utf8");
-const constants = `\nPC_MARKER_SOURCE :: prep { ${literal(source)} }\nPC_MARKER_STATUS :: prep { [String:String]{${rows.join(",\n")}} }\nPC_FMT_RUNTIME_SOURCE :: prep { ${literal(runtimeSource)} }\n`;
+const constants = `\nPC_MARKER_SOURCE :: comptime { ${literal(source)} }\nPC_MARKER_STATUS :: comptime { [String:String]{${rows.join(",\n")}} }\nPC_FMT_RUNTIME_SOURCE :: comptime { ${literal(runtimeSource)} }\n`;
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), unit + constants + fixtures);
 writeFileSync(join(out, "project/package.jet"), 'name: "parser_contract_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');

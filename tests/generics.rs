@@ -29,7 +29,7 @@ module cache<K>(capacity: Int) {
     struct Buffer { items: [K#capacity] }
     fn slots() -> Int { capacity }
 }
-PROFILE_SLOTS :: prep { $build.settings.cache_slots }
+PROFILE_SLOTS :: comptime { $build.settings.cache_slots }
 module tuned :: cache<Int>($build.settings.cache_slots)
 module chained :: cache<Int>(PROFILE_SLOTS)
 fn run() { print(tuned.slots()) }
@@ -239,10 +239,10 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
 #[test]
 fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
     let source = r#"
-BASE :: prep { 40 }
+BASE :: comptime { 40 }
 
 module cache<K>(capacity: Int) {
-    COMPUTED_SIZE :: prep { BASE + capacity }
+    COMPUTED_SIZE :: comptime { BASE + capacity }
     struct Entry { items: [K#capacity] }
     fn size() -> Int { COMPUTED_SIZE }
 }
@@ -316,8 +316,8 @@ fn run() {}
     let body_items = r#"
 module complete<T>(count: Int, label: String) {
     #Meta(category: label)
-    VALUE :: prep { count }
-    COMPTIME_VALUE :: prep { count + 1 }
+    VALUE :: comptime { count }
+    COMPTIME_VALUE :: comptime { count + 1 }
     tag Marked { deny: [Net] }
     trait Reveal { fn reveal(self) -> T }
     struct Wrapped { value: T }
@@ -442,9 +442,9 @@ fn run() {}
 fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box(capacity: Int) {
-    BASE :: prep { capacity }
+    BASE :: comptime { capacity }
     fn shadowed() -> Int {
-        base :: prep { 5 }
+        base :: comptime { 5 }
         return base
     }
     fn plain_shadowed() -> Int {
@@ -674,7 +674,7 @@ fn plan<T>(json: ^String) -> Plan<T> {
 fn mixed<T, Value>(value: ^Value) -> Mixed<T, Value> {
     Mixed<T, Value>{values: [Value]{value}}
 }
-CONSTANT :: prep { Plan<Int>{json: "constant", phantom: 9} }
+CONSTANT :: comptime { Plan<Int>{json: "constant", phantom: 9} }
 fn run() {
     empty :: token<Int>()
     another :: token<String>()

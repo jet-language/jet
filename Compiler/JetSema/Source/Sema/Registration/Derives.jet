@@ -5,8 +5,8 @@
 // compiler-generated trait block, exactly like the Rust bootstrap's
 // `Registration/Derives.rs` + `Comptime::expand_derive_body`.
 //
-// Expansion is linear in the template: `prep if` selects its branch before
-// the branch is expanded, `prep loop` pushes one binding onto the shared scope
+// Expansion is linear in the template: `comptime if` selects its branch before
+// the branch is expanded, `comptime loop` pushes one binding onto the shared scope
 // per value, and conditions are answered directly on the scope values the
 // template already owns (no merged scope snapshot per condition).
 use jet_foundation.[
@@ -977,11 +977,11 @@ fn sema_derive_prep_if_selected(expansion: &SemaDeriveExpansion, cond: Expr, con
     expanded :: sema_derive_expand_expr(&expansion, cond)
     if expansion.failure != None -> return false
     value :: sema_derive_static_value(expansion, expanded) ?? {
-        sema_derive_fail(&expansion, sema_error("E0956", cond_span, "a `prep if` condition in a derive template is not a known-time value", "derive template conditions compare reflected facts and literals already in the template scope", "compare reflected facts such as `T.$kind == \"enum\"` or `field.$ty == T.$name`"))
+        sema_derive_fail(&expansion, sema_error("E0956", cond_span, "a `comptime if` condition in a derive template is not a known-time value", "derive template conditions compare reflected facts and literals already in the template scope", "compare reflected facts such as `T.$kind == \"enum\"` or `field.$ty == T.$name`"))
         return false
     }
     if value == .Bool(selected) -> return selected
-    sema_derive_fail(&expansion, sema_error("E0989", cond_span, "a `prep if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `prep if flag {{ … }}`"))
+    sema_derive_fail(&expansion, sema_error("E0989", cond_span, "a `comptime if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `comptime if flag {{ … }}`"))
     false
 }
 
@@ -1011,7 +1011,7 @@ fn sema_derive_expand_loop_block(expansion: &SemaDeriveExpansion, body: [Stmt], 
     if body[0] == .For(var, _, _, kind, loop_body, _, _, _, _) {
         if kind == .In(collection, _) {
             values :: sema_derive_loop_values(expansion, collection) ?? {
-                sema_derive_fail(&expansion, sema_error("E0956", span, "a `prep loop` source is not a compile-time list", "`prep loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.$fields`"))
+                sema_derive_fail(&expansion, sema_error("E0956", span, "a `comptime loop` source is not a compile-time list", "`comptime loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.$fields`"))
                 return
             }
             loop value in values {
@@ -1360,7 +1360,7 @@ fn sema_derive_expand_body(expansion: &SemaDeriveExpansion, body: [DeriveBodyIte
             .Item(item) -> &out.push(sema_derive_expand_item(&expansion, item))
             .Loop(var, _, source, loop_body, _) -> {
                 values :: sema_derive_loop_values(expansion, source) ?? {
-                    sema_derive_fail(&expansion, sema_error("E0956", expr_span(source), "a `prep loop` source is not a compile-time list", "`prep loop` expands one item template for each value in its source list", "use a reflected/comptime list such as `T.$fields`, or a closed type list like `[TypeA, TypeB]`"))
+                    sema_derive_fail(&expansion, sema_error("E0956", expr_span(source), "a `comptime loop` source is not a compile-time list", "`comptime loop` expands one item template for each value in its source list", "use a reflected/comptime list such as `T.$fields`, or a closed type list like `[TypeA, TypeB]`"))
                     return
                 }
                 loop value in values {

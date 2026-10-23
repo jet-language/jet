@@ -1,26 +1,26 @@
-// `prep if` selects a branch at
+// `comptime if` selects a branch at
 // compile time. Only the selected arm is type-checked and emitted; the
 // dropped arm gets name-resolution only (typos still caught).
-DEBUG :: prep { false }
+DEBUG :: comptime { false }
 
-PLATFORM :: prep { "unix" }
+PLATFORM :: comptime { "unix" }
 
 fn run() {
-    prep if DEBUG {
+    comptime if DEBUG {
         print("debug mode")
     } else {
         print("release mode")
     }
-    prep if PLATFORM == "windows" {
+    comptime if PLATFORM == "windows" {
         print("windows path")
     } else {
         print("unix path")
     }
-    // Nested prep if (comptime else-if chain)
-    prep if DEBUG {
+    // Nested comptime if (comptime else-if chain)
+    comptime if DEBUG {
         print("debug")
     } else {
-        prep if PLATFORM == "unix" {
+        comptime if PLATFORM == "unix" {
             print("unix, non-debug")
         } else {
             print("other")

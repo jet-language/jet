@@ -447,10 +447,10 @@ fn compiler_queries_precede_source_facades_for_module_and_nested_aliases() {
     ] {
         let source = format!(
             "{import}\n\
-             LEXED :: prep {{ {prefix}.lex(`fn run() {{}}`) ?? panic(\"lex\") }}\n\
-             PARSED :: prep {{ {prefix}.parse(`fn run() {{}}`) ?? panic(\"parse\") }}\n\
-             CHECKED :: prep {{ {prefix}.check(PARSED) ?? panic(\"check\") }}\n\
-             MAPPED :: prep {{ {prefix}.source_map(`fn run() {{}}`) ?? panic(\"map\") }}\n\
+             LEXED :: comptime {{ {prefix}.lex(`fn run() {{}}`) ?? panic(\"lex\") }}\n\
+             PARSED :: comptime {{ {prefix}.parse(`fn run() {{}}`) ?? panic(\"parse\") }}\n\
+             CHECKED :: comptime {{ {prefix}.check(PARSED) ?? panic(\"check\") }}\n\
+             MAPPED :: comptime {{ {prefix}.source_map(`fn run() {{}}`) ?? panic(\"map\") }}\n\
              fn run() {{ print(\"compiler queries\") }}\n"
         );
         jet::compile(&source).unwrap_or_else(|diagnostics| {
@@ -510,7 +510,7 @@ fn compiler_query_argument_types_are_checked_before_evaluation() {
         ("source_map", "false"),
     ] {
         let source = format!(
-            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}({argument}) }}\nfn run() {{}}\n"
+            "use core.compiler as compiler\nVALUE :: comptime {{ compiler.{operation}({argument}) }}\nfn run() {{}}\n"
         );
         let diagnostics = jet::compile(&source).expect_err("query input must have its canonical type");
         assert!(
@@ -524,7 +524,7 @@ fn compiler_query_argument_types_are_checked_before_evaluation() {
 fn compiler_package_query_extra_arguments_are_rejected_at_checking() {
     for operation in ["manifest", "package", "lock", "profiles"] {
         let source = format!(
-            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}(\"extra\") }}\nfn run() {{}}\n"
+            "use core.compiler as compiler\nVALUE :: comptime {{ compiler.{operation}(\"extra\") }}\nfn run() {{}}\n"
         );
         let diagnostics = jet::compile(&source).expect_err("package queries take no arguments");
         assert!(
@@ -538,7 +538,7 @@ fn compiler_package_query_extra_arguments_are_rejected_at_checking() {
 fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
     for operation in ["lex", "parse", "check", "source_map"] {
         let zero = format!(
-            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}() }}\n"
+            "use core.compiler as compiler\nVALUE :: comptime {{ compiler.{operation}() }}\n"
         );
         let diagnostics = jet::compile(&zero).expect_err("zero-argument call must be rejected");
         assert!(
@@ -547,7 +547,7 @@ fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
         );
 
         let extra = format!(
-            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}(\"source\", \"extra\") }}\n"
+            "use core.compiler as compiler\nVALUE :: comptime {{ compiler.{operation}(\"source\", \"extra\") }}\n"
         );
         let diagnostics =
             jet::compile(&extra).expect_err("extra-argument call must be rejected");

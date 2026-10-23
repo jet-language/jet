@@ -178,7 +178,7 @@ fn run() {
     );
 }
 
-/// Card #1543 merge-review finding 2: a `prep { ... }` comptime block inside a
+/// Card #1543 merge-review finding 2: a `comptime { ... }` comptime block inside a
 /// `-[]>` fn must NOT ALSO trip a run-time-voiced E3401 on top of the real
 /// build-time one — it emits no runtime code at all (I3), so the run-time
 /// `-[]>` walk must not descend into it a second time. `print` here is
@@ -189,7 +189,7 @@ fn run() {
 fn pure_fn_comptime_block_is_excluded_from_runtime_check() {
     let src = r#"
 fn good() -[]> Int {
-    prep {
+    comptime {
         print("build-time only")
     }
     return 42
@@ -201,7 +201,7 @@ fn run() {
     let res = jet::compile(src);
     assert!(
         res.is_err(),
-        "print() inside `prep {{ }}` is still build-time invalid"
+        "print() inside `comptime {{ }}` is still build-time invalid"
     );
     let diags = res.unwrap_err();
     let e3401s: Vec<_> = diags.iter().filter(|d| d.code == "E3401").collect();
@@ -223,9 +223,9 @@ fn run() {
 #[test]
 fn comptime_named_authority_scope_compiles() {
     let src = r#"
-ANSWER :: prep { 42 }
+ANSWER :: comptime { 42 }
 fn run() {
-    prep {
+    comptime {
         #FX(authority: IO) {}
     }
     print("{ANSWER}")

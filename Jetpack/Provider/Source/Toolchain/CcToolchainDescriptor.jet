@@ -13,24 +13,24 @@
 // the source fingerprint, and the producer facts. Hangar verification lives in
 // CcToolchainHangar.jet and acquisition in CcToolchainAcquisition.jet.
 
-CC_TOOLCHAIN_PACKAGE :: prep { "cc-toolchain" }
-CC_TOOLCHAIN_SOURCE :: prep { "jetpack" }
-CC_TOOLCHAIN_RECIPE_ID :: prep { "jet-cc-toolchain-v1" }
-CC_TOOLCHAIN_PRODUCER :: prep { "jet-cc" }
-CC_TOOLCHAIN_NIX_PRODUCER :: prep { "nix" }
-CC_TOOLCHAIN_SCHEMA :: prep { "1" }
-CC_TOOLCHAIN_FIXTURE_MANIFEST :: prep { "jet-cc-toolchain" }
-CC_TOOLCHAIN_FIXTURE_LAYOUT :: prep { "fixture-v1" }
-CC_TOOLCHAIN_NIX_LAYOUT :: prep { "nix-index-hangar-v1" }
-CC_TOOLCHAIN_VIRTUAL_BASE :: prep { "/jet/toolchains" }
-CC_TOOLCHAIN_NIX_STORE_PREFIX :: prep { "/nix/store/" }
-CC_TOOLCHAIN_MAX_MANIFEST_BYTES :: prep { 1048576 }
-CC_TOOLCHAIN_MAX_BUNDLE_NODES :: prep { 250000 }
-CC_TOOLCHAIN_MAX_BUNDLE_BYTES :: prep { 8589934592 }
-CC_TOOLCHAIN_MAX_NIX_OBJECTS :: prep { 250000 }
-CC_TOOLCHAIN_MAX_MARKER_BYTES :: prep { 16384 }
-CC_TOOLCHAIN_MAX_TARGET_BYTES :: prep { 128 }
-CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: prep { 256 }
+CC_TOOLCHAIN_PACKAGE :: comptime { "cc-toolchain" }
+CC_TOOLCHAIN_SOURCE :: comptime { "jetpack" }
+CC_TOOLCHAIN_RECIPE_ID :: comptime { "jet-cc-toolchain-v1" }
+CC_TOOLCHAIN_PRODUCER :: comptime { "jet-cc" }
+CC_TOOLCHAIN_NIX_PRODUCER :: comptime { "nix" }
+CC_TOOLCHAIN_SCHEMA :: comptime { "1" }
+CC_TOOLCHAIN_FIXTURE_MANIFEST :: comptime { "jet-cc-toolchain" }
+CC_TOOLCHAIN_FIXTURE_LAYOUT :: comptime { "fixture-v1" }
+CC_TOOLCHAIN_NIX_LAYOUT :: comptime { "nix-index-hangar-v1" }
+CC_TOOLCHAIN_VIRTUAL_BASE :: comptime { "/jet/toolchains" }
+CC_TOOLCHAIN_NIX_STORE_PREFIX :: comptime { "/nix/store/" }
+CC_TOOLCHAIN_MAX_MANIFEST_BYTES :: comptime { 1048576 }
+CC_TOOLCHAIN_MAX_BUNDLE_NODES :: comptime { 250000 }
+CC_TOOLCHAIN_MAX_BUNDLE_BYTES :: comptime { 8589934592 }
+CC_TOOLCHAIN_MAX_NIX_OBJECTS :: comptime { 250000 }
+CC_TOOLCHAIN_MAX_MARKER_BYTES :: comptime { 16384 }
+CC_TOOLCHAIN_MAX_TARGET_BYTES :: comptime { 128 }
+CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: comptime { 256 }
 
 // This rule acquisition record.
 //
@@ -66,7 +66,7 @@ struct CcNixAcquisitionRecord {
 // The first production record is scoped to the platform for which the signed
 // feed publishes both `gcc` and `lld` outputs. Another target needs another
 // signed index/cache record, not a host-PATH guess or a copied sysroot.
-CC_NIX_ACQUISITION_RECORDS :: prep { [CcNixAcquisitionRecord]{
+CC_NIX_ACQUISITION_RECORDS :: comptime { [CcNixAcquisitionRecord]{
     {
         id: "jet-cc-nixos-unstable-e5bdc4a4-x86_64-linux-v1",
         channel: "nixos-unstable",

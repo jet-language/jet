@@ -338,7 +338,7 @@ fn store_reuse_find_system_tool(name: String) -> String StoreError! {
     Err(StoreError.NotFound("required system tool `{name}` not found"))
 }
 
-STORE_LEASE_KEEPER_SCRIPT :: prep { "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n" }
+STORE_LEASE_KEEPER_SCRIPT :: comptime { "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n" }
 
 // Rust `create_exec_wrappers`: a read-only tmpfs in a private rootless
 // mount namespace holds one link per executable naming its pinned

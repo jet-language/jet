@@ -288,7 +288,7 @@ fn repr_c_enum_surface_is_stable() {
 
 #[test]
 fn computed_declaration_values_format_stably() {
-    let src = "LANES :: prep { 2 }\nBASE :: prep { 40 }\nstruct Frame { values: [Int#(LANES * 2)] }\n#Layout(c, tag: U8) enum Code { First = BASE + 1 Second }\n";
+    let src = "LANES :: comptime { 2 }\nBASE :: comptime { 40 }\nstruct Frame { values: [Int#(LANES * 2)] }\n#Layout(c, tag: U8) enum Code { First = BASE + 1 Second }\n";
     let once = jet::format_source(src).expect("computed declaration values should format");
     assert!(
         once.contains("[Int#(LANES * 2)]"),
@@ -603,7 +603,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    prep if $build.os == {
+    comptime if $build.os == {
         .Linux -> {
             b :: LinuxBackend{ name: "gtk" }
             print(b.label())
@@ -615,7 +615,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("prep if $build.os == {"),
+        out.contains("comptime if $build.os == {"),
         "expected the `@if $build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. The formatter may add visible arm blocks.
@@ -2530,22 +2530,22 @@ fn fmt_keeps_parens_around_binary_receiver() {
 
 #[test]
 fn fmt_prep_block_is_idempotent() {
-    // D-PREP-SURFACE2=A: `prep { … }` formatting round-trips — the `prep`
+    // D-PREP-SURFACE2=A: `comptime { … }` formatting round-trips — the `comptime`
     // head, brace, and body all survive a second fmt.
-    let src = r#"LIMIT :: prep { 1000 }
+    let src = r#"LIMIT :: comptime { 1000 }
 
 fn run() {
-    prep {
+    comptime {
         ratio :: LIMIT / 10
         if ratio < 1 { panic("bad") }
     }
     print("ok")
 }
 "#;
-    let out = jet::format_source(src).expect("fmt should accept a prep block");
+    let out = jet::format_source(src).expect("fmt should accept a comptime block");
     assert!(
-        out.contains("    prep {\n"),
-        "prep block head + open brace must survive fmt, got:\n{out}"
+        out.contains("    comptime {\n"),
+        "comptime block head + open brace must survive fmt, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "comptime block formatting must be idempotent");
@@ -2714,7 +2714,7 @@ fn fmt_layout_compiler_fact_and_field_selector_stability() {
 
 #[test]
 fn fmt_origin_compiler_fact_stability() {
-    let src = "fn run() {\n    #Track speed :: 3.5\n    speed_origin :: prep { speed.$origin }\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    speed_origin :: comptime { speed.$origin }\n}\n";
     let once = jet::format_source(src).expect("origin compiler fact should parse");
     assert!(
         once.contains("speed.$origin"),
@@ -4207,7 +4207,7 @@ fn external_module_format_remains_parseable_and_idempotent() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)
-SIZE :: prep { capacity }
+SIZE :: comptime { capacity }
 struct Buffer { slots: [T#capacity] }
 module nested<U> { fn keep(value: U) -> U { return value.copy() } }
 module inner :: nested<T>
@@ -4439,7 +4439,7 @@ struct Widget {
     #Doc("display name") label: String
 }
 
-LIMIT :: prep { 32 }
+LIMIT :: comptime { 32 }
 
 #Inline
 fn hot(a: Int) -> Int {
@@ -4457,7 +4457,7 @@ fn run() {
     for needle in [
         "#Codable",
         "#Doc(\"display name\") label: String",
-        "LIMIT :: prep { 32 }",
+        "LIMIT :: comptime { 32 }",
         "#Inline",
         "#Off print(\"off\")",
         "#Impure(\"reads the wall clock\") {",

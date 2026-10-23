@@ -1,8 +1,8 @@
 // Claims ported from crates/jetpack/src/Provider/script_registry.rs
 // #[cfg(test)].
 
-SCRIPT_TEST_SHA256 :: prep { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
-SCRIPT_TEST_SHA1 :: prep { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+SCRIPT_TEST_SHA256 :: comptime { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+SCRIPT_TEST_SHA1 :: comptime { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
 
 fn provider_script_test_authority(kind: ScriptRegistryKind) -> RegistryAuthority Never! {
     RegistryAuthority{provider: kind.label(), registry: kind.repository(), allow: kind.fetch_authorities(), deny: [String]{}}
@@ -81,7 +81,7 @@ fn provider_script_test_cpan(base: String, repo: String, name: String, version: 
     archive
 }
 
-SCRIPT_TEST_CREATE_ZIP :: prep { `$z=new ZipArchive(); if($z->open($argv[2],ZipArchive::CREATE|ZipArchive::OVERWRITE)!==true) exit(2); $root=rtrim($argv[1],DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR; $it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($argv[1],FilesystemIterator::SKIP_DOTS)); foreach($it as $f){$z->addFile($f->getPathname(),substr($f->getPathname(),strlen($root)));} if(!$z->close()) exit(3);` }
+SCRIPT_TEST_CREATE_ZIP :: comptime { `$z=new ZipArchive(); if($z->open($argv[2],ZipArchive::CREATE|ZipArchive::OVERWRITE)!==true) exit(2); $root=rtrim($argv[1],DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR; $it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($argv[1],FilesystemIterator::SKIP_DOTS)); foreach($it as $f){$z->addFile($f->getPathname(),substr($f->getPathname(),strlen($root)));} if(!$z->close()) exit(3);` }
 
 // A Packagist dist `dist/<name>.zip` whose root directory holds `relative`.
 fn provider_script_test_zip(base: String, repo: String, name: String, relative: String, code: String) -[FS, Exec, Time.Wait]> String Never! {

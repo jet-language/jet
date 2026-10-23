@@ -6,7 +6,7 @@ fn net_style_view() -> String {
     socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")
     return "{net.ip_to_string(ip4)}:{net.ip_is_ipv4(ip4)}|{net.ip_to_string(ip6)}:{net.ip_is_ipv4(ip6)}|{net.socket_host(socket)}:{net.socket_port(socket)}:{net.socket_to_string(socket)}|{io.style_force("red", "x").len()}:{io.style_force("unknown", "plain")}"
 }
-EXPECTED :: prep { net_style_view() }
+EXPECTED :: comptime { net_style_view() }
 
 fn run() {
     actual :: net_style_view()

@@ -14,7 +14,7 @@ use jet_pkg_model.[
 
 // Ripper-based discovery: prints each top-level one-argument `def` name and
 // aborts on a parse error or unsupported parameters. It never loads the script.
-PKG_RUBY_DISCOVERER :: prep { ```require 'ripper'
+PKG_RUBY_DISCOVERER :: comptime { ```require 'ripper'
 source = File.binread(ARGV.fetch(0))
 tree = Ripper.sexp(source)
 abort 'parse error' unless tree && tree[0] == :program
@@ -31,7 +31,7 @@ end
 ``` }
 
 // The persistent worker. Hole: `allowed`, the quoted method names.
-PKG_RUBY_WORKER :: prep { ```require 'json'
+PKG_RUBY_WORKER :: comptime { ```require 'json'
 STDIN.binmode
 STDOUT.binmode
 ALLOWED = [@@allowed@@].to_h { |name| [name, true] }.freeze
@@ -76,7 +76,7 @@ loop do
 end
 ``` }
 
-PKG_RUBY_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "RubyError"} }
+PKG_RUBY_RESERVED :: comptime { [String]{"open", "cancel", "close", "decode_response", "Session", "RubyError"} }
 
 // Bind the top-level one-argument methods of the Ruby script at `path`.
 fn pkg_ruby_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {

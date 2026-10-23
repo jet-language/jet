@@ -808,7 +808,7 @@ fn jfmt_fmt_derive_decl(f: &JetFmt, derive_def: DeriveDef) {
 }
 
 fn jfmt_fmt_item_template_loop(f: &JetFmt, loop_item: ItemTemplateLoop) {
-    jfmt_write(&f, "prep loop ")
+    jfmt_write(&f, "comptime loop ")
     jfmt_write(&f, loop_item.var)
     jfmt_write(&f, " in ")
     jfmt_fmt_expr(&f, loop_item.source, JFMT_PREC_OR_FALLBACK)
@@ -833,7 +833,7 @@ fn jfmt_fmt_derive_body_items(f: &JetFmt, body: [DeriveBodyItem]) {
             .Item(item) -> jfmt_fmt_item(&f, item)
             .Stmt(stmt) -> jfmt_fmt_stmt(&f, stmt)
             .Loop(var, _, source, inner, _) -> {
-                jfmt_write(&f, "prep loop ")
+                jfmt_write(&f, "comptime loop ")
                 jfmt_write(&f, var)
                 jfmt_write(&f, " in ")
                 jfmt_fmt_expr(&f, source, JFMT_PREC_OR_FALLBACK)
@@ -1310,8 +1310,8 @@ fn jfmt_fmt_type_params(f: &JetFmt, params: [TypeParam], source: JetFmtSourceLis
         param :: params[index]
         jfmt_comma_before(&f, index, multiline, param.name_span.start)
         if param.prep == .Val(prep) {
-            // A number parameter prints `prep N: Int`.
-            jfmt_write(&f, "prep {param.name}: {prep.value_type}")
+            // A number parameter prints `comptime N: Int`.
+            jfmt_write(&f, "comptime {param.name}: {prep.value_type}")
         } else {
             jfmt_write(&f, param.name)
             if param.bounds.len() == 1 {
@@ -1505,7 +1505,7 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func) {
     // (card #2789), respelled by preserve
     // the build-time callable mark on capability constructors. It sits after
     // any markers, directly before `fn`, exactly where `method_in_type` reads it.
-    if func.is_comptime -> jfmt_write(&f, "prep ")
+    if func.is_comptime -> jfmt_write(&f, "comptime ")
     jfmt_write(&f, "fn ")
     jfmt_write(&f, func.name)
     type_source :: jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_ANGLE)
@@ -2103,7 +2103,7 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
     }
     if c.is_comptime {
         // Compile time is always the explicit
-        // `NAME :: prep { value }`.
+        // `NAME :: comptime { value }`.
         jfmt_write(&f, c.name)
         jfmt_write(&f, " :: ")
         jfmt_fmt_prepared_value(&f, c.value)

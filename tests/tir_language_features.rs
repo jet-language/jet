@@ -915,8 +915,8 @@ fn comptime_const_inline() {
         return;
     }
     let src = "\
-VERSION :: prep { \"1.0\" }
-BANNER :: prep { \"logbook {VERSION}\" }
+VERSION :: comptime { \"1.0\" }
+BANNER :: comptime { \"logbook {VERSION}\" }
 fn wrap(s: String) -> String {
     return \"{BANNER}: {s}\"
 }

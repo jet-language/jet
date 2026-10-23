@@ -59,20 +59,20 @@ fn csv_records_free(records: I64) {
 }
 
 // CsvKernel.rs parser state, one word each.
-CSV_FIELDS :: prep { I64{0} }
-CSV_FIELD :: prep { I64{8} }
-CSV_QUOTED :: prep { I64{16} }
-CSV_AFTER_QUOTE :: prep { I64{24} }
-CSV_PENDING_CR :: prep { I64{32} }
-CSV_PENDING_LINE :: prep { I64{40} }
-CSV_PENDING_COLUMN :: prep { I64{48} }
-CSV_RECORD :: prep { I64{56} }
-CSV_LINE :: prep { I64{64} }
-CSV_COLUMN :: prep { I64{72} }
-CSV_ENDED :: prep { I64{80} }
-CSV_SAW_INPUT :: prep { I64{88} }
-CSV_RECORDS :: prep { I64{96} }
-CSV_STATE_BYTES :: prep { I64{104} }
+CSV_FIELDS :: comptime { I64{0} }
+CSV_FIELD :: comptime { I64{8} }
+CSV_QUOTED :: comptime { I64{16} }
+CSV_AFTER_QUOTE :: comptime { I64{24} }
+CSV_PENDING_CR :: comptime { I64{32} }
+CSV_PENDING_LINE :: comptime { I64{40} }
+CSV_PENDING_COLUMN :: comptime { I64{48} }
+CSV_RECORD :: comptime { I64{56} }
+CSV_LINE :: comptime { I64{64} }
+CSV_COLUMN :: comptime { I64{72} }
+CSV_ENDED :: comptime { I64{80} }
+CSV_SAW_INPUT :: comptime { I64{88} }
+CSV_RECORDS :: comptime { I64{96} }
+CSV_STATE_BYTES :: comptime { I64{104} }
 
 fn csv_flag(state: I64, offset: I64) -> Bool { trap_word(state + offset) != I64{0} }
 fn csv_set(state: I64, offset: I64, value: Bool) { trap_store(state + offset, if value -> I64{1} else -> I64{0}) }

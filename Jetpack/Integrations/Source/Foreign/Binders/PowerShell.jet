@@ -16,7 +16,7 @@ use jet_pkg_model.[
 
 // Parses the script with the PowerShell parser and prints each top-level
 // function name; a parse error prints `ParserError` and exits 2.
-PKG_PWSH_VALIDATOR :: prep { ```$tokens = $null
+PKG_PWSH_VALIDATOR :: comptime { ```$tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }
@@ -24,7 +24,7 @@ $ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.L
 ``` }
 
 // The persistent worker. Hole: `allowed`, the quoted command allow-list.
-PKG_PWSH_WORKER :: prep { ```$ErrorActionPreference = 'Stop'
+PKG_PWSH_WORKER :: comptime { ```$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [Console]::OpenStandardOutput()
@@ -75,7 +75,7 @@ while ($true) {
 ``` }
 
 // The generated module's types after the import block. Hole: `abi`.
-PKG_PWSH_JET_TYPES :: prep { ```}
+PKG_PWSH_JET_TYPES :: comptime { ```}
 use c.@@abi@@ as abi
 use core.encoding.json as json
 
@@ -95,7 +95,7 @@ enum PowerShellError {
 
 ``` }
 
-PKG_PWSH_JET_SESSION :: prep { ```impl Session.Close {
+PKG_PWSH_JET_SESSION :: comptime { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -112,7 +112,7 @@ fn cancel(session: Session) { abi.cancel(session.value) }
 ``` }
 
 // Generated names a PowerShell function may not project onto.
-PKG_PWSH_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "Session", "PowerShellError"} }
+PKG_PWSH_RESERVED :: comptime { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "Session", "PowerShellError"} }
 
 // A discovered function: its PowerShell name (the worker's lookup key) and
 // its projected Jet name.

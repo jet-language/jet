@@ -1,9 +1,9 @@
 use core.encoding.hex as comptime_diff_hex
 use core.archive.zstd as zstd
 
-BYTES :: prep { [U8]{ 72, 101, 108, 108, 111 } }
-ENCODED :: prep { zstd.compress(BYTES) ?? [U8]{} }
-EXPECTED :: prep { zstd.decompress(ENCODED) ?? [U8]{} }
+BYTES :: comptime { [U8]{ 72, 101, 108, 108, 111 } }
+ENCODED :: comptime { zstd.compress(BYTES) ?? [U8]{} }
+EXPECTED :: comptime { zstd.decompress(ENCODED) ?? [U8]{} }
 
 fn run() {
     restored :: zstd.decompress(ENCODED) ?? [U8]{}

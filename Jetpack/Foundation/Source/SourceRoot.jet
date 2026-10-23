@@ -6,10 +6,10 @@
 use core.sys as sys
 use core.files as files
 
-TOOLCHAIN_ROOT_ENV :: prep { "JET_TOOLCHAIN_ROOT" }
+TOOLCHAIN_ROOT_ENV :: comptime { "JET_TOOLCHAIN_ROOT" }
 
 // The markers that identify a Jet source root; all of them must exist.
-SOURCE_ROOT_MARKERS :: prep { [String]{"Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-foundation/Cargo.toml", "Core", "Compiler"} }
+SOURCE_ROOT_MARKERS :: comptime { [String]{"Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-foundation/Cargo.toml", "Core", "Compiler"} }
 
 fn foundation_jet_source_root() -[FS, Env]> String IOError! {
     root :: sys.get(TOOLCHAIN_ROOT_ENV) ?? return Err(IOError.NotFound(IOContext{operation: .Resolve, resource: Val(TOOLCHAIN_ROOT_ENV), os_code: None, cause: Val("`{TOOLCHAIN_ROOT_ENV}` is not set; the bridge builder needs the Jet toolchain source tree")}))

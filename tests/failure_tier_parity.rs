@@ -73,7 +73,7 @@ fn matrix() -> String {
     return "{implicit(2) ?? -1}|{implicit(0) ?? -1}|{explicit(2) ?? -2}|{explicit(0) ?? -2}|{converted(2) ?? -3}|{converted(0) ?? -3}|{contextual() ?? -4}|{optional_success(2) ?? -5}|{optional_success(0) ?? -5}|{unit_caller(false) ?? -6}|{unit_caller(true) ?? -6}|{impossible() ?? -7}"
 }
 
-COMPTIME_MATRIX :: prep { matrix() }
+COMPTIME_MATRIX :: comptime { matrix() }
 
 fn run() {
     print(COMPTIME_MATRIX)

@@ -44,7 +44,7 @@ enum IRRouteResult {
 
 struct IRRoute { symbol: String, export: String, native_lists: Bool, params: [IRRouteCarrier], result: IRRouteResult }
 
-IR_RUNTIME_ROUTES :: prep { [IRRoute]{
+IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_app_auth", export: "jet_app_auth", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthApp"}}},
     IRRoute{symbol: "jet_app_auth_oauth", export: "jet_app_auth_oauth", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetAuthApp"}, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthApp"}}},
     IRRoute{symbol: "jet_app_auth_routes", export: "jet_app_auth_routes", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetAuthApp"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
@@ -1739,7 +1739,7 @@ fn ir_key_row(keys: [String], rows: [Int], key: String) -> Int? Never! {
     None
 }
 
-IR_RUNTIME_ROUTE_KEYS :: prep { [String]{
+IR_RUNTIME_ROUTE_KEYS :: comptime { [String]{
     "JetByteBuffer::capacity",
     "JetByteBuffer::from",
     "JetByteBuffer::to_bytes",
@@ -3416,7 +3416,7 @@ IR_RUNTIME_ROUTE_KEYS :: prep { [String]{
     "service_authority_try_send",
     "service_authority_validate_directory",
 } }
-IR_RUNTIME_ROUTE_KEY_ROWS :: prep { [Int]{
+IR_RUNTIME_ROUTE_KEY_ROWS :: comptime { [Int]{
     1449,
     1450,
     1451,
@@ -5112,7 +5112,7 @@ fn ir_runtime_route(symbol: String) -> IRRoute? {
 // by `jet_rt_handle_eq_<runtime>` when `eq`.
 struct IRRuntimeHandle { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }
 
-IR_RUNTIME_HANDLES :: prep { [IRRuntimeHandle]{
+IR_RUNTIME_HANDLES :: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "__DeliveryFacts", runtime: "JetServiceDeliveryFacts", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "__DeliveryRecord", runtime: "JetServiceDeliveryRecord", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "__EndpointMailbox", runtime: "JetServiceEndpointMailbox", clone: true, display: false, show: false, debug: false, eq: false},
@@ -5790,7 +5790,7 @@ IR_RUNTIME_HANDLES :: prep { [IRRuntimeHandle]{
 } }
 
 // Opaque native providers: physical ownership ABI only, no Rust schema.
-IR_NATIVE_PROVIDER_HANDLES :: prep { [IRRuntimeHandle]{
+IR_NATIVE_PROVIDER_HANDLES :: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
@@ -5799,7 +5799,7 @@ IR_NATIVE_PROVIDER_HANDLES :: prep { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 
-IR_RUNTIME_HANDLE_KEYS :: prep { [String]{
+IR_RUNTIME_HANDLE_KEYS :: comptime { [String]{
     "<corelib>/__core_crypto_jetc::Reader",
     "<corelib>/app::Auth",
     "<corelib>/core.collections.set::StringSet",
@@ -6475,7 +6475,7 @@ IR_RUNTIME_HANDLE_KEYS :: prep { [String]{
     "__WorkerTopologyKind",
     "__WorkerTopologyState",
 } }
-IR_RUNTIME_HANDLE_KEY_ROWS :: prep { [Int]{
+IR_RUNTIME_HANDLE_KEY_ROWS :: comptime { [Int]{
     34,
     27,
     32,
@@ -7151,7 +7151,7 @@ IR_RUNTIME_HANDLE_KEY_ROWS :: prep { [Int]{
     25,
     26,
 } }
-IR_NATIVE_PROVIDER_HANDLE_KEYS :: prep { [String]{
+IR_NATIVE_PROVIDER_HANDLE_KEYS :: comptime { [String]{
     "<corelib>/core.process::ProcessStderrStream",
     "<corelib>/core.process::ProcessStdin",
     "<corelib>/core.process::ProcessStdoutStream",
@@ -7159,7 +7159,7 @@ IR_NATIVE_PROVIDER_HANDLE_KEYS :: prep { [String]{
     "ProcessStdin",
     "ProcessStdoutStream",
 } }
-IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS :: prep { [Int]{
+IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS :: comptime { [Int]{
     4,
     2,
     0,
@@ -7185,7 +7185,7 @@ fn ir_runtime_handle(name: String) -> IRRuntimeHandle? {
 // keyed by runtime type: a struct's fields in constructor order or an enum's
 // variants in index order, each `name=kind` when it carries a member (Text,
 // Int, U64, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).
-IR_GENERATED_RECORDS :: prep { [IRRecordSchema]{
+IR_GENERATED_RECORDS :: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cKeyStatus", variants: "Active,Retired,Revoked", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cWrappedVaultKey", variants: "", fields: "encoded=List.Byte,mode=Int,key_type=Int,origin_name=Text,origin_generation=Int,header_len=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_ddata_c_cDataError", variants: "", fields: "kind=Tag.DataErrorKind,operation=Text,row=OptInt,column=OptInt,index=OptInt,reason=Text,cause=OptRec.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingError"},
@@ -7453,7 +7453,7 @@ IR_GENERATED_RECORDS :: prep { [IRRecordSchema]{
 } }
 // Declaration-proven scalar records; Lower still proves the actual native field.
 struct IRRuntimeWordRecord { runtime: String, field: String }
-IR_WORD_RECORDS :: prep { [IRRuntimeWordRecord]{
+IR_WORD_RECORDS :: comptime { [IRRuntimeWordRecord]{
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cInstant", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cStopwatch", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "Duration", field: "ns"},
@@ -7465,7 +7465,7 @@ IR_WORD_RECORDS :: prep { [IRRuntimeWordRecord]{
 // write read-only caller stack headers, never owned/freeable field values.
 struct IRHandleField { runtime: String, field: String, kind: String, header_bytes: Int }
 
-IR_HANDLE_FIELDS :: prep { [IRHandleField]{
+IR_HANDLE_FIELDS :: comptime { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_c_cDBPoolReceipt", field: "__jet_max", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_c_cDBPoolReceipt", field: "__jet_available", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_c_cDBPoolReceipt", field: "__jet_leased", kind: "Handle.JetInt", header_bytes: 0},
@@ -7782,7 +7782,7 @@ IR_HANDLE_FIELDS :: prep { [IRHandleField]{
     IRHandleField{runtime: "ProcessChild", field: "stdin", kind: "Handle.ProcessStdin", header_bytes: 0},
 } }
 
-IR_HANDLE_FIELD_KEYS :: prep { [String]{
+IR_HANDLE_FIELD_KEYS :: comptime { [String]{
     "CBORWriter finished",
     "CBORWriter limits",
     "CBORWriter output",
@@ -8098,7 +8098,7 @@ IR_HANDLE_FIELD_KEYS :: prep { [String]{
     "__jet__x3ccorelib_x3e_score_dtime_c_cZonedDateTime __jet_instant",
     "__jet__x3ccorelib_x3e_score_dtime_c_cZonedDateTime __jet_zone_value",
 } }
-IR_HANDLE_FIELD_KEY_ROWS :: prep { [Int]{
+IR_HANDLE_FIELD_KEY_ROWS :: comptime { [Int]{
     73,
     71,
     70,
@@ -8423,7 +8423,7 @@ fn ir_runtime_handle_field(runtime: String, field: String) -> IRHandleField? {
 }
 enum IREnvironmentOp { Bytes Set Remove Columns Compare Seed Text }
 struct IREnvironmentRoute { symbol: String, export: String, op: IREnvironmentOp, arity: Int }
-IR_ENVIRONMENT_ROUTES :: prep { [IREnvironmentRoute]{
+IR_ENVIRONMENT_ROUTES :: comptime { [IREnvironmentRoute]{
     IREnvironmentRoute{symbol: "jet_sys_env_value_raw", export: "jet_rt_logical_env_get_os", op: IREnvironmentOp.Bytes, arity: 1},
     IREnvironmentRoute{symbol: "jet_std_env_try_set", export: "jet_rt_logical_env_set", op: IREnvironmentOp.Set, arity: 2},
     IREnvironmentRoute{symbol: "jet_std_env_unset", export: "jet_rt_logical_env_unset", op: IREnvironmentOp.Remove, arity: 1},
@@ -8442,7 +8442,7 @@ fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {
 
 // Candidate source identities; the backend validates against the actual native layout.
 struct IRNativeType { jet_name: String, declaration: String, arguments: String }
-IR_NATIVE_TYPES :: prep { [IRNativeType]{
+IR_NATIVE_TYPES :: comptime { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::ExpiryCloseProbe", declaration: "<corelib>/core.crypto.vault::ExpiryCloseProbe", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyStatus", declaration: "<corelib>/core.crypto.vault::KeyStatus", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::VaultError", declaration: "<corelib>/core.crypto.vault::VaultError", arguments: ""},
@@ -8542,7 +8542,7 @@ IR_NATIVE_TYPES :: prep { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.time::Zone", declaration: "<corelib>/core.time::Zone", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.time::ZonedDateTime", declaration: "<corelib>/core.time::ZonedDateTime", arguments: ""},
 } }
-IR_NATIVE_TYPE_KEYS :: prep { [String]{
+IR_NATIVE_TYPE_KEYS :: comptime { [String]{
     "<corelib>/core.crypto.vault::ExpiryCloseProbe",
     "<corelib>/core.crypto.vault::KeyStatus",
     "<corelib>/core.crypto.vault::VaultError",
@@ -8642,7 +8642,7 @@ IR_NATIVE_TYPE_KEYS :: prep { [String]{
     "<corelib>/core.time::Zone",
     "<corelib>/core.time::ZonedDateTime",
 } }
-IR_NATIVE_TYPE_KEY_ROWS :: prep { [Int]{
+IR_NATIVE_TYPE_KEY_ROWS :: comptime { [Int]{
     0,
     1,
     2,

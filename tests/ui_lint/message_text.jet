@@ -1,7 +1,7 @@
 fn read(req: HTTPRequest) -> String {
     body :: req.body().text(1048576) ?? "fallback"
     smaller :: req.body().text(1024) ?? "fallback"
-    exact :: prep { 1024 * 1024 }
+    exact :: comptime { 1024 * 1024 }
     from_constant :: req.body().text(exact) ?? "fallback"
     #allow(message_text, "the fixture exercises suppression of this occurrence") allowed :: req.body().text(1048576) ?? "fallback"
     print(smaller)

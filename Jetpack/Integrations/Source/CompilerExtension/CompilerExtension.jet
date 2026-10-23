@@ -22,28 +22,28 @@ use jet_pkg_model.[
 ]
 
 // Wire protocol version of the typed post-sema snapshot contract.
-EXTENSION_PROTOCOL_VERSION :: prep { 1 }
+EXTENSION_PROTOCOL_VERSION :: comptime { 1 }
 // The first hook stage: after sema, typed facts only.
-EXTENSION_STAGE :: prep { "typed" }
+EXTENSION_STAGE :: comptime { "typed" }
 // The Component Model world of every compiler-extension component.
-EXTENSION_WORLD_NAME :: prep { "compiler-extension-v1" }
-EXTENSION_PACKAGE_NAME :: prep { "jet:compiler-extension@0.1.0" }
+EXTENSION_WORLD_NAME :: comptime { "compiler-extension-v1" }
+EXTENSION_PACKAGE_NAME :: comptime { "jet:compiler-extension@0.1.0" }
 // The application `target: sandbox` world, kept to assert the two never
 // collide.
-EXTENSION_APPLICATION_PLUGIN_WORLD :: prep { "jetplugin" }
+EXTENSION_APPLICATION_PLUGIN_WORLD :: comptime { "jetplugin" }
 // The guest export that receives the snapshot and returns the response.
-EXTENSION_ANALYZE_EXPORT :: prep { "analyze" }
+EXTENSION_ANALYZE_EXPORT :: comptime { "analyze" }
 // Expert registration until a user-facing spelling is balloted: the path of
 // one `compiler-extension-v1` component; unset skips the post-sema hook.
-EXTENSION_ENV_COMPILER_EXTENSION :: prep { "JET_COMPILER_EXTENSION" }
+EXTENSION_ENV_COMPILER_EXTENSION :: comptime { "JET_COMPILER_EXTENSION" }
 // Hidden sibling-host verb; its version is part of the process protocol.
-EXTENSION_HOST_SUBCOMMAND :: prep { "__compiler-extension-v1" }
+EXTENSION_HOST_SUBCOMMAND :: comptime { "__compiler-extension-v1" }
 // Largest encoded snapshot accepted across the compiler/host pipe.
-EXTENSION_MAX_SNAPSHOT_BYTES :: prep { 16777216 }
+EXTENSION_MAX_SNAPSHOT_BYTES :: comptime { 16777216 }
 // Outer process deadline; guest execution has its own 2 s deadline.
-EXTENSION_HOST_PROCESS_TIMEOUT_MS :: prep { 5000 }
+EXTENSION_HOST_PROCESS_TIMEOUT_MS :: comptime { 5000 }
 // The failure text that replaces a leaked internal diagnostic.
-EXTENSION_INTERNAL_FAILURE :: prep { "compiler-extension failed with an internal message" }
+EXTENSION_INTERNAL_FAILURE :: comptime { "compiler-extension failed with an internal message" }
 
 // The closed set of Jet plugin mechanisms, one semantic role each.
 enum PluginMechanism {

@@ -12,7 +12,7 @@ struct TclBindResult {
     provenance: String
 }
 
-PKG_TCL_TOOL_ACTION :: prep { "rejected the Tcl binding bridge" }
+PKG_TCL_TOOL_ACTION :: comptime { "rejected the Tcl binding bridge" }
 
 // Build the Tcl bridge seeded with `source` and render its Jet surface.
 fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> TclBindResult ForeignBindError! {
@@ -53,7 +53,7 @@ fn pkg_tcl_render_c(lib: String, seed: String) -> String Never! {
 }
 
 // The generated session surface. Hole: `abi`.
-PKG_TCL_JET :: prep { ```#Import module c.@@abi@@ {
+PKG_TCL_JET :: comptime { ```#Import module c.@@abi@@ {
     fn open() -> Int = "@@abi@@_open"
     fn eval(handle: Int, code: String) -> String = "@@abi@@_eval"
     fn eval_once(code: String) -> String = "@@abi@@_eval_once"
@@ -105,7 +105,7 @@ fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
 ``` }
 
 // The thread-affine interpreter bridge. Holes: `abi` and the c-escaped `seed`.
-PKG_TCL_BRIDGE_C :: prep { ```#include <tcl.h>
+PKG_TCL_BRIDGE_C :: comptime { ```#include <tcl.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>

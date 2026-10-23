@@ -15,10 +15,10 @@ use jet_pkg_model.[
     pkg_worker_run_tool,
 ]
 
-PKG_R_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "RError"} }
+PKG_R_RESERVED :: comptime { [String]{"open", "cancel", "close", "decode_response", "Session", "RError"} }
 
 // The private scratch prefix the supervisor creates per worker for plots.
-PKG_R_PLOT_TEMP_PREFIX :: prep { "/tmp/jet-r-plot-" }
+PKG_R_PLOT_TEMP_PREFIX :: comptime { "/tmp/jet-r-plot-" }
 
 // Bind the top-level one-argument functions of the R script at `path`.
 fn pkg_r_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
@@ -113,7 +113,7 @@ fn pkg_r_reserved(value: String) -> Bool Never! {
     PKG_R_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
-PKG_R_JET_SESSION :: prep { ```impl Session.Close {
+PKG_R_JET_SESSION :: comptime { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -131,7 +131,7 @@ fn cancel(session: Session) { abi.cancel(session.value) }
 
 // Parses the script without evaluating it and prints `N\t<name>` per
 // top-level one-argument function or `E\tARG\t<name>` for an unsupported one.
-PKG_R_DISCOVERER :: prep { ```args <- commandArgs(trailingOnly = TRUE)
+PKG_R_DISCOVERER :: comptime { ```args <- commandArgs(trailingOnly = TRUE)
 expressions <- parse(file = args[[1]], keep.source = FALSE)
 for (expression in expressions) {
   if (!is.call(expression) || !(as.character(expression[[1]]) %in% c("<-", "="))) next
@@ -147,7 +147,7 @@ for (expression in expressions) {
 // Generated into each worker so plot output is checked where it crosses the
 // process boundary. This is a structural XML tokenizer/canonicalizer: regexes
 // are used only for scalar value checks after elements and attributes parse.
-PKG_R_SVG_RUNTIME :: prep { ```
+PKG_R_SVG_RUNTIME :: comptime { ```
 svg_error <- function() stop("invalid SVG plot")
 svg_name_char <- function(ch, first = FALSE) {
   if (length(ch) == 0 || is.na(ch)) return(FALSE)
@@ -354,7 +354,7 @@ plot_to_svg <- function(fn, input) {
 
 // The persistent worker. Holes: `allowed` (one `name = TRUE` row per
 // function) and `svg_runtime`.
-PKG_R_WORKER :: prep { ```suppressPackageStartupMessages(library(jsonlite))
+PKG_R_WORKER :: comptime { ```suppressPackageStartupMessages(library(jsonlite))
 input <- file("/dev/stdin", "rb")
 output <- file("/dev/stdout", "wb")
 script <- new.env(parent = baseenv())

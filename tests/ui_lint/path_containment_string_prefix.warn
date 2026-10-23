@@ -1,11 +1,17 @@
-Warning [L0517] (path_containment_string_prefix): A typed normalized Path is checked with a string prefix
-  --> tests/ui_lint/path_containment_string_prefix.jet:22:8
+Warning [L0101] (unused_local_binding): Local binding `err` is never read.
+  --> tests/ui_lint/path_containment_string_prefix.jet:16:22
     |
- 22 |     if candidate != base && !candidate.starts_with("{base}/") {
-    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: Path.is_within() owns separator-aware lexical containment; converting both paths to strings repeats that policy
- Fix: Replace the string comparison with Path.is_within()
-More: jet-lang.dev/e/L0517
+ 16 |     physical_base :: fs.canonicalize(Path.from("/srv/root")) ?? ""
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
+ Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
+More: jet-lang.dev/e/L0101
 
-ok: `tests/ui_lint/path_containment_string_prefix.jet` has no errors (1 warning)
-run `jet explain L0517` to learn more
+Warning [L0101] (unused_local_binding): Local binding `err` is never read.
+  --> tests/ui_lint/path_containment_string_prefix.jet:17:27
+    |
+ 17 |     physical_candidate :: fs.canonicalize(Path.from("/srv/root/file")) ?? ""
+    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
+ Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
+More: jet-lang.dev/e/L0101

@@ -6,8 +6,8 @@
 
 // List every zip entry as `<hex file type>\t<name>`, refusing more entries,
 // larger entries, a larger total, or longer names than the argument limits.
-PACKAGIST_ZIP_LIST :: prep { `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),"\t",$name,"\n"; }` }
-PACKAGIST_ZIP_EXTRACT :: prep { `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); if(!$z->extractTo($argv[2])) exit(3);` }
+PACKAGIST_ZIP_LIST :: comptime { `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),"\t",$name,"\n"; }` }
+PACKAGIST_ZIP_EXTRACT :: comptime { `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); if(!$z->extractTo($argv[2])) exit(3);` }
 
 fn provider_packagist_fetch(authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
     repository :: authority.registry()

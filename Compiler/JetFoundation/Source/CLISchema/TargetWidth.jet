@@ -3,7 +3,7 @@
 #Layout(c)
 struct JetCompilerMetadataPointer { pointer: *Int }
 
-TARGET_POINTER_SIZE :: prep { JetCompilerMetadataPointer.$layout.size ?? panic("compiler target has no concrete pointer layout") }
-JET_COMPILER_TARGET_USIZE_MAX :: prep {
+TARGET_POINTER_SIZE :: comptime { JetCompilerMetadataPointer.$layout.size ?? panic("compiler target has no concrete pointer layout") }
+JET_COMPILER_TARGET_USIZE_MAX :: comptime {
     (if TARGET_POINTER_SIZE <= 0 || TARGET_POINTER_SIZE > 8 -> panic("compiler target pointer width does not fit the U64 metadata carrier") else if TARGET_POINTER_SIZE == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * TARGET_POINTER_SIZE)) - U64{1})
 }

@@ -439,7 +439,7 @@ fn run() {
 use core.time as date
 
 fn run() {
-    today :: prep { date.today() }
+    today :: comptime { date.today() }
 }
 "#;
     let fold_diagnostics =

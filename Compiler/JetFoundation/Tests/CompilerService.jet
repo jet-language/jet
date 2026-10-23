@@ -51,9 +51,9 @@ fn compiler_service_test_response(text: String) -> Dyn Never! {
     assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Bytes\":[256]}}")) == None, "an out-of-range byte is refused")
 
     // comptime-evaluate request and responses.
-    request :: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE :: prep {{ 1 + 2 }}\n", "/tmp/project"))
+    request :: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE :: comptime {{ 1 + 2 }}\n", "/tmp/project"))
     fields :: compiler_service_comptime_request_from(request) ?? panic("the comptime request reads back")
-    assert_eq(fields.program, "JET_CONFIG_VALUE :: prep {{ 1 + 2 }}\n")
+    assert_eq(fields.program, "JET_CONFIG_VALUE :: comptime {{ 1 + 2 }}\n")
     assert_eq(fields.base_dir, "/tmp/project")
     assert(compiler_service_comptime_request_from(compiler_service_test_response("{{\"program\":\"x\"}}")) == None, "a request without base_dir is refused")
     if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Int(3)}))) == {

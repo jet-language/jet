@@ -31,8 +31,8 @@ test('native C policy keeps other hardening and never changes the parent environ
 test('the Jet CLI embeds the same single native C policy file', () => {
   const embedded = readFileSync(join(root, 'Compiler/JetCli/Source/Cli/NativeCPolicy.jet'), 'utf8');
   assert.equal(nativeCPolicyPath, join(root, 'Compiler/JetCli/Source/Cli/native-c-policy.tsv'));
-  assert.match(embedded, /JET_CLI_NATIVE_C_FLAGS :: prep \{ jet_cli_native_c_policy_values\(embed_file\("native-c-policy\.tsv"\), "flag"\) \}/u);
-  assert.match(embedded, /JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep \{ jet_cli_native_c_policy_values\(embed_file\("native-c-policy\.tsv"\), "hardening-remove"\) \}/u);
+  assert.match(embedded, /JET_CLI_NATIVE_C_FLAGS :: comptime \{ jet_cli_native_c_policy_values\(embed_file\("native-c-policy\.tsv"\), "flag"\) \}/u);
+  assert.match(embedded, /JET_CLI_NATIVE_C_HARDENING_REMOVED :: comptime \{ jet_cli_native_c_policy_values\(embed_file\("native-c-policy\.tsv"\), "hardening-remove"\) \}/u);
 });
 
 test('native fixture and packaging drivers have no independent C compiler policy', () => {
@@ -65,7 +65,7 @@ test('real native C witnesses have no glibc fortified imports and resolve agains
   }
   const providerSymbols = runtimeExportSignatures(root);
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
-  const stride = /RT_HOST_U8_STRIDE\s*::\s*prep\s*\{\s*I64\{(1|8)\}\s*\}/u.exec(collections)?.[1];
+  const stride = /RT_HOST_U8_STRIDE\s*::\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/u.exec(collections)?.[1];
   assert.ok(stride, 'the TCP fixture must use the canonical U8 carrier epoch');
   const census = [];
   for (const name of fixtureNames) {

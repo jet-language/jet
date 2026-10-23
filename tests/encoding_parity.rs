@@ -318,14 +318,14 @@ use core.encoding.cbor as cbor
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-JSON_CANON :: prep { json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) ?? panic("JSON render") }
-JSONL_N :: prep { (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len() }
-CSV_N :: prep { (csv.parse("name,score\nada,9\n") ?? panic("csv")).len() }
-XML_TEXT :: prep { xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) ?? panic("xml render") }
-CBOR_ROUND :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) ?? panic("JSON render") }
-B64_N :: prep { (base64.decode("Zg==") ?? panic("b64")).len() }
-B64URL_N :: prep { (base64.decode_url("aGk") ?? panic("b64url")).len() }
-B32_N :: prep { (base32.decode("MZXQ====") ?? panic("b32")).len() }
+JSON_CANON :: comptime { json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) ?? panic("JSON render") }
+JSONL_N :: comptime { (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len() }
+CSV_N :: comptime { (csv.parse("name,score\nada,9\n") ?? panic("csv")).len() }
+XML_TEXT :: comptime { xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) ?? panic("xml render") }
+CBOR_ROUND :: comptime { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) ?? panic("JSON render") }
+B64_N :: comptime { (base64.decode("Zg==") ?? panic("b64")).len() }
+B64URL_N :: comptime { (base64.decode_url("aGk") ?? panic("b64url")).len() }
+B32_N :: comptime { (base32.decode("MZXQ====") ?? panic("b32")).len() }
 
 fn run() {
     print("{JSON_CANON}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) ?? panic("JSON render")}")
@@ -676,8 +676,8 @@ struct Packet {
     payload: [U8]
 }
 
-ROOT :: prep { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
-PACKET :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
+ROOT :: comptime { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
+PACKET :: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
 
 fn gap() -[]> String {
     folded := text.casefold("Straße")
@@ -1665,7 +1665,7 @@ fn comptime_rejects_file_backed_streams_at_named_boundary() {
     ] {
         let scratch = Scratch::new(label);
         let source = format!(
-            "use core.encoding.[{module}]\nuse core.files as files\n\nPROBE :: prep {{ files.read(\"probe.txt\") }}\n\nfn ignored() {{ input :: files.open(\"x\") }}\n\nfn run() {{\n    print(PROBE)\n}}\n"
+            "use core.encoding.[{module}]\nuse core.files as files\n\nPROBE :: comptime {{ files.read(\"probe.txt\") }}\n\nfn ignored() {{ input :: files.open(\"x\") }}\n\nfn run() {{\n    print(PROBE)\n}}\n"
         );
         let path = scratch.write_project("2026", &source);
         let diags = jet::check_with_path(path.to_str().unwrap());
@@ -1806,7 +1806,7 @@ struct ExactIntRow {
     large: Int
 }
 
-LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
+LIMITED_TEXT :: comptime { "1{"0".repeat(1000000)}" }
 
 fn run() {
     exact_text :: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")

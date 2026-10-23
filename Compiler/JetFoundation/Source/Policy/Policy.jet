@@ -111,11 +111,11 @@ struct PolicyRule {
     combine: PolicyCombine
 }
 
-POLICY_PACKAGE_SCOPES :: prep { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
-POLICY_ALL_SCOPES :: prep { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_PACKAGE_SCOPES :: comptime { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_ALL_SCOPES :: comptime { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
-POLICY_RULES :: prep { [PolicyRule]{
+POLICY_RULES :: comptime { [PolicyRule]{
     {key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},

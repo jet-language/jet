@@ -675,9 +675,8 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
         parser_type_close_here(&state) -> parser_add_error_here(&state, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
         else -> {
             loop {
-                // `comptime N: Int` (or `prep N: Int`) declares a compile-time
-                // number parameter; `<prep>` and `<prep: Trait>` stay type parameters.
-                if (parser_current_kind(&state) == TOKEN_KW_COMPTIME || (parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "prep")) && parser_kind_at(&state, 1) == TOKEN_IDENT {
+                // `comptime N: Int` declares a compile-time number parameter.
+                if parser_current_kind(&state) == TOKEN_KW_COMPTIME && parser_kind_at(&state, 1) == TOKEN_IDENT {
                     prep_head :: parser_bump(&state)
                     &params.push(parser_parse_prep_param(&state, prep_head.span))
                     if parser_type_close_here(&state) -> break
@@ -707,7 +706,7 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
     params
 }
 
-// Parse `N: Int` after `prep` into the typed number-parameter slot.
+// Parse `N: Int` after `comptime` into the typed number-parameter slot.
 fn parser_parse_prep_param(state: &JetParserState, prep_span: Span) -> TypeParam {
     name :: parser_expect_name(&state, "for a number parameter name")
     param_name :: parser_value(state, name)
@@ -1949,7 +1948,7 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     value
 }
 
-// A method inside a type body: `fn`, `pub fn`, `prep fn`, or `pub prep fn`.
+// A method inside a type body: `fn`, `pub fn`, `comptime fn`, or `pub comptime fn`.
 fn parser_method_starts_here(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_KW_FN || parser_prep_fn_ahead(&state) || (parser_current_kind(&state) == TOKEN_KW_PUB && (parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_prep_verb_ahead(&state, 1, TOKEN_KW_FN)))
 }
@@ -2125,7 +2124,7 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             prepared = true
             parsed_value = ParsedExpr{expr: tail, span: span}
         } else {
-            parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+            parser_add_error_code(&state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME :: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
         }
     } else {
         parsed_value = parser_parse_expression(&state, 1, 0)
@@ -2535,7 +2534,7 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef? {
     parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
     trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
     // Rust `derive_body_items`: a derive body is the shared template body —
-    // items, statements and `prep loop` templates (parser_marker_body).
+    // items, statements and `comptime loop` templates (parser_marker_body).
     body :: parser_marker_body(&state)
     end :: parser_lookahead(&state, -1).span
     type_param :: parser_value(state, type_name)

@@ -25,7 +25,7 @@ JET_CLI_EXPAND_LENSES :: [JetCLIExpandLensSpec]{
     {name: "layout", summary: "compiler-owned type layout facts"},
     {name: "origin", summary: "typed #Track provenance facts"},
     {name: "derive", summary: "derived behavior already attached to types"},
-    {name: "templates", summary: "checked prep loop marker in impl, test, and measurement expansions"},
+    {name: "templates", summary: "checked comptime loop marker in impl, test, and measurement expansions"},
     {name: "callable-signature", summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable"},
 }
 
@@ -181,12 +181,12 @@ fn jet_cli_expand_template(unit: JetDriverDocModule, span: Span, kind: String, n
         jet_cli_status_field("text", jet_cli_status_text(text)),
         jet_cli_status_field("source", jet_cli_status_text(unit.path)),
         jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
-        jet_cli_status_field("origin", jet_cli_status_text("prep loop (closed comptime source)")),
+        jet_cli_status_field("origin", jet_cli_status_text("comptime loop (closed comptime source)")),
     },
     )
     line :: diagnostic_line_at(unit.source, span.start)
     column :: diagnostic_column_at(unit.source, span.start)
-    JetCLIExpandFact{source: unit.path, offset: span.start, name: "{kind}:{name}", text: "{unit.path}:{line}:{column}   {text}   [from closed comptime prep loop]", value: value}
+    JetCLIExpandFact{source: unit.path, offset: span.start, name: "{kind}:{name}", text: "{unit.path}:{line}:{column}   {text}   [from closed comptime loop]", value: value}
 }
 
 fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
@@ -194,7 +194,7 @@ fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandFact]
     loop unit in modules {
         has_loop := false
         loop line in unit.source.lines() {
-            if line.trim_start().starts_with("prep loop") -> has_loop = true
+            if line.trim_start().starts_with("comptime loop") -> has_loop = true
         }
         if !has_loop -> next
         loop item in unit.items {

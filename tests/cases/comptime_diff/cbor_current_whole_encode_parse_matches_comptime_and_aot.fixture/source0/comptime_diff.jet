@@ -2,8 +2,8 @@ use core.encoding.hex as comptime_diff_hex
 use core.encoding.json as json
 use core.encoding.cbor as cbor
 use core.encoding.hex as hex
-ENCODED :: prep { hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor")) }
-PARSED :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) ?? panic("JSON encode") }
+ENCODED :: comptime { hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor")) }
+PARSED :: comptime { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) ?? panic("JSON encode") }
 
 fn run() {
     r :: hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor"))

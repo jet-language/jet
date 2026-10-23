@@ -1137,7 +1137,7 @@ fn authority_dev_runs_the_same_value() {
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "AUTHORITY :: prep { Authority.from_rights([\"FS.Read\", \"IO\"]) }\nNARROWED :: prep { AUTHORITY.with(\"FS.Read\") }\nRELEASED :: prep { NARROWED.without(\"FS.Read\") }\n\nfn run() { print(\"authority\") }\n";
+    let source = "AUTHORITY :: comptime { Authority.from_rights([\"FS.Read\", \"IO\"]) }\nNARROWED :: comptime { AUTHORITY.with(\"FS.Read\") }\nRELEASED :: comptime { NARROWED.without(\"FS.Read\") }\n\nfn run() { print(\"authority\") }\n";
     let output = jet::compile(source).expect("comptime should construct Authority");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }

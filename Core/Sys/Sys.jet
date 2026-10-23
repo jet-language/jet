@@ -23,11 +23,11 @@ use __core_files_path_components.[PathPlatform]
 #Layout(c)
 struct SysTargetPointer { pointer: *Int }
 
-// Layout facts must be evaluated inside the selected-target prep boundary,
+// Layout facts must be evaluated inside the selected-target comptime boundary,
 // not through an ordinary function checked outside compile-time context.
 // Each prepared binding has one final expression.
-SYS_TARGET_POINTER_BYTES :: prep { SysTargetPointer.$layout.size ?? panic("selected target has no concrete pointer layout") }
-SYS_TARGET_USIZE_MAX :: prep {
+SYS_TARGET_POINTER_BYTES :: comptime { SysTargetPointer.$layout.size ?? panic("selected target has no concrete pointer layout") }
+SYS_TARGET_USIZE_MAX :: comptime {
     if {
         SYS_TARGET_POINTER_BYTES <= 0 || SYS_TARGET_POINTER_BYTES > 8 -> panic("selected target pointer width does not fit the U64 carrier")
         SYS_TARGET_POINTER_BYTES == 8 -> U64{0xffffffffffffffff}
@@ -38,7 +38,7 @@ SYS_TARGET_USIZE_MAX :: prep {
 fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 #Test("usize maximum follows the selected target pointer layout") {
-    size :: prep { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
+    size :: comptime { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
     maximum :: usize_max()
     assert((maximum >> (8 * (size - 1))) == U64{255})
     assert((maximum.bit_and(U64{255})) == U64{255})

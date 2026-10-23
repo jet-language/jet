@@ -627,7 +627,7 @@ fn expand_templates_projects_checked_marker_impl_and_test_items() {
     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"selection\":\"templates\""));
-    assert!(json_text.contains("\"origin\":\"prep loop (closed comptime source)\""));
+    assert!(json_text.contains("\"origin\":\"comptime loop (closed comptime source)\""));
     assert!(json_text.contains("\"name\":\"case 1\""));
     assert!(json_text.contains("\"name\":\"case 2\""));
 }

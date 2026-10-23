@@ -1,4 +1,4 @@
-// D-PREP-FN1=A (respelling D-FOUND-LITERAL1=A): `prep fn` marks a literal
+// D-PREP-FN1=A (respelling D-FOUND-LITERAL1=A): `comptime fn` marks a literal
 // hook, a method that runs while building to turn a written number into a
 // value. Literal.Int hooks receive the Int; Literal.Float hooks receive the
 // source digits as text, so no Float rounding happens on the way in.
@@ -8,7 +8,7 @@ struct Rational {
 }
 
 impl Rational.Literal.Int {
-    prep fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+    comptime fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
 }
 
 struct Cents {
@@ -16,7 +16,7 @@ struct Cents {
 }
 
 impl Cents.Literal.Float {
-    prep fn from_literal(digits: String) -> Cents {
+    comptime fn from_literal(digits: String) -> Cents {
         parts :: digits.split(".").to_list()
         whole :: Int.parse(parts[0]) ?? 0
         fraction_text :: if parts.len() > 1 -> parts[1] else -> "0"

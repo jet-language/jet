@@ -16,7 +16,7 @@ use jet_pkg_model.[
 // Static token discovery run with `php -r`: prints `N\t<name>` per top-level
 // one-argument function or `E\tARG\t<name>` for an unsupported signature.
 // Source bytes are tokenized, never executed.
-PKG_PHP_TOKEN_ANALYZER :: prep { ```
+PKG_PHP_TOKEN_ANALYZER :: comptime { ```
 $source = @file_get_contents($argv[1]);
 if ($source === false) exit(2);
 $tokens = token_get_all($source, TOKEN_PARSE);
@@ -67,7 +67,7 @@ for ($i = 0, $count = count($tokens); $i < $count; $i++) {
 ``` }
 
 // The pool worker. Hole: `allowed`, one `'name' => true` row per function.
-PKG_PHP_WORKER :: prep { ```<?php
+PKG_PHP_WORKER :: comptime { ```<?php
 ini_set('display_errors', '0');
 error_reporting(0);
 $autoload = getenv('COMPOSER_AUTOLOAD');
@@ -122,7 +122,7 @@ while (true) {
 
 // The pool layer over the supervisor. Holes: `abi` (the public pool ABI),
 // `inner` (the supervisor ABI), and `wrappers`.
-PKG_PHP_POOL_C :: prep { ```
+PKG_PHP_POOL_C :: comptime { ```
 #define PHP_POOL_WORKERS 4
 #define PHP_POOLS 8
 typedef struct {int64_t workers[PHP_POOL_WORKERS];uint32_t generation;uint32_t next;int opening;int open;int closing;int active;pthread_mutex_t mutex;pthread_cond_t idle;} PhpPool;
@@ -141,7 +141,7 @@ void @@abi@@_close(int64_t h){php_failed=0;int n=(int)(h&255)-1;uint32_t gen=(ui
 @@wrappers@@
 ``` }
 
-PKG_PHP_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "PhpPool", "PhpError"} }
+PKG_PHP_RESERVED :: comptime { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "PhpPool", "PhpError"} }
 
 // Bind the top-level one-argument functions of the PHP script at `path`.
 fn pkg_php_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {

@@ -3,20 +3,20 @@
 // action records, and append durable checksummed transactions that compact
 // into one snapshot.
 
-STORE_JOURNAL_DIR :: prep { "journal" }
-STORE_JOURNAL_COMPACT_AFTER :: prep { 64 }
+STORE_JOURNAL_DIR :: comptime { "journal" }
+STORE_JOURNAL_COMPACT_AFTER :: comptime { 64 }
 // Compact on size as well as count: replay cost is bytes parsed, not file
 // count. A 59-transaction journal reached 57 MiB and made every graph load
 // re-parse and re-hash all of it.
-STORE_JOURNAL_COMPACT_AFTER_BYTES :: prep { 4194304 }
-STORE_MAX_CLOSURE_OBJECTS :: prep { 1000000 }
-STORE_MAX_CLOSURE_RECORDS :: prep { 1000000 }
-STORE_MAX_CLOSURE_DELETIONS :: prep { 1000000 }
-STORE_MAX_CLOSURE_TRANSACTIONS :: prep { 100000 }
-STORE_CLOSURE_DB_DIR :: prep { "closure-db" }
-STORE_JOURNAL_PARTIAL_SUFFIX :: prep { ".partial" }
-STORE_JOURNAL_TXN_SUFFIX :: prep { ".txn" }
-STORE_JOURNAL_HEADER :: prep { "jet-closure-journal-v1" }
+STORE_JOURNAL_COMPACT_AFTER_BYTES :: comptime { 4194304 }
+STORE_MAX_CLOSURE_OBJECTS :: comptime { 1000000 }
+STORE_MAX_CLOSURE_RECORDS :: comptime { 1000000 }
+STORE_MAX_CLOSURE_DELETIONS :: comptime { 1000000 }
+STORE_MAX_CLOSURE_TRANSACTIONS :: comptime { 100000 }
+STORE_CLOSURE_DB_DIR :: comptime { "closure-db" }
+STORE_JOURNAL_PARTIAL_SUFFIX :: comptime { ".partial" }
+STORE_JOURNAL_TXN_SUFFIX :: comptime { ".txn" }
+STORE_JOURNAL_HEADER :: comptime { "jet-closure-journal-v1" }
 
 enum ClosureJournalKind {
     Delta

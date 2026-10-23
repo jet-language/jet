@@ -17,7 +17,7 @@ package {
 //
 // Run it inside `nix develop` (which provides gtk4):
 //     jet run Examples/features/ui/ui_native_linux.jet
-// and a window opens with a live counter. Selection is the shipped `prep if
+// and a window opens with a live counter. Selection is the shipped `comptime if
 // $build.os` dispatch: only the `.Linux` arm compiles into a
 // native Linux build, so the gtk path never reaches a non-Linux target. The
 // native link (`-lgtk-4 …`) is named by `use c.gtk4` via `pkg-config gtk4`
@@ -30,7 +30,7 @@ use core.reactive as reactive
 use c.gtk4 as gtk4
 
 fn run() {
-    prep if $build.os == {
+    comptime if $build.os == {
         .Linux -> {
             clicks :: reactive.signal(0)
             app :: ui.gtk_backend()

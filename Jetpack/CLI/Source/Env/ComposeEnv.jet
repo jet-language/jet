@@ -140,7 +140,7 @@ struct NativeOutputFact {
     platform: NativeOutputPlatform
 }
 
-CLI_NATIVE_OUTPUT_FACTS :: prep { [NativeOutputFact]{
+CLI_NATIVE_OUTPUT_FACTS :: comptime { [NativeOutputFact]{
     {package: "tzdata", relative: "share/zoneinfo", variable: "TZDIR", platform: NativeOutputPlatform.Any},
     {package: "vulkan-loader", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux},
     {package: "raylib", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
@@ -149,7 +149,7 @@ CLI_NATIVE_OUTPUT_FACTS :: prep { [NativeOutputFact]{
 // The two repo dev tools project the admitted native binaries named by $JET
 // and $JETPACK (flake.nix `mkJetDevBin`), not realized packages, and get no
 // generated shell wrapper.
-CLI_NATIVE_DEV_TOOLS :: prep { [NativeDevTool]{
+CLI_NATIVE_DEV_TOOLS :: comptime { [NativeDevTool]{
     {definition: "jetDev", command: "jet", variable: "JET"},
     {definition: "jetpackDev", command: "jetpack", variable: "JETPACK"}
 } }
@@ -551,7 +551,7 @@ struct ProviderMetadataFile {
     variable: String
 }
 
-CLI_PROVIDER_METADATA_FILES :: prep { [ProviderMetadataFile]{
+CLI_PROVIDER_METADATA_FILES :: comptime { [ProviderMetadataFile]{
     {file: "lua-path", variable: "LUA_PATH"},
     {file: "lua-cpath", variable: "LUA_CPATH"},
     {file: "gem-home", variable: "GEM_HOME"},

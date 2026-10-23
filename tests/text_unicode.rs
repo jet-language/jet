@@ -536,17 +536,17 @@ fn unicode_text_behavior_matches_comptime_and_aot() {
 use core.text as text
 use core.regex as re
 
-FOLDED :: prep { text.casefold("Straßeİς") }
-LOWERED :: prep { text.lower("ΟΣ") }
-UPPERED :: prep { text.upper("ßև") }
-METHOD_LOWERED :: prep { "__PINNED_UPPER__".to_lower() }
-METHOD_UPPERED :: prep { "__PINNED_LOWER__".to_upper() }
-METHOD_TRIMMED :: prep { "__PINNED_SPACE__jet__PINNED_SPACE__".trim() }
-KEYCAP :: prep { text.display_width("1️⃣") }
-EMOJI :: prep { text.display_width("©️") }
-IGNORABLE :: prep { text.display_width("́‍") }
-CLASSES :: prep { text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ") }
-REGEX_SPACE :: prep { re.is_match(.{"\s"}, " ") }
+FOLDED :: comptime { text.casefold("Straßeİς") }
+LOWERED :: comptime { text.lower("ΟΣ") }
+UPPERED :: comptime { text.upper("ßև") }
+METHOD_LOWERED :: comptime { "__PINNED_UPPER__".to_lower() }
+METHOD_UPPERED :: comptime { "__PINNED_LOWER__".to_upper() }
+METHOD_TRIMMED :: comptime { "__PINNED_SPACE__jet__PINNED_SPACE__".trim() }
+KEYCAP :: comptime { text.display_width("1️⃣") }
+EMOJI :: comptime { text.display_width("©️") }
+IGNORABLE :: comptime { text.display_width("́‍") }
+CLASSES :: comptime { text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ") }
+REGEX_SPACE :: comptime { re.is_match(.{"\s"}, " ") }
 
 fn run() {
     runtime_folded :: text.casefold("Straßeİς")

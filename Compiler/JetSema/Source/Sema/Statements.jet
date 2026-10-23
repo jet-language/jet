@@ -3506,7 +3506,7 @@ fn sema_stmt_track_origin(binding: Binding, environment: SemaScopeEnvironment, p
     })
 }
 
-// `name :: prep { value }` in a body is compile-time code
+// `name :: comptime { value }` in a body is compile-time code
 // (Rust `check_binding` under `in_comptime`). A value already known here, such
 // as a fact read on a local, binds at once; any other value is staged through
 // the body comptime evaluator and binds when the owner body is checked again.
@@ -5914,7 +5914,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             }
             .ComptimeBlock(_, _, span) -> {
                 complete = false
-                sema_check_unsupported(&context, "the statement-level `prep` block at offset {span.start} is not executed by the self-hosted checker yet")
+                sema_check_unsupported(&context, "the statement-level `comptime` block at offset {span.start} is not executed by the self-hosted checker yet")
             }
             .Live(_, span) -> {
                 complete = false
@@ -6162,8 +6162,8 @@ fn sema_stmt_context_allocator_type(ty: Type) -> Bool Never! {
 }
 
 // Rust CheckerCore `check_comptime_if`
-// `prep if` selects a branch while building. Its condition is compile-time
-// code, like `name :: prep { value }` (sema_stmt_check_prepared_binding): a
+// `comptime if` selects a branch while building. Its condition is compile-time
+// code, like `name :: comptime { value }` (sema_stmt_check_prepared_binding): a
 // value already known here selects at once; any other value is staged through
 // the body comptime evaluator, and the branch is selected when the owner body
 // is checked again. The selected arm is an ordinary nested block emitted
@@ -6180,7 +6180,7 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     runtime_local := false
     sema_stmt_reads_runtime_local(condition, &runtime_local)
     if runtime_local {
-        &diagnostics.push(sema_error("E0989", cond_span, "this `prep if` condition can't be known at compile time", "a `prep if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag :: prep {{ … }}`, then write `prep if flag {{ … }}`"))
+        &diagnostics.push(sema_error("E0989", cond_span, "this `comptime if` condition can't be known at compile time", "a `comptime if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag :: comptime {{ … }}`, then write `comptime if flag {{ … }}`"))
         return false
     }
     if sema_expr_unwrap_tag(condition.ty) != Type.Bool {
@@ -6194,7 +6194,7 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
         if staged == .Val(body_value) {
             value = Val(body_value.value)
         } else {
-            _ := sema_comptime_body_capture(&context, environment, program, scopes, "prep if", cond, condition.ty, cond_span, span)
+            _ := sema_comptime_body_capture(&context, environment, program, scopes, "comptime if", cond, condition.ty, cond_span, span)
             return false
         }
     }
@@ -6229,7 +6229,7 @@ fn sema_stmt_reads_runtime_local(expression: TExpr, found: &Bool) Never! {
 }
 
 fn sema_stmt_prep_if_not_bool(cond_span: Span) -> Diagnostic {
-    sema_error("E0989", cond_span, "a `prep if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `prep if flag {{ … }}`")
+    sema_error("E0989", cond_span, "a `comptime if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `comptime if flag {{ … }}`")
 }
 
 // The dropped arm is not a path through this code.
@@ -6250,10 +6250,10 @@ fn sema_stmt_check_dropped_prep_arm(body: [Stmt], return_type: Type?, environmen
     }
 }
 
-// Rust OSTarget `fold_switch` `prep if
-// $build.os == { .Linux -> … }` folds to the chain of `prep if` arms whose
+// Rust OSTarget `fold_switch` `comptime if
+// $build.os == { .Linux -> … }` folds to the chain of `comptime if` arms whose
 // conditions are this build's `$build.os == .OS` as Bool literals, so the
-// `prep if` check selects the arm. Every arm head is a distinct bare OS
+// `comptime if` check selects the arm. Every arm head is a distinct bare OS
 // variant, and the arms cover every OS or carry an `else`, whatever the
 // target. A `$build.settings.<key>` dispatch folds against the declared
 // setting; the Jet loader declares no manifest settings yet, so it reports
@@ -6269,14 +6269,14 @@ fn sema_stmt_check_prep_switch(subject: Expr, arms: [SwitchArm], else_body: [Stm
                 return false
             }
         }
-        &diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `prep if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `prep if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        &diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
     active := ""
     if program.registration_graph == .Val(graph) {
         active = graph.build_facts.os
     } else {
-        sema_check_unsupported(&context, "the `prep if $build.os` dispatch at offset {span.start} has no build facts to fold on")
+        sema_check_unsupported(&context, "the `comptime if $build.os` dispatch at offset {span.start} has no build facts to fold on")
         return false
     }
     oses :: [String]{"Linux", "MacOS", "Windows"}

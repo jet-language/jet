@@ -1,4 +1,4 @@
-// D-PREP-SURFACE2=A: a `prep` value may call a function declared in another
+// D-PREP-SURFACE2=A: a `comptime` value may call a function declared in another
 // file, through a member import or a qualified name. The callee's body runs
 // while building with its own file's names in scope, so it can call a third
 // file and build that file's structs and enums. At runtime the constants
@@ -9,14 +9,14 @@ use tables.[build_squares]
 use shapes.[Grid, Corner]
 
 // A member-imported function.
-SQUARES :: prep { build_squares(5) }
+SQUARES :: comptime { build_squares(5) }
 
 // A qualified call; the callee calls a third file.
-CUBES :: prep { tables.build_cubes(4) }
+CUBES :: comptime { tables.build_cubes(4) }
 
 // A struct and an enum declared in another file.
-GRID :: prep { shapes.square_grid(3) }
-CORNER :: prep { shapes.corner_at(7) }
+GRID :: comptime { shapes.square_grid(3) }
+CORNER :: comptime { shapes.corner_at(7) }
 
 fn area(grid: Grid) -> Int { grid.width * grid.height }
 

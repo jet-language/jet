@@ -86,9 +86,9 @@ fn pc_trait_effect_slots() {
 }
 
 fn pc_enum_methods() {
-    parsed :: parse_source("enum Choice {{\n First\n Second\n fn name(self) -> String {{ \"first\" }}\n fn label(self) -> String {{ \"public\" }}\n prep fn from_int(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
-    pc_require(parsed.diagnostics.len() == 0, "enum methods accept public-default and prep heads")
-    pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve public-default visibility and prep facts")
+    parsed :: parse_source("enum Choice {{\n First\n Second\n fn name(self) -> String {{ \"first\" }}\n fn label(self) -> String {{ \"public\" }}\n comptime fn from_int(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "enum methods accept public-default and comptime heads")
+    pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve public-default visibility and comptime facts")
 }
 
 fn pc_explicit_privacy() {

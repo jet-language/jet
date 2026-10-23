@@ -1,5 +1,5 @@
 // String.count uses the builtin kernel, not core.text.parse.count.
-// A parameterized helper forces the prep evaluator to dispatch the MIR route.
+// A parameterized helper forces the comptime evaluator to dispatch the MIR route.
 fn count_matches(text: String, needle: String) -> Int Never! {
     text.count(needle)
 }
@@ -21,10 +21,10 @@ fn string_counts() -> [Int] Never! {
 }
 
 fn run() {
-    folded :: prep { string_counts() }
+    folded :: comptime { string_counts() }
     runtime :: string_counts()
     expected :: [2, 2, 1, 2, 1, 1, 0, 0, 0, 0, 0]
-    assert(folded == expected, "String.count prep kernel semantics")
+    assert(folded == expected, "String.count comptime kernel semantics")
     assert(runtime == expected, "String.count runtime kernel semantics")
     print("{folded}")
     print("{runtime}")

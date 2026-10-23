@@ -2,9 +2,9 @@
 // Lower's fallible-capacity helpers build (Builtins.jet, Lists.jet, Atomic.jet)
 // and read back field by field. CAbiRoutes.rs AllocError carrier; Box16 is
 // requested_bytes (i64 word) at 0 and the owned allocator text at 8.
-ALLOC_ERROR_BYTES :: prep { I64{16} }
-ALLOC_ERROR_REQUESTED :: prep { I64{0} }
-ALLOC_ERROR_ALLOCATOR :: prep { I64{8} }
+ALLOC_ERROR_BYTES :: comptime { I64{16} }
+ALLOC_ERROR_REQUESTED :: comptime { I64{0} }
+ALLOC_ERROR_ALLOCATOR :: comptime { I64{8} }
 
 #Export(c) fn jet_rt_record_new_alloc_error(requested_bytes: I64, allocator: I64) -> I64 {
     raw :: jet_int_owned_to_i64(requested_bytes)

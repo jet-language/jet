@@ -6,10 +6,10 @@ use core.encoding.hex as hex
 #Codable
 struct Packet { id: Int, payload: [U8] }
 
-EXPECTED_MAP :: prep { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
-EXPECTED_FLOATS :: prep { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
-EXPECTED_NAN :: prep { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
-EXPECTED_TYPED :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
+EXPECTED_MAP :: comptime { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
+EXPECTED_FLOATS :: comptime { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
+EXPECTED_NAN :: comptime { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
+EXPECTED_TYPED :: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
 
 fn run() {
     actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))

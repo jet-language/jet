@@ -16,7 +16,7 @@
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fact", "fn", "impl", "marker", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
-const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "it", "prep", "self", "shared"];
+const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "comptime", "it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
@@ -264,7 +264,7 @@ module.exports = grammar({
       ),
 
     // ── Bindings, labels, calls, members ─────────────────────────────────────
-    // `name :: value`, `name := value`, `LIMIT :: prep { … }`, `outer :: loop`.
+    // `name :: value`, `name := value`, `LIMIT :: comptime { … }`, `outer :: loop`.
     binding: ($) =>
       prec(
         PREC.binding,
@@ -404,7 +404,7 @@ module.exports = grammar({
           1,
           choice(
             "priv", "null", "const", "comptime", "copy", "move", "mutate", "it",
-            "as", "distinct", "prep", "uninit", "freeze", "effect", "rust", "via",
+            "as", "distinct", "uninit", "freeze", "effect", "rust", "via",
           ),
         ),
       ),

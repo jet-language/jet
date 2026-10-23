@@ -15,13 +15,13 @@ Jet uses one language at every stage. A compile-time expression is still typed
 Jet code, and a generated item must pass the ordinary checker before it can
 become part of a program. The boundary is visible in source:
 
-- `prep { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
+- `comptime { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
   Its body runs while building and emits no runtime code. In the binding form
-  `name :: prep { ... }`, the final expression supplies the prepared value.
+  `name :: comptime { ... }`, the final expression supplies the prepared value.
   That value retains its checked initializer type: numeric widths, empty-list
   element types, optional elements, and function return types are not inferred
   again from the evaluator's erased value representation. The retired
-  `@ { ... }` spelling teaches `prep { ... }` (E0388).
+  `@ { ... }` spelling teaches `comptime { ... }` (E0388).
 - `@name :: expression` binds a value evaluated during compilation.
 - Compiler facts carry `$`: members of their subject such as `T.$fields`, or
   the roots `$build`, `$package`, `$phase` and `$program`. They do not replace
@@ -43,7 +43,7 @@ ordinary runtime expression:
 fn area(width: Int, height: Int) -> Int { width * height }
 
 fn run() {
-    prep {
+    comptime {
         @cells :: area(@WIDTH, @HEIGHT)
         if @cells > 100 -> panic("the grid is too large")
     }
@@ -66,7 +66,7 @@ emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See
 [`comptime_if.jet`](../../../Examples/features/comptime/comptime_if.jet).
 
-`prep loop` is the one typed compile-time repetition mechanism used by derive
+`comptime loop` is the one typed compile-time repetition mechanism used by derive
 and marker bodies. [`derive_loop.jet`](../../../Examples/features/reflection/derive_loop.jet)
 uses it to create methods from `T.$fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
@@ -109,7 +109,7 @@ gate and the command-line grant:
 use core.files as fs
 
 fn run() {
-    prep {
+    comptime {
         #Impure("read an explicitly approved ambient input") {
             @CONFIG :: fs.read("config.txt")
         }

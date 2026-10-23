@@ -922,9 +922,9 @@ fn comptime_if_selected_branch() {
         return;
     }
     let src = "\
-DEBUG :: prep { false }
+DEBUG :: comptime { false }
 fn pick(x: Int) -> Int {
-    prep if DEBUG {
+    comptime if DEBUG {
         return x + 100
     } else {
         return x + 1
@@ -1284,7 +1284,7 @@ fn package_namespace_uses_owner_indices_without_sibling_imports() {
     let scratch = common::Scratch::new("namespace_owner_indices");
     let files = [
         ("package.jet", "name: \"namespace_owner_indices\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
-        ("main.jet", "#NoPrelude\nFOLDED :: prep { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: record.amount()\n    boxed :: wrap(result + amount)\n    state :: State.Ready(boxed.value)\n}\n"),
+        ("main.jet", "#NoPrelude\nFOLDED :: comptime { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: record.amount()\n    boxed :: wrap(result + amount)\n    state :: State.Ready(boxed.value)\n}\n"),
         ("types.jet", "#NoPrelude\nstruct Record { value: Int }\nstruct Box<T> { value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
         ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\n"),
         ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn make() -> Record { Record{value: TOKEN} }\nfn fold_record() -> Record { Record{value: 11} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
@@ -1326,7 +1326,7 @@ fn comptime_qualified_module_function_call_reaches_its_body() {
     let scratch = common::Scratch::new("comptime_qualified_function_call");
     for (name, source) in [
         ("package.jet", "name: \"comptime_qualified_function_call\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
-        ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: prep { helper.double(20) + helper.double(1) }\nfn run() {}\n"),
+        ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: comptime { helper.double(20) + helper.double(1) }\nfn run() {}\n"),
         ("helper.jet", "#NoPrelude\nfn double(value: Int) -> Int { value * 2 }\n"),
     ] {
         fs::write(scratch.join(name), source).unwrap();

@@ -49,7 +49,7 @@ fn sema_call_check_comptime_input(call: Call, expected: Type?, environment: Sema
         return failed
     }
     if scopes.comptime_execution_depth == 0 {
-        &diagnostics.push(sema_error("E0956", call.name_span, "`{builtin}` is compile-time only", "the compiler reads the file while building, so it is a value in the program, not a runtime read", "use it in a `prep` binding, e.g. `TEXT :: prep {{ {builtin}(\"file\") }}`"))
+        &diagnostics.push(sema_error("E0956", call.name_span, "`{builtin}` is compile-time only", "the compiler reads the file while building, so it is a value in the program, not a runtime read", "use it in a `comptime` binding, e.g. `TEXT :: comptime {{ {builtin}(\"file\") }}`"))
         return failed
     }
     path :: sema_comptime_input_literal(call.args[0].expr) ?? {

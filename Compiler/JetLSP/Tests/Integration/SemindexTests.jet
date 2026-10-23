@@ -263,7 +263,7 @@ use std.process.[Command]
 
 // Rust: tests/semindex.rs:649
 #Test("tracked_float_symbol_exposes_its_binding_site") {
-    src :: "fn run() {{\n    #Track speed :: 3.5\n    origin :: prep {{ speed.$origin }}\n    print(origin?.source ?? \"missing\")\n}}\n"
+    src :: "fn run() {{\n    #Track speed :: 3.5\n    origin :: comptime {{ speed.$origin }}\n    print(origin?.source ?? \"missing\")\n}}\n"
     path :: temp_fixture("tracked_float_binding.jet", src)
     symbols :: open_symbols(path).expect("tracked-value semantic symbols")
     speed :: symbols.lookup("speed").into_iter().find(symbol -> symbol.kind == SemanticSymbolKind.Local).expect("tracked local")

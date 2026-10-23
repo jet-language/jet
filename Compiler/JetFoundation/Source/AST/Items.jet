@@ -537,13 +537,12 @@ struct TypeParam {
     name_span: Span
     bounds: [String]
     // Set when the declaration is a compile-time number
-    // parameter, `<prep N: Int>`; `bounds` is then empty. `<prep>` and
-    // `<prep: Trait>` stay ordinary type parameters named `prep`.
+    // parameter, `<comptime N: Int>`; `bounds` is then empty.
     prep: PrepParam?
 }
 
 // The declaration head of a compile-time number parameter.
-// Only the declaration carries `prep`; uses write the plain name. Sema rejects
+// Only the declaration carries `comptime`; uses write the plain name. Sema rejects
 // it with E0390 until card #3505 lands substitution, identity and layout.
 struct PrepParam {
     prep_span: Span

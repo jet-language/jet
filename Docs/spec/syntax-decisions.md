@@ -31,12 +31,12 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
-| `@` | live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$` | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
-| `prep` | explicit shared-preparation block `prep { … }`; `NAME :: prep { value }` is the only compile-time binding; `@ { … }` is retired | `D-PREP-SURFACE2=A` |
-| `prep if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
-| `prep loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
-| `prep fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
-| `<prep N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
+| `@` | live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$` | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
+| `comptime` | compile-time block `comptime { … }`; `NAME :: comptime { value }` is the only compile-time binding; `@ { … }` and `prep` are retired | `D-PREP-SURFACE2=A` |
+| `comptime if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
+| `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
+| `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
+| `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
 | `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
 | `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*` | `D-BUILD-FACT3=A` |
 | `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
@@ -102,11 +102,11 @@ replaces the same-day "ALL_CAPS implies compile time" rule)*: in the owner's
 words, "module/file-level immutable bindings are ALL_CAPS (`MAX_ROWS :: 100`);
 function locals stay snake_case; mutable bindings are never ALL_CAPS", and
 "compile time is ALWAYS explicit and never implied by casing:
-`NAME :: prep { value }`, so `:: prep` is greppable. A binding without `prep`
+`NAME :: comptime { value }`, so `:: comptime` is greppable. A binding without `comptime`
 is an ordinary runtime value, even if ALL_CAPS." `#Static` and `#Inline`
-precede either form (`#Static NAME :: prep { value }`). Names bound inside a
-`prep { … }` block stay inside it; a build-time value that outlives the block
-is bound as `name :: prep { value }`. See D-PREP-SURFACE2=A.
+precede either form (`#Static NAME :: comptime { value }`). Names bound inside a
+`comptime { … }` block stay inside it; a build-time value that outlives the block
+is bound as `name :: comptime { value }`. See D-PREP-SURFACE2=A.
 
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1; applied by
 D-ACRO-CASE1=A + D-ACRO-LEX1=A)*: initials-formed names stay all-caps inside
@@ -3326,10 +3326,10 @@ name**, so it is written at every mention:
 @limit :: 1000
 
 fn run() {
-    prep {
+    comptime {
         @ratio :: @limit /% 10
     }
-    prep if debug { … }
+    comptime if debug { … }
     print("limit: {@limit}")
     print("ratio: {@ratio}")
 }
@@ -3451,15 +3451,15 @@ reverse-amendment links at [S57 line 2561](#L2561) and [the reversal paragraph
 line 2588](#L2588).
 
 **D-PREP-SURFACE2=A — Shared preparation and phase query** *(ratified
-2026-09-21, card #3520)*: `prep { … }` is always a brace-delimited expression.
+2026-09-21, card #3520)*: `comptime { … }` is always a brace-delimited expression.
 Its final expression supplies its value; without one it returns `Unit`.
 Prepared values use ordinary names. `@PHASE()` is a total compiler-known
 `Phase` with exactly `Preparation`, `Build`, and `Runtime`, selected at the
 expression's evaluation site rather than by optimizer behavior. It adds no
-prep-specific condition or loop form; ordinary Jet control flow remains valid.
+comptime-specific condition or loop form; ordinary Jet control flow remains valid.
 `#Runtime(.NoEager)` and `#Runtime(.Only)` remain scoped to functions, methods,
 or explicit blocks: the first blocks automatic eager evaluation but permits
-explicit prep, while the second rejects prep and build calls.
+explicit comptime, while the second rejects comptime and build calls.
 
 **D-META-REFLECT2=A — Typed compiler metadata roots** *(ratified 2026-09-21,
 card #3520)*: checked facts use uppercase callable roots and lowercase record
@@ -5201,7 +5201,7 @@ fn-level `#Target(OS.*)` gating (option A) rejected.
 
 ```jet
 fn run() {
-    prep if @build.os == {
+    comptime if @build.os == {
         .Linux   -> { b :: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend{ name: "win32" }    print(b.label()) }
@@ -8140,26 +8140,35 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
+**2026-10-23 — `prep` retired; `comptime` is the one compile-time word**:
+every form that `prep` led (`prep { … }`, `NAME :: prep { value }`,
+`prep if`, `prep loop`, `prep fn`, `<prep N: Int>`) is now spelled with the
+`comptime` keyword, and the parser no longer reads `prep` as a head. `prep`
+is an ordinary identifier everywhere. The formatter, editor grammars,
+keyword catalogs and teaching diagnostics (E0377, E0388, E0389, E3401,
+E0956) spell `comptime`. Older entries are respelled with `comptime`; decision
+IDs such as D-PREP-SURFACE2 keep their names.
+
 **2026-09-28 — D-PREP-SURFACE2=A shipped (statement form)** *(card #3520)*:
-`prep { … }` replaces `@ { … }` as the explicit shared-preparation block. Its
+`comptime { … }` replaces `@ { … }` as the explicit shared-preparation block. Its
 body runs while building and emits no runtime code, and compile-time bindings
 made inside keep their `@` names afterward, as before. `prep` stays
 contextual: `if prep { … }` still reads a value named `prep`. The retired
 `@ { … }` head teaches E0388 with a machine-applicable respelling, and the
-formatter emits only `prep { … }`. The ratified value form
-(`lanes :: prep { calculate_lanes() + 0 }`) has no build-time value fold in
+formatter emits only `comptime { … }`. The ratified value form
+(`lanes :: comptime { calculate_lanes() + 0 }`) has no build-time value fold in
 either compiler yet, so it is rejected with E0391 rather than accepted
 silently. Other `@` uses are unchanged.
 
 **2026-09-30 — D-PREP-SURFACE2=A constants shipped** *(card #3662; amended
 the same day by the owner ruling under D-SHAPE-CASE1)*: compile time is always
-explicit. A build-time constant is `NAME :: prep { value }` at module scope and
-`name :: prep { value }` in a block (a block holding one final expression);
+explicit. A build-time constant is `NAME :: comptime { value }` at module scope and
+`name :: comptime { value }` in a block (a block holding one final expression);
 casing never implies compile time, so an ALL_CAPS `NAME :: value` is an
-ordinary runtime constant. `#Static NAME :: prep { value }` and
-`#Inline NAME :: prep { value }` keep D-CONSTMARK1. The retired `@NAME :: value`
+ordinary runtime constant. `#Static NAME :: comptime { value }` and
+`#Inline NAME :: comptime { value }` keep D-CONSTMARK1. The retired `@NAME :: value`
 declaration teaches E0388 with the behavior-preserving edit
-`NAME :: prep { value }`, and a retired `@NAME` read teaches `NAME` (retirement
+`NAME :: comptime { value }`, and a retired `@NAME` read teaches `NAME` (retirement
 row `comptime-constant-mark`); prefix `@` in code now marks a D-MEMREF1 link.
 The supported value block holds exactly one final expression: setup bindings
 must be separate prepared bindings, and validation can be a conditional within
@@ -8172,10 +8181,10 @@ table inside `prep`, not an adjacent statement `if` or a chain of statement
 `else` bodies. The full-width arm avoids shifting the U64 carrier by 64.
 
 **2026-09-28 — D-PREP-BRANCH1=A, D-PREP-FN1=A, D-CONSTGEN2=A shipped**
-*(card #3662)*: `prep if` and `prep loop` replace `@if` and `@loop` in
+*(card #3662)*: `comptime if` and `comptime loop` replace `@if` and `@loop` in
 statements, derive and marker bodies, root declaration templates, and test
-loops, with unchanged branch checking. `prep fn` replaces `@fn` on literal
-hooks and keeps the `is_comptime` flag and purity checks. `<prep N: Int>`
+loops, with unchanged branch checking. `comptime fn` replaces `@fn` on literal
+hooks and keeps the `is_comptime` flag and purity checks. `<comptime N: Int>`
 declares a number parameter on types and functions; `<prep>` and
 `<prep: Trait>` stay type parameters. `prep` is contextual, so a name `prep`
 stays an ordinary identifier. The retired heads teach E0388 (`@if`, `@loop`,
@@ -10109,7 +10118,7 @@ Other static cells (plain mutable module bindings, `#Static`) keep E0223.
 `#Persist` on a local binding keeps E0145. Example:
 `Examples/features/devloop/persist_write_borrow.jet` (prints `1`).
 
-**2026-10-22 — D-PREP-LOCAL1=A** *(card #5091)*: `name :: prep { value }`
+**2026-10-22 — D-PREP-LOCAL1=A** *(card #5091)*: `name :: comptime { value }`
 inside a function body is supported: the block runs while building and every
 read of `name` is the prepared value (a read counts as a use, so no unused
 binding lint). Example: `Examples/features/comptime/prep_local_value.jet`

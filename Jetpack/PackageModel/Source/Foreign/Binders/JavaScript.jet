@@ -7,8 +7,8 @@
 use core.files as files
 use core.process as process
 
-PKG_JS_RUNTIME :: prep { "node" }
-PKG_JS_TOOL_ACTION :: prep { "rejected the JavaScript binding" }
+PKG_JS_RUNTIME :: comptime { "node" }
+PKG_JS_TOOL_ACTION :: comptime { "rejected the JavaScript binding" }
 
 // Bind the scalar declarations of a `.d.ts` file to the module at `runtime_path`.
 fn pkg_javascript_bind(declaration_path: String, declarations: String, runtime_path: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
@@ -134,7 +134,7 @@ fn pkg_javascript_render_worker(functions: [ScalarBridgeFunction]) -> String Nev
 }
 
 // The fixed worker body after the `RESULTS` table.
-PKG_JS_WORKER_TAIL :: prep { ```};
+PKG_JS_WORKER_TAIL :: comptime { ```};
 
 function convert(kind, value) {
   if (kind === "int") return BigInt(value);

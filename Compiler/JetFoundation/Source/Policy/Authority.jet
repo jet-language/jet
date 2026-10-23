@@ -8,25 +8,25 @@
 // Policy/EffectProjection.jet); this file stays compiler-free.
 
 // jet_foundation::Effects::EFFECT_ROOTS: the thirteen grantable roots.
-AUTHORITY_EFFECT_ROOTS :: prep { [String]{
+AUTHORITY_EFFECT_ROOTS :: comptime { [String]{
     "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"
 } }
 
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
-AUTHORITY_EXEC_ARGS_LEAF :: prep { "Exec.Args" }
+AUTHORITY_EXEC_ARGS_LEAF :: comptime { "Exec.Args" }
 // ApplicationAuthority::AMBIENT_BASIC_EFFECTS print,
 // allocate, and read arguments. Never the `Exec` root.
-AUTHORITY_AMBIENT_BASIC_EFFECTS :: prep { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
+AUTHORITY_AMBIENT_BASIC_EFFECTS :: comptime { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
 // ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
-AUTHORITY_APPLICATION_DEFAULT :: prep { "application default" }
+AUTHORITY_APPLICATION_DEFAULT :: comptime { "application default" }
 // ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.holds.
-AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
+AUTHORITY_PACKAGE_DEFAULT :: comptime { "package.jet default" }
 // The deny-only stop root.
-AUTHORITY_PANIC_ROOT :: prep { "Panic" }
+AUTHORITY_PANIC_ROOT :: comptime { "Panic" }
 // jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
 // work, a deny-only leaf.
-AUTHORITY_TIME_WAIT_LEAF :: prep { "Time.Wait" }
+AUTHORITY_TIME_WAIT_LEAF :: comptime { "Time.Wait" }
 
 // jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root and the
 // `Time.Wait` leaf may be refused but never have to be granted, so the

@@ -2,9 +2,9 @@ use core.encoding.json as json
 use core.encoding.jsonl as jsonl
 use core.math as math
 
-COMPTIME_UNSUPPORTED :: prep { json.to_string(Dyn.Float(math.nan())) }
-COMPTIME_CHAR :: prep { json.to_string('\n') ?? panic("comptime Char JSON") }
-C0_EXPECTED :: prep { "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\"" }
+COMPTIME_UNSUPPORTED :: comptime { json.to_string(Dyn.Float(math.nan())) }
+COMPTIME_CHAR :: comptime { json.to_string('\n') ?? panic("comptime Char JSON") }
+C0_EXPECTED :: comptime { "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\"" }
 
 fn reject(label: String, number: Float) {
     tree :: Dyn.Array([Dyn]{Dyn.Float(number)})

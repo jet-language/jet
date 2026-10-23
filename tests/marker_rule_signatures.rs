@@ -265,7 +265,7 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
         // at this scope, so this is the only spelling that reaches the row.
         (
             "#Static on a marked constant",
-            "#Static LIMIT :: prep { 10 }\nfn run() {}",
+            "#Static LIMIT :: comptime { 10 }\nfn run() {}",
             jet::Policy::RuleSite::Constant,
         ),
     ];
@@ -313,7 +313,7 @@ fn a_constant_only_row_teaches_the_marked_binding() {
         .find(|diagnostic| diagnostic.code == "E0355")
         .unwrap_or_else(|| panic!("expected the wrong-site report: {unmarked:?}"));
     assert!(
-        wrong_site.fix.contains("`#Static NAME :: prep { value }`"),
+        wrong_site.fix.contains("`#Static NAME :: comptime { value }`"),
         "{}",
         wrong_site.fix
     );
@@ -569,8 +569,8 @@ fn run() {}
 #[test]
 fn static_string_products_resolve_before_consumers() {
     let source = r#"
-LABEL :: prep { "shared" }
-PAGE :: prep { "index.html" }
+LABEL :: comptime { "shared" }
+PAGE :: comptime { "index.html" }
 #HTML(PAGE)
 Tiny :: distinct Int(0..3)
 #Test(LABEL) {}
@@ -632,8 +632,8 @@ fn html_marker_uses_typed_path_signature() {
 #[test]
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
-        "VALUE :: prep { 42 }\n#HTML(VALUE)\nfn run() {}",
-        "VALUE :: prep { 42 }\n#Test(VALUE) {}\nfn run() {}",
+        "VALUE :: comptime { 42 }\n#HTML(VALUE)\nfn run() {}",
+        "VALUE :: comptime { 42 }\n#Test(VALUE) {}\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -651,9 +651,9 @@ fn static_string_products_report_one_shared_type_error_each() {
 fn static_type_and_field_strings_use_the_same_signature_gate() {
     let valid = codes(
         r#"
-TAG_NAME :: prep { "kind" }
-FIELD_NAME :: prep { "identifier" }
-VARIANT_NAME :: prep { "ready" }
+TAG_NAME :: comptime { "kind" }
+FIELD_NAME :: comptime { "identifier" }
+VARIANT_NAME :: comptime { "ready" }
 #[Codable, Discriminant(TAG_NAME)]
 enum Event { #Rename(VARIANT_NAME) Ready }
 #Codable
@@ -664,9 +664,9 @@ fn run() {}
     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
 
     for source in [
-        "VALUE :: prep { 42 }\n#[Codable, Discriminant(VALUE)] enum Event { Ready }\nfn run() {}",
-        "VALUE :: prep { 42 }\n#Codable struct Row { #Rename(VALUE) id: Int }\nfn run() {}",
-        "VALUE :: prep { 42 }\n#Codable enum Event { #Rename(VALUE) Ready }\nfn run() {}",
+        "VALUE :: comptime { 42 }\n#[Codable, Discriminant(VALUE)] enum Event { Ready }\nfn run() {}",
+        "VALUE :: comptime { 42 }\n#Codable struct Row { #Rename(VALUE) id: Int }\nfn run() {}",
+        "VALUE :: comptime { 42 }\n#Codable enum Event { #Rename(VALUE) Ready }\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -739,8 +739,8 @@ fn run() {}
 #[test]
 fn duplicate_html_markers_still_fail_before_resolution() {
     let source = r#"
-FIRST :: prep { "first.html" }
-SECOND :: prep { "second.html" }
+FIRST :: comptime { "first.html" }
+SECOND :: comptime { "second.html" }
 #HTML(FIRST)
 #HTML(SECOND)
 fn run() {}
@@ -799,7 +799,7 @@ fn run() {}
 fn resolved_test_names_keep_duplicate_identity() {
     let diagnostics = codes(
         r#"
-NAME :: prep { "same" }
+NAME :: comptime { "same" }
 #Test(NAME) {}
 #Test("same") {}
 fn run() {}
@@ -817,7 +817,7 @@ fn run() {}
 
 #[test]
 fn formatter_preserves_static_rule_expressions() {
-    let source = "NAME :: prep { \"case\" }\n#Test(NAME) {}\n#HTML(NAME)\nfn run() {}\n";
+    let source = "NAME :: comptime { \"case\" }\n#Test(NAME) {}\n#HTML(NAME)\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("static rule expressions should format");
     assert!(formatted.contains("#Test(NAME)"), "{formatted}");
     assert!(formatted.contains("#HTML(NAME)"), "{formatted}");

@@ -22,12 +22,12 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
     { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
-    { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
-    { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep {{ … }}`; `NAME :: prep {{ value }}` is the only compile-time binding; `@ {{ … }}` is retired", decision: "D-PREP-SURFACE2=A" },
-    { spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
-    { spelling: "prep loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
-    { spelling: "prep fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
-    { spelling: "<prep N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
+    { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
+    { spelling: KW_COMPTIME, meaning: "compile-time block `comptime {{ … }}`; `NAME :: comptime {{ value }}` is the only compile-time binding; `@ {{ … }}` and `prep` are retired", decision: "D-PREP-SURFACE2=A" },
+    { spelling: "comptime if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
+    { spelling: "comptime loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
+    { spelling: "comptime fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
+    { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
     { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
     { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`", decision: "D-BUILD-FACT3=A" },
     { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A" },
@@ -63,9 +63,6 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: ":>", meaning: "close a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
     { spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`", decision: "D-FENCE2=A" },
 }
-
-/// A shared preparation block always has an explicit body.
-KW_PREP :: "prep"
 
 /// Checked compiler metadata queries that
 /// has not yet given a `$` root. `$phase`, `$program` and `$package` are the

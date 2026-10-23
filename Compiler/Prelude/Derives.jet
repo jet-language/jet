@@ -12,14 +12,14 @@
 // different variants by ordinal before comparing payloads.
 derive T.Equatable {
     fn equal(self, rhs: T) -> Bool {
-        prep if T.$kind == "enum" {
-            prep loop left in T.$fields {
+        comptime if T.$kind == "enum" {
+            comptime loop left in T.$fields {
                 if self == {
                     .$left -> {
                         if rhs == {
                             .$left -> {
-                                prep loop field in left.$fields {
-                                    prep if field.$ty == T.$name {
+                                comptime loop field in left.$fields {
+                                    comptime if field.$ty == T.$name {
                                         if self.$field.equal(rhs.$field) == false -> return false
                                     } else {
                                         if self.$field != rhs.$field -> return false
@@ -36,13 +36,13 @@ derive T.Equatable {
             }
             return false
         } else {
-            prep if T.$kind == "struct" {
-                prep loop field in T.$fields {
+            comptime if T.$kind == "struct" {
+                comptime loop field in T.$fields {
                     if self.$field != rhs.$field -> return false
                 }
                 return true
             } else {
-                prep if T.$base == "Float" || T.$base == "Float32" {
+                comptime if T.$base == "Float" || T.$base == "Float32" {
                     return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
                 } else {
                     return self.raw() == rhs.raw()
@@ -54,23 +54,23 @@ derive T.Equatable {
 
 derive T.Comparable {
     fn compare(self, rhs: T) -> Ordering {
-        prep if T.$kind == "enum" {
+        comptime if T.$kind == "enum" {
             jet_rhs_variant_index := 0
-            prep loop right in T.$fields {
+            comptime loop right in T.$fields {
                 if rhs == {
                     .$right -> { jet_rhs_variant_index = right.$index }
                     else -> {}
                 }
             }
-            prep loop left in T.$fields {
+            comptime loop left in T.$fields {
                 if self == {
                     .$left -> {
                         if jet_rhs_variant_index > left.$index -> return .Less
                         if jet_rhs_variant_index < left.$index -> return .Greater
                         if rhs == {
                             .$left -> {
-                                prep loop field in left.$fields {
-                                    prep if field.$ty == T.$name {
+                                comptime loop field in left.$fields {
+                                    comptime if field.$ty == T.$name {
                                         if self.$field.compare(rhs.$field) == {
                                             .Less -> return .Less
                                             .Greater -> return .Greater
@@ -92,8 +92,8 @@ derive T.Comparable {
             }
             return .Equal
         } else {
-            prep if T.$kind == "struct" {
-                prep loop field in T.$fields {
+            comptime if T.$kind == "struct" {
+                comptime loop field in T.$fields {
                     if self.$field < rhs.$field -> return .Less
                     if self.$field > rhs.$field -> return .Greater
                 }

@@ -257,8 +257,8 @@ The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME :: value`,
 described below.
 The retired `#Known` constant, branch, and block forms teach E0377 and recover
-their compile-time form. Their replacements use `NAME :: prep { value }`,
-`prep if condition { … }`, and `prep { … }` (D-META-STAGE1=B,
+their compile-time form. Their replacements use `NAME :: comptime { value }`,
+`comptime if condition { … }`, and `comptime { … }` (D-META-STAGE1=B,
 D-PREP-SURFACE2=A). Constant and local-name repairs use the same canonical
 identifier-casing algorithm as semantic diagnostics.
 
@@ -437,9 +437,9 @@ parentheses: `value ?? (next)`.
 A compile-time constant is an ordinary ALL_CAPS name: an immutable module-level
 `::` binding such as `MAX_RETRIES :: 3` is evaluated while building and read as
 `MAX_RETRIES`; failure to compute it stops the build (D-PREP-SURFACE2=A). In a
-block, names stay snake_case (D-SHAPE-CASE1): `lanes :: prep { calculate() }`
+block, names stay snake_case (D-SHAPE-CASE1): `lanes :: comptime { calculate() }`
 evaluates its single final expression while building, and names bound inside a
-`prep { … }` statement block stay readable after it. Ordinary foldable expressions need no constant. At file
+`comptime { … }` statement block stay readable after it. Ordinary foldable expressions need no constant. At file
 scope, other `name :: value` and `name := value` bindings remain runtime module
 globals; they do not require `#Persist`. `#Static NAME :: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME ::
@@ -489,7 +489,7 @@ D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
 
 Struct and enum bodies may declare methods with `fn` or `pub fn`; `pub`
 exports the method, while an unqualified method remains private. A build-time
-method places `prep` directly before `fn`, including `pub prep fn`.
+method places `comptime` directly before `fn`, including `pub comptime fn`.
 Methods declared inside a generic struct share that struct's type-parameter
 scope; Core's generic record methods use this form rather than generic `impl`
 heads.
@@ -628,7 +628,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-prep if $build.os == {
+comptime if $build.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …

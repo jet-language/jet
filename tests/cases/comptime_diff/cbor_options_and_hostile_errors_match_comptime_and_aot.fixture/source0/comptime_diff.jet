@@ -57,15 +57,15 @@ fn show_ints(bytes: [U8]) -> String {
     return "unreachable"
 }
 
-EXPECTED_MALFORMED :: prep { show([255]) }
-EXPECTED_TRUNCATED :: prep { show([129]) }
-EXPECTED_NONCANONICAL :: prep { show_strict([24, 1]) }
-EXPECTED_UNSUPPORTED :: prep { show([192, 1]) }
-EXPECTED_MISMATCH :: prep { show_ints([129, 97, 120]) }
-EXPECTED_DEPTH :: prep { show_depth([129, 129, 1]) }
-EXPECTED_ITEMS :: prep { show_items([130, 1, 2]) }
-EXPECTED_BYTES :: prep { show_bytes([130, 1, 2]) }
-EXPECTED_ALLOC :: prep { show_alloc([130, 1, 2]) }
+EXPECTED_MALFORMED :: comptime { show([255]) }
+EXPECTED_TRUNCATED :: comptime { show([129]) }
+EXPECTED_NONCANONICAL :: comptime { show_strict([24, 1]) }
+EXPECTED_UNSUPPORTED :: comptime { show([192, 1]) }
+EXPECTED_MISMATCH :: comptime { show_ints([129, 97, 120]) }
+EXPECTED_DEPTH :: comptime { show_depth([129, 129, 1]) }
+EXPECTED_ITEMS :: comptime { show_items([130, 1, 2]) }
+EXPECTED_BYTES :: comptime { show_bytes([130, 1, 2]) }
+EXPECTED_ALLOC :: comptime { show_alloc([130, 1, 2]) }
 
 fn run() {
     malformed_wire := [U8]{ 255 }

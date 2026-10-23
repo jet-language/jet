@@ -19,7 +19,7 @@ use jet_pkg_model.[
     pkg_worker_require_supported_host, pkg_worker_run_tool,
 ]
 
-PKG_OCTAVE_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"} }
+PKG_OCTAVE_RESERVED :: comptime { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"} }
 
 // Bind the one-matrix functions of the Octave `.m` script at `path`.
 fn pkg_octave_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
@@ -136,7 +136,7 @@ fn pkg_octave_reserved(value: String) -> Bool Never! {
 }
 
 // Generated module head. Hole: `abi`.
-PKG_OCTAVE_JET_HEAD :: prep { ```use c.@@abi@@ as abi
+PKG_OCTAVE_JET_HEAD :: comptime { ```use c.@@abi@@ as abi
 use core.compute as compute
 use core.encoding.json as json
 
@@ -147,7 +147,7 @@ use core.encoding.json as json
     fn close(handle: Int) = "@@abi@@_close"
 ``` }
 
-PKG_OCTAVE_JET_TYPES :: prep { ```}
+PKG_OCTAVE_JET_TYPES :: comptime { ```}
 
 struct Session {
     value: Int
@@ -167,7 +167,7 @@ enum OctaveError {
 
 ``` }
 
-PKG_OCTAVE_JET_SESSION :: prep { ```impl Session.Close {
+PKG_OCTAVE_JET_SESSION :: comptime { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -184,7 +184,7 @@ fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 ``` }
 
 // One generated tensor call. Hole: `function`.
-PKG_OCTAVE_JET_FUNCTION :: prep { ```fn @@function@@(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
+PKG_OCTAVE_JET_FUNCTION :: comptime { ```fn @@function@@(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [Dyn]{}
     loop dimension in compute.shape(input) {
@@ -227,7 +227,7 @@ PKG_OCTAVE_JET_FUNCTION :: prep { ```fn @@function@@(session: Session, input: Te
 
 // The persistent worker. `__JET_SCRIPT__` and `__JET_ALLOWED__` are replaced
 // in that order, exactly as the Rust binder does.
-PKG_OCTAVE_WORKER :: prep { ```input = fopen('/dev/stdin', 'rb');
+PKG_OCTAVE_WORKER :: comptime { ```input = fopen('/dev/stdin', 'rb');
 output = fopen('/dev/stdout', 'wb');
 script_path = __JET_SCRIPT__;
 try

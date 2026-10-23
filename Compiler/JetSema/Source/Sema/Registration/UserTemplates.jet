@@ -1,6 +1,6 @@
 // Package-authored
 // templates (user `derive T.Name` providers, declared marker bodies and root
-// `prep loop` declarations) expand through the same typed template engine as
+// `comptime loop` declarations) expand through the same typed template engine as
 // the Prelude providers (Registration/Derives.jet). Generated items re-enter
 // ordinary registration as written items; nothing is serialized or re-lexed.
 // Rust: `Bundle/Pipeline/CheckInner.rs` (user derives, marker bodies) and
@@ -169,10 +169,10 @@ fn sema_user_template_function_info(function: Func) -> CtValue? {
 }
 
 // ---------------------------------------------------------------------------
-// Root `prep loop` declarations (Rust `expand_item_template_loops`). They
+// Root `comptime loop` declarations (Rust `expand_item_template_loops`). They
 // expand before registration in the module's known-time constant scope.
 
-// Expands the root `prep loop` items of `items` in place; a list without one
+// Expands the root `comptime loop` items of `items` in place; a list without one
 // is left untouched (not copied).
 fn sema_derive_expand_template_loops(items: &[Item], diagnostics: &[Diagnostic]) {
     has_loop :: loop item in items {

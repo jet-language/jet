@@ -58,7 +58,7 @@ fn helper() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
 test("an imported declaration cannot adopt the following global initializer as its body", () => {
   assert.deepEqual(closure(`
 #Import(c) fn imported(value: I64) = "imported"
-GLOBAL :: prep { I64{0} }
+GLOBAL :: comptime { I64{0} }
 #Export(c) fn ordinary() { imported(I64{0}) }
 `), []);
 });
@@ -91,7 +91,7 @@ test("generated registry is the exact literal symbol list and stale bytes fail",
 // Direct named calls only; foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
 // The symbols land as literal data: no compile-time execution host is needed.
-RUNTIME_STOP_EXPORTS :: prep { [String]{
+RUNTIME_STOP_EXPORTS :: comptime { [String]{
     "stopped",
 } }
 

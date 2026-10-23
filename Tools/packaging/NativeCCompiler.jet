@@ -141,8 +141,8 @@ fn test_command(argv: [String]) -> String {
 
 #Test("the Jet CLI embeds the same single native C policy file") {
     embedded :: files.read("{test_root()}/Compiler/JetCli/Source/Cli/NativeCPolicy.jet") ?? panic("cannot read NativeCPolicy.jet")
-    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS :: prep {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"flag\") }}"))
-    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"hardening-remove\") }}"))
+    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS :: comptime {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"flag\") }}"))
+    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED :: comptime {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"hardening-remove\") }}"))
 }
 
 #Test("native fixture and packaging drivers have no independent C compiler policy") {
@@ -197,7 +197,7 @@ fn forbidden(name: String) -> Bool { re.is_match(Regex{"_chk(?:_|$)"}, name) || 
     }
     provider :: runtime_export_names(root)
     collections :: files.read("{root}/Compiler/JetRuntime/Source/Collections.jet") ?? panic("cannot read Collections.jet")
-    stride_match :: re.match(Regex{"RT_HOST_U8_STRIDE\s*::\s*prep\s*\{{\s*I64\{{(1|8)\}}\s*\}}"}, collections) ?? panic("the TCP fixture must use the canonical U8 carrier epoch")
+    stride_match :: re.match(Regex{"RT_HOST_U8_STRIDE\s*::\s*comptime\s*\{{\s*I64\{{(1|8)\}}\s*\}}"}, collections) ?? panic("the TCP fixture must use the canonical U8 carrier epoch")
     stride :: stride_match.groups[0]
     problems := [String]{}
     loop name in ["ProcessRoutesWitness", "ProcessExecutionWitness", "TerminalProcessWitness", "ProcessSpecWitness", "TCPRoutesWitness"] {

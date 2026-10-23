@@ -30,8 +30,8 @@ struct Ring {
     tail: Int
 }
 
-SIZE :: prep { Ring.$layout.size }
-ALIGNMENT :: prep { Ring.$layout.alignment }
+SIZE :: comptime { Ring.$layout.size }
+ALIGNMENT :: comptime { Ring.$layout.alignment }
 
 fn run() {
     print("{SIZE}:{ALIGNMENT}")

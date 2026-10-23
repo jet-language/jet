@@ -90,7 +90,7 @@ fn builtin_static(owner: String, method: String, parameters: [Type], return_type
 // execution host. A `parameter_convention: AccessConvention.Move` row owns its
 // arguments: each one moves into the constructed value.
 
-BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
+BUILTIN_STATIC_ROWS :: comptime { [BuiltinStaticRow]{
     {module_name: "", owner: "Int", method: "parse", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt}, arity_code: "E0104"},
     {module_name: "", owner: "Int", method: "from_radix", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String, Type.Int}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.IntFromRadix, arity_code: "E0104"},
     {module_name: "", owner: "Float", method: "parse", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseFloat}, arity_code: "E0104"},
@@ -155,7 +155,7 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
 } }
 
 // Numeric destination owners (`numeric_type_from_name`) and their host words.
-BUILTIN_NUMERIC_KINDS :: prep { [BuiltinNumericKind]{
+BUILTIN_NUMERIC_KINDS :: comptime { [BuiltinNumericKind]{
     {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
     {name: "I8", ty: Type.IntN{signed: true, bits: 8}, rust: "i8", integer: true, fixed: true, signed: true, bits: 8},
     {name: "I16", ty: Type.IntN{signed: true, bits: 16}, rust: "i16", integer: true, fixed: true, signed: true, bits: 16},
@@ -172,7 +172,7 @@ BUILTIN_NUMERIC_KINDS :: prep { [BuiltinNumericKind]{
 
 // Destination-owned `from_<source>` spellings (Syntax.rs
 // `NUMERIC_CONVERSION_SOURCES`; the semantic symbol catalog reads it too).
-BUILTIN_NUMERIC_SOURCES :: prep { [BuiltinNumericSource]{
+BUILTIN_NUMERIC_SOURCES :: comptime { [BuiltinNumericSource]{
     {method: "from_i8", source: "I8"},
     {method: "from_i64", source: "I64"},
     {method: "from_i16", source: "I16"},

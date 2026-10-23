@@ -155,7 +155,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     tmp :: envmodel_test_workspace_dir("comptime-list")
     envmodel_test_write_package(tmp, "packages/hello", "name: \"hello\"\n")
     envmodel_test_write_package(tmp, "packages/ranker", "name: \"ranker\"\n")
-    plan :: envmodel_test_eval_in("PKGS :: prep {{ [\"./packages/hello\", \"./packages/ranker\"] }}\nmodule workspace {{\n    members: PKGS\n}}\n", tmp)
+    plan :: envmodel_test_eval_in("PKGS :: comptime {{ [\"./packages/hello\", \"./packages/ranker\"] }}\nmodule workspace {{\n    members: PKGS\n}}\n", tmp)
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
@@ -165,7 +165,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     tmp :: envmodel_test_workspace_dir("comptime-strings")
     envmodel_test_write_package(tmp, "workspace-packages/a", "name: \"a\"\n")
     envmodel_test_write_package(tmp, "workspace-packages/b", "name: \"b\"\n")
-    plan :: envmodel_test_eval_in("BASE :: prep {{ \"./workspace-packages\" }}\nmodule workspace {{\n    members: [\"{{BASE}}/a\", \"{{BASE}}/b\"]\n}}\n", tmp)
+    plan :: envmodel_test_eval_in("BASE :: comptime {{ \"./workspace-packages\" }}\nmodule workspace {{\n    members: [\"{{BASE}}/a\", \"{{BASE}}/b\"]\n}}\n", tmp)
     assert_eq(envmodel_test_member_paths(plan), [String]{"./workspace-packages/a", "./workspace-packages/b"})
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }

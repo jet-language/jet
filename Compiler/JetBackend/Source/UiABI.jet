@@ -1,214 +1,214 @@
 // Shared native-private Node160/metadata contract, adapted from 78f5f6471.
 // Rust Ui.rs:64-101 has raw Option<i64> callbacks, not Closure24 owners.
 // Nullable text/metadata pointers mean None; a present empty text owns E4.
-UI_NODE_BYTES :: prep { I64{160} }
-UI_NODE_CHILD_BYTES :: prep { I64{8} } // owned Node-pointer slots, not U8
-UI_NODE_LABEL :: prep { I64{0} }
-UI_NODE_WIDTH :: prep { I64{8} }
-UI_NODE_HEIGHT :: prep { I64{16} }
-UI_NODE_ROLE :: prep { I64{24} } // -1 = None
-UI_NODE_KIND :: prep { I64{32} }
-UI_NODE_CHILDREN :: prep { I64{40} }
-UI_NODE_COLOR :: prep { I64{48} }
-UI_NODE_STYLE_PRESENT :: prep { I64{56} }
+UI_NODE_BYTES :: comptime { I64{160} }
+UI_NODE_CHILD_BYTES :: comptime { I64{8} } // owned Node-pointer slots, not U8
+UI_NODE_LABEL :: comptime { I64{0} }
+UI_NODE_WIDTH :: comptime { I64{8} }
+UI_NODE_HEIGHT :: comptime { I64{16} }
+UI_NODE_ROLE :: comptime { I64{24} } // -1 = None
+UI_NODE_KIND :: comptime { I64{32} }
+UI_NODE_CHILDREN :: comptime { I64{40} }
+UI_NODE_COLOR :: comptime { I64{48} }
+UI_NODE_STYLE_PRESENT :: comptime { I64{56} }
 // Optional inline colors: kind 0 = None, 1/2/3 = ANSI16/ANSI256/RGB.
-UI_NODE_FOREGROUND_KIND :: prep { I64{64} }
-UI_NODE_FOREGROUND_WORD :: prep { I64{72} }
-UI_NODE_BACKGROUND_KIND :: prep { I64{80} }
-UI_NODE_BACKGROUND_WORD :: prep { I64{88} }
-UI_NODE_STYLE_FLAGS :: prep { I64{96} } // bools packed in bits 0,1,2
-UI_NODE_ABSENT_MASK :: prep { I64{104} }
-UI_NODE_IME :: prep { I64{112} }
-UI_NODE_CLICK_FN :: prep { I64{120} } // raw i64, Some(0) is valid
-UI_NODE_DROP_FN :: prep { I64{128} }
-UI_NODE_ACCESSIBILITY :: prep { I64{136} }
-UI_NODE_SHORTCUT :: prep { I64{144} }
-UI_NODE_KEY :: prep { I64{152} }
-UI_NODE_SLOT_IME :: prep { I64{2} }
-UI_NODE_SLOT_CLICK :: prep { I64{8} }
-UI_NODE_SLOT_DROP :: prep { I64{16} }
-UI_NODE_OPTION_MASK :: prep { I64{26} }
+UI_NODE_FOREGROUND_KIND :: comptime { I64{64} }
+UI_NODE_FOREGROUND_WORD :: comptime { I64{72} }
+UI_NODE_BACKGROUND_KIND :: comptime { I64{80} }
+UI_NODE_BACKGROUND_WORD :: comptime { I64{88} }
+UI_NODE_STYLE_FLAGS :: comptime { I64{96} } // bools packed in bits 0,1,2
+UI_NODE_ABSENT_MASK :: comptime { I64{104} }
+UI_NODE_IME :: comptime { I64{112} }
+UI_NODE_CLICK_FN :: comptime { I64{120} } // raw i64, Some(0) is valid
+UI_NODE_DROP_FN :: comptime { I64{128} }
+UI_NODE_ACCESSIBILITY :: comptime { I64{136} }
+UI_NODE_SHORTCUT :: comptime { I64{144} }
+UI_NODE_KEY :: comptime { I64{152} }
+UI_NODE_SLOT_IME :: comptime { I64{2} }
+UI_NODE_SLOT_CLICK :: comptime { I64{8} }
+UI_NODE_SLOT_DROP :: comptime { I64{16} }
+UI_NODE_OPTION_MASK :: comptime { I64{26} }
 
-UI_ACCESSIBILITY_BYTES :: prep { I64{40} }
-UI_ACCESSIBILITY_NAME :: prep { I64{0} }
-UI_ACCESSIBILITY_DESCRIPTION :: prep { I64{8} }
-UI_ACCESSIBILITY_LENGTH :: prep { I64{16} }
-UI_ACCESSIBILITY_CAPACITY :: prep { I64{24} }
-UI_ACCESSIBILITY_DATA :: prep { I64{32} }
-UI_STATE_BYTES :: prep { I64{16} }
-UI_STATE_PAYLOAD :: prep { I64{8} }
-UI_STATE_DISABLED :: prep { I64{0} }
-UI_STATE_BUSY :: prep { I64{1} }
-UI_STATE_EXPANDED :: prep { I64{2} }
-UI_STATE_CHECKED :: prep { I64{3} }
-UI_STATE_SELECTED :: prep { I64{4} }
-UI_STATE_REQUIRED :: prep { I64{5} }
-UI_STATE_VALUE :: prep { I64{6} }
-UI_SHORTCUT_BYTES :: prep { I64{16} }
-UI_SHORTCUT_KEY :: prep { I64{0} }
-UI_SHORTCUT_MODIFIERS :: prep { I64{8} }
+UI_ACCESSIBILITY_BYTES :: comptime { I64{40} }
+UI_ACCESSIBILITY_NAME :: comptime { I64{0} }
+UI_ACCESSIBILITY_DESCRIPTION :: comptime { I64{8} }
+UI_ACCESSIBILITY_LENGTH :: comptime { I64{16} }
+UI_ACCESSIBILITY_CAPACITY :: comptime { I64{24} }
+UI_ACCESSIBILITY_DATA :: comptime { I64{32} }
+UI_STATE_BYTES :: comptime { I64{16} }
+UI_STATE_PAYLOAD :: comptime { I64{8} }
+UI_STATE_DISABLED :: comptime { I64{0} }
+UI_STATE_BUSY :: comptime { I64{1} }
+UI_STATE_EXPANDED :: comptime { I64{2} }
+UI_STATE_CHECKED :: comptime { I64{3} }
+UI_STATE_SELECTED :: comptime { I64{4} }
+UI_STATE_REQUIRED :: comptime { I64{5} }
+UI_STATE_VALUE :: comptime { I64{6} }
+UI_SHORTCUT_BYTES :: comptime { I64{16} }
+UI_SHORTCUT_KEY :: comptime { I64{0} }
+UI_SHORTCUT_MODIFIERS :: comptime { I64{8} }
 
 // UI slice3: seed HostServices74-76/1242-1246, WebTable51-120,
 // WebForms1657-1662, WebQuery303-383, WebStore242-249.
-UI_FILE_FILTER_BYTES :: prep { I64{24} }
-UI_FILE_FILTER_LABEL :: prep { I64{0} }
-UI_FILE_FILTER_EXTENSIONS :: prep { I64{8} }
-UI_FILE_FILTER_MIME_TYPES :: prep { I64{16} }
-UI_FILE_FILTER_CHILD_BYTES :: prep { I64{8} }
-UI_TABLE_SORT_BYTES :: prep { I64{16} }
-UI_TABLE_SORT_COLUMN :: prep { I64{0} }
-UI_TABLE_SORT_DIRECTION :: prep { I64{8} }
-UI_TABLE_FILTER_BYTES :: prep { I64{16} }
-UI_TABLE_FILTER_COLUMN :: prep { I64{0} }
-UI_TABLE_FILTER_VALUE :: prep { I64{8} }
-UI_TABLE_STATE_BYTES :: prep { I64{64} }
-UI_TABLE_STATE_SORT :: prep { I64{0} }
-UI_TABLE_STATE_FILTER :: prep { I64{8} }
-UI_TABLE_STATE_PAGE_INDEX :: prep { I64{16} }
-UI_TABLE_STATE_PAGE_SIZE :: prep { I64{24} }
-UI_TABLE_STATE_SELECTED_KEYS :: prep { I64{32} }
-UI_TABLE_STATE_SELECTION_ANCHOR :: prep { I64{40} }
-UI_TABLE_STATE_FOCUS_KEY :: prep { I64{48} }
-UI_TABLE_STATE_PAGE_MODE :: prep { I64{56} }
-UI_FORM_LIFECYCLE_BYTES :: prep { I64{32} }
-UI_FORM_LIFECYCLE_STATUS :: prep { I64{0} }
-UI_FORM_LIFECYCLE_RESULT :: prep { I64{8} }
-UI_FORM_LIFECYCLE_ERROR :: prep { I64{16} }
-UI_FORM_LIFECYCLE_GENERATION :: prep { I64{24} } // raw u64
-UI_MUTATION_BYTES :: prep { I64{88} }
-UI_MUTATION_STATUS :: prep { I64{0} }
-UI_MUTATION_GENERATION :: prep { I64{8} }
-UI_MUTATION_OPTIMISTIC :: prep { I64{16} }
-UI_MUTATION_VALUE :: prep { I64{24} }
-UI_MUTATION_RESULT :: prep { I64{32} }
-UI_MUTATION_ERROR :: prep { I64{40} }
-UI_MUTATION_CONTEXT :: prep { I64{48} }
-UI_MUTATION_ROLLBACK :: prep { I64{56} }
-UI_MUTATION_PAUSED :: prep { I64{64} }
-UI_MUTATION_QUEUED :: prep { I64{72} } // raw usize
-UI_MUTATION_REPLAYED :: prep { I64{80} } // raw u64
-UI_QUERY_STATE_BYTES :: prep { I64{48} }
-UI_QUERY_STATE_STATUS :: prep { I64{0} }
-UI_QUERY_STATE_VALUE :: prep { I64{8} }
-UI_QUERY_STATE_ERROR :: prep { I64{16} }
-UI_QUERY_STATE_GENERATION :: prep { I64{24} }
-UI_QUERY_STATE_QUEUED :: prep { I64{32} }
-UI_QUERY_STATE_OFFLINE :: prep { I64{40} }
-UI_STORE_EVENT_BYTES :: prep { I64{48} }
-UI_STORE_EVENT_SEQUENCE :: prep { I64{0} }
-UI_STORE_EVENT_GENERATION :: prep { I64{8} }
-UI_STORE_EVENT_ACTION :: prep { I64{16} }
-UI_STORE_EVENT_CHANGED_FIELDS :: prep { I64{24} }
-UI_STORE_EVENT_CURSOR :: prep { I64{32} }
-UI_STORE_EVENT_KIND :: prep { I64{40} }
+UI_FILE_FILTER_BYTES :: comptime { I64{24} }
+UI_FILE_FILTER_LABEL :: comptime { I64{0} }
+UI_FILE_FILTER_EXTENSIONS :: comptime { I64{8} }
+UI_FILE_FILTER_MIME_TYPES :: comptime { I64{16} }
+UI_FILE_FILTER_CHILD_BYTES :: comptime { I64{8} }
+UI_TABLE_SORT_BYTES :: comptime { I64{16} }
+UI_TABLE_SORT_COLUMN :: comptime { I64{0} }
+UI_TABLE_SORT_DIRECTION :: comptime { I64{8} }
+UI_TABLE_FILTER_BYTES :: comptime { I64{16} }
+UI_TABLE_FILTER_COLUMN :: comptime { I64{0} }
+UI_TABLE_FILTER_VALUE :: comptime { I64{8} }
+UI_TABLE_STATE_BYTES :: comptime { I64{64} }
+UI_TABLE_STATE_SORT :: comptime { I64{0} }
+UI_TABLE_STATE_FILTER :: comptime { I64{8} }
+UI_TABLE_STATE_PAGE_INDEX :: comptime { I64{16} }
+UI_TABLE_STATE_PAGE_SIZE :: comptime { I64{24} }
+UI_TABLE_STATE_SELECTED_KEYS :: comptime { I64{32} }
+UI_TABLE_STATE_SELECTION_ANCHOR :: comptime { I64{40} }
+UI_TABLE_STATE_FOCUS_KEY :: comptime { I64{48} }
+UI_TABLE_STATE_PAGE_MODE :: comptime { I64{56} }
+UI_FORM_LIFECYCLE_BYTES :: comptime { I64{32} }
+UI_FORM_LIFECYCLE_STATUS :: comptime { I64{0} }
+UI_FORM_LIFECYCLE_RESULT :: comptime { I64{8} }
+UI_FORM_LIFECYCLE_ERROR :: comptime { I64{16} }
+UI_FORM_LIFECYCLE_GENERATION :: comptime { I64{24} } // raw u64
+UI_MUTATION_BYTES :: comptime { I64{88} }
+UI_MUTATION_STATUS :: comptime { I64{0} }
+UI_MUTATION_GENERATION :: comptime { I64{8} }
+UI_MUTATION_OPTIMISTIC :: comptime { I64{16} }
+UI_MUTATION_VALUE :: comptime { I64{24} }
+UI_MUTATION_RESULT :: comptime { I64{32} }
+UI_MUTATION_ERROR :: comptime { I64{40} }
+UI_MUTATION_CONTEXT :: comptime { I64{48} }
+UI_MUTATION_ROLLBACK :: comptime { I64{56} }
+UI_MUTATION_PAUSED :: comptime { I64{64} }
+UI_MUTATION_QUEUED :: comptime { I64{72} } // raw usize
+UI_MUTATION_REPLAYED :: comptime { I64{80} } // raw u64
+UI_QUERY_STATE_BYTES :: comptime { I64{48} }
+UI_QUERY_STATE_STATUS :: comptime { I64{0} }
+UI_QUERY_STATE_VALUE :: comptime { I64{8} }
+UI_QUERY_STATE_ERROR :: comptime { I64{16} }
+UI_QUERY_STATE_GENERATION :: comptime { I64{24} }
+UI_QUERY_STATE_QUEUED :: comptime { I64{32} }
+UI_QUERY_STATE_OFFLINE :: comptime { I64{40} }
+UI_STORE_EVENT_BYTES :: comptime { I64{48} }
+UI_STORE_EVENT_SEQUENCE :: comptime { I64{0} }
+UI_STORE_EVENT_GENERATION :: comptime { I64{8} }
+UI_STORE_EVENT_ACTION :: comptime { I64{16} }
+UI_STORE_EVENT_CHANGED_FIELDS :: comptime { I64{24} }
+UI_STORE_EVENT_CURSOR :: comptime { I64{32} }
+UI_STORE_EVENT_KIND :: comptime { I64{40} }
 
 // JetKey private enum: raw u32 Char/Ctrl payload, raw i64 F payload.
-UI_KEY_BYTES :: prep { I64{16} }
-UI_KEY_KIND :: prep { I64{0} }
-UI_KEY_PAYLOAD :: prep { I64{8} }
+UI_KEY_BYTES :: comptime { I64{16} }
+UI_KEY_KIND :: comptime { I64{0} }
+UI_KEY_PAYLOAD :: comptime { I64{8} }
 
 // InputEvent and TuiEvent: tag plus inline Size16 or owned/scalar pair.
-UI_EVENT_BYTES :: prep { I64{24} }
-UI_EVENT_KIND :: prep { I64{0} }
-UI_EVENT_FIRST :: prep { I64{8} }
-UI_EVENT_SECOND :: prep { I64{16} }
+UI_EVENT_BYTES :: comptime { I64{24} }
+UI_EVENT_KIND :: comptime { I64{0} }
+UI_EVENT_FIRST :: comptime { I64{8} }
+UI_EVENT_SECOND :: comptime { I64{16} }
 
 // Preview Device inline tag/text, narrow viewport scalars in private words.
-UI_PREVIEW_BYTES :: prep { I64{40} }
-UI_PREVIEW_DEVICE :: prep { I64{0} }
-UI_PREVIEW_CUSTOM :: prep { I64{8} }
-UI_PREVIEW_WIDTH :: prep { I64{16} }
-UI_PREVIEW_HEIGHT :: prep { I64{24} }
-UI_PREVIEW_SCALE :: prep { I64{32} }
+UI_PREVIEW_BYTES :: comptime { I64{40} }
+UI_PREVIEW_DEVICE :: comptime { I64{0} }
+UI_PREVIEW_CUSTOM :: comptime { I64{8} }
+UI_PREVIEW_WIDTH :: comptime { I64{16} }
+UI_PREVIEW_HEIGHT :: comptime { I64{24} }
+UI_PREVIEW_SCALE :: comptime { I64{32} }
 // VirtualPlan twelve raw i64 fields then an owned sequence of inline pairs.
-UI_VIRTUAL_BYTES :: prep { I64{104} }
-UI_VIRTUAL_MEASUREMENTS :: prep { I64{96} }
-UI_VIRTUAL_WORD_BYTES :: prep { I64{8} }
-UI_VIRTUAL_PAIR_BYTES :: prep { I64{16} }
+UI_VIRTUAL_BYTES :: comptime { I64{104} }
+UI_VIRTUAL_MEASUREMENTS :: comptime { I64{96} }
+UI_VIRTUAL_WORD_BYTES :: comptime { I64{8} }
+UI_VIRTUAL_PAIR_BYTES :: comptime { I64{16} }
 
 // Raylib metadata: no destructor closes/unloads native resources in the seed.
-UI_RAYLIB_WINDOW_BYTES :: prep { I64{32} }
-UI_RAYLIB_WINDOW_WIDTH :: prep { I64{0} }
-UI_RAYLIB_WINDOW_HEIGHT :: prep { I64{8} }
-UI_RAYLIB_WINDOW_TITLE :: prep { I64{16} }
-UI_RAYLIB_WINDOW_NATIVE :: prep { I64{24} }
-UI_RAYLIB_ATLAS_BYTES :: prep { I64{64} }
-UI_RAYLIB_ATLAS_PATH :: prep { I64{0} }
-UI_RAYLIB_ATLAS_NAME :: prep { I64{8} }
-UI_RAYLIB_ATLAS_TEXTURE_PATH :: prep { I64{16} }
-UI_RAYLIB_ATLAS_REGIONS :: prep { I64{24} }
-UI_RAYLIB_ATLAS_TEXTURE_PRESENT :: prep { I64{32} }
-UI_RAYLIB_ATLAS_TEXTURE :: prep { I64{40} }
-UI_RAYLIB_ATLAS_TEXTURE_SECOND :: prep { I64{48} }
-UI_RAYLIB_ATLAS_TEXTURE_LAST :: prep { I64{56} }
-UI_RAYLIB_REGION_BYTES :: prep { I64{40} }
-UI_RAYLIB_REGION_X :: prep { I64{8} }
-UI_RAYLIB_REGION_WORD_BYTES :: prep { I64{8} }
+UI_RAYLIB_WINDOW_BYTES :: comptime { I64{32} }
+UI_RAYLIB_WINDOW_WIDTH :: comptime { I64{0} }
+UI_RAYLIB_WINDOW_HEIGHT :: comptime { I64{8} }
+UI_RAYLIB_WINDOW_TITLE :: comptime { I64{16} }
+UI_RAYLIB_WINDOW_NATIVE :: comptime { I64{24} }
+UI_RAYLIB_ATLAS_BYTES :: comptime { I64{64} }
+UI_RAYLIB_ATLAS_PATH :: comptime { I64{0} }
+UI_RAYLIB_ATLAS_NAME :: comptime { I64{8} }
+UI_RAYLIB_ATLAS_TEXTURE_PATH :: comptime { I64{16} }
+UI_RAYLIB_ATLAS_REGIONS :: comptime { I64{24} }
+UI_RAYLIB_ATLAS_TEXTURE_PRESENT :: comptime { I64{32} }
+UI_RAYLIB_ATLAS_TEXTURE :: comptime { I64{40} }
+UI_RAYLIB_ATLAS_TEXTURE_SECOND :: comptime { I64{48} }
+UI_RAYLIB_ATLAS_TEXTURE_LAST :: comptime { I64{56} }
+UI_RAYLIB_REGION_BYTES :: comptime { I64{40} }
+UI_RAYLIB_REGION_X :: comptime { I64{8} }
+UI_RAYLIB_REGION_WORD_BYTES :: comptime { I64{8} }
 
-UI_GRANTED_PATH_BYTES :: prep { I64{24} }
-UI_GRANTED_PATH_PATH :: prep { I64{0} }
-UI_GRANTED_PATH_ROOT :: prep { I64{8} }
-UI_GRANTED_PATH_ACCESS :: prep { I64{16} }
-UI_DIALOG_BYTES :: prep { I64{56} }
-UI_DIALOG_KIND :: prep { I64{0} }
-UI_DIALOG_TITLE :: prep { I64{8} }
-UI_DIALOG_GRANT :: prep { I64{16} }
-UI_DIALOG_INITIAL :: prep { I64{32} }
-UI_DIALOG_FILTERS :: prep { I64{40} }
-UI_DIALOG_MULTIPLE :: prep { I64{48} }
+UI_GRANTED_PATH_BYTES :: comptime { I64{24} }
+UI_GRANTED_PATH_PATH :: comptime { I64{0} }
+UI_GRANTED_PATH_ROOT :: comptime { I64{8} }
+UI_GRANTED_PATH_ACCESS :: comptime { I64{16} }
+UI_DIALOG_BYTES :: comptime { I64{56} }
+UI_DIALOG_KIND :: comptime { I64{0} }
+UI_DIALOG_TITLE :: comptime { I64{8} }
+UI_DIALOG_GRANT :: comptime { I64{16} }
+UI_DIALOG_INITIAL :: comptime { I64{32} }
+UI_DIALOG_FILTERS :: comptime { I64{40} }
+UI_DIALOG_MULTIPLE :: comptime { I64{48} }
 
 // Native seed UIHostError eight variants, independent of Core UIHostError.
-UI_HOST_ERROR_BYTES :: prep { I64{32} }
-UI_HOST_ERROR_KIND :: prep { I64{0} }
-UI_HOST_ERROR_FIRST :: prep { I64{8} }
-UI_HOST_ERROR_SECOND :: prep { I64{16} }
-UI_HOST_ERROR_THIRD :: prep { I64{24} }
+UI_HOST_ERROR_BYTES :: comptime { I64{32} }
+UI_HOST_ERROR_KIND :: comptime { I64{0} }
+UI_HOST_ERROR_FIRST :: comptime { I64{8} }
+UI_HOST_ERROR_SECOND :: comptime { I64{16} }
+UI_HOST_ERROR_THIRD :: comptime { I64{24} }
 
 // Seed-native clipboard success payloads; raw usize is not exact Int.
-UI_TEXT_RANGE_BYTES :: prep { I64{16} }
-UI_TEXT_RANGE_START :: prep { I64{0} }
-UI_TEXT_RANGE_END :: prep { I64{8} }
-UI_CLIPBOARD_TEXT_BYTES :: prep { I64{16} }
-UI_CLIPBOARD_TEXT_TEXT :: prep { I64{0} }
-UI_CLIPBOARD_TEXT_SELECTION :: prep { I64{8} }
-UI_CLIPBOARD_WRITE_BYTES :: prep { I64{8} }
-UI_CLIPBOARD_WRITE_CHARACTERS :: prep { I64{0} }
+UI_TEXT_RANGE_BYTES :: comptime { I64{16} }
+UI_TEXT_RANGE_START :: comptime { I64{0} }
+UI_TEXT_RANGE_END :: comptime { I64{8} }
+UI_CLIPBOARD_TEXT_BYTES :: comptime { I64{16} }
+UI_CLIPBOARD_TEXT_TEXT :: comptime { I64{0} }
+UI_CLIPBOARD_TEXT_SELECTION :: comptime { I64{8} }
+UI_CLIPBOARD_WRITE_BYTES :: comptime { I64{8} }
+UI_CLIPBOARD_WRITE_CHARACTERS :: comptime { I64{0} }
 
-UI_SHORTCUT_BINDING_BYTES :: prep { I64{32} }
-UI_SHORTCUT_BINDING_SHORTCUT :: prep { I64{0} }
-UI_SHORTCUT_BINDING_ACTION :: prep { I64{16} }
-UI_SHORTCUT_BINDING_NODE :: prep { I64{24} }
-UI_SHORTCUT_DISPATCH_BYTES :: prep { I64{40} }
-UI_SHORTCUT_DISPATCH_KIND :: prep { I64{0} }
-UI_SHORTCUT_DISPATCH_BINDING :: prep { I64{8} }
+UI_SHORTCUT_BINDING_BYTES :: comptime { I64{32} }
+UI_SHORTCUT_BINDING_SHORTCUT :: comptime { I64{0} }
+UI_SHORTCUT_BINDING_ACTION :: comptime { I64{16} }
+UI_SHORTCUT_BINDING_NODE :: comptime { I64{24} }
+UI_SHORTCUT_DISPATCH_BYTES :: comptime { I64{40} }
+UI_SHORTCUT_DISPATCH_KIND :: comptime { I64{0} }
+UI_SHORTCUT_DISPATCH_BINDING :: comptime { I64{8} }
 
-UI_ACCESSIBILITY_PROJECTION_BYTES :: prep { I64{48} }
-UI_ACCESSIBILITY_PROJECTION_NODE :: prep { I64{0} }
-UI_ACCESSIBILITY_PROJECTION_METADATA :: prep { I64{8} }
+UI_ACCESSIBILITY_PROJECTION_BYTES :: comptime { I64{48} }
+UI_ACCESSIBILITY_PROJECTION_NODE :: comptime { I64{0} }
+UI_ACCESSIBILITY_PROJECTION_METADATA :: comptime { I64{8} }
 
-UI_IME_COMPOSITION_BYTES :: prep { I64{32} }
-UI_IME_COMPOSITION_TEXT :: prep { I64{0} }
-UI_IME_COMPOSITION_SELECTION :: prep { I64{8} }
-UI_IME_COMPOSITION_MARKED :: prep { I64{24} }
-UI_IME_EVENT_BYTES :: prep { I64{24} }
-UI_IME_EVENT_TARGET :: prep { I64{0} }
-UI_IME_EVENT_PHASE :: prep { I64{8} }
-UI_IME_EVENT_COMPOSITION :: prep { I64{16} }
+UI_IME_COMPOSITION_BYTES :: comptime { I64{32} }
+UI_IME_COMPOSITION_TEXT :: comptime { I64{0} }
+UI_IME_COMPOSITION_SELECTION :: comptime { I64{8} }
+UI_IME_COMPOSITION_MARKED :: comptime { I64{24} }
+UI_IME_EVENT_BYTES :: comptime { I64{24} }
+UI_IME_EVENT_TARGET :: comptime { I64{0} }
+UI_IME_EVENT_PHASE :: comptime { I64{8} }
+UI_IME_EVENT_COMPOSITION :: comptime { I64{16} }
 
-UI_DROP_ITEM_BYTES :: prep { I64{32} }
-UI_DROP_ITEM_KIND :: prep { I64{0} }
-UI_DROP_ITEM_PAYLOAD :: prep { I64{8} }
-UI_DRAG_EVENT_BYTES :: prep { I64{32} }
-UI_DRAG_EVENT_TARGET :: prep { I64{0} }
-UI_DRAG_EVENT_PHASE :: prep { I64{8} }
-UI_DRAG_EVENT_OPERATION :: prep { I64{16} }
-UI_DRAG_EVENT_ITEMS :: prep { I64{24} }
+UI_DROP_ITEM_BYTES :: comptime { I64{32} }
+UI_DROP_ITEM_KIND :: comptime { I64{0} }
+UI_DROP_ITEM_PAYLOAD :: comptime { I64{8} }
+UI_DRAG_EVENT_BYTES :: comptime { I64{32} }
+UI_DRAG_EVENT_TARGET :: comptime { I64{0} }
+UI_DRAG_EVENT_PHASE :: comptime { I64{8} }
+UI_DRAG_EVENT_OPERATION :: comptime { I64{16} }
+UI_DRAG_EVENT_ITEMS :: comptime { I64{24} }
 
 // Seed WebForms.rs:1580-1583; two inline List24 headers and Text8 keys.
 // Keep the shared layout independent of runtime-only DataSequences constants.
-UI_FORM_ACTION_ERROR_FIELDS :: prep { I64{0} }
-UI_FORM_ACTION_ERROR_FORM :: prep { I64{24} }
-UI_FORM_ACTION_ERROR_BYTES :: prep { I64{48} }
-UI_FORM_ERROR_ENTRY_KEY :: prep { I64{0} }
-UI_FORM_ERROR_ENTRY_MESSAGES :: prep { I64{8} }
-UI_FORM_ERROR_ENTRY_BYTES :: prep { I64{32} }
+UI_FORM_ACTION_ERROR_FIELDS :: comptime { I64{0} }
+UI_FORM_ACTION_ERROR_FORM :: comptime { I64{24} }
+UI_FORM_ACTION_ERROR_BYTES :: comptime { I64{48} }
+UI_FORM_ERROR_ENTRY_KEY :: comptime { I64{0} }
+UI_FORM_ERROR_ENTRY_MESSAGES :: comptime { I64{8} }
+UI_FORM_ERROR_ENTRY_BYTES :: comptime { I64{32} }

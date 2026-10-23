@@ -92,8 +92,8 @@ use jet_parser.[
     parse_generated_source,
 ]
 
-JET_CANONICAL_EFFECT_PACKAGE_IDENTITY :: prep { "jet:canonical-prelude" }
-JET_CANONICAL_EFFECT_MODULE_PATH :: prep { "Prelude/Effects.jet" }
+JET_CANONICAL_EFFECT_PACKAGE_IDENTITY :: comptime { "jet:canonical-prelude" }
+JET_CANONICAL_EFFECT_MODULE_PATH :: comptime { "Prelude/Effects.jet" }
 
 enum SemaRegistrationNominalKind {
     Struct
@@ -770,13 +770,13 @@ fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrati
 fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
-        // `<prep N: Int>` parses into `TypeParam.prep`, but
+        // `<comptime N: Int>` parses into `TypeParam.prep`, but
         // number-parameter substitution, instance identity and layout belong
         // to card #3505. Until they land, the parameter is rejected here, the
         // one registration entry for function, method, struct, enum and alias
         // generics, and never registered as a type parameter.
         if parameter.prep != None {
-            &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet", "`<prep N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship"))
+            &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship"))
             next
         }
         duplicate :: loop previous in params {
@@ -2289,7 +2289,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // and resolve `module.f(...)` and `use module.[f]` before registration.
     module_row.inline_bindings = sema_inline_modules_lower(&module_row.program, &diagnostics)
     sema_policy_materialize(&module_row.program, policies, module_row.module_identity, module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
-    // Root `prep loop` declarations expand first, so every
+    // Root `comptime loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
     // Each `protocol` becomes its generated `.Client`/`.Server` handle types

@@ -3,7 +3,7 @@
 // manager that checks the production flags, per-claim scratch trees, and
 // bounded waits.
 
-CLI_TEST_FAKE_SYSTEMD_RUN :: prep { ``#!/bin/sh
+CLI_TEST_FAKE_SYSTEMD_RUN :: comptime { ``#!/bin/sh
 set -eu
 state=${JETPACK_FAKE_SYSTEMD_STATE:-$(dirname "$0")/../state}
 unit=
@@ -43,7 +43,7 @@ printf '%s\n' "$$" > "$state/$unit.pid"
 exec "$@"
 `` }
 
-CLI_TEST_FAKE_SYSTEMCTL :: prep { ``#!/bin/sh
+CLI_TEST_FAKE_SYSTEMCTL :: comptime { ``#!/bin/sh
 set -eu
 state=${JETPACK_FAKE_SYSTEMD_STATE:-$(dirname "$0")/../state}
 signal=TERM
@@ -78,7 +78,7 @@ exit 0
 
 // The catalog tool fixture: one script answering for every service binary
 // and readiness probe by its own name.
-CLI_TEST_CATALOG_TOOL :: prep { ``#!/bin/sh
+CLI_TEST_CATALOG_TOOL :: comptime { ``#!/bin/sh
 set -eu
 name=${0##*/}
 case "$name" in

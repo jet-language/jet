@@ -45,7 +45,7 @@ if (mode === 'assemble') {
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'compile') {
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
-  const stride = /RT_HOST_U8_STRIDE\s*::\s*prep\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
+  const stride = /RT_HOST_U8_STRIDE\s*::\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
   if (!stride) throw Error('TCP witness requires the canonical native U8 epoch');
   for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : name === 'build-http' ? [`-DJET_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
 } else if (mode === 'link') {

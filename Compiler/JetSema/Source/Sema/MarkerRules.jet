@@ -1050,7 +1050,7 @@ fn sema_marker_rules_applied_site_error(marker: Marker, rule: TAppliedRule, site
         &legal.push("{companion.site} with companion `#{companion.rule}`")
     }
     allowed := if legal.len() == 0 -> "no active attachment sites" else -> legal.join(", ")
-    fix := if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} NAME :: prep {{ value }}` — a storage marker precedes a module constant" else -> "move `#{marker.name}` to one of its registered sites"
+    fix := if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} NAME :: comptime {{ value }}` — a storage marker precedes a module constant" else -> "move `#{marker.name}` to one of its registered sites"
     sema_error("E0355", marker.span, "`#{marker.name}` cannot attach at the {sema_marker_rules_site_name(site)} site", "the registry allows `#{marker.name}` only at: {allowed}", fix)
 }
 
@@ -1614,7 +1614,7 @@ fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDecl
 // function to point at. Statements count transitively through nested blocks
 // but not through a lambda body, which compiles to its own closure. Only
 // direct self-recursion is checked, exactly as in the Rust checker.
-SEMA_INLINE_ALWAYS_MAX_STMTS :: prep { 40 }
+SEMA_INLINE_ALWAYS_MAX_STMTS :: comptime { 40 }
 
 struct SemaInlineAlwaysScan {
     target: String

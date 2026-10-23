@@ -1,4 +1,4 @@
-// A module `prep` table evaluates helper bodies before they are checked, the
+// A module `comptime` table evaluates helper bodies before they are checked, the
 // way the compiler's own registry tables are built: a one-row typed list whose
 // row is a named-payload variant holding its own typed list, optional helpers
 // matched with `.Val(...)` / `.None` patterns, enum equality in the table
@@ -87,12 +87,12 @@ fn order_rank(order: Ordering) -> Int {
     }
 }
 
-SHAPES :: prep { numeric_union() }
-RANKS :: prep { [Int]{sink_rank("core.log"), sink_rank("core.term")} }
-IS_CREDENTIAL :: prep { [Bool]{Sink.Credential == Sink.Credential, Sink.Other == Sink.Credential} }
-LABELS :: prep { [String]{label_of(Sink.Credential), label_of(Sink.Other)} }
-EFFECTS :: prep { [String]{effect_label("core.time"), effect_label("core.compute"), effect_label("core.text")} }
-ORDERS :: prep { [Int]{order_rank(sink_order(Sink.Credential)), order_rank(sink_order(Sink.Other))} }
+SHAPES :: comptime { numeric_union() }
+RANKS :: comptime { [Int]{sink_rank("core.log"), sink_rank("core.term")} }
+IS_CREDENTIAL :: comptime { [Bool]{Sink.Credential == Sink.Credential, Sink.Other == Sink.Credential} }
+LABELS :: comptime { [String]{label_of(Sink.Credential), label_of(Sink.Other)} }
+EFFECTS :: comptime { [String]{effect_label("core.time"), effect_label("core.compute"), effect_label("core.text")} }
+ORDERS :: comptime { [Int]{order_rank(sink_order(Sink.Credential)), order_rank(sink_order(Sink.Other))} }
 
 fn run() {
     print("shapes {SHAPES.len()} width {shape_width(SHAPES[0])}")

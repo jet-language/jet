@@ -237,9 +237,9 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
             project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70)
         }
         .ComptimeIf(cond: cond, then_body: then_body, else_body: else_body, span: span, ..) -> {
-            add_region(g, ordinal, "comptime_if", "prep if", span)
+            add_region(g, ordinal, "comptime_if", "comptime if", span)
             node_id :: "{g.graph_id}:stmt:{ordinal}:comptime_if"
-            add_node(g, node_id, "branch", "prep if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
+            add_node(g, node_id, "branch", "comptime if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
             add_inline(g, node_id, ordinal, "cond", src, cond.span())
             project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
             if else_body == .Val(body) { project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70) }

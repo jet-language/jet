@@ -26,7 +26,7 @@ struct LuaBindResult {
 
 // The fixed C entry points every Lua binding imports; they drive both the
 // generated import block and the reserved-name check.
-PKG_LUA_FIXED_FUNCTIONS :: prep { [(name: String, signature: String)]{
+PKG_LUA_FIXED_FUNCTIONS :: comptime { [(name: String, signature: String)]{
     (name: "open", signature: "() Int"),
     (name: "take_error", signature: "() Int"),
     (name: "cancel", signature: "(handle: Int)"),
@@ -36,7 +36,7 @@ PKG_LUA_FIXED_FUNCTIONS :: prep { [(name: String, signature: String)]{
     (name: "view_release", signature: "(handle: Int, table: Int)")
 } }
 
-PKG_LUA_RESERVED :: prep { [String]{"Session", "TableView", "LuaError", "decode_response", "decode_status"} }
+PKG_LUA_RESERVED :: comptime { [String]{"Session", "TableView", "LuaError", "decode_response", "decode_status"} }
 
 // One lexical token of the discovery scan: a name or one of `(`, `)`, `,`.
 enum LuaToken {
@@ -46,7 +46,7 @@ enum LuaToken {
 
 // The verb phrase a failing Lua build tool reports; its detail is the
 // laundered stderr line (stdout is discarded).
-PKG_LUA_TOOL_ACTION :: prep { "rejected the Lua binding input" }
+PKG_LUA_TOOL_ACTION :: comptime { "rejected the Lua binding input" }
 
 // Bind the named top-level `function name(input)` declarations of `source`.
 fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
@@ -261,7 +261,7 @@ fn pkg_lua_reserved(value: String) -> Bool Never! {
     PKG_LUA_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
-PKG_LUA_JET_SESSION :: prep { ```impl Session.Close {
+PKG_LUA_JET_SESSION :: comptime { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -292,7 +292,7 @@ fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
 ``` }
 
 // The three generated entry points per function. Hole: `name`.
-PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
+PKG_LUA_JET_FUNCTION :: comptime { ```pub fn @@name@@(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
     payload :: json.to_string(input) ?? return Err(LuaError.Protocol)
     raw :: abi.@@name@@(session.value, payload, deadline_ms)
     code :: abi.take_error()
@@ -318,7 +318,7 @@ fn @@name@@_view(session: Session, deadline_ms: Int) -> TableView LuaError! {
 
 // The embedded-VM bridge. Holes: `abi`, the c-escaped `codec` and `program`,
 // and the per-function `wrappers`.
-PKG_LUA_BRIDGE_C :: prep { ```#include <lua.h>
+PKG_LUA_BRIDGE_C :: comptime { ```#include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <stdint.h>
@@ -353,7 +353,7 @@ void @@abi@@_close(int64_t h){failed=0;int index=(int)(h&63)-1;uint32_t generati
 @@wrappers@@``` }
 
 // The JSON codec loaded into every Lua state before the user module.
-PKG_LUA_JSON_CODEC :: prep { ```
+PKG_LUA_JSON_CODEC :: comptime { ```
 jet = jet or {}; jet.null = jet.null or setmetatable({}, {__tostring=function() return "null" end})
 local kinds=setmetatable({}, {__mode="k"})
 local function decode(text)

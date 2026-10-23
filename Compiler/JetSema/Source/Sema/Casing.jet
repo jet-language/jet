@@ -61,7 +61,7 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
 // This rule applied acronym lexicon: every initials-formed word in current
 // Jet names, in canonical caps. Mirrors `ACRONYMS` in
 // crates/jet-foundation/src/Syntax/acronyms.rs.
-SEMA_CASING_ACRONYMS :: prep { [String]{
+SEMA_CASING_ACRONYMS :: comptime { [String]{
     "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
     "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DKIM", "DMA", "DNS",
     "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
@@ -162,7 +162,7 @@ fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics
     }
 }
 
-// A `<prep N: Int>` number parameter is rejected with E0390 by
+// A `<comptime N: Int>` number parameter is rejected with E0390 by
 // registration, so it has no type-parameter casing to check.
 fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) {
     if parameter.prep != None -> return

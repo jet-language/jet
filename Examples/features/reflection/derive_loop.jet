@@ -1,7 +1,7 @@
-// D-STRUCT-ONCE1=A: one typed `prep loop` mechanism reaches derive/marker bodies,
+// D-STRUCT-ONCE1=A: one typed `comptime loop` mechanism reaches derive/marker bodies,
 // root impl items, and interpolated test declarations.
 derive T.FieldNames {
-    prep loop field in T.$fields {
+    comptime loop field in T.$fields {
         method :: "field_{field.$name}"
         fn $method(self) -> String { field.$name }
     }
@@ -9,7 +9,7 @@ derive T.FieldNames {
 
 marker AddMarkerFields($sites: [.Type]) {
     type_name :: target.$name
-    prep loop field in target.$fields {
+    comptime loop field in target.$fields {
         method :: "marked_{field.$name}"
         impl $type_name {
             fn $method(self) -> String { field.$name }
@@ -27,15 +27,15 @@ struct Case {
     n: Int
 }
 
-CASES :: prep { [Case]{Case{n: 1}, Case{n: 2}} }
+CASES :: comptime { [Case]{Case{n: 1}, Case{n: 2}} }
 
-prep loop T in [Point] {
+comptime loop T in [Point] {
     impl T {
         fn generated(self) -> String { "generated" }
     }
 }
 
-prep loop case in CASES {
+comptime loop case in CASES {
     #Test("case {case.n}") {
         .measure {
             assert(case.n > 0)

@@ -220,7 +220,7 @@ fn codegen_controls_are_four_separate_registry_rows_and_projections() {
     assert!(applied_rule("Static").unwrap().sites.contains(&RuleSite::Constant));
     assert!(!applied_rule("Static").unwrap().sites.contains(&RuleSite::Function));
     assert!(!applied_rule("Kernel").unwrap().sites.contains(&RuleSite::Constant));
-    let bundle = clean(&[("main.jet", "#Inline fn hint(value: Int) -> Int { value + 1 }\n#Inline(.Always) fn promise(value: Int) -> Int { value + 1 }\n#Scalar fn scalar(value: Int) -> Int { value + 1 }\n#Kernel(.parallel) fn kernel(value: Int) -> Int { value + 1 }\n#Static TABLE :: prep { 7 }\nfn run() { print(TABLE) }\n")]);
+    let bundle = clean(&[("main.jet", "#Inline fn hint(value: Int) -> Int { value + 1 }\n#Inline(.Always) fn promise(value: Int) -> Int { value + 1 }\n#Scalar fn scalar(value: Int) -> Int { value + 1 }\n#Kernel(.parallel) fn kernel(value: Int) -> Int { value + 1 }\n#Static TABLE :: comptime { 7 }\nfn run() { print(TABLE) }\n")]);
     let items = &bundle.modules[bundle.entry].items;
     assert!(function(items, "hint").is_inline);
     assert!(!function(items, "hint").is_inline_always);

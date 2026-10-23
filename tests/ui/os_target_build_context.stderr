@@ -1,8 +1,8 @@
-Error [E-OSTARGET-BUILD-CONTEXT]: A `prep if … == { … }` dispatch branches on `$build.os`
-  --> tests/ui/os_target_build_context.jet:2:19
+Error [E-OSTARGET-BUILD-CONTEXT]: A `comptime if … == { … }` dispatch branches on `$build.os`
+  --> tests/ui/os_target_build_context.jet:2:23
     |
-  2 |     prep if build.arch == {
-    |                   ^^^^
+  2 |     comptime if build.arch == {
+    |                       ^^^^
  Why: `$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)
- Fix: Write `prep if $build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time
+ Fix: Write `comptime if $build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time
 More: jet-lang.dev/e/E-OSTARGET-BUILD-CONTEXT

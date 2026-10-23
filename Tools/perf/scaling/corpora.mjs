@@ -20,7 +20,7 @@
 // Both compilers build these packages: one package, one flat namespace across
 // its files (E0624 forbids the same top-level name in two files), no path
 // dependencies (the bootstrap runner authorizes one source root), no bounded
-// trait method calls through a type parameter and no mutation inside `prep`
+// trait method calls through a type parameter and no mutation inside `comptime`
 // (both unsupported by the generated compiler today).
 
 import { DOMAINS } from './domains.mjs';
@@ -226,7 +226,7 @@ function comptime(n, r) {
   for (let i = 0; i < n; i++) {
     const a = r.int(3, 40);
     const b = r.int(5, 90);
-    const lines = [i % 3 === 2 ? `LIMIT_${i} :: prep { LIMIT_${i - 1} * 2 + ${b} }` : `LIMIT_${i} :: prep { ${a} * 7 + ${b} }`, ''];
+    const lines = [i % 3 === 2 ? `LIMIT_${i} :: comptime { LIMIT_${i - 1} * 2 + ${b} }` : `LIMIT_${i} :: comptime { ${a} * 7 + ${b} }`, ''];
     if (i % 2 === 0) {
       lines.push(`struct Gauge${i} {`, '    level: Int', '}', '', `impl Gauge${i} {`,
         `    fn clamp(self) -> Int { if self.level > LIMIT_${i} -> LIMIT_${i} else -> self.level }`, '}', '',

@@ -108,7 +108,7 @@ use jet_lexer.[
     Token,
 ]
 
-MAX_EXPRESSION_DEPTH :: prep { 256 }
+MAX_EXPRESSION_DEPTH :: comptime { 256 }
 
 struct ParsedExpr {
     expr: Expr
@@ -628,15 +628,14 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
             span: span,
         }
     }
-    // `prep { … }` in value position. The block's final
+    // `comptime { … }` in value position. The block's final
     // expression is its value, but no build-time value fold exists yet, so
-    // the block is consumed and E0391 teaches the statement form. Where a
-    // struct literal cannot follow (`if prep { … }`), `prep` stays a name.
+    // the block is consumed and E0391 teaches the statement form.
     if allow_struct_lit && parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
         parser_bump(&state)
         block :: parser_parse_block(&state)
         span :: parser_cover(token.span, block.span)
-        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value in a form this compiler does not support yet", "Jet makes the block's final expression its value; today only `name :: prep {{ value }}` with a single final expression is evaluated while building", "write `name :: prep {{ value }}` with one final expression, or bind the result inside a `prep {{ … }}` statement block")
+        parser_add_error_code(&state, "E0391", span, "`comptime {{ … }}` is used as a value in a form this compiler does not support yet", "Jet makes the block's final expression its value; today only `name :: comptime {{ value }}` with a single final expression is evaluated while building", "write `name :: comptime {{ value }}` with one final expression, or bind the result inside a `comptime {{ … }}` statement block")
         return ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(&state)}, span: span}
     }
     if allow_struct_lit && parser_typed_literal_head_ahead(&state) {

@@ -52,7 +52,7 @@ const collectionsPath = 'Compiler/JetRuntime/Source/Collections.jet';
 const collections = readFileSync(join(root, collectionsPath));
 const collectionsInput = admitted.provenance.source.files.find(row => row.path === collectionsPath);
 if (!collectionsInput || nativePackHash(collections) !== collectionsInput.sha256) throw Error('canonical U8 carrier source differs from the RC runtime');
-const stride = /RT_HOST_U8_STRIDE\s*::\s*prep\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections.toString('utf8'))?.[1];
+const stride = /RT_HOST_U8_STRIDE\s*::\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections.toString('utf8'))?.[1];
 if (!stride) throw Error('canonical U8 carrier source has no admitted epoch');
 const sourceHandle = fileObject(source), compilerHandle = fileObject(jet);
 const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => ({ path: resolve(musl, name), handle: fileObject(resolve(musl, name)) }));

@@ -1279,7 +1279,7 @@ fn build() -> [Int] {
     return xs
 }
 fn run() {
-    built :: prep { build() }
+    built :: comptime { build() }
     print(\"{built}\")
     print(\"{built[1]}\")
 }
@@ -1292,7 +1292,7 @@ fn run() {
 #[test]
 fn lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers() {
     let src = r#"
-TOWER :: prep { 99 }
+TOWER :: comptime { 99 }
 fn choose(tower: Int) -> Int { tower }
 fn run() {
     print(choose(7))
@@ -1306,9 +1306,9 @@ fn run() {
 #[test]
 fn embedded_comptime_integer_constants_keep_exact_values_on_all_tiers() {
     let src = r#"
-MASK :: prep { 0xffffffffffffffff }
-BELOW :: prep { -9223372036854775809 }
-EDGE :: prep { 9223372036854775807 }
+MASK :: comptime { 0xffffffffffffffff }
+BELOW :: comptime { -9223372036854775809 }
+EDGE :: comptime { 9223372036854775807 }
 fn run() {
     print(MASK)
     print(BELOW)
@@ -1331,7 +1331,7 @@ fn run() {
 #[test]
 fn comptime_enum_constant_ignores_unreachable_type_body_methods_on_all_tiers() {
     let src = r#"
-COLORS :: prep { [Color]{Color.Red, Color.Green} }
+COLORS :: comptime { [Color]{Color.Red, Color.Green} }
 enum Color {
     Red
     Green
@@ -1579,8 +1579,8 @@ enum Light {
     Green
 }
 
-PAIR_VALUE :: prep { Pair{left: 7, right: \"seven\"} }
-LIGHT_VALUE :: prep { Light.Green }
+PAIR_VALUE :: comptime { Pair{left: 7, right: \"seven\"} }
+LIGHT_VALUE :: comptime { Light.Green }
 
 fn run() {
     p :: Pair{left: 7, right: \"seven\"}
