@@ -1,0 +1,9 @@
+# tests/taskgroup_params.rs::parameter_spawn_rejects_view_capture at tests/taskgroup_params.rs:203; hand-port
+fixture: parameter_spawn_rejects_view_capture.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/taskgroup_params.rs:212 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/taskgroup_params.rs:212 the errors are exactly E1102
+json: stdout doc $.reports[?code="E1102"] #= 1 # tests/taskgroup_params.rs:212 reports E1102

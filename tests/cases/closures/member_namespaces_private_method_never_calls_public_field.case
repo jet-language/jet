@@ -1,0 +1,11 @@
+# tests/closures.rs::member_namespaces_private_method_never_calls_public_field at tests/closures.rs:536; hand-port
+# Source migration: the Rust loader found the sibling `worker.jet` by itself; Jet imports it with `use "worker"` first.
+fixture: member_namespaces_private_method_never_calls_public_field.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check run.jet
+exit: 1 # tests/closures.rs:543 sema errors
+stderr: ~ "Error [E0605]" # tests/closures.rs:544 the private method is selected, E0605
+stderr: ~ "step" # tests/closures.rs:544 naming `step`
+stderr: !~ "[E0105]" # tests/closures.rs:545 no duplicate-member error

@@ -1,0 +1,9 @@
+# tests/resource_close.rs::borrowed_close_owner_keeps_the_borrowed_move_diagnostic at tests/resource_close.rs:618; hand-port
+fixture: borrowed_close_owner_keeps_the_borrowed_move_diagnostic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/resource_close.rs:632 is rejected
+json: stdout doc $.reports[?code="E0201"] #>= 1 # tests/resource_close.rs:632 reports E0201
+json: stdout doc $.reports[?code="E0222"] #= 0 # tests/resource_close.rs:632 never reports E0222

@@ -1,0 +1,19 @@
+
+fn spawn_bad(_group: Group) {
+    _bad :: task panic("child")
+}
+
+fn leave() -> Int {
+    task.group group {
+        spawn_bad(group)
+        total := 0
+        loop n in 0..<2000000 { total += n }
+        return 1
+    }
+    return 0
+}
+
+fn run() {
+    leave()
+    print("after")
+}

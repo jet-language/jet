@@ -1,0 +1,19 @@
+# tests/refutable_test_bind.rs::refutable_variant_owner_fixture_matches_all_tiers at tests/refutable_test_bind.rs:128; hand-port
+fixture: refutable_variant_owner_fixture_matches_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+requires: tool:node
+step r1rel: jet run --release r1/refutable_variant_owner.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/patterns/refutable_variant_owner.out # tests/refutable_test_bind.rs:131 assert_example_cli_tiers_agree
+step r1: jet run r1/refutable_variant_owner.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/patterns/refutable_variant_owner.out # tests/refutable_test_bind.rs:131 assert_example_cli_tiers_agree
+stdout: == r1rel # tir_support assert_example_cli_tiers_agree release/default agreement
+step: jet build --target web r2/run.jet
+exit: 0
+step r2web: node app.js
+cwd: r2/.jet/build
+exit: 0
+stdout: = ../../../Examples/features/expected/patterns/refutable_variant_owner.out # tests/refutable_test_bind.rs:135 assert_awaited_web_tier

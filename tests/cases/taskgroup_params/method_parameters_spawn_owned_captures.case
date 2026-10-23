@@ -1,0 +1,14 @@
+# tests/taskgroup_params.rs::method_parameters_spawn_owned_captures at tests/taskgroup_params.rs:290; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: method_parameters_spawn_owned_captures.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = "42\n" # tests/taskgroup_params.rs:424 run_default_multi
+step: jet build r2/method_parameter_group.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "42\n" # tests/taskgroup_params.rs:430 build_and_run_full with prefix jet_taskgroup (if have_rustc)

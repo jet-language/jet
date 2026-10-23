@@ -550,14 +550,41 @@ tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target.
 tests/cases/web_scaffold/jet_new_web_scaffold_runs_from_new_to_browser.case	#5454	jet build --target web is E2104 `jet build --target=web` is not part of the Jet-hosted CLI yet (#5201)
 tests/cases/jetpack_acquisition/non_tty_download_without_yes_fails_before_realization.case	#5454	needs a Jet-built jetpack binary (#4589)
 tests/cases/diagnostic_gate/warnings_never_choose_execution_exit_code.case	#5454	E2104 the Jet backend can't build main.jet: core.http.client get (runtime route jet_http_client_get) (#5519)
-tests/cases/int_division/storing_a_quotient_in_a_whole_number_points_at_floor_division.case	#5454	E0108 This needs Int, but the value is Fraction; the Fix no longer says Use `/%` to divide and round down
-tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case	#5454	U8 bit_xor I8 reports E0108 and Float bit_xor reports E0311 (no bit_xor on Float), not E0109
-tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case	#5454	`12 ^ 2` reports E0003 Expected `,` between call arguments, not E0398
-tests/cases/power_and_exclusive_or/power_result_types_follow_the_operands.case	#5454	ICE: semantic body rechecking: the statement `Float{2.0}.pow(10)` checked incomplete without a report
-tests/cases/run_entry/loose_top_level_statements_require_explicit_run.case	#5454	`limit :: 2` then `print(limit)` reports only E0357 Constant `limit` must be ALL_CAPS; no E0621
-tests/cases/run_entry/loose_statements_are_rejected_even_with_explicit_run.case	#5454	ICE: unsupported program form `script body` (semantic declaration checking)
-tests/cases/sema_burndown/mapped_byte_element_and_copy_inference_tiers.case	#5454	E2305 Returned views need a stable owner relationship on a local `mapped.window_len(0, 1)`
-tests/cases/sema_burndown/source_qualified_file_scope_read_tiers.case	#5454	E2104 the Jet backend can not build files.scope: struct literal of FileScope; runtime route jet_files_scope_roots_raw
-tests/cases/tir_core_and_closures/parallel_collection_adapters_use_stable_bounded_chunks.case	#5454	E1102 `parallel callback` can not cross a parallel worker boundary because `callback` is not sendable (values.para_map(double))
-tests/cases/tir_io_and_ownership/qualified_io_input_or_return.case	#5454	E2104 the Jet backend can not build term.input: runtime route jet_std_io_input
-tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.case	#5454	E2104 the Jet backend can not build peek: expression RawOf (`p :: *cell`)
+tests/cases/int_division/storing_a_quotient_in_a_whole_number_points_at_floor_division.case	#5454	E0108 This needs Int, but the value is Fraction; the Fix no longer says Use `/%` to divide and round down (#5523)
+tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case	#5454	U8 bit_xor I8 reports E0108 and Float bit_xor reports E0311 (no bit_xor on Float), not E0109 (#5524)
+tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case	#5454	`12 ^ 2` reports E0003 Expected `,` between call arguments, not E0398 (#5525)
+tests/cases/power_and_exclusive_or/power_result_types_follow_the_operands.case	#5454	ICE: semantic body rechecking: the statement `Float{2.0}.pow(10)` checked incomplete without a report (#5526)
+tests/cases/run_entry/loose_top_level_statements_require_explicit_run.case	#5454	`limit :: 2` then `print(limit)` reports only E0357 Constant `limit` must be ALL_CAPS; no E0621 (#5527)
+tests/cases/run_entry/loose_statements_are_rejected_even_with_explicit_run.case	#5454	ICE: unsupported program form `script body` (semantic declaration checking) (#5528)
+tests/cases/sema_burndown/mapped_byte_element_and_copy_inference_tiers.case	#5454	E2305 Returned views need a stable owner relationship on a local `mapped.window_len(0, 1)` (#5529)
+tests/cases/sema_burndown/source_qualified_file_scope_read_tiers.case	#5454	E2104 the Jet backend can not build files.scope: struct literal of FileScope; runtime route jet_files_scope_roots_raw (#5530)
+tests/cases/tir_core_and_closures/parallel_collection_adapters_use_stable_bounded_chunks.case	#5454	E1102 `parallel callback` can not cross a parallel worker boundary because `callback` is not sendable (values.para_map(double)) (#5531)
+tests/cases/tir_io_and_ownership/qualified_io_input_or_return.case	#5454	E2104 the Jet backend can not build term.input: runtime route jet_std_io_input (#5532)
+tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.case	#5454	E2104 the Jet backend can not build peek: expression RawOf (`p :: *cell`) (#5533)
+tests/cases/arena/close_while_a_view_is_live_is_e0212.case	#5454	jet check reports E0905, not E0220, E0212
+tests/cases/arena/erased_close_does_not_consume_arena_owner.case	#5454	E0905 `Arena` isn't `Close`
+tests/cases/arena/explicit_region_spans_two_arenas.case	#5454	E2104 the Jet backend can't build it yet: run [function:fixture.run]: expression AllocNew at fixture.jet:69..72
+tests/cases/arena/region_confines_view_escape.case	#5454	jet check accepts it; Rust reported E0212
+tests/cases/arena/reset_in_loop_invalidates_view_after_loop.case	#5454	jet check accepts it; Rust reported E0632
+tests/cases/arena/reset_on_branch_invalidates_view_at_join.case	#5454	jet check accepts it; Rust reported E0632
+tests/cases/arena/use_after_close_is_e0121_before_backend.case	#5454	jet check reports E0905, not E0121
+tests/cases/arena/use_after_reset_is_e0632.case	#5454	jet check accepts it; Rust reported E0632
+tests/cases/arena/view_escape_is_e0631.case	#5454	jet check accepts it; Rust reported E0631
+tests/cases/arena/view_stored_in_binding_is_e0631.case	#5454	jet check accepts it; Rust reported E0212
+tests/cases/closures/member_namespaces_keep_within_kind_duplicates.case	#5454	E0105 says "`step` is defined twice" without naming the member kind; Rust named "field `step`" / "method `step`"
+tests/cases/closures/member_namespaces_preserve_method_receiver_and_effect_checks.case	#5454	the `&self` method call compiles without E0224, and the effect ceiling reports E3401 instead of E0740
+tests/cases/closures/member_namespaces_private_method_never_calls_public_field.case	#5454	jet check accepts `worker.step(1)` through the public callable field; Rust selected the private method and reported E0605
+tests/cases/closures/member_namespaces_wrong_method_arguments_never_call_the_field.case	#5454	jet check accepts `worker.step()` through the callable field; Rust selected the method and reported E0766 for the missing `amount`
+tests/cases/encoding_edition/edition_2027_json_canonical_is_fallible_jcs.case	#5454	E2001 Package manifest requests an unsupported language edition
+tests/cases/encoding_edition/user_deprecated_marker_emits_l2001_for_a_consumer.case	#5454	E2001 Package manifest requests an unsupported language edition
+tests/cases/generics/explicit_generic_calls_cover_value_and_result_only_arguments.case	#5454	E2104 the Jet backend can't build it yet: run [function:main.run]: expression AmbientInput at main.jet:157..162
+tests/cases/generics/generic_method_calls_keep_owner_and_method_arguments_separate.case	#5454	E0764 `convert` has no parameter labelled `value`
+tests/cases/generics/generic_module_diagnostics_hide_instance_mangling.case	#5454	E0113 This value is `M5BoxedEntry`, but `wrong` returns String
+tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing.case	#5454	jet check reports E0905, not E0112, E0112, E0112, E0109, E0112
+tests/cases/numeric_methods/named_bit_methods_emit_and_run_on_u8_i64_u64.case	#5454	E2104 the Jet backend can't build it yet: run [function:named_bit_methods_aot.run]: fixed-width power at named_bit_methods_aot.jet:152..155
+tests/cases/numeric_methods/named_methods_cover_exact_and_fixed_integer_widths.case	#5454	E2104 the Jet backend can't build it yet: run [function:numeric_methods.run]: runtime route jet_fraction_numerator handle argument of Int at numeric_methods.jet:1477..1486
+tests/cases/refutable_test_bind/refutable_variant_owner_fixture_matches_all_tiers.case	#5454	release and default tiers agree; the awaited web tier fails: `jet build --target web` is not part of the Jet-hosted CLI yet (E2104) (#5201)
+tests/cases/taskgroup_params/default_run_joins_helper_spawn_before_outer_exit.case	#5454	E2104 the Jet backend can't build it yet: run [function:main.run]: host call Method shared.edit at main.jet:445..454; spawn_later.lambda@120 [function:spawn_later#lambda@120..290]: host call Method shared.edit at main.jet:130..139
+tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues.case	#5454	L1101 `_bad` still owes `join`
+tests/cases/taskgroup_params/native_panicked_wait_closes_group_before_caller_continues.case	#5454	E2104 the Jet backend can't build it yet: slow_value [function:main.slow_value]: host call Method shared.edit at main.jet:75..84
+tests/cases/taskgroup_params/taskgroup_type_is_second_class.case	#5454	only the struct-field position reports E1110; return types report only E0113, and list/tuple/Val/closure-parameter captures of a Group compile

@@ -1,0 +1,20 @@
+# tests/numeric_methods.rs::core_sign_uses_the_source_int_contract at tests/numeric_methods.rs:44; hand-port
+fixture: core_sign_uses_the_source_int_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/core_sign_int_contract.jet
+exit: 0
+stdout: = "-1\n0\n1\n" # tests/numeric_methods.rs:47 assert_tiers_agree
+step: jet build r1/core_sign_int_contract.jet
+exit: 0
+step r1aot: built
+exit: 0
+stdout: = "-1\n0\n1\n" # tests/numeric_methods.rs:47 assert_tiers_agree
+stdout: == r1 # tir_support assert_tiers_agree AOT/run agreement
+stderr: == r1 # tir_support assert_tiers_agree AOT/run agreement
+step: jet build r2/core_sign_int_contract_aot.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "-1\n0\n1\n" # tests/numeric_methods.rs:51 build_and_run

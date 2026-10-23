@@ -1,0 +1,9 @@
+# tests/arena.rs::view_stored_in_binding_is_e0631 at tests/arena.rs:237; hand-port
+fixture: view_stored_in_binding_is_e0631.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/arena.rs:248 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/arena.rs:248 the errors are exactly E0212
+json: stdout doc $.reports[?code="E0212"] #= 1 # tests/arena.rs:248 reports E0212

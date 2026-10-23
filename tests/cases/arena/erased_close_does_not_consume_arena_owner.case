@@ -1,0 +1,15 @@
+# tests/arena.rs::erased_close_does_not_consume_arena_owner at tests/arena.rs:129; hand-port
+fixture: erased_close_does_not_consume_arena_owner.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run arena_erased_close.jet
+exit: 0
+stdout: = "42\n" # tests/arena.rs:151 assert_tiers_agree
+step: jet build arena_erased_close.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "42\n" # tests/arena.rs:151 assert_tiers_agree
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

@@ -1,0 +1,14 @@
+# tests/taskgroup_params.rs::native_panicked_wait_closes_group_before_caller_continues at tests/taskgroup_params.rs:494; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: native_panicked_wait_closes_group_before_caller_continues.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = "settled\ncaller\n" # tests/taskgroup_params.rs:424 run_default_multi
+step: jet build r2/taskgroup_wait_panic.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "settled\ncaller\n" # tests/taskgroup_params.rs:430 build_and_run_full with prefix jet_taskgroup (if have_rustc)
