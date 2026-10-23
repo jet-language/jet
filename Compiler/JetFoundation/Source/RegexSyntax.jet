@@ -2,6 +2,8 @@
 // Offsets count decoded Unicode scalar values, not UTF-8 bytes.
 
 REGEX_SYNTAX_USIZE_MAX :: prep { 0xffffffffffffffff }
+// The most a counted repetition `{n,m}` may repeat, as in RE2.
+REGEX_SYNTAX_MAX_REPEAT :: 1000
 
 struct RegexSyntaxError {
     offset: Int
@@ -167,6 +169,7 @@ fn regex_syntax_parse_quant(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
         return None
     }
     if regex_syntax_peek(parser) != Val(123) -> return None
+    start :: parser.pos
     _ := regex_syntax_bump(&parser)
     min_result :: regex_syntax_parse_number(&parser)
     if min_result.error == .Val(error) -> return Val(error)
@@ -187,6 +190,7 @@ fn regex_syntax_parse_quant(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     }
     if regex_syntax_bump(&parser) != Val(125) -> return Val(regex_syntax_error(parser, "missing `}}` in quantifier"))
     if max == .Val(value) && value < min -> return Val(regex_syntax_error(parser, "quantifier max is below min"))
+    if min > REGEX_SYNTAX_MAX_REPEAT || (max ?? 0) > REGEX_SYNTAX_MAX_REPEAT -> return Val(regex_syntax_error_at(start, "a counted repetition may repeat at most {REGEX_SYNTAX_MAX_REPEAT} times"))
     None
 }
 

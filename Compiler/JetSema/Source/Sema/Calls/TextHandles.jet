@@ -1,8 +1,5 @@
-// Checked producers for typed Regex/Match and Email values.
-// The value types are the exact Core owners selected by Registration; Regex
-// construction still enters through the existing typed literal/CoreCall
-// paths, never through a second parser or constructor route. `URL` and
-// `MIME` are the `core.net.url`/`core.net.mime` source records: their
+// Checked producers for typed Email values. `Regex`/`Match` (`core.regex`),
+// `URL` and `MIME` (`core.net.url`/`core.net.mime`) are source records: their
 // documented fields and methods resolve through the declarations, with no
 // handle twins.
 use jet_foundation.[
@@ -24,67 +21,14 @@ fn sema_text_handle_result(ok: Type, err: Type) -> Type Never! {
     sema_network_handle_result(ok, err)
 }
 
-fn sema_text_handle_string_pairs() -> Type Never! {
-    Type.List{element: Type.List{element: Type.String}}
-}
-
-fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
-    string := Type.String
-    int := Type.Int
-    match_ty := Type.Named{name: "Match"}
-    if owner == "Regex" {
-        if (method == "pattern" || method == "source" || method == "flags" || method == "options") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "names" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: string}, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "count" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, int, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if (method == "is_match" || method == "full_match") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.Bool, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if method == "match" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.Option{inner: match_ty}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if method == "find" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if (method == "find_all" || method == "split") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: string}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if method == "matches" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: match_ty}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if (method == "replace" || method == "replace_first") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_text_handle_parameter("replacement", string)}, AccessConvention.Read))
-        if method == "split_limit" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: string}, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_text_handle_parameter("limit", int)}, AccessConvention.Read))
-        if method == "replace_all_with" && argc == 2 {
-            callback := Type.Fn{params: [Type]{match_ty}, ret: Val(string), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-            spec := sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_network_handle_argument_move("replace", callback)}, AccessConvention.Read)
-            spec.callback_non_escaping = true
-            return Val(spec)
-        }
-    }
-    if owner == "Match" {
-        if (method == "group" || method == "group_start" || method == "group_end") && argc == 1 {
-            result := if method == "group" -> Type.Option{inner: string} else -> Type.Option{inner: int}
-            return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, result, [SemaCallParam]{sema_text_handle_parameter("index", Type.Int)}, AccessConvention.Read))
-        }
-        if method == "name" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
-        if (method == "start" || method == "end") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, int, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "named_captures" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
-    }
-    None
-}
-
-fn sema_text_handle_known_method(owner: String, method: String) -> Bool Never! {
-    if owner == "Regex" -> return method == "pattern" || method == "source" || method == "flags" || method == "options" || method == "names" || method == "count" || method == "is_match" || method == "full_match" || method == "match" || method == "find" || method == "find_all" || method == "matches" || method == "split" || method == "replace" || method == "replace_first" || method == "split_limit" || method == "replace_all_with"
-    if owner == "Match" -> return method == "group" || method == "name" || method == "start" || method == "end" || method == "named_captures" || method == "group_start" || method == "group_end"
-    false
-}
-fn sema_text_handle_expected_arity(owner: String, method: String) -> Int Never! {
-    if owner == "Regex" {
-        if method == "replace" || method == "replace_first" || method == "split_limit" || method == "replace_all_with" -> return 2
-        if method == "count" || method == "is_match" || method == "full_match" || method == "match" || method == "find" || method == "find_all" || method == "matches" || method == "split" -> return 1
-    }
-    if owner == "Match" && (method == "group" || method == "name" || method == "group_start" || method == "group_end") -> return 1
-    0
-}
-
 fn sema_text_handle_owner_module(owner: String) -> String Never! {
-    if owner == "Regex" || owner == "Match" -> return "core.regex"
     if owner == "Message" || owner == "Mailer" -> return "core.email"
     ""
 }
 
-// A Core owner reaches sema either by its bare leaf (`Regex`) or by the
+// A Core owner reaches sema either by its bare leaf (`Message`) or by the
 // canonical identity Registration gives a source-declared Core nominal
-// (`<corelib>/core.regex::Regex`); both name the same owner.
+// (`<corelib>/core.email::Message`); both name the same owner.
 fn sema_text_handle_nominal_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) -> Val(sema_text_handle_owner_leaf(name))
@@ -95,7 +39,7 @@ fn sema_text_handle_nominal_owner(ty: Type) -> String? {
 }
 
 fn sema_text_handle_owner_leaf(name: String) -> String Never! {
-    loop leaf in ([String]{"Regex", "Match", "Message", "Mailer"}) {
+    loop leaf in ([String]{"Message", "Mailer"}) {
         if core_identity_is(name, sema_text_handle_owner_module(leaf), leaf) -> return leaf
     }
     name.copy()
@@ -109,11 +53,11 @@ fn sema_text_handle_written_name(ty: Type) -> String Never! {
     }
 }
 
-// Rust `regex_method_return` / `email_method_return` claim a receiver by its
-// type name alone (net_text_time.rs:668). A canonical Core identity is the
-// owner itself; a bare name the module resolves names the Core owner only
-// when that declaration belongs to the owner's Core module, and a bare name
-// the module does not bind is the Core handle.
+// Rust `email_method_return` claims a receiver by its type name alone
+// (net_text_time.rs:668). A canonical Core identity is the owner itself; a
+// bare name the module resolves names the Core owner only when that
+// declaration belongs to the owner's Core module, and a bare name the module
+// does not bind is the Core handle.
 fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_text_handle_nominal_owner(receiver_type) ?? return false
     if actual != owner -> return false
@@ -125,23 +69,6 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
         if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
     }
     true
-}
-
-// Nominal Regex/Match methods. The matching TIR kinds already
-// have Source codegen routes and do not repeat typed-literal validation.
-fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if (owner != "Regex" && owner != "Match") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment, program) || !sema_text_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    spec := sema_text_handle_regex_spec(owner, method, args.len())
-    if spec == None {
-        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", sema_text_handle_expected_arity(owner, method), args.len(), false, span))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    signature := spec ?? SemaNetworkHandleSpec{operation: THandleOp.RegexMethod{kind: owner, method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
-    signature.effect_name = Val("")
-    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), AccessConvention.Read, signature.callback_non_escaping, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {

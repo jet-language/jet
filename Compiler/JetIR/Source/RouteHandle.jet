@@ -407,51 +407,6 @@ fn ir_handle_ui_route(receiver: Type, method: String) -> IRHandleRoute? {
     Val(ir_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
 }
 
-fn ir_handle_regex_route(kind: String, method: String) -> IRHandleRoute? {
-    symbol := ""
-    if {
-        kind == "Regex" -> {
-            if method == {
-                "pattern" | "source" | "flags" | "options" | "names" -> symbol = "jet_std::JetRegex::{method}"
-                "count" | "is_match" | "full_match" | "find" | "find_all" | "matches" | "split" -> symbol = "jet_std::JetRegex::{method}"
-                "match" -> symbol = "jet_std::JetRegex::match_value"
-                "replace" | "replace_first" | "replace_all_with" | "split_limit" -> symbol = "jet_std::JetRegex::{method}"
-                else -> return None
-            }
-        }
-        kind == "Match" -> {
-            if method == {
-                "start" | "end" | "named_captures" -> symbol = "jet_std::JetRegexMatch::{method}"
-                "group" -> symbol = "jet_std::JetRegexMatch::group"
-                "name" -> symbol = "jet_std::JetRegexMatch::name"
-                "group_start" | "group_end" -> symbol = "jet_std::JetRegexMatch::{method}"
-                else -> return None
-            }
-        }
-        else -> {
-            return None
-        }
-    }
-    mask := if {
-        kind == "Match" -> {
-            if method == {
-                "group" | "group_start" | "group_end" -> [Bool]{true, false}
-                "name" -> [Bool]{true, true}
-                else -> [Bool]{true}
-            }
-        }
-        else -> {
-            if method == {
-                "pattern" | "source" | "flags" | "options" | "names" | "start" | "end" | "named_captures" -> [Bool]{true}
-                "replace" | "replace_first" -> [Bool]{true, true, true}
-                "replace_all_with" | "split_limit" -> [Bool]{true, true, false}
-                else -> [Bool]{true, true}
-            }
-        }
-    }
-    Val(ir_handle_h("{kind}.{method}", symbol, mask, None))
-}
-
 fn ir_handle_app_route(method: String, source_arg_count: Int) -> IRHandleRoute? {
     arity := 0
     if method == {
@@ -797,7 +752,6 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .LoadableMethod(method) -> return ir_handle_loadable_route(method)
         .UIBackendMethod(method) -> return ir_handle_ui_route(receiver, method)
         .CivilTimeMethod(kind, method) -> return ir_handle_civil_time_route(kind, method)
-        .RegexMethod(kind, method) -> return ir_handle_regex_route(kind, method)
         .AppMethod(method, source_arg_count) -> return ir_handle_app_route(method, source_arg_count)
         .ProcessChildMethod(method) -> {
             if method == {

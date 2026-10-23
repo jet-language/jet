@@ -2520,7 +2520,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program:
             }
         }
     }
-    if !source_declaration && !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
+    if !source_declaration && !sema_network_handle_known_method(receiver_name, method) -> return false
     loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
         methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
         loop method_index in 0..<methods.len() {
@@ -3036,8 +3036,6 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     if app.handled -> return app
     network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if network.handled -> return network
-    text := sema_call_try_text_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if text.handled -> return text
     email := sema_call_try_email_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if email.handled -> return email
     reflection := sema_call_try_reflection_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

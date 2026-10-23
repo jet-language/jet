@@ -629,7 +629,9 @@ fn jet_driver_comptime_run_index(checked_functions: [SemaComptimeFunctionResult]
 
 // The owner maps of `graph`, which never changes during a run, filled in
 // ascending key order (JetDriverModuleKeyRow); a key's first registration
-// owns it and every later one marks it ambiguous.
+// owns it and a later one from another module marks it ambiguous. One module
+// lists an impl method both on its nominal and on its impl block, which is
+// the same owner.
 fn jet_driver_comptime_owners_build(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
     index.owners_built = true
     rows := jet_driver_registration_function_rows(graph)
@@ -637,7 +639,7 @@ fn jet_driver_comptime_owners_build(graph: SemaRegistrationGraph, index: &JetDri
     &rows.sort_by((left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
     loop at in 0..<rows.len() {
         if at > 0 && rows[at - 1].key == rows[at].key {
-            index.ambiguous_owners[rows[at].key] = true
+            if index.owners.get(rows[at].key) != .Val(rows[at].module_identity) -> index.ambiguous_owners[rows[at].key] = true
         } else {
             index.owners[rows[at].key] = rows[at].module_identity
         }

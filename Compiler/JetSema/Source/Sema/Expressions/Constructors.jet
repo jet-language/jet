@@ -39,6 +39,7 @@ use jet_foundation.[
     core_record_literal_fields,
     core_record_literal_is_core_only,
     core_source_owns_type,
+    core_identity_is,
     core_type_modules,
     expr_span,
     typed_head_kind_of,
@@ -1555,7 +1556,7 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
     parts := if value == {
         .Str(rows, _, _) -> rows
         else -> {
-            &diagnostics.push(sema_error("E0152", span, "`Regex.{{ … }}` needs one quoted pattern", "a regex typed literal contains pattern text, not another expression shape", "write `Regex.{{\"...\"}}`"))
+            &diagnostics.push(sema_error("E0152", span, "`Regex{{…}}` needs one quoted pattern", "a regex typed literal contains pattern text, not another expression shape", "write `Regex{{\"...\"}}`"))
             return None
         }
     }
@@ -1565,7 +1566,7 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
             .Lit(text) -> pattern = "{pattern}{text}"
             .Byte(byte) -> pattern = "{pattern}{sema_expr_byte_text(byte)}"
             .Interp(expr, _) -> {
-                &diagnostics.push(sema_error("E0152", expr_span(expr), "a `Regex` literal cannot contain interpolation", "the compiler must know the complete pattern before the program runs", "use a fixed `Regex.{{\"...\"}}` pattern, or build text and call `re.compile(text)`"))
+                &diagnostics.push(sema_error("E0152", expr_span(expr), "a `Regex` literal cannot contain interpolation", "the compiler must know the complete pattern before the program runs", "use a fixed `Regex{{\"...\"}}` pattern, or build text and call `re.compile(text)`"))
                 return None
             }
         }
@@ -1590,6 +1591,13 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
             return None
         }
     }
+}
+
+// Whether `ty` names the Regex type: the written prelude head `Regex`, or the
+// canonical `core.regex` record an expected slot resolves to.
+fn sema_expression_is_regex_head(ty: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == .Named(name) -> return name == "Regex" || core_identity_is(name, "core.regex", "Regex")
+    false
 }
 
 fn sema_expression_typed_literal_mismatch(head: Type, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1814,10 +1822,10 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
                     return sema_expression_typed_literal_text(head_kind, result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 }
             }
-            // The written `Regex` head is the compile-checked pattern literal even when
-            // `use core.regex` resolves the bare name to its source-owned record.
-            regex_head :: Type.Named{name: "Regex"}
-            if result_head == regex_head || sema_expr_unwrap_tag(written_head) == regex_head -> return sema_expression_typed_literal_regex(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            // The `Regex` head is the compile-checked pattern literal whether it is
+            // written (`Regex{…}`, which `use core.regex` may resolve to the
+            // source-owned record) or inferred from a Regex-typed slot (`{…}`).
+            if sema_expression_is_regex_head(result_head) || sema_expression_is_regex_head(written_head) -> return sema_expression_typed_literal_regex(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None

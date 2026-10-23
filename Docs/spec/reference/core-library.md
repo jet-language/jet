@@ -3304,29 +3304,47 @@ the helper types only control inputs and observations.
 
 ### `core.regex` — linear-time regular expressions
 
-`core.regex` is a Thompson/Pike VM over Unicode scalars, the same engine and
-rules as the Prelude engine, so every tier gives one answer. Matching is linear
-in the text, with no recursion and no step budget. It supports concatenation,
-alternation, capture groups numbered by their `(`, `(?:…)`, `(?<name>…)`, `*`,
-`+`, `?`, `{n}`, `{n,}`, `{n,m}`, `.`, `^`, `$` (end of text), classes over
-scalars (`[]`, `[^]`, ranges), `\d` and `\w` (ASCII), `\s` (Unicode
-White_Space), and `\p{L}`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}`,
-`\p{White_Space}` with `\P{…}` outside `[]`. `ignore_case` compares Unicode
-simple lowercase mappings; `multiline` lets `^` match after a newline;
-`dot_matches_newline` lets `.` match `\n`. Backreferences and lookaround are
-syntax errors. A malformed pattern is a typed `RegexError`. The implementation
-is in [`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
+`core.regex` is a Thompson/Pike VM over Unicode scalars, so every tier gives
+one answer. Matching is linear in the text, with no recursion and no step
+budget. It supports concatenation, alternation, capture groups numbered by
+their `(`, `(?:…)`, `(?<name>…)`, `*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}` (a count
+may be at most 1000), `.`, `^`, `$` (end of text), classes over scalars (`[]`,
+`[^]`, ranges), `\d` and `\w` (ASCII), `\s` (Unicode White_Space), and
+`\p{L}`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}`, `\p{White_Space}`
+with `\P{…}` outside `[]`. `ignore_case` compares Unicode simple lowercase
+mappings; `multiline` lets `^` match after a newline; `dot_matches_newline`
+lets `.` match `\n`. A `RegexFlags` value displays as its inline-flag letters
+(`"im"`). Backreferences and lookaround are syntax errors. A malformed pattern
+is a typed `RegexError`. The implementation is in
+[`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
 
-Checked `Regex{"…"}` literals and inferred-head `.{"…"}` arguments produce the
-same source-owned `Regex` as `compile`; they do not use a separate native regex
-carrier or engine. The compiler validates the complete literal before lowering
-it through the source `compile` function and retaining its checked success value.
+Checked `Regex{"…"}` literals and inferred-head `{"…"}` arguments in a
+`Regex`-typed slot produce the same source-owned `Regex` as `compile`; there is
+no separate native regex carrier or engine. The compiler validates the complete
+literal before lowering it through the source `compile` function and retaining
+its checked success value.
 
-`Match.start` and `Match.end` are character (Unicode scalar) positions.
-`Match.groups` is a positional list; a group that did not take part is `""`.
-`replace` expands `$0`…`$N`, `${name}` and `$$`. Use the compiled `Regex`
-value when the same expression is used repeatedly, and call `escape` for
-literal user input.
+`Regex` has the public fields `pattern` and `flags`. `Match` has the public
+fields `start`, `end`, `text` and `groups`; `start` and `end` are character
+(Unicode scalar) positions, and `groups` is a positional list in which a group
+that did not take part is `""`. `replace`, `replace_first` and `expand` share
+one template dialect: `$N` and `${N}` insert group `N` (`$0` is the whole
+match), `${name}` inserts a named group, `$$` is a literal `$`, and any other
+`$` is literal text. Use the compiled `Regex` value when the same expression is
+used repeatedly, and call `escape` for literal user input.
+
+Methods on `Regex` take the receiver as the pattern of the free function of
+the same name: `is_match`, `full_match`, `match`, `find`, `find_all`,
+`matches`, `split`, `split_limit`, `replace`, `replace_first`, plus
+`replace_all_with(text, replacer: fn(Match) -> String)`, which replaces every
+match with what `replacer` returns for it. Methods on `Match`:
+
+| Method | Result | Description |
+|---|---|---|
+| `group(n: Int) -> ?String` | text | Group `n` (0 is the whole match); none when there is no group `n` or it took no part. |
+| `name(name: String) -> ?String` | text | The named group, as `group` reports it. |
+| `group_start(n: Int) -> ?Int` | position | Character position where group `n` starts. |
+| `group_end(n: Int) -> ?Int` | position | Character position where group `n` ends. |
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3345,7 +3363,7 @@ literal user input.
 | `split_limit(pattern: Regex, text: String, n: Int) -> [String]` | text list | Split with a maximum number of matches. |
 | `replace(pattern: Regex, text: String, replacement: String) -> String` | text | Replace every match. |
 | `replace_first(pattern: Regex, text: String, replacement: String) -> String` | text | Replace only the first match. |
-| `expand(match: Match, template: String) -> String` | text | Expand numbered capture references. |
+| `expand(match: Match, template: String) -> String` | text | Expand a replacement template against a match. |
 | `purge() !RegexError` | — | Report that the source engine has no mutable cache to purge. |
 | `subn(pattern: Regex, text: String, replacement: String) -> {text: String, count: Int}` | replacement receipt | Replace matches and return their count. |
 

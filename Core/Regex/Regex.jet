@@ -11,25 +11,24 @@ package {
 
 // core.regex — one engine, compile-checked literals, fallible runtime.
 //
-// `r"..."` literals are a compiler feature. `compile` is for patterns that
-// arrive at run time. This file is the same Thompson/Pike VM as the Prelude
-// engine (Prelude/CoreLib/JetStd/Regex.rs): the pattern is parsed as Unicode
-// scalars, compiles to Consume/Save/Split/Assert/Match instructions, and one
-// scan advances every live thread a scalar at a time, so matching is linear in
-// the text with no recursion and no budget. The grammar, the instruction
-// shapes, the scan, and the match rules are the Prelude's:
+// `Regex{"..."}` literals are checked by the compiler. `compile` is for
+// patterns that arrive at run time. The engine is a Thompson/Pike VM: the
+// pattern is parsed as Unicode scalars, compiles to Consume/Save/Split/Assert/
+// Match instructions, and one scan advances every live thread a scalar at a
+// time, so matching is linear in the text with no recursion and no budget.
 // - leftmost start, captures numbered by their `(`, `(?:…)`, `(?<name>…)`,
-//   `*` `+` `?` `{n}` `{n,}` `{n,m}`, `.`, `^`, `$` (end of text only);
+//   `*` `+` `?` `{n}` `{n,}` `{n,m}` (counts up to MAX_REPEAT), `.`, `^`,
+//   `$` (end of text only);
 // - classes match scalars: `[]`/`[^]` members and ranges, `\d` and `\w`
 //   (ASCII), `\s` (Unicode White_Space), `\p{L}`/`\p{Letter}`/
 //   `\p{Alphabetic}` (Alphabetic), `\p{N}`/`\p{Number}` (Numeric),
 //   `\p{White_Space}`/`\p{Whitespace}`, and `\P{…}` outside `[]`;
 // - `ignore_case` compares Unicode simple lowercase mappings;
 // - backreferences and lookaround are syntax errors.
-// Match.start and Match.end count characters (Unicode scalars), as the
-// Prelude's Match.start()/end() do, so they compose with String indexing.
-// The scan reuses one set of thread lists for the whole text. A pattern that
-// does not compile fails with RegexError, never a panic.
+// Match.start and Match.end count characters (Unicode scalars), so they
+// compose with String indexing. The scan reuses one set of thread lists for
+// the whole text. A pattern that does not compile fails with RegexError,
+// never a panic.
 
 #Error
 enum RegexError {
@@ -37,10 +36,20 @@ enum RegexError {
     Cache
 }
 
+/// Displays as its inline-flag letters: `i` ignore_case, `m` multiline,
+/// `s` dot_matches_newline (`"im"`; `""` for the defaults).
 struct RegexFlags {
     ignore_case: Bool
     multiline: Bool
     dot_matches_newline: Bool
+    impl Display {
+        fn display(self) -> String {
+            i :: if self.ignore_case -> "i" else -> ""
+            m :: if self.multiline -> "m" else -> ""
+            s :: if self.dot_matches_newline -> "s" else -> ""
+            "{i}{m}{s}"
+        }
+    }
 }
 
 struct Pattern {
@@ -73,11 +82,84 @@ struct Regex {
 }
 
 /// `start` and `end` are character (Unicode scalar) positions in the text.
+/// `groups` holds each capture group's text, `""` for a group that took no
+/// part; `group`, `group_start` and `group_end` tell the two apart.
 struct Match {
     start: Int
     end: Int
     text: String
     groups: [String]
+    priv spans: [Int]
+    priv names: [String]
+}
+
+impl Regex {
+    fn is_match(self, text: String) -> Bool Never! { is_match(self, text) }
+    fn full_match(self, text: String) -> Bool Never! { full_match(self, text) }
+    fn match(self, text: String) -> Match? Never! { match(self, text) }
+    fn find(self, text: String) -> String? Never! { find(self, text) }
+    fn find_all(self, text: String) -> [String] Never! { find_all(self, text) }
+    fn matches(self, text: String) -> [Match] Never! { matches(self, text) }
+    fn split(self, text: String) -> [String] Never! { split(self, text) }
+    fn split_limit(self, text: String, n: Int) -> [String] Never! { split_limit(self, text, n) }
+    fn replace(self, text: String, replacement: String) -> String Never! { replace(self, text, replacement) }
+    fn replace_first(self, text: String, replacement: String) -> String Never! { replace_first(self, text, replacement) }
+
+    /// Replace every match with what `replacer` returns for it.
+    fn replace_all_with(self, text: String, replacer: fn(Match) -> String Never!) -> String Never! {
+        raw :: text.bytes()
+        out := [U8]{}
+        cur := 0
+        chars := CharCursor{byte: 0, count: 0}
+        vm := new_vm(self.ops.len())
+        loop run in scan_in(self, &vm, raw, 0, raw.len(), false, false, false, -1) {
+            k := cur
+            loop k < run.start {
+                &out.push(raw[k])
+                k = k + 1
+            }
+            m :: make_match(self, &vm, raw, run, &chars, true)
+            loop b in replacer(m).bytes() -> &out.push(b)
+            cur = run.end
+        }
+        loop cur < raw.len() {
+            &out.push(raw[cur])
+            cur = cur + 1
+        }
+        String.from_bytes(out) ?? ""
+    }
+}
+
+impl Match {
+    /// Group `n`'s text: 0 is the whole match; None when the pattern has no
+    /// group `n` or the group took no part in this match.
+    fn group(self, n: Int) -> String? Never! {
+        if n == 0 -> return Val(self.text.copy())
+        if n < 0 || n > self.groups.len() || self.spans[2 * n - 2] < 0 -> return None
+        Val(self.groups[n - 1].copy())
+    }
+
+    /// The text of the group named `name`, as `group` reports it.
+    fn name(self, name: String) -> String? Never! {
+        loop g in 0..<self.names.len() {
+            if self.names[g] != "" && self.names[g] == name -> return self.group(g + 1)
+        }
+        None
+    }
+
+    /// The character position where group `n` starts (0 is the whole match).
+    fn group_start(self, n: Int) -> Int? Never! {
+        if n == 0 -> return Val(self.start)
+        if n < 0 || n > self.groups.len() || self.spans[2 * n - 2] < 0 -> return None
+        Val(self.spans[2 * n - 2])
+    }
+
+    /// The character position where group `n` ends (0 is the whole match).
+    fn group_end(self, n: Int) -> Int? Never! {
+        if n == 0 -> return Val(self.end)
+        if n < 0 || n > self.groups.len() || self.spans[2 * n - 2] < 0 -> return None
+        Val(self.spans[2 * n - 1])
+    }
 }
 
 fn flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags Never! {
@@ -207,88 +289,72 @@ fn split_limit(pattern: Regex, text: String, n: Int) -> [String] Never! {
     out
 }
 
-/// Replace every match. The replacement expands `$0`…`$N` (a group number),
-/// `${name}` (a named group) and `$$`; a group that did not take part adds
-/// nothing, exactly as the Prelude engine expands it.
+/// Replace every match, expanding `replacement` as `expand` does.
 fn replace(pattern: Regex, text: String, replacement: String) -> String Never! { replace_n(pattern, text, replacement, false) }
 
-/// Expand numbered capture references in a replacement template.
-/// Supported forms are `\1` through `\9`, `\g<1>`, `$1`, `${1}`, and `\\`.
+/// Expand a replacement template for one match: `$N` and `${N}` insert group
+/// N (`$0` is the whole match), `${name}` the named group, and `$$` one `$`.
+/// A group the pattern lacks, or one that took no part, inserts nothing; any
+/// other `$` is literal text.
 fn expand(m: Match, template: String) -> String Never! {
     raw :: template.bytes()
     out := [U8]{}
     i := 0
     loop i < raw.len() {
-        marker :: raw[i]
-        if marker != (U8{92}) && marker != (U8{36}) {
-            &out.push(marker)
-            i = i + 1
-            next
-        }
+        b :: raw[i]
         i = i + 1
-        if i >= raw.len() {
-            &out.push(marker)
-            break
+        if b != (U8{36}) || i >= raw.len() {
+            &out.push(b)
+            next
         }
-        n :: raw[i]
-        if (marker == (U8{92}) || marker == (U8{36})) && n >= 49 && n <= 57 {
-            index :: Int.from_u8(n) - 49
-            if index < m.groups.len() {
-                loop b in m.groups[index].bytes() -> &out.push(b)
-            }
+        n :: Int.from_u8(raw[i])
+        if n == 36 {
+            &out.push(b)
             i = i + 1
             next
         }
-        if marker == (U8{36}) && n == (U8{123}) {
+        if n >= 48 && n <= 57 {
+            j := i
+            loop j < raw.len() && raw[j] >= 48 && raw[j] <= 57 -> j = j + 1
+            loop c in group_by_reference(m, raw, i, j).bytes() -> &out.push(c)
+            i = j
+            next
+        }
+        if n == 123 {
             j := i + 1
-            index := 0
-            found := false
-            loop j < raw.len() {
-                d :: raw[j]
-                if d == (U8{125}) {
-                    found = true
-                    break
-                }
-                if d < 48 || d > 57 -> break
-                index = index * 10 + d - 48
-                j = j + 1
-            }
-            if found && index > 0 && index - 1 < m.groups.len() {
-                loop b in m.groups[index - 1].bytes() -> &out.push(b)
+            loop j < raw.len() && raw[j] != (U8{125}) -> j = j + 1
+            if j < raw.len() {
+                loop c in group_by_reference(m, raw, i + 1, j).bytes() -> &out.push(c)
                 i = j + 1
                 next
             }
         }
-        if marker == (U8{92}) && n == (U8{103}) && i + 1 < raw.len() && raw[i + 1] == (U8{60}) {
-            j := i + 2
-            index := 0
-            found := false
-            loop j < raw.len() {
-                d :: raw[j]
-                if d == (U8{62}) {
-                    found = true
-                    break
-                }
-                if d < 48 || d > 57 -> break
-                index = index * 10 + d - 48
-                j = j + 1
-            }
-            if found && index > 0 && index - 1 < m.groups.len() {
-                loop b in m.groups[index - 1].bytes() -> &out.push(b)
-                i = j + 1
-                next
-            }
-        }
-        &out.push(marker)
-        &out.push(n)
-        i = i + 1
+        &out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
 
+/// The text `raw[from..<to]` names in a template: a group number when it is
+/// all digits, otherwise a group name.
+fn group_by_reference(m: Match, raw: [U8], from: Int, to: Int) -> String Never! {
+    if from == to -> return ""
+    index := 0
+    k := from
+    loop k < to {
+        d :: Int.from_u8(raw[k])
+        if d < 48 || d > 57 {
+            return m.name(slice(raw, from, to)) ?? ""
+        }
+        if index > (INT_MAX - (d - 48)) /% 10 -> return ""
+        index = index * 10 + (d - 48)
+        k = k + 1
+    }
+    m.group(index) ?? ""
+}
+
 fn replace_first(pattern: Regex, text: String, replacement: String) -> String Never! { replace_n(pattern, text, replacement, true) }
 
-fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String {
+fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String Never! {
     raw :: text.bytes()
     limit := -1
     if first_only -> limit = 1
@@ -303,7 +369,7 @@ fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool
             k = k + 1
         }
         m :: make_match(pattern, &vm, raw, run, &chars, true)
-        loop b in expand_replacement(pattern, m, replacement).bytes() -> &out.push(b)
+        loop b in expand(m, replacement).bytes() -> &out.push(b)
         cur = run.end
     }
     rest := cur
@@ -314,75 +380,12 @@ fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool
     String.from_bytes(out) ?? ""
 }
 
-/// The Prelude's replacement expansion (`expand_regex_replacement`).
-fn expand_replacement(re: Regex, m: Match, template: String) -> String Never! {
-    raw :: template.bytes()
-    out := [U8]{}
-    i := 0
-    loop i < raw.len() {
-        b :: raw[i]
-        if b != (U8{36}) {
-            &out.push(b)
-            i = i + 1
-            next
-        }
-        i = i + 1
-        if i >= raw.len() {
-            &out.push(b)
-            break
-        }
-        n :: Int.from_u8(raw[i])
-        if n == 36 {
-            &out.push(b)
-            i = i + 1
-            next
-        }
-        if n == 123 {
-            i = i + 1
-            name := [U8]{}
-            loop i < raw.len() {
-                c :: raw[i]
-                i = i + 1
-                if c == (U8{125}) -> break
-                &name.push(c)
-            }
-            wanted :: String.from_bytes(name) ?? ""
-            g := 0
-            loop g < re.names.len() {
-                if re.names[g] != "" && re.names[g] == wanted {
-                    loop c in m.groups[g].bytes() -> &out.push(c)
-                    break
-                }
-                g = g + 1
-            }
-            next
-        }
-        if n >= 48 && n <= 57 {
-            index := 0
-            valid := true
-            loop i < raw.len() {
-                d :: Int.from_u8(raw[i])
-                if d < 48 || d > 57 -> break
-                if index > (INT_MAX - (d - 48)) /% 10 {
-                    valid = false
-                } else {
-                    index = index * 10 + (d - 48)
-                }
-                i = i + 1
-            }
-            if valid && index == 0 {
-                loop c in m.text.bytes() -> &out.push(c)
-            } else if valid && index <= m.groups.len() {
-                loop c in m.groups[index - 1].bytes() -> &out.push(c)
-            }
-            next
-        }
-        &out.push(b)
-    }
-    String.from_bytes(out) ?? ""
-}
-
 INT_MAX :: 9223372036854775807
+
+// The most a counted repetition `{n,m}` may repeat, as in RE2: the program
+// grows with the count, so the cap keeps compile size proportional to the
+// pattern text.
+MAX_REPEAT :: 1000
 
 // Parse tree node kinds. A quantifier node wraps `left`; `a`/`b` hold a
 // literal scalar, a group index, or a quantifier's min/max (-1 = unbounded).
@@ -541,6 +544,7 @@ impl Parser {
         }
         if &self.bump() != 125 -> return Err(RegexError.Syntax)
         if hi >= 0 && hi < lo -> return Err(RegexError.Syntax)
+        if lo > MAX_REPEAT || hi > MAX_REPEAT -> return Err(RegexError.Syntax)
         Ok(&self.emit(N_RANGE, lo, hi, atom, -1))
     }
 
@@ -1237,7 +1241,7 @@ impl CharCursor {
     }
 }
 
-fn find_match(pattern: Regex, text: String) -> Match? {
+fn find_match(pattern: Regex, text: String) -> Match? Never! {
     raw :: text.bytes()
     vm := new_vm(pattern.ops.len())
     runs :: scan_in(pattern, &vm, raw, 0, raw.len(), false, true, false, 1)
@@ -1255,7 +1259,10 @@ fn make_match(re: Regex, vm: &VM, raw: [U8], run: Run, chars: &CharCursor, rerun
         inner :: scan_in(re, &vm, raw, run.start, run.end, true, true, false, 1)
         if inner.len() == 1 -> caps = inner[0].caps
     }
+    first :: &chars.at(raw, run.start)
+    last :: &chars.at(raw, run.end)
     groups := [String]{}
+    spans := [Int]{}
     g := 0
     loop g < re.groups {
         g = g + 1
@@ -1265,14 +1272,30 @@ fn make_match(re: Regex, vm: &VM, raw: [U8], run: Run, chars: &CharCursor, rerun
             start = caps[2 * g]
             end = caps[2 * g + 1]
         }
-        if {
-            start >= 0 && end >= start -> &groups.push(slice(raw, start, end))
-            else -> &groups.push("")
+        if start >= 0 && end >= start {
+            &groups.push(slice(raw, start, end))
+            at :: first + char_count(raw, run.start, start)
+            &spans.push(at)
+            &spans.push(at + char_count(raw, start, end))
+        } else {
+            &groups.push("")
+            &spans.push(-1)
+            &spans.push(-1)
         }
     }
-    first :: &chars.at(raw, run.start)
-    last :: &chars.at(raw, run.end)
-    Match{start: first, end: last, text: slice(raw, run.start, run.end), groups: groups}
+    Match{start: first, end: last, text: slice(raw, run.start, run.end), groups: groups, spans: spans, names: re.names.copy()}
+}
+
+/// The number of characters (Unicode scalars) in `raw[from..<to]`.
+fn char_count(raw: [U8], from: Int, to: Int) -> Int Never! {
+    count := 0
+    i := from
+    loop i < to {
+        b :: Int.from_u8(raw[i])
+        if b < 128 || b >= 192 -> count = count + 1
+        i = i + 1
+    }
+    count
 }
 
 fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
@@ -1292,7 +1315,7 @@ fn is_group_name_char(n: Int) -> Bool Never! {
         (n >= 97 && n <= 122)
 }
 
-fn is_meta(b: U8) -> Bool {
+fn is_meta(b: U8) -> Bool Never! {
     n :: b
     n == 92 || n == 46 || n == 94 || n == 36 || n == 42 || n == 43 || n == 63 || n == 40 || n == 41 || n == 91 || n == 93 || n == 123 || n == 125 || n == 124
 }
