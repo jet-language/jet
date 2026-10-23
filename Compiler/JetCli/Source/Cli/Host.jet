@@ -13,6 +13,7 @@ use jet_backend.[
     x64_file_exec,
     x64_image_exec,
     x64_image_load,
+    x64_image_perf_map,
     x64_image_spawn,
     x64_image_unload,
     x64_link_executable,
@@ -857,6 +858,19 @@ fn jet_cli_launch_plan(file: String, program_args: [String], release: Bool, invo
 
 #Import(c) fn jet_cli_scheduler_shutdown() -> I64 = "jet_rt_scheduler_shutdown"
 
+// JET_PERF_MAP=1 (Docs/spec/reference/environment.md): the program `image`
+// running from memory as `pid` gets a perf map, so `perf report` names its
+// functions (Image/Loader.jet x64_image_perf_map). Unset, nothing is written.
+// A spawned program also gets the map under jet's pid: jet mapped the image
+// before the fork, and perf keys anonymous code by the pid that mapped it.
+fn jet_cli_perf_map(image: [U8], pid: Int) {
+    if (cli_sys.get("JET_PERF_MAP") ?? "") != "1" -> return
+    jet :: cli_process.current_pid()
+    failure := x64_image_perf_map(image, pid)
+    if failure == "" && pid != jet -> failure = x64_image_perf_map(image, jet)
+    if failure != "" -> cli_term.eprint("jet: no perf map for the program: {failure}")
+}
+
 // Run the linked program `image` of `file` with `program_args` on this
 // process's stdin, stdout and stderr, as its built file would run, and end as
 // it ends: in memory (Image/Loader.jet) in place of jet when jet is
@@ -874,12 +888,14 @@ fn jet_cli_launch(image: [U8], file: String, binary: String, kept: Bool, program
         // jet single-threaded, so the program can take its place.
         _ := jet_cli_scheduler_shutdown()
         if x64_process_threads() == 1 {
+            jet_cli_perf_map(image, cli_process.current_pid())
             reason = x64_image_exec(loaded, launch)
             x64_image_unload(loaded)
         } else {
             spawned :: x64_image_spawn(loaded, launch, [Int]{})
             x64_image_unload(loaded)
             if spawned.failure == "" {
+                jet_cli_perf_map(image, spawned.pid)
                 status :: x64_process_wait_foreground(spawned.pid)
                 if status < 0 -> return jet_cli_launch_failed("couldn't wait for the program (errno {-status})", color)
                 return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
@@ -2151,7 +2167,10 @@ fn jet_cli_dev_start(built: JetCLIBuilt, file: String, program_args: [String], p
     if reason == "" {
         spawned :: x64_image_spawn(loaded, launch, [Int]{})
         x64_image_unload(loaded)
-        if spawned.failure == "" -> return JetCLIDevChild.Memory{pid: spawned.pid}
+        if spawned.failure == "" {
+            jet_cli_perf_map(image, spawned.pid)
+            return JetCLIDevChild.Memory{pid: spawned.pid}
+        }
         reason = spawned.failure
     }
     if verbose -> cli_term.eprint("jet dev: running {binary} from a file: {reason}")

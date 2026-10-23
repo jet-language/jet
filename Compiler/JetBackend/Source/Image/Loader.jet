@@ -264,6 +264,67 @@ fn x64_image_segments(bytes: [U8]) -> X64Segments Never! {
     X64Segments{segments: segments, low: low, high: high, entry: loader_u64(bytes, 24), phdr: phdr, phnum: phnum, failure: ""}
 }
 
+// Append `value` in hex (no prefix) to `out`.
+fn loader_hex_push(out: &[U8], value: Int) Never! {
+    digits :: "0123456789abcdef".bytes()
+    shift := 60
+    loop shift > 0 && (value >> shift).bit_and(15) == 0 { shift -= 4 }
+    loop shift >= 0 {
+        &out.push(digits[(value >> shift).bit_and(15)])
+        shift -= 4
+    }
+}
+
+// Write the perf map of the image `bytes` running as `pid`:
+// /tmp/perf-<pid>.map, where `perf report` looks up code that has no file
+// behind it, as an image run from memory has none. One "<start> <size>
+// <name>" line (hex) per sized function of the image's .symtab, the names
+// a built program shows. JET_PERF_MAP=1 asks for it (Host.jet
+// jet_cli_launch). Returns "" once written, else why it wasn't.
+fn x64_image_perf_map(bytes: [U8], pid: Int) -> String {
+    size :: bytes.len()
+    if size < 64 -> return "the image is not an ELF file"
+    shoff :: loader_u64(bytes, 40)
+    shnum :: loader_u16(bytes, 60)
+    if shoff == 0 || shnum == 0 -> return "the image has no section headers"
+    if loader_u16(bytes, 58) != 64 || shoff + shnum * 64 > size -> return "the image's section headers are malformed"
+    separators :: " \n".bytes()
+    out := [U8]{}
+    loop k in 0..<shnum {
+        at :: shoff + k * 64
+        // SHT_SYMTAB; its sh_link names the string table.
+        if loader_u32(bytes, at + 4) != 2 -> next
+        symbols :: loader_u64(bytes, at + 24)
+        symbols_size :: loader_u64(bytes, at + 32)
+        link :: loader_u32(bytes, at + 40)
+        if link >= shnum || symbols + symbols_size > size -> return "the image's .symtab is malformed"
+        names :: loader_u64(bytes, shoff + link * 64 + 24)
+        names_end :: names + loader_u64(bytes, shoff + link * 64 + 32)
+        if names_end > size -> return "the image's .strtab is malformed"
+        loop s in 0..<symbols_size /% 24 {
+            symbol :: symbols + s * 24
+            // STT_FUNC
+            if Int.from_u8(bytes[symbol + 4]).bit_and(15) != 2 -> next
+            value :: loader_u64(bytes, symbol + 8)
+            length :: loader_u64(bytes, symbol + 16)
+            name := names + loader_u32(bytes, symbol)
+            if value == 0 || length == 0 || name >= names_end || Int.from_u8(bytes[name]) == 0 -> next
+            loader_hex_push(&out, value)
+            &out.push(separators[0])
+            loader_hex_push(&out, length)
+            &out.push(separators[0])
+            loop name < names_end && Int.from_u8(bytes[name]) != 0 {
+                &out.push(bytes[name])
+                name += 1
+            }
+            &out.push(separators[1])
+        }
+    }
+    path :: "/tmp/perf-{pid}.map"
+    loader_files.write_bytes(path, out) ?? return "couldn't write {path}: {err}"
+    ""
+}
+
 // Map the static x86-64 executable `bytes` at its link addresses.
 fn x64_image_load(bytes: [U8]) -> X64LoadedImage {
     plan :: x64_image_segments(bytes)
