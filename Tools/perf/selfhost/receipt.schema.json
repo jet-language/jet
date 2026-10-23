@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jet.selfhost.receipt.v1",
+  "title": "Jet self-host workload receipt",
+  "type": "object",
+  "required": ["schema", "study", "status", "manifest", "sourceBoundary", "evidencePolicy", "workloads", "summary", "goNoGo"],
+  "properties": {
+    "schema": { "const": "jet.selfhost.receipt.v1" },
+    "study": { "const": "#2955" },
+    "status": { "enum": ["unrun", "unresolved", "observed-within-scope"] },
+    "generatedAt": { "type": "string" },
+    "manifest": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "runRoot": { "type": "string" },
+    "requested": { "type": "object" },
+    "sourceBoundary": { "type": "object" },
+    "evidencePolicy": { "type": "object" },
+    "workloads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" },
+          "evidence": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "summary": { "type": ["object", "null"] },
+    "goNoGo": { "type": ["object", "null"] }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jet.selfhost.reasoning.capture.v1",
+  "title": "Jet self-host workload reasoning capture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "study", "workload", "tasks"],
+  "properties": {
+    "schema": { "const": "jet.selfhost.reasoning.capture.v1" },
+    "study": { "const": "#2955" },
+    "workload": { "type": "string", "minLength": 1 },
+    "readiness": { "const": false },
+    "portApproval": { "enum": ["not-addressed", "rejected"] },
+    "tasks": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "evidenceClass", "observation"],
+        "properties": {
+          "id": { "enum": ["explain", "predict", "modify", "derive"] },
+          "evidenceClass": { "enum": ["machine", "model", "human"] },
+          "observation": { "type": "string", "minLength": 1 },
+          "source": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}
