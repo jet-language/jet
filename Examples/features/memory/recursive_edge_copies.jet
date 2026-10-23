@@ -1,0 +1,50 @@
+// A copy is its own value, also through a recursive field. `Node.meta` leads
+// back to `Node` (a Meta holds child Nodes), so Jet keeps it out of line. A
+// write through it into one copy never shows in another copy. Each case
+// edits a copy and prints the original, then the copy.
+
+struct Node {
+    name: String
+    meta: Meta
+}
+
+struct Meta {
+    note: String
+    count: Int
+    tags: [String]
+    children: [Node]
+}
+
+fn renamed(node: Node, note: String) -> Node {
+    value := node
+    value.meta.note = note
+    value
+}
+
+fn add_tag(node: &Node, text: String) {
+    &node.meta.tags.push(text)
+}
+
+fn run() {
+    original := Node{name: "root", meta: Meta{note: "first", count: 1, tags: [String]{"a"}, children: [Node]{}}}
+
+    second := original
+    second.meta.note = "second"
+    print("assign: {original.meta.note} / {second.meta.note}")
+
+    other := renamed(original, "third")
+    print("returned: {original.meta.note} / {other.meta.note}")
+
+    tagged := original
+    add_tag(&tagged, "b")
+    print("write param: {original.meta.tags.len()} / {tagged.meta.tags.len()}")
+
+    grown := original
+    &grown.meta.children.push(Node{name: "leaf", meta: Meta{note: "leaf", count: 0, tags: [String]{}, children: [Node]{}}})
+    grown.meta.children[0].meta.note = "leaf edited"
+    print("nested: {original.meta.children.len()} / {grown.meta.children.len()} {grown.meta.children[0].meta.note}")
+
+    counted := original
+    counted.meta.count += 5
+    print("compound: {original.meta.count} / {counted.meta.count}")
+}

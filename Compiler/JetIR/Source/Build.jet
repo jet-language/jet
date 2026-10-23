@@ -1662,14 +1662,19 @@ fn ir_member_write(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member:
 
 // The member `name` of the struct an aggregate slot holds.
 fn ir_member_of(m: &IRModule, p: IRProgram, b: IRBuilder, base: Int, name: String) -> IRMember? Never! {
-    ty :: ir_untag(m.types[b.f.slot_type[base]].ty)
+    ir_member_of_row(&m, p, b.f.slot_type[base], name)
+}
+
+// The member `name` of the struct (or tuple) of type row `row`.
+fn ir_member_of_row(m: &IRModule, p: IRProgram, row: Int, name: String) -> IRMember? Never! {
+    ty :: ir_untag(m.types[row].ty)
     members := [IRMember]{}
     if ty == .Tuple(fields) {
         members = ir_tuple_members(&m, p, fields) ?? return None
     } else {
         nominal :: ir_nominal_name(ty) ?? return None
-        row :: ir_type_def(p, nominal) ?? return None
-        members = ir_struct_members(&m, p, row, ir_type_args(ty)) ?? return None
+        definition :: ir_type_def(p, nominal) ?? return None
+        members = ir_struct_members(&m, p, definition, ir_type_args(ty)) ?? return None
     }
     loop member in members {
         if member.name == name -> return Val(member)

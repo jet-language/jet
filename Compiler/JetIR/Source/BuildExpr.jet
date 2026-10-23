@@ -2282,12 +2282,15 @@ fn ir_precise_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_
     ir_call(&m, p, &b, key, [Type]{}, -1, [IRWriteBack]{}, call_args, span)
 }
 
-// The storage a write through `place` reaches: a path through a List element
-// or a Map entry goes through ir_place_address, which gives each List and Map
-// on the way a buffer of its own, then reads a scalar or box place's value
-// from its address; any other place is its value.
+// The storage a write through `place` reaches. A path through a List element,
+// a Map entry or a recursive edge goes through ir_place_address: each List and
+// Map on the way gets a buffer of its own, and each recursive edge a wrapper of
+// its own (copies of an aggregate share its edges' wrappers, uncounted, so a
+// write into a shared wrapper would reach every copy, and two threads writing
+// copies would both drop its old member). A scalar or box place's value is then
+// read from its address. Any other place is its value.
 fn ir_write_base(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
-    if !ir_place_has_index(p, b, place) -> return ir_expr(&m, p, &b, place)
+    if !ir_place_needs_address(&m, p, b, place) -> return ir_expr(&m, p, &b, place)
     backs := [IRWriteBack]{}
     address :: ir_place_address(&m, p, &b, place, &backs, span)
     if ir_failed(b) || address < 0 || ir_kind_of(m, b, address) == .Aggregate -> return address
@@ -2296,14 +2299,23 @@ fn ir_write_base(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Sp
     ir_load_at(&m, &b, address, 0, row)
 }
 
-fn ir_place_has_index(p: IRProgram, b: IRBuilder, place: Int) -> Bool Never! {
+// Whether a write through `place` passes a List element, a Map entry or a
+// recursive edge (a struct member held in a wrapper box).
+fn ir_place_needs_address(m: &IRModule, p: IRProgram, b: IRBuilder, place: Int) -> Bool Never! {
     if ir_body_node(p, b, place).kind == {
-        .Borrow(inner, _) -> return ir_place_has_index(p, b, inner)
-        .Move(inner) -> return ir_place_has_index(p, b, inner)
-        .Field(receiver, _) -> return ir_place_has_index(p, b, receiver)
+        .Borrow(inner, _) -> return ir_place_needs_address(&m, p, b, inner)
+        .Move(inner) -> return ir_place_needs_address(&m, p, b, inner)
+        .Field(receiver, field) -> return ir_place_boxed_member(&m, p, b, receiver, field.name) || ir_place_needs_address(&m, p, b, receiver)
         .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
         else -> return false
     }
+}
+
+// Whether member `name` of the struct `receiver` is a recursive edge.
+fn ir_place_boxed_member(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, name: String) -> Bool Never! {
+    row :: ir_value_type(&m, p, ir_ty(p, b, receiver)) ?? return false
+    member :: ir_member_of_row(&m, p, row, name) ?? return false
+    member.boxed
 }
 
 // The address of a write place: an aggregate variable is its storage, a
