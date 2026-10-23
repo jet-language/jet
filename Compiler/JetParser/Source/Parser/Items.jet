@@ -92,6 +92,7 @@ use jet_lexer.[
     TOKEN_INT,
     TOKEN_KW_COPY,
     TOKEN_KW_DERIVE,
+    TOKEN_KW_COMPTIME,
     TOKEN_KW_EFFECT,
     TOKEN_KW_ENUM,
     TOKEN_KW_EXTERN,
@@ -674,9 +675,9 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
         parser_type_close_here(&state) -> parser_add_error_here(&state, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
         else -> {
             loop {
-                // `prep N: Int` declares a compile-time number
-                // parameter; `<prep>` and `<prep: Trait>` stay type parameters.
-                if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "prep" && parser_kind_at(&state, 1) == TOKEN_IDENT {
+                // `comptime N: Int` (or `prep N: Int`) declares a compile-time
+                // number parameter; `<prep>` and `<prep: Trait>` stay type parameters.
+                if (parser_current_kind(&state) == TOKEN_KW_COMPTIME || (parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "prep")) && parser_kind_at(&state, 1) == TOKEN_IDENT {
                     prep_head :: parser_bump(&state)
                     &params.push(parser_parse_prep_param(&state, prep_head.span))
                     if parser_type_close_here(&state) -> break
