@@ -1379,7 +1379,7 @@ target, generated sources, and schema.
 Generated wrappers keep ownership, errors, layout, callbacks, and task crossings
 explicit. Safe Jet cannot acquire an ungated unsafe operation through a bridge.
 Executable bridge proof is in `tests/cffi.rs`, the scoped C++ system proof, and
-`tests/golden.rs`.
+the feature goldens run by `Tools/testkit/Golden.jet`.
 
 ### Jet as guest: embedding contract
 
@@ -1721,11 +1721,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `#Unsafe("reason") fn` contract, both
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
-  sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
-  the audited `48_lowlevel` must contain no `unsafe`, and even there every
-  `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
-  it lowers an already-checked `#Unsafe` region straight to a Rust `unsafe`
-  region and makes no safety decision of its own.
+  sema (E3101/E3102/E3103), and every gated region is counted, positioned and
+  reasoned in the unsafe ratchet (`Tools/agent/check-unsafe-ratchet.mjs`).
+  Codegen stays dumb: it lowers an already-checked `#Unsafe` region straight to
+  an unsafe region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must lower to
   MIR that every back end accepts. New language features land as: spec →
   parser → sema checks → codegen → tests, in that order.

@@ -91,7 +91,7 @@ Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the Rust feature runner (`tests/golden.rs`) and the
+These rules apply to the testkit golden suite (`Tools/testkit/Golden.jet`) and the
 native feature runner (`Tools/agent/run-feature-examples.mjs`). Native parity additionally
 requires an executed reference with the same exit and both output streams;
 an emit-only reference does not establish runtime parity.
@@ -160,6 +160,6 @@ files are the evidence; this manifest does not duplicate the collection API.
   checker.
 - [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
-- [`tests/golden.rs`](../tests/golden.rs) and
+- [`Tools/testkit/Golden.jet`](../Tools/testkit/Golden.jet) and
   [`tests/suite_goldens.rs`](../tests/suite_goldens.rs) are the source of truth
   for the two golden layouts.
