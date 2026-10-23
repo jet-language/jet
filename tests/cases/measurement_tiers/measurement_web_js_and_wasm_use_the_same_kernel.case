@@ -1,0 +1,16 @@
+# tests/measurement_tiers.rs::measurement_web_js_and_wasm_use_the_same_kernel at tests/measurement_tiers.rs:144; hand-port
+# The web build of a measured sum prints the same result as every native tier. The original's string checks on the
+# generated JS and Rust-for-Wasm text (__measurement_add present, no JetMeasurement) tested the deleted Rust emitter.
+fixture: measurement_web_js_and_wasm_use_the_same_kernel.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build --target web main.jet
+exit: 0 # tests/measurement_tiers.rs:147 compile_web_with_path(..) is Ok
+when tool node
+step web: node app.js
+cwd: .jet/build
+exit: 0 # tests/measurement_tiers.rs:193 node runs app.js
+stdout: = "15.0 ± 0.223606797749979\n" # tests/measurement_tiers.rs:199 EXPECTED
+end when

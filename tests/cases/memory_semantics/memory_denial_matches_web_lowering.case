@@ -1,0 +1,10 @@
+# tests/memory_semantics.rs::memory_denial_matches_web_lowering at tests/memory_semantics.rs:135; hand-port
+# The web target accepts a run() that denies Mem.Alloc and produces a web artifact.
+fixture: memory_denial_matches_web_lowering.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build --target web main.jet
+exit: 0 # tests/memory_semantics.rs:138 web accepts the memory denial source
+file: .jet/build/app.js exists # tests/memory_semantics.rs:139 web lowering produced an artifact

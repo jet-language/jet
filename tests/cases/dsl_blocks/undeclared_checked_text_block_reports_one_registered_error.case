@@ -1,0 +1,10 @@
+# tests/dsl_blocks.rs::undeclared_checked_text_block_reports_one_registered_error at tests/dsl_blocks.rs:50; hand-port
+# An undeclared checked text block marker (#Graph) is one registered E0927 with a what, a why and a fix.
+fixture: undeclared_checked_text_block_reports_one_registered_error.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1 # tests/dsl_blocks.rs:51 jet::compile(..).unwrap_err
+stderr: count "Error [E0927]" = 1 # tests/dsl_blocks.rs:56 exactly one E0927 (what is the headline)
+stderr: ~ " Why: " # tests/dsl_blocks.rs:59 why is not empty
+stderr: ~ " Fix: " # tests/dsl_blocks.rs:60 fix is not empty
+stderr: !~ "internal compiler error" # tests/dsl_blocks.rs:51 a diagnostic, not a crash

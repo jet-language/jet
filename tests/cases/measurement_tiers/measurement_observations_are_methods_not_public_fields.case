@@ -1,0 +1,18 @@
+# tests/measurement_tiers.rs::measurement_observations_are_methods_not_public_fields at tests/measurement_tiers.rs:226; hand-port
+# A Measurement exposes no public value/uncertainty fields and no add/sub/mul/div/sqrt methods: each program is rejected.
+fixture: measurement_observations_are_methods_not_public_fields.fixture
+env: NO_COLOR=1
+step: jet check field_value.jet
+exit: nonzero # tests/measurement_tiers.rs:229 Measurement.value is not exposed
+step: jet check field_uncertainty.jet
+exit: nonzero # tests/measurement_tiers.rs:229 Measurement.uncertainty is not exposed
+step: jet check method_add.jet
+exit: nonzero # tests/measurement_tiers.rs:234 Measurement.add is not accepted
+step: jet check method_sub.jet
+exit: nonzero # tests/measurement_tiers.rs:234 Measurement.sub is not accepted
+step: jet check method_mul.jet
+exit: nonzero # tests/measurement_tiers.rs:234 Measurement.mul is not accepted
+step: jet check method_div.jet
+exit: nonzero # tests/measurement_tiers.rs:234 Measurement.div is not accepted
+step: jet check method_sqrt.jet
+exit: nonzero # tests/measurement_tiers.rs:234 Measurement.sqrt is not accepted
