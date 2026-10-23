@@ -142,7 +142,8 @@ use jet_eval.[
     JetEvalConfig,
     JetEvalIRResult,
     jet_eval_compiler_services_program_info,
-    jet_eval_ir_comptime_run,
+    jet_eval_native_load,
+    jet_eval_native_run,
 ]
 
 fn jet_driver_source_location_for_load_module(load: JetDriverLoadResult, module_identity: String, site: Span) -> SemaSourceLocation? {
@@ -922,7 +923,7 @@ fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: JetEvalCompt
         build_host_adapter: build_host_adapter,
         comptime_input_adapter: inputs,
         host_hooks: original.host_hooks,
-        runtime_ir: original.runtime_ir,
+        native: original.native,
     }
 }
 
@@ -1279,6 +1280,9 @@ fn jet_driver_comptime_flush(
         flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
         return flushed
     }
+    if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.load", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
+    native := jet_eval_native_load(^built, jet_driver_comptime_eval_config(request.eval_config, None))
+    if request.trace_sink == .Val(sink) -> sink.end("comptime.load", 1)
     evaluated_index := 0
     loop index in start..<batch.entries.len() {
         entry :: batch.entries[index]
@@ -1293,7 +1297,7 @@ fn jet_driver_comptime_flush(
         source :: entry.source
         comptime_request :: entry.request
         if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.eval", source.source_file, source.name)
-        eval_result :: jet_eval_ir_comptime_run(&built, item, jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file)), comptime_request.span)
+        eval_result :: jet_eval_native_run(&native, item, [TComptimeValue]{}, jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file)), comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
         jet_driver_record_eval_result(&trace, eval_result)
         if source.kind == SemaComptimeItemKind.FieldDefault && eval_result.error != None && eval_result.internal_problem == None {

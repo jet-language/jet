@@ -1,6 +1,6 @@
 // The compile-time evaluator's configuration, host adapters and failure
-// carriers. The IR machine (IR/) runs checked programs on them; values are
-// the shared Foundation carrier TComptimeValue.
+// carriers. Compile-time code runs natively in a child of the compiler
+// (IR/Native.jet); values are the shared Foundation carrier TComptimeValue.
 use jet_foundation.[
     Diagnostic,
     Span,
@@ -60,8 +60,9 @@ trait JetEvalComptimeInputAdapter {
 }
 
 struct JetEvalConfig {
-    // Step budget for compile-time evaluation. Runtime execution (a program
-    // run) has no step limit, like a built binary.
+    // Budget for one compile-time call: a native call has fuel /% 2000
+    // milliseconds (IR/Native.jet). Runtime execution (a program run) has
+    // no limit, like a built binary.
     fuel: Int
     max_call_depth: Int
     max_collection_len: Int
@@ -72,9 +73,10 @@ struct JetEvalConfig {
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
     host_hooks: Shared<SemaRegistrationHostHooks>
-    // The runtime pack's IR (runtime.ir), which IR evaluation runs runtime
-    // routes on (IR/Runtime.jet); None leaves them unsupported.
-    runtime_ir: Shared<JetEvalRuntimeIR>?{None}
+    // The compile session's native children over the runtime image
+    // (IR/Native.jet); None: this toolchain has no runtime image, so
+    // compile-time code can't run.
+    native: Shared<JetEvalNativeSession>?{None}
     // `jet eval`'s `run`: an ambient effect is refused as the evaluator mode
     // refuses it (E3401, jet_eval_effect_fail), not as a comptime effect a
     // gate admits (E3410).
@@ -100,7 +102,7 @@ fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         runtime_execution: true,
         build_host_adapter: build_host_adapter,
         host_hooks: config.host_hooks,
-        runtime_ir: config.runtime_ir,
+        native: config.native,
     }
 }
 

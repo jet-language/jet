@@ -236,6 +236,7 @@ fn trap_root_panic_report(message: I64) -> I64 {
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // Core.rs jet_runtime_stop_unwind carries the raw message into the task
     // runner, not this process report (Scheduler.rs jet_scheduler_panic_message).
+    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, code) -> return
     trap_header(code)
     trap_write(message, message_len)
@@ -252,6 +253,7 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
 // is out of range (this type is {bits} bits wide)". The count prints in the
 // shifted type's signedness (1 = unsigned), as the seed's i128 operand does.
 #Export(c) fn jet_rt_fixed_shift_stop(direction: I64, count: I64, count_unsigned: I64, bits: I64, file: I64, file_len: I64, line: I64) {
+    comptime_serve_stop(I64{2}, count, count_unsigned, bits, I64{0})
     message :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(message, rt_static_text("Shifting "))
     jet_rt_string_builder_push(message, if (direction == I64{0}) -> rt_static_text("left") else -> rt_static_text("right"))
@@ -321,6 +323,7 @@ fn trap_native_index_range_root() {
 }
 
 #Export(c) fn jet_rt_panic_message(message: I64, message_len: I64) {
+    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, I64{0}) -> return
     trap_header(I64{0})
     trap_write(message, message_len)
@@ -337,6 +340,7 @@ fn trap_native_index_range_root() {
         if (jet_scheduler_native_propagate() != I64{0}) -> return
         return
     }
+    comptime_serve_stop(I64{3}, len, native, I64{0}, I64{0})
     // Outcome.rs:2463-2466 supplies the one list-index reason. Reuse the
     // existing decimal formatter, including I64.MIN; publication copies it.
     message :: jet_rt_string_builder_new()
@@ -376,6 +380,7 @@ fn trap_host_fault(message: I64, length: I64) {
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
+    comptime_serve_stop(I64{1}, reason, length, I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_msg_unreachable()
@@ -480,6 +485,7 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 }
 
 #Export(c) fn jet_rt_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
+    comptime_serve_stop(I64{4}, kind, message, left, right)
     if (jet_rt_stop_domain() == I64{2}) {
         // Same raw task message as trap_rich; equality stops carry their text.
         raw := message

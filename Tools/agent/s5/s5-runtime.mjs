@@ -41,7 +41,7 @@ const outer = JSON.parse(fs.readFileSync(path.join(out, 'provenance.json'), 'utf
 if (JSON.stringify(receipt) !== JSON.stringify(outer) || receipt.backend !== 'jet-native' ||
     receipt.runtimeKey !== key || receipt.rustObjects !== 0 || receipt.llvmObjects !== 0) throw Error('pack provenance is not one Jet-only production');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-for (const [file, digest] of [['jet_runtime_jet.o', receipt.objectSha256], ['runtime.ir', receipt.irSha256], ['jet_runtime.pack.o', receipt.packSha256], ['runtime.abi.json', receipt.abiSha256]]) {
+for (const [file, digest] of [['jet_runtime_jet.o', receipt.objectSha256], ['jet_runtime.pack.o', receipt.packSha256], ['runtime.abi.json', receipt.abiSha256]]) {
   if (!digest || hash(path.join(dir, file)) !== digest) throw Error('published artifact hash mismatch: ' + file);
 }
 if (hash(${JSON.stringify(jet)}) !== receipt.compilerSha256) throw Error('pack compiler does not match the shared build');

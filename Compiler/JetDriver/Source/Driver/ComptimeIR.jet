@@ -1,12 +1,13 @@
-// Comptime evaluation on the IR machine: a flush's checked closure and the
-// item functions of its evaluated entries are built as one slot IR program
+// Native comptime: a flush's checked closure and the item functions of its
+// evaluated entries are built as one slot IR program
 // (jet_eval_ir_comptime_build), laid out by the run's staged declaration
-// rows, and each entry runs its own item function on it
-// (jet_eval_ir_comptime_run) over the runtime pack's IR.
+// rows, compiled and loaded once into the session's comptime child
+// (jet_eval_native_load), and each entry runs its own item function there
+// (jet_eval_native_run).
 use jet_foundation.[Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility]
 use jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
 use jet_ir.[ir_comptime_item_function]
-use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_invoke]
+use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_native_load, jet_eval_native_run]
 
 // The type, impl and constant rows of every module of a run's graph
 // (jet_driver_comptime_stage).
@@ -87,5 +88,6 @@ fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeV
     built := jet_eval_ir_comptime_build(^checked.functions, keys, ^declarations.type_defs, ^declarations.impls, ^declarations.constants)
     if built.build_failures.len() > 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder refused the invocation's code: {built.build_failures.join("; ")}")}
     if built.items[0] < 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder did not build the invocation's entry function")}
-    JetDriverInvocationRun{result: Val(jet_eval_ir_comptime_invoke(&built, 0, args, config, span)), problem: None}
+    program := jet_eval_native_load(^built, config)
+    JetDriverInvocationRun{result: Val(jet_eval_native_run(&program, 0, args, config, span)), problem: None}
 }

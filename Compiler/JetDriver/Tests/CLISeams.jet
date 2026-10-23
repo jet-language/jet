@@ -167,9 +167,13 @@ fn seams_checked_projection() {
         seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job compile")
         seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
         inputs := ^front.inputs ?? panic("selected checked inputs missing")
+        // The entry builds and loads; with no runtime image (a test has no
+        // toolchain) it can't run, and says so rather than guessing a value.
+        // Its native execution is the feature examples' (`jet eval`).
         run :: jet_driver_invocation_run(^inputs, [TComptimeValue]{}, jet_eval_default_config(), Span{start: 0, end: 0})
         evaluated :: run.result ?? panic(run.problem ?? "selected entry did not build")
-        seams_require(evaluated.value == (Val(TComptimeValue.Int{value: 7})), "selected declared body executes")
+        refused :: evaluated.error ?? panic("an entry without the runtime image ran")
+        seams_require(evaluated.value == None && refused.diagnostic.what.contains("jet_runtime.image"), "selected declared body needs the runtime image")
     }
     // A named generator does not need a synthetic or pre-existing run body.
     generate := seams_request("#Job fn generate_files() -> Int {{ 3 }}", JetDriverCompileMode.Program)

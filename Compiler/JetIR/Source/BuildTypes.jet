@@ -479,8 +479,8 @@ fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
     None
 }
 
-// Method `method` of compiler value `owner`, which the evaluator answers:
-// jet_comptime_host_method(`{owner}.{method}`, impure, (row, word)...) over
+// Method `method` of compiler value `owner`, which the compiler answers
+// (ir_host_route kind 1): `{owner}.{method}`, impure, (row, word)... over
 // the receiver and the arguments, `impure` inside an `#Impure` block.
 fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: Int, args: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -494,9 +494,36 @@ fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: St
     loop argument in args {
         if !ir_host_operand(&m, p, &b, argument, &operands, &words) -> return -1
     }
-    answer :: ir_runtime(&m, &b, "jet_comptime_host_method", operands, row)
+    answer :: ir_host_route(&m, &b, 1, row, operands)
     loop word in words -> ir_release(&m, &b, word)
     answer
+}
+
+// A host route of compile-time code: the comptime child hands its compiler
+// (JetRuntime ComptimeServe.jet) route `kind` (1 method, 2 field, 3 comptime
+// input) and a stack area of words, the answer's row key and then
+// `operands`; the compiler reads them and answers a value of row `row`, in
+// place when it is an aggregate (or a float, which a word cell carries).
+fn ir_host_route(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [Int]) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    area :: ir_temp(&m, &b, pointer_row)
+    count :: operands.len() + 1
+    ir_emit(&b.f, IROp.StackAddress, area, 8 * count, 8, -1, b.line)
+    key :: ir_host_row_key(&m, &b, row)
+    ir_emit(&b.f, IROp.Store, -1, area, 0, key, b.line)
+    loop (index, operand) in operands -> ir_emit(&b.f, IROp.Store, -1, area, 8 * (index + 1), operand, b.line)
+    kind_word :: ir_word_const(&m, &b, kind)
+    count_word :: ir_word_const(&m, &b, count)
+    row_kind :: m.types[row].kind
+    if row_kind == .Aggregate -> return ir_runtime(&m, &b, "jet_comptime_host_into", [Int]{kind_word, area, count_word}, row)
+    if row_kind == .Float || row_kind == .Float32 {
+        cell :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, cell, 8, 8, -1, b.line)
+        word_row :: ir_word_row(&m)
+        _ :: ir_runtime(&m, &b, "jet_comptime_host_into", [Int]{cell, kind_word, area, count_word}, word_row)
+        return ir_load_at(&m, &b, cell, 0, row)
+    }
+    ir_runtime(&m, &b, "jet_comptime_host", [Int]{kind_word, area, count_word}, row)
 }
 
 // Appends operand `operand`'s type row and word to a host method's operands.
@@ -516,7 +543,7 @@ fn ir_host_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: Int, oper
 }
 
 // A host route names an operand's type row by its intern key, a text the
-// evaluator looks up in the running module's type_rows: the merge
+// compiler looks up in the comptime module's type_rows: the merge
 // (BuildMerge.jet) renumbers rows and data rows but no Const word.
 fn ir_host_row_key(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
     string_row :: ir_string_row(&m)
@@ -526,8 +553,8 @@ fn ir_host_row_key(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
     key
 }
 
-// Field `field` of the compiler value in slot `base`, which the evaluator
-// answers: jet_comptime_host_field(field, row key, word).
+// Field `field` of the compiler value in slot `base`, which the compiler
+// answers (ir_host_route kind 2): field, row key, word.
 fn ir_host_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, field: String, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     string_row :: ir_string_row(&m)
@@ -535,7 +562,7 @@ fn ir_host_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int,
     ir_emit(&b.f, IROp.ConstText, name, ir_intern_text(&m, field), -1, -1, b.line)
     base_row :: b.f.slot_type[base]
     row_key :: ir_host_row_key(&m, &b, base_row)
-    value :: ir_runtime(&m, &b, "jet_comptime_host_field", [Int]{name, row_key, base}, row)
+    value :: ir_host_route(&m, &b, 2, row, [Int]{name, row_key, base})
     ir_release(&m, &b, base)
     value
 }

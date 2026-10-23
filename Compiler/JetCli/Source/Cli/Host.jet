@@ -47,7 +47,9 @@ use jet_driver.[
     jet_driver_source_query,
 ]
 use jet_eval.[
-    jet_eval_ir_run,
+    JetEvalIRComptime,
+    jet_eval_native_load,
+    jet_eval_native_run,
 ]
 use jet_foundation.[
     CtValue,
@@ -56,6 +58,7 @@ use jet_foundation.[
     DIAGNOSTIC_LINT,
     GateLedger,
     Span,
+    TComptimeValue,
     JET_COMPILER_TARGET_USIZE_MAX,
     PolicyKey,
     FnBody,
@@ -205,9 +208,9 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
 // `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks for the
 // interpreter (Eval mode under `--pure`, where the driver adds the transitive
 // E3401 purity walk from `run`) and stops before lowering; the checked
-// program builds as slot IR from `run`, and the IR evaluator runs `run` itself
-// (not the generated entry, which drops a valued result) over the runtime
-// pack's IR. What the program printed is program output: before the value,
+// program builds as slot IR from `run`, which runs natively in the
+// compile's comptime child (not the generated entry, which drops a valued
+// result). What the program printed is program output: before the value,
 // or on stderr under `--json` so stdout stays one `eval` document.
 fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     source :: cli_files.read(file) ?? return JetDriverVerbOutput{
@@ -250,7 +253,8 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     entry :: built.program.function_rows.get(entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
     config.eval_entry = true
-    evaluated :: jet_eval_ir_run(&built.program, layouts, entry, config, span)
+    program := jet_eval_native_load(JetEvalIRComptime{code: ^built.program, layouts: layouts, items: [Int]{entry}, build_failures: [String]{}}, config)
+    evaluated :: jet_eval_native_run(&program, 0, [TComptimeValue]{}, config, span)
     if evaluated.error == .Val(failure) {
         jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
@@ -312,16 +316,14 @@ JET_CLI_RUNTIME_PACK_FILE :: "jet_runtime.pack.o"
 JET_CLI_RUNTIME_OBJECT_FILE :: "jet_runtime_jet.o"
 // The pack prelinked at LINK_RUN_BASE (Image/RuntimePack.jet
 // x64_link_runtime_image), beside it: `jet run` binds a program with no C
-// closure to it instead of linking the pack.
+// closure to it instead of linking the pack, and compile-time code runs
+// bound to it in the comptime child (JetEval Native.jet).
 JET_CLI_RUNTIME_IMAGE_FILE :: "jet_runtime.image"
 // Written by packaging: the toolchain's native runtime key for every profile.
 JET_CLI_RUNTIME_KEY_FILE :: "native.key"
 // Written by packaging beside the pack: every symbol the runtime exports, one
 // per line.
 JET_CLI_RUNTIME_EXPORTS_FILE :: "runtime.exports"
-// Written by packaging beside the pack: the runtime's optimized IR module
-// (JetIR Codec.jet), which compile-time evaluation runs.
-JET_CLI_RUNTIME_IR_FILE :: "runtime.ir"
 
 // jet-runtime/ beside the `jet` executable.
 fn jet_cli_runtime_dir() -[Env]> String Never! {

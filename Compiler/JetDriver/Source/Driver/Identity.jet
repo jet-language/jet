@@ -1,5 +1,4 @@
 use core.build.[BuildGraphNode]
-use jet_backend.[X64ExecutionHost, X64ExecutionRequest, X64ExecutionResponse]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
 use jet_foundation.[
@@ -251,7 +250,6 @@ struct JetDriverCompileRequest {
     // When set, every Tier-1 comptime input this compile reads (path and
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
-    execution_host: JetDriverExecutionHost?{None}
 }
 
 struct JetDriverGatePolicy {
@@ -274,16 +272,6 @@ trait JetDriverRecordStore {
     fn record(self, schema: String, key: String) -[FS]> [U8]?
     fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
     fn stamp(self, path: String) -[FS]> String?
-}
-
-// One compiler-process-owned native child, shared by comptime and REPL.
-// The CLI owns lifetime, sandbox and artifact admission; the compiler sends
-// only a checked selected callable. This is not a user plugin API.
-// Bounds describe the host's raw C/Asm child transport and serialization,
-// not the selected program's ambient authority (checked before admission).
-trait JetDriverExecutionHost {
-    fn execute(self, request: X64ExecutionRequest) -[Exec, IO, FFI.C, FFI.Asm, Time.Wait]> X64ExecutionResponse
-    fn session_resource(self) -[]> X64ExecutionHost Never!
 }
 
 // The raw build-input transport a host supplies for checked `fn build` input
