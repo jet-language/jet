@@ -21,6 +21,7 @@ fn policy_key_name(key: PolicyKey) -> String Never! {
         .PrecisionDemotion -> "precision_demotion"
         .Structure -> "structure"
         .LintAllow -> "lint_allow"
+        .CheckRemoval -> "check_removal"
         .ScopedGC -> "gc"
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
@@ -45,6 +46,7 @@ fn policy_key_parse(name: String) -> PolicyKey? Never! {
         "precision_demotion" -> Val(PolicyKey.PrecisionDemotion)
         "structure" -> Val(PolicyKey.Structure)
         "lint_allow" -> Val(PolicyKey.LintAllow)
+        "check_removal" -> Val(PolicyKey.CheckRemoval)
         "gc" -> Val(PolicyKey.ScopedGC)
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
@@ -130,6 +132,7 @@ POLICY_RULES :: comptime { [PolicyRule]{
     {key: PolicyKey.PrecisionDemotion, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Structure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.LintAllow, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    {key: PolicyKey.CheckRemoval, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.ScopedGC, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Override},
     {key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
@@ -197,6 +200,7 @@ fn policy_key_debug_text(key: PolicyKey) -> String Never! {
         .PrecisionDemotion -> "PrecisionDemotion"
         .Structure -> "Structure"
         .LintAllow -> "LintAllow"
+        .CheckRemoval -> "CheckRemoval"
         .ScopedGC -> "ScopedGc"
         .ExplicitUnits -> "ExplicitUnits"
         .Copies -> "Copies"

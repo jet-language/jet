@@ -89,6 +89,11 @@ const literals = {
   list_head: "the list has ",
   list_position: " items, so position ",
   list_end: " doesn't exist`\n  --> <core.prelude>:0\n",
+  // `bounds: report` (JetRuntime jet_rt_report_list_bounds): the failed
+  // check's line, then its file and line; the program goes on.
+  report_list_head: "bounds report: the list has ",
+  report_list_at: " doesn't exist (",
+  report_list_end: ")\n",
   unreachable: "internal error: entered unreachable code: ",
   locals: "locals: ",
   todo: "#Todo at ",

@@ -5,6 +5,7 @@ use jet_foundation.[
     GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse,
     gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at,
     diagnostic_render_all, diagnostic_from_registry, SourceFile,
+    BuildOptionChoice, BuildOptionLayer, BuildOptionsResolved, build_option_flags, build_option_removes_check,
 ]
 use jetpack_trust.[TrustRecord]
 
@@ -27,6 +28,15 @@ fn jet_cli_gates_entry(args: [String]) -> String? Never! {
 
 fn jet_cli_gate_external(kind: GateKind, scope: String, source: String, subject: String, detail: String, provenance: [String]) -> GateEntry Never! {
     GateEntry{kind: kind, domain: "security", scope: scope, source: source, span: None, subject: subject, reason: None, status: Val("recorded"), detail: detail, provenance: provenance, operations: []}
+}
+
+// The `check_removal` gate of a build option value that removes a runtime
+// check (BuildOptionRow.removes_check), as the command line, a `package.jet`
+// profile or `fn build` wrote it.
+fn jet_cli_check_removal_gate(choice: BuildOptionChoice) -> GateEntry Never! {
+    source :: if choice.layer == BuildOptionLayer.Flag -> "command line" else -> "build options"
+    subject :: if choice.site == "" -> choice.written.copy() else -> "{choice.written} {choice.site}"
+    jet_cli_gate_external(GateKind.CheckRemoval, "build", source, subject, "build option that removes a runtime check", [source])
 }
 
 // Host reads the actual canonical TrustStore once; only typed projection lives
@@ -61,6 +71,11 @@ fn jet_cli_gate_append_invocation(ledger: &GateLedger, args: [String]) Never! {
         scope :: if kind == GateKind.SessionFlag -> "session" else -> "build"
         gate_ledger_push(&ledger, jet_cli_gate_external(kind, scope, "command line", subject, "written invocation choice", ["command line"]))
         if argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" -> gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
+    }
+    if build_option_flags(args) == .Resolved(flags, _) {
+        loop choice in flags.written {
+            if build_option_removes_check(choice) -> gate_ledger_push(&ledger, jet_cli_check_removal_gate(choice))
+        }
     }
 }
 
@@ -197,7 +212,7 @@ fn jet_cli_gates_host(request: JetDriverCompileRequest, args: [String], file: St
     if !result.source.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
     kind := GateKind?{None}
     if jet_cli_option_value(args, "--kind") == .Val(value) {
-        parsed :: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
+        parsed :: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
         kind = Val(parsed)
     }
     if !result.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)

@@ -1,6 +1,6 @@
 // Exact compiler-value contract from Collections.rs::build_context_method_*.
 // This table is arity-polymorphic; Core owns the session semantics, not sema.
-use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_row, build_option_value_of_variant, build_option_variants_text]
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
 use jet_parser.[jfmt_format_program_with_tokens]
 use jet_lexer.[Token]
 
@@ -105,6 +105,10 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
 fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Build"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    if build_option_refusal(method) == .Val(refusal) {
+        &diagnostics.push(sema_error("E3502", span, "`b.{method}` isn't a build option", refusal.law, "remove the `b.{method}` call"))
+        return failed
+    }
     if method == "pin" || build_option_row(method) != None -> return sema_call_build_option(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &diagnostics)
     contract :: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
@@ -191,6 +195,10 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
         name = ""
         if args[0].expr == .Field(base, member, _, _) {
             if base == .Ident(base_name, _, _) {
+                if base_name.len() == 0 && build_option_refusal(member) == .Val(refusal) {
+                    &diagnostics.push(sema_error("E3502", args[0].span, "`.{member}` isn't a build option", refusal.law, "remove the `b.pin` call"))
+                    return failed
+                }
                 if base_name.len() == 0 && build_option_row(member) != None -> name = member.copy()
             }
         }

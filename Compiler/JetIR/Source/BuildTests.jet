@@ -35,9 +35,11 @@ struct IROutputCheck { name: String, key: String }
 // otherwise every test is spawned before any is joined.
 struct IRTestHarness { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool }
 
-// Builds `harness` and every function it reaches.
-fn ir_build_tests(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness) -> IRBuildResult Never! {
+// Builds `harness` and every function it reaches, keeping `checks`
+// (ir_bounds_mode).
+fn ir_build_tests(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+    p.checks = checks
     ir_foreign_index(&p, ^foreign)
     m := ir_module_for(p)
     failures := [IRBuildFailure]{}

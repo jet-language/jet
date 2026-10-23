@@ -11,12 +11,12 @@ fn s5_gate_law_declaration(key: PolicyKey, value: PolicyValue, scope: PolicyScop
     PolicyDeclaration{key: key, value: value, scope: scope, span: Span{start: 0, end: 0}, target: None, source: source}
 }
 
-#Test("all fourteen gate kinds have one key and an authoritative floor") {
+#Test("all fifteen gate kinds have one key and an authoritative floor") {
     keys := [PolicyKey]{}
     loop row in POLICY_RULES {
         if policy_key_is_audited_gate(row.key) -> &keys.push(row.key)
     }
-    assert_eq(keys.len(), 14)
+    assert_eq(keys.len(), 15)
     loop key in keys {
         kind :: gate_kind_parse(policy_key_name(key)) ?? panic("every audited key has a gate kind")
         assert_eq(gate_kind_policy_key(kind), key)

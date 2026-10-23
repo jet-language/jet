@@ -8,7 +8,7 @@ use jet_driver.[
 ]
 use jet_foundation.[
     BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile,
-    build_option_method_value, build_options_with_code,
+    build_option_check_removal_note, build_option_method_value, build_options_check_removals, build_options_with_code,
 ]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
 use core.files as build_files
@@ -85,6 +85,10 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, threa
         .Refused(code, what, fix) -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
         .Resolved(resolved, notes) -> {
             loop note in notes -> jet_cli_write_notice("{note}\n")
+            // The command line and profile removals were noted before the compile (jet_cli_build_options).
+            loop choice in build_options_check_removals(resolved) {
+                if choice.layer == BuildOptionLayer.Code -> jet_cli_write_notice("{build_option_check_removal_note(choice)}\n")
+            }
             resolved_options = Val(^resolved)
         }
     }

@@ -21,8 +21,12 @@ use jet_foundation.[
     BuildOptionChoice,
     BuildOptionLayer,
     BuildOptions,
+    build_option_check_removal_note,
+    build_option_flag_refusal,
+    build_options_check_removals,
     build_option_flag_row,
     build_option_flags,
+    build_option_refusal,
     build_option_row,
     build_option_values_text,
     build_options_resolve,
@@ -405,6 +409,7 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
         if jet_cli_is_known_flag(argument) -> next
         head :: argument.split("=").to_list()[0]
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
+        if build_option_flag_refusal(head) == .Val(refusal) -> return Val(jet_cli_fail("E2102", "`{head}` isn't a build option jet has", refusal.law, "drop `{head}`", color, JET_DRIVER_EXIT_USAGE))
         program :: command == "run" || command == "test"
         fix := ""
         if jet_cli_closest_flag(head) == .Val(close) {
@@ -754,6 +759,7 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
         if declared == .Val(found) {
             site :: "in profile `{name}` of package.jet"
             loop field in found.fields {
+                if build_option_refusal(field.name) == .Val(refusal) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {field.value}` {site} isn't a build option", refusal.law, "remove the `{field.name}` field", color, JET_DRIVER_EXIT_USAGE)}
                 row :: build_option_row(field.name) ?? next
                 if !row.values.contains(field.value) {
                     return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {field.value}` {site} isn't a value of `{field.name}`", jet_cli_why("E2104"), "write `{field.name}:` with one of {build_option_values_text(row)}", color, JET_DRIVER_EXIT_USAGE)}
@@ -777,6 +783,7 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
             text := ""
             if !quiet {
                 loop note in notes -> text = "{text}{note}\n"
+                loop choice in build_options_check_removals(options) -> text = "{text}{build_option_check_removal_note(choice)}\n"
             }
             return JetCLIBuildOptions.Selected{options: options, notes: text}
         }

@@ -2,6 +2,7 @@
 # from `fn build` and from a flag, in that order; a flag that replaces a
 # profile or `fn build` value says so, and a flag against a pin is E2113.
 fixture: fixtures/build_options
+artifact: app
 env: NO_COLOR=1
 step: jet run --profile=fast main.jet
 cwd: set
@@ -12,31 +13,31 @@ step: jet run --profile=fast --optimize=none main.jet
 cwd: set
 exit: 0
 stdout: = "build options: ok\n"
-stderr: ~ "note: --optimize=none replaces optimize: full in profile `fast` of package.jet for this run"
+stderr: ~ "note: --optimize=none replaces optimize: full in profile `fast` of package.jet for this run" # the replace note names the profile value
 step: jet build
 cwd: set
 exit: 0
-stderr: !~ "note:"
+stderr: !~ "note:" # no flag replaces a written value
 step: jet build --optimize=basic
 cwd: set
 exit: 0
-stderr: ~ "note: --optimize=basic replaces b.optimize(.Full) at @build.jet:3 for this run"
+stderr: ~ "note: --optimize=basic replaces b.optimize(.Full) at @build.jet:3 for this run" # the replace note names the fn build call
 step: jet build --optimize
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: `--optimize` needs a value"
+stderr: ~ "Error [E2104]: `--optimize` needs a value" # the rest of the report is the registered E2104 row
 step: jet build --optimize=fast
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: `--optimize=fast` isn't a value of `optimize`"
+stderr: ~ "Error [E2104]: `--optimize=fast` isn't a value of `optimize`" # the rest of the report is the registered E2104 row
 step: jet build --optimize=full --optimize=none
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: `--optimize=full` and `--optimize=none` disagree"
+stderr: ~ "Error [E2104]: `--optimize=full` and `--optimize=none` disagree" # the rest of the report is the registered E2104 row
 step: jet run --profile=nope main.jet
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: build profile `nope` isn't declared"
+stderr: ~ "Error [E2104]: Build profile `nope` isn't declared" # the rest of the report is the registered E2104 row
 step: jet build --optimize=full
 cwd: pinned
 exit: 0

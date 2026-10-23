@@ -21,6 +21,8 @@ use jet_foundation.[
     TGCPromotionEdge,
     Type,
     TypedLitBody,
+    gate_kind_parse,
+    policy_key_name,
     policy_scope_name,
     policy_scope_rank,
     policy_value_display,
@@ -443,7 +445,11 @@ fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaratio
         // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet),
         // and so does `explicit_units` (E0127, Scopes.jet sema_scope_module_policy
         // and sema_scope_push_unit_policy).
-        if declaration.key != PolicyKey.ScopedGC && declaration.key != PolicyKey.Copies && declaration.key != PolicyKey.ExplicitUnits -> return true
+        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.ExplicitUnits -> next
+        // An audited-gate key (`unsafe: .Forbid`, `check_removal: .Forbid`, …)
+        // is no memory policy: the gate ledger and pkg_check_project_gate
+        // enforce it.
+        if gate_kind_parse(policy_key_name(declaration.key)) == None -> return true
     }
     false
 }

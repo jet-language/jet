@@ -398,6 +398,24 @@ fn trap_list_bounds_reason(len: I64, index: I64) -> I64 {
     jet_rt_string_drop(message)
 }
 
+// `bounds: report` (JetIR ir_list_bounds_report): a failed list bounds check
+// of code built with the `check_removal` gate writes one line to stderr,
+// naming the indexing file and line, and the program goes on with the
+// access. The index is the native word the check compared, so no exact-Int
+// seam is crossed and nothing here stops.
+#Export(c) fn jet_rt_report_list_bounds(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
+    jet_rt_stdout_flush()
+    trap_msg_report_list_head()
+    trap_number(len)
+    trap_msg_list_position()
+    trap_number(index)
+    trap_msg_report_list_at()
+    trap_write(file, file_len)
+    trap_write_word(I64{58}, I64{1})
+    trap_number(trap_line(line))
+    trap_msg_report_list_end()
+}
+
 // CAbi.rs:91-98: an uncaught host payload is a defect, not an E3001 stop.
 // Rust's thread/source/backtrace panic-hook framing is host implementation
 // detail; retain the payload bytes and the host-fault exit class. Like

@@ -66,6 +66,7 @@ use jet_foundation.[
     BuildOptions,
     build_options_stock,
     build_options_value,
+    build_options_check_removals,
     CtValue,
     Diagnostic,
     DIAGNOSTIC_ERROR,
@@ -94,10 +95,13 @@ use jet_ir.[
     IRFunction,
     IROp,
     IROutputCheck,
+    IRChecks,
     IRProgram,
     IRTestCase,
     IRTestHarness,
     ir_build_program,
+    ir_checks_of,
+    ir_checks_stock,
     ir_program_new,
     ir_build_tests,
     ir_optimize_module,
@@ -113,6 +117,7 @@ use jet_pkg_model.[
     ManifestEntry,
     PackageFacts,
     pkg_format_source,
+    pkg_check_project_gate,
     pkg_manifest_diagnostic_from_row,
     pkg_manifest_parse_diagnostic,
 ]
@@ -261,7 +266,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     loop function in checked.functions {
         if function.key == entry_key -> span = function.source_span
     }
-    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, result.compiler_threads)
+    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads)
     if built.failures.len() > 0 {
         rows :: loop failure in built.failures -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
         jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet evaluator can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), "correct the reported backend problems, then retry `jet eval {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
@@ -411,8 +416,9 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // after the object's, as when they came after it.
 // A function the builder can't build becomes one trap, so selection still
 // runs over the whole module and the failure lists every builder and
-// selection finding. `level` is the IR passes' optimization level
-// (jet_cli_native_level). `keep_going` (JET_KEEP_GOING): every finding is
+// selection finding. `options` are the build options: the IR passes'
+// optimization level (jet_cli_native_level) and the runtime checks the
+// program keeps (jet_cli_ir_checks). `keep_going` (JET_KEEP_GOING): every finding is
 // one row of `census` instead, and the route goes on
 // while it still has object bytes, so each later phase reports too.
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
@@ -426,7 +432,7 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // maps it into jet (Image/Loader.jet). `file` is the entry path the
 // command named (jet_cli_debug_directory). `hot`: the functions to lay out
 // first (ir_x64_hot_order; jet_cli_hot_text).
-fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, level: Int, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
+fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, options: BuildOptions, runtime_dir: String, executable_path: String, base: Int, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     if harness == None && checked.entry_key == None -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.NoEntry}
@@ -449,7 +455,7 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     foreign_link :: result.foreign_link.copy()
     task.group native_foreign {
         realizing :: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE)
-        object :: jet_cli_native_object(result, ^checked, harness, level, runtime_exports, keep_going, &census, file, hot)
+        object :: jet_cli_native_object(result, ^checked, harness, options, runtime_exports, keep_going, &census, file, hot)
         if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
         &objects.push(^object)
         &closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
@@ -667,9 +673,11 @@ fn jet_cli_runtime_exports_compare(bytes: [U8], start: Int, end: Int, row: [U8])
 // `ir.build`, `ir.opt`, `ir.x64` and `ir.object` of jet_cli_native_executable.
 // The object lays out the functions `hot` names first (ir_x64_hot_order);
 // `--trace` counts the names that name none (`ir.object.hot_missing`).
-fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, level: Int, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env]> JetCLINativeObject Never! {
+fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, keep_going: Bool, census: &[String], file: String, hot: [String]) -[FS, Env]> JetCLINativeObject Never! {
     trace_sink :: result.trace_sink
+    level :: jet_cli_native_level(options)
     checked := ^inputs
+    checks :: jet_cli_ir_checks(result, checked, options)
     declarations := jet_driver_checked_declarations(&checked)
     // The program's C closure defines its foreign functions' symbols.
     closure_symbols := [String:Bool]{}
@@ -683,7 +691,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
         }
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", result.compiler_threads)
+    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan, checks) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", checks, result.compiler_threads)
     function_count :: built.program.functions.len()
     if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
     rows := [String]{}
@@ -800,7 +808,7 @@ fn jet_cli_build_native(file: String, command: String, options: BuildOptions, re
     census := [String]{}
     base :: if command == "run" -> LINK_RUN_BASE else -> LINK_BASE
     hot :: if command == "build" -> jet_cli_hot_text(snapshot.roots[0].canonical_path) else -> [String]{}
-    linked := jet_cli_native_executable(result, ^inputs, None, sources, jet_cli_native_level(options), jet_cli_runtime_dir(), binary, base, keep_going, &census, file, hot)
+    linked := jet_cli_native_executable(result, ^inputs, None, sources, options, jet_cli_runtime_dir(), binary, base, keep_going, &census, file, hot)
     if census.len() > 0 {
         problem :: jet_cli_keep_going_append(census)
         if problem != "" -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
@@ -859,6 +867,36 @@ fn jet_cli_native_level(options: BuildOptions) -> Int Never! {
     }
 }
 
+// The runtime checks the native build keeps: the `bounds` option's mode in
+// the modules of the built package (the compile's package identity). Every
+// other module, a dependency's or Core's, keeps the fatal check its writer
+// built it with.
+fn jet_cli_ir_checks(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs, options: BuildOptions) -> IRChecks Never! {
+    bounds :: build_options_value(options, "bounds")
+    modules := [String:Bool]{}
+    if bounds != "fatal" {
+        loop graph_module in inputs.modules {
+            if graph_module.package_identity == result.package_identity -> modules[graph_module.module_identity.copy()] = true
+        }
+    }
+    ir_checks_of(bounds, modules)
+}
+
+// D-GATE-LAW1: a resolved build option value that removes a runtime check
+// (build_options_check_removals) is a `check_removal` gate of the package at
+// `root`; E3415 when its organization or package policy forbids it
+// (pkg_check_project_gate, the writer every external gate shares).
+fn jet_cli_check_removal_refusal(root: String, options: BuildOptions, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+    loop choice in build_options_check_removals(options) {
+        // The registered row writes the site in backticks.
+        site :: if choice.layer == BuildOptionLayer.Flag -> "command line ({choice.written})" else -> "{choice.written} {choice.site.replace("`", "")}"
+        pkg_check_project_gate(root, PolicyKey.CheckRemoval, site) ?? {
+            return Val(JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", err.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        }
+    }
+    None
+}
+
 enum JetCLIBuilt {
     // The linked executable; `path` is its place in .jet/build (written
     // there by `jet build`; by `jet run` only to run it from a file).
@@ -874,6 +912,7 @@ enum JetCLIBuilt {
 fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     if !result.complete -> return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}
+    if jet_cli_check_removal_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return JetCLIBuilt.Failed{output: refused}
     checked := ^inputs ?? return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")}
     build_dir :: jet_cli_build_dir_path(snapshot)
     binary :: "{build_dir}/{name}"
@@ -1212,6 +1251,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing the tests of `{file}`")
     root :: snapshot.roots[0].canonical_path
+    if jet_cli_check_removal_refusal(root, options.build, color) == .Val(refused) -> return refused
     build_dir :: "{root}/.jet/build"
     cli_files.create_dir_all(build_dir) ?? return jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)
     // Process-private: concurrent `jet test` runs of one file never replace
@@ -1230,7 +1270,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     // The harness's build, object and link are one traced span.
     if result.trace_sink == .Val(sink) -> sink.begin("native.build", "", -1, -1)
     census := [String]{}
-    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, jet_cli_native_level(options.build), jet_cli_runtime_dir(), binary, LINK_BASE, false, &census, file, [String]{})
+    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, options.build, jet_cli_runtime_dir(), binary, LINK_BASE, false, &census, file, [String]{})
     if native == {
         .Failed(failure) -> return jet_cli_test_native_failure(file, failure, color)
         .Image(executable) -> {

@@ -56,6 +56,16 @@ fn ir_list_bounds_stop(m: &IRModule, b: &IRBuilder, length: Int, index: Int) Nev
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
+// The `bounds: report` line of a failed check, at the builder's current
+// line; the access goes on (ir_checked_address):
+// jet_rt_report_list_bounds(length, native index, path, path length, line).
+fn ir_list_bounds_report(m: &IRModule, b: &IRBuilder, length: Int, index: Int) Never! {
+    args := [Int]{length, index}
+    site :: b.line
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    _ :: ir_runtime(&m, &b, "jet_rt_report_list_bounds", args, -1)
+}
+
 // A new Option box holding the element at `address`: moved out of the
 // List when `moving`, else a copy of it.
 fn ir_element_option(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: Int, option_row: Int, moving: Bool) -> Int Never! {

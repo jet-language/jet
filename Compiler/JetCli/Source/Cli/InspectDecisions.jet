@@ -4,7 +4,7 @@
 // build and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
 use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, canonical_pass_boundary_gaps]
-use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_optimize_module_measured, ir_opt_options_from, ir_opt_report_text]
+use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_optimize_module_measured, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
 struct JetCLIDecisions {
@@ -25,7 +25,7 @@ fn jet_cli_opt_options(level: Int) -> IROptOptions {
 fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, level: Int, threads: CompilerThreads) -> JetCLIDecisions {
     checked := ^inputs
     declarations := jet_driver_checked_declarations(&checked)
-    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", threads)
+    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", ir_checks_stock(), threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(level), threads)

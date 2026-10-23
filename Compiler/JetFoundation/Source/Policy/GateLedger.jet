@@ -15,6 +15,9 @@ enum GateKind {
     Nondeterministic
     Structure
     LintAllow
+    // A build option value that removes a runtime memory-safety check
+    // (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
+    CheckRemoval
 }
 
 fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
@@ -33,6 +36,7 @@ fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
         .Nondeterministic -> PolicyKey.Nondeterministic
         .Structure -> PolicyKey.Structure
         .LintAllow -> PolicyKey.LintAllow
+        .CheckRemoval -> PolicyKey.CheckRemoval
     }
 }
 
@@ -56,13 +60,14 @@ fn gate_kind_parse(value: String) -> GateKind? Never! {
         "nondeterministic" | "determinism" -> Val(GateKind.Nondeterministic)
         "structure" -> Val(GateKind.Structure)
         "lint_allow" -> Val(GateKind.LintAllow)
+        "check_removal" -> Val(GateKind.CheckRemoval)
         else -> None
     }
 }
 
 fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
     if kind == {
-        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic -> true
+        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic | .CheckRemoval -> true
         else -> false
     }
 }
@@ -70,19 +75,20 @@ fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
 fn gate_kind_order(kind: GateKind) -> Int Never! {
     if kind == {
         .Unsafe -> 0
-        .Impure -> 1
-        .Nondeterministic -> 2
-        .DependencyGrant -> 3
-        .BuildFlag -> 4
-        .SessionFlag -> 5
-        .TrustGrant -> 6
-        .ForcePin -> 7
-        .TaintScrub -> 8
-        .DutyDrop -> 9
-        .StateTransition -> 10
-        .PrecisionDemotion -> 11
-        .Structure -> 12
-        .LintAllow -> 13
+        .CheckRemoval -> 1
+        .Impure -> 2
+        .Nondeterministic -> 3
+        .DependencyGrant -> 4
+        .BuildFlag -> 5
+        .SessionFlag -> 6
+        .TrustGrant -> 7
+        .ForcePin -> 8
+        .TaintScrub -> 9
+        .DutyDrop -> 10
+        .StateTransition -> 11
+        .PrecisionDemotion -> 12
+        .Structure -> 13
+        .LintAllow -> 14
     }
 }
 

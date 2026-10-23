@@ -13,7 +13,7 @@ use jet_driver.[
     jet_driver_report_problems,
 ]
 use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
-use jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_function_text]
+use jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_checks_stock, ir_function_text]
 use jet_parser.[parse_source]
 
 fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
@@ -65,7 +65,7 @@ fn jet_cli_emit_ir_result(file: String, source: String, color: Bool, json: Bool,
     stderr :: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
     checked := ^inputs ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     declarations := jet_driver_checked_declarations(&checked)
-    built :: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, result.compiler_threads) else -> ir_build_all(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, result.compiler_threads)
+    built :: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, result.compiler_threads)
     if built.failures.len() > 0 {
         rows :: loop failure in built.failures -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), "correct the reported native backend problems, then retry `jet emit --ir {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}

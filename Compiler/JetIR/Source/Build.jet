@@ -117,11 +117,52 @@ struct IRBuilder {
     // built (ir_transact): its stop edges restore them (ir_stop_return),
     // which builds their Rollback calls and assignments.
     program: IRProgram?{None}
+    // What a failed bounds check of this body does (ir_checked_address):
+    // the program's mode in a function of a module IRChecks names, else Fatal.
+    bounds: IRBoundsMode{IRBoundsMode.Fatal}
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
 // being built) names the checked function `key` applied to `args`.
 struct IRDeferredCall { at: Int, key: String, function: Int{-1}, args: [Type]{[Type]{}} }
+
+// The `bounds` build option (JetFoundation BuildOptions.jet): what a failed
+// list bounds check does. Fatal stops the program (ir_list_bounds_stop);
+// Report writes the failure (ir_list_bounds_report) and goes on with the
+// access; Off drops the check.
+enum IRBoundsMode { Fatal Report Off }
+
+// The runtime checks a program keeps. `bounds` holds in the functions of
+// `modules` (module identities: the code the built package wrote). Every
+// other function keeps Fatal, so a dependency's function, generic or not,
+// keeps its writer's check wherever it is instantiated or inlined.
+struct IRChecks {
+    bounds: IRBoundsMode
+    modules: [String:Bool]
+}
+
+fn ir_checks_stock() -> IRChecks Never! {
+    IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}}
+}
+
+// The checks of a resolved `bounds` value (`fatal`, `report` or `off`) over
+// `modules`.
+fn ir_checks_of(bounds: String, modules: [String:Bool]) -> IRChecks Never! {
+    mode :: if bounds == {
+        "fatal" -> IRBoundsMode.Fatal
+        "report" -> IRBoundsMode.Report
+        "off" -> IRBoundsMode.Off
+        else -> panic("`{bounds}` is not a value of the `bounds` build option")
+    }
+    IRChecks{bounds: mode, modules: modules}
+}
+
+// The bounds mode of checked function `row` (-1: glue, Fatal).
+fn ir_bounds_mode(p: IRProgram, row: Int) -> IRBoundsMode Never! {
+    if row < 0 || p.checks.bounds == .Fatal -> return IRBoundsMode.Fatal
+    if p.checks.modules.get(p.functions[row].module_identity) == None -> return IRBoundsMode.Fatal
+    p.checks.bounds
+}
 
 // The checked program the builder reads: the checked functions every IR
 // function id may name, by key, and the checked type declarations, by key
@@ -186,6 +227,8 @@ struct IRProgram {
     // The program entry's function row (ir_build_program; -1: no entry): its
     // returns tell the runtime the process is ending (ir_emit_return).
     entry: Int{-1}
+    // The runtime checks the built functions keep (ir_bounds_mode).
+    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}}}
 }
 
 // A Display, Printable, Close or user Comparable implementation: the
@@ -840,9 +883,11 @@ fn ir_symbol_name(function: FnBody) -> String Never! {
 // are the checked modules' type, implementation and constant declarations,
 // in module order; `sources` the checked source files' text by path (the
 // source locations of journeys and contract reports); `foreign` the checked
-// foreign functions.
-fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, threads: CompilerThreads) -> IRBuildResult Never! {
+// foreign functions; `checks` the runtime checks the program's functions
+// keep (ir_bounds_mode).
+fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+    p.checks = checks
     ir_foreign_index(&p, ^foreign)
     row :: p.rows.get(entry_key) ?? {
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
@@ -995,6 +1040,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
         m.subst_names = job.subst_names
         m.subst_types = job.subst_types
         b.row = job.row
+        b.bounds = ir_bounds_mode(p, job.row)
         b.made = job.made
         b.next_node = job.next_node
         ir_build_lambda(&m, p, &b, job)
@@ -1010,6 +1056,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
     m.subst_names = if queued.args.len() > 0 -> ir_generic_names(p, function) else -> [String]{}
     m.subst_types = queued.args.copy()
     b.row = queued.row
+    b.bounds = ir_bounds_mode(p, queued.row)
     b.entry = queued.row == p.entry && queued.args.len() == 0
     ir_build_function(&m, p, &b, function)
     if b.error != "" {
@@ -2117,13 +2164,20 @@ fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, inde
 }
 
 // The address of element `native` (a native word) of the list at `list`,
-// after the bounds check.
+// after the bounds check the builder's mode keeps (IRBuilder.bounds): Fatal
+// stops at a failed check, Report reports it and goes on, Off has none.
 fn ir_checked_address(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row: Int) -> Int Never! {
-    length :: ir_load_word(&m, &b, list, 0)
-    bad :: ir_index_order(&m, &b, IROp.Ge, native, length)
-    ir_open_if(&b.f, bad, b.line)
-    ir_list_bounds_stop(&m, &b, length, native)
-    ir_end(&b.f, b.line)
+    if b.bounds != .Off {
+        length :: ir_load_word(&m, &b, list, 0)
+        bad :: ir_index_order(&m, &b, IROp.Ge, native, length)
+        ir_open_if(&b.f, bad, b.line)
+        if b.bounds == .Report {
+            ir_list_bounds_report(&m, &b, length, native)
+        } else {
+            ir_list_bounds_stop(&m, &b, length, native)
+        }
+        ir_end(&b.f, b.line)
+    }
     data :: ir_load_word(&m, &b, list, 16)
     stride :: ir_list_stride(m, row)
     ir_element_address(&m, &b, data, native, stride)

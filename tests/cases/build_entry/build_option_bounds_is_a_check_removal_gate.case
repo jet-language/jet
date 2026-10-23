@@ -1,0 +1,65 @@
+# #5005: `bounds: fatal|report|off`. `report` and `off` remove a memory-safety
+# check, so each is a `check_removal` gate: a note names it (`--quiet` drops
+# it), `jet inspect gates` lists it, and `policy: { check_removal: .Forbid }`
+# refuses it (E3415). Jai's `null` and `casts` have no row: each spelling is
+# refused with the law that leaves nothing to switch.
+fixture: fixtures/build_bounds
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: open
+exit: 70
+stderr: ~ "the list has 3 items, so position 3 doesn't exist" # the stock bounds check stops the program
+stderr: ~ "--> main.jet:7" # at the indexing line
+step: jet run --bounds=report main.jet
+cwd: open
+exit: 0
+stdout: = "went on\n"
+stderr: ~ "note: `--bounds=report` removes bounds checks from this package's code (check_removal gate)" # the gate note
+stderr: ~ "bounds report: the list has 3 items, so position 3 doesn't exist (main.jet:7)" # the report line, and the program goes on
+step: jet run --profile=unchecked main.jet
+cwd: open
+exit: 0
+stdout: = "went on\n"
+stderr: ~ "note: `bounds: off` in profile `unchecked` of package.jet removes bounds checks from this package's code (check_removal gate)" # the gate note names the profile field
+step: jet run --quiet --bounds=off main.jet
+cwd: open
+exit: 0
+stdout: = "went on\n"
+stderr: empty
+step: jet inspect gates --json main.jet --bounds=report
+cwd: open
+exit: 0
+json: stdout doc $.gates.entries[?kind="check_removal"][0].subject = "--bounds=report"
+json: stdout doc $.gates.entries[?kind="check_removal"][0].source = "command line"
+step: jet run --bounds=off main.jet
+cwd: forbid
+exit: 1
+stderr: = build-option-bounds-forbid-e3415.stderr
+step: jet build --profile=unchecked main.jet
+cwd: forbid
+exit: 1
+stderr: ~ "Error [E3415]: The `check_removal` gate at `bounds: report in profile unchecked of package.jet` is forbidden by" # the profile field is the gate's site
+step: jet run main.jet
+cwd: forbid
+exit: 0
+stdout: = "checked\n"
+step: jet run --null=off main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2102]: `--null` isn't a build option jet has" # refused as no option
+stderr: ~ "a reference is never null" # naming the law
+step: jet build --casts main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2102]: `--casts` isn't a build option jet has" # refused as no option
+stderr: ~ "a conversion is total or returns an Optional" # naming the law
+step: jet run --profile=nulls main.jet
+cwd: refused_profile
+exit: 2
+stderr: ~ "Error [E2104]: `null: off` in profile `nulls` of package.jet isn't a build option" # refused as no option
+stderr: ~ "a reference is never null" # naming the law
+step: jet build
+cwd: refused_code
+exit: 1
+stderr: ~ "Error [E3502]: `b.casts` isn't a build option" # refused as no option
+stderr: ~ "a conversion is total or returns an Optional" # naming the law

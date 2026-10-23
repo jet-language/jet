@@ -13,13 +13,50 @@ struct BuildOptionRow {
     // The stock value of `jet build`, and of `jet run`, `jet dev` and `jet test`.
     stock_build: String
     stock_run: String
+    // The values that remove a runtime memory-safety check. Each is a
+    // `check_removal` gate (GateKind.CheckRemoval) the owning policy can refuse
+    // (E3415), and it applies only to code the built package wrote.
+    removes_check: [String]
     help: String
 }
 
 JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
-    {name: "optimize", values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", help: "How hard to optimize: none, basic or full"},
+    {name: "optimize", values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
+    // A failed list bounds check: fatal stops the program (the stock), report
+    // writes the failure to stderr and goes on with the access unchecked, off
+    // drops the check.
+    {name: "bounds", values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
 } }
+
+// The Jai build options Jet refuses, each with the law that leaves nothing for
+// it to switch. A profile field, flag or `fn build` call of one of these names
+// is refused with `law` instead of being an unknown name.
+struct BuildOptionRefusal {
+    name: String
+    law: String
+}
+
+JET_BUILD_OPTION_REFUSALS :: comptime { [BuildOptionRefusal]{
+    {name: "null", law: "Jet has no null check to switch: a reference is never null, and a raw pointer's validity is the obligation of the `#Unsafe` code that uses it (I1)"},
+    {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional (D-SHAPE-CONVERT1)"},
+} }
+
+fn build_option_refusal(name: String) -> BuildOptionRefusal? {
+    loop refusal in JET_BUILD_OPTION_REFUSALS {
+        if refusal.name == name -> return Val(refusal.copy())
+    }
+    None
+}
+
+// The refused option a jet flag (`--null` or `--null=off`) names.
+fn build_option_flag_refusal(argument: String) -> BuildOptionRefusal? {
+    head :: argument.split("=").to_list()[0]
+    loop refusal in JET_BUILD_OPTION_REFUSALS {
+        if build_option_flag(refusal.name) == head -> return Val(refusal.copy())
+    }
+    None
+}
 
 // The layer a value came from, in D-SETTING-ORDER1 order.
 enum BuildOptionLayer {
@@ -136,6 +173,28 @@ fn build_options_value(options: BuildOptions, name: String) -> String Never! {
         if choice.name == name -> return choice.value
     }
     panic("build option `{name}` is not a row of JET_BUILD_OPTIONS")
+}
+
+// Whether `choice`'s value removes a runtime check (its row's `removes_check`).
+fn build_option_removes_check(choice: BuildOptionChoice) -> Bool Never! {
+    row :: build_option_row(choice.name) ?? return false
+    row.removes_check.contains(choice.value)
+}
+
+// The resolved values that remove a runtime check, in table order.
+fn build_options_check_removals(options: BuildOptions) -> [BuildOptionChoice] Never! {
+    out := [BuildOptionChoice]{}
+    loop choice in options.values {
+        if build_option_removes_check(choice) -> &out.push(choice.copy())
+    }
+    out
+}
+
+// The stderr receipt of one check removal (build_options_check_removals), the
+// `check_removal` gate `jet inspect gates` lists for the same choice.
+fn build_option_check_removal_note(choice: BuildOptionChoice) -> String Never! {
+    place :: if choice.site == "" -> "`{choice.written}`" else -> "`{choice.written}` {choice.site}"
+    "note: {place} removes {choice.name} checks from this package's code (check_removal gate)"
 }
 
 // The jet flags of `argv` that name a row, as Flag-layer choices, or the
