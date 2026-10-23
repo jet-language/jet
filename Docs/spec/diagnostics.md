@@ -240,7 +240,7 @@ Expected files are read-only in ordinary runs.
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
-200ms. `tests/dev_latency.rs` measures `Examples/features/collections/wordcount.jet`
+200ms. `Compiler/JetLSP/Tests/Integration/DevLatencyTests.jet` measures `Examples/features/collections/wordcount.jet`
 with `BUDGET_MS: u128 = 200`, uses five timed rounds after warm-up, and keeps
 watch coalescing below 5ms with idle polling at most 10ms. This is the user
 latency contract, not a claim that every machine has one fixed runtime.
