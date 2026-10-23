@@ -639,16 +639,16 @@ fn jet_cli_memory_available() -[FS]> Int? Never! {
     }
     loop {
         directory :: "/sys/fs/cgroup{path}"
-        limit :: jet_cli_cgroup_bytes("{directory}/memory.max")
-        used :: jet_cli_cgroup_bytes("{directory}/memory.current")
-        if limit == .Val(max) && used == .Val(current) {
-            headroom :: if max > current -> max - current else -> 0
-            if headroom < available -> available = headroom
+        // A level whose memory.max is `max` bounds nothing; its usage isn't read.
+        if jet_cli_cgroup_bytes("{directory}/memory.max") == .Val(max) {
+            if jet_cli_cgroup_bytes("{directory}/memory.current") == .Val(current) {
+                headroom :: if max > current -> max - current else -> 0
+                if headroom < available -> available = headroom
+            }
         }
         if path == "" || path == "/" -> break
-        cut := path.len() - 1
-        loop cut > 0 && path.slice(cut..<(cut + 1)) != "/" -> cut -= 1
-        path = path.slice(0..<cut)
+        cut :: path.rfind("/")
+        path = if cut > 0 -> path.slice(0, cut) else -> ""
     }
     Val(available)
 }
