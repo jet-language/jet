@@ -428,10 +428,14 @@ fn scheduler_task_completion_begin() -> I64 {
     scheduler_words_push(stack, frame)
     frame
 }
+// The last owner runs the box's release helper at 16 when it has one: a
+// box with nothing to release (a lambda with no captures) holds 0 there,
+// as JetIR ir_closure_unref reads it.
 fn scheduler_closure_drop(closure: I64) {
     count :: sync_load(closure) - I64{1}
     sync_store(closure, count)
-    if (count == I64{0}) -> coll_call1_unit(sync_load(closure + I64{16}), closure)
+    release :: sync_load(closure + I64{16})
+    if (count == I64{0} && release != I64{0}) -> coll_call1_unit(release, closure)
 }
 fn scheduler_task_completion_register(closure: I64) {
     stack :: sync_load(thread_base() + I64{80})

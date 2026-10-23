@@ -1939,6 +1939,16 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     }
     if name == "jet_ordering_then" || name == "jet_ordering_reverse" -> return Val(ir_ordering_method(&m, p, &b, name, inputs, span))
     if name == "jet_std::JetShared::new" -> return Val(ir_shared_new(&m, p, &b, inputs, result, span))
+    // `os.atexit(handler)`: the runtime's exit queue takes the handler's
+    // closure box over (Task.jet jet_rt_native_atexit; it runs invoke at 8,
+    // then the release at 16, as a scope guard does).
+    if name == "jet_std_os_atexit" {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "atexit with {inputs.len()} arguments"))
+        handler :: ir_own(&m, p, &b, inputs[0])
+        _ :: ir_runtime(&m, &b, "jet_rt_native_atexit", [Int]{handler}, -1)
+        b.fresh[handler] = false
+        return Val(-1)
+    }
     strings :: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
     lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
     if !strings && !lists -> return None
