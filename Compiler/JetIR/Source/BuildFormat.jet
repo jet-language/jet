@@ -10,7 +10,8 @@ use jet_foundation.[Span, TExpr, TStrFormat, Type]
 // parameter takes any other value's Display text; a numeric parameter takes
 // the value cast to its type.
 fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, format: TStrFormat, span: Span) -> Int Never! {
-    concrete :: ir_subst(m, value.ty)
+    value_ty :: ir_ty(p, b, value)
+    concrete :: ir_subst(m, value_ty)
     member :: ir_string_format_member(concrete, format) ?? return ir_fail_slot(&b, span, "interpolation format {format}")
     row := -1
     loop (index, function) in p.functions {
@@ -33,9 +34,9 @@ fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, for
     if ir_failed(b) || slot < 0 -> return -1
     argument := slot
     if format == .Pretty {
-        argument = ir_render(&m, p, &b, value.ty, slot, IRRender.Debug, span)
+        argument = ir_render(&m, p, &b, value_ty, slot, IRRender.Debug, span)
     } else if target == Type.String && ir_untag(concrete) != Type.String {
-        argument = ir_render(&m, p, &b, value.ty, slot, IRRender.Display, span)
+        argument = ir_render(&m, p, &b, value_ty, slot, IRRender.Display, span)
     } else if target != Type.String && target != concrete {
         target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
         // A distinct or tagged value already is its base's row.

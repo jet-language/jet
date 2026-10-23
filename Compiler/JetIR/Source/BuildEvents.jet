@@ -38,7 +38,7 @@ fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         .EventMethod(_) -> {}
         else -> return None
     }
-    route :: ir_general_handle_route(operation, ir_subst(m, receiver.ty), args.len(), ir_failure_carrier_for_type(ty)) ?? return None
+    route :: ir_general_handle_route(operation, ir_subst(m, ir_ty(p, b, receiver)), args.len(), ir_failure_carrier_for_type(ty)) ?? return None
     if route.module_name != "core.event" -> return None
     symbol :: route.symbol
     if symbol == "jet_std::JetEvent::on" -> return Val(ir_event_listen(&m, p, &b, ty, receiver, args, false, false, span))
@@ -85,7 +85,8 @@ fn ir_event_query(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
 // kept handler is cloned for it first; the priority crosses as a native word.
 fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, args: [TExpr], prioritized: Bool, once: Bool, span: Span) -> Int Never! {
     if args.len() != (if prioritized -> 3 else -> 2) -> return ir_fail_slot(&b, span, "Event listener registration with {args.len()} arguments")
-    closure_ty :: ir_subst(m, args[args.len() - 1].ty)
+    handler_ty :: ir_ty(p, b, args[args.len() - 1])
+    closure_ty :: ir_subst(m, handler_ty)
     if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) {
         if params.len() != 1 -> return ir_fail_slot(&b, span, "Event handler taking {params.len()} parameters")
     } else {
@@ -100,7 +101,7 @@ fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     if prioritized {
         value :: ir_expr(&m, p, &b, args[1])
         if ir_failed(b) || value < 0 -> return -1
-        if ir_untag(ir_subst(m, args[1].ty)) == Type.Int {
+        if ir_untag(ir_subst(m, ir_ty(p, b, args[1]))) == Type.Int {
             word_row :: ir_word_row(&m)
             priority = ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
         } else {
@@ -137,7 +138,7 @@ fn ir_event_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     if ir_failed(b) || event < 0 -> return -1
     payload := -1
     slot := ir_word_const(&m, &b, 0)
-    if !ir_unit_type(ir_subst(m, args[0].ty)) {
+    if !ir_unit_type(ir_subst(m, ir_ty(p, b, args[0]))) {
         payload = ir_expr(&m, p, &b, args[0])
         if ir_failed(b) || payload < 0 -> return -1
         slot = ir_lazy_value_slot(&m, &b, payload)

@@ -23,6 +23,7 @@ use jet_foundation.[
     type_name,
     core_identity_is,
     tir_symbol_local,
+    tir_expr_retype,
 ]
 
 fn sema_time_named(name: String) -> Type Never! {
@@ -398,10 +399,10 @@ fn sema_time_clock_retagged(value: ^TExpr, tagged: Type, expected: Type?, enviro
     retagged := ^value
     if retagged.ty == .Result(_, err) {
         // copy: `err` is a payload of `retagged.ty`, which the new Type.Result replaces
-        retagged.ty = Type.Result{ok: tagged, err: err.copy()}
+        tir_expr_retype(&retagged, Type.Result{ok: tagged, err: err.copy()})
         return Val(retagged)
     }
-    retagged.ty = tagged
+    tir_expr_retype(&retagged, tagged)
     sema_expr_expected(retagged, expected, environment, program, &diagnostics)
 }
 

@@ -173,15 +173,16 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
             ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
             return None
         }
-        call :: ir_tx_method_expr(p, snapshot.local, owner, method, [TCallArg]{}, span)
-        if ir_untag(call.ty) == .Result(ok, error) {
+        call :: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [TCallArg]{}, span)
+        if ir_untag(ir_ty(p, b, call)) == .Result(ok, error) {
             saved_ty = ok.copy()
             // A `Never` failure is uninhabited whatever the enclosing rail.
             conversion :: if ir_never_type(ir_untag(error)) -> TTryConvert.Never else -> TTryConvert.NoConversion
-            checked :: TExpr{ty: ok, kind: TExprKind.Try{value: call, conversion: conversion, failure: b.failure.copy()}, span: span}
+            failure :: b.failure.copy()
+            checked :: ir_node(&b, ok, TExprKind.Try{value: call, conversion: conversion, failure: failure}, span)
             value = ir_expr(&m, p, &b, checked)
         } else {
-            saved_ty = call.ty.copy()
+            saved_ty = ir_ty(p, b, call).copy()
             value = ir_expr(&m, p, &b, call)
         }
     } else {
@@ -200,22 +201,22 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
 
 // `local.<method>(args)` of its Rollback implementation, typed by the
 // method's declared return.
-fn ir_tx_method_expr(p: IRProgram, local: TLocal, owner: Type, method: TMethodRef, args: [TCallArg], span: Span) -> TExpr Never! {
+fn ir_tx_method_expr(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, method: TMethodRef, args: [TCallArg], span: Span) -> TExpr Never! {
     ret := Type.Named{name: "Unit"}
     if p.rows.get(method.symbol.key) == .Val(row) {
         ret = p.functions[row].ret ?? Type.Named{name: "Unit"}
     }
-    receiver :: TExpr{ty: owner, kind: TExprKind.Local{local: local}, span: span}
-    TExpr{ty: ret, kind: TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span: span}
+    receiver :: ir_node(&b, owner, TExprKind.Local{local: local}, span)
+    ir_node(&b, ret, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span)
 }
 
 // Puts the saved value back (codegen jet_codegen_transaction_restore_snapshot).
 fn ir_tx_restore(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: IRTxSnapshot, span: Span) Never! {
-    saved :: TExpr{ty: snapshot.saved_ty, kind: TExprKind.Local{local: snapshot.saved}, span: span}
+    saved :: ir_node(&b, snapshot.saved_ty, TExprKind.Local{local: snapshot.saved}, span)
     if snapshot.rollback == .Val(owner) {
         method :: snapshot.restore ?? return ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::restore")
         argument :: TCallArg{value: saved, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-        call :: ir_tx_method_expr(p, snapshot.local, owner, method, [TCallArg]{argument}, span)
+        call :: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [TCallArg]{argument}, span)
         result :: ir_expr(&m, p, &b, call)
         ir_release(&m, &b, result)
         return

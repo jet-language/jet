@@ -82,6 +82,7 @@ use jet_foundation.[
     PlaceAccess,
     TTryConvert,
     ast_empty_lambda_meta,
+    tir_expr_retype,
 ]
 
 // A checked node of `kind`. The kind moves in: callers build it as a literal
@@ -926,7 +927,7 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
             if bounds.len() != 1 -> return updated
             if offered == .TraitObject(_) -> return updated
             source := updated
-            updated.ty = required
+            tir_expr_retype(&updated, required)
             updated.kind = TExprKind.TraitBox{value: source, target: required}
             return updated
         }
@@ -4490,7 +4491,7 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
                 if ranged && sema_expression_is_place(expr) {
                     span :: expr_span(expr)
                     window :: Expr.Place{value: expr, access: PlaceAccess.Read, span: span, id: AST_NODE_GENERATED}
-                    return sema_expr_check_place_expr(window, expr, PlaceAccess.Read, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return sema_check_expression_recorded(expr, sema_expr_check_place_expr(window, expr, PlaceAccess.Read, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics), &context)
                 }
             }
         }
@@ -4500,13 +4501,13 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
     // string view binding read where `String` is expected, outside a borrow
     // position, materializes one owned copy.
     if expected == .Val(destination) && expr == .Ident(view_name, view_span, _) {
-        if sema_read_view_owning_read(view_name, destination, scopes, context) || (!context.borrow_ctx && sema_string_view_owning_read(expr, destination, scopes)) -> return sema_string_view_materialize(view_name, view_span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+        if sema_read_view_owning_read(view_name, destination, scopes, context) || (!context.borrow_ctx && sema_string_view_owning_read(expr, destination, scopes)) -> return sema_check_expression_recorded(expr, sema_string_view_materialize(view_name, view_span, expected, environment, program, &scopes, &state, &context, &diagnostics), &context)
     }
     // Only a bare member chain can be handled there; testing that here keeps
     // the chain check's frame off every other expression level.
     if sema_expr_is_bare_member_chain(expr) {
         bare_member :: sema_expr_check_bare_member_chain(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if bare_member.handled -> return bare_member.value
+        if bare_member.handled -> return sema_check_expression_recorded(expr, bare_member.value, &context)
     }
     if !sema_enter_source_nesting(&context, expr_span(expr), &diagnostics) -> return None
     // A call root auto-propagates its Result carrier
@@ -4532,10 +4533,20 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
     }
     // The checked value moves out and back: binding it while `checked` was
     // still returned copied the whole checked tree at every level.
-    value :: checked ?? return None
+    value := checked ?? return None
     if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
     sema_cell_guard_check_construct(expr, value.ty, &diagnostics)
-    Val(value)
+    sema_check_record_expr_type(expr, &value, &context)
+    Val(^value)
+}
+
+// An expression form checked outside the common exit (a ranged view
+// argument, a materialized view read, a bare member chain) files its value
+// in the column there.
+fn sema_check_expression_recorded(expr: Expr, checked: TExpr?, context: &SemaCheckContext) -> TExpr? Never! {
+    value := checked ?? return None
+    sema_check_record_expr_type(expr, &value, &context)
+    Val(^value)
 }
 
 // Check a carrier consumer's subject (`??`, `?`, an `.Ok`/`.Err` pattern): the

@@ -25,6 +25,7 @@ use jet_foundation.[
     expr_span,
     type_identity_equal,
     type_name,
+    tir_expr_retype,
 ]
 
 SEMA_SHARED_SNAPSHOT_TYPE :: prep { "SharedSnapshot" }
@@ -103,7 +104,7 @@ fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: 
     if callback.kind == .Lambda(lambda) && (lambda.effects.maximal || lambda.effects.solved.len() > 0) {
         &diagnostics.push(sema_error("E3401", expr_span(args[0].expr), "`Shared.capture` calls the impure function `capture projection`", "`capture projection` is impure, but `Shared.capture` declares `-[]>`", "remove the call from `Shared.capture`, or drop the `-[]>` bound from `Shared.capture` so its effects are inferred"))
     }
-    callback.ty = Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    tir_expr_retype(&callback, Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
     sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 

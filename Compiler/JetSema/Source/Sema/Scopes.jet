@@ -3,6 +3,7 @@
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
     AccessConvention,
+    AST_NODE_GENERATED,
     ArithmeticPolicyFact,
     CoreMarkerApplication,
     Diagnostic,
@@ -25,6 +26,8 @@ use jet_foundation.[
     SymbolKind,
     TComptimeValue,
     TExpr,
+    TExprType,
+    TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
     TTypedGoal,
     TFailureCarrier,
@@ -38,6 +41,7 @@ use jet_foundation.[
     ViewSourcePath,
     type_identity_equal,
     type_name,
+    expr_node_id,
     Effect,
     Exactness,
     Func,
@@ -618,6 +622,14 @@ struct SemaCheckContext {
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
     // The body's `todo` goals, with the card naming each one's expected type.
     typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The expression-type column (TFunc.expr_types): a row per checked
+    // expression, keyed by its node id, with the row of each source node id,
+    // and the next function-local id for a node whose source id is generated
+    // or already filed (a desugared copy). A snapshot starts with no rows and
+    // continues the id count; its merge hands both back.
+    expr_types: [TExprType]{[TExprType]{}}
+    expr_type_rows: [Int:Int]{[Int:Int]{}}
+    next_expr_id: Int{TEXPR_FIRST_LOCAL_ID}
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
@@ -999,6 +1011,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
         compiler_generated: source.compiler_generated,
+        next_expr_id: source.next_expr_id,
     }
     sema_comptime_body_sources_index(&snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1031,6 +1044,8 @@ struct SemaCheckContextMark {
     incomplete_reasons: Int
     origin_facts: Int
     typed_goals: Int
+    expr_types: Int
+    next_expr_id: Int
     saved: SemaCheckContext
 }
 
@@ -1063,6 +1078,8 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
         incomplete_reasons: context.incomplete_reasons.len(),
         origin_facts: context.origin_facts.len(),
         typed_goals: context.typed_goals.len(),
+        expr_types: context.expr_types.len(),
+        next_expr_id: context.next_expr_id,
         saved: SemaCheckContext{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -1158,6 +1175,13 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
     loop context.typed_goals.len() > mark.typed_goals -> _ := &context.typed_goals.pop()
+    loop context.expr_types.len() > mark.expr_types {
+        dropped := &context.expr_types.pop()
+        if dropped == .Val(row) {
+            if row.id >= 0 -> _ := &context.expr_type_rows.remove(row.id)
+        }
+    }
+    context.next_expr_id = mark.next_expr_id
     loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := &context.noelse_chain_starts.pop()
     loop context.failure_edges.len() > mark.failure_edges -> _ := &context.failure_edges.pop()
     loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()
@@ -1222,6 +1246,61 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
 // Every path that marks a body incomplete without a diagnostic calls this.
 fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
     &context.incomplete_reasons.push(reason)
+}
+
+// Files `value`, the checked form of `expr`, in the function's
+// expression-type column under the expression's node id, or under a fresh
+// function-local id when that id is generated or already filed (a desugared
+// copy checked again). A value a nested check filed (a grouping, a delegated
+// form) keeps its row.
+fn sema_check_record_expr_type(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
+    if value.id != AST_NODE_GENERATED -> return
+    id := expr_node_id(expr)
+    if id == AST_NODE_GENERATED || context.expr_type_rows.get(id) != None {
+        id = context.next_expr_id
+        context.next_expr_id -= 1
+    } else {
+        context.expr_type_rows[id] = context.expr_types.len()
+    }
+    value.id = id
+    &context.expr_types.push(TExprType{id: id, ty: value.ty})
+}
+
+// Hands the column rows a snapshot (sema_check_context_snapshot) filed back
+// to the context it was taken from, with its id count.
+fn sema_check_context_merge_expr_types(source: SemaCheckContext, target: &SemaCheckContext) Never! {
+    loop index in 0..<source.expr_types.len() {
+        row :: source.expr_types[index]
+        if row.id >= 0 -> target.expr_type_rows[row.id] = target.expr_types.len()
+        &target.expr_types.push(row)
+    }
+    target.next_expr_id = source.next_expr_id
+}
+
+// Hands back the column rows a full copy of `target` filed past target's own
+// rows, with its id count: a check run on a copied context keeps its rows.
+fn sema_check_context_return_expr_types(copied: SemaCheckContext, target: &SemaCheckContext) Never! {
+    loop index in target.expr_types.len()..<copied.expr_types.len() {
+        row :: copied.expr_types[index]
+        if row.id >= 0 -> target.expr_type_rows[row.id] = target.expr_types.len()
+        &target.expr_types.push(row)
+    }
+    target.next_expr_id = copied.next_expr_id
+}
+
+// Rolls `context` back to `mark` but keeps the column rows filed since it,
+// with the id count: the facts of an erased `#DebugOnly` body stay inside it,
+// while its checked statements stay in the tree and keep their types.
+fn sema_check_context_rollback_keep_expr_types(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+    kept := [TExprType]{}
+    loop index in mark.expr_types..<context.expr_types.len() -> &kept.push(context.expr_types[index])
+    next_expr_id :: context.next_expr_id
+    sema_check_context_rollback(&context, mark)
+    loop row in kept {
+        if row.id >= 0 -> context.expr_type_rows[row.id] = context.expr_types.len()
+        &context.expr_types.push(row)
+    }
+    context.next_expr_id = next_expr_id
 }
 
 fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {

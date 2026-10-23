@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id, tir_expr_retype]
 
 fn sema_policy_builtin(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -142,7 +142,8 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     }
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, policy.name, params, None, true, binding, &arguments, environment, program, &scopes, &tail_store, &context, policy.name_span, &diagnostics) ?? return None
     captured := callee
-    captured.ty = all_params[count].ty ?? return None
+    captured_ty :: all_params[count].ty ?? return None
+    tir_expr_retype(&captured, captured_ty)
     conventions := (loop parameter in params -> parameter.convention)
     value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper_name: Val(wrapper.symbol.id.key), captures: [TCapture]{}, callee: captured}}, policy.name_span)
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))

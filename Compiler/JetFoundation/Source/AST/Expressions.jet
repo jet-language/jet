@@ -538,6 +538,62 @@ fn expr_span(expr: Expr) -> Span {
     Span{start: 0, end: 0}
 }
 
+// The AST NodeId of an expression (AST_NODE_GENERATED for a compiler-built one).
+fn expr_node_id(expr: Expr) -> Int Never! {
+    if expr == {
+        .Str(_, _, id) -> id
+        .StrMatchLit(_, _, id) -> id
+        .BinMatchLit(_, _, id) -> id
+        .Int(_, _, _, _, id) -> id
+        .Float(_, _, _, _, id) -> id
+        .Bool(_, _, id) -> id
+        .Unit(_, id) -> id
+        .Char(_, _, id) -> id
+        .ListLit(_, _, id) -> id
+        .MemberSpread(_, _, _, id) -> id
+        .Spread(_, _, id) -> id
+        .MapLit(_, _, id) -> id
+        .Index(_, _, _, _, id) -> id
+        .Slice(_, _, _, _, _, id) -> id
+        .Range(_, _, _, _, id) -> id
+        .Ident(_, _, id) -> id
+        .Call(_, id) -> id
+        .Unary(_, _, _, id) -> id
+        .Binary(_, _, _, _, id) -> id
+        .CompareChain(_, _, _, _, id) -> id
+        .UnitLit(_, _, _, _, _, _, id) -> id
+        .Deref(_, _, id) -> id
+        .RawOf(_, _, id) -> id
+        .Copy(_, _, id) -> id
+        .Place(_, _, _, id) -> id
+        .Field(_, _, _, id) -> id
+        .OptField(_, _, _, _, _, id) -> id
+        .MethodCall(_, _, _, _, _, _, id) -> id
+        .OptMethodCall(_, _, _, _, _, _, id) -> id
+        .StructLit(_, _, _, _, _, _, _, id) -> id
+        .TypedLit(_, _, _, id) -> id
+        .EnumLit(_, _, _, _, _, _, id) -> id
+        .Tainted(_, _, _, id) -> id
+        .Present(_, _, id) -> id
+        .Absent(_, id) -> id
+        .Todo(_, _, id) -> id
+        .NoElse(_, id) -> id
+        .ReduceMarker(_, _, id) -> id
+        .PatternTest(_, _, _, id) -> id
+        .Ok(_, _, id) -> id
+        .Err(_, _, id) -> id
+        .Try(_, _, _, _, id) -> id
+        .OrFallback(_, _, _, _, id) -> id
+        .If(_, _, _, _, _, _, id) -> id
+        .TupleLit(_, _, _, id) -> id
+        .Lambda(_, id) -> id
+        .CallValue(_, _, _, id) -> id
+        .PtrFromAddr(_, _, _, _, _, id) -> id
+        .ComptimeName(_, _, _, id) -> id
+        .Paren(_, _, id) -> id
+    }
+}
+
 // The first source byte of an expression. A method call is spanned at its
 // method name, so a method chain or a member path starts at its receiver.
 fn expr_source_start(expr: Expr) -> Int Never! {

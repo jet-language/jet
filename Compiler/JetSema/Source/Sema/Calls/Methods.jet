@@ -41,6 +41,7 @@ use jet_foundation.[
     symbol_id,
     type_name,
     tir_symbol_local,
+    tir_expr_retype,
 ]
 
 struct SemaMethodSpecialCheck {
@@ -166,7 +167,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
             callback_value.kind = TExprKind.Lambda{value: moved_lambda}
         }
     }
-    callback_value.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty))
+    tir_expr_retype(&callback_value, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty)))
     callback_name :: sema_shared_access_host_method_name(receiver_value.ty, method)
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, callback_name, span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
@@ -803,7 +804,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
                 callback.kind = TExprKind.Lambda{value: moved_lambda}
             }
         }
-        callback.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty))
+        tir_expr_retype(&callback, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty)))
         callback_name :: sema_shared_access_host_method_name(receiver_value.ty, resolved_candidate.method.name)
         call_value = sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }

@@ -71,10 +71,10 @@ fn ir_trait_implementer(p: IRProgram, row: Int, owner: SymbolID) -> Type? Never!
 }
 
 // The list literal values boxed as trait values of `target`.
-fn ir_trait_boxes(values: [TExpr], target: Type) -> [TExpr] Never! {
+fn ir_trait_boxes(b: &IRBuilder, values: [TExpr], target: Type) -> [TExpr] Never! {
     boxed := [TExpr]{}
     loop value in values {
-        &boxed.push(TExpr{ty: target, kind: TExprKind.TraitBox{value: value, target: target}, span: value.span})
+        &boxed.push(ir_node(&b, target, TExprKind.TraitBox{value: value, target: target}, value.span))
     }
     boxed
 }
@@ -86,7 +86,7 @@ fn ir_trait_boxes(values: [TExpr], target: Type) -> [TExpr] Never! {
 fn ir_trait_box(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, target: Type, span: Span) -> Int Never! {
     bounds :: if ir_untag(target) == .TraitObject(names) -> names else -> { return ir_fail_slot(&b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait") }
     if bounds.len() != 1 -> return ir_fail_slot(&b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait")
-    concrete :: ir_subst(m, value.ty)
+    concrete :: ir_subst(m, ir_ty(p, b, value))
     if ir_untag(concrete) == .TraitObject(_) -> return ir_expr(&m, p, &b, value)
     row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
     size := 0

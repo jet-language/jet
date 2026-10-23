@@ -515,11 +515,15 @@ fn sema_taskgroup_call_body_result(signature: Type) -> Type? {
     }
 }
 
-fn sema_taskgroup_task_group_expr(context: SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> TExpr? {
-    updated_context := context
-    index :: sema_taskgroup_spawn_group_index(updated_context) ?? return None
-    name := updated_context.taskgroups.stack[index].name
-    sema_check_expression(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, &scopes, &state, &tail_store, &updated_context, &diagnostics)
+fn sema_taskgroup_task_group_expr(context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> TExpr? {
+    index :: sema_taskgroup_spawn_group_index(context) ?? return None
+    name := context.taskgroups.stack[index].name
+    // The group reference is checked on a copy of the context; only its
+    // expression-type rows come back.
+    updated_context := context.copy()
+    group :: sema_check_expression(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, &scopes, &state, &tail_store, &updated_context, &diagnostics)
+    sema_check_context_return_expr_types(updated_context, &context)
+    group
 }
 
 fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
@@ -765,7 +769,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     }
     group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(context) != None {
-        group = sema_taskgroup_task_group_expr(context, environment, program, &scopes, &state, &tail_store, &diagnostics, span)
+        group = sema_taskgroup_task_group_expr(&context, environment, program, &scopes, &state, &tail_store, &diagnostics, span)
         if group == None -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     task_type := Type.Apply{name: "Task", args: [Type]{task_result_ty}}

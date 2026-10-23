@@ -85,7 +85,7 @@ fn ir_channel_capacity_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, capacity:
 // channel), is_ready, try_receive and receive on a Receiver. None leaves any
 // other operation to ir_handle_method.
 fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: THandleOp, args: [TExpr], span: Span) -> Int? Never! {
-    receiver_ty :: ir_subst(m, receiver.ty)
+    receiver_ty :: ir_subst(m, ir_ty(p, b, receiver))
     sender :: ir_channel_element(receiver_ty, "Sender")
     receiving :: ir_channel_element(receiver_ty, "Receiver")
     element :: sender ?? (receiving ?? return None)
@@ -144,7 +144,8 @@ fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
 // fresh endpoint over and adds one for a kept receiver; the Iter is then
 // walked as any other.
 fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, body: [TStmt], span: Span) Never! {
-    element :: ir_channel_element(ir_subst(m, collection.ty), "Receiver") ?? return ir_fail(&b, span, "channel loop over {ir_type_name(collection.ty)}")
+    collection_ty :: ir_ty(p, b, collection)
+    element :: ir_channel_element(ir_subst(m, collection_ty), "Receiver") ?? return ir_fail(&b, span, "channel loop over {ir_type_name(collection_ty)}")
     iter_ty :: Type.Apply{name: "Iter", args: [Type]{element}}
     iter_row :: ir_value_type(&m, p, iter_ty) ?? return ir_fail(&b, span, "type {ir_type_name(iter_ty)}")
     item_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "type {ir_type_name(element)}")

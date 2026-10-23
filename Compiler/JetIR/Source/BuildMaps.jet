@@ -334,10 +334,11 @@ fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map
 
 // `map[key]` read as a value (borrowed: the map keeps it).
 fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, span: Span) -> Int Never! {
+    base_ty :: ir_ty(p, b, base)
     map :: ir_expr(&m, p, &b, base)
     if ir_failed(b) || map < 0 -> return -1
     row :: b.f.slot_type[map]
-    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map index of {ir_type_name(base.ty)}")
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map index of {ir_type_name(base_ty)}")
     key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 -> return -1
     address :: ir_map_value_address(&m, p, &b, row, map, key)
@@ -349,12 +350,13 @@ fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: T
 // missing key stops, as a read does). An aggregate value is its storage's
 // address, any other the address of its word (ir_place_address).
 fn ir_map_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, backs: &[IRWriteBack], span: Span) -> Int Never! {
+    base_ty :: ir_ty(p, b, base)
     map :: ir_place_address(&m, p, &b, base, &backs, span)
     if ir_failed(b) -> return -1
-    if map < 0 || ir_kind_of(m, b, map) != .Aggregate -> return ir_fail_slot(&b, span, "write of a map entry of {ir_type_name(base.ty)}")
+    if map < 0 || ir_kind_of(m, b, map) != .Aggregate -> return ir_fail_slot(&b, span, "write of a map entry of {ir_type_name(base_ty)}")
     ir_make_unique(&m, p, &b, map)
     row :: b.f.slot_type[map]
-    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "write of a map entry of {ir_type_name(base.ty)}")
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "write of a map entry of {ir_type_name(base_ty)}")
     key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 -> return -1
     value :: ir_map_value_address(&m, p, &b, row, map, key)
@@ -370,15 +372,16 @@ fn ir_map_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, 
 // (ir_assign_place), and the place is a write base (ir_write_base): a Map
 // inside a List element writes that List's own buffer, never a shared one.
 fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, op: TBinaryOp?, value: TExpr, span: Span) Never! {
-    written_row :: ir_value_type(&m, p, base.ty) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
-    written :: ir_map_shape(&m, p, written_row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
+    base_ty :: ir_ty(p, b, base)
+    written_row :: ir_value_type(&m, p, base_ty) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
+    written :: ir_map_shape(&m, p, written_row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
     right :: ir_value_as(&m, p, &b, value, written.value.ty, span)
     if ir_failed(b) -> return
     map :: ir_write_base(&m, p, &b, base, span)
     if ir_failed(b) || map < 0 -> return
     ir_make_unique(&m, p, &b, map)
     row :: b.f.slot_type[map]
-    shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
     key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 || right < 0 -> return
     binary :: op ?? return ir_map_set(&m, p, &b, row, map, key, right)
@@ -387,7 +390,8 @@ fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: TExpr, i
     current :: ir_load_at(&m, &b, address, 0, shape.value.ty)
     site :: b.line
     value_ty :: m.types[shape.value.ty].ty
-    result :: ir_binary(&m, p, &b, binary, false, site, value_ty, current, right, value.ty, span)
+    value_type :: ir_ty(p, b, value)
+    result :: ir_binary(&m, p, &b, binary, false, site, value_ty, current, right, value_type, span)
     ir_release(&m, &b, right)
     if ir_failed(b) -> return
     if m.types[shape.value.ty].drop != "" -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)

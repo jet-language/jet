@@ -1886,7 +1886,9 @@ fn ir_compare_chain(m: &IRModule, p: IRProgram, b: &IRBuilder, operands: [TExpr]
         right :: ir_expr(&m, p, &b, operands[index + 1])
         if ir_failed(b) -> return -1
         site :: b.line
-        test :: ir_binary(&m, p, &b, op, false, site, operands[index].ty, left, right, operands[index + 1].ty, span)
+        operand_ty :: ir_ty(p, b, operands[index])
+        operand_type :: ir_ty(p, b, operands[index + 1])
+        test :: ir_binary(&m, p, &b, op, false, site, operand_ty, left, right, operand_type, span)
         if ir_failed(b) -> return -1
         ir_release(&m, &b, left)
         if index + 1 == operators.len() {
@@ -2166,11 +2168,12 @@ fn ir_collect_unions(ty: Type, found: &[Type]) Never! {
 // The call argument `value` widened to the union `union_ty` (sema
 // widen_to_union).
 fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: TExpr, union_ty: Type, span: Span) -> Int Never! {
-    subst_ty :: ir_subst(m, value.ty)
-    member_row :: ir_value_type(&m, p, subst_ty) ?? return ir_type_fail(&b, span, value.ty)
+    value_ty :: ir_ty(p, b, value)
+    subst_ty :: ir_subst(m, value_ty)
+    member_row :: ir_value_type(&m, p, subst_ty) ?? return ir_type_fail(&b, span, value_ty)
     payload :: ir_value_as(&m, p, &b, value, member_row, span)
     if ir_failed(b) -> return -1
-    ir_union_box(&m, p, &b, payload, value.ty, union_ty, span)
+    ir_union_box(&m, p, &b, payload, value_ty, union_ty, span)
 }
 
 // A new box of the structural enum of union `union_ty` holding `payload`
@@ -2791,6 +2794,7 @@ fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> 
 // Convert.jet lower_convert_numeric / lower_convert_prelude).
 
 fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, span: Span) -> Int Never! {
+    receiver_ty :: ir_ty(p, b, receiver)
     target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if operation == .CheckedIntToFixed(_, _) {
         // A sized literal that fits is the fixed word itself (Lower
@@ -2806,13 +2810,13 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if ir_failed(b) || value < 0 -> return -1
     if operation == {
         .CastAs(_) -> return ir_numeric_cast(&m, p, &b, value, target, span)
-        .ToShow -> return ir_render(&m, p, &b, receiver.ty, value, IRRender.Display, span)
+        .ToShow -> return ir_render(&m, p, &b, receiver_ty, value, IRRender.Display, span)
         .InlineRange(_, _, checked) -> {
             if checked -> return ir_fail_slot(&b, span, "checked inline-range conversion")
             return ir_copy_value(&m, p, &b, value, span)
         }
         .CheckedIntToFixed(host_kind, line) -> {
-            if ir_kind_of(m, b, value) != .Int || m.types[target].kind != .Word -> return ir_fail_slot(&b, span, "checked fixed conversion of {ir_type_name(receiver.ty)}")
+            if ir_kind_of(m, b, value) != .Int || m.types[target].kind != .Word -> return ir_fail_slot(&b, span, "checked fixed conversion of {ir_type_name(receiver_ty)}")
             int_row :: ir_type_row(&m, Type.Int) ?? 0
             kind_word :: ir_int_constant(&m, &b, int_row, host_kind)
             args := [Int]{value, kind_word}
@@ -2835,7 +2839,7 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             ir_release(&m, &b, value)
             return result
         }
-        .Predicate(method) -> return ir_float_predicate(&m, &b, value, method, receiver.ty, span)
+        .Predicate(method) -> return ir_float_predicate(&m, &b, value, method, receiver_ty, span)
         else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
 }

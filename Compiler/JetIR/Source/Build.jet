@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, TCallArg, TConstantDef, TExpr, TFailureCarrier, TFunc, TGenericParam, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
+use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, TCallArg, TConstantDef, TExpr, TExprKind, TExprType, TFailureCarrier, TFunc, TGenericParam, TImplDef, TLambda, TLocal, TTypeDef, tir_expr_type, type_carrier_identity]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -85,6 +85,12 @@ struct IRBuilder {
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
     impure: Int{0}
+    // The checked function whose expression-type column (TFunc.expr_types)
+    // types the nodes this body reads (-1: glue with no checked body), and
+    // the nodes the builder made itself (ir_node) with the next id it hands out.
+    row: Int{-1}
+    nodes: [TExprType]{[TExprType]{}}
+    next_node: Int{IR_FIRST_NODE_ID}
     // The closures this body created so far, by key base (ir_lambda).
     lambdas: [String:Int]
 }
@@ -192,7 +198,9 @@ fn ir_source_line_text(p: IRProgram, path: String, line: Int) -> String? Never! 
 struct IRQueued { row: Int, id: Int, args: [Type], lambda: Int{-1} }
 
 // A lambda body to build as its own function: the box holds its captures
-// at their offsets; the instance substitution it was created under.
+// at their offsets; the instance substitution it was created under; the
+// checked function whose column types its nodes and the nodes the creating
+// builder made (IRBuilder `row`, `nodes`, `next_node`).
 struct IRLambdaJob {
     lambda: TLambda
     captures: [IRCaptureSlot]
@@ -200,6 +208,9 @@ struct IRLambdaJob {
     line: Int
     subst_names: [String]
     subst_types: [Type]
+    row: Int
+    nodes: [TExprType]
+    next_node: Int
 }
 
 // One closure capture: the name the body reads, its byte offset in the box,
@@ -471,7 +482,7 @@ fn ir_owner_args(p: IRProgram, function: TFunc, owner: Type) -> [Type]? Never! {
 // written without them (`Box.new(7)`): what the call's type `ty` and its
 // arguments' types give the owner parameters in the method's signature.
 // None when they leave one unbound.
-fn ir_infer_owner_args(p: IRProgram, function: TFunc, ty: Type, args: [TCallArg]) -> [Type]? Never! {
+fn ir_infer_owner_args(p: IRProgram, b: IRBuilder, function: TFunc, ty: Type, args: [TCallArg]) -> [Type]? Never! {
     names := [String]{}
     bound := [Type?]{}
     loop binder in ir_owner_binders(p, function) {
@@ -480,7 +491,7 @@ fn ir_infer_owner_args(p: IRProgram, function: TFunc, ty: Type, args: [TCallArg]
     }
     if function.ret == .Val(ret) -> ir_bind_names(names, ret, ty, &bound)
     loop (index, param) in function.params {
-        if index < args.len() -> ir_bind_names(names, param.ty, args[index].value.ty, &bound)
+        if index < args.len() -> ir_bind_names(names, param.ty, ir_ty(p, b, args[index].value), &bound)
     }
     inferred := [Type]{}
     loop slot in bound {
@@ -725,6 +736,9 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
         job :: m.lambdas[queued.lambda].copy()
         m.subst_names = job.subst_names
         m.subst_types = job.subst_types
+        b.row = job.row
+        b.nodes = job.nodes
+        b.next_node = job.next_node
         ir_build_lambda(&m, p, &b, job)
         if b.error != "" {
             &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: m.functions[queued.id].name, message: b.error, source_file: job.source_file, span: if b.error_span.end > 0 -> b.error_span else -> job.lambda.source_span})
@@ -737,6 +751,7 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
     function :: p.functions[queued.row].copy()
     m.subst_names = if queued.args.len() > 0 -> ir_generic_names(p, function) else -> [String]{}
     m.subst_types = queued.args.copy()
+    b.row = queued.row
     ir_build_function(&m, p, &b, function)
     if b.error != "" {
         &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: function.name, message: b.error, source_file: function.source_file, span: if b.error_span.end > 0 -> b.error_span else -> function.source_span})
@@ -747,6 +762,32 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
     IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}, lambdas: [String:Int]{}}
+}
+
+// The first id of the nodes a builder makes itself (ir_node), far below the
+// function-local ids the checker and tir_function_seal hand out.
+IR_FIRST_NODE_ID :: -1099511627776
+
+// The checked type of `value`: its row in the expression-type column of the
+// builder's checked function, or of the nodes the builder made (ir_node).
+fn ir_ty(p: IRProgram, b: IRBuilder, value: TExpr) -> Type Never! {
+    if value.id <= IR_FIRST_NODE_ID {
+        loop row in b.nodes {
+            if row.id == value.id -> return row.ty.copy()
+        }
+    } else if b.row >= 0 {
+        if tir_expr_type(p.functions[b.row].expr_types, value.id) == .Val(ty) -> return ty
+    }
+    panic("{b.f.name}: node {value.id} at {value.span.start} has no expression-type row")
+}
+
+// A node the builder makes itself (a desugared step), typed `ty` under the
+// next builder id.
+fn ir_node(b: &IRBuilder, ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
+    id :: b.next_node
+    b.next_node -= 1
+    &b.nodes.push(TExprType{id: id, ty: ty.copy()})
+    TExpr{ty: ty, kind: kind, span: span, id: id}
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {

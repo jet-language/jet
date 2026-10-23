@@ -28,6 +28,7 @@ use jet_foundation.[
     expr_span,
     type_identity_equal,
     type_name,
+    tir_expr_retype,
 ]
 
 fn sema_string_view_copies_declaration(declaration: PolicyDeclaration) -> Bool Never! {
@@ -238,7 +239,7 @@ fn sema_string_view_check_field(value: Expr, field_ty: Type, environment: SemaSc
             return None
         }
         viewed := checked
-        viewed.ty = field_ty
+        tir_expr_retype(&viewed, field_ty)
         return Val(viewed)
     }
     if sema_string_view_call_sources(value, scopes, &state).len() > 0 -> return sema_string_view_lower_init(checked)
@@ -270,7 +271,7 @@ fn sema_string_view_return_value(value: Expr, success: Type, environment: SemaSc
     lowered := sema_string_view_lower_init(checked)
     if lowered != None -> return lowered
     viewed := checked
-    viewed.ty = success
+    tir_expr_retype(&viewed, success)
     Val(viewed)
 }
 

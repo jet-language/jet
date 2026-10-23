@@ -51,6 +51,7 @@ use jet_foundation.[
     TEffectFacts,
     TEffectSpan,
     TExpr,
+    TExprType,
     TFailureCarrier,
     TFunc,
     TFuncKind,
@@ -79,6 +80,7 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     tir_symbol_local,
+    tir_function_seal,
     tir_test_artifact_fact,
     type_name,
     type_with_effective_fn_returns,
@@ -1930,6 +1932,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params
             default_context.host_hooks = context.host_hooks
+            // The default's rows are the function's column rows.
+            default_context.next_expr_id = context.next_expr_id
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork :: sema_ownership_fork(&state)
             checked_default :: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
@@ -1942,6 +1946,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
                 }
                 else -> {
                     default_expr = checked_default
+                    sema_check_context_merge_expr_types(default_context, &context)
                 }
             }
         }
@@ -2056,7 +2061,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     }
     sema_place_borrow_function(&body, params, place_borrow_receiver)
     target :: sema_function_target_applicability(func)
-    tir :: TFunc{
+    expr_types := ^context.expr_types
+    context.expr_types = [TExprType]{}
+    tir := TFunc{
         name: func.name,
         module_name: module_name,
         module_identity: module_identity,
@@ -2096,9 +2103,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         kind: function_kind,
         origin_facts: context.origin_facts.copy(),
         typed_goals: context.typed_goals.copy(),
+        expr_types: ^expr_types,
     }
+    // Nodes no source expression produced take function-local rows.
+    _ := tir_function_seal(&tir, context.next_expr_id, false)
     SemaFunctionResult{
-        value: Val(tir),
+        value: Val(^tir),
         complete: true,
         exact_int_reachable: context.exact_int_reachable,
         copy_events: context.copy_events.copy(),

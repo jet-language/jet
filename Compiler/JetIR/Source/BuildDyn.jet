@@ -12,7 +12,7 @@ use jet_foundation.[Span, TBuiltinOp, TCallArg, TExpr, TExprKind, THandleOp, TPa
 // canonical Dyn and the operation is one of the tree methods here; None
 // leaves the operation to ir_handle_method.
 fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: THandleOp, args: [TExpr], span: Span) -> Int? Never! {
-    dyn_row :: ir_dyn_def(p, receiver.ty) ?? return None
+    dyn_row :: ir_dyn_def(p, ir_ty(p, b, receiver)) ?? return None
     if operation == {
         .DynGetKey -> return Val(ir_dyn_key_lookup(&m, p, &b, ty, dyn_row, receiver, args, false, span))
         .DynHas -> return Val(ir_dyn_key_lookup(&m, p, &b, ty, dyn_row, receiver, args, true, span))
@@ -101,7 +101,10 @@ fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_ro
     tree :: ir_expr(&m, p, &b, receiver)
     key :: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || tree < 0 || key < 0 -> return -1
-    if ir_kind_of(m, b, key) != .String -> return ir_fail_slot(&b, span, "Dyn key lookup by {ir_type_name(args[0].ty)}")
+    if ir_kind_of(m, b, key) != .String {
+        key_ty :: ir_ty(p, b, args[0])
+        return ir_fail_slot(&b, span, "Dyn key lookup by {ir_type_name(key_ty)}")
+    }
     pointer_row :: ir_pointer_row(&m)
     zero :: ir_word_const(&m, &b, 0)
     hit :: ir_temp(&m, &b, pointer_row)
@@ -158,8 +161,9 @@ fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_ro
 struct IRDynPlace { cell: Int, current: Int, tree: Int, backs: [IRWriteBack] }
 
 fn ir_dyn_place_open(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: TExpr, span: Span) -> IRDynPlace? Never! {
-    value_row :: ir_value_type(&m, p, receiver.ty) ?? {
-        _ :: ir_type_fail(&b, span, receiver.ty)
+    receiver_ty :: ir_ty(p, b, receiver)
+    value_row :: ir_value_type(&m, p, receiver_ty) ?? {
+        _ :: ir_type_fail(&b, span, receiver_ty)
         return None
     }
     backs := [IRWriteBack]{}
@@ -191,7 +195,8 @@ fn ir_dyn_place_close(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, p
 fn ir_dyn_set_path(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: TExpr, keys: [Bool], site_text: String, location: TPanicLoc, args: [TExpr], span: Span) -> Int Never! {
     if args.len() != keys.len() + 1 -> return ir_fail_slot(&b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
     value_expr :: args[keys.len()]
-    if ir_dyn_def(p, value_expr.ty) == None -> return ir_fail_slot(&b, span, "Dyn path value of type {ir_type_name(value_expr.ty)} is not the canonical Dyn")
+    value_ty :: ir_ty(p, b, value_expr)
+    if ir_dyn_def(p, value_ty) == None -> return ir_fail_slot(&b, span, "Dyn path value of type {ir_type_name(value_ty)} is not the canonical Dyn")
     pointer_row :: ir_pointer_row(&m)
     word_row :: ir_word_row(&m)
     string_row :: ir_string_row(&m)
@@ -201,7 +206,10 @@ fn ir_dyn_set_path(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
         step :: ir_expr(&m, p, &b, args[index])
         if ir_failed(b) || step < 0 -> return -1
         expected :: if key -> IRTypeKind.String else -> IRTypeKind.Int
-        if ir_kind_of(m, b, step) != expected -> return ir_fail_slot(&b, span, "Dyn path step {index} of type {ir_type_name(args[index].ty)} is neither a String key nor an Int index")
+        if ir_kind_of(m, b, step) != expected {
+            step_ty :: ir_ty(p, b, args[index])
+            return ir_fail_slot(&b, span, "Dyn path step {index} of type {ir_type_name(step_ty)} is neither a String key nor an Int index")
+        }
         item :: ir_runtime(&m, &b, if key -> "jet_rt_record_new_dyn_text" else -> "jet_rt_record_new_dyn_int", [Int]{step}, pointer_row)
         _ :: ir_runtime(&m, &b, "jet_rt_record_seq_list_rec_dyn_push", [Int]{sequence, item}, -1)
         ir_release(&m, &b, step)
@@ -240,7 +248,10 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
     _ :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Dyn.remove as {ir_type_name(ty)}") }
     key :: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || key < 0 -> return -1
-    if ir_kind_of(m, b, key) != .String -> return ir_fail_slot(&b, span, "Dyn.remove by {ir_type_name(args[0].ty)}")
+    if ir_kind_of(m, b, key) != .String {
+        key_ty :: ir_ty(p, b, args[0])
+        return ir_fail_slot(&b, span, "Dyn.remove by {ir_type_name(key_ty)}")
+    }
     place :: ir_dyn_place_open(&m, p, &b, dyn_row, receiver, span) ?? return -1
     removed :: ir_route_option(&m, p, &b, "jet_dyn_remove", [Int]{place.tree, key}, IRRouteCarrier.Handle{name: "Dyn"}, ty, span)
     if ir_failed(b) -> return -1
@@ -269,7 +280,7 @@ fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: TExpr, tar
 // (jet_codegen_lower_container_encode). The builtin and typed codec routes
 // have no lowering here.
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
-    concrete :: ir_subst(m, receiver.ty)
+    concrete :: ir_subst(m, ir_ty(p, b, receiver))
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
     key :: ir_codec_impl(p, concrete, "Encode", "encode")
     if key != "" {
@@ -278,8 +289,7 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         return ir_call(&m, p, &b, key, [Type]{}, self_slot, [IRWriteBack]{}, [TCallArg]{}, span)
     }
     if ir_dyn_def(p, ir_subst(m, ty)) != None {
-        typed := receiver.copy()
-        typed.ty = concrete.copy()
+        typed :: ir_node(&b, concrete, receiver.kind.copy(), receiver.span)
         if ir_untag(concrete) == .Map(map_key, _, _) {
             if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(&m, p, &b, ty, typed, span)
         }
@@ -326,11 +336,12 @@ fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
     output_local :: tir_generated_local("encode_output_{output}", span)
     &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
     item_local :: tir_user_local("encode_item_{output}", span)
-    item_expr :: TExpr{ty: element, kind: TExprKind.Local{local: item_local}, span: span}
-    encoded :: TExpr{ty: ty, kind: TExprKind.HandleMethod{receiver: item_expr, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span: span}
-    output_expr :: TExpr{ty: output_ty, kind: TExprKind.Local{local: output_local}, span: span}
-    push :: TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [TExpr]{encoded}}, span: span}
-    source_expr :: TExpr{ty: value.ty, kind: TExprKind.Local{local: source_local}, span: span}
+    item_expr :: ir_node(&b, element, TExprKind.Local{local: item_local}, span)
+    encoded :: ir_node(&b, ty, TExprKind.HandleMethod{receiver: item_expr, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span)
+    output_expr :: ir_node(&b, output_ty, TExprKind.Local{local: output_local}, span)
+    push :: ir_node(&b, Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [TExpr]{encoded}}, span)
+    value_ty :: ir_ty(p, b, value)
+    source_expr :: ir_node(&b, value_ty, TExprKind.Local{local: source_local}, span)
     walk :: TStmt.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [TStmt]{TStmt.ExprStmt{value: push, span: span}}, span: span}
     ir_stmt(&m, p, &b, walk)
     ir_scope_close(&m, &b)
