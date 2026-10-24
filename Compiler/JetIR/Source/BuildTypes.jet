@@ -1065,6 +1065,20 @@ fn ir_word_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
     None
 }
 
+// A Core struct carried as its runtime handle whose one String field is
+// the handle's text: its field name, the export that renders the text and
+// the export that builds the handle from it. The checked program names
+// the Core/Files/Path.jet record `Path { raw: String }` and the builtin Path
+// alike, so both lower to the JetPath handle, and the record's `raw` is the
+// handle's text. None for any other type row.
+fn ir_text_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
+    if !ir_is_handle(m, row) -> return None
+    name :: ir_nominal_name(ir_untag(m.types[row].ty)) ?? return None
+    handle :: ir_handle_runtime(p, name) ?? return None
+    if handle.runtime == "JetPath" -> return Val(IRWordRecord{field: "raw", getter: "jet_path_to_string", constructor: "jet_path_from"})
+    None
+}
+
 // Whether the value a pointer member points at lays out: a struct already
 // being laid out does (the pointer breaks the cycle).
 fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {

@@ -1265,6 +1265,15 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if value < 0 || ir_kind_of(m, b, value) != .Int -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression_ty)}")
                 return ir_word_record_new(&m, &b, record, value, ty)
             }
+            if ir_text_record(m, p, ty) == .Val(record) {
+                if fields.len() != 1 || fields[0].field.name != record.field -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression_ty)}")
+                text :: ir_expr(&m, p, &b, fields[0].value)
+                if ir_failed(b) -> return -1
+                if text < 0 || ir_kind_of(m, b, text) != .String -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression_ty)}")
+                handle :: ir_runtime(&m, &b, record.constructor, [Int]{text}, ty)
+                ir_release(&m, &b, text)
+                return handle
+            }
             if m.types[ty].kind != .Aggregate -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression_ty)}")
             storage :: ir_fresh_temp(&m, &b, ty)
             ir_emit(&b.f, IROp.StackAddress, storage, m.types[ty].size, 8, -1, b.line)
@@ -1291,6 +1300,14 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                         exact :: ir_runtime(&m, &b, record.getter, [Int]{base}, int_row)
                         ir_release(&m, &b, base)
                         return exact
+                    }
+                }
+                if ir_text_record(m, p, b.f.slot_type[base]) == .Val(record) {
+                    if record.field == field.name {
+                        string_row :: ir_string_row(&m)
+                        text :: ir_runtime(&m, &b, record.getter, [Int]{base}, string_row)
+                        ir_release(&m, &b, base)
+                        return text
                     }
                 }
                 receiver_ty :: ir_ty(p, b, receiver)
@@ -1334,6 +1351,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 return ir_member_read(&m, &b, tuple, members[index])
             }
             if call == .NumericBounds(bound_ty, member) -> return ir_numeric_bound(&m, &b, expression_ty, bound_ty, member, span)
+            if call == .OptionProbe(inner, kind) {
+                if kind == .Unwrap -> return ir_option_unwrap(&m, p, &b, inner, span)
+            }
             if call == .Method(receiver, method, args) {
                 if ir_untag(ir_subst(m, ir_ty(p, b, receiver))) == .Shared(_) {
                     if (method == "guard_read" || method == "guard_edit") && args.len() == 0 -> return ir_shared_guard(&m, p, &b, expression_ty, receiver, method == "guard_edit", span)
@@ -1474,6 +1494,23 @@ fn ir_raw_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, sp
         return pointer
     }
     ir_fail_slot(&b, span, "raw address of a temporary")
+}
+
+// The payload of an Option the checked program knows present (a select
+// arm's received value). A borrowed Option lends its payload; an owned one
+// gives an owned copy and is released.
+fn ir_option_unwrap(m: &IRModule, p: IRProgram, b: &IRBuilder, inner: Int, span: Span) -> Int Never! {
+    option_ty :: ir_ty(p, b, inner)
+    payload_ty :: if ir_untag(ir_subst(m, option_ty)) == .Option(payload) -> payload else -> { return ir_fail_slot(&b, span, "Option probe of {ir_type_name(option_ty)}") }
+    row :: ir_value_type(&m, p, payload_ty) ?? return ir_type_fail(&b, span, payload_ty)
+    option :: ir_expr(&m, p, &b, inner)
+    if ir_failed(b) || option < 0 -> return -1
+    payload :: ir_load_at(&m, &b, option, 0, row)
+    if !b.fresh[option] -> return payload
+    if payload >= 0 && ir_kind_of(m, b, payload) == .Aggregate -> return ir_fail_slot(&b, span, "Option probe of an owned {ir_type_name(option_ty)}")
+    owned :: if payload >= 0 -> ir_own(&m, p, &b, payload) else -> -1
+    ir_release(&m, &b, option)
+    owned
 }
 
 // `p.*`: the value at raw pointer `p`, read in place; the pointee's owner
