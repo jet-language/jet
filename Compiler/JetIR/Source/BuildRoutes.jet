@@ -3190,6 +3190,11 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     loop (index, arg) in args {
         slot :: ir_expr(&m, p, &b, arg)
         if ir_failed(b) -> return -1
+        // A route writes a `&` List argument's buffer in place: a buffer
+        // another holder shares is first the argument's own.
+        if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
+            if access == .Write -> ir_make_unique(&m, p, &b, slot)
+        }
         // Bounded Core slots take I64, but a volatile store writes the
         // checked T through Ptr<T> and `keep<T>` returns its argument at the
         // checked type: neither narrows exact Int.
