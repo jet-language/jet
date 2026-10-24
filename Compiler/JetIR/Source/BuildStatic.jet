@@ -440,10 +440,12 @@ fn ir_static_struct(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, 
 // order this does not reproduce ("order": tuple, List and Option keys).
 fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Never! {
     if kind != "int" && kind != "word" && kind != "uword" && kind != "string" -> return None
-    // Each key with its position; sorting the pairs orders equal keys by
-    // position, so the last of a run is the later duplicate. "uword" keys
-    // are Int keys below 2^63 (a larger one is a BigInt key), so their
-    // signed order is their unsigned order.
+    // Each key with its position; ordering the pairs by key, then position,
+    // makes the last of a run the later duplicate. The comparator is
+    // explicit because a named tuple's own order compares its members in
+    // name order (S73), which would put `at` before `key`. "uword" keys are
+    // Int keys below 2^63 (a larger one is a BigInt key), so their signed
+    // order is their unsigned order.
     words := [(key: Int, at: Int)]{}
     texts := [(key: String, at: Int)]{}
     loop (index, entry) in entries {
@@ -457,14 +459,14 @@ fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Nev
     kept := [Int]{}
     if kind == "string" {
         if texts.len() != entries.len() -> return None
-        &texts.sort()
+        &texts.sort_by((left, right) -> (left.key <=> right.key).then(left.at <=> right.at))
         loop (index, pair) in texts {
             if index + 1 < texts.len() && texts[index + 1].key == pair.key -> next
             &kept.push(pair.at)
         }
     } else {
         if words.len() != entries.len() -> return None
-        &words.sort()
+        &words.sort_by((left, right) -> (left.key <=> right.key).then(left.at <=> right.at))
         loop (index, pair) in words {
             if index + 1 < words.len() && words[index + 1].key == pair.key -> next
             &kept.push(pair.at)
