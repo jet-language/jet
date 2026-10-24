@@ -1,0 +1,11 @@
+# #5930: `jet check` of a program that uses every Core source module stopped
+# with E3001 in sema_effect_collect_claimed ("the list has 1 items, so position
+# 5032 doesn't exist"). A collecting thread holds only its own node's row, and
+# a direct call without a call-site fact read its callee's node to name it.
+# core.units reports its own errors (18 today); the check must finish them.
+fixture: fixtures/b15_effect_threads_name_direct_callee_without_its_node
+env: NO_COLOR=1
+step: jet check source0.jet
+exit: 1
+stderr: !~ "E3001" # the threaded effect collection names the callee from the call index
+stderr: ~ "Core/Units/Units.jet" # core.units' own errors reach the report

@@ -1005,6 +1005,10 @@ struct SemaEffectCallIndex {
     // The node of each registered declaration with a body, by DeclID row
     // (-1: none), so a direct call finds its callee's node without its key.
     node_by_decl: [Int]{[Int]{}}
+    // Each node's key, in node order, so a walk names its callee's node
+    // without reading that node: a collecting thread holds only its own
+    // node's row (sema_effect_collect_claimed).
+    node_keys: [String]{[String]{}}
 }
 
 // The effect node of the declaration `callee`, -1 when it has no body here.
@@ -1199,8 +1203,7 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], facts: SemaEffec
 fn sema_effect_record_decl_call(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, callee: DeclID, span: Span) Never! {
     target :: sema_effect_decl_node(facts, callee)
     if target >= 0 {
-        edge_key :: nodes[target].key.copy()
-        sema_effect_node_add_edge(&nodes, node_index, edge_key)
+        sema_effect_node_add_edge(&nodes, node_index, facts.node_keys[target])
     } else {
         sema_effect_record_memory_open(&nodes, node_index, span, "callee body is unavailable and has no verified signed memory summary")
     }
@@ -2266,7 +2269,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, decls)
-    calls := SemaEffectCallIndex{modules: ^owned_prepared.calls, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods, unsafe_names: ^unsafe_names, node_by_decl: ^node_by_decl}
+    calls := SemaEffectCallIndex{modules: ^owned_prepared.calls, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods, unsafe_names: ^unsafe_names, node_by_decl: ^node_by_decl, node_keys: ^node_keys}
     any_unsafe :: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
