@@ -1907,6 +1907,10 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("count_bytes", 0) => Some(Some(Type::Int)),
+        ("hash", 0) => Some(Some(Type::IntN {
+            signed: false,
+            bits: 64,
+        })),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("try_push", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),

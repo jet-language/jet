@@ -2424,6 +2424,12 @@ the UTF-8 byte length. The public convenience surface is the qualified
 `core.text` module; the old catalogue of unqualified string methods is not a
 separate core module contract (D-STR-DECLINE1=C).
 
+`s.hash()` returns a `U64` hash of the UTF-8 bytes, read in place. Equal
+strings hash equal within one process run (on every optimization tier and at
+compile time), so the value can key a hash table. It is not cryptographic, and
+the value may differ between runs and compiler versions: never persist it or
+compare it across processes.
+
 ### `core.time` — dates, durations, and clocks
 
 `core.time` uses the proleptic Gregorian calendar, including year `0` (1 BCE),

@@ -3,6 +3,36 @@
 #Export(c) fn jet_string_copy(value: I64) -> I64 { jet_rt_string_clone(value) }
 #Export(c) fn jet_string_count_bytes(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_len(value)) }
 
+// `s.hash()`: the U64 bits of a non-cryptographic hash of the UTF-8 bytes,
+// read in place (no copy). Whole little-endian words, then each tail byte,
+// are folded by multiply-xorshift; murmur3's fmix64 finishes.
+// Equal strings hash equal; values are stable within one process run only.
+#Export(c) fn jet_string_hash(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    len :: rt_text_len(value)
+    hash := wrapping(len * I64{-7046029254386353131}).bit_xor(I64{-3750763034362895579})
+    words :: len - len % I64{8}
+    at := I64{0}
+    loop at < words {
+        hash = rt_text_hash_fold(hash, rt_text_word(data + at))
+        at += I64{8}
+    }
+    loop at < len {
+        hash = rt_text_hash_fold(hash, rt_text_byte(data + at))
+        at += I64{1}
+    }
+    hash = hash.bit_xor((hash >> I64{33}).bit_and(I64{2147483647}))
+    hash = wrapping(hash * I64{-49064778989728563})
+    hash = hash.bit_xor((hash >> I64{33}).bit_and(I64{2147483647}))
+    hash = wrapping(hash * I64{-4265267296055464877})
+    hash.bit_xor((hash >> I64{33}).bit_and(I64{2147483647}))
+}
+
+fn rt_text_hash_fold(hash: I64, word: I64) -> I64 {
+    mixed :: wrapping(hash.bit_xor(word) * I64{-7046029254386353131})
+    mixed.bit_xor((mixed >> I64{29}).bit_and(I64{34359738367}))
+}
+
 #Export(c) fn jet_string_chars(value: I64, output: I64) -> I64 {
     count :: jet_char_len(value)
     if (count > I64{1152921504606846975}) {

@@ -78,6 +78,10 @@ BUILTIN_METHOD_ROWS :: comptime { [BuiltinMethodRow]{
     // bootstrap's `LenString` does; `count_bytes` counts UTF-8 bytes.
     {receiver: BuiltinMethodReceiver.String, name: "len", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.LenString}},
     {receiver: BuiltinMethodReceiver.String, name: "count_bytes", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "count_bytes"}}},
+    // `hash` is a non-cryptographic U64 of the UTF-8 bytes, read in place:
+    // equal strings hash equal, and values are stable within one process run
+    // only, never across runs or compiler versions.
+    {receiver: BuiltinMethodReceiver.String, name: "hash", parameters: [Type]{}, result: Type.IntN{signed: false, bits: 64}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "hash"}}},
     {receiver: BuiltinMethodReceiver.String, name: "is_empty", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.IsEmpty}},
     {receiver: BuiltinMethodReceiver.String, name: "try_push", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "AllocError"}}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.TryStringPush}},
     {receiver: BuiltinMethodReceiver.String, name: "contains", parameters: [Type]{Type.String}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Contains}},
