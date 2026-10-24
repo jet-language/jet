@@ -1,0 +1,116 @@
+#!/usr/bin/env jet
+// Exercise the real registry, renderer and Host callback against its UI snapshot.
+// Usage: jet run Compiler/JetBackend/Tests/TestNativeOutputDiagnostic.jet -- OUT CHECKER_JET
+// Run from the repository root: the Foundation, Host and expected-output sources are read from the working directory.
+use core.files as files
+use core.process as process
+use core.term as term
+
+fn fail(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// `parts` joined by `sep`.
+fn join_with(parts: [String], sep: String) -> String {
+    out := ""
+    i := 0
+    loop i < parts.len() {
+        if i > 0 {
+            out = "{out}{sep}"
+        }
+        out = "{out}{parts[i]}"
+        i = i + 1
+    }
+    out
+}
+
+// Each source with every repeated `use core.` line blanked, keeping the first occurrence across all sources.
+fn blank_repeated_core_uses(sources: [String]) -> [String] {
+    seen := [String]{}
+    out := [String]{}
+    loop source in sources {
+        kept := [String]{}
+        loop line in source.split("\n") {
+            known := false
+            loop prior in seen {
+                if prior == line {
+                    known = true
+                }
+            }
+            if {
+                !line.starts_with("use core.") -> {
+                    &kept.push(line.copy())
+                }
+                known -> {
+                    &kept.push("")
+                }
+                else -> {
+                    &seen.push(line.copy())
+                    &kept.push(line.copy())
+                }
+            }
+        }
+        &out.push(join_with(kept, "\n"))
+    }
+    out
+}
+
+// The `jet_cli_native_test_unrun_check_report` function from Host.jet, from its header line through the first line starting with a closing brace.
+fn host_report_helper(host: String) -> String {
+    lines := [String]{}
+    loop line in host.split("\n") {
+        &lines.push(line.copy())
+    }
+    start := -1
+    end := -1
+    i := 0
+    loop i < lines.len() {
+        if start < 0 && lines[i].starts_with("fn jet_cli_native_test_unrun_check_report()") {
+            start = i
+        }
+        if start >= 0 && end < 0 && lines[i].starts_with("}}") {
+            end = i
+        }
+        i = i + 1
+    }
+    if start < 0 || end < 0 {
+        fail("Host must own the actual registered fatal output-check callback")
+    }
+    body := [String]{}
+    loop index in start..<(end + 1) {
+        &body.push(lines[index].copy())
+    }
+    join_with(body, "\n")
+}
+
+fn run() {
+    args :: process.args()
+    if args.len() != 2 -> fail("expected OUT CHECKER_JET")
+    out :: files.absolute(args[0].copy()) ?? fail("cannot resolve {args[0]}: {err}")
+    jet :: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
+    files.create_dir_all(out.copy()) ?? fail("cannot create {out}: {err}")
+    repo :: files.canonicalize(".") ?? fail("cannot resolve the repository root: {err}")
+    names := ["Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "Compiler/JetFoundation/Source/Registry/Diagnostics.jet", "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", "Compiler/JetFoundation/Source/Diagnostics/Render.jet"]
+    sources := [String]{}
+    loop name in names {
+        text :: files.read(files.join(repo.copy(), name.copy())) ?? fail("cannot read {name}: {err}")
+        &sources.push(text)
+    }
+    host :: files.read(files.join(repo.copy(), "Compiler/JetCli/Source/Cli/Host.jet")) ?? fail("cannot read Host.jet: {err}")
+    helper :: host_report_helper(host)
+    parts := blank_repeated_core_uses(sources)
+    &parts.push(helper)
+    &parts.push("use core.term as snapshot_term\nfn run() {{\n    output :: snapshot_term.stdout()\n    &output.write(jet_cli_native_test_unrun_check_report()).drop(\"snapshot stdout\")\n}}\n")
+    snapshot :: join_with(parts, "\n\n")
+    snapshot_path :: files.join(out.copy(), "snapshot.jet")
+    files.write(snapshot_path.copy(), snapshot) ?? fail("cannot write {snapshot_path}: {err}")
+    files.write(files.join(out.copy(), "package.jet"), "name: \"native_output_check_diagnostic\"\nversion: \"0.0.1\"\n") ?? fail("cannot write package.jet: {err}")
+    result :: process.cmd([jet.copy(), "run", snapshot_path.copy()]).cwd(out.copy()).run() ?? fail("cannot run {jet}: {err}")
+    files.write(files.join(out.copy(), "stdout"), result.output.copy()) ?? fail("cannot write stdout: {err}")
+    files.write(files.join(out.copy(), "stderr"), result.errors.copy()) ?? fail("cannot write stderr: {err}")
+    if !result.success -> fail(result.errors)
+    expected :: files.read(files.join(repo.copy(), "tests/cli/native_output_check_fatal.txt")) ?? fail("cannot read native_output_check_fatal.txt: {err}")
+    if result.output != expected -> fail("native output-check stdout differs from tests/cli/native_output_check_fatal.txt")
+    term.print("native output-check diagnostic UI snapshot: passed")
+}

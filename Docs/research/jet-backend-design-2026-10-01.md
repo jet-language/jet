@@ -2691,7 +2691,7 @@ filter, serial and shuffle policies), and `Tests/test-native-test-contract.mjs`
 (output checks observe joined batch state; a fatal child preserves completed
 outcomes and reruns only unreported bodies, never output checks). The registered
 E3015 what/why/fix snapshot is exercised by
-`Tests/test-native-output-diagnostic.mjs`. These consumers require the real
+`Tests/TestNativeOutputDiagnostic.jet`. These consumers require the real
 composed candidate, host and matching runtime pack; metadata-only checks do
 not admit execution parity.
 Its registered What line starts `Output check not run:` in sentence case,
