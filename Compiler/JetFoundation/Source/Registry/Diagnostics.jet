@@ -212,6 +212,10 @@ fn diagnostic_identities_in(bytes: [U8]) -> [DiagnosticIdentity] Never! {
 // -1 when no identity starts there. A module identity's package part is
 // skipped by its length prefix, since it may hold `:`.
 fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity]) -> Int Never! {
+    // Both forms start with `m` or `<`; every other byte position returns
+    // before any prefix bytes are built.
+    first :: diagnostic_byte_at(bytes, index)
+    if first != 109 && first != 60 -> return -1
     module_form :: diagnostic_bytes_at(bytes, index, "module:")
     if !module_form && !diagnostic_bytes_at(bytes, index, "<corelib>/") -> return -1
     cursor := -1
@@ -230,7 +234,7 @@ fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity
         if diagnostic_byte_at(bytes, cursor) != 58 -> return -1
         cursor += 1
         path_start :: cursor
-        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_bytes_at(bytes, cursor, "::") -> cursor += 1
+        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) -> cursor += 1
         stem_start := path_start
         stem_end := cursor
         loop at in path_start..<cursor {
@@ -243,7 +247,7 @@ fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity
     } else {
         cursor = index + 10
         segment := cursor
-        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_bytes_at(bytes, cursor, "::") && diagnostic_byte_at(bytes, cursor) != 47 {
+        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) && diagnostic_byte_at(bytes, cursor) != 47 {
             if diagnostic_byte_at(bytes, cursor) == 46 -> segment = cursor + 1
             cursor += 1
         }
@@ -251,7 +255,7 @@ fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity
     }
     leaf := -1
     loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) {
-        if diagnostic_bytes_at(bytes, cursor, "::") {
+        if diagnostic_colons_at(bytes, cursor) {
             leaf = cursor + 2
             cursor += 2
             next
@@ -277,7 +281,7 @@ fn diagnostic_identity_plain_use(context: [U8], identities: [DiagnosticIdentity]
         loop identity in identities {
             if index >= identity.start && index < identity.end -> inside = true
         }
-        if !inside && diagnostic_bytes_at(context, index, head) {
+        if !inside && diagnostic_bytes_match(context, index, word) {
             before :: diagnostic_byte_at(context, index - 1)
             after :: diagnostic_byte_at(context, index + word.len())
             if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 -> return true
@@ -288,12 +292,21 @@ fn diagnostic_identity_plain_use(context: [U8], identities: [DiagnosticIdentity]
 }
 
 fn diagnostic_bytes_at(bytes: [U8], index: Int, text: String) -> Bool Never! {
-    expected :: text.bytes()
+    diagnostic_bytes_match(bytes, index, text.bytes())
+}
+
+// Whether `bytes` holds `expected` at `index`.
+fn diagnostic_bytes_match(bytes: [U8], index: Int, expected: [U8]) -> Bool Never! {
     if index < 0 || index + expected.len() > bytes.len() -> return false
     loop offset in 0..<expected.len() {
         if bytes[index + offset] != expected[offset] -> return false
     }
     true
+}
+
+// Whether a `::` path separator starts at `index`.
+fn diagnostic_colons_at(bytes: [U8], index: Int) -> Bool Never! {
+    diagnostic_byte_at(bytes, index) == 58 && diagnostic_byte_at(bytes, index + 1) == 58
 }
 
 fn diagnostic_is_word_byte(value: Int) -> Bool Never! {
