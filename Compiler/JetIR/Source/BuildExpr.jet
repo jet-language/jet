@@ -1064,7 +1064,12 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .StrLit(parts) -> return ir_string(&m, p, &b, parts, span)
         .Unit -> return -1
         .Local(local) -> {
-            binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "read of unknown local {local.name}")
+            // A Unit binding holds no slot (the Let lowering binds nothing for
+            // it), so its read is the Unit value, as `.Unit` is.
+            binding :: ir_lookup_local(b, local) ?? {
+                if ir_unit_type(expression_ty) -> return -1
+                return ir_fail_slot(&b, span, "read of unknown local {local.name}")
+            }
             return ir_read_binding(&m, &b, binding)
         }
         .Move(value) -> {
@@ -1586,8 +1591,30 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         &inputs.push(slot)
     }
     if inputs.len() != route.borrow_mask.len() -> return ir_fail_slot(&b, span, "handle method {route.member} with {inputs.len()} of {route.borrow_mask.len()} operands")
+    if operation == .DurationScale || operation == .DurationDivide {
+        return ir_duration_scale(&m, p, &b, if operation == .DurationScale -> "jet_duration_scale_at" else -> "jet_duration_divide_at", inputs, ty, span)
+    }
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     ir_route(&m, p, &b, route.symbol, inputs, route.borrow_mask, result, span)
+}
+
+// `d * n`, `n * d` and `d / n` (sema's DurationScale and DurationDivide): the
+// located export takes the duration's ns and the factor as exact Ints, then
+// the call site, so an overflow or a zero divisor stops at the user's line
+// (#5825), not at <core.prelude>:0. The operands are released after the call,
+// as ir_route releases a borrowed argument.
+fn ir_duration_scale(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    record :: ir_word_record(m, p, row) ?? return ir_fail_slot(&b, span, "{export} without the Duration word record")
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    value :: ir_runtime(&m, &b, record.getter, [Int]{inputs[0]}, int_row)
+    args := [Int]{value, inputs[1]}
+    site :: b.line
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    exact :: ir_runtime(&m, &b, export, args, int_row)
+    ir_release(&m, &b, value)
+    loop input in inputs -> ir_release(&m, &b, input)
+    ir_word_record_new(&m, &b, record, exact, row)
 }
 
 fn ir_handle_op_name(operation: BodyHandleOp) -> String Never! {

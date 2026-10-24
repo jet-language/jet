@@ -178,15 +178,22 @@ fn runtime_duration_float_word(whole: Float) -> I64 {
 }
 
 // MathRandomTime.rs:212-223: a failed checked scale or divide panics with
-// Duration.rs jet_duration_kernel_scale_error_reason.
-fn runtime_duration_scale_stop() -> I64 {
+// Duration.rs jet_duration_kernel_scale_error_reason. Compiled code passes
+// the call site (the `_at` exports), so the stop names the user's line; the
+// route form has none and reports <core.prelude>:0 (`file` 0).
+fn runtime_duration_scale_stop(file: I64, file_len: I64, line: I64) -> I64 {
     message :: rt_static_text("duration scaling overflowed or divided by zero")
-    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    if (file == I64{0}) {
+        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    } else {
+        trap_simple(I64{0}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    }
     I64{0}
 }
 
 // Duration.rs jet_duration_kernel_scale: i64 checked_mul of ns by the factor.
-#Export(c) fn jet_duration_scale(value: I64, factor: I64) -> I64 {
+// Compiled `d * n` and `n * d` (JetIR ir_duration_scale) pass the call site.
+#Export(c) fn jet_duration_scale_at(value: I64, factor: I64, file: I64, file_len: I64, line: I64) -> I64 {
     a :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     b :: host_native_int(factor)
@@ -201,18 +208,28 @@ fn runtime_duration_scale_stop() -> I64 {
     } else {
         overflow = a != I64{0} && b < maximum / a
     }
-    if overflow -> return runtime_duration_scale_stop()
+    if overflow -> return runtime_duration_scale_stop(file, file_len, line)
     jet_int_owned_from_i64(a * b)
 }
 
 // Duration.rs jet_duration_kernel_divide: i64 checked_div, truncating.
-#Export(c) fn jet_duration_divide(value: I64, factor: I64) -> I64 {
+// Compiled `d / n` (JetIR ir_duration_scale) passes the call site.
+#Export(c) fn jet_duration_divide_at(value: I64, factor: I64, file: I64, file_len: I64, line: I64) -> I64 {
     a :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     b :: host_native_int(factor)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (b == I64{0} || (b == I64{-1} && a == I64{-9223372036854775807 - 1})) -> return runtime_duration_scale_stop()
+    if (b == I64{0} || (b == I64{-1} && a == I64{-9223372036854775807 - 1})) -> return runtime_duration_scale_stop(file, file_len, line)
     jet_int_owned_from_i64(a / b)
+}
+
+// The route forms (RuntimeRoutes duration.scale/divide), without a site.
+#Export(c) fn jet_duration_scale(value: I64, factor: I64) -> I64 {
+    jet_duration_scale_at(value, factor, I64{0}, I64{0}, I64{0})
+}
+
+#Export(c) fn jet_duration_divide(value: I64, factor: I64) -> I64 {
+    jet_duration_divide_at(value, factor, I64{0}, I64{0}, I64{0})
 }
 
 // Duration.rs jet_duration_kernel_round_quotient's mode names: 0 trunc,
