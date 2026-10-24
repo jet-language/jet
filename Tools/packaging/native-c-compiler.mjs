@@ -38,9 +38,15 @@ export function nativeCEnvironment(environment = process.env) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === nativeCCompiler) {
+  // This wrapper must never reach itself again: a CC that names this file (or
+  // a `cc` on PATH that resolves back here) would fork without bound.
+  if (process.env.JET_NATIVE_C_WRAPPER_ACTIVE === '1') {
+    process.stderr.write('native-c-compiler: CC resolves back to this wrapper; set CC to a real C compiler\n');
+    process.exit(2);
+  }
   const compiler = process.env.CC ?? 'cc';
   const result = spawnSync(compiler, [...process.argv.slice(2), ...nativeCFlags], {
-    env: nativeCEnvironment(), stdio: 'inherit',
+    env: { ...nativeCEnvironment(), JET_NATIVE_C_WRAPPER_ACTIVE: '1' }, stdio: 'inherit',
   });
   if (result.error) throw result.error;
   if (result.signal) process.kill(process.pid, result.signal);
