@@ -5342,7 +5342,11 @@ fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, environ
     if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) -> return true
     if !sema_expression_propagating_call(value) -> return false
     known_type :: sema_stmt_return_known_type(value, environment, scopes) ?? return false
-    sema_stmt_return_types_are_carriers(known_type, sema_stmt_return_required_type(return_type))
+    required :: sema_stmt_return_required_type(return_type)
+    // A `T Never!` call has no failure to bring into a fallible carrier, so
+    // Rust lifts it like a plain arm (`check_return_expr`).
+    if sema_stmt_type_is_fallible_result(required) && !sema_stmt_type_is_fallible_result(known_type) -> return false
+    sema_stmt_return_types_are_carriers(known_type, required)
 }
 // A value `if` in a `T !E` slot that builds the carrier on some arm while
 // another arm is a plain success value (`.Int(_) -> Val(n)` beside
