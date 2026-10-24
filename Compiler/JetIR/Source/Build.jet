@@ -1247,6 +1247,11 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
         // (ir_window_subject), and so is a recursive edge's wrapper in it:
         // the name binds the payload's storage, the wrapper's for an edge.
         row_type :: b.f.slot_type[row.slot]
+        // A recursive edge's counted wrapper may be shared by copies of
+        // the struct holding it: a window writes through its holder's own.
+        if row.window && row.boxed && !row.loaded {
+            _ :: ir_wrapper_unique(&m, p, &b, row.subject, IRMember{name: "", offset: row.offset, ty: row_type, boxed: true})
+        }
         if row.window && !row.loaded && m.types[row_type].kind != .Aggregate {
             pointer_row :: ir_pointer_row(&m)
             address :: ir_temp(&m, &b, pointer_row)

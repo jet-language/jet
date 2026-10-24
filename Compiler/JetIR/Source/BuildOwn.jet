@@ -30,8 +30,9 @@ fn ir_inline_members(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never!
 }
 
 // Whether a byte copy of a value of type row `row` still shares something
-// with its source: a counted buffer (retained), or a value with a runtime
-// clone. A View windows its owner's buffer and shares it uncounted.
+// with its source: a counted buffer (retained), a value with a runtime
+// clone, or a recursive edge's wrapper box, which is its holder's own. A
+// View windows its owner's buffer and shares it uncounted.
 fn ir_copy_needs(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.types[row].clone != "" -> return true
     // An Atomic<Int> word owns its exact Int (ir_atomic_row).
@@ -40,7 +41,7 @@ fn ir_copy_needs(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_counted_entry(&m, p, row) != None -> return true
     members :: ir_inline_members(&m, p, row) ?? return false
     loop member in members {
-        if !member.boxed && ir_copy_needs(&m, p, member.ty) -> return true
+        if member.boxed || ir_copy_needs(&m, p, member.ty) -> return true
     }
     false
 }
@@ -80,9 +81,73 @@ fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: I
     }
     members :: ir_inline_members(&m, p, row) ?? return
     loop member in members {
-        if member.boxed || !ir_copy_needs(&m, p, member.ty) -> next
+        if member.boxed {
+            ir_wrapper_copy(&m, &b, at, member)
+            next
+        }
+        if !ir_copy_needs(&m, p, member.ty) -> next
         ir_copy_fixup_at(&m, p, &b, member.ty, at, member.offset)
     }
+}
+
+// A struct's recursive edge (`member`, boxed) holds its value in a counted
+// wrapper box: the byte copy at `at` is one more owner of it, and a write
+// first makes it its holder's own (ir_wrapper_unique), as a List's buffer.
+fn ir_wrapper_copy(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    wrapper :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Load, wrapper, at, member.offset, -1, b.line)
+    present :: ir_option_is_some(&m, &b, wrapper)
+    ir_open_if(&b.f, present, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_block_retain", [Int]{wrapper}, -1)
+    ir_end(&b.f, b.line)
+}
+
+// The wrapper of recursive edge `member` of the aggregate at `base`, its
+// holder's own before a write through it: a sole owner's comes back as is;
+// a shared one (or a static one) is copied, the copy's value gaining an
+// owner, stored back, and the old wrapper loses an owner.
+fn ir_wrapper_unique(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    holder :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Load, holder, base, member.offset, -1, b.line)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    sole :: ir_runtime(&m, &b, "jet_rt_block_unique", [Int]{holder}, bool_row)
+    ir_open_if(&b.f, sole, b.line)
+    ir_else(&b.f, b.line)
+    width :: ir_align8(m.types[member.ty].size)
+    replica :: ir_box_alloc(&m, &b, width, pointer_row)
+    ir_emit(&b.f, IROp.CopyBytes, -1, replica, holder, width, b.line)
+    ir_emit(&b.f, IROp.Store, -1, base, member.offset, replica, b.line)
+    ir_copy_fixup_at(&m, p, &b, member.ty, replica, 0)
+    _ :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{holder}, bool_row)
+    ir_emit(&b.f, IROp.Move, holder, replica, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    holder
+}
+
+// The drop of a struct's recursive edge (`member`, boxed) at `at`: the
+// wrapper loses an owner, and its last owner drops the value and frees it.
+// A static struct's wrapper carries an immortal count word, so it is never
+// freed.
+fn ir_wrapper_drop(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    wrapper :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Load, wrapper, at, member.offset, -1, b.line)
+    present :: ir_option_is_some(&m, &b, wrapper)
+    ir_open_if(&b.f, present, b.line)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    last :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{wrapper}, bool_row)
+    ir_open_if(&b.f, last, b.line)
+    if ir_glue_drops(m, member.ty) {
+        value :: ir_load_at(&m, &b, wrapper, 0, member.ty)
+        ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+    }
+    width :: ir_align8(m.types[member.ty].size)
+    bytes :: ir_word_const(&m, &b, width)
+    ir_free(&m, &b, wrapper, bytes)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
 }
 
 // ---------------------------------------------------------------------------
@@ -129,11 +194,11 @@ fn ir_glue_drops(m: IRModule, row: Int) -> Bool Never! {
 }
 
 // `row`, a tuple or struct row, drops through its glue when an inline
-// member is dropped with it.
+// member is dropped with it or a recursive edge's wrapper is its own.
 fn ir_mark_members(m: &IRModule, row: Int, members: [IRMember]) -> Int Never! {
     if m.types[row].drop != "" -> return row
     loop member in members {
-        if !member.boxed && ir_glue_drops(m, member.ty) {
+        if member.boxed || ir_glue_drops(m, member.ty) {
             key :: ir_drop_key(m, row)
             m.types[row].drop = key
             return row
@@ -439,8 +504,9 @@ fn ir_drop_glues(m: &IRModule, p: IRProgram) Never! {
 
 // The drop routine of the type row `row`: a counted buffer's last owner
 // drops each element and frees the buffer (Lower lower_list_drop_glue); a
-// tuple or struct drops each member dropped with it; a box's last owner
-// drops its active payload and frees it (ir_box_drop_body).
+// tuple or struct drops each member dropped with it and each recursive
+// edge's wrapper (ir_wrapper_drop); a box's last owner drops its active
+// payload and frees it (ir_box_drop_body).
 fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     key :: ir_drop_key(m, row)
     id :: m.functions.len()
@@ -465,7 +531,11 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
         ir_end(&a.f, a.line)
     } else if ir_inline_members(&m, p, row) == .Val(members) {
         loop member in members {
-            if member.boxed || !ir_glue_drops(m, member.ty) -> next
+            if member.boxed {
+                ir_wrapper_drop(&m, &a, at, member)
+                next
+            }
+            if !ir_glue_drops(m, member.ty) -> next
             value :: ir_load_at(&m, &a, at, member.offset, member.ty)
             ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
         }

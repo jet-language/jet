@@ -818,13 +818,16 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
             if ir_failed(b) -> return
         }
         // The old value closes before it ends, unless it moved out
-        // (ir_close_overwritten). A recursive edge's old value stays in its
-        // wrapper box, which copies of the aggregate share; the write gives
-        // this one a new wrapper.
+        // (ir_close_overwritten). A recursive edge's old value drops with
+        // its wrapper box, the aggregate's own; the write gives it a new one.
         ir_close_overwritten(&m, p, &b, base, member, span)
-        if !member.boxed && m.types[member.ty].drop != "" {
-            old :: ir_member_read(&m, &b, base, member)
-            ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        if {
+            member.boxed -> ir_wrapper_drop(&m, &b, base, member)
+            m.types[member.ty].drop != "" -> {
+                old :: ir_member_read(&m, &b, base, member)
+                ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+            }
+            else -> {}
         }
         ir_member_write(&m, p, &b, base, member, result)
         return
@@ -2425,18 +2428,10 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs
         holder := base
         offset := member.offset
         if member.boxed {
-            // A recursive edge's value lives in its wrapper box; a write
-            // place gets a wrapper of its own, since a copy of the
-            // aggregate shares the old one.
-            size :: m.types[member.ty].size
-            width :: if size < 8 -> 8 else -> size
-            old :: ir_temp(&m, &b, pointer_row)
-            ir_emit(&b.f, IROp.Load, old, base, member.offset, -1, b.line)
-            holder = ir_box_alloc(&m, &b, width, pointer_row)
-            ir_emit(&b.f, IROp.CopyBytes, -1, holder, old, width, b.line)
-            ir_emit(&b.f, IROp.Store, -1, base, member.offset, holder, b.line)
-            // The new wrapper is one more owner of the value's buffers.
-            ir_copy_fixup_at(&m, p, &b, member.ty, holder, 0)
+            // A recursive edge's value lives in its counted wrapper box,
+            // which copies of the aggregate share: the write goes through
+            // the holder's own (ir_wrapper_unique).
+            holder = ir_wrapper_unique(&m, p, &b, base, member)
             offset = 0
         }
         address :: if m.types[member.ty].kind == .Aggregate -> ir_temp(&m, &b, member.ty) else -> ir_temp(&m, &b, pointer_row)

@@ -279,6 +279,36 @@ fn listened(from: Int, to: Int) -> Int {
     total
 }
 
+// A struct whose only field is a recursive edge: its wrapper box is a
+// capture's own and is freed with the closure box.
+struct CycleOnly {
+    ty: CycleShape
+}
+
+enum CycleShape {
+    Int
+    Named(name: String)
+    Other(items: [CycleOnly])
+}
+
+fn cycle_weight(shape: CycleShape) -> Int {
+    if shape == {
+        .Int -> 1
+        .Named(name) -> name.len()
+        .Other(items) -> items.len()
+    }
+}
+
+fn captures_cycle_struct(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        x :: CycleOnly{ty: CycleShape.Named{name: "n{i % 1000}"}}
+        f :: (n: Int) -> n + cycle_weight(x.ty)
+        total += f(i)
+    }
+    total
+}
+
 fn run() {
     // The exit queue owns this box until the process ends: one owner, run
     // once, then released (a double release would trap at exit).
@@ -303,4 +333,5 @@ fn run() {
     measure("transaction hook", hooks, 200000)
     measure("fallible transaction hook", fallible_hooks, 200000)
     measure("event listener", listened, 50000)
+    measure("captures a cycle struct", captures_cycle_struct, 400000)
 }
