@@ -1854,16 +1854,29 @@ fn ir_x64_reports_stop(m: IRModule, id: Int) -> Bool Never! {
 // runs in the body's frame with the open constructs of its If (every one
 // already laid out); one that falls off its end resumes after the If.
 fn ir_x64_pads(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, exit: Int, lines: &[X64LineRow]) Never! {
-    seen := [String:Int]{}
+    // Keys by hash (ir_x64_key_hash) -> their indexes in `keys`, compared
+    // in full.
+    seen := [Int:[Int]]{}
+    keys := [[Int]]{}
+    labels := [Int]{}
     loop pad in e.pads {
         label := exit
         bare :: pad.end == pad.at + 2 && f.op[pad.at + 1] == .Return && f.a[pad.at + 1] < 0
         if !bare {
             key :: ir_x64_pad_key(f, al, pad)
-            label = seen.get(key) ?? -1
+            hash :: ir_x64_key_hash(key)
+            known :: seen.get(hash) ?? [Int]{}
+            label = -1
+            loop index in known {
+                if label < 0 && ir_x64_same_key(keys[index], key) -> label = labels[index]
+            }
             if label < 0 {
                 label = e.code.len()
-                seen[key] = label
+                grown := known.copy()
+                &grown.push(keys.len())
+                seen[hash] = ^grown
+                &keys.push(key.copy())
+                &labels.push(label)
                 e.open = pad.open
                 e.heads = pad.heads
                 &e.open.push(pad.at)
@@ -1896,11 +1909,14 @@ fn ir_x64_pads(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
 // slot is read. An edge that can leave otherwise (a branch out of it, as
 // an inlined callee's edge does, or its end) runs on in the body, where
 // another edge's temporaries may share a live register: its key is its own.
-fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> String Never! {
+// Each instruction is its op code, then fields that op's code fixes the
+// number of (a slot is ir_x64_key_slot's tagged form, reads come counted),
+// so equal keys are equal edges.
+fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> [Int] Never! {
     names := [Int:Int]{}
     order := [Int]{}
     reads := [Int]{}
-    out := [String]{}
+    out := [Int]{}
     depth := 0
     last :: f.op[pad.end - 1]
     escapes := pad.end == pad.at + 1 || (last != .Return && last != .Unreachable)
@@ -1909,61 +1925,104 @@ fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> String N
         a :: f.a[at]
         b :: f.b[at]
         c :: f.c[at]
-        text := ir_op_name(op)
+        &out.push(ir_op_code(op))
         if op == {
             .Block | .Loop -> {
-                text = "{text} {a - at}"
+                &out.push(a - at)
                 depth += 1
             }
             .If -> {
-                cond :: ir_x64_key_slot(f, al, pad, &names, &order, a)
-                text = "{text} {cond} {if b >= 0 -> b - at else -> -1} {c - at}"
+                ir_x64_key_slot(f, al, pad, &names, &order, &out, a)
+                &out.push(if b >= 0 -> b - at else -> -1)
+                &out.push(c - at)
                 depth += 1
             }
-            .Else -> text = "{text} {a - at}"
+            .Else -> &out.push(a - at)
             .End -> {
-                text = "{text} {a - at}"
+                &out.push(a - at)
                 depth -= 1
             }
             .Br | .BrIf -> {
                 level :: if op == .Br -> a else -> b
                 if level >= depth -> escapes = true
-                cond :: if op == .BrIf -> ir_x64_key_slot(f, al, pad, &names, &order, a) else -> ""
-                text = "{text} {level} {cond}"
+                &out.push(level)
+                if op == .BrIf -> ir_x64_key_slot(f, al, pad, &names, &order, &out, a)
             }
             else -> {
-                text = "{text} {ir_x64_key_slot(f, al, pad, &names, &order, ir_x64_write(f, at))}"
+                ir_x64_key_slot(f, al, pad, &names, &order, &out, ir_x64_write(f, at))
                 ir_x64_reads_into(f, at, &reads)
-                loop slot in reads -> text = "{text} {ir_x64_key_slot(f, al, pad, &names, &order, slot)}"
+                &out.push(reads.len())
+                loop slot in reads -> ir_x64_key_slot(f, al, pad, &names, &order, &out, slot)
                 // The fields that are no slots.
                 if op == {
-                    .Call | .CallRuntime -> text = "{text} | {a} {c}"
-                    .CallIndirect -> text = "{text} | {c}"
-                    .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> text = "{text} | {c}"
-                    .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset -> text = "{text} | {b} {c}"
-                    .Store -> text = "{text} | {b}"
+                    .Call | .CallRuntime -> {
+                        &out.push(a)
+                        &out.push(c)
+                    }
+                    .CallIndirect | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> &out.push(c)
+                    .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset -> {
+                        &out.push(b)
+                        &out.push(c)
+                    }
+                    .Store -> &out.push(b)
                     .Return -> {}
-                    else -> text = "{text} | {a} {b} {c}"
+                    else -> {
+                        &out.push(a)
+                        &out.push(b)
+                        &out.push(c)
+                    }
                 }
             }
         }
-        &out.push(text)
     }
-    if escapes -> &out.push("@{pad.at}")
-    out.join("\n")
+    if escapes {
+        &out.push(-1)
+        &out.push(pad.at)
+    }
+    out
 }
 
-// A slot in ir_x64_pad_key: one live only inside the edge by its number in
-// `order` (its first use adds it, with its type), any other by itself.
-fn ir_x64_key_slot(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, names: &[Int:Int], order: &[Int], slot: Int) -> String Never! {
-    if slot < 0 -> return "_"
-    if f.slot_kind[slot] != .Temp || al.starts[slot] <= pad.at || al.ends[slot] >= pad.end -> return "s{slot}"
+// A slot in ir_x64_pad_key, appended to `out`: `_` (no slot) as 0; a slot
+// live only inside the edge as 2 and its number in `order`, or at its first
+// use (which adds it) as 3, its number and its type; any other as 1 and itself.
+fn ir_x64_key_slot(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, names: &[Int:Int], order: &[Int], out: &[Int], slot: Int) Never! {
+    if slot < 0 {
+        &out.push(0)
+        return
+    }
+    if f.slot_kind[slot] != .Temp || al.starts[slot] <= pad.at || al.ends[slot] >= pad.end {
+        &out.push(1)
+        &out.push(slot)
+        return
+    }
     known :: names.get(slot) ?? -1
-    if known >= 0 -> return "t{known}"
+    if known >= 0 {
+        &out.push(2)
+        &out.push(known)
+        return
+    }
     id :: order.len()
     &order.push(slot)
     names[slot] = id
-    "t{id}:{f.slot_type[slot]}"
+    &out.push(3)
+    &out.push(id)
+    &out.push(f.slot_type[slot])
+}
+
+// A hash of `key` for ir_x64_pads' table, kept below 2^31 so no step
+// overflows.
+fn ir_x64_key_hash(key: [Int]) -> Int Never! {
+    hash := key.len() %% 2147483647
+    loop value in key -> hash = (hash * 131 + value %% 2147483647) %% 2147483647
+    hash
+}
+
+fn ir_x64_same_key(a: [Int], b: [Int]) -> Bool Never! {
+    if a.len() != b.len() -> return false
+    loop index in 0..<a.len() {
+        if a[index] != b[index] -> return false
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------

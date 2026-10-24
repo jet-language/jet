@@ -96,34 +96,42 @@ struct IRX64Allocation {
     result_home: Int
 }
 
-// The slots instruction `at` reads, into `reads` (cleared first).
+// Which operands of an instruction are slots it reads: none; `a`; `a` and
+// `b`; the `c` call arguments from `b`; `a` and those arguments; `a` and
+// `c`; `a` when it is a slot (a Return's value).
+IR_X64_READS_NONE :: 0
+IR_X64_READS_A :: 1
+IR_X64_READS_AB :: 2
+IR_X64_READS_ARGS :: 3
+IR_X64_READS_A_ARGS :: 4
+IR_X64_READS_AC :: 5
+IR_X64_READS_RESULT :: 6
+
+fn ir_x64_read_form(op: IROp) -> Int Never! {
+    if op == {
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> IR_X64_READS_A
+        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> IR_X64_READS_AB
+        .Call | .CallRuntime -> IR_X64_READS_ARGS
+        .CallIndirect -> IR_X64_READS_A_ARGS
+        .Store -> IR_X64_READS_AC
+        .Return -> IR_X64_READS_RESULT
+        else -> IR_X64_READS_NONE
+    }
+}
+
+// The slots instruction `at` reads, into `reads` (cleared first), in
+// operand order.
 fn ir_x64_reads_into(f: IRFunction, at: Int, reads: &[Int]) Never! {
     &reads.clear()
-    op :: f.op[at]
+    form :: ir_x64_read_form(f.op[at])
+    if form == IR_X64_READS_NONE -> return
     a :: f.a[at]
-    b :: f.b[at]
-    c :: f.c[at]
-    if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> &reads.push(a)
-        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat -> {
-            &reads.push(a)
-            &reads.push(b)
-        }
-        .Call | .CallRuntime -> { loop index in b..<(b + c) -> &reads.push(f.args[index]) }
-        .CallIndirect -> {
-            &reads.push(a)
-            loop index in b..<(b + c) -> &reads.push(f.args[index])
-        }
-        .Store -> {
-            &reads.push(a)
-            &reads.push(c)
-        }
-        .CopyBytes -> {
-            &reads.push(a)
-            &reads.push(b)
-        }
-        .Return -> { if a >= 0 -> &reads.push(a) }
-        else -> {}
+    if form != IR_X64_READS_ARGS && (form != IR_X64_READS_RESULT || a >= 0) -> &reads.push(a)
+    if form == IR_X64_READS_AB -> &reads.push(f.b[at])
+    if form == IR_X64_READS_AC -> &reads.push(f.c[at])
+    if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+        b :: f.b[at]
+        loop index in b..<(b + f.c[at]) -> &reads.push(f.args[index])
     }
 }
 
@@ -138,6 +146,24 @@ fn ir_x64_write(f: IRFunction, at: Int) -> Int Never! {
 fn ir_x64_align(value: Int, align: Int) -> Int Never! {
     if align <= 1 || value % align == 0 -> return value
     value + align - value % align
+}
+
+// Grows `slot`'s range to the whole loop `head`..`tail` when the range is
+// live around its back edge: it overlaps the loop without lying inside it,
+// or lies inside but its first reference reads it. Whether it changed.
+fn ir_x64_grow_range(starts: &[Int], ends: &[Int], slot: Int, head: Int, tail: Int, first_write: Bool) -> Bool Never! {
+    if ends[slot] < head || starts[slot] > tail -> return false
+    if starts[slot] > head && ends[slot] <= tail && first_write -> return false
+    changed := false
+    if starts[slot] > head {
+        starts[slot] = head
+        changed = true
+    }
+    if ends[slot] < tail {
+        ends[slot] = tail
+        changed = true
+    }
+    changed
 }
 
 fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
@@ -205,17 +231,21 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             last_write[written] = at
         }
     }
+    classes :: loop slot in 0..<count -> ir_x64_row_class(m, f.slot_type[slot])
     consts := [Bool]{}
     values := [Int]{}
     addressed := [Bool]{}
     loop slot in 0..<count {
         at :: last_write[slot]
-        constant :: slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .Const && ir_x64_row_class(m, f.slot_type[slot]) == .General
+        constant :: slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .Const && classes[slot] == .General
         &consts.push(constant)
         &values.push(if constant -> f.a[at] else -> 0)
-        &addressed.push(slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .StackAddress && ir_x64_row_class(m, f.slot_type[slot]) == .General)
+        &addressed.push(slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .StackAddress && classes[slot] == .General)
     }
-    // Loops, as (start, end) instruction pairs.
+    // Loops, as (start, end) instruction pairs, and their nest: per
+    // instruction the innermost loop holding it (in its body or as its End;
+    // a Loop instruction itself sits in the enclosing loop) and the loop it
+    // heads, per loop the loop holding it.
     loop_starts := [Int]{}
     loop_ends := [Int]{}
     loop at in 0..<f.op.len() {
@@ -224,26 +254,52 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             &loop_ends.push(f.a[at])
         }
     }
+    inner := [Int]{}
+    heads := [Int]{}
+    parents := [Int]{}
+    open := [Int]{}
+    nested := true
+    loop at in 0..<f.op.len() {
+        loop open.len() > 0 && loop_ends[open[open.len() - 1]] < at {
+            _ := &open.pop()
+        }
+        holder :: if open.len() > 0 -> open[open.len() - 1] else -> -1
+        &inner.push(holder)
+        if f.op[at] == .Loop {
+            row :: parents.len()
+            &heads.push(row)
+            &parents.push(holder)
+            if loop_ends[row] <= at || loop_ends[row] >= f.op.len() || (holder >= 0 && loop_ends[row] > loop_ends[holder]) -> nested = false
+            &open.push(row)
+        } else {
+            &heads.push(-1)
+        }
+    }
     // Grow every range that is live around a back edge to its whole loop,
-    // until no range changes (once per nesting level at most).
-    changed := true
-    loop changed {
-        changed = false
-        loop slot in 0..<count {
-            if starts[slot] > ends[slot] -> next
-            loop row in 0..<loop_starts.len() {
-                head :: loop_starts[row]
-                tail :: loop_ends[row]
-                if ends[slot] < head || starts[slot] > tail -> next
-                inside :: starts[slot] > head && ends[slot] <= tail
-                if inside && first_writes[slot] -> next
-                if starts[slot] > head {
-                    starts[slot] = head
-                    changed = true
+    // until no range changes. Growing is monotone, so every order of trying
+    // the loops reaches the same ranges. Only a loop holding the range's
+    // start in its body, or its end in its body or at its head, can change
+    // it: with nested loops each range walks just those two chains of
+    // enclosing loops; otherwise it tries every loop.
+    loop slot in 0..<count {
+        if starts[slot] > ends[slot] || ends[slot] < 0 -> next
+        changed := true
+        loop changed {
+            changed = false
+            if nested {
+                row := if starts[slot] >= 0 -> inner[starts[slot]] else -> -1
+                loop row >= 0 {
+                    if ir_x64_grow_range(&starts, &ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) -> changed = true
+                    row = parents[row]
                 }
-                if ends[slot] < tail {
-                    ends[slot] = tail
-                    changed = true
+                row = if heads[ends[slot]] >= 0 -> heads[ends[slot]] else -> inner[ends[slot]]
+                loop row >= 0 {
+                    if ir_x64_grow_range(&starts, &ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) -> changed = true
+                    row = parents[row]
+                }
+            } else {
+                loop row in 0..<loop_starts.len() {
+                    if ir_x64_grow_range(&starts, &ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) -> changed = true
                 }
             }
         }
@@ -256,7 +312,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     keys := [Int]{}
     loop slot in 0..<count {
         if starts[slot] > ends[slot] || consts[slot] || addressed[slot] -> next
-        if ir_x64_row_class(m, f.slot_type[slot]) != .General -> next
+        if classes[slot] != .General -> next
         &keys.push((starts[slot] + 1) * count + slot)
     }
     &keys.sort()
@@ -322,7 +378,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     homes := [Int]{}
     loop slot in 0..<count {
         home := 0
-        if regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && ir_x64_row_class(m, f.slot_type[slot]) != .Empty {
+        if regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty {
             depth += 8
             home = 0 - depth
         }

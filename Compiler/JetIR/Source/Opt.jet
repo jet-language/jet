@@ -695,7 +695,6 @@ fn ir_opt_facts(f: IRFunction) -> OptFacts Never! {
     region := [Int]{}
     parent := [Int]{-1}
     open := [Int]{0}
-    reads := [Int]{}
     loop at in 0..<f.op.len() {
         op :: f.op[at]
         if op == .Else || op == .End -> _ := &open.pop()
@@ -704,9 +703,26 @@ fn ir_opt_facts(f: IRFunction) -> OptFacts Never! {
             &parent.push(open[open.len() - 1])
             &open.push(parent.len() - 1)
         }
-        ir_x64_reads_into(f, at, &reads)
-        loop slot in reads {
-            if slot >= 0 && slot < count -> uses[slot] = uses[slot] + 1
+        // The reads of ir_x64_reads_into, counted in place.
+        form :: ir_x64_read_form(op)
+        if form != IR_X64_READS_NONE {
+            a :: f.a[at]
+            if form != IR_X64_READS_ARGS && a >= 0 && a < count -> uses[a] = uses[a] + 1
+            if form == IR_X64_READS_AB {
+                b :: f.b[at]
+                if b >= 0 && b < count -> uses[b] = uses[b] + 1
+            }
+            if form == IR_X64_READS_AC {
+                c :: f.c[at]
+                if c >= 0 && c < count -> uses[c] = uses[c] + 1
+            }
+            if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+                first :: f.b[at]
+                loop index in first..<(first + f.c[at]) {
+                    slot :: f.args[index]
+                    if slot >= 0 && slot < count -> uses[slot] = uses[slot] + 1
+                }
+            }
         }
         written :: ir_x64_write(f, at)
         if written >= 0 && written < count {
@@ -714,7 +730,7 @@ fn ir_opt_facts(f: IRFunction) -> OptFacts Never! {
             def_at[written] = at
         }
     }
-    OptFacts{defs: defs, def_at: def_at, uses: uses, region: region, parent: parent}
+    OptFacts{defs: ^defs, def_at: ^def_at, uses: ^uses, region: ^region, parent: ^parent}
 }
 
 // Whether region `outer` encloses (or is) region `inner`.
@@ -754,49 +770,57 @@ fn ir_opt_const_at(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int? N
 // only together with every Br inside it.
 
 fn ir_opt_compact(f: &IRFunction) Never! {
-    op := [IROp]{}
-    dst := [Int]{}
-    a := [Int]{}
-    b := [Int]{}
-    c := [Int]{}
-    line := [Int]{}
-    loop at in 0..<f.op.len() {
-        if f.op[at] == .Nop -> next
-        &op.push(f.op[at])
-        &dst.push(f.dst[at])
-        &a.push(f.a[at])
-        &b.push(f.b[at])
-        &c.push(f.c[at])
-        &line.push(f.code_line[at])
+    nops := 0
+    loop kind in f.op {
+        if kind == .Nop -> nops += 1
+    }
+    // Without a Nop the columns stay as they are; only the indexes are
+    // recomputed.
+    if nops > 0 {
+        op := [IROp]{}
+        dst := [Int]{}
+        a := [Int]{}
+        b := [Int]{}
+        c := [Int]{}
+        line := [Int]{}
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .Nop -> next
+            &op.push(f.op[at])
+            &dst.push(f.dst[at])
+            &a.push(f.a[at])
+            &b.push(f.b[at])
+            &c.push(f.c[at])
+            &line.push(f.code_line[at])
+        }
+        f.op = ^op
+        f.dst = ^dst
+        f.a = ^a
+        f.b = ^b
+        f.c = ^c
+        f.code_line = ^line
     }
     open := [Int]{}
-    loop at in 0..<op.len() {
-        if op[at] == {
+    loop at in 0..<f.op.len() {
+        if f.op[at] == {
             .Block | .Loop -> &open.push(at)
             .If -> {
-                b[at] = -1
+                f.b[at] = -1
                 &open.push(at)
             }
-            .Else -> b[open[open.len() - 1]] = at
+            .Else -> f.b[open[open.len() - 1]] = at
             .End -> {
                 opener :: &open.pop() ?? panic("ir_opt_compact: End without an open construct")
-                a[at] = opener
-                if op[opener] == .If {
-                    c[opener] = at
-                    if b[opener] >= 0 -> a[b[opener]] = at
+                f.a[at] = opener
+                if f.op[opener] == .If {
+                    f.c[opener] = at
+                    if f.b[opener] >= 0 -> f.a[f.b[opener]] = at
                 } else {
-                    a[opener] = at
+                    f.a[opener] = at
                 }
             }
             else -> {}
         }
     }
-    f.op = ^op
-    f.dst = ^dst
-    f.a = ^a
-    f.b = ^b
-    f.c = ^c
-    f.code_line = ^line
 }
 
 // Turns instruction `at` into a Nop.
