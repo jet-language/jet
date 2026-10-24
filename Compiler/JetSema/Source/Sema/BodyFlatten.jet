@@ -1796,31 +1796,11 @@ fn body_copy_lambda_body(value: BodyLambdaBody, flat: &BodyFlat) -> BodyLambdaBo
     }
 }
 
-fn body_copy_parameter(value: BodyParameter, flat: &BodyFlat) -> BodyParameter Never! {
-    BodyParameter{
-        local: value.local,
-        name: value.name,
-        span: value.span,
-        ty: value.ty,
-        convention: value.convention,
-        public_label: value.public_label,
-        zone: value.zone,
-        default: body_copy_opt_expr(value.default, &flat),
-        variadic: value.variadic,
-    }
-}
-
 fn body_copy_place(value: BodyPlace, flat: &BodyFlat) -> BodyPlace Never! {
     if value == {
         .Local(f_local) -> BodyPlace.Local{local: f_local}
         .Expr(f_value) -> BodyPlace.Expr{value: body_copy_expr(f_value, &flat)}
     }
-}
-
-fn body_copy_list_parameter(values: [BodyParameter], flat: &BodyFlat) -> [BodyParameter] Never! {
-    result := [BodyParameter]{}
-    loop value in values -> &result.push(body_copy_parameter(value, &flat))
-    result
 }
 
 fn body_copy_list_stmt(values: [Int], flat: &BodyFlat) -> [Int] Never! {
