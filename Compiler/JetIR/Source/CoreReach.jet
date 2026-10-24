@@ -113,14 +113,21 @@ fn ir_core_reach_lambda_keys(tree: BodyTree, value: BodyLambda, functions: [FnBo
     }
 }
 
-// The Core method `loop line in handle.lines()` reads each line with (Rust
+// The Core function `loop line in handle.lines()` reads each line with (Rust
 // CollectionIoSources.rs jet_std_file_reader_read_line /
-// jet_std_io_stdin_read_line): the Core `read_line` whose owner is the
-// handle's type, FileReader or StdinHandle; "" when the program holds none.
+// jet_std_io_stdin_read_line / the process stream line readers): the Core
+// `read_line` whose owner is the handle's type, FileReader or StdinHandle,
+// or core.process `__stdout_next_line` / `__stderr_next_line` for a child's
+// ProcessStdoutStream / ProcessStderrStream; "" when the program holds none.
 fn ir_line_reader_key(functions: [FnBody], handle: Type) -> String Never! {
     owner :: ir_line_reader_owner(handle)
     if owner == "" -> return ""
+    stream :: if owner == "ProcessStdoutStream" -> "__stdout_next_line" else if owner == "ProcessStderrStream" -> "__stderr_next_line" else -> ""
     loop function in functions {
+        if stream != "" {
+            if function.name == stream && core_identity_in_module(function.module_identity, "core.process") -> return function.key.copy()
+            next
+        }
         if function.name != "read_line" || !function.module_identity.starts_with("<corelib>/") -> next
         if function.kind == .Method(_, owner_type) {
             if ir_line_reader_owner(owner_type) == owner -> return function.key.copy()
@@ -136,27 +143,13 @@ fn ir_line_reader_owner(ty: Type) -> String Never! {
     parts[parts.len() - 1].copy()
 }
 
-// Implicit process loops have no keyed NodeKind.Call. Resolve the authored Core
-// helper from the checked function inventory, then retain its dependencies
-// with the ordinary reachability walk. Both streams share cursor mechanics.
-// A file or stdin line loop roots its handle's line reader the same way.
+// A line loop has no keyed NodeKind.Call: it roots its handle's line reader
+// (ir_line_reader_key) from the checked function inventory, and the ordinary
+// reachability walk retains the reader's dependencies.
 fn ir_core_reach_one_stmt_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String]) Never! {
         if tree.stmts[statement] == {
-            .ForIn(_, _, _, source, collection, _, method, _, _, _, body, _) -> {
-                if method == .Val(kind) && kind == .LinesProcessStream {
-                    // Each nominal arm owns its binder; boolean alternatives
-                    // do not introduce one shared value into their result.
-                    name :: if body_type(tree, collection) == {
-                        .Named(value) -> value
-                        .Apply(value, _) -> value
-                        else -> ""
-                    }
-                    member :: if name == "ProcessStdoutStream" || name.ends_with("::ProcessStdoutStream") -> "__stdout_next_line" else if name == "ProcessStderrStream" || name.ends_with("::ProcessStderrStream") -> "__stderr_next_line" else -> ""
-                    loop helper in functions {
-                        if member != "" && helper.name == member && core_identity_in_module(helper.module_identity, "core.process") -> ir_core_reach_add(&keys, helper.key)
-                    }
-                }
-                if method == .Val(kind) && (kind == .LinesFile || kind == .LinesStdin) -> ir_core_reach_add(&keys, ir_line_reader_key(functions, body_type(tree, source)))
+            .ForIn(_, _, _, source, _, _, method, _, _, _, body, _) -> {
+                if method == .Val(kind) && (kind == .LinesFile || kind == .LinesStdin || kind == .LinesProcessStream) -> ir_core_reach_add(&keys, ir_line_reader_key(functions, body_type(tree, source)))
                 ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
             .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)

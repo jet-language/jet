@@ -81,6 +81,11 @@ extern void jet_rt_root_leave(int64_t, int64_t *);
 extern int64_t jet_rt_root_take_stop(int64_t, int64_t *);
 extern void jet_rt_stop_drop(int64_t);
 extern int64_t jet_scheduler_native_status(void);
+extern int64_t jet_rt_handle_field_process_child_stdout(ProcessChild *);
+extern int64_t jet_rt_handle_clone_process_stdout_stream(int64_t);
+extern void jet_rt_handle_drop_process_stdout_stream(int64_t);
+extern int64_t jet_process_stream_line_bytes_raw(int64_t, int64_t *, int64_t *, int64_t *);
+extern void jet_rt_free(int64_t, int64_t, int64_t);
 #ifdef JET_PROCESS_JET_FIXTURES
 // The fresh native library exports this Jet fixture; Spec is an opaque word.
 extern int64_t jet_rt_process_execution_controlled_fixture(Spec *);
@@ -256,6 +261,46 @@ int main(int argc, char **argv, char **envp) {
         check(kill((pid_t)pid, 0) == -1 && errno == ESRCH, "child pid reaped after wait");
         drop_receipt(r);
         jet_rt_handle_drop_process_child(child);
+        jet_rt_handle_drop_process_spec(s);
+    }
+
+    // 6b. A streamed stdout reads the collector's capture through the child's
+    // own cell: lines arrive in order, a clone of the cell keeps the child
+    // after its last alias drops, and the receipt still holds every byte.
+    {
+        Spec *s = SPEC("/bin/sh", "-c", "printf 'a\\nb'");
+        s = replace(s, jet_process_spec_stdout(s, 0));
+        ProcessChild *child = NULL;
+        IOError *e = NULL;
+        check(jet_process_spec_spawn(s, &child, &e) == 1 && e == NULL && child != NULL, "stream spawn ok");
+        int64_t pipe = jet_rt_handle_field_process_child_stdout(child);
+        check(pipe != 0 && pipe == jet_rt_handle_field_process_child_stdout(child), "stdout field lends one cell");
+        int64_t data = 0, len = 0, error = 0;
+        check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "a\n", 2) == 0, "streamed first line");
+        jet_rt_free(data, len, 1);
+        ProcessReceipt *r = NULL;
+        check(jet_process_child_wait(child, &r, &e) == 1 && e == NULL && r != NULL, "stream wait ok");
+        check(eq(receipt_output(r), "a\nb"), "receipt keeps streamed bytes");
+        drop_receipt(r);
+        check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 0 && data == 0, "stream at EOF after wait");
+        jet_rt_handle_drop_process_child(child);
+        jet_rt_handle_drop_process_spec(s);
+    }
+    {
+        Spec *s = SPEC("/bin/sh", "-c", "printf 'x\\ny\\n'");
+        s = replace(s, jet_process_spec_stdout(s, 0));
+        ProcessChild *child = NULL;
+        IOError *e = NULL;
+        check(jet_process_spec_spawn(s, &child, &e) == 1 && e == NULL && child != NULL, "pinned spawn ok");
+        int64_t held = jet_rt_handle_clone_process_stdout_stream(jet_rt_handle_field_process_child_stdout(child));
+        jet_rt_handle_drop_process_child(child);
+        int64_t data = 0, len = 0, error = 0;
+        check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "x\n", 2) == 0, "clone reads after the child alias drops");
+        jet_rt_free(data, len, 1);
+        check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "y\n", 2) == 0, "clone reads every line");
+        jet_rt_free(data, len, 1);
+        check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 0, "clone reaches EOF");
+        jet_rt_handle_drop_process_stdout_stream(held);
         jet_rt_handle_drop_process_spec(s);
     }
 

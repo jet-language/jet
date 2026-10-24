@@ -478,14 +478,22 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
             // (TForInMethod.Chars); the walk of the checked `s.chars()`
             // list visits the same Chars in the same order.
             chars :: method_kind == (Val(TForInMethod.Chars)) && ir_untag(ir_ty(p, b, collection)) == .List(_)
-            file_lines :: method_kind == (Val(TForInMethod.LinesFile))
-            lines :: file_lines || method_kind == (Val(TForInMethod.LinesStdin))
+            line_export :: if method_kind == {
+                .Val(kind) -> if kind == {
+                    .LinesFile -> "jet_rt_native_iter_file_lines"
+                    .LinesStdin -> "jet_rt_native_iter_stdin_lines"
+                    .LinesProcessStream -> "jet_rt_native_iter_process_lines"
+                    else -> ""
+                }
+                .None -> ""
+            }
+            lines :: line_export != ""
             received :: method_kind == (Val(TForInMethod.ChannelReceiver))
             if (method_kind != None && !chars && !lines && !received) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
             // `loop line in handle.lines()` reads its source, the handle
             // (Sema sema_stmt_for_in_source); `collection` is the checked
             // `lines()` call, which has no function of its own.
-            if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, source, file_lines, body, span)
+            if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, source, line_export, body, span)
             if received -> return ir_channel_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             if ir_iter_element(ir_subst(m, ir_ty(p, b, collection))) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)

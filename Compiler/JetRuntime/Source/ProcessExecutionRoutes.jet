@@ -1,8 +1,14 @@
 // Plain native execution. Authority-bound execution remains fail-closed until
 // the native isolation engine exists; a plain bwrap argv is ordinary execution.
-// ExecutionChild128: mutex0 refs8 Child72*16 owned Spec136*24 worker32 done40
+// ExecutionChild160: mutex0 refs8 Child72*16 owned Spec136*24 worker32 done40
 // receipt48 error56 reserved64 startNs72 output80 errors88 captured96 timeout104
-// limit112 stop120. Worker owns one ref; every public alias owns one ref.
+// limit112 stop120 stdoutPipe128 stderrPipe136 stdoutAt144 stderrAt152.
+// Worker owns one ref; every public alias owns one ref. Each pipe is the
+// Pipe40 cell the child lends as `child.stdout` / `child.stderr`, made on
+// first use; each At is how far its readers have consumed that capture.
+PROCESS_EXECUTION_BYTES :: I64{160}
+PROCESS_EXECUTION_STDOUT :: I64{128}
+PROCESS_EXECUTION_STDERR :: I64{136}
 fn rt_process_execution_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 fn process_execution_native(child: I64) -> I64 { fd_word(child, I64{16}) }
 fn process_execution_now() -> I64 { sync_now_ns() }
@@ -15,8 +21,8 @@ fn process_execution_launch(spec: I64, collect: Bool, err: I64) -> I64 {
     }
     native :: process_execution_launch_native(spec, err)
     if (native == I64{0}) -> return I64{0}
-    child :: jet_rt_alloc(I64{128}, I64{8})
-    coll_zero(child, I64{128})
+    child :: jet_rt_alloc(PROCESS_EXECUTION_BYTES, I64{8})
+    coll_zero(child, PROCESS_EXECUTION_BYTES)
     fd_put(child, I64{8}, I64{1})
     fd_put(child, I64{16}, native)
     fd_put(child, I64{24}, jet_rt_handle_clone_process_spec(spec))

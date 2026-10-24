@@ -1722,6 +1722,7 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_rt_bytes_unpack", export: "jet_rt_bytes_unpack_route", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_rt_string_byte_len", export: "jet_rt_string_byte_len", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_rt_string_data", export: "jet_rt_string_data", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
+    IRRoute{symbol: "jet_process_stream_line_bytes_raw", export: "jet_process_stream_line_bytes_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessStdoutStream"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.List{elem: IRRouteCarrier.Word}, err: IRRouteCarrier.Handle{name: "IOError"}}},
 } }
 
 // #5001: each table below is read in place, and its lookup is keyed: the
@@ -2586,6 +2587,7 @@ IR_RUNTIME_ROUTE_KEYS :: comptime { [String]{
     "jet_process_stdin_write",
     "jet_process_stdin_write_all",
     "jet_process_stdout_read",
+    "jet_process_stream_line_bytes_raw",
     "jet_random_os_entropy",
     "jet_random_state_raw",
     "jet_random_try_update_raw",
@@ -4265,6 +4267,7 @@ IR_RUNTIME_ROUTE_KEY_ROWS :: comptime { [Int]{
     1647,
     1648,
     1649,
+    1677,
     676,
     677,
     678,
@@ -7721,6 +7724,8 @@ IR_HANDLE_FIELDS :: comptime { [IRHandleField]{
     IRHandleField{runtime: "XMLWriter", field: "limits", kind: "Handle.EncodingLimits", header_bytes: 0},
     IRHandleField{runtime: "XMLWriter", field: "finished", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "ProcessChild", field: "stdin", kind: "Handle.ProcessStdin", header_bytes: 0},
+    IRHandleField{runtime: "ProcessChild", field: "stdout", kind: "Handle.ProcessStdoutStream", header_bytes: 0},
+    IRHandleField{runtime: "ProcessChild", field: "stderr", kind: "Handle.ProcessStderrStream", header_bytes: 0},
 } }
 
 IR_HANDLE_FIELD_KEYS :: comptime { [String]{
@@ -7934,7 +7939,9 @@ IR_HANDLE_FIELD_KEYS :: comptime { [String]{
     "Message text",
     "ProcessChild detached",
     "ProcessChild process_group",
+    "ProcessChild stderr",
     "ProcessChild stdin",
+    "ProcessChild stdout",
     "ProcessPlan backend",
     "ProcessPlan descendants",
     "ProcessPlan executable_identity",
@@ -8233,7 +8240,9 @@ IR_HANDLE_FIELD_KEY_ROWS :: comptime { [Int]{
     263,
     267,
     266,
+    298,
     296,
+    297,
     271,
     272,
     268,

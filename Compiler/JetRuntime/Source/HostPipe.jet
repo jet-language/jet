@@ -1,12 +1,17 @@
 // CommonTypes.rs:162-165; Top/Process.rs:3325-3343:
 // Rc<RefCell<Option<BufReader<ProcessReader>>>>, NOT a reference to Child.
-// Pipe24 is canonical native storage: non-atomic Rc refs0, RefCell borrow8,
-// owned FD72 pointer16 (0 = None). FD72 owns the one shared refill buffer and
-// cursor (HostFiles.jet:1-3). No Rust Rc/RefCell/Box offset is projected.
-PIPE_BYTES :: I64{24}
+// Pipe40 is canonical native storage: non-atomic Rc refs0, RefCell borrow8,
+// owned FD72 pointer16 (0 = None), source24 stream32. FD72 owns the one
+// shared refill buffer and cursor (HostFiles.jet:1-3). A child's own cell
+// (ProcessReader::Shared) has no FD72: source is its ExecutionChild160 and
+// stream 1/2 names the capture it reads; stream 0 is the taken reader. No
+// Rust Rc/RefCell/Box offset is projected.
+PIPE_BYTES :: I64{40}
 PIPE_REFS :: I64{0}
 PIPE_BORROW :: I64{8}
 PIPE_FD :: I64{16}
+PIPE_SOURCE :: I64{24}
+PIPE_STREAM :: I64{32}
 
 fn pipe_borrow_stop() {
     // Seed rustc 1.97.1 (8bab26f4f); library/core/src/cell.rs:902,912-917:
@@ -34,11 +39,28 @@ fn pipe_unborrow(pipe: I64) { fd_put(pipe, PIPE_BORROW, I64{0}) }
     fd_put(pipe, PIPE_REFS, I64{1})
     fd_put(pipe, PIPE_BORROW, I64{0})
     fd_put(pipe, PIPE_FD, fd)
+    fd_put(pipe, PIPE_SOURCE, I64{0})
+    fd_put(pipe, PIPE_STREAM, I64{0})
     pipe
+}
+// The cell `child` owns for its stream `stream`, holding no reference to it:
+// while a clone of the cell lives elsewhere, that clone keeps the child.
+fn pipe_shared(child: I64, stream: I64) -> I64 {
+    pipe :: jet_process_pipe_take_raw(I64{0})
+    fd_put(pipe, PIPE_SOURCE, child)
+    fd_put(pipe, PIPE_STREAM, stream)
+    pipe
+}
+// Rust's Option::take on the child's reader: every clone now reads EOF.
+fn pipe_detach(pipe: I64) {
+    if (pipe != I64{0}) -> fd_put(pipe, PIPE_STREAM, I64{0})
 }
 fn pipe_clone(pipe: I64) -> I64 {
     // Rc is !Send; do not turn the counter into Arc or allocate an outer box.
-    fd_put(pipe, PIPE_REFS, wrapping(fd_word(pipe, PIPE_REFS) + I64{1}))
+    refs :: wrapping(fd_word(pipe, PIPE_REFS) + I64{1})
+    fd_put(pipe, PIPE_REFS, refs)
+    source :: fd_word(pipe, PIPE_SOURCE)
+    if (refs == I64{2} && source != I64{0}) -> _ := jet_rt_handle_clone_process_child(source)
     pipe
 }
 fn pipe_drop(pipe: I64) {
@@ -47,6 +69,12 @@ fn pipe_drop(pipe: I64) {
     }
     refs :: wrapping(fd_word(pipe, PIPE_REFS) - I64{1})
     fd_put(pipe, PIPE_REFS, refs)
+    source :: fd_word(pipe, PIPE_SOURCE)
+    if (refs == I64{1} && source != I64{0}) {
+        // The last outside clone lets go of the child that owns this cell.
+        jet_rt_handle_drop_process_child(source)
+        return
+    }
     if (refs != I64{0}) {
         return
     }
@@ -62,6 +90,7 @@ fn pipe_drop(pipe: I64) {
 #Export(c) fn jet_process_pipe_close_raw(pipe: I64) {
     fd :: pipe_borrow_mut(pipe)
     fd_put(pipe, PIPE_FD, I64{0})
+    fd_put(pipe, PIPE_STREAM, I64{0})
     jet_fd_drop_raw(fd)
     pipe_unborrow(pipe)
 }
@@ -81,6 +110,12 @@ fn pipe_output_name() -> I64 {
     fd_put(data_out, I64{0}, I64{0})
     fd_put(len_out, I64{0}, I64{0})
     fd_put(error_out, I64{0}, I64{0})
+    stream :: fd_word(pipe, PIPE_STREAM)
+    if (stream != I64{0}) {
+        process_execution_stream_bytes(fd_word(pipe, PIPE_SOURCE), stream, I64{9223372036854775807}, true, data_out, len_out)
+        pipe_unborrow(pipe)
+        return I64{1}
+    }
     if (fd == I64{0}) {
         pipe_unborrow(pipe)
         return I64{1}
@@ -169,8 +204,9 @@ fn pipe_output_name() -> I64 {
 // ProcessStdoutStream.read(max) / ProcessStderrStream.read(max): Read::read
 // on the child's pipe through the same FD72 refill buffer `lines` uses, so
 // the two interleave: bytes a line read buffered ahead are returned first.
-// Up to `maximum` bytes (capped at 16 MiB); empty at EOF or after the stream
-// was taken. 1 => owned compact U8 data+len, 0 => owned IOError.
+// A child's own cell reads its capture the same way, through one consumed
+// offset. Up to `maximum` bytes (capped at 16 MiB); empty at EOF or after the
+// stream was taken. 1 => owned compact U8 data+len, 0 => owned IOError.
 fn pipe_read(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
     fd_put(output, I64{0}, I64{0})
     fd_put(len, I64{0}, I64{0})
@@ -186,6 +222,12 @@ fn pipe_read(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 
         limit = jet_int_owned_to_i64(maximum)
     }
     fd :: pipe_borrow_mut(pipe)
+    stream :: fd_word(pipe, PIPE_STREAM)
+    if (stream != I64{0}) {
+        process_execution_stream_bytes(fd_word(pipe, PIPE_SOURCE), stream, limit, false, output, len)
+        pipe_unborrow(pipe)
+        return I64{1}
+    }
     if (fd == I64{0}) {
         pipe_unborrow(pipe)
         return I64{1}

@@ -207,7 +207,7 @@ export function validateLoweringRuntimeAbi(definitions) {
 
 // Native opaque providers have no Rust record declaration. Admit their
 // ownership metadata only from the canonical physical ABI, never a marker
-// struct or a guessed Rust type. Pipe24 is shared by these two nominals.
+// struct or a guessed Rust type. Pipe40 is shared by these two nominals.
 export function nativeProviderHandles(definitions) {
   const types = ["ProcessStdoutStream", "ProcessStderrStream"];
   const lifecycle = types.flatMap((type) => [`jet_rt_handle_clone_${runtimeAbiAtom(type)}`, `jet_rt_handle_drop_${runtimeAbiAtom(type)}`]);
@@ -222,7 +222,7 @@ export function nativeProviderHandles(definitions) {
   ];
   for (const { name, params, ret } of required) {
     const definition = definitions.get(name);
-    if (!definition) throw new Error(`native Pipe24 provider requires ${name}`);
+    if (!definition) throw new Error(`native Pipe40 provider requires ${name}`);
     validateRuntimeRoute({ symbol: name, name, params: params.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, definition);
   }
   return types.flatMap((runtime) => [

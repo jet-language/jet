@@ -1,5 +1,5 @@
 // Plain ProcessSpec collector/lifecycle on the existing Child72 syscall seam.
-// ExecutionChild128 and launch/receipt metadata are owned by ProcessExecutionRoutes.
+// ExecutionChild160 and launch/receipt metadata are owned by ProcessExecutionRoutes.
 // stop120 bits: requested=1, closed=2, explicit wait=4, group swept=8.
 fn process_execution_flags_add(child: I64, flag: I64) {
     loop {
@@ -44,7 +44,9 @@ fn process_execution_release(child: I64) {
     jet_rt_handle_drop_io_error(fd_word(child, I64{56}))
     jet_rt_string_drop(fd_word(child, I64{80}))
     jet_rt_string_drop(fd_word(child, I64{88}))
-    jet_rt_free(child, I64{128}, I64{8})
+    pipe_drop(fd_word(child, PROCESS_EXECUTION_STDOUT))
+    pipe_drop(fd_word(child, PROCESS_EXECUTION_STDERR))
+    jet_rt_free(child, PROCESS_EXECUTION_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_clone_process_child(child: I64) -> I64 {
     _ := sync_add(child + I64{8}, I64{1})
@@ -214,6 +216,12 @@ fn process_execution_wait(child: I64, ok: I64, err: I64) -> I64 {
     }
     process_execution_flags_add(child, I64{4})
     if !process_execution_collect_start(child, err) -> return I64{0}
+    // Rust's wait drops the public readers before joining the collector: a
+    // stream read after an explicit wait is at EOF.
+    sync_mutex_lock(child)
+    pipe_detach(fd_word(child, PROCESS_EXECUTION_STDOUT))
+    pipe_detach(fd_word(child, PROCESS_EXECUTION_STDERR))
+    sync_mutex_unlock(child)
     // Each aliased waiter owns its single-parker slot; polling remains the
     // seed's 10ms scheduler wait rather than sharing notification state.
     park :: sync_park_new()
@@ -297,6 +305,81 @@ fn process_stdin_failure(errno: I64, err: I64) -> I64 {
 #Export(c) fn jet_rt_handle_field_process_child_stdin(child: I64) -> I64 { process_execution_native(child) }
 #Export(c) fn jet_rt_handle_clone_process_stdin(stdin: I64) -> I64 { jet_process_retain_raw(stdin) }
 #Export(c) fn jet_rt_handle_drop_process_stdin(stdin: I64) { jet_process_drop_raw(stdin) }
+// Borrowed: each field lends the child's own Pipe40 cell for the place's
+// lifetime, made on first use. Like Rust's ProcessReader::Shared, the cell
+// reads the collector's capture of its stream rather than the pipe itself, so
+// the receipt keeps every byte and the child never blocks on an unread pipe.
+#Export(c) fn jet_rt_handle_field_process_child_stdout(child: I64) -> I64 { process_execution_pipe(child, I64{1}) }
+#Export(c) fn jet_rt_handle_field_process_child_stderr(child: I64) -> I64 { process_execution_pipe(child, I64{2}) }
+fn process_execution_pipe(child: I64, stream: I64) -> I64 {
+    slot :: if (stream == I64{1}) -> PROCESS_EXECUTION_STDOUT else -> PROCESS_EXECUTION_STDERR
+    sync_mutex_lock(child)
+    if (fd_word(child, slot) == I64{0}) -> fd_put(child, slot, pipe_shared(child, stream))
+    pipe :: fd_word(child, slot)
+    sync_mutex_unlock(child)
+    pipe
+}
+// The next bytes of `child`'s captured stream `stream` (1 stdout, 2 stderr)
+// past what its readers consumed: through the first newline when `line`, else
+// up to `maximum` bytes. Waits on the collector until it captures them or the
+// stream ends; at the end it returns what remains, and none is EOF. Writes
+// owned data+len, or 0/0: a line as compact U8 bytes (the line ABI of
+// HostPipe.jet), a read as the native U8 list compiler_fs_bytes_take makes.
+fn process_execution_stream_bytes(child: I64, stream: I64, maximum: I64, line: Bool, data_out: I64, len_out: I64) {
+    fd_put(data_out, I64{0}, I64{0})
+    fd_put(len_out, I64{0}, I64{0})
+    native :: process_execution_native(child)
+    capture :: if (stream == I64{1}) -> I64{80} else -> I64{88}
+    consumed :: if (stream == I64{1}) -> I64{144} else -> I64{152}
+    park := I64{0}
+    loop {
+        // Read before the capture: the collector appends a stream's last
+        // bytes before it marks that stream closed.
+        sync_mutex_lock(native)
+        closed :: fd_word(native, spawn_stream_offset(native, stream)) < I64{0}
+        sync_mutex_unlock(native)
+        sync_mutex_lock(child)
+        text :: fd_word(child, capture)
+        data :: rt_text_data(text)
+        filled :: rt_text_len(text)
+        at :: fd_word(child, consumed)
+        end := at
+        found := false
+        loop end < filled && end - at < maximum {
+            byte := I64{0}
+            #Unsafe("the child mutex holds the capture builder's initialized bytes") {
+                byte = os_load_u8(wrapping(data + end))
+            }
+            end = wrapping(end + I64{1})
+            if (line && byte == I64{10}) {
+                found = true
+                break
+            }
+        }
+        if (found || closed || (!line && end > at)) {
+            count :: end - at
+            if (count > I64{0} && line) {
+                bytes :: jet_rt_alloc(count, I64{1})
+                rt_text_bytes_copy(bytes, wrapping(data + at), count)
+                fd_put(data_out, I64{0}, bytes)
+                fd_put(len_out, I64{0}, count)
+            }
+            if (count > I64{0} && !line) {
+                bytes :: jet_rt_alloc(count, I64{8})
+                rt_text_bytes_copy(bytes, wrapping(data + at), count)
+                compiler_fs_bytes_take(bytes, count, count, data_out, len_out)
+            }
+            fd_put(child, consumed, end)
+            sync_mutex_unlock(child)
+            break
+        }
+        sync_mutex_unlock(child)
+        if (park == I64{0}) -> park = sync_park_new()
+        // Cancellation propagates through the scheduler; the read ends empty.
+        if (scheduler_yield(rt_static_text("process stream"), park, I64{10000000}) != I64{0}) -> break
+    }
+    if (park != I64{0}) -> sync_park_drop(park)
+}
 // Writes every byte on a private dup so a concurrent close cannot recycle the
 // descriptor mid-write; Ok(0) is the closed writer, EINTR retries.
 fn process_stdin_write_bytes(stdin: I64, data: I64, length: I64, err: I64) -> I64 {
