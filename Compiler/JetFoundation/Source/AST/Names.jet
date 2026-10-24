@@ -175,7 +175,11 @@ fn name_rows_key(map: NameRows, text: String, hash: Int) -> Int? Never! {
 
 // Binds `text` to `row` (>= 0), replacing any earlier value.
 fn name_rows_set(map: &NameRows, text: String, row: Int) Never! {
-    hash :: name_rows_hash(text)
+    name_rows_set_hashed(&map, text, name_rows_hash(text), row)
+}
+
+// name_rows_set for a `text` whose name_rows_hash is `hash`.
+fn name_rows_set_hashed(map: &NameRows, text: String, hash: Int, row: Int) Never! {
     if name_rows_key(map, text, hash) == .Val(key) {
         map.rows[key] = row
         return

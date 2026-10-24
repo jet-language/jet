@@ -53,8 +53,11 @@ use jet_foundation.[
     pattern_binding_names,
     NameRows,
     name_rows,
+    name_rows_get,
     name_rows_get_text,
+    name_rows_hash,
     name_rows_set,
+    name_rows_set_hashed,
 ]
 
 enum SemaOwnershipReferenceKind {
@@ -324,8 +327,30 @@ struct SemaOwnershipPath {
     share_found: [SemaOwnershipShareSite]
     // Only bindings whose provenance changed on an in-place arm; whole-state
     // snapshot paths include every binding because they have no undo trail.
-    frozen: [String:SemaOwnershipFreezeSite?]
+    frozen: SemaOwnershipFrozenRows
     freeze_sites: [SemaOwnershipFreezeSite]
+}
+
+// The freeze provenance of binding keys (a path's `frozen`): a hashed key
+// table whose row of a key is its first-set position in `sites`.
+struct SemaOwnershipFrozenRows {
+    keys: NameRows
+    sites: [SemaOwnershipFreezeSite?]
+}
+
+fn sema_ownership_frozen_rows() -> SemaOwnershipFrozenRows Never! {
+    SemaOwnershipFrozenRows{keys: name_rows(), sites: [SemaOwnershipFreezeSite?]{}}
+}
+
+// Binds `key` (whose name_rows_hash is `hash`) to `site`, replacing any
+// earlier site of the key.
+fn sema_ownership_frozen_set(rows: &SemaOwnershipFrozenRows, key: String, hash: Int, site: SemaOwnershipFreezeSite?) Never! {
+    if name_rows_get(rows.keys, key, hash) == .Val(row) {
+        rows.sites[row] = site
+        return
+    }
+    name_rows_set_hashed(&rows.keys, key, hash, rows.sites.len())
+    &rows.sites.push(site)
 }
 
 struct SemaOwnershipFreezeSite {
@@ -4887,19 +4912,19 @@ fn sema_ownership_check_ident_reference(state: &SemaOwnershipState, name: String
 // Branch facts are joined per key, like Rust `FlowFacts::merge_paths` rows:
 // `slots` maps a key to its bucket in `rows`, and each bucket lists the
 // merged rows of that key in merge order.
-fn sema_ownership_bucket_add(slots: &[String:Int], rows: &[[Int]], key: String, row: Int) Never! {
-    if slots.get(key) == .Val(slot) {
+fn sema_ownership_bucket_add(slots: &NameRows, rows: &[[Int]], key: String, row: Int) Never! {
+    if name_rows_get_text(slots, key) == .Val(slot) {
         &rows[slot].push(row)
     } else {
-        slots[key] = rows.len()
+        name_rows_set(&slots, key, rows.len())
         &rows.push([Int]{row})
     }
 }
 
 // Overlapping places share one root, so a candidate move is compared only
 // with the merged moves of its root.
-fn sema_ownership_moved_covered(merged: [SemaOwnershipMovedPlace], slots: [String:Int], rows: [[Int]], candidate: SemaOwnershipMovedPlace) -> Bool Never! {
-    slot :: slots.get(candidate.place.root_key) ?? return false
+fn sema_ownership_moved_covered(merged: [SemaOwnershipMovedPlace], slots: NameRows, rows: [[Int]], candidate: SemaOwnershipMovedPlace) -> Bool Never! {
+    slot :: name_rows_get_text(slots, candidate.place.root_key) ?? return false
     loop row in rows[slot] {
         if sema_ownership_places_overlap(merged[row].place, candidate.place) -> return true
     }
@@ -4907,8 +4932,8 @@ fn sema_ownership_moved_covered(merged: [SemaOwnershipMovedPlace], slots: [Strin
 }
 
 // An exact loan shares its root with the loan it repeats.
-fn sema_ownership_merge_loan(merged: &[SemaOwnershipLoan], slots: &[String:Int], rows: &[[Int]], loan: SemaOwnershipLoan) Never! {
-    if slots.get(loan.place.root_key) == .Val(slot) {
+fn sema_ownership_merge_loan(merged: &[SemaOwnershipLoan], slots: &NameRows, rows: &[[Int]], loan: SemaOwnershipLoan) Never! {
+    if name_rows_get_text(slots, loan.place.root_key) == .Val(slot) {
         loop row in rows[slot] {
             if sema_ownership_loan_same(loan, merged[row]) -> return
         }
@@ -4918,8 +4943,8 @@ fn sema_ownership_merge_loan(merged: &[SemaOwnershipLoan], slots: &[String:Int],
 }
 
 // A repeated view has the same carrier; merged views are all active.
-fn sema_ownership_merge_view(merged: &[SemaOwnershipViewFact], slots: &[String:Int], rows: &[[Int]], fact: SemaOwnershipViewFact) Never! {
-    if slots.get(fact.carrier_key) == .Val(slot) {
+fn sema_ownership_merge_view(merged: &[SemaOwnershipViewFact], slots: &NameRows, rows: &[[Int]], fact: SemaOwnershipViewFact) Never! {
+    if name_rows_get_text(slots, fact.carrier_key) == .Val(slot) {
         loop row in rows[slot] {
             if sema_ownership_view_same(fact, merged[row]) {
                 if fact.invalidated && !merged[row].invalidated {
@@ -5007,15 +5032,18 @@ fn sema_ownership_fork_path(state: SemaOwnershipState, fork: SemaOwnershipFork) 
     loop row in fork.declarations..<state.declarations.len() -> &declarations.push(state.declarations[row])
     references := [SemaOwnershipReference]{}
     loop row in fork.references..<state.references.len() -> &references.push(state.references[row])
-    frozen := [String:SemaOwnershipFreezeSite?]{}
+    frozen := sema_ownership_frozen_rows()
     if state.forks == 0 {
-        loop fact in state.declarations -> frozen[fact.key] = fact.frozen_site
+        loop fact in state.declarations -> sema_ownership_frozen_set(&frozen, fact.key, name_rows_hash(fact.key), fact.frozen_site)
     } else {
         loop row in fork.trail..<state.trail.len() {
-            fact :: state.declarations[state.trail[row].row]
-            frozen[fact.key] = sema_ownership_frozen_for_key(state, fact.key)
+            key :: state.declarations[state.trail[row].row].key
+            hash :: name_rows_hash(key)
+            // A key the trail repeats has the same last-row site.
+            if name_rows_get(frozen.keys, key, hash) != None -> next
+            sema_ownership_frozen_set(&frozen, key, hash, sema_ownership_frozen_for_key_hashed(state, key, hash))
         }
-        loop fact in declarations -> frozen[fact.key] = fact.frozen_site
+        loop fact in declarations -> sema_ownership_frozen_set(&frozen, fact.key, name_rows_hash(fact.key), fact.frozen_site)
     }
     SemaOwnershipPath{
         scope_depth: state.scope_depth,
@@ -5044,7 +5072,7 @@ fn sema_ownership_fork_base(fork: SemaOwnershipFork) -> SemaOwnershipPath Never!
         views: fork.views,
         uninit: fork.uninit,
         share_found: fork.share_found,
-        frozen: [String:SemaOwnershipFreezeSite?]{},
+        frozen: sema_ownership_frozen_rows(),
         freeze_sites: fork.freeze_sites,
     }
 }
@@ -5113,11 +5141,12 @@ fn sema_ownership_fork_apply(state: &SemaOwnershipState, path: SemaOwnershipPath
     state.share_found = path.share_found
     state.loans = path.loans
     state.views = path.views
-    loop (key, site) in path.frozen {
-        if sema_ownership_declaration_index(&state, key) == .Val(row) {
-            sema_ownership_note_undo(&state, row)
-            state.declarations[row].frozen_site = site
-        }
+    loop key_row in 0..<path.frozen.sites.len() {
+        slot :: name_rows_get(state.key_slots, path.frozen.keys.texts[key_row], path.frozen.keys.hashes[key_row]) ?? next
+        row :: state.key_facts[slot].last
+        if row < 0 -> next
+        sema_ownership_note_undo(&state, row)
+        state.declarations[row].frozen_site = path.frozen.sites[key_row]
     }
     state.freeze_sites = path.freeze_sites
     sema_ownership_recompute_reference_counts(&state)
@@ -5132,11 +5161,14 @@ fn sema_ownership_share_found_add(found: &[SemaOwnershipShareSite], site: SemaOw
 
 // A declaration of a path joins under a key neither the fork (the rows of
 // `index` before `limit`) nor an earlier joined row has.
-fn sema_ownership_join_declaration(index: SemaOwnershipState, limit: Int, keys: &[String:Bool], joined: &[SemaOwnershipBindingFact], fact: SemaOwnershipBindingFact) Never! {
-    first :: sema_ownership_first_row(index, fact.key)
-    if first >= 0 && first < limit -> return
-    if keys.get(fact.key) != None -> return
-    keys[fact.key] = true
+fn sema_ownership_join_declaration(index: SemaOwnershipState, limit: Int, keys: &NameRows, joined: &[SemaOwnershipBindingFact], fact: SemaOwnershipBindingFact) Never! {
+    hash :: name_rows_hash(fact.key)
+    if name_rows_get(index.key_slots, fact.key, hash) == .Val(slot) {
+        first :: index.key_facts[slot].first
+        if first >= 0 && first < limit -> return
+    }
+    if name_rows_get(keys, fact.key, hash) != None -> return
+    name_rows_set_hashed(&keys, fact.key, hash, 0)
     &joined.push(fact)
 }
 
@@ -5158,20 +5190,16 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
     if then_path.next_seq > next_seq -> next_seq = then_path.next_seq
     if else_path.next_seq > next_seq -> next_seq = else_path.next_seq
     declarations := [SemaOwnershipBindingFact]{}
-    declaration_keys := [String:Bool]{}
+    declaration_keys := name_rows()
     loop fact in then_path.declarations -> sema_ownership_join_declaration(index, fork.declarations, &declaration_keys, &declarations, fact)
     loop fact in else_path.declarations -> sema_ownership_join_declaration(index, fork.declarations, &declaration_keys, &declarations, fact)
-    frozen := [String:SemaOwnershipFreezeSite?]{}
-    loop (key, _) in then_path.frozen {
-        left :: sema_ownership_path_frozen(index, then_path, key)
-        right :: if has_else -> sema_ownership_path_frozen(index, else_path, key) else -> sema_ownership_frozen_for_key(index, key)
-        frozen[key] = if left != None && right != None -> Val(left) else -> None
-    }
-    loop (key, _) in else_path.frozen {
-        if frozen.get(key) != None -> next
-        left :: sema_ownership_path_frozen(index, then_path, key)
-        right :: if has_else -> sema_ownership_path_frozen(index, else_path, key) else -> sema_ownership_frozen_for_key(index, key)
-        frozen[key] = if left != None && right != None -> Val(left) else -> None
+    frozen := sema_ownership_frozen_rows()
+    loop row in 0..<then_path.frozen.sites.len() -> sema_ownership_join_frozen(index, then_path, else_path, has_else, &frozen, then_path.frozen.keys.texts[row], then_path.frozen.keys.hashes[row])
+    loop row in 0..<else_path.frozen.sites.len() {
+        key :: else_path.frozen.keys.texts[row]
+        hash :: else_path.frozen.keys.hashes[row]
+        if name_rows_get(frozen.keys, key, hash) != None -> next
+        sema_ownership_join_frozen(index, then_path, else_path, has_else, &frozen, key, hash)
     }
     freeze_sites := fork.freeze_sites.copy()
     loop site in then_path.freeze_sites {
@@ -5190,7 +5218,7 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
     }
 
     merged_moves := [SemaOwnershipMovedPlace]{}
-    move_slots := [String:Int]{}
+    move_slots := name_rows()
     move_rows := [[Int]]{}
     loop moved in then_path.moved {
         if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
@@ -5221,14 +5249,14 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
     // path carries them.  Keep pre-merge hazards and union both branch facts;
     // lexical scope cleanup has already removed facts whose owners ended.
     merged_loans := fork.loans
-    loan_slots := [String:Int]{}
+    loan_slots := name_rows()
     loan_rows := [[Int]]{}
     loop (row, loan) in merged_loans -> sema_ownership_bucket_add(&loan_slots, &loan_rows, loan.place.root_key, row)
     loop loan in then_path.loans -> sema_ownership_merge_loan(&merged_loans, &loan_slots, &loan_rows, loan)
     loop loan in else_path.loans -> sema_ownership_merge_loan(&merged_loans, &loan_slots, &loan_rows, loan)
 
     merged_views := [SemaOwnershipViewFact]{}
-    view_slots := [String:Int]{}
+    view_slots := name_rows()
     view_rows := [[Int]]{}
     loop view in fork.views {
         if view.active {
@@ -5259,9 +5287,21 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
     }
 }
 
-fn sema_ownership_path_frozen(state: SemaOwnershipState, path: SemaOwnershipPath, key: String) -> SemaOwnershipFreezeSite? Never! {
-    if path.frozen.get(key) == .Val(site) -> return site
-    sema_ownership_frozen_for_key(state, key)
+// The freeze site of `key` (whose name_rows_hash is `hash`) at the end of
+// `path`: the path's own row, else the last declaration row in `state`.
+fn sema_ownership_path_frozen(state: SemaOwnershipState, path: SemaOwnershipPath, key: String, hash: Int) -> SemaOwnershipFreezeSite? Never! {
+    if name_rows_get(path.frozen.keys, key, hash) == .Val(row) -> return path.frozen.sites[row]
+    sema_ownership_frozen_for_key_hashed(state, key, hash)
+}
+
+// Joins the freeze site of `key` into `frozen`: a binding stays frozen only
+// where both paths keep a site.
+fn sema_ownership_join_frozen(index: SemaOwnershipState, then_path: SemaOwnershipPath, else_path: SemaOwnershipPath, has_else: Bool, frozen: &SemaOwnershipFrozenRows, key: String, hash: Int) Never! {
+    left :: sema_ownership_path_frozen(index, then_path, key, hash)
+    right :: if has_else -> sema_ownership_path_frozen(index, else_path, key, hash) else -> sema_ownership_frozen_for_key_hashed(index, key, hash)
+    site := SemaOwnershipFreezeSite?{None}
+    if left != None && right != None -> site = left
+    sema_ownership_frozen_set(&frozen, key, hash, site)
 }
 
 // The join of whole-state copies: `state` becomes `before` plus the join of
@@ -5278,14 +5318,16 @@ fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnershipSt
 // unwritten by either path stays unwritten, and a fixed-list slot counts as
 // written only where every path wrote it.
 fn sema_ownership_uninit_join(left: [SemaOwnershipUninitFact], right: [SemaOwnershipUninitFact]) -> [SemaOwnershipUninitFact] Never! {
-    right_slots := [String:Int]{}
+    // copy: the join is the left facts themselves when the right adds none.
+    if right.len() == 0 -> return left.copy()
+    right_slots := name_rows()
     right_rows := [[Int]]{}
     loop (row, other) in right -> sema_ownership_bucket_add(&right_slots, &right_rows, other.key, row)
     merged := [SemaOwnershipUninitFact]{}
-    merged_keys := [String:Bool]{}
+    merged_keys := name_rows()
     loop fact in left {
         joined := fact
-        if right_slots.get(joined.key) == .Val(key_slot) {
+        if name_rows_get_text(right_slots, joined.key) == .Val(key_slot) {
             loop row in right_rows[key_slot] {
                 if joined.fixed_len == right[row].fixed_len {
                     kept := [Int]{}
@@ -5299,12 +5341,12 @@ fn sema_ownership_uninit_join(left: [SemaOwnershipUninitFact], right: [SemaOwner
                 }
             }
         }
-        merged_keys[joined.key] = true
+        name_rows_set(&merged_keys, joined.key, 0)
         &merged.push(joined)
     }
     loop fact in right {
-        if merged_keys.get(fact.key) != None -> next
-        merged_keys[fact.key] = true
+        if name_rows_get_text(merged_keys, fact.key) != None -> next
+        name_rows_set(&merged_keys, fact.key, 0)
         &merged.push(fact)
     }
     merged
@@ -5621,13 +5663,17 @@ fn sema_ownership_check_statements(state: &SemaOwnershipState, statements: [Stmt
     SemaOwnershipFlowResult{complete: valid, falls_through: falls_through}
 }
 
+// The freeze site of the last declaration row of `key`.
 fn sema_ownership_frozen_for_key(state: SemaOwnershipState, key: String) -> SemaOwnershipFreezeSite? Never! {
-    index := state.declarations.len() - 1
-    loop index >= 0 {
-        if state.declarations[index].key == key -> return state.declarations[index].frozen_site
-        index -= 1
-    }
-    None
+    sema_ownership_frozen_for_key_hashed(state, key, name_rows_hash(key))
+}
+
+// sema_ownership_frozen_for_key for a `key` whose name_rows_hash is `hash`.
+fn sema_ownership_frozen_for_key_hashed(state: SemaOwnershipState, key: String, hash: Int) -> SemaOwnershipFreezeSite? Never! {
+    slot :: name_rows_get(state.key_slots, key, hash) ?? return None
+    row :: state.key_facts[slot].last
+    if row < 0 -> return None
+    state.declarations[row].frozen_site
 }
 
 fn sema_ownership_frozen_expr_site(state: SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> SemaOwnershipFreezeSite? Never! {
