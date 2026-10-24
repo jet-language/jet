@@ -2630,6 +2630,17 @@ fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bo
     false
 }
 
+// Rust `infer_call` ("Lexical value bindings win over file functions and
+// imported calls"): the nearest binding of the name is a parameter or local
+// whose type is a function, so the call reads that value even when a
+// declared function of the same name is visible further out.
+fn sema_expr_callable_local_index(environment: SemaScopeEnvironment, scopes: SemaScopeTable, name: String) -> Int? {
+    index :: sema_scope_resolve_index(scopes, name) ?? return None
+    if scopes.bindings[index].symbol.kind == SymbolKind.Function -> return None
+    callable_ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
+    if sema_call_type_is_function(callable_ty) -> Val(index) else -> None
+}
+
 fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // `close(^value)` is the ambient `Close` sugar ahead
     // of every declared function (Rust `check_call_inner`).
@@ -2637,6 +2648,13 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     // Teaching forms, `measurement` and `apply` precede name resolution.
     forms := sema_call_try_direct_forms(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if forms.handled -> return forms.value
+    // A callable parameter or local wins over a same-named declared, Core or
+    // ambient function.
+    if sema_expr_callable_local_index(environment, scopes, call.name) != None {
+        value_end := call.name_span.end
+        if call.args.len() > 0 -> value_end = expr_span(call.args[call.args.len() - 1].expr).end
+        return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, call.args, Span{start: call.name_span.start, end: value_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     // A loaded declaration owns the call even when Core also imports the name.
     if sema_expr_declared_function_named(scopes, call.name) {
         return sema_expr_check_declared_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2654,17 +2672,6 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     if special.handled -> return special.value
     ambient := sema_call_try_ambient_prelude(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if ambient.handled -> return ambient.value
-    // Rust `infer_call` callable-binding route (`direct_calls.rs`): only when
-    // no declared function has the name (`funcs.get(name).is_none()`), a
-    // parameter or local whose type is a function is called as a value.
-    callable_index := sema_scope_resolve_index(scopes, call.name)
-    if callable_index == .Val(index) && !sema_expr_declared_function_named(scopes, call.name) {
-        if scopes.bindings[index].symbol.kind != SymbolKind.Function && sema_scope_binding_type(environment, scopes, index) == .Val(callable_ty) && sema_call_type_is_function(callable_ty) {
-            value_end := call.name_span.end
-            if call.args.len() > 0 -> value_end = expr_span(call.args[call.args.len() - 1].expr).end
-            return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, call.args, Span{start: call.name_span.start, end: value_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        }
-    }
     if sema_call_default_err_candidate(call, expected, scopes) {
         scopes.ownership_call_depth += 1
         checked_default := sema_call_check_default_err(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
