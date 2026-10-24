@@ -719,6 +719,41 @@ fn jet_cli_cpu_list(text: String) -> [Int]? Never! {
     Val(cpus)
 }
 
+// The compiler's thread default once other work is counted: one thread per
+// physical core (jet_cli_physical_cores), but never more than the CPUs other
+// processes leave free at start. `/proc/stat`'s `procs_running` line counts
+// the runnable threads at this instant, this thread among them; the others
+// spread over the host's online CPUs, so their share of the `logical` CPUs
+// this process may use counts as busy. A quiet host gets every physical
+// core; on an SMT host the default shrinks only once fewer CPUs than
+// physical cores are free, since a busy core's sibling still runs a compiler
+// thread. An unreadable file leaves the physical-core count.
+fn jet_cli_default_threads(logical: Int) -[FS]> Int Never! {
+    physical :: jet_cli_physical_cores(logical)
+    stat :: cli_files.read("/proc/stat") ?? return physical
+    online_list :: cli_files.read("/sys/devices/system/cpu/online") ?? return physical
+    online :: jet_cli_cpu_list(online_list.trim()) ?? return physical
+    jet_cli_threads_left(physical, logical, online.len(), stat)
+}
+
+// At most `physical` threads, and at most the `logical` CPUs this process may
+// use less the busy share of them that `stat` (the text of `/proc/stat`)
+// shows across `online` CPUs; at least one. `physical` when `stat` has no
+// `procs_running` count.
+fn jet_cli_threads_left(physical: Int, logical: Int, online: Int, stat: String) -> Int Never! {
+    running := -1
+    loop line in stat.lines() {
+        if line.starts_with("procs_running ") -> running = Int.parse(line.slice(14..<line.len()).trim()) ?? -1
+    }
+    if running < 0 -> return physical
+    others :: if running > 1 -> running - 1 else -> 0
+    spread :: if online < logical -> logical else -> online
+    free :: logical - others * logical /% spread
+    if free < 1 -> return 1
+    if free < physical -> return free
+    physical
+}
+
 // The Core library rows of the toolchain tree that `JET_TOOLCHAIN_ROOT`
 // names, or the refusal that stops the request. Each body is read when the
 // compile first schedules its row (jet_driver_core_text_file), so a compile
@@ -768,7 +803,7 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         eval_config: jet_cli_eval_config(),
         record_store: None,
         trace_sink: None,
-        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_physical_cores(cores)), cores: cores, memory_available: jet_cli_memory_available()},
+        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),

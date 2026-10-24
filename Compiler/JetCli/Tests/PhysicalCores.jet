@@ -1,5 +1,5 @@
 // The compiler's default thread count: Linux CPU lists and the physical-core count.
-use jet_cli.[jet_cli_cpu_list, jet_cli_physical_cores]
+use jet_cli.[jet_cli_cpu_list, jet_cli_physical_cores, jet_cli_threads_left]
 
 #Test("cpu_list_reads_ranges_and_single_cpus") {
     assert_eq(jet_cli_cpu_list("0-3,8-9") ?? [Int]{}, [Int]{0, 1, 2, 3, 8, 9})
@@ -12,4 +12,20 @@ use jet_cli.[jet_cli_cpu_list, jet_cli_physical_cores]
     cores :: jet_cli_physical_cores(4096)
     assert(cores >= 1 && cores <= 4096)
     assert_eq(jet_cli_physical_cores(1), 1)
+}
+
+#Test("threads_left_shrinks_only_when_busy_cpus_leave_fewer_than_the_cores") {
+    // A quiet 16-core, 32-CPU host: only this thread runs.
+    assert_eq(jet_cli_threads_left(16, 32, 32, "cpu  10 0 10 900 0 0 0 0 0 0\nctxt 4242\nprocs_running 1\nprocs_blocked 0\n"), 16)
+    // 8 others running: their siblings' CPUs still leave 16 free.
+    assert_eq(jet_cli_threads_left(16, 32, 32, "procs_running 9\nprocs_blocked 0"), 16)
+    // 20 others running leave 12 CPUs.
+    assert_eq(jet_cli_threads_left(16, 32, 32, "processes 900\nprocs_running 21\n"), 12)
+    // Pinned to 12 of 32 CPUs: the others' share of those 12 counts.
+    assert_eq(jet_cli_threads_left(6, 12, 32, "procs_running 17\n"), 6)
+    assert_eq(jet_cli_threads_left(6, 12, 32, "procs_running 25\n"), 3)
+    // A saturated host still gets one thread; unreadable text keeps the cores.
+    assert_eq(jet_cli_threads_left(16, 32, 32, "procs_running 65\n"), 1)
+    assert_eq(jet_cli_threads_left(16, 32, 32, "garbage"), 16)
+    assert_eq(jet_cli_threads_left(16, 32, 32, "procs_running x\n"), 16)
 }
