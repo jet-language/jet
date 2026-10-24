@@ -1,0 +1,148 @@
+enum Tree {
+    Leaf(Int)
+    Branch(left: Tree, right: Forest)
+    Tagged(label: String, body: Node)
+}
+
+enum Forest {
+    Empty
+    Trees([Tree])
+    Linked(head: Tree, rest: Forest)
+}
+
+enum Node {
+    Plain(Int)
+    Holds(Tree?)
+    Grows(Forest)
+}
+
+struct Layer0 {
+    tree: Tree
+    node: Node
+}
+
+fn use_0(layer: Layer0) -> Int {
+    if layer.tree == {
+        .Leaf(value) -> value
+        .Branch(_, _) -> 1
+        .Tagged(_, _) -> 2
+    }
+}
+
+struct Layer1 {
+    left: Layer0
+    right: Layer0
+    tree: Tree
+}
+
+fn use_1(layer: Layer1) -> Int {
+    inner :: layer.left
+    if layer.tree == {
+        .Leaf(value) -> value + use_0(inner)
+        .Branch(_, _) -> 1
+        .Tagged(_, body) -> if body == {
+            .Plain(value) -> value
+            .Holds(_) -> 0
+            .Grows(_) -> 1
+        }
+    }
+}
+
+struct Layer2 {
+    left: Layer1
+    right: Layer1
+    tree: Tree
+}
+
+fn use_2(layer: Layer2) -> Int {
+    inner :: layer.left
+    if layer.tree == {
+        .Leaf(value) -> value + use_1(inner)
+        .Branch(_, _) -> 2
+        .Tagged(_, body) -> if body == {
+            .Plain(value) -> value
+            .Holds(_) -> 0
+            .Grows(_) -> 2
+        }
+    }
+}
+
+struct Layer3 {
+    left: Layer2
+    right: Layer2
+    tree: Tree
+}
+
+fn use_3(layer: Layer3) -> Int {
+    inner :: layer.left
+    if layer.tree == {
+        .Leaf(value) -> value + use_2(inner)
+        .Branch(_, _) -> 3
+        .Tagged(_, body) -> if body == {
+            .Plain(value) -> value
+            .Holds(_) -> 0
+            .Grows(_) -> 3
+        }
+    }
+}
+
+struct Layer4 {
+    left: Layer3
+    right: Layer3
+    tree: Tree
+}
+
+fn use_4(layer: Layer4) -> Int {
+    inner :: layer.left
+    if layer.tree == {
+        .Leaf(value) -> value + use_3(inner)
+        .Branch(_, _) -> 4
+        .Tagged(_, body) -> if body == {
+            .Plain(value) -> value
+            .Holds(_) -> 0
+            .Grows(_) -> 4
+        }
+    }
+}
+
+struct Layer5 {
+    left: Layer4
+    right: Layer4
+    tree: Tree
+}
+
+fn use_5(layer: Layer5) -> Int {
+    inner :: layer.left
+    if layer.tree == {
+        .Leaf(value) -> value + use_4(inner)
+        .Branch(_, _) -> 5
+        .Tagged(_, body) -> if body == {
+            .Plain(value) -> value
+            .Holds(_) -> 0
+            .Grows(_) -> 5
+        }
+    }
+}
+
+struct Layer6 {
+    left: Layer5
+    right: Layer5
+    tree: Tree
+}
+
+fn use_6(layer: Layer6) -> Int {
+    inner :: layer.left
+    if layer.tree == {
+        .Leaf(value) -> value + use_5(inner)
+        .Branch(_, _) -> 6
+        .Tagged(_, body) -> if body == {
+            .Plain(value) -> value
+            .Holds(_) -> 0
+            .Grows(_) -> 6
+        }
+    }
+}
+
+fn run() {
+    print(use_0(Layer0{tree: Tree.Leaf(1), node: Node.Plain(2)}))
+}

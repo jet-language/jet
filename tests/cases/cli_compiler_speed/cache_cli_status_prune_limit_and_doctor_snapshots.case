@@ -1,0 +1,63 @@
+# tests/cli_compiler_speed.rs::cache_cli_status_prune_limit_and_doctor_snapshots at tests/cli_compiler_speed.rs:1405; hand-port
+# Claim: cache status exits 0 and shows limit 20 GiB (JET_STORE_CAP_BYTES) and reserve 2 GiB (tests/cli_compiler_speed.rs:1411-1429)
+# Claim: cache prune --to 1K exits 0 and reports its 1 KiB target (tests/cli_compiler_speed.rs:1431-1443)
+# Claim: cache limit --host 4G exits 0 and persists the host limit (tests/cli_compiler_speed.rs:1445-1458)
+# Claim: cache status after the limit shows limit 4 GiB (host policy) (tests/cli_compiler_speed.rs:1460-1472)
+# Claim: self doctor reports the artifact-store row with 4 GiB cap and 2 GiB reserve (tests/cli_compiler_speed.rs:1474-1482)
+# Not ported: seeding a 2 KiB blob through jet_store::Store::publish_blob (tests/cli_compiler_speed.rs:1408-1409): Rust API, no CLI path; the fixture store starts empty, so the used/removed counts in the Rust snapshots (2 KiB, 1 blob, freed 2 KiB) are not reproduced
+fixture: cache_cli_status_prune_limit_and_doctor_snapshots.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # tests/cli_compiler_speed.rs:1407 fixture dirs (isolates persisted host limit from the real config)
+step: jet cache status
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: HOME=home
+env: XDG_CONFIG_HOME=home/config
+exit: 0 # tests/cli_compiler_speed.rs:1411-1429 status snapshot
+stdout: ~ "limit      20 GiB (JET_STORE_CAP_BYTES)" # tests/cli_compiler_speed.rs:1411-1429 status snapshot
+stdout: ~ "reserve    keep 2 GiB free on that filesystem" # tests/cli_compiler_speed.rs:1411-1429 status snapshot
+stdout: ~ "leases     0 live" # tests/cli_compiler_speed.rs:1411-1429 status snapshot
+stdout: ~ "tiers      local" # tests/cli_compiler_speed.rs:1411-1429 status snapshot
+step: jet cache prune --to 1K
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: HOME=home
+env: XDG_CONFIG_HOME=home/config
+exit: 0 # tests/cli_compiler_speed.rs:1431-1443 prune snapshot
+stdout: ~ "target 1 KiB" # tests/cli_compiler_speed.rs:1431-1443 prune snapshot
+step: jet cache limit --host 4G
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: HOME=home
+env: XDG_CONFIG_HOME=home/config
+exit: 0 # tests/cli_compiler_speed.rs:1445-1458 limit snapshot
+stdout: ~ "host limit 4 GiB (persisted)" # tests/cli_compiler_speed.rs:1445-1458 limit snapshot
+step: jet cache status
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: HOME=home
+env: XDG_CONFIG_HOME=home/config
+exit: 0 # tests/cli_compiler_speed.rs:1460-1472 limited status
+stdout: ~ "limit      4 GiB (host policy)" # tests/cli_compiler_speed.rs:1460-1472 limited status
+stdout: ~ "leases     0 live" # tests/cli_compiler_speed.rs:1460-1472 limited status
+step: jet self doctor
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: HOME=home
+env: XDG_CONFIG_HOME=home/config
+exit: 0 # tests/cli_compiler_speed.rs:1474-1482 doctor row
+stdout: ~ "artifact store:" # tests/cli_compiler_speed.rs:1474-1482 doctor row
+stdout: ~ "(footprint 0 B; cap 4 GiB; reserve 2 GiB; 0 entries; 0 live leases)" # tests/cli_compiler_speed.rs:1474-1482 doctor row

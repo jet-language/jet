@@ -1,0 +1,30 @@
+# tests/cli_compiler_speed.rs::compiler_speed_named_job_dev_matches_run_and_interpreter at tests/cli_compiler_speed.rs:469; hand-port
+# Claim: jet run run.jet -- seed_data exits 0 and prints the job output (tests/cli_compiler_speed.rs:498-522)
+# Claim: jet dev --watch=off --quiet run.jet -- seed_data exits 0 and prints the same output (tests/cli_compiler_speed.rs:499-523)
+# Claim: unknown dev job exits nonzero and keeps E1294 (tests/cli_compiler_speed.rs:525-545)
+# Fixture migrated: package.jet is new: Tools/perf/package.jet (the Rust fixture's source) is absent on dev HEAD, so the package carries only name and version
+fixture: compiler_speed_named_job_dev_matches_run_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run run.jet -- seed_data
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # tests/cli_compiler_speed.rs:498-522 run named job
+stdout: = "hello from job\nseeded\n" # tests/cli_compiler_speed.rs:517-520 run named job output
+step: jet dev run.jet --watch=off --quiet -- seed_data
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # tests/cli_compiler_speed.rs:499-522 dev named job
+stdout: = "hello from job\nseeded\n" # tests/cli_compiler_speed.rs:517-520 dev named job output
+step: jet dev run.jet --watch=off --quiet -- missing_job
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: nonzero # tests/cli_compiler_speed.rs:537-541 unknown dev job is rejected
+stderr: ~ "E1294" # tests/cli_compiler_speed.rs:542-545 unknown dev job keeps E1294

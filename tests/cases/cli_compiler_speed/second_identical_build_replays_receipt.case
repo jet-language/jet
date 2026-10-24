@@ -1,0 +1,43 @@
+# tests/cli_compiler_speed.rs::second_identical_build_replays_receipt at tests/cli_compiler_speed.rs:1271; hand-port
+# Claim: first debug build exits 0 and does not replay a receipt (tests/cli_compiler_speed.rs:1327-1337)
+# Claim: second identical debug build exits 0 and prints up to date (tests/cli_compiler_speed.rs:1356-1366)
+# Claim: second build stdout equals the first (tests/cli_compiler_speed.rs:1367-1370)
+# Claim: built binary prints receipt-replay (tests/cli_compiler_speed.rs:1305-1325)
+# Not ported: rustc argv log comparison (tests/cli_compiler_speed.rs:1338-1380): reads generated rustc argv
+# Not ported: jet_store last_build_record node checks (tests/cli_compiler_speed.rs:1289-1303,1349-1375): Rust jet_store API
+# Not ported: binary mtime check (tests/cli_compiler_speed.rs:1381-1385): the fixture cannot read mtime portably in a sh step
+fixture: second_identical_build_replays_receipt.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # tests/cli_compiler_speed.rs:1305-1306 shell temp roots
+step: jet build main.jet --profile=debug
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: RUSTC_LINKER=cc
+env: NIX_BUILD_TOP=nix-shell.first
+env: TMPDIR=nix-shell.first
+env: TMP=nix-shell.first
+env: TEMP=nix-shell.first
+env: TEMPDIR=nix-shell.first
+exit: 0 # tests/cli_compiler_speed.rs:1327-1337 first build does the work
+stderr: !~ "up to date:" # tests/cli_compiler_speed.rs:1327-1337 first build does the work
+step: jet build main.jet --profile=debug
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: RUSTC_LINKER=cc
+env: NIX_BUILD_TOP=nix-shell.second
+env: TMPDIR=nix-shell.second
+env: TMP=nix-shell.second
+env: TEMP=nix-shell.second
+env: TEMPDIR=nix-shell.second
+exit: 0 # tests/cli_compiler_speed.rs:1356-1366 second build replays receipt
+stderr: ~ "up to date: " # tests/cli_compiler_speed.rs:1356-1366 second build replays receipt
+step: built
+exit: 0 # tests/cli_compiler_speed.rs:1305-1325 built binary output
+stdout: = "receipt-replay\n" # tests/cli_compiler_speed.rs:1305-1325 built binary output
