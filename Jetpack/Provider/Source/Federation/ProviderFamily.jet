@@ -50,7 +50,7 @@ enum ProviderFamily {
     }
 }
 
-struct ProviderContract {
+struct ProviderFamilyContract {
     family: ProviderFamily
     parses_refs: Bool
     probes_metadata: Bool
@@ -63,10 +63,10 @@ struct ProviderContract {
     // The surface this build owns for `family`. Metadata normalization does
     // not imply Jet can fetch or lock bytes from a foreign ecosystem, so those
     // capabilities stay false until a real provider adapter supplies them.
-    fn for_family(family: ProviderFamily) -> ProviderContract Never! {
+    fn for_family(family: ProviderFamily) -> ProviderFamilyContract Never! {
         first_party :: family.is_local_or_first_party()
         byte_owner :: first_party || family == ProviderFamily.Binary
-        ProviderContract{
+        ProviderFamilyContract{
             family: family,
             parses_refs: true,
             probes_metadata: true,
@@ -79,15 +79,15 @@ struct ProviderContract {
     }
 
     // The contract of every built-in family, in family order.
-    fn built_in() -> [ProviderContract] Never! {
+    fn built_in() -> [ProviderFamilyContract] Never! {
         families :: [ProviderFamily]{
             ProviderFamily.Core, ProviderFamily.Nix, ProviderFamily.Path, ProviderFamily.Github,
             ProviderFamily.JetRegistry, ProviderFamily.Npm, ProviderFamily.PyPI, ProviderFamily.Cargo,
             ProviderFamily.SwiftPM, ProviderFamily.Maven, ProviderFamily.NuGet, ProviderFamily.Conan,
             ProviderFamily.Vcpkg, ProviderFamily.Homebrew, ProviderFamily.Binary
         }
-        contracts := [ProviderContract]{}
-        loop family in families -> &contracts.push(ProviderContract.for_family(family))
+        contracts := [ProviderFamilyContract]{}
+        loop family in families -> &contracts.push(ProviderFamilyContract.for_family(family))
         contracts
     }
 }

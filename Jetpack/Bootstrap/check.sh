@@ -105,6 +105,24 @@ if [[ -z "$jet" || ! -x "$jet" ]]; then
   echo "jetpack-bootstrap: JET must name the admitted native jet compiler" >&2
   exit 69
 fi
+# The compiler's identity and toolchain root are environment facts of the
+# admitted compiler: the IDENTITY file beside $JET names it (the compiler refuses
+# a host without JET_COMPILER_IDENTITY), and the Core library tree is the
+# repository that holds this script. Explicit settings win.
+if [[ -z "${JET_COMPILER_IDENTITY:-}" ]]; then
+  identity_file="$(dirname "$jet")/IDENTITY"
+  identity=""
+  if [[ -r "$identity_file" ]]; then IFS= read -r identity < "$identity_file" || true; fi
+  if [[ -z "$identity" ]]; then
+    echo "jetpack-bootstrap: JET_COMPILER_IDENTITY is unset and $identity_file is missing or empty" >&2
+    exit 69
+  fi
+  export JET_COMPILER_IDENTITY="$identity"
+fi
+if [[ -z "${JET_TOOLCHAIN_ROOT:-}" ]]; then
+  [[ -d "$repo/Core" ]] || { echo "jetpack-bootstrap: JET_TOOLCHAIN_ROOT is unset and $repo has no Core/ tree" >&2; exit 69; }
+  export JET_TOOLCHAIN_ROOT="$repo"
+fi
 
 root_tag="$(printf '%s\0%s\0%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" "$own_area" "$deps_from_head" | sha256sum | cut -c1-10)"
 scratch="$HOME/.cache/jet-dev/jetpack-bootstrap/$worker-$root_tag"

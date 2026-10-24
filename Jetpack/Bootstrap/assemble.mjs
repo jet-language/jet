@@ -60,7 +60,7 @@ const mapPath = resolve(scratchDir, "jetpack.map.json");
 const packageSource = [
   'name: "jetpack_bootstrap"',
   'version: "0.1.0"',
-  'edition: "2028"',
+  'edition: "2026"',
   "authority: {",
   "    holds: {",
   "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]",
@@ -89,7 +89,7 @@ async function jetFilesUnder(directory) {
   for (const entry of entries) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) files.push(...(await jetFilesUnder(path)));
-    else if (entry.isFile() && entry.name.endsWith(".jet")) files.push(path);
+    else if (entry.isFile() && entry.name.endsWith(".jet") && entry.name !== "package.jet") files.push(path);
   }
   return files;
 }
@@ -154,6 +154,7 @@ async function readManifest(name) {
   const workingText = await readFile(manifestPath, "utf8").catch((error) => fail(`cannot read ${label}: ${error.message}`));
   const text = mergedManifest(workingText, name);
   const entries = [];
+  const misplaced = [];
   // Section headers look like `# == PackageModel ==`; the name is the text before any `(`.
   let section = null;
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
@@ -176,7 +177,7 @@ async function readManifest(name) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
     const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
-    if (area !== undefined && area !== section) fail(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
+    if (area !== undefined && area !== section) misplaced.push(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
     if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
     if (selectedAreas !== null && !selectedAreas.has(section)) continue;
     // Dependency references have the same live/HEAD rule, never a per-file
@@ -199,6 +200,10 @@ async function readManifest(name) {
     const sourceText = bytes.toString("utf8");
     if (!Buffer.from(sourceText, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
     entries.push({ sourcePath, bytes, text: rebaseEmbeds(sourceText, sourcePath, where), where, section });
+  }
+  if (misplaced.length > 0) {
+    for (const message of misplaced) console.error(`jetpack-bootstrap: ${message}`);
+    process.exit(1);
   }
   return entries;
 }
