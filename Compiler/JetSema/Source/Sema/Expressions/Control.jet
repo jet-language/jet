@@ -38,7 +38,7 @@ use jet_foundation.[
     expr_span,
     failure_contract_of_function,
     symbol_id,
-    tir_symbol_local,
+    checked_symbol_local,
     type_identity_equal,
     type_name,
 ]
@@ -112,7 +112,7 @@ fn sema_expression_panic_locals(scopes: SemaScopeTable, span: Span) -> [TPanicLo
     loop name in names {
         row :: rows.get(name) ?? { next }
         symbol :: scopes.bindings[row].symbol
-        &locals.push(TPanicLocal{display_name: name, local: tir_symbol_local(name, symbol.span, symbol.id)})
+        &locals.push(TPanicLocal{display_name: name, local: checked_symbol_local(name, symbol.span, symbol.id)})
     }
     locals
 }
@@ -1231,7 +1231,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         frame :: scopes.current
         sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         sema_ownership_declare_binding(&fallback_state, symbol, false)
-        ambient_err = Val(tir_symbol_local("err", span, symbol.id))
+        ambient_err = Val(checked_symbol_local("err", span, symbol.id))
     }
     fallback_reaches_merge := false
     // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback, which
@@ -1506,7 +1506,7 @@ fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: E
     _ := sema_scope_declare_local(&scopes, symbol, window, if window -> AccessConvention.Write else -> AccessConvention.Read, bounds, false)
     sema_ownership_declare_binding(&state, symbol, false)
     _ := sema_ownership_record_pattern_views(&state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, scopes)
-    local := tir_symbol_local(name, subject_span, id)
+    local := checked_symbol_local(name, subject_span, id)
     local.generated = true
     local.integer_bounds = bounds
     Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span})

@@ -4,11 +4,11 @@ use jet_foundation.[
     TIntegerBounds,
     TUnaryOp,
     integer_bounds_exact,
-    tir_cost_bounded,
-    tir_cost_combine_bounds,
-    tir_cost_max,
-    tir_cost_min,
-    tir_cost_type_bounds,
+    checked_cost_bounded,
+    checked_cost_combine_bounds,
+    checked_cost_max,
+    checked_cost_min,
+    checked_cost_type_bounds,
 ]
 
 // The exact value an integer literal node spells. A literal beyond i64 is a
@@ -45,7 +45,7 @@ fn tir_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
     Val(integer_bounds_exact(value))
 }
 
-fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
+fn checked_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
     known :: tir_expr_known_bounds(expression)
     if known != None -> return known
     bounds := TIntegerBounds?{None}
@@ -57,31 +57,31 @@ fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
             if operation == {
                 .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi})
                 .CastAs(destination) -> {
-                    if destination == "i64" && tir_cost_integer_bounds(receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 -> bounds = Val(original)
+                    if destination == "i64" && checked_cost_integer_bounds(receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 -> bounds = Val(original)
                 }
                 else -> {}
             }
         }
         .Unary(op, value) -> {
-            if op == TUnaryOp.Neg && tir_cost_integer_bounds(value) == .Val(operand) {
-                bounds = tir_cost_bounded(-operand.hi, -operand.lo)
+            if op == TUnaryOp.Neg && checked_cost_integer_bounds(value) == .Val(operand) {
+                bounds = checked_cost_bounded(-operand.hi, -operand.lo)
             }
         }
         .Binary(op, _, _, left, right) -> {
-            if tir_cost_integer_bounds(left) == .Val(lhs) && tir_cost_integer_bounds(right) == .Val(rhs) -> bounds = tir_cost_combine_bounds(op, lhs, rhs)
+            if checked_cost_integer_bounds(left) == .Val(lhs) && checked_cost_integer_bounds(right) == .Val(rhs) -> bounds = checked_cost_combine_bounds(op, lhs, rhs)
         }
         .OrFallback(value, fallback, _) -> {
             success := TIntegerBounds?{None}
             if value.ty == {
-                .Option(inner) -> success = tir_cost_type_bounds(inner)
-                .Result(ok, _) -> success = tir_cost_type_bounds(ok)
+                .Option(inner) -> success = checked_cost_type_bounds(inner)
+                .Result(ok, _) -> success = checked_cost_type_bounds(ok)
                 else -> {}
             }
             if fallback == .Value(alternative) {
-                if success == .Val(normal) && tir_cost_integer_bounds(alternative) == .Val(other) -> bounds = Val(TIntegerBounds{lo: tir_cost_min(normal.lo, other.lo), hi: tir_cost_max(normal.hi, other.hi)})
+                if success == .Val(normal) && checked_cost_integer_bounds(alternative) == .Val(other) -> bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
             } else { bounds = success }
         }
         else -> {}
     }
-    if bounds != None -> bounds else -> tir_cost_type_bounds(expression.ty)
+    if bounds != None -> bounds else -> checked_cost_type_bounds(expression.ty)
 }

@@ -159,7 +159,7 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     quiet_failure :: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, false)
     verbose_failure :: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, true)
     inspect_build_require(!quiet_failure.stdout.contains("L0507") && verbose_failure.stdout.contains("L0507"), "build failure advisories require verbose presentation")
-    internal_query :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost MIR")}
+    internal_query :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost its plan")}
     internal_failure :: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false, false)
-    inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost MIR"), "internal query failures retain ICE exit and stream")
+    inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost its plan"), "internal query failures retain ICE exit and stream")
 }

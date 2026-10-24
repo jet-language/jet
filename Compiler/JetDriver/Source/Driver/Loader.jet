@@ -852,7 +852,7 @@ fn jet_driver_manifest_entry_function(source_path: String, tokens: [Token], tabl
         if token.kind == TOKEN_IDENT && token_decoded(tables, token) == "entry" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             value_index :: index + 2
             if value_index >= close_index || (tokens[value_index].kind != TOKEN_IDENT && !jet_driver_is_manifest_string(tokens[value_index].kind)) {
-                &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(token.span), source_path, 0, "a package output entry must name a function", "the private driver binds the selected package entry to one typed MIR function identity", "write `entry: function_name` or `entry: module_alias.function_name`"))
+                &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(token.span), source_path, 0, "a package output entry must name a function", "the private driver binds the selected package entry to one checked function identity", "write `entry: function_name` or `entry: module_alias.function_name`"))
                 index += 1
                 next
             }
@@ -1582,7 +1582,7 @@ fn jet_driver_source_file_index(files: [SourceFile], path: String) -> Int? {
 
 fn jet_driver_add_source_file(files: &[SourceFile], file: SourceFile, diagnostics: &[Diagnostic]) {
     if file.id.value != source_file_id(file.path).value {
-        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source-file identity does not match its canonical path", "MIR source identities are stable functions of the path", "rebuild the source-file identity with source_file_id(path)"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source-file identity does not match its canonical path", "source-file identities are stable functions of the path", "rebuild the source-file identity with source_file_id(path)"))
         return
     }
     loop existing in files {

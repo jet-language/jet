@@ -21,7 +21,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     expr_span,
     symbol_id,
-    tir_symbol_local,
+    checked_symbol_local,
     type_identity_equal,
     type_name,
 ]
@@ -574,7 +574,7 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
             init = sema_tir_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
-        local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed

@@ -6,7 +6,7 @@
 // Decode implementation, a container's Core decode helper or the runtime's
 // scalar Decode adapter.
 
-use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, tir_generated_local, tir_user_local, StmtKind]
+use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, StmtKind]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
@@ -402,16 +402,16 @@ fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
         ir_scope_close(&m, &b)
         return -1
     }
-    source_local :: tir_generated_local("encode_source_{source}", span)
+    source_local :: checked_generated_local("encode_source_{source}", span)
     source_owned :: b.fresh[source] && ir_has_drop(m, b, source)
     &b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
     b.fresh[source] = false
     // The item List leaves the scope as the payload: its binding never owns it.
     output :: ir_list_empty(&m, &b, output_row)
     b.fresh[output] = false
-    output_local :: tir_generated_local("encode_output_{output}", span)
+    output_local :: checked_generated_local("encode_output_{output}", span)
     &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
-    item_local :: tir_user_local("encode_item_{output}", span)
+    item_local :: checked_user_local("encode_item_{output}", span)
     item_expr :: ir_node(&b, element, NodeKind.Local{local: item_local}, span)
     encoded :: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
     output_expr :: ir_node(&b, output_ty, NodeKind.Local{local: output_local}, span)

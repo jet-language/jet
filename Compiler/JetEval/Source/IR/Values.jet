@@ -4,7 +4,7 @@
 // its declaration's name, an enum case by its variant name, Some/Ok as
 // Present, None as a clean failure and Err as a told one, a fixed-width
 // integer as an Int.
-use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, tir_comptime_integer_key, type_name, FnBody]
+use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, type_name, FnBody]
 use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, ir_build_roots_in, ir_declared_field_type, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // What one IR evaluation produced: its value (when it completed with data),
@@ -97,7 +97,7 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
         .Bool -> return Val(TComptimeValue.Bool{value: word != 0})
         .Int -> {
             value :: jet_eval_ir_int_value(&s, word) ?? return None
-            // As the MIR evaluator spells it: an Int outside 64 bits is a BigInt decimal.
+            // An Int outside 64 bits is a BigInt decimal.
             if !jet_eval_ir_in_range(value, 64, true) -> return Val(TComptimeValue.BigInt{decimal: "{value}"})
             return Val(TComptimeValue.Int{value: value})
         }
@@ -200,7 +200,7 @@ fn jet_eval_ir_transport_fail(s: &JetEvalIRState, ty: Type) -> TComptimeValue? N
 // JetIR ir_comptime_key_value); None for a value no key spells.
 fn jet_eval_ir_key(m: IRModule, p: IRProgram, value: TComptimeValue, ty: Type) -> TComptimeKey? Never! {
     if value == {
-        .Int(number) -> return Val(tir_comptime_integer_key(number))
+        .Int(number) -> return Val(checked_comptime_integer_key(number))
         .BigInt(decimal) -> return Val(TComptimeKey.BigInt{decimal: decimal})
         .String(text) -> return Val(TComptimeKey.String{value: text})
         .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})

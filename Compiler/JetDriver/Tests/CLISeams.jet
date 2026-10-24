@@ -191,7 +191,7 @@ fn seams_checked_projection() {
     if library.inputs == .Val(checked) -> library_entry = checked.entry_key != None
     seams_require(library.compile.complete && !library_entry, "no `fn run` and no outputs: library, no entry")
     // Eval's existing canonical purity pass must attribute a transitive effect
-    // through checked TIR calls, including calls nested in a conditional.
+    // through checked calls, including calls nested in a conditional.
     pure := seams_request("fn leaf() {{ print(\"effect\") }}\nfn helper() {{ if true {{ leaf() }} }}\nfn evaluate() {{ helper() }}\nfn run() {{ }}", JetDriverCompileMode.Eval)
     pure.selected_entry = Val("evaluate")
     impure :: jet_driver_compile(^pure)

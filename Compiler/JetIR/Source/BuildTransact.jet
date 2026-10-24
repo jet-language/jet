@@ -11,7 +11,7 @@
 // process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
 // latest first, then drop the Stm and the handle before the exit's own drops.
 
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
@@ -166,7 +166,7 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
     if stm != None {
         stm_row :: ir_stm_row(&m)
         state :: ir_runtime(&m, &b, "jet_rt_native_stm_begin", [Int]{}, stm_row)
-        local :: tir_generated_local("jet_stm_{b.f.slot_type.len()}", span)
+        local :: checked_generated_local("jet_stm_{b.f.slot_type.len()}", span)
         ir_bind_local(&m, p, &b, local, state)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction Stm without its binding")
         stm_slot = binding.slot
@@ -278,7 +278,7 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
         ir_fail(&b, span, "transaction snapshot of {snapshot.local.name} without a value")
         return None
     }
-    saved :: tir_generated_local("jet_txn_snapshot_{value}", span)
+    saved :: checked_generated_local("jet_txn_snapshot_{value}", span)
     ir_bind_local(&m, p, &b, saved, value)
     Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: snapshot.rollback_type, restore: snapshot.restore_method})
 }

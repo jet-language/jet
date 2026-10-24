@@ -1471,7 +1471,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             checked :: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
-            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_replay_artifact(job, artifact, absolute) else -> jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR))
+            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_replay_artifact(job, artifact, absolute) else -> jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR))
         }
     }
     output

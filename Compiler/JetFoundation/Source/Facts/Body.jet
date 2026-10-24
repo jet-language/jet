@@ -6,7 +6,7 @@
 // NodeId (>= 0), or a function-local id (<= TEXPR_FIRST_LOCAL_ID) for a node
 // no source expression produced. Expression fields are node ids into the same
 // tree; statement fields are indices into BodyTree.stmts. Every variant keeps
-// its TIR name and payload order.
+// its TExprKind name and payload order.
 
 // One function's (or one standalone expression's) flat rows: nodes and the
 // expression-type column sorted by id, statements in post order. The
@@ -56,7 +56,7 @@ fn body_type(tree: BodyTree, id: Int) -> Type Never! {
 
 // The index in `tree.types` of node `id`'s checked type.
 fn body_type_id(tree: BodyTree, id: Int) -> Int Never! {
-    tir_expr_type_id(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
+    checked_expr_type_id(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
 }
 
 // Statement `index`.
@@ -302,7 +302,7 @@ enum NodeKind {
     PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String)
     MathLaneIndex(lane_type: String, base: Int, index: Int, line: Int)
     MathSwizzleRead(type_name: String, receiver: Int, lanes: [Int])
-    // #4318: `fact` is the sema decision behind the copy; MIR keeps it on Copy.
+    // #4318: `fact` is the sema decision behind the copy.
     Clone(value: Int, fact: CopyFact)
     ExplicitCopy(value: Int)
     MaterializeView(value: Int)
@@ -822,7 +822,7 @@ enum BodyPlace {
 
 // Child walkers: each visits the node id of every expression reachable from
 // the value without passing through another expression (statement blocks are
-// entered), in field order, as TIR's tir_each_*_child walkers visit child TExprs.
+// entered), in field order, as sema's Tree.jet walkers visit child TExprs.
 fn body_each_str_part_child(tree: BodyTree, value: BodyStrPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Interpolation(f0, _) -> {

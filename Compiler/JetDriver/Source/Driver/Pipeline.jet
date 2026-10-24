@@ -1,4 +1,4 @@
-// Checked Jet front-end pipeline: parse, check, lower, and assemble package MIR.
+// Checked Jet front-end pipeline: parse, check, lower, and assemble the package IR.
 use jet_sema.[
     JET_CANONICAL_EFFECT_MODULE_PATH,
     JET_CANONICAL_EFFECT_PACKAGE_IDENTITY,
@@ -1952,7 +1952,7 @@ fn jet_driver_comptime_run(
                 folded := ^checked_item.folded
                 checked_item.folded = None
                 comptime_request :: checked_item.request ?? {
-                    &diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
+                    &diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked expression", "retain the canonical Sema comptime request"))
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
@@ -2183,7 +2183,7 @@ fn jet_driver_comptime_run(
     finished
 }
 
-// G (closure-scoped staging): what a checked comptime item's TIR reaches
+// G (closure-scoped staging): what a checked comptime item's checked body reaches
 // beyond itself. `functions` are the keys of the functions it calls;
 // `everything` is set once it names any other declaration (a constant, a
 // nominal type, a trait, a field owner, a foreign row, ...) or holds a form
@@ -2265,7 +2265,7 @@ fn jet_driver_comptime_reach_stmt(reach: &JetDriverComptimeReach, tree: BodyTree
 }
 
 // G: whether an evaluated entry may build with no declaration rows: it names
-// no staged constant, its checked closure is empty and its TIR (and expected
+// no staged constant, its checked closure is empty and its checked body (and expected
 // type) reaches nothing.
 fn jet_driver_comptime_entry_bare(request: SemaComptimeItemRequest, function_keys: [String]) -> Bool Never! {
     if request.dependencies.len() > 0 || function_keys.len() > 0 -> return false
@@ -2583,7 +2583,7 @@ struct JetDriverCExportRow {
 }
 
 // The entry module's `#Export(c)` functions in declaration order, read from
-// the registration graph before MIR lowering so the graph need not stay
+// the registration graph before IR lowering so the graph need not stay
 // alive through lowering and assembly (jet_driver_c_exports).
 fn jet_driver_c_export_rows(graph: SemaRegistrationGraph, entry_module_identity: String) -> [JetDriverCExportRow] Never! {
     rows := [JetDriverCExportRow]{}
@@ -2600,7 +2600,7 @@ fn jet_driver_c_export_rows(graph: SemaRegistrationGraph, entry_module_identity:
     rows
 }
 
-// The Rust foreign facts of the registration graph a compile kept past MIR
+// The Rust foreign facts of the registration graph a compile kept past IR
 // lowering; a compile that released it had no `extern rust` function, whose
 // facts are empty (jet_driver_rust_foreign_present).
 fn jet_driver_late_rust_foreign_facts(graph: SemaRegistrationGraph?) -> JetDriverRustForeignFacts Never! {
@@ -2761,7 +2761,7 @@ fn jet_driver_keep_going_skip_set(skip: [String]) -> [String:Bool] Never! {
 
 // A checked function whose body is one unreachable stop: its signature,
 // owner and identity are unchanged, so every caller still lowers.
-fn jet_driver_keep_going_tir_trap(function: FnBody, reason: String) -> FnBody Never! {
+fn jet_driver_keep_going_trap_body(function: FnBody, reason: String) -> FnBody Never! {
     trapped := function
     // The stop takes an id below every node of the tree, so the rows stay
     // sorted by id with it first; the parameter defaults keep their nodes.
@@ -2787,7 +2787,7 @@ fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[
         if skip.get("lower:{functions[position].name}@{position}") == None -> next
         // The report and the trap read the row in place; the slot is written
         // only after the trap row is built, when no view of it is live.
-        trap :: jet_driver_keep_going_tir_trap_row(&kg, functions[position], "lowered as a trap: an earlier keep-going run crashed lowering it", "keep-going trap: lowering this function crashed an earlier run")
+        trap :: jet_driver_keep_going_trap_body_row(&kg, functions[position], "lowered as a trap: an earlier keep-going run crashed lowering it", "keep-going trap: lowering this function crashed an earlier run")
         functions[position] = trap
     }
 }
@@ -2795,9 +2795,9 @@ fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[
 // Records the census row for a function that lowers as a trap and builds the
 // trap. The caller writes the trap into the slot after this returns, when no
 // view of the row is live.
-fn jet_driver_keep_going_tir_trap_row(kg: &JetDriverKeepGoingLog, function: FnBody, reason: String, trap_text: String) -> FnBody {
+fn jet_driver_keep_going_trap_body_row(kg: &JetDriverKeepGoingLog, function: FnBody, reason: String, trap_text: String) -> FnBody {
     jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", reason, "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
-    jet_driver_keep_going_tir_trap(function, trap_text)
+    jet_driver_keep_going_trap_body(function, trap_text)
 }
 
 // Codegen lowers a checked direct call to its callee's checked function or
@@ -2822,7 +2822,7 @@ fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, funct
     loop position in 0..<functions.len() {
         missing_id :: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
         missing :: decls.rows[missing_id.row].key
-        trap :: jet_driver_keep_going_tir_trap_row(&kg, functions[position], "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "keep-going trap: this function calls `{missing}`, which did not check")
+        trap :: jet_driver_keep_going_trap_body_row(&kg, functions[position], "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "keep-going trap: this function calls `{missing}`, which did not check")
         functions[position] = trap
     }
 }
@@ -2876,13 +2876,12 @@ struct JetDriverCheckedProjectionCapture {
     source_modules: [Int]{[Int]{}}
     entry_module: Int?{None}
     schema_ingress: JetDriverSchemaIngress?{None}
-    // `jet_driver_lowering_inputs`: stop right before MIR lowering and keep its inputs.
+    // `jet_driver_lowering_inputs`: stop right before IR lowering and keep its inputs.
     stop_before_lowering: Bool{false}
     lowering_inputs: JetDriverLoweringInputs?{None}
 }
 
-// What the slot IR builder reads, where MIR lowering would start (Pipeline
-// `jet_driver_lower_releasing`): the checked functions, after Core pruning
+// What the slot IR builder reads: the checked functions, after Core pruning
 // and keep-going traps; the declaration table their direct calls name; the
 // checked modules (declarations, names) beside
 // them; the checked source files' text by path (the first file of a path);
@@ -3271,7 +3270,7 @@ fn jet_driver_loaded_identity_counts(modules: [JetDriverLoadedModule]) -> [Strin
     counts
 }
 
-// The checked front-end and TIR stages every compile runs.
+// The checked front-end stages every compile runs.
 fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, owned_load: ^JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
     load := ^owned_load
     trace := jet_driver_empty_compile_trace()
@@ -3651,7 +3650,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.owners")
     // Every checked function moves out of its graph module into one list, so
-    // the checked TIR is resident once from here on: the rows return to their
+    // the checked bodies are resident once from here on: the rows return to their
     // modules after lowering for the entry and foreign lookups
     // (jet_driver_restore_checked_functions) and are released after those.
     checked_functions := [FnBody]{}
@@ -3689,7 +3688,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
             // `module.items`) though registration never saw them.
             registered :: (module_registered && registered_function_keys[graph_module.module_identity].has_key(function.key)) || graph_module.injected_function_keys.contains(function.key)
             if function.module_identity != graph_module.module_identity || !registered {
-                &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "a checked function lost its canonical module or symbol identity", "cross-module call resolution and MIR IDs use exact declaration identities", "preserve module_identity and the original function SymbolId through Sema"))
+                &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "a checked function lost its canonical module or symbol identity", "cross-module call resolution and IR IDs use exact declaration identities", "preserve module_identity and the original function SymbolId through Sema"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
             }
             repeated :: repeated_rows[checked_row]

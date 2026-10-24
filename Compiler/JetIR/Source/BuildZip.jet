@@ -3,7 +3,7 @@
 // through one runtime zip node, whose callback builds the next row tuple. A
 // padded zip hands the node the value each side stands in with once it ends.
 
-use jet_foundation.[Span, SymbolID, SymbolKind, TCapture, TCaptureFacts, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, TFieldRef, BodyLambda, BodyLambdaBody, TZipFillMode, TZipMode, Type, TypeTupleField, symbol_id, tir_generated_local]
+use jet_foundation.[Span, SymbolID, SymbolKind, TCapture, TCaptureFacts, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, TFieldRef, BodyLambda, BodyLambdaBody, TZipFillMode, TZipMode, Type, TypeTupleField, symbol_id, checked_generated_local]
 
 fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type], span: Span) -> Int Never! {
     fill_count :: if mode == .Pad && fill_mode != .DefaultNone -> 1 else -> 0
@@ -236,7 +236,7 @@ fn ir_zip_tuple_field(ty: Type, name: String) -> Type? Never! {
 }
 
 fn ir_zip_local(b: &IRBuilder, name: String, ty: Type, span: Span) -> Int Never! {
-    ir_node(&b, ty, NodeKind.Local{local: tir_generated_local(name, span)}, span)
+    ir_node(&b, ty, NodeKind.Local{local: checked_generated_local(name, span)}, span)
 }
 
 struct IRZipAdapter {

@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, DeclID, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, tir_generated_local, tir_user_local, type_carrier_identity, StmtKind]
+use jet_foundation.[AccessConvention, DeclID, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
 
 fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
     b.line = function.line
@@ -3116,16 +3116,16 @@ fn ir_dyn_object_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
         ir_scope_close(&m, &b)
         return -1
     }
-    source_local :: tir_generated_local("encode_source_{source}", span)
+    source_local :: checked_generated_local("encode_source_{source}", span)
     &b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: b.fresh[source] && ir_has_drop(m, b, source)})
     b.fresh[source] = false
     // The pair List leaves the scope as the payload: its binding never owns it.
     output :: ir_list_empty(&m, &b, output_row)
     b.fresh[output] = false
-    output_local :: tir_generated_local("encode_output_{output}", span)
+    output_local :: checked_generated_local("encode_output_{output}", span)
     &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
-    key_local :: tir_user_local("encode_key_{output}", span)
-    item_local :: tir_user_local("encode_value_{output}", span)
+    key_local :: checked_user_local("encode_key_{output}", span)
+    item_local :: checked_user_local("encode_value_{output}", span)
     key_expr :: ir_node(&b, Type.String, NodeKind.Local{local: key_local}, span)
     item_expr :: ir_node(&b, element, NodeKind.Local{local: item_local}, span)
     encoded :: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)

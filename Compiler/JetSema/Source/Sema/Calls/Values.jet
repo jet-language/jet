@@ -12,7 +12,7 @@ use jet_foundation.[
     TLetTy,
     Type,
     expr_span,
-    tir_symbol_local,
+    checked_symbol_local,
     Func,
 ]
 
@@ -104,7 +104,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         owner :: sema_scope_function_owner_key(scopes)
         pin_slot :: -checked_args.len() - 1
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, span.start, pin_slot, "callee", callee_value.ty, span)
-        local := tir_symbol_local("binder_ref_{span.start}_{pin_slot}", span, symbol.id)
+        local := checked_symbol_local("binder_ref_{span.start}_{pin_slot}", span, symbol.id)
         local.generated = true
         borrowed :: sema_ownership_places_from_expr_in_state(callee, scopes, &state).len() > 0
         local.deref = borrowed

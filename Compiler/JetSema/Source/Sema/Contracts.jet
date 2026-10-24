@@ -33,8 +33,8 @@ use jet_foundation.[
     Type,
     expr_span,
     symbol_id,
-    tir_generated_local,
-    tir_symbol_local,
+    checked_generated_local,
+    checked_symbol_local,
     type_name,
 ]
 
@@ -69,9 +69,9 @@ fn sema_contract_result_for_function(return_type: Type?, span: Span, environment
     carrier :: sema_effective_return_type(return_type)
     binding :: sema_contract_success_type(return_type)
     mode :: sema_contract_result_mode(carrier, binding)
-    binding_local := tir_generated_local("result", span)
+    binding_local := checked_generated_local("result", span)
     binding_local.symbol_id = Val(sema_contract_result_binding_symbol(environment, program, owner, binding, span).id)
-    carrier_local :: if mode != TContractResultMode.Direct -> tir_generated_local("result_carrier", span) else -> binding_local
+    carrier_local :: if mode != TContractResultMode.Direct -> checked_generated_local("result_carrier", span) else -> binding_local
     TContractResult{carrier_ty: carrier, binding_ty: binding, carrier_local: carrier_local, binding_local: binding_local, mode: mode}
 }
 
@@ -813,7 +813,7 @@ fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, pr
 fn sema_contract_pin_argument(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
     original := argument.value
     init := original
-    local := tir_generated_local("contract_arg_{call_span.start}_{index}", call_span)
+    local := checked_generated_local("contract_arg_{call_span.start}_{index}", call_span)
     local.mutable = argument.mut_borrow
     if argument.borrow || argument.mut_borrow {
         access :: if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
@@ -821,7 +821,7 @@ fn sema_contract_pin_argument(environment: SemaScopeEnvironment, program: SemaPr
         local.deref = true
     }
     symbol :: sema_contract_generated_argument_symbol(environment, program, owner, index, parameter_name, call_span, original.ty)
-    local = tir_symbol_local(local.name, local.span, symbol.id)
+    local = checked_symbol_local(local.name, local.span, symbol.id)
     local.generated = true
     local.mutable = argument.mut_borrow
     local.deref = argument.borrow || argument.mut_borrow

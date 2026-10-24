@@ -78,8 +78,8 @@ use jet_foundation.[
     compiler_transfer_rows,
     expr_span,
     symbol_id,
-    tir_symbol_local,
-    tir_test_artifact_fact,
+    checked_symbol_local,
+    checked_test_artifact_fact,
     type_name,
     type_with_effective_fn_returns,
     CodeModule,
@@ -2032,7 +2032,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
                 }
             }
         }
-        local := tir_symbol_local(func.params[param_index].name, func.params[param_index].name_span, param_symbol.id)
+        local := checked_symbol_local(func.params[param_index].name, func.params[param_index].name_span, param_symbol.id)
         local.mutable = param_mutable
         if !sema_function_explicit_receiver(function_kind, param_index, func.params[param_index]) {
             public_label :: func.params[param_index].public_label.map((label) -> label.name) ?? func.params[param_index].name
@@ -3274,7 +3274,7 @@ fn sema_check_registration_module_test(environment: SemaScopeEnvironment, progra
                 if checked_test.function == .Val(function) {
                     &module_result.injected_function_keys.push(function.key)
                     &module_result.functions.push(function)
-                    &module_result.tests.push(tir_test_artifact_fact(environment.module_identity, test))
+                    &module_result.tests.push(checked_test_artifact_fact(environment.module_identity, test))
                 }
             }
         }

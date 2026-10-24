@@ -31,7 +31,7 @@ use jet_foundation.[
     is_compute_tensor_family,
     boundary_head_carrier_module,
     symbol_id,
-    tir_symbol_local,
+    checked_symbol_local,
     type_name,
     EffectRowEntry,
     ForKind,
@@ -722,7 +722,7 @@ fn sema_expression_optional_method_call(receiver: Expr, method: String, method_s
     call :: checked_call ?? return None
     flatten :: if call.ty == {.Option(_) -> true else -> false}
     result_ty :: if flatten -> call.ty else -> Type.Option{inner: call.ty}
-    binding :: tir_symbol_local(name, receiver_span, symbol.id)
+    binding :: checked_symbol_local(name, receiver_span, symbol.id)
     value :: sema_tir_node(result_ty, TExprKind.OptMethodCall{base: checked_base, binding: binding, call: call, flatten: flatten}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }

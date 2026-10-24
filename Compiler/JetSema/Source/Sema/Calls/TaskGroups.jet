@@ -37,8 +37,8 @@ use jet_foundation.[
     UnOp,
     expr_span,
     symbol_id,
-    tir_symbol_local,
-    tir_user_local,
+    checked_symbol_local,
+    checked_user_local,
     type_identity_equal,
     type_name,
 ]
@@ -400,7 +400,7 @@ fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, b
     if context.taskgroups.stack.len() > 0 -> _ := &context.taskgroups.stack.pop()
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     if !nested.complete || !valid -> return None
-    group_local := tir_symbol_local(name, name_span, id)
+    group_local := checked_symbol_local(name, name_span, id)
     TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
 }
 
@@ -1037,7 +1037,7 @@ fn sema_readiness_check_head(cond: Expr, table: &SemaReadinessTable, environment
             id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, binding)
             symbol :: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_name: environment.module_identity, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
             if checked == .Val(receiver) {
-                &table.arms.push(Val(SemaReadinessArm.Receive{local: tir_symbol_local(binding, cond_span, id), receiver: receiver, ordinal: table.receivers}))
+                &table.arms.push(Val(SemaReadinessArm.Receive{local: checked_symbol_local(binding, cond_span, id), receiver: receiver, ordinal: table.receivers}))
             } else {
                 &table.arms.push(None)
             }
@@ -1085,7 +1085,7 @@ fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResul
         {name: "arm", ty: Type.Int},
         {name: "value", ty: payload_ty},
     }}
-    result_local :: tir_user_local("__select_result", span)
+    result_local :: checked_user_local("__select_result", span)
     // The wait reads the builder chain from the outer node inward, so the
     // chain is built from the last arm back to keep source order.
     builder := sema_node(&context, builder_ty, NodeKind.SelectStart, span)

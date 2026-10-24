@@ -10,14 +10,14 @@ TCOST_INLINE_MIN :: -4611686018427387904
 
 TCOST_INLINE_MAX :: 4611686018427387903
 
-fn tir_cost_bounded(lo: Int, hi: Int) -> TIntegerBounds? Never! {
+fn checked_cost_bounded(lo: Int, hi: Int) -> TIntegerBounds? Never! {
     if lo < TCOST_I128_MIN || hi > TCOST_I128_MAX -> return None
     Val(TIntegerBounds{lo: lo, hi: hi})
 }
 
-fn tir_cost_type_bounds(ty: Type) -> TIntegerBounds? Never! {
+fn checked_cost_type_bounds(ty: Type) -> TIntegerBounds? Never! {
     if ty == {
-        .InlineRange(_, lo, hi) -> tir_cost_bounded(lo, hi)
+        .InlineRange(_, lo, hi) -> checked_cost_bounded(lo, hi)
         .IntN(signed, bits) -> {
             if bits <= 0 || bits > 128 || (!signed && bits == 128) -> return None
             if signed {
@@ -26,25 +26,25 @@ fn tir_cost_type_bounds(ty: Type) -> TIntegerBounds? Never! {
             }
             Val(TIntegerBounds{lo: 0, hi: (1 << bits) - 1})
         }
-        .Tagged(_, inner) -> tir_cost_type_bounds(inner)
+        .Tagged(_, inner) -> checked_cost_type_bounds(inner)
         else -> None
     }
 }
 
-fn tir_cost_min(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
+fn checked_cost_min(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
 
-fn tir_cost_max(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
+fn checked_cost_max(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
 
-fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
+fn checked_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
     if op == {
-        .Add -> return tir_cost_bounded(tir_cost_min(left.lo + right.lo, 0), tir_cost_max(left.hi + right.hi, 0))
-        .Sub -> return tir_cost_bounded(tir_cost_min(left.lo - right.hi, 0), tir_cost_max(left.hi - right.lo, 0))
+        .Add -> return checked_cost_bounded(checked_cost_min(left.lo + right.lo, 0), checked_cost_max(left.hi + right.hi, 0))
+        .Sub -> return checked_cost_bounded(checked_cost_min(left.lo - right.hi, 0), checked_cost_max(left.hi - right.lo, 0))
         .Mul -> {
             first :: left.lo * right.lo
             second :: left.lo * right.hi
             third :: left.hi * right.lo
             fourth :: left.hi * right.hi
-            return tir_cost_bounded(tir_cost_min(tir_cost_min(first, second), tir_cost_min(third, fourth)), tir_cost_max(tir_cost_max(first, second), tir_cost_max(third, fourth)))
+            return checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
         }
         .FloorDiv -> {
             if right.lo <= 0 && right.hi >= 0 -> return None
@@ -53,7 +53,7 @@ fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerB
             second :: left.lo /% right.hi
             third :: left.hi /% right.lo
             fourth :: left.hi /% right.hi
-            return tir_cost_bounded(tir_cost_min(tir_cost_min(first, second), tir_cost_min(third, fourth)), tir_cost_max(tir_cost_max(first, second), tir_cost_max(third, fourth)))
+            return checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
         }
         .Mod | .Rem -> {
             if right.lo <= 0 && right.hi >= 0 -> return None
@@ -61,7 +61,7 @@ fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerB
             if right.lo == TCOST_I128_MIN || right.hi == TCOST_I128_MIN -> return None
             low_abs :: if right.lo < 0 -> -right.lo else -> right.lo
             high_abs :: if right.hi < 0 -> -right.hi else -> right.hi
-            magnitude :: tir_cost_max(low_abs, high_abs) - 1
+            magnitude :: checked_cost_max(low_abs, high_abs) - 1
             if right.hi < 0 -> return Val(TIntegerBounds{lo: -magnitude, hi: 0})
             return Val(TIntegerBounds{lo: 0, hi: magnitude})
         }
@@ -69,11 +69,11 @@ fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerB
     }
 }
 
-fn tir_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
+fn checked_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
     bounds.lo >= TCOST_INLINE_MIN && bounds.hi <= TCOST_INLINE_MAX
 }
 
-fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
+fn checked_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
         | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
@@ -90,7 +90,7 @@ fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
     }
 }
 
-fn tir_cost_operation(kind: TCostKind) -> String Never! {
+fn checked_cost_operation(kind: TCostKind) -> String Never! {
     if kind == {
         .ViewMaterialization -> "materializing a read-only view"
         .CollectionCopyOnWrite -> "editing a shared map backing store"
@@ -100,7 +100,7 @@ fn tir_cost_operation(kind: TCostKind) -> String Never! {
     }
 }
 
-fn tir_cost_fix(kind: TCostKind) -> String Never! {
+fn checked_cost_fix(kind: TCostKind) -> String Never! {
     if kind == {
         .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
         .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"

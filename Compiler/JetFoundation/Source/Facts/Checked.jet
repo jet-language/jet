@@ -132,8 +132,6 @@ enum CopyFact { Explicit Materialize Share Scalar ViewMaterialize }
 // locals, method and call facts, constants, type and impl rows. The checker's
 // own expression tree is private to JetSema (Sema/Tree.jet).
 
-TIR_SCHEMA_VERSION :: 8
-
 enum TAddressLifetime {
     Stack
     Heap
@@ -177,21 +175,21 @@ struct TLocal {
     place_borrow: Bool{false}
 }
 
-fn tir_user_local(name: String, span: Span) -> TLocal Never! {
+fn checked_user_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
-fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
-    local := tir_user_local(name, span)
+fn checked_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
+    local := checked_user_local(name, span)
     local.symbol_id = Val(symbol_id)
     local
 }
 
-fn tir_generated_local(name: String, span: Span) -> TLocal Never! {
+fn checked_generated_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
-fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
+fn checked_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
@@ -849,22 +847,9 @@ enum TCostState {
     OptimizerRemoved
 }
 
-enum TFactExclusivity {
-    Unknown
-    Shared
-    Exclusive
-    Move
-}
-
-enum TFactPurity {
-    Unknown
-    Pure
-    Impure
-}
-
 // The index in the tree's `types` that a body's sorted rows
 // (BodyTree.expr_types) file for node id `id`.
-fn tir_expr_type_id(rows: [TExprType], id: Int) -> Int? Never! {
+fn checked_expr_type_id(rows: [TExprType], id: Int) -> Int? Never! {
     low := 0
     high := rows.len()
     loop low < high {

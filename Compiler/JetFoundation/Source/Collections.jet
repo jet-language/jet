@@ -1,9 +1,9 @@
-// Canonical structural collection contracts shared by Source Sema and TIR lowering.
+// Canonical structural collection contracts shared by Source Sema and IR lowering.
 // Zip and para_* are intentionally owned by their dedicated checkers.
 //
 // Every collection and Iter operation is one checked row in
 // COLLECTION_OPERATIONS. Arity, receiver access, argument and callback shapes,
-// the result projection, the TIR operation, the Mem effect and the documented
+// the result projection, the checked operation, the Mem effect and the documented
 // law are all read from that row; no other table repeats them. Each row names
 // one COLLECTION_LAWS entry that states its timing, result ownership, callback
 // count and order, stop-item consumption, failure channel and buffering.
@@ -186,8 +186,9 @@ enum CollectionResult {
     DisjointUnit
 }
 
-// TIR producer. Fixed operations carry their TIR op; the others select one from
-// the checked callback and element facts at the call site.
+// The checked operation a row produces. Fixed operations carry their builtin
+// or closure op; the others select one from the checked callback and element
+// facts at the call site.
 enum CollectionOp {
     Builtin(op: TBuiltinOp)
     Closure(op: TClosureOp)

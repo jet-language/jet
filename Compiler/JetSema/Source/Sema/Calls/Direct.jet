@@ -26,7 +26,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
-    tir_generated_local,
+    checked_generated_local,
     type_name,
     Func,
 ]
@@ -238,7 +238,7 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
             else -> {}
         }
     }
-    local :: tir_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span)
+    local :: checked_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span)
     read :: sema_tir_node(checked.ty, TExprKind.Local{local: local}, call.name_span)
     line :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
     record :: core_call("core.term", "eprint") ?? {
@@ -492,7 +492,7 @@ fn sema_call_check_ambient_print(call: Call, environment: SemaScopeEnvironment, 
     body := [TStmt]{}
     prints := [TStmt]{}
     loop index in 0..<values.len() {
-        local :: tir_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span)
+        local :: checked_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span)
         &body.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: values[index], gc_promotion: None, gc_transferred: false, span: call.name_span})
         read :: sema_tir_node(values[index].ty, TExprKind.Local{local: local}, call.name_span)
         &prints.push(TStmt.ExprStmt{value: sema_tir_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})

@@ -315,7 +315,7 @@ fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, arg
 // runtime_bridge.rs `b.embed` -> dispatch.rs `eval_build_embed`: one locked
 // relative UTF-8 file below the build file's directory.
 fn jet_driver_build_embed(host: JetDriverSharedBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
-    relative :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0956", "``b.embed` requires a path string` isn't supported by the current evaluator yet", "The canonical TIR evaluator doesn't cover this construct yet", "Report this unsupported construct as a compiler bug", span)
+    relative :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0956", "``b.embed` requires a path string` isn't supported by the current evaluator yet", "The canonical evaluator doesn't cover this construct yet", "Report this unsupported construct as a compiler bug", span)
     escapes := args.len() != 1 || relative.starts_with("/")
     loop part in relative.split("/") {
         if part == ".." -> escapes = true

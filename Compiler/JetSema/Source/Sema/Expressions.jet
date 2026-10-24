@@ -68,7 +68,7 @@ use jet_foundation.[
     expr_source_start,
     expr_span,
     symbol_id,
-    tir_symbol_local,
+    checked_symbol_local,
     type_identity_equal,
     type_name,
     CORE_SOURCE_OWNED_ROWS,
@@ -3600,7 +3600,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
     kind :: scopes.bindings[index].symbol.kind
     result := TExpr?{None}
     if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
-        local := tir_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id)
+        local := checked_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id)
         local.mutable = scopes.bindings[index].mutable
         local.integer_bounds = scopes.bindings[index].integer_bounds
         value :: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span}
@@ -4442,8 +4442,8 @@ fn sema_expr_check_pattern_test(subject: Expr, pattern: Pattern, span: Span, exp
     sema_expr_expected_owned(sema_tir_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span), expected, environment, program, &diagnostics)
 }
 
-// The deepest source nesting sema checks, the limit the
-// parser and the TIR evaluator share.
+// The deepest source nesting sema checks; the parser enforces the same
+// limit (MAX_EXPRESSION_DEPTH).
 SEMA_MAX_SOURCE_NESTING :: 256
 
 // Enter one checked source form (a statement list or an expression level).
@@ -4452,7 +4452,7 @@ SEMA_MAX_SOURCE_NESTING :: 256
 fn sema_enter_source_nesting(context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     depth :: context.source_nesting + 1
     if depth > SEMA_MAX_SOURCE_NESTING {
-        &diagnostics.push(sema_error("E1403", span, "this code nests {depth} levels deep; the limit is {SEMA_MAX_SOURCE_NESTING}", "each nested source form needs one compiler checking frame, and the parser, sema, and TIR evaluator enforce the same published limit", "pull inner parts out into named bindings or helper functions"))
+        &diagnostics.push(sema_error("E1403", span, "this code nests {depth} levels deep; the limit is {SEMA_MAX_SOURCE_NESTING}", "each nested source form needs one compiler checking frame, and the parser and sema enforce the same published limit", "pull inner parts out into named bindings or helper functions"))
         return false
     }
     context.source_nesting = depth

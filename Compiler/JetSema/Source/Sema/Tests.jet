@@ -8,7 +8,7 @@ use jet_foundation.[
     TestDef,
     Type,
     ast_func,
-    tir_test_artifact_key,
+    checked_test_artifact_key,
     type_name,
 ]
 
@@ -55,7 +55,7 @@ struct SemaTestFunctionCheckResult {
 }
 
 fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
-    key := tir_test_artifact_key(environment.module_identity, test)
+    key := checked_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
     // Rust Validation.rs names the synthetic body `__test_<name>`; a runtime

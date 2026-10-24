@@ -1,7 +1,7 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
 
-use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, tir_builtin_mutates_receiver, tir_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index]
+use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
 // when full, then stores the element at `len`.
@@ -458,7 +458,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     // A write through the receiver reaches it as a write place: each List or
     // Map on a path through an element (`&rows[0].cells.push(x)`) is made its
     // own first, so the write never lands in a buffer another holder shares.
-    mutates :: tir_builtin_mutates_receiver(operation)
+    mutates :: checked_builtin_mutates_receiver(operation)
     subject :: if mutates -> ir_write_base(&m, p, &b, receiver, span) else -> ir_expr(&m, p, &b, receiver)
     if ir_failed(b) -> return -1
     if subject < 0 -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} on a Unit receiver")
@@ -638,7 +638,7 @@ fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         | .RemoveList(_, _) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
         else -> {}
     }
-    if tir_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
+    if checked_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
     route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
     if route.arity != operands.len() -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
     if ir_list_value_builtin(&m, p, &b, ty, route.symbol, operands, span) == .Val(expanded) -> return expanded
@@ -797,7 +797,7 @@ fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFn
             names := [String]{}
             loop (index, param) in params {
                 name :: "policy_arg_{index}"
-                local :: ir_node(&b, param, NodeKind.Local{local: tir_generated_local(name, span)}, span)
+                local :: ir_node(&b, param, NodeKind.Local{local: checked_generated_local(name, span)}, span)
                 &args.push(ir_policy_arg(local, true))
                 &names.push(name)
             }
@@ -881,12 +881,12 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
     from_result :: from_ret ?? unit
     to_result :: returned ?? unit
     inner_name :: "fn_widen_inner"
-    inner :: ir_node(&b, from_ty, NodeKind.Local{local: tir_generated_local(inner_name, span)}, span)
+    inner :: ir_node(&b, from_ty, NodeKind.Local{local: checked_generated_local(inner_name, span)}, span)
     names := [String]{}
     args := [BodyCallArg]{}
     loop (index, param) in params {
         name :: "fn_widen_arg_{index}"
-        local :: ir_node(&b, param, NodeKind.Local{local: tir_generated_local(name, span)}, span)
+        local :: ir_node(&b, param, NodeKind.Local{local: checked_generated_local(name, span)}, span)
         &args.push(ir_policy_arg(local, true))
         &names.push(name)
     }

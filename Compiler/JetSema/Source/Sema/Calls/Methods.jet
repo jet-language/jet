@@ -31,7 +31,7 @@ use jet_foundation.[
     sema_reserved_type_name,
     symbol_id,
     type_name,
-    tir_symbol_local,
+    checked_symbol_local,
 ]
 
 struct SemaMethodSpecialCheck {
@@ -748,7 +748,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         pin_slot :: -typed.values.len() - 1
         owner :: sema_scope_function_owner_key(scopes)
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
-        local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = access == AccessConvention.Write
         local.deref = borrowed

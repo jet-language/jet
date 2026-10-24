@@ -26,7 +26,7 @@ use jet_foundation.[
     body_node,
     body_type,
     symbol_id,
-    tir_symbol_local,
+    checked_symbol_local,
     type_name,
 ]
 
@@ -70,7 +70,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
         ty: Val(receiver_value.ty), visibility: 0}
     _ := sema_scope_declare_local(&scopes, mux_symbol, false, AccessConvention.Read, None, false)
     sema_ownership_declare_binding(&state, mux_symbol, false)
-    mux_local :: tir_symbol_local(mux_name, span, mux_id)
+    mux_local :: checked_symbol_local(mux_name, span, mux_id)
     &body.push(TStmt.Let{local: mux_local, let_ty: TLetTy.Inferred,
         init: receiver_value, gc_promotion: None, gc_transferred: false, span: span})
     value_name :: "__jet_http_mount_value_{span.start}"

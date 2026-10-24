@@ -62,15 +62,15 @@ use jet_foundation.[
     expr_span,
     measure_literal_value,
     symbol_id,
-    tir_generated_local,
-    tir_symbol_local,
+    checked_generated_local,
+    checked_symbol_local,
     type_identity_equal,
     type_identity_key,
     type_name,
     TextEdit,
     UnOp,
     diagnostic_with_edit,
-    tir_persistent_local,
+    checked_persistent_local,
 ]
 
 struct SemaStatementResult {
@@ -571,10 +571,10 @@ fn sema_stmt_check_subject_switch(subject: Expr, arms: [SwitchArm], else_body: [
     // `declare_in_scope`, so a nested subject table shadows the enclosing
     // table's `it` instead of reading it.
     it_frame :: scopes.current
-    bounds :: tir_cost_integer_bounds(init)
+    bounds :: checked_cost_integer_bounds(init)
     sema_scope_push_binding(&scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: bounds, string_view: false, compiler_builtin: false})
     sema_ownership_declare_binding(&state, symbol, false)
-    it_local := tir_symbol_local("it", subject_span, id)
+    it_local := checked_symbol_local("it", subject_span, id)
     it_local.generated = true
     it_local.integer_bounds = bounds
     checked :: sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, local), else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
@@ -1794,7 +1794,7 @@ fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, en
         return None
     }
     if ty != None -> sema_ownership_declare_binding(&state, symbol, false)
-    Val(tir_symbol_local(name, name_span, symbol.id))
+    Val(checked_symbol_local(name, name_span, symbol.id))
 }
 
 // Rust lends each ViewMut item for one iteration; the descriptor may not
@@ -2384,7 +2384,7 @@ fn sema_stmt_destructure_local(name: BindName, ty: Type, mutable: Bool, environm
     }
     sema_ownership_declare_binding(&state, symbol, false)
     sema_single_use_note_binding(&state, symbol, environment, program)
-    local := tir_symbol_local(local_name, local_span, id)
+    local := checked_symbol_local(local_name, local_span, id)
     local.mutable = mutable
     Val(local)
 }
@@ -2737,7 +2737,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
             frame :: scopes.current
             sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
             sema_ownership_declare_binding(&state, symbol, false)
-            result.ambient_err = Val(tir_symbol_local("err", span, symbol.id))
+            result.ambient_err = Val(checked_symbol_local("err", span, symbol.id))
         }
         else -> {}
     }
@@ -2985,7 +2985,7 @@ fn sema_stmt_check_optional_refinement(name: BindName, fallback: OrFallback, spa
     symbol :: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_name: environment.module_identity, owner: Val(owner), span: name.span, ty: Val(value.ty), visibility: 0}
     sema_scope_refine_local(&scopes, symbol)
     sema_ownership_declare_binding(&state, symbol, false)
-    Val(TStmt.Let{local: tir_symbol_local(name.name, name.span, id), let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
+    Val(TStmt.Let{local: checked_symbol_local(name.name, name.span, id), let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
 }
 
 // The `else` of a guard table holds the payload of every
@@ -3168,7 +3168,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         if source.kind != SymbolKind.Parameter && !sema_stmt_move_direct(binding.init, &state, scopes, "the destructuring binding", &diagnostics) -> return None
     }
     if diagnostics.len() != before || locals.len() != names.len() -> return None
-    temp := tir_generated_local("__jet_destructure_{span.start}", span)
+    temp := checked_generated_local("__jet_destructure_{span.start}", span)
     temp.mutable = true
     if pattern == {
         .Struct(_, _, _, _, _) -> Val(TStmt.StructDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
@@ -3289,7 +3289,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     owner := sema_scope_local_owner_key(scopes)
     id :: symbol_id(kind, environment.module_identity, owner, binding.name)
     symbol := Symbol{id: id, kind: kind, name: binding.name, module_name: environment.module_identity, owner: Val(owner), span: binding.name_span, ty: Val(init.ty), visibility: 0}
-    bounds :: if binding.mutable -> None else -> tir_cost_integer_bounds(init)
+    bounds :: if binding.mutable -> None else -> checked_cost_integer_bounds(init)
     if !sema_scope_declare_local(&scopes, symbol, binding.mutable, AccessConvention.Read, bounds, string_view) {
         &diagnostics.push(sema_already_defined(binding.name, binding.name_span))
         return None
@@ -3320,7 +3320,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_function_reactive_record_binding(&context, binding, symbol, init.ty)
-    local := tir_symbol_local(binding.name, binding.name_span, symbol.id)
+    local := checked_symbol_local(binding.name, binding.name_span, symbol.id)
     local.mutable = binding.mutable
     local.integer_bounds = bounds
     let_ty := TLetTy.Inferred
@@ -3433,7 +3433,7 @@ fn sema_stmt_check_uninit_binding(binding: Binding, environment: SemaScopeEnviro
     }
     sema_ownership_uninit_set(&state, SemaOwnershipUninitFact{key: id.key, name: binding.name, fixed_len: fixed_len, initialized: [Int]{}})
     if !valid -> return None
-    local := tir_symbol_local(binding.name, binding.name_span, id)
+    local := checked_symbol_local(binding.name, binding.name_span, id)
     local.mutable = true
     local.uninit_scalar = !fixed
     local.uninit_fixed = fixed
@@ -3639,7 +3639,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
     if op == None -> sema_ownership_note_frozen_binding(&state, binding.symbol.id.key, expr, scopes)
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
-    local := tir_symbol_local(name, binding.symbol.span, binding.symbol.id)
+    local := checked_symbol_local(name, binding.symbol.span, binding.symbol.id)
     local.mutable = true
     span :: Span{start: name_span.start, end: expr_span(expr).end}
     value := checked
@@ -3711,7 +3711,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
-    storage := tir_persistent_local(name, environment.module_identity, required, name_span)
+    storage := checked_persistent_local(name, environment.module_identity, required, name_span)
     storage.mutable = true
     place :: sema_tir_node(required, TExprKind.Local{local: storage}, name_span)
     span :: Span{start: name_span.start, end: expr_span(expr).end}
@@ -3876,7 +3876,7 @@ fn sema_stmt_transaction_snapshots(roots: [String], scopes: SemaScopeTable, envi
         if index == None -> next
         binding :: scopes.bindings[index ?? 0]
         if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> next
-        local := tir_symbol_local(name, binding.symbol.span, binding.symbol.id)
+        local := checked_symbol_local(name, binding.symbol.span, binding.symbol.id)
         local.mutable = binding.mutable
         local.integer_bounds = binding.integer_bounds
         rollback := sema_stmt_transaction_rollback_methods(binding.symbol.ty ?? Type.Named{name: "Unit"}, environment, program)
@@ -3895,7 +3895,7 @@ fn sema_stmt_transaction_snapshots(roots: [String], scopes: SemaScopeTable, envi
 }
 
 fn sema_stmt_transaction_stm_local(span: Span) -> TLocal Never! {
-    local := tir_generated_local("stm", span)
+    local := checked_generated_local("stm", span)
     local.mutable = true
     local
 }
@@ -4149,7 +4149,7 @@ fn sema_stmt_check_transaction(name: String?, name_span: Span?, body: [Stmt], im
             return None
         }
         sema_ownership_declare_binding(&state, symbol, false)
-        local := tir_symbol_local(handle_name, handle_span, symbol.id)
+        local := checked_symbol_local(handle_name, handle_span, symbol.id)
         local.mutable = true
         handle = Val(local)
     }
@@ -4164,7 +4164,7 @@ fn sema_stmt_check_transaction(name: String?, name_span: Span?, body: [Stmt], im
     if !nested.complete -> return None
     if inside_transaction -> return Val(TStmt.Region{body: nested.value, span: span})
     if handle == None && snapshots.len() > 0 {
-        synthesized := tir_generated_local("txn", span)
+        synthesized := checked_generated_local("txn", span)
         synthesized.mutable = true
         handle = Val(synthesized)
     }
@@ -5631,7 +5631,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                                     sema_stmt_restore_statement_scopes(&scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                                     return SemaStatementResult{value: output, complete: false}
                                 }
-                                local :: tir_symbol_local(var, var_span, symbol.id)
+                                local :: checked_symbol_local(var, var_span, symbol.id)
                                 &output.push(TStmt.ForRange{label: label_name, local: local, start: start_tir, end: end_tir, step: step_value, exclusive: exclusive, body: nested.value, vectorization: None, span: span})
                             }
                         }
@@ -6730,7 +6730,7 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
                             _ := sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Authority.from_rights", handle.span, [EffectRowEntry]{}, &diagnostics)
                             rights_arg :: TCallArg{value: rights_value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
                             init :: sema_tir_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{rights_arg}}, handle.span)
-                            &region_body.push(TStmt.Let{local: tir_symbol_local(handle.name, handle.span, symbol.id), let_ty: TLetTy.Annotated{ty: Type.Named{name: "Authority"}, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: handle.span})
+                            &region_body.push(TStmt.Let{local: checked_symbol_local(handle.name, handle.span, symbol.id), let_ty: TLetTy.Annotated{ty: Type.Named{name: "Authority"}, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: handle.span})
                         }
                     }
                     else -> {
