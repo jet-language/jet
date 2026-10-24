@@ -136,10 +136,9 @@ fn ir_nodes_have_lambda(nodes: [BodyNode]) -> Bool Never! {
     false
 }
 
-// A top-level infallible function whose written failure set is empty
-// (`T Never!`) returns its success value directly; its checked body and its
-// call sites keep the `Result<T, Never>` carrier (codegen
-// jet_codegen_plain_return).
+// A top-level infallible function whose written failure set is empty (`T
+// Never!`) returns its success value directly; its checked body and its call
+// sites keep the `Result<T, Never>` carrier.
 fn ir_plain_return(function: FnBody) -> Type? Never! {
     if function.kind != .TopLevel -> return None
     if function.failure_carrier != .Infallible -> return None
@@ -163,8 +162,8 @@ fn ir_executable_return(function: FnBody) -> Type? Never! {
 // `Unit Never!` carrier) hands back `Ok(())`, a Unit function returns, and
 // any other function cannot get here.
 fn ir_return_fallthrough(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
-    // A diverging (`-> Never`) body cannot end (codegen terminates it
-    // Unreachable).
+    // A diverging (`-> Never`) body cannot end: its fallthrough is
+    // Unreachable.
     if b.failure == .Diverges(_) {
         ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
         return
@@ -223,16 +222,15 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     if ir_body_stmt(p, b, statement) == {
         .Let(local, let_ty, init, _, _, span) -> {
             ir_stmt_line(p, &b, span)
-            // `name := &place` binds an alias of the place, never a copy (codegen
-            // Statements.jet TStmt.Let alias_place): a write borrow's edits reach
-            // the owner. A range borrow keeps its View value below.
+            // `name := &place` binds an alias of the place, never a copy: a
+            // write borrow's edits reach the owner. A range borrow keeps its
+            // View value below.
             if local.address_lifetime == None && local.persist_key == None && ir_body_node(p, b, init).kind == .Borrow(borrowed, _) {
                 if local.deref || !(ir_body_node(p, b, borrowed).kind == .Slice(_, _, _, _, _)) -> return ir_bind_pin(&m, p, &b, local, init, span)
             }
             if local.deref || local.address_lifetime != None || local.persist_key != None -> return ir_fail(&b, span, "addressed or persistent binding")
-            // A GC-promoted or automatic-root binding binds as a plain local
-            // (codegen only marks the root, which Lower never reads); codegen
-            // rejects a Resource wrapper outright.
+            // A GC-promoted or automatic-root binding binds as a plain local;
+            // a Resource wrapper is rejected outright.
             if let_ty == .Annotated(_, wrapper) {
             }
             init_ty :: ir_ty(p, b, init)
@@ -461,8 +459,8 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
             if ir_iter_element(ir_subst(m, ir_ty(p, b, collection))) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
         }
-        // Scopes whose markers lower to nothing outside a sentry build
-        // (Lower lower_scope): their body runs as a plain scope.
+        // Scopes whose markers lower to nothing outside a sentry build: their
+        // body runs as a plain scope.
         .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Live(body, _) -> ir_stmts(&m, p, &b, body)
         // An `#Impure` body is a plain scope whose build host calls may
         // touch the ambient world (ir_host_method).
@@ -476,11 +474,10 @@ fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
         .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
         .ContextBlock(guards, body, _) -> ir_context_block(&m, p, &b, guards, body)
         .Shield(body, _) -> ir_shield(&m, p, &b, body)
-        // Test scope members (codegen jet_codegen_lower_scope_member): a
-        // `.setup` body runs in the enclosing scope, so its bindings stay
-        // visible after it; a `.measure` body runs as a plain scope (no
-        // runtime action, Lower lower_test_scope_member). `.expect_fail`,
-        // `.timeout` and `.skip` need the runtime's test scope rail.
+        // Test scope members: a `.setup` body runs in the enclosing scope, so
+        // its bindings stay visible after it; a `.measure` body runs as a
+        // plain scope (no runtime action). `.expect_fail`, `.timeout` and
+        // `.skip` need the runtime's test scope rail.
         .ScopeMember(kind, body, span) -> {
             if kind == {
                 .Setup -> {
@@ -507,8 +504,7 @@ fn ir_stmt_line(p: IRProgram, b: &IRBuilder, span: Span) Never! {
     if line > 0 -> b.line = line
 }
 
-// `pattern :: init else { fallback }` (codegen
-// jet_codegen_lower_refutable_bind): the fallback runs when the pattern
+// `pattern :: init else { fallback }`: the fallback runs when the pattern
 // misses; on a match the pattern's names stay bound after the statement.
 fn ir_refutable_bind(m: &IRModule, p: IRProgram, b: &IRBuilder, pattern: BodyPattern, init: Int, fallback: [Int], span: Span) Never! {
     // The tested box lives as long as the names bound from it: a hidden
@@ -569,8 +565,7 @@ fn ir_assign_aggregate(m: &IRModule, b: &IRBuilder, slot: Int, value: Int, owns:
 }
 
 // A pinned borrowed argument or receiver (`pin = &place`, sema's
-// evaluation-order pin): an alias of the place, as codegen's
-// jet_codegen_lower_local_place binds it, which never owns the value. A
+// evaluation-order pin): an alias of the place, which never owns the value. A
 // read aliases the place's value; a write aliases an aggregate's storage.
 fn ir_bind_pin(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
     init_ty :: ir_ty(p, b, init)
@@ -600,8 +595,7 @@ fn ir_bind_pin(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: I
     &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
 
-// `task.group(group) { .. }` (codegen jet_codegen_lower_task_group, Lower
-// lower_task_group_new): `group` owns the runtime JetTaskGroup from
+// `task.group(group) { .. }`: `group` owns the runtime JetTaskGroup from
 // JetTaskGroup.new() or .with_limit(limit); the block's end closes it
 // (jet_rt_native_task_group_close joins its children), and its drop joins
 // them on an early exit.
@@ -632,14 +626,12 @@ fn ir_task_group(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limit
     ir_scope_close(&m, &b)
 }
 
-// `task.all` / `task.any` / `task.race` over tasks (codegen
-// jet_codegen_lower_task_group_value, Lower Tasks.jet:188 lower_task_group;
-// `kind` 0 all, 1 any, 2 race as lower_task_kind): the runtime takes the
-// owned List of Task handles (leaving an empty header). `all` joins them
-// into the Result box's List payload, failing fast with a TaskFailure;
-// `any` and `race` store the winner's result and cancel and drain the rest.
-// A named tuple of Tasks joins into the tuple of their results (Lower
-// lower_task_tuple_all); only `all` has a carrier for it.
+// `task.all` / `task.any` / `task.race` over tasks (`kind` 0 all, 1 any, 2
+// race): the runtime takes the owned List of Task handles (leaving an empty
+// header). `all` joins them into the Result box's List payload, failing fast
+// with a TaskFailure; `any` and `race` store the winner's result and cancel
+// and drain the rest. A named tuple of Tasks joins into the tuple of their
+// results; only `all` has a carrier for it.
 fn ir_task_group_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, tasks: Int, kind: Int, span: Span) -> Int Never! {
     task_ty :: ir_ty(p, b, tasks)
     operation :: if {
@@ -705,9 +697,8 @@ fn ir_task_group_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, task
 }
 
 // A runtime task outcome `export(args..., out) -> verdict` as a Result box
-// whose payload `out` addresses (Lower Tasks.jet:264 lower_task_outcome): a
-// failure's runtime record (TaskFailure) is rebuilt in its declared layout;
-// a handle error stays the handle.
+// whose payload `out` addresses: a failure's runtime record (TaskFailure) is
+// rebuilt in its declared layout; a handle error stays the handle.
 fn ir_task_outcome(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], result_ty: Type, err_ty: Type, span: Span) -> Int Never! {
     err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
     boxed :: ir_result_box(&m, p, &b, result_ty, true, -1)
@@ -728,10 +719,9 @@ fn ir_task_outcome(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     boxed
 }
 
-// `name := T{ uninit }` (codegen InitializeUninit): the variable's storage
-// without a value; checking proves every read follows a write. A scalar
-// starts as zero; a fixed list `[T#N]{ uninit }` is the List of its N
-// unwritten elements (Lower lower_initialize_uninit).
+// `name := T{ uninit }`: the variable's storage without a value; checking
+// proves every read follows a write. A scalar starts as zero; a fixed list
+// `[T#N]{ uninit }` is the List of its N unwritten elements.
 fn ir_bind_uninit(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, ty: Type, span: Span) Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_fail(&b, span, "uninitialized {ir_type_name(ty)}")
     slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, local.name))
@@ -760,8 +750,7 @@ fn ir_bind_uninit(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, ty: 
     }
 }
 
-// `(a, b) :: init` / `{x, y} :: init` (codegen
-// jet_codegen_lower_field_destructure): each name binds its own copy of the
+// `(a, b) :: init` / `{x, y} :: init`: each name binds its own copy of the
 // field it names; a fresh subject ends after the copies.
 fn ir_field_destructure(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, binds: [TDestructureBinding], span: Span) Never! {
     init_ty :: ir_ty(p, b, init)
@@ -776,9 +765,8 @@ fn ir_field_destructure(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, bi
     ir_release(&m, &b, subject)
 }
 
-// `[a, b] :: init` (codegen jet_codegen_lower_list_destructure): the first
-// `count` names each bind a copy of the element at their position, after
-// its bounds check.
+// `[a, b] :: init`: the first `count` names each bind a copy of the element
+// at their position, after its bounds check.
 fn ir_list_destructure(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, count: Int, elements: [TLocal], span: Span) Never! {
     init_ty :: ir_ty(p, b, init)
     list :: ir_expr(&m, p, &b, init)
@@ -796,9 +784,9 @@ fn ir_list_destructure(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, cou
 
 // `receiver.field (op)= value` through the aggregate's storage, and
 // `list[index] (op)= value` through the element's. The value comes first,
-// then the place (codegen jet_codegen_lower_index_assign and its Assign
-// lowering): a value that grows a List on the place's path, or keeps a copy
-// of it, must not find the place's address or unique buffer already taken.
+// then the place (its Assign lowering): a value that grows a List on the
+// place's path, or keeps a copy of it, must not find the place's address or
+// unique buffer already taken.
 fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TBinaryOp?, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
     if ir_body_node(p, b, place).kind == .Field(receiver, field) {
@@ -844,8 +832,8 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
     ir_fail(&b, span, "assignment to {place_kind} place")
 }
 
-// `storage (op)= value` for module storage `key` (Lower lower_static_walk):
-// the value, then the read-modify-write through the storage cell.
+// `storage (op)= value` for module storage `key`: the value, then the
+// read-modify-write through the storage cell.
 fn ir_storage_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op: TBinaryOp?, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
     at :: p.constants.get(key) ?? return ir_fail(&b, span, "module storage {key} without a declaration")
@@ -877,12 +865,11 @@ fn ir_loop_frame(b: IRBuilder, label: String?) -> IRLoopFrame? Never! {
     None
 }
 
-// `loop i in start..end by step` (codegen jet_codegen_lower_numeric_range_loop
-// over the runtime cursor, Collections.jet jet_loop_range_init /
-// jet_loop_range_has_next): the bounds and step are evaluated once; a zero
-// step stops the program; a positive step walks up to the end, a negative
-// one down to it. A literal step fixes the direction; a computed one tests
-// its sign each round. `next` leaves the body's Block to the step.
+// `loop i in start..end by step` (over the runtime cursor jet_loop_range_init
+// / jet_loop_range_has_next): the bounds and step are evaluated once; a zero
+// step stops the program; a positive step walks up to the end, a negative one
+// down to it. A literal step fixes the direction; a computed one tests its
+// sign each round. `next` leaves the body's Block to the step.
 fn ir_range_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, local: TLocal, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int], span: Span) Never! {
     start_ty :: ir_ty(p, b, start)
     end_ty :: ir_ty(p, b, end)
@@ -953,9 +940,8 @@ fn ir_range_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, loca
     ir_scope_close(&m, &b)
 }
 
-// `loop n in band` over a Range value (Lower lower_range_cursor_init): the
-// Ints from its `start` up to its `end`, the end included unless the value
-// is `exclusive`.
+// `loop n in band` over a Range value: the Ints from its `start` up to its
+// `end`, the end included unless the value is `exclusive`.
 fn ir_range_value_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, local: TLocal, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     collection_ty :: ir_ty(p, b, collection)
     if step != None -> return ir_fail(&b, span, "stepped loop over a Range value")
@@ -1110,8 +1096,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             kind :: ir_kind_of(m, b, value)
             if op == .Not {
                 if kind == .Int || kind == .Word {
-                    // `bit_not` (Lower lower_unary): an exact Int is `-v - 1`,
-                    // its bits xor -1; a fixed width flips only its own bits.
+                    // `bit_not`: an exact Int is `-v - 1`, its bits xor -1; a
+                    // fixed width flips only its own bits.
                     row :: b.f.slot_type[value]
                     signed :: m.types[row].signed
                     bits :: m.types[row].bits
@@ -1128,9 +1114,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 return slot
             }
             if kind == .Word {
-                // Fixed-width negation is the checked `0 - v` (Lower
-                // lower_unary): it stops on signed MIN or a nonzero unsigned
-                // operand with the subtraction's overflow message.
+                // Fixed-width negation is the checked `0 - v`: it stops on
+                // signed MIN or a nonzero unsigned operand with the
+                // subtraction's overflow message.
                 zero :: ir_const_like(&m, &b, value, 0)
                 slot :: ir_temp_like(&m, &b, value)
                 sub :: ir_emit(&b.f, IROp.Sub, slot, zero, value, IR_OVERFLOW_TRAP, b.line)
@@ -1246,7 +1232,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             loop field in fields {
                 member :: ir_member_of(&m, p, b, storage, field.field.name) ?? return ir_fail_slot(&b, span, "struct field {field.field.name}")
                 // A member of a field's structural union is boxed as that
-                // union (codegen widens the checked field value the same way).
+                // union.
                 value :: ir_value_as(&m, p, &b, field.value, member.ty, span)
                 if ir_failed(b) -> return -1
                 if value < 0 -> return ir_fail_slot(&b, span, "Unit struct field")
@@ -1385,7 +1371,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 ir_emit(&b.f, IROp.ConstText, expected, ir_intern_text(&m, ir_type_name(expression_ty)), -1, -1, site)
                 _ :: ir_runtime(&m, &b, "jet_todo_stop", [Int]{file, line, expected}, -1)
             } else {
-                // codegen jet_codegen_lower_never: Lower stops through jet_rt_unreachable.
+                // Any other `Never` stops through jet_rt_unreachable.
                 message :: ir_static_text(&m, &b, reason)
                 _ :: ir_runtime(&m, &b, "jet_rt_unreachable", message, -1)
             }
@@ -1393,7 +1379,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return ir_unreachable_value(&m, p, &b, expression_ty)
         }
         .PatternMatches(subject, pattern) -> {
-            // A test only (codegen lowers the pattern condition without binding).
+            // A test only: the pattern condition without binding.
             pending :: b.pending.len()
             bound :: b.bindings.len()
             test :: ir_option_test(&m, p, &b, pattern.shape, subject, span)
@@ -1424,7 +1410,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .TaskGroupRace(tasks) -> return ir_task_group_value(&m, p, &b, expression_ty, tasks, 2, span)
         .TraitBox(value, target) -> return ir_trait_box(&m, p, &b, value, target, span)
         // A distinct value lays out as its base, so construction and raw
-        // extraction are the value itself (codegen: a Transparent convert).
+        // extraction are the value itself (a Transparent convert).
         .DistinctCtor(argument) | .DistinctRaw(argument) -> return ir_expr(&m, p, &b, argument)
         .DistinctConvert(_, argument, operation, range, fallible) -> return ir_distinct_convert(&m, p, &b, expression_ty, argument, operation, range, fallible, span)
         else -> {
@@ -1434,10 +1420,10 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
     }
 }
 
-// `consume(x)` (codegen: a Drop of `^x`, a move to nowhere): the value's
-// cleanup runs now. An owned variable's binding stops owning it, so its
-// scope-end drop does not run a second time; a fresh value drops in place.
-// A payload binding's value ends with its carrier box's last owner.
+// `consume(x)` (a Drop of `^x`, a move to nowhere): the value's cleanup runs
+// now. An owned variable's binding stops owning it, so its scope-end drop
+// does not run a second time; a fresh value drops in place. A payload
+// binding's value ends with its carrier box's last owner.
 fn ir_drop_value(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     if ir_body_node(p, b, value).kind == .Local(local) {
@@ -1477,10 +1463,10 @@ fn ir_payload_binding(m: IRModule, b: IRBuilder, carrier: Int) -> Bool Never! {
     carrier >= 0 && ir_box_row(m, b.f.slot_type[carrier])
 }
 
-// `close(^x)` (codegen jet_codegen_lower_close): a Core file owner, an
-// arena or a handle closes by its drop; a type's own Close method runs
-// through the variable's close glue, which its scope then no longer runs.
-// Either way it is `consume(x)` with a Unit result.
+// `close(^x)`: a Core file owner, an arena or a handle closes by its drop; a
+// type's own Close method runs through the variable's close glue, which its
+// scope then no longer runs. Either way it is `consume(x)` with a Unit
+// result.
 fn ir_close_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: Int, span: Span) -> Int Never! {
     if !ir_unit_type(ty) -> return ir_fail_slot(&b, span, "close with a {ir_type_name(ty)} result")
     name :: ir_nominal_name(ir_untag(ir_subst(m, ir_ty(p, b, inner)))) ?? ""
@@ -1489,11 +1475,10 @@ fn ir_close_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: In
     ir_drop_value(&m, p, &b, value, span)
 }
 
-// `defer close(^x)` (codegen jet_codegen_register_defer_close): the
-// resource closes at every exit of its scope, before the scope's automatic
-// closes (ir_close_defer). A variable whose value closes is armed to close
-// there from its binding on, so the defer arms it only when its binding
-// did not.
+// `defer close(^x)`: the resource closes at every exit of its scope, before
+// the scope's automatic closes (ir_close_defer). A variable whose value
+// closes is armed to close there from its binding on, so the defer arms it
+// only when its binding did not.
 fn ir_defer_close(m: &IRModule, p: IRProgram, b: &IRBuilder, close: Int, span: Span) Never! {
     close_kind :: ir_body_node(p, b, close).kind
     inner :: if close_kind == .Close(value) -> value else -> { return ir_fail(&b, span, "deferred {ir_expr_kind_name(close_kind)}") }
@@ -1510,12 +1495,11 @@ fn ir_defer_close(m: &IRModule, p: IRProgram, b: &IRBuilder, close: Int, span: S
     if !ir_has_drop(m, b, binding.slot) -> ir_fail(&b, span, "deferred close of {local.name}, which neither closes nor drops")
 }
 
-// A runtime-handle method (codegen jet_codegen_lower_general_handle_method,
-// Lower's HandleMethod route call): the receiver then the arguments cross
-// the operation's closed Prelude route; a static constructor (`Path.from`)
-// passes its arguments only. Forms codegen or Lower lower specially (Task,
-// channel and Transaction handles, the native Dyn tree, HTTP, Serde, DB,
-// ...) and closure, mutating or frame-scheduled forms are not built here.
+// A runtime-handle method: the receiver then the arguments cross the
+// operation's closed Prelude route; a static constructor (`Path.from`) passes
+// its arguments only. Forms with their own builders (Task, channel and
+// Transaction handles, the native Dyn tree, HTTP, Serde, DB, ...) and
+// closure, mutating or frame-scheduled forms are not built here.
 fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
     if operation == .TaskDetach -> return ir_task_detach(&m, p, &b, receiver, span)
     if operation == .TaskJoin -> return ir_task_join(&m, p, &b, ty, receiver, span)
@@ -1539,8 +1523,8 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         else -> false
     }
     if dedicated -> return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)}")
-    // to_text and equal_unordered on a Dyn cross the encoding.dyn data
-    // route (codegen jet_codegen_data_handle_route) with the Dyn as a tree.
+    // to_text and equal_unordered on a Dyn cross the encoding.dyn data route
+    // with the Dyn as a tree.
     data_symbol :: if operation == {
         .DynToText | .JSONToText -> "jet_dyn_to_text"
         .DynEqualUnordered | .JSONEqualUnordered -> "jet_dyn_equal_unordered"
@@ -1562,9 +1546,8 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     }
     carrier :: ir_failure_carrier_for_type(ty)
     route :: ir_general_handle_route(operation, ir_ty(p, b, receiver), args.len(), carrier) ?? return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
-    // A mutating receiver (codegen jet_codegen_handle_receiver_is_mutating)
-    // still crosses as its handle: the route mutates the runtime value
-    // behind it (Lower Routes.jet lower_route_args, a HandleMut carrier).
+    // A mutating receiver still crosses as its handle: the route mutates the
+    // runtime value behind it (a HandleMut carrier).
     if route.closure_method -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure")
     if route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" -> return ir_fail_slot(&b, span, "handle method {route.symbol}")
     special :: ir_nominal_name(ir_untag(ir_subst(m, ir_ty(p, b, receiver)))) ?? ""
@@ -1580,8 +1563,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         &inputs.push(slot)
     }
     if operation == .DurationNew(unit, _) {
-        // The checked unit crosses as its DurationUnit tag (codegen
-        // jet_codegen_lower_general_handle_method).
+        // The checked unit crosses as its DurationUnit tag.
         unit_def :: ir_type_def(p, "DurationUnit") ?? return ir_fail_slot(&b, span, "DurationUnit without its declaration")
         unit_index :: ir_variant_index(p, unit_def, unit) ?? return ir_fail_slot(&b, span, "DurationUnit without {unit}")
         unit_row :: ir_value_type(&m, p, Type.Named{name: "DurationUnit"}) ?? return ir_type_fail(&b, span, Type.Named{name: "DurationUnit"})
@@ -1638,10 +1620,8 @@ fn ir_handle_op_name(operation: BodyHandleOp) -> String Never! {
     text
 }
 
-// `a.div_euclid(b)` / `a.rem_euclid(b)` on exact Ints (codegen
-// jet_codegen_lower_numeric_binary_method, Lower lower_numeric_euclid): the
-// located runtime route jet_int_{div,rem}_euclid (Lower's inline fast path
-// computes the same value).
+// `a.div_euclid(b)` / `a.rem_euclid(b)` on exact Ints: the located runtime
+// route jet_int_{div,rem}_euclid.
 fn ir_numeric_euclid(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TNumericOp, argument: Int, span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     remainder :: if operation == {
@@ -1664,12 +1644,10 @@ fn ir_numeric_euclid(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     result
 }
 
-// `a.wrapping_add(b)` and the other overflow policies (codegen
-// jet_codegen_lower_overflow_opt; Lower lower_numeric_overflow and
-// lower_narrow_overflow), inline at the word's own width. An unbounded Int's
-// wrapping or saturating form is its exact operator; a checked form is an
-// Option box (None on overflow); a policy form stops as the trapping operator
-// does, at the call's line.
+// `a.wrapping_add(b)` and the other overflow policies, inline at the word's
+// own width. An unbounded Int's wrapping or saturating form is its exact
+// operator; a checked form is an Option box (None on overflow); a policy form
+// stops as the trapping operator does, at the call's line.
 fn ir_overflow_opt(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, prefix: String, operation: String, line: Int, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     lhs_ty :: ir_ty(p, b, lhs)
     rhs_ty :: ir_ty(p, b, rhs)
@@ -1867,8 +1845,8 @@ fn ir_overflow_division(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, che
 }
 
 // A checked result of Option type `ty`: None when `failed`; the caller
-// computes the value in the open Else and ir_checked_close boxes it
-// (Lower lower_numeric_finish: an 8-byte box, null for None).
+// computes the value in the open Else and ir_checked_close boxes it (an
+// 8-byte box, null for None).
 fn ir_checked_open(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, failed: Int, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if m.types[row].kind != .Pointer -> return ir_fail_slot(&b, span, "checked overflow result {ir_type_name(ty)}")
@@ -1889,10 +1867,9 @@ fn ir_checked_close(m: &IRModule, p: IRProgram, b: &IRBuilder, result: Int, valu
     result
 }
 
-// rotate_left / rotate_right (Lower lower_numeric_overflow's rotate and
-// lower_narrow_rotate): the count modulo the width, the two shifted halves
-// or-ed (a zero count shifts the other half by the full width, which the
-// machine shift masks to the value itself or a narrow word cuts to 0). A
+// rotate_left / rotate_right: the count modulo the width, the two shifted
+// halves or-ed (a zero count shifts the other half by the full width, which
+// the machine shift masks to the value itself or a narrow word cuts to 0). A
 // signed 64-bit count must not be negative; its halves shift as U64.
 fn ir_rotate(m: &IRModule, b: &IRBuilder, left_rotate: Bool, value: Int, count: Int, signed: Bool, bits: Int) -> Int Never! {
     if signed {
@@ -1939,10 +1916,10 @@ fn ir_copy_word(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! 
     bits
 }
 
-// An owner-qualified call (codegen StaticCalls.jet): a user type's static
-// method is a direct call of its checked function (a generic owner's type
-// arguments lead the method's own); a Prelude owner's crosses its runtime
-// route `<path>::<member>` with the arguments' borrow mask.
+// An owner-qualified call: a user type's static method is a direct call of
+// its checked function (a generic owner's type arguments lead the method's
+// own); a Prelude owner's crosses its runtime route `<path>::<member>` with
+// the arguments' borrow mask.
 fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     if owner == .Prelude(rooted, path, _) {
         if method.trait_owner != None -> return ir_fail_slot(&b, span, "trait-qualified Prelude static call {path}.{method.name}")
@@ -1959,8 +1936,8 @@ fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TS
         slots := [Int]{}
         borrowed := [Bool]{}
         loop arg in args {
-            // A function value already is its closure (Lower ignores
-            // fn_coercion); a `[T#N]` is carried as the List it widens to.
+            // A function value already is its closure; a `[T#N]` is carried
+            // as the List it widens to.
             if arg.widen_to_union != None || arg.box_as_trait != None || arg.spread -> return ir_fail_slot(&b, span, "coerced Prelude static call argument")
             value :: ir_expr(&m, p, &b, arg.value)
             if ir_failed(b) -> return -1
@@ -2005,8 +1982,8 @@ fn ir_branch_value(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], value
     ir_scope_close(&m, &b)
 }
 
-// A loop ending a valued block (codegen jet_codegen_lower_loop_value): each
-// `break v` writes `v` into the result and leaves the loop.
+// A loop ending a valued block: each `break v` writes `v` into the result and
+// leaves the loop.
 fn ir_loop_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, label: String?, body: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     result :: ir_temp(&m, &b, row)
@@ -2041,8 +2018,8 @@ fn ir_short_circuit(m: &IRModule, p: IRProgram, b: &IRBuilder, is_and: Bool, lhs
     result
 }
 
-// A string literal: an immortal static text when every part is literal,
-// else a runtime builder fed each part (Lower lower_build_string).
+// A string literal: an immortal static text when every part is literal, else
+// a runtime builder fed each part.
 fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], span: Span) -> Int Never! {
     literal := ""
     all_literal := true
@@ -2117,9 +2094,9 @@ fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], sp
 }
 
 // `print(value)`: its shown text to stdout with a line end and a flush
-// (Lower semantic Print: jet_term_write_stdout_line(text, flush 1)). A value
-// whose type selects a Display implementation prints that rendering (Rust
-// lower_print_value: an explicit Display before the Printable show).
+// (jet_term_write_stdout_line(text, flush 1)). A value whose type selects a
+// Display implementation prints that rendering: an explicit Display before
+// the Printable show.
 fn ir_print(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
     slot :: ir_expr(&m, p, &b, value)
@@ -2178,9 +2155,8 @@ fn ir_call_row(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [
         &moves.push(ir_receiver_access(p.functions[row].kind) == "move")
     }
     loop (index, arg) in args {
-        // A function value already is its closure (Lower ignores
-        // fn_coercion); a widened `[T#N]` is the List it is carried as, and
-        // a move parameter's ir_own copies it.
+        // A function value already is its closure; a widened `[T#N]` is the
+        // List it is carried as, and a move parameter's ir_own copies it.
         if arg.spread -> return ir_fail_slot(&b, span, "coerced call argument")
         if params[index].convention == .Write || arg.mut_borrow {
             address :: ir_place_address(&m, p, &b, arg.value, &backs, span)
@@ -2330,10 +2306,10 @@ fn ir_tag_order_test(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, lh
 }
 
 // A precise numeric builtin (`Fraction`/`Decimal`/`Complex` arithmetic and
-// conversions) calls its core.math source helper, as codegen
-// jet_codegen_lower_precise_builtin does; when the program holds no core.math
-// (the type is then its runtime handle) it is the `jet_<type>_<function>`
-// route, its constructors taking their arguments by value.
+// conversions) calls its core.math source helper; when the program holds no
+// core.math (the type is then its runtime handle) it is the
+// `jet_<type>_<function>` route, its constructors taking their arguments by
+// value.
 fn ir_precise_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, args: [Int], span: Span) -> Int Never! {
     helper :: ir_precise_source_helper(type_name, function) ?? ""
     key :: "function:<corelib>/core.math::{helper}"
@@ -2501,13 +2477,13 @@ fn ir_receiver_access(kind: TFuncKind) -> String Never! {
 }
 
 // ---------------------------------------------------------------------------
-// The default `Err` (Lower NativeErr.jet): the runtime's own JetErr handle.
+// The default `Err`: the runtime's own JetErr handle.
 
-// `Err{message, code, cause, ...}` (Lower lower_native_err_construct): the
-// fields in source order, then jet_rt_record_new_jet_err(message, code,
-// cause), which clones the message and the code box's text and takes the
-// cause handle out of its Option box. Any other field (the private metadata)
-// is evaluated and released: the runtime keeps its own fresh state.
+// `Err{message, code, cause, ...}`: the fields in source order, then
+// jet_rt_record_new_jet_err(message, code, cause), which clones the message
+// and the code box's text and takes the cause handle out of its Option box.
+// Any other field (the private metadata) is evaluated and released: the
+// runtime keeps its own fresh state.
 fn ir_default_err_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [BodyStructFieldValue], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     message := -1
@@ -2554,10 +2530,10 @@ fn ir_default_err_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, f
     result
 }
 
-// `error.message` / `.code` / `.cause` of a default `Err` (Lower
-// lower_native_err_field, lower_record_load_value): an owned copy through
-// jet_rt_record_get_jet_err_<field>; an optional field's getter writes its
-// payload to an out word and reports presence, and the value gets a new box.
+// `error.message` / `.code` / `.cause` of a default `Err`: an owned copy
+// through jet_rt_record_get_jet_err_<field>; an optional field's getter
+// writes its payload to an out word and reports presence, and the value gets
+// a new box.
 fn ir_default_err_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, name: String, span: Span) -> Int Never! {
     if name != "message" && name != "code" && name != "cause" -> return ir_fail_slot(&b, span, "field {name} of the default Err")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -2779,12 +2755,11 @@ fn ir_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, shap
     }
 }
 
-// The Bool test of a binary pattern on the `[U8]` `subject` (Lower
-// lower_scan_match): one 64-byte descriptor row per part
-// [tag, a, b, width, destination, storage, scratch, scratch] for
-// `jet_rt_binary_pattern_match`. A bit field captures into its own zeroed
-// frame cell at its packed width; the rest capture receives a List header
-// box. Only a match writes them, and the names bind from those cells.
+// The Bool test of a binary pattern on the `[U8]` `subject`: one 64-byte
+// descriptor row per part [tag, a, b, width, destination, storage, scratch,
+// scratch] for `jet_rt_binary_pattern_match`. A bit field captures into its
+// own zeroed frame cell at its packed width; the rest capture receives a List
+// header box. Only a match writes them, and the names bind from those cells.
 fn ir_binary_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, parts: [TBinaryPatternPart], span: Span) -> Int Never! {
     element :: ir_list_element(&m, p, b, subject) ?? return ir_fail_slot(&b, span, "binary pattern on a non-List subject")
     if m.types[element].kind != .Word || m.types[element].bits != 8 || m.types[element].signed -> return ir_fail_slot(&b, span, "binary pattern on a non-[U8] subject")
@@ -2977,9 +2952,8 @@ fn ir_hide_condition_names(b: &IRBuilder, from: Int, to: Int) Never! {
     }
 }
 
-// The test of an Option or Result shape on the carrier box `value`
-// (codegen OptionIsSome / ResultIsOk); a payload binding is bound when the
-// If opens (IRPending).
+// The test of an Option or Result shape on the carrier box `value` (Some /
+// Ok); a payload binding is bound when the If opens (IRPending).
 fn ir_carrier_shape_test(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, shape: BodyPatternShape, span: Span) -> Int Never! {
     carrier :: ir_untag(m.types[b.f.slot_type[value]].ty)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -3045,8 +3019,8 @@ fn ir_pend(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: String, subject: 
     &b.pending.push(IRPending{name: binding, slot: slot, subject: subject, offset: offset, selector: selector})
 }
 
-// An enum value: a payload-free enum's variant index (Lower
-// lower_discriminant), else a new box with the discriminant and payload.
+// An enum value: a payload-free enum's variant index, else a new box with the
+// discriminant and payload.
 fn ir_enum_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, variant: String, payload: BodyEnumPayload, span: Span) -> Int Never! {
     slot_type :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     row :: ir_type_def(p, owner) ?? ir_enum_def(m, p, slot_type) ?? return ir_fail_slot(&b, span, "enum {owner} without a declaration")
@@ -3094,13 +3068,11 @@ fn ir_enum_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Str
     boxed
 }
 
-// `Dyn.Null`, `Dyn.Array(items)`, ... (codegen jet_codegen_lower_json_literal):
-// the native Dyn enum's variant over its payload, which the box stores as
-// its own (a borrowed payload is cloned, as codegen's `clone_arg` copy). An
+// `Dyn.Null`, `Dyn.Array(items)`, ...: the native Dyn enum's variant over its
+// payload, which the box stores as its own (a borrowed payload is cloned). An
 // Object over a map literal of Dyn values is the `(key, value)` pair List in
-// literal order (codegen jet_codegen_lower_ordered_object_encode, whose
-// encode of a Dyn value is that value); one over another container encodes
-// and is not built.
+// literal order (whose encode of a Dyn value is that value); one over another
+// container encodes and is not built.
 fn ir_json_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, variant: String, argument: Int?, span: Span) -> Int Never! {
     if argument == None -> return ir_enum_value(&m, p, &b, ty, "Dyn", variant, BodyEnumPayload.Unit, span)
     value := argument
@@ -3112,8 +3084,8 @@ fn ir_json_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, variant:
         pair_ty :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: ty}}}
         pairs := [Int]{}
         loop entry in entries {
-            // A value spelled through another name of the Dyn declaration
-            // is that Dyn (codegen encodes it, which is the value itself).
+            // A value spelled through another name of the Dyn declaration is
+            // that Dyn: its encode is the value itself.
             key_ty :: ir_ty(p, b, entry.key)
             value_ty :: ir_ty(p, b, entry.value)
             if ir_untag(key_ty) != Type.String || ir_dyn_def(p, value_ty) == None -> return ir_fail_slot(&b, span, "Dyn.Object entry {ir_type_name(key_ty)}: {ir_type_name(value_ty)}")
@@ -3127,8 +3099,7 @@ fn ir_json_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, variant:
     ir_enum_value(&m, p, &b, ty, "Dyn", variant, BodyEnumPayload.Positional{args: [BodyEnumArg]{BodyEnumArg{value: value}}}, span)
 }
 
-// `Dyn.Object(map)` over a map value (codegen
-// jet_codegen_lower_container_encode): the `(key, value.encode())` pair List
+// `Dyn.Object(map)` over a map value: the `(key, value.encode())` pair List
 // in the map's iteration order, built by a loop over the map, as the Object
 // payload.
 fn ir_dyn_object_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
@@ -3217,8 +3188,7 @@ fn ir_result_ctor(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
 
 // `return value`: a Unit executable return only evaluates it; any other
 // return hands back the value as the executable return type. A returned
-// `Err(...)` is where its failure starts: the journey's origin (codegen
-// Statements.jet `.Return`, jet_codegen_lower_journey_origin).
+// `Err(...)` is where its failure starts: the journey's origin.
 fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span) Never! {
     returned :: value ?? return ir_return_fallthrough(&m, p, &b)
     if b.f.result < 0 {
@@ -3247,7 +3217,7 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
 
 // A `?` site that joins the failure's journey (TryWithContext): its source
 // location, its `?(note)`, and whether the operand's failure starts at this
-// site (`fresh`, codegen jet_codegen_try_operand_starts_failure).
+// site (`fresh`).
 struct IRTrySite { note: Int?, file: String, line: Int, function: String, fresh: Bool }
 
 // A Core call runs no program code, so its failure starts at the call; one
@@ -3262,10 +3232,9 @@ fn ir_try_starts_failure(p: IRProgram, b: IRBuilder, operand: Int) -> Bool Never
     false
 }
 
-// `value?` (codegen jet_codegen_lower_try_value): the success payload, or
-// the failure handed back to the caller. A plain `T Never!` call result is
-// its own success. At a journey `site` the success edge drops the journey
-// an earlier, handled failure left.
+// `value?`: the success payload, or the failure handed back to the caller. A
+// plain `T Never!` call result is its own success. At a journey `site` the
+// success edge drops the journey an earlier, handled failure left.
 fn ir_try(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     subject :: ir_expr(&m, p, &b, value)
@@ -3319,9 +3288,8 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
     subject
 }
 
-// The journey routes' source-site arguments in ABI order: file, line,
-// column, function (codegen jet_codegen_try_site_values); the column is
-// that of `span` in the building function's source.
+// The journey routes' source-site arguments in ABI order: file, line, column,
+// function; the column is that of `span` in the building function's source.
 fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line: Int, function: String, span: Span) -> [Int] Never! {
     if line < 1 || line > 4294967295 {
         ir_fail(&b, span, "journey site line {line} is outside the supported source range")
@@ -3341,11 +3309,11 @@ fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line
     [Int]{file_text, line_word, column_word, function_text}
 }
 
-// A returned `Err(...)` at `span` starts the journey (codegen
-// jet_codegen_lower_journey_origin) at the span's line. Core library code
-// handing on an error it was given (`reraise`, ir_core_reraise) is not
-// where the failure starts: it only drops a journey an earlier, handled
-// failure left, and the failure joins the journey at the program's `?`.
+// A returned `Err(...)` at `span` starts the journey at the span's line. Core
+// library code handing on an error it was given (`reraise`, ir_core_reraise)
+// is not where the failure starts: it only drops a journey an earlier,
+// handled failure left, and the failure joins the journey at the program's
+// `?`.
 fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, reraise: Bool, span: Span) Never! {
     if reraise {
         _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
@@ -3359,13 +3327,12 @@ fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, reraise: Bool, s
     _ :: ir_runtime(&m, &b, "jet_journey_origin", values, -1)
 }
 
-// The hop of the failure edge at `site`: a failure that starts here drops
-// the journey an earlier, handled failure left; then the site joins the
-// journey (never in Core library code, whose `?` the program's own `?`
-// stands for), or, for a `?(note)` whose error is the default `Err`,
-// becomes a context frame of `error` (codegen jet_codegen_lower_try_context).
-// Returns the error the edge hands on: `error`, or the framed copy that
-// replaces it.
+// The hop of the failure edge at `site`: a failure that starts here drops the
+// journey an earlier, handled failure left; then the site joins the journey
+// (never in Core library code, whose `?` the program's own `?` stands for),
+// or, for a `?(note)` whose error is the default `Err`, becomes a context
+// frame of `error`. Returns the error the edge hands on: `error`, or the
+// framed copy that replaces it.
 fn ir_journey_hop(m: &IRModule, p: IRProgram, b: &IRBuilder, site: IRTrySite, error: Int, framed: Bool, span: Span) -> Int Never! {
     if site.fresh {
         _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
@@ -3442,7 +3409,7 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
         }
     }
     // A Result here is a trait call's propagated carrier (ir_trait_propagate):
-    // its failure leaves an Option function as None, as codegen's does.
+    // its failure leaves an Option function as None.
     if optional && b.f.result >= 0 {
         if site == .Val(at) {
             _ :: ir_journey_hop(&m, p, &b, at, -1, false, span)
@@ -3462,8 +3429,7 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
         ir_comptime_item_failure(&m, p, &b, subject, is_result, span)
         return
     }
-    // An infallible or diverging function's failure edge is dead (codegen
-    // jet_codegen_lower_try_value `.Infallible` / `.Diverges`).
+    // An infallible or diverging function's failure edge is dead.
     if b.failure == .Infallible || b.failure == .Diverges(_) {
         ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
         return
@@ -3501,7 +3467,7 @@ fn ir_comptime_item_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: 
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
-// `value ?? fallback` (codegen jet_codegen_lower_or_fallback).
+// `value ?? fallback`.
 fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     subject :: ir_expr(&m, p, &b, value)
@@ -3548,8 +3514,7 @@ fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
         ir_release(&m, &b, payload)
     }
     ir_else(&b.f, b.line)
-    // The fallback sees the failure's error under the ambient binding
-    // (codegen jet_codegen_lower_fallback_failure).
+    // The fallback sees the failure's error under the ambient binding.
     mark :: b.bindings.len()
     if ambient == .Val(local) {
         if !is_result -> return ir_fail_slot(&b, span, "`??` ambient error binding on an Option")
@@ -3568,9 +3533,8 @@ fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
     result
 }
 
-// `base?.member` (codegen jet_codegen_lower_optional_field): an absent base
-// stays absent; a present one's member, in a new Option box unless the
-// member is itself the optional result (`flatten`).
+// `base?.member`: an absent base stays absent; a present one's member, in a
+// new Option box unless the member is itself the optional result (`flatten`).
 fn ir_optional_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, member: String, flatten: Bool, span: Span) -> Int Never! {
     base_ty :: ir_ty(p, b, base)
     inner_ty := Type.Int
@@ -3599,9 +3563,9 @@ fn ir_optional_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: 
     result
 }
 
-// `base?.method(args)` (codegen jet_codegen_lower_optional_method_call): the
-// call runs only on a present base, with `binding` naming its payload; its
-// value in a new Option box unless it is itself the optional result.
+// `base?.method(args)`: the call runs only on a present base, with `binding`
+// naming its payload; its value in a new Option box unless it is itself the
+// optional result.
 fn ir_optional_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, binding: TLocal, call: Int, flatten: Bool, span: Span) -> Int Never! {
     base_ty :: ir_ty(p, b, base)
     inner_ty := Type.Int
@@ -3690,7 +3654,7 @@ fn ir_loop_jump(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, exit:
 fn ir_list_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, values: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     element_row := -1
-    // A `[T#N]` literal is the List of its N elements (codegen BuildList).
+    // A `[T#N]` literal is the List of its N elements.
     if ir_untag(ty) == {
         .List(element) | .FixedList(element, _) -> element_row = ir_value_type(&m, p, element) ?? -1
         else -> {}
@@ -3705,9 +3669,8 @@ fn ir_list_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, values: 
     ir_list_from(&m, p, &b, row, element_row, elements)
 }
 
-// `[a, ..xs, b]` (codegen jet_codegen_lower_list_spread): a new List of
-// each element part's value and a copy of every element of each spread
-// list, in order.
+// `[a, ..xs, b]`: a new List of each element part's value and a copy of every
+// element of each spread list, in order.
 fn ir_list_spread(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, parts: [BodyListSpreadPart], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     element_row := -1
@@ -3861,10 +3824,9 @@ fn ir_tuple_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, names: 
     storage
 }
 
-// `base[start..end]` (codegen jet_codegen_lower_slice, Lower lower_slice): the
-// runtime checks the bounds and picks the stop; a String slices through
-// jet_rt_string_slice_range, a List's window header is a View as is and
-// gets a buffer of its own as a List.
+// `base[start..end]`: the runtime checks the bounds and picks the stop; a
+// String slices through jet_rt_string_slice_range, a List's window header is a
+// View as is and gets a buffer of its own as a List.
 fn ir_slice(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, start: Int, end: Int, range: Int?, location: TPanicLoc, span: Span) -> Int Never! {
     base_ty :: ir_ty(p, b, base)
     receiver := base
@@ -3903,9 +3865,9 @@ fn ir_slice(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, star
     owned
 }
 
-// The window header of a List or View `source` over the native `bounds`
-// (Lower lower_slice_window): the runtime checks them and picks the stop;
-// a View's window keeps borrowing the source buffer.
+// The window header of a List or View `source` over the native `bounds`: the
+// runtime checks them and picks the stop; a View's window keeps borrowing the
+// source buffer.
 fn ir_list_window(m: &IRModule, b: &IRBuilder, row: Int, source: Int, element_row: Int, bounds: [Int], line: Int, view: Bool) -> Int Never! {
     stop_args := [Int]{bounds[0], bounds[1], bounds[2], ir_load_word(&m, &b, source, 0)}
     loop value in ir_location(&m, &b, line) -> &stop_args.push(value)
@@ -3924,8 +3886,8 @@ fn ir_list_window(m: &IRModule, b: &IRBuilder, row: Int, source: Int, element_ro
     window
 }
 
-// `base.view(range)` / a declared view's subrange (Lower lower_view_new):
-// the View window of the List or View receiver, which it borrows.
+// `base.view(range)` / a declared view's subrange: the View window of the
+// List or View receiver, which it borrows.
 fn ir_view_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], line: Int, span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     if ir_view_element(ty) == None -> return ir_fail_slot(&b, span, "a view of type {ir_type_name(ty)}")
@@ -3949,9 +3911,9 @@ fn ir_is_view(ty: Type) -> Bool Never! {
     false
 }
 
-// A view (or fixed list) copied out as the owned collection `ty` (codegen
-// jet_codegen_collection_materialize_view): the source's header read as
-// `ty`'s, its elements copied, and a fresh owned source dropped.
+// A view (or fixed list) copied out as the owned collection `ty`: the
+// source's header read as `ty`'s, its elements copied, and a fresh owned
+// source dropped.
 fn ir_materialize_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     slot :: ir_expr(&m, p, &b, value)
@@ -3970,9 +3932,9 @@ fn ir_materialize_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
     copied
 }
 
-// A slice's (start, end, exclusive) as native words and a Bool (Lower
-// lower_slice_bounds): a Range value's fields, or the bare bounds with the
-// kernel's own stop (exclusive for a String, inclusive for a List).
+// A slice's (start, end, exclusive) as native words and a Bool: a Range
+// value's fields, or the bare bounds with the kernel's own stop (exclusive
+// for a String, inclusive for a List).
 fn ir_slice_bounds(m: &IRModule, p: IRProgram, b: &IRBuilder, start: Int, end: Int, range: Int?, text: Bool, span: Span) -> [Int] Never! {
     bounds := [Int]{}
     if range == .Val(range_expr) {
@@ -4010,8 +3972,8 @@ fn ir_fail_bounds(b: &IRBuilder, span: Span, message: String) -> [Int] Never! {
     [Int]{}
 }
 
-// `start..end` / `start..<end` as a value (codegen
-// jet_codegen_lower_range_value): a Range struct of its bounds and stop.
+// `start..end` / `start..<end` as a value: a Range struct of its bounds and
+// stop.
 fn ir_range_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, start: Int, end: Int, exclusive: Bool, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if m.types[row].kind != .Aggregate -> return ir_fail_slot(&b, span, "range value of {ir_type_name(ty)}")
@@ -4034,9 +3996,8 @@ fn ir_range_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, start: In
 }
 
 // `&place` / `&write place` as a value: a read of a list window is the View
-// over the list's storage (codegen jet_codegen_list_read_view); any other
-// read is the place's value, which its holder keeps; a written aggregate is
-// the address of its storage.
+// over the list's storage; any other read is the place's value, which its
+// holder keeps; a written aggregate is the address of its storage.
 fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, access: AccessConvention, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     if access == .Read {
@@ -4080,11 +4041,10 @@ fn ir_window_box(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
 }
 
 // The box a write window (`if &place == .Variant(payload)`) writes through:
-// the box at `place`, first made its holder's own (Lower
-// lower_box_make_unique) and stored back, so a write through a payload
-// never reaches a box another holder shares: a copy (`b := a`), the
-// caller's value behind a write parameter, or another thread's view of the
-// same data. A variable that does not own its box keeps it as is.
+// the box at `place`, first made its holder's own and stored back, so a write
+// through a payload never reaches a box another holder shares: a copy (`b :=
+// a`), the caller's value behind a write parameter, or another thread's view
+// of the same data. A variable that does not own its box keeps it as is.
 fn ir_window_subject(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, place_ty: Type, span: Span) -> Int Never! {
     if ir_body_node(p, b, place).kind == .Local(local) {
         binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "write of unknown local {local.name}")
@@ -4109,11 +4069,11 @@ fn ir_window_subject(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, plac
 }
 
 // ---------------------------------------------------------------------------
-// Closures (Lower Closures.jet layout): a counted box (ir_closure_box) with
-// its code at 8 and the captures from 24. The code takes the box as its
-// hidden first parameter. A capture the body writes is held by address: its
-// variable becomes a frame cell from the closure's creation on. Any other
-// capture is a copy the box owns until its release helper drops it.
+// Closures: a counted box (ir_closure_box) with its code at 8 and the
+// captures from 24. The code takes the box as its hidden first parameter. A
+// capture the body writes is held by address: its variable becomes a frame
+// cell from the closure's creation on. Any other capture is a copy the box
+// owns until its release helper drops it.
 //
 // The lambda's function is keyed by its enclosing function, its own source
 // span and its occurrence there: the merge shares functions by key, and the
@@ -4233,7 +4193,7 @@ fn ir_build_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) 
 }
 
 // A call through a closure box: its code with the box as the hidden first
-// argument (Lower Closures.jet).
+// argument.
 fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args: [BodyCallArg], signature: Type, span: Span) -> Int Never! {
     params := [Type]{}
     returned := Type?{None}
@@ -4369,11 +4329,10 @@ fn ir_startup_guard(m: &IRModule, p: IRProgram, definition: TConstantDef) -> Int
     id
 }
 
-// A named function used as a value of the function type `ty`: a closure
-// box (no captures) whose code is an adapter taking the box first, then the
-// value's parameters, and calling the function (Lower Closures.jet: a
-// function value is the closure of a thunk). One adapter per function and
-// value type.
+// A named function used as a value of the function type `ty`: a closure box
+// (no captures) whose code is an adapter taking the box first, then the
+// value's parameters, and calling the function (a function value is the
+// closure of a thunk). One adapter per function and value type.
 fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     signature :: ir_untag(ir_subst(m, ty))
@@ -4476,7 +4435,7 @@ fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComp
         }
         .BigInt(decimal) -> {
             // A U64 beyond the exact-Int range keeps its decimal; its word
-            // destination takes the bit pattern (Lower ir_constant_u64_bits).
+            // destination takes the bit pattern (ir_constant_u64_bits).
             if m.types[row].kind == .Word -> return ir_int_constant(&m, &b, row, ir_constant_u64_bits(decimal))
             slot :: ir_fresh_temp(&m, &b, row)
             ir_emit(&b.f, IROp.ConstBigInt, slot, ir_intern_name(&m, decimal), -1, -1, b.line)
@@ -4512,8 +4471,8 @@ fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComp
         .Enum(_, variant, args) -> return ir_comptime_enum(&m, p, &b, ty, row, variant, args, span)
         .Bytes(bytes) -> return ir_comptime_bytes(&m, p, &b, ty, row, bytes, span)
         .Failed(report) -> {
-            // Lower lower_constant_tree_value: a told failure is an Err box,
-            // a clean failure of an Option is None.
+            // A told failure is an Err box, a clean failure of an Option is
+            // None.
             if report == .Told(told) {
                 if ir_untag(ty) == .Result(_, err_ty) {
                     payload :: ir_comptime(&m, p, &b, err_ty, told, span)
@@ -4531,9 +4490,8 @@ fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComp
     }
 }
 
-// A Map constant (Lower lower_constant_map_fill): an empty header, then each
-// entry set in order through map.set, which orders the keys and retires
-// duplicates.
+// A Map constant: an empty header, then each entry set in order through
+// map.set, which orders the keys and retires duplicates.
 fn ir_comptime_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, entries: [TComptimeMapEntry], span: Span) -> Int Never! {
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map constant of {ir_type_name(ty)}")
     key_ty :: m.types[shape.key.ty].ty.copy()
@@ -4549,8 +4507,7 @@ fn ir_comptime_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int
     map
 }
 
-// A map constant's key as the compile-time value it builds from (Lower
-// lower_constant_key).
+// A map constant's key as the compile-time value it builds from.
 fn ir_comptime_key_value(key: TComptimeKey) -> TComptimeValue Never! {
     if key == {
         .Int(value) -> TComptimeValue.Int{value: value}
@@ -4670,15 +4627,15 @@ fn ir_comptime_name(value: TComptimeValue) -> String Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Program stops (Lower Require.jet): require / require_eq / panic report
-// through jet_rt_require_stop(ordinal, descriptor, message, left, right,
-// locals), which does not return. The 88-byte descriptor holds the path,
-// line, function, source line, column, caret and the rendered context text.
+// Program stops: require / require_eq / panic report through
+// jet_rt_require_stop(ordinal, descriptor, message, left, right, locals),
+// which does not return. The 88-byte descriptor holds the path, line,
+// function, source line, column, caret and the rendered context text.
 
-// A checked stop location with its report source (Rust capture_panic_loc):
-// sema locates the stop by file, line and 1-based byte column; the line's
-// text, trailing whitespace trimmed, and its character column come from the
-// checked source this program holds.
+// A checked stop location with its report source: sema locates the stop by
+// file, line and 1-based byte column; the line's text, trailing whitespace
+// trimmed, and its character column come from the checked source this program
+// holds.
 fn ir_report_location(p: IRProgram, location: TPanicLoc) -> TPanicLoc Never! {
     // copy: the report's location is the caller's own; the checked expression keeps its location.
     located := location.copy()
@@ -4805,8 +4762,7 @@ fn ir_store_text(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, text: Stri
     ir_emit(&b.f, IROp.Store, -1, base, offset + 8, pair[1], b.line)
 }
 
-// Lower lower_require_context_text: the report's static context, with the
-// runtime's exact spacing.
+// The report's static context, with the runtime's exact spacing.
 fn ir_stop_context(path: String, location: TPanicLoc, function: String) -> String Never! {
     out := [U8]{}
     if path != "" {

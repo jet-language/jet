@@ -1,9 +1,8 @@
-// The IR builder's `#Pre`/`#Post` contracts (codegen Statements.jet
-// jet_codegen_lower_contract_scope). A checked clause is a `require` of its
-// condition with its message; a function with contracts has its body in a
-// ContractScope whose `pre` clauses run on entry and whose `post` clauses run
-// at every return, with the returned carrier (or its success payload) bound
-// to `result`.
+// The IR builder's `#Pre`/`#Post` contracts. A checked clause is a `require`
+// of its condition with its message; a function with contracts has its body
+// in a ContractScope whose `pre` clauses run on entry and whose `post`
+// clauses run at every return, with the returned carrier (or its success
+// payload) bound to `result`.
 
 use jet_foundation.[Span, BodyContract, TContractResult, TPanicLoc, TPanicLocal, BodyRequireKind]
 
@@ -11,9 +10,8 @@ use jet_foundation.[Span, BodyContract, TContractResult, TPanicLoc, TPanicLocal,
 // return checks.
 struct IRContractFrame { result: TContractResult, post: [BodyContract] }
 
-// One checked clause (codegen Statements.jet jet_codegen_lower_contract):
-// a proven or stripped clause emits nothing. Its report quotes the clause's
-// source line (jet_codegen_contract_context).
+// One checked clause: a proven or stripped clause emits nothing. Its report
+// quotes the clause's source line.
 fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
     if contract.disposition != .Check -> return
     if contract.file != b.f.source_file -> return ir_fail(&b, contract.span, "contract source differs from its function source")
@@ -37,10 +35,9 @@ fn ir_contract_scope(m: &IRModule, p: IRProgram, b: &IRBuilder, pre: [BodyContra
     _ :: &b.contracts.pop()
 }
 
-// The `post` clauses of the innermost scope at a return of the carrier
-// `slot` (-1: Unit; codegen jet_codegen_lower_contract_return): `result` is
-// the carrier itself, or its Ok/Val payload, and a failed carrier returns
-// unchecked.
+// The `post` clauses of the innermost scope at a return of the carrier `slot`
+// (-1: Unit): `result` is the carrier itself, or its Ok/Val payload, and a
+// failed carrier returns unchecked.
 fn ir_contract_return(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
     if b.contracts.len() == 0 -> return
     frame :: b.contracts[b.contracts.len() - 1]

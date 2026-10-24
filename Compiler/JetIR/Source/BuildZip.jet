@@ -1,6 +1,5 @@
-// `a.zip(b)`, `zip(a: …, b: …, c: …)`, `zip_short` and `zip_pad` (codegen
-// jet_codegen_lower_builtin_zip, Lower LazyIter.jet lower_lazy_zip): every
-// input becomes an Iter, then each further column folds into the rows so far
+// `a.zip(b)`, `zip(a: …, b: …, c: …)`, `zip_short` and `zip_pad`: every input
+// becomes an Iter, then each further column folds into the rows so far
 // through one runtime zip node, whose callback builds the next row tuple. A
 // padded zip hands the node the value each side stands in with once it ends.
 
@@ -72,7 +71,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
             column_fill = ir_member_read(&m, &b, fill, member)
         }
         if actual != target {
-            // A fill of another numeric type converts (codegen NumericCast).
+            // A fill of another numeric type converts (ir_numeric_cast).
             target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
             column_fill = ir_numeric_cast(&m, p, &b, column_fill, target_row, span)
             if ir_failed(b) || column_fill < 0 -> return -1
@@ -163,9 +162,8 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
     left
 }
 
-// `rows.unzip()` (codegen jet_codegen_lower_builtin_unzip): one List per
-// row field, each row's fields pushed in order; an Iter is drained into a
-// List first.
+// `rows.unzip()`: one List per row field, each row's fields pushed in order;
+// an Iter is drained into a List first.
 fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     columns_shape := [TypeTupleField]{}
@@ -248,10 +246,9 @@ struct IRZipAdapter {
     release: Int
 }
 
-// A capture-free closure over `params` returning `body` (codegen
-// jet_codegen_builtin_synthetic_lambda), built as its own function like a
-// source lambda (ir_lambda), and its lazy.callback. `role` keeps the
-// callbacks of one zip apart.
+// A capture-free closure over `params` returning `body`, built as its own
+// function like a source lambda (ir_lambda), and its lazy.callback. `role`
+// keeps the callbacks of one zip apart.
 fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, params: [Type], names: [String], ret: Type, body: Int, span: Span) -> IRZipAdapter Never! {
     failed :: IRZipAdapter{closure: -1, callback: -1, release: -1}
     closure_ty :: Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
@@ -297,9 +294,9 @@ fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, param
     IRZipAdapter{closure: handed.held, callback: ir_lazy_address(&m, &b, helper), release: handed.release}
 }
 
-// The stop context of a strict zip (codegen jet_codegen_builtin_zip_context_args):
-// policy, file, line, function, source line, column and caret width; line 1,
-// column 1 and an empty line for a function with no checked source.
+// The stop context of a strict zip: policy, file, line, function, source line,
+// column and caret width; line 1, column 1 and an empty line for a function with
+// no checked source.
 fn ir_zip_strict_context(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) -> [Int] Never! {
     file :: b.f.source_file.copy()
     line :: ir_source_line_of(p, file, span.start) ?? 1

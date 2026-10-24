@@ -1,5 +1,5 @@
-// Core source-body reachability (Rust Codegen/TIR/mod.rs
-// `reachable_core_source_callables`, `should_lower_imported_core_body`).
+// Core source-body reachability: which imported Core source bodies a program
+// builds.
 use jet_foundation.[
     BodyLambda,
     BodyNode,
@@ -87,12 +87,12 @@ fn ir_precise_source_family(name: String, owner: String, prefix: String) -> Bool
     helper == name
 }
 
-// Rust `is_core_precise_source_target`: a precise operation (Int.abs and the
-// Fraction, Decimal and Complex registry; Float has no source helper) lowers
-// to its `Core/Math/Math.jet` helper by name (`jet_codegen_lower_precise_builtin`)
-// from sites with no keyed call: registered `core.math.fraction`/`decimal`
-// constructors, constants and synthesized operations. That closed registry is
-// rooted, not every `__` helper in the file.
+// A precise operation (Int.abs and the Fraction, Decimal and Complex
+// registry; Float has no source helper) lowers to its `Core/Math/Math.jet`
+// helper by name from sites with no keyed call: registered
+// `core.math.fraction`/`decimal` constructors, constants and synthesized
+// operations. That closed registry is rooted, not every `__` helper in the
+// file.
 fn ir_precise_source_name(name: String) -> Bool Never! {
     if (ir_precise_source_helper("Int", "abs") ?? "") == name -> return true
     ir_precise_source_family(name, "Fraction", "__fraction_") || ir_precise_source_family(name, "Decimal", "__decimal_") || ir_precise_source_family(name, "Complex", "__complex_")
@@ -231,8 +231,8 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> ir_core_reach_add(&keys, symbol.key)
-        // Interpolation selectors call their source formatter by name
-        // (`jet_codegen_lower_string_format_value`), with no keyed call.
+        // Interpolation selectors call their source formatter by name with no
+        // keyed call.
         .StrLit(parts) -> {
             loop part in parts {
                 if part == .Interpolation(value, format) {
@@ -297,9 +297,9 @@ fn ir_core_reach_expr_children(tree: BodyTree, expression: Int, pending: &[Int])
     body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> &pending.push(child))
 }
 
-// The `Core/Math/Math.jet` helper one checked expression lowers to by name
-// (`jet_codegen_lower_precise_builtin`): a precise operation, `Int.abs`, or a
-// registered `core.math.fraction`/`decimal` constructor.
+// The `Core/Math/Math.jet` helper one checked expression lowers to by name: a
+// precise operation, `Int.abs`, or a registered
+// `core.math.fraction`/`decimal` constructor.
 fn ir_precise_expr_helper(expression: BodyNode) -> String? Never! {
     if expression.kind == {
         .PreciseBuiltin(owner, operation, _) -> ir_precise_source_helper(owner, operation)
@@ -394,14 +394,12 @@ fn ir_core_reach_template_key(key: String) -> String Never! {
 // methods stay rooted because Codegen resolves their implicit uses (`close`,
 // `display`, index hooks, trait dispatch) by owner type rather than by a key
 // in the caller's body. The closed precise-operation source registry
-// (`ir_precise_source_target`) is rooted as in Rust. A
-// compiler-generated Core method (`FnBody.synthetic`: a Prelude/Derives.jet
-// `Equatable`/`Comparable` body) is not a root: as in
-// Rust `reachable_core_source_callables`, it is kept only when a kept body
-// names it (sema rewrites `==`/`<` on its owner into a keyed method call). An
-// unreached derive then loses its impl row (Rust `lower_impl_rows`), so no
-// impl is emitted for a runtime-backed Core carrier (`Cursor` -> `JetCursor`,
-// `URL`/`MIME` -> `jet_std`).
+// (`ir_precise_source_target`) is rooted. A compiler-generated Core method
+// (`FnBody.synthetic`: a Prelude/Derives.jet `Equatable`/`Comparable` body)
+// is not a root: it is kept only when a kept body names it (sema rewrites
+// `==`/`<` on its owner into a keyed method call). An unreached derive then
+// loses its impl row, so no impl is emitted for a runtime-backed Core carrier
+// (`Cursor` -> `JetCursor`, `URL`/`MIME` -> `jet_std`).
 //
 // The roots' bodies, nearly every kept body, are read on the threads
 // `threads` admits (ir_core_reach_root_targets); the rows they

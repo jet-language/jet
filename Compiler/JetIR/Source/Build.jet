@@ -1,7 +1,4 @@
-// The IR builder: checked TIR functions to IR. Every construct keeps the
-// meaning the retired native lowering gave it: the same runtime routes,
-// argument orders and source locations, so a program behaves the same as it
-// did there. A construct the builder does not
+// The IR builder: checked functions to IR. A construct the builder does not
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
@@ -186,8 +183,7 @@ fn ir_bounds_mode(p: IRProgram, row: Int) -> IRBoundsMode Never! {
 // function id may name, by key, and the checked type declarations, by key
 // and by name. It is read-only while functions are built; the build state
 // (queue, instances, substitution) lives in IRModule. A generic function is
-// built once per distinct list of concrete type arguments (monomorphized as
-// the old path's Mono pass does).
+// built once per distinct list of concrete type arguments (monomorphized).
 struct IRProgram {
     functions: [FnBody]
     rows: [String:Int]
@@ -203,11 +199,10 @@ struct IRProgram {
     // runs (ir_entry_function).
     startup: [String]
     // A selected Display (`display`), Printable (`show`) or user Comparable
-    // (`compare`) implementation method by "<trait>|<rendered type key>"
-    // (Lower Display.jet render rows, Maps.jet lower_order_user_impl).
+    // (`compare`) implementation method by "<trait>|<rendered type key>".
     render_impls: [String:Int]
     // The selected Close implementation method (`close`) by rendered type
-    // key (Lower Values.jet lower_close_index).
+    // key.
     close_methods: [String:Int]
     // The implementation methods a dynamic trait call may select, by
     // "<trait>|<method>" (function rows; see ir_trait_methods).
@@ -262,9 +257,8 @@ struct IRProgram {
 // method it selects, its trait's short name and its owner's rendered type key.
 struct IRImplMethod { method: String, trait_short: String, owner_key: String }
 
-// The checked source files (`path` -> text) as rows of bytes and line
-// starts (codegen Builder.jet jet_codegen_source_index): IRProgram's
-// `source_bytes`, `source_lines` and `source_rows`.
+// The checked source files (`path` -> text) as rows of bytes and line starts:
+// IRProgram's `source_bytes`, `source_lines` and `source_rows`.
 struct IRSourceIndex {
     bytes: [[U8]]
     lines: [[Int]]
@@ -286,8 +280,8 @@ fn ir_source_index(sources: [String:String]) -> IRSourceIndex Never! {
     index
 }
 
-// The 1-based line holding byte `offset` of `path` (codegen
-// jet_codegen_line_of); None when the file is not a checked source.
+// The 1-based line holding byte `offset` of `path`; None when the file is not
+// a checked source.
 fn ir_source_line_of(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     row :: p.source_rows.get(path) ?? return None
     low := 0
@@ -299,9 +293,8 @@ fn ir_source_line_of(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     Val(low)
 }
 
-// The 1-based character column of byte `offset` of `path` (codegen
-// jet_codegen_source_column_at): 1 when the file is not a checked source,
-// None when the offset falls outside it.
+// The 1-based character column of byte `offset` of `path`: 1 when the file is
+// not a checked source, None when the offset falls outside it.
 fn ir_source_column(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     row :: p.source_rows.get(path) ?? return Val(1)
     if offset < 0 || offset > p.source_bytes[row].len() -> return None
@@ -314,9 +307,8 @@ fn ir_source_column(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     Val(column)
 }
 
-// Line `line` of `path` without its line break (codegen
-// jet_codegen_source_location): "" when the file is not a checked source;
-// None when the line is outside it or not UTF-8.
+// Line `line` of `path` without its line break: "" when the file is not a
+// checked source; None when the line is outside it or not UTF-8.
 fn ir_source_line_text(p: IRProgram, path: String, line: Int) -> String? Never! {
     row :: p.source_rows.get(path) ?? return Val("")
     if line < 1 || line > p.source_lines[row].len() -> return None
@@ -415,11 +407,10 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
     loop (index, definition) in types -> &type_keys.push((key: definition.key.copy(), at: index, row: index))
     loop (index, definition) in types -> &type_keys.push((key: definition.name.copy(), at: types.len() + index, row: index))
     type_rows :: ir_first_rows(^type_keys)
-    // The Display, Printable and Close implementations of the host target
-    // (Lower lower_render_impl_applies, lower_close_index), and the user
-    // Comparable ones (a derived Comparable orders structurally: Lower
-    // lower_order_user_impl). Every trait implementation of the host target
-    // also names its methods' traits for ir_trait_methods.
+    // The Display, Printable and Close implementations of the host target,
+    // and the user Comparable ones (a derived Comparable orders
+    // structurally). Every trait implementation of the host target also names
+    // its methods' traits for ir_trait_methods.
     impl_slots := [String:Int]{}
     impl_traits := [[String]]{}
     impl_methods := [IRImplMethod]{}
@@ -468,7 +459,7 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody], decls: DeclTable) Never!
     rows :: ir_first_rows(^function_keys)
     // An implementation method is checked as its owner's method of that name
     // (a TraitMethod when its trait resolves in the implementing module,
-    // else a plain Method, as codegen jet_codegen_impl_method_matches reads it).
+    // else a plain Method).
     owner_methods := [String:Int]{}
     render_impls := [String:Int]{}
     loop (index, function) in owned {
@@ -665,12 +656,12 @@ fn ir_module_for(p: IRProgram) -> IRModule Never! {
     m
 }
 
-// The implementation methods of every trait by "<trait>|<method>" (codegen
-// jet_codegen_lower_impl_definition): an implementation's method is the
-// same-module method of that name on the implementation's owner. It is
-// checked as a TraitMethod when its trait resolves in the implementing
-// module, else as a plain Method of the owner, which `impl_slots` (by
-// "<module>|<owner key>|<method>") and `impl_traits` name the traits of.
+// The implementation methods of every trait by "<trait>|<method>": an
+// implementation's method is the same-module method of that name on the
+// implementation's owner. It is checked as a TraitMethod when its trait
+// resolves in the implementing module, else as a plain Method of the owner,
+// which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
+// name the traits of.
 fn ir_trait_methods(functions: [FnBody], type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
     slots := [String:Int]{}
     keys := [String]{}
@@ -767,7 +758,7 @@ fn ir_function_row_id(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -
 
 // The type parameters an instance of `function` binds, in order: those its
 // owner's pattern binds (a method of a generic type, `Pair<T>`), then its
-// own (codegen jet_codegen_checked_method_return_type).
+// own.
 fn ir_generic_names(p: IRProgram, function: FnBody) -> [String] Never! {
     names := [String]{}
     loop binder in ir_owner_binders(p, function) -> &names.push(binder.name)
@@ -1010,16 +1001,15 @@ IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
 
 // The function the executable starts: `entry` itself when it takes nothing,
 // returns nothing, the program computes no constant at startup and the
-// `backtrace` build option is the stock `full`, otherwise a generated
-// `entry` function. It first passes a `brief` or `off` backtrace to the
-// runtime (jet_rt_fault_backtrace, the IRBacktrace word), computes every
-// constant computed at startup (p.startup, through ir_startup_guard), then
-// calls `entry` and handles its failure carrier as Lower's entry helper does
-// (Lower/Entry.jet lower_entry_function): an `Err` ends the process with the
+// `backtrace` build option is the stock `full`, otherwise a generated `entry`
+// function. It first passes a `brief` or `off` backtrace to the runtime
+// (jet_rt_fault_backtrace, the IRBacktrace word), computes every constant
+// computed at startup (p.startup, through ir_startup_guard), then calls
+// `entry` and handles its failure carrier: an `Err` ends the process with the
 // error's report and exit status 1 (the default `Err` through
-// jet_rt_entry_error_exit_err, any other error through its Printable text
-// and jet_rt_entry_error_exit), a `None` with "entry returned no value";
-// success drops the result and returns.
+// jet_rt_entry_error_exit_err, any other error through its Printable text and
+// jet_rt_entry_error_exit), a `None` with "entry returned no value"; success
+// drops the result and returns.
 fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row :: m.functions[entry].result
     if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full) -> return entry
@@ -1365,8 +1355,7 @@ fn ir_drop_binding(m: &IRModule, b: &IRBuilder, binding: IRBinding) Never! {
 // other read of a place another holder keeps is copied through its type's
 // runtime clone. A value with a drop and no clone (a file or socket handle)
 // moves: the variable it is read from stops owning it, so its scope-end
-// drop cannot release what the new holder keeps (Lower's moved-binding
-// drop flag).
+// drop cannot release what the new holder keeps.
 fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
     if slot < 0 || b.fresh[slot] || !ir_has_drop(m, b, slot) -> return slot
     row :: b.f.slot_type[slot]
@@ -1485,8 +1474,7 @@ fn ir_meet_paths(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnStat
 }
 
 // A variable one path moved and the other kept still owns its value
-// through a live flag each path sets, which its drop tests (Lower's
-// moved-binding drop flag).
+// through a live flag each path sets, which its drop tests.
 fn ir_join_owned(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnState], else_states: [IROwnState]) Never! {
     joined := [Int]{}
     loop index in 0..<then_states.len() {
@@ -1859,8 +1847,7 @@ fn ir_string_row(m: &IRModule) -> Int Never! {
     ir_type_row(&m, Type.String) ?? 0
 }
 
-// A source location argument triple: (path address, path length, line), as
-// lower_location passes it.
+// A source location argument triple: (path address, path length, line).
 fn ir_location(m: &IRModule, b: &IRBuilder, line: Int) -> [Int] Never! {
     path :: b.f.source_file
     args := ir_static_text(&m, &b, path)
@@ -2016,7 +2003,7 @@ fn ir_load_word(m: &IRModule, b: &IRBuilder, base: Int, offset: Int) -> Int Neve
     slot
 }
 
-// Heap storage of `size` bytes (Lower lower_alloc_bytes: jet_rt_alloc(bytes, 8)).
+// Heap storage of `size` bytes (jet_rt_alloc(bytes, 8)).
 fn ir_box_alloc(m: &IRModule, b: &IRBuilder, size: Int, row: Int) -> Int Never! {
     bytes :: ir_word_const(&m, &b, ir_align8(size))
     align :: ir_word_const(&m, &b, 8)
@@ -2068,7 +2055,7 @@ fn ir_load_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, row: Int) -> 
 }
 
 // A new Result box of type `ty` holding `payload` (-1: Unit) as Ok or Err
-// (Lower lower_result_box; an Ok(()) payload word is 0).
+// (an Ok(()) payload word is 0).
 fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: Bool, payload: Int) -> Int Never! {
     line :: b.line
     row :: ir_value_type(&m, p, ty) ?? ir_pointer_row(&m)
@@ -2092,8 +2079,7 @@ fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: B
 
 // `expression` as a value of type row `row`: a plain `T Never!` call result
 // is boxed into `Ok` where its carrier is wanted, and a Result box is
-// unwrapped where its plain success is (codegen
-// jet_codegen_reconcile_plain_call_return, jet_codegen_lower_return_value).
+// unwrapped where its plain success is.
 fn ir_value_as(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, row: Int, span: Span) -> Int Never! {
     if !ir_is_result(m.types[row].ty) {
         if ir_body_node(p, b, expression).kind == .Ok(inner) -> return ir_value_as(&m, p, &b, inner, row, span)

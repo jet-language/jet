@@ -1,9 +1,6 @@
 // The IR builder's value ownership beyond a runtime drop: a copy that owns
-// every buffer of its own (Lower's clone glue, Lists.jet
-// lower_list_clone_glue and Places.jet lower_glue_clone_fields), and the
-// close of a Close value, or of a value holding one, when the variable that
-// owns it goes out of scope (Lower Values.jet lower_close_frame /
-// lower_close_drop_glue, PartialDrop.jet lower_contains_close).
+// every buffer of its own, and the close of a Close value, or of a value
+// holding one, when the variable that owns it goes out of scope.
 
 use jet_foundation.[Span, Type]
 
@@ -48,10 +45,9 @@ fn ir_copy_needs(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 
 // Makes the byte copy at `at` of a value of the aggregate type row `row` an
 // owner of its own: each counted buffer gains an owner (the copy shares it
-// until a write makes it unique, Lower lower_list_retain) and each value
-// with a runtime clone is cloned. A nested aggregate goes through its row's
-// helper function, so every row's copy is built once (Lower's per-type
-// clone glue) however often a type graph reaches it.
+// until a write makes it unique) and each value with a runtime clone is
+// cloned. A nested aggregate goes through its row's helper function, so every
+// row's copy is built once however often a type graph reaches it.
 fn ir_copy_fixup(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
     if !ir_copy_needs(&m, p, row) -> return
     ir_copy_fixup_body(&m, p, &b, row, at)
@@ -151,11 +147,11 @@ fn ir_wrapper_drop(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Never
 }
 
 // ---------------------------------------------------------------------------
-// Counted buffers (Lower Lists.jet): a List, Map, Set or PriorityQueue header
-// owns its buffer through the runtime's count word (Refcount.jet). A copy
-// retains the buffer, a write first makes it unique, and the last owner's
-// drop drops the elements and frees it. A buffer of capacity 0 is frozen (a
-// static, a window, an empty header) and never counted or freed.
+// Counted buffers: a List, Map, Set or PriorityQueue header owns its buffer
+// through the runtime's count word (Refcount.jet). A copy retains the buffer,
+// a write first makes it unique, and the last owner's drop drops the elements
+// and frees it. A buffer of capacity 0 is frozen (a static, a window, an
+// empty header) and never counted or freed.
 
 // The element row of a type row whose value is a counted buffer header,
 // None for any other (a View shares its owner's buffer uncounted).
@@ -208,11 +204,11 @@ fn ir_mark_members(m: &IRModule, row: Int, members: [IRMember]) -> Int Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Counted boxes (Lower LowerRepr.Boxed): an Option, Result, union or payload
-// enum value is a heap box whose count word (Refcount.jet) counts its
-// holders. A copy is one more owner of the same box, a write through a match
-// window first makes it unique, and the last owner's drop drops the active
-// payload and frees the box (Lower lower_glue_function, lower_box_copy).
+// Counted boxes: an Option, Result, union or payload enum value is a heap box
+// whose count word (Refcount.jet) counts its holders. A copy is one more
+// owner of the same box, a write through a match window first makes it
+// unique, and the last owner's drop drops the active payload and frees the
+// box.
 
 // The clone key of a box row: a copy retains the box (ir_clone).
 fn ir_box_share() -> String Never! { "#box.share" }
@@ -345,9 +341,9 @@ fn ir_box_drop_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int
 }
 
 // The IR function making the box its parameter holds (box row `row`) its
-// caller's own before a write (Lower lower_helper_box_unique): a null box or
-// a sole owner's comes back as is; a shared one is copied, the copy's
-// members gaining an owner, and the old box loses one.
+// caller's own before a write: a null box or a sole owner's comes back as is;
+// a shared one is copied, the copy's members gaining an owner, and the old
+// box loses one.
 fn ir_box_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key :: "#box.unique<{ir_row_key(m, row)}>"
     known :: m.function_rows.get(helper_key) ?? -1
@@ -502,11 +498,10 @@ fn ir_drop_glues(m: &IRModule, p: IRProgram) Never! {
     }
 }
 
-// The drop routine of the type row `row`: a counted buffer's last owner
-// drops each element and frees the buffer (Lower lower_list_drop_glue); a
-// tuple or struct drops each member dropped with it and each recursive
-// edge's wrapper (ir_wrapper_drop); a box's last owner drops its active
-// payload and frees it (ir_box_drop_body).
+// The drop routine of the type row `row`: a counted buffer's last owner drops
+// each element and frees the buffer; a tuple or struct drops each member
+// dropped with it and each recursive edge's wrapper (ir_wrapper_drop); a
+// box's last owner drops its active payload and frees it (ir_box_drop_body).
 fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     key :: ir_drop_key(m, row)
     id :: m.functions.len()
@@ -517,8 +512,7 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     if ir_box_row(m, row) {
         ir_box_drop_body(&m, p, &a, row, at)
     } else if ir_atomic_scalar(m.types[row].ty) != None {
-        // An Atomic<Int> releases the exact Int its word owns (Lower
-        // lower_atomic_drop_glue).
+        // An Atomic<Int> releases the exact Int its word owns.
         _ :: ir_runtime(&m, &a, "jet_rt_atomic_int_drop", [Int]{at}, -1)
     } else if ir_counted_entry(&m, p, row) == .Val(entry) {
         capacity :: ir_load_word(&m, &a, at, 8)
@@ -547,7 +541,7 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
 
 // Gives up one owner of the counted buffer `data` holding `length` elements
 // of row `entry` in `capacity` slots; the last owner drops each element and
-// frees the buffer (Lower lower_list_release_buffer).
+// frees the buffer.
 fn ir_release_buffer(m: &IRModule, b: &IRBuilder, entry: Int, data: Int, length: Int, capacity: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     last :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{data}, bool_row)
@@ -590,8 +584,8 @@ fn ir_release_moved_buffer(m: &IRModule, b: &IRBuilder, data: Int, capacity: Int
     ir_end(&b.f, b.line)
 }
 
-// Makes the counted buffer of the header at `header` its own before a write
-// (Lower lower_list_make_unique); a header of any other type is left as is.
+// Makes the counted buffer of the header at `header` its own before a write;
+// a header of any other type is left as is.
 fn ir_make_unique(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never! {
     if header < 0 || ir_failed(b) -> return
     row :: b.f.slot_type[header]
@@ -602,11 +596,10 @@ fn ir_make_unique(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never!
     ir_emit(&b.f, IROp.Call, -1, helper, start, 1, b.line)
 }
 
-// The IR function making the counted buffer of its header parameter (type
-// row `row`) unique (Lower lower_helper_list_unique): a sole owner, or an
-// empty frozen header, writes in place; any other buffer is replaced by a
-// copy (capacity kept, or the length when frozen) whose elements gain an
-// owner, and the old buffer loses one.
+// The IR function making the counted buffer of its header parameter (type row
+// `row`) unique: a sole owner, or an empty frozen header, writes in place;
+// any other buffer is replaced by a copy (capacity kept, or the length when
+// frozen) whose elements gain an owner, and the old buffer loses one.
 fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key :: "#unique<{ir_row_key(m, row)}>"
     known :: m.function_rows.get(helper_key) ?? -1
@@ -803,10 +796,9 @@ fn ir_close_part_rows(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
 }
 
 // Whether some part of a value of type row `row`, at any depth, has a Close
-// method (Lower lower_contains_close); `row`'s own method does not count.
-// A walk that finds none from a row without a method proves every row it
-// visited free of Close at any depth (m.close_free), and a later walk does
-// not enter a free row again.
+// method; `row`'s own method does not count. A walk that finds none from a
+// row without a method proves every row it visited free of Close at any depth
+// (m.close_free), and a later walk does not enter a free row again.
 fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.close_free.get(row) != None -> return false
     seen := [Int:Bool]{}
@@ -1005,11 +997,11 @@ fn ir_part_bit(bit: Int) -> Int Never! {
     value
 }
 
-// Closes what is left of the value in `value` (type row `row`, at `depth`
-// of its variable's value) whose `parts` may have moved out, by the bits of
+// Closes what is left of the value in `value` (type row `row`, at `depth` of
+// its variable's value) whose `parts` may have moved out, by the bits of
 // `armed`: nothing when the value itself moved; the whole value (only its
-// members when `members_only`) when no part under it did; else each part
-// in turn (Lower lower_partial_drop_node).
+// members when `members_only`) when no part under it did; else each part in
+// turn.
 fn ir_close_partial(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, armed: Int, parts: [IRMovedPart], depth: Int, members_only: Bool, span: Span) Never! {
     // The bits are distinct, so their sums are their unions.
     exact := 0
@@ -1200,10 +1192,9 @@ fn ir_close_index(b: IRBuilder, slot: Int) -> Int Never! {
 }
 
 // The value in `slot` moves out of its variable: its scope no longer closes
-// it. A part read out of a closing variable's value (ir_close_note) moves
-// out of that value, so its variable's scope closes only the rest (Lower's
-// partial move, PartialDrop.jet): the part's bit of `armed` is set while
-// the variable is armed.
+// it. A part read out of a closing variable's value (ir_close_note) moves out
+// of that value, so its variable's scope closes only the rest: the part's
+// bit of `armed` is set while the variable is armed.
 fn ir_close_disarm(b: &IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 -> return
     whole := false
@@ -1302,9 +1293,8 @@ fn ir_closes(b: IRBuilder, slot: Int) -> Bool Never! {
 }
 
 // `defer close(^x)` names the closing variable in `slot`: it closes before
-// the scope's automatic closes, after the defers that follow it (Lower's
-// defer frame runs before the scope's close frame). Its close row moves
-// last, so the deferred rows run latest first.
+// the scope's automatic closes, after the defers that follow it. Its close
+// row moves last, so the deferred rows run latest first.
 fn ir_close_defer(b: &IRBuilder, slot: Int) Never! {
     at :: ir_close_index(b, slot)
     if at < 0 -> return

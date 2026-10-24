@@ -1,12 +1,11 @@
-// Channels (Lower Tasks.jet:698-821): a Sender<T> or Receiver<T> is an owned
-// runtime channel endpoint handle; `channel<T>()` writes both endpoints of
-// one runtime channel into the tuple, the endpoint methods cross the native
-// channel exports, and `loop value in rx` walks the receiver as an Iter.
+// Channels: a Sender<T> or Receiver<T> is an owned runtime channel endpoint
+// handle; `channel<T>()` writes both endpoints of one runtime channel into
+// the tuple, the endpoint methods cross the native channel exports, and `loop
+// value in rx` walks the receiver as an Iter.
 
 use jet_foundation.[Span, BodyHandleOp, TLocal, Type, type_carrier_identity]
 
-// The element of a `Sender<T>` / `Receiver<T>` endpoint (Lower Tasks.jet
-// lower_task_handle_element).
+// The element of a `Sender<T>` / `Receiver<T>` endpoint.
 fn ir_channel_element(ty: Type, endpoint: String) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
         if name == endpoint && args.len() == 1 -> return Val(args[0].copy())
@@ -15,15 +14,15 @@ fn ir_channel_element(ty: Type, endpoint: String) -> Type? Never! {
 }
 
 // The row of a channel endpoint: the owned runtime channel, whose drop
-// retires the endpoint and whose clone adds one (Lower Tasks.jet:47-48).
+// retires the endpoint and whose clone adds one.
 fn ir_channel_row(m: &IRModule, ty: Type, endpoint: String) -> Int Never! {
     atom :: if endpoint == "Sender" -> "sender" else -> "receiver"
     ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_{atom}_drop", "jet_rt_native_{atom}_clone"))
 }
 
-// `channel<T>()` / `channel_bounded<T>(capacity)` (Lower Tasks.jet
-// lower_channel_call): both endpoints of one runtime channel, written into
-// the result tuple; the bound crosses as its exact Int.
+// `channel<T>()` / `channel_bounded<T>(capacity)`: both endpoints of one
+// runtime channel, written into the result tuple; the bound crosses as its
+// exact Int.
 fn ir_channel_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, bounded: Bool, args: [Int], span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     fields :: if ir_untag(result_ty) == .Tuple(items) -> items else -> { return ir_fail_slot(&b, span, "channel producing {ir_type_name(result_ty)}") }
@@ -80,10 +79,9 @@ fn ir_channel_capacity_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, capacity:
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
-// An endpoint method (Lower Tasks.jet lower_channel_method): close on either
-// endpoint, send on a Sender (an owned copy of the value moves into the
-// channel), is_ready, try_receive and receive on a Receiver. None leaves any
-// other operation to ir_handle_method.
+// An endpoint method: close on either endpoint, send on a Sender (an owned
+// copy of the value moves into the channel), is_ready, try_receive and
+// receive on a Receiver. None leaves any other operation to ir_handle_method.
 fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     receiver_ty :: ir_subst(m, ir_ty(p, b, receiver))
     sender :: ir_channel_element(receiver_ty, "Sender")
@@ -139,10 +137,9 @@ fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     Val(result)
 }
 
-// `loop value in rx` (Lower Tasks.jet lower_channel_cursor_init): the
-// receiver becomes a runtime Iter over the values it receives, which takes a
-// fresh endpoint over and adds one for a kept receiver; the Iter is then
-// walked as any other.
+// `loop value in rx`: the receiver becomes a runtime Iter over the values it
+// receives, which takes a fresh endpoint over and adds one for a kept
+// receiver; the Iter is then walked as any other.
 fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, body: [Int], span: Span) Never! {
     collection_ty :: ir_ty(p, b, collection)
     element :: ir_channel_element(ir_subst(m, collection_ty), "Receiver") ?? return ir_fail(&b, span, "channel loop over {ir_type_name(collection_ty)}")
@@ -159,8 +156,7 @@ fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, va
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, item_row, body)
 }
 
-// `select { ... }` (Tasks.jet lower_task_select on the old path): the
-// readiness table's receivers and timer deadlines
+// `select { ... }`: the readiness table's receivers and timer deadlines
 // (exact nanoseconds) become two owned Lists, which the runtime empties, and
 // the runtime writes the ready arm and its payload (the received value's
 // box, or None for a timer) into the result tuple.
@@ -211,8 +207,8 @@ fn ir_select_payload_type(ty: Type) -> Type Never! {
     }
 }
 
-// The receivers and timer durations of a readiness table, latest arm first
-// (codegen jet_codegen_lower_select_builder); false for any other builder.
+// The receivers and timer durations of a readiness table, latest arm first;
+// false for any other builder.
 fn ir_select_table(p: IRProgram, b: IRBuilder, table: Int, receivers: &[Int], durations: &[Int]) -> Bool Never! {
     if ir_body_node(p, b, table).kind == {
         .SelectStart -> return true

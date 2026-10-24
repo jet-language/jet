@@ -1,12 +1,12 @@
-// Synchronous typed events (Lower Events.jet): an Event<T> is the runtime's
-// EventCore handle; Subscription, EventScope and EventTrace are its other
-// handles. A handler is the moved closure box the provider retains, invoked
-// through the typed lazy.callback helper with the emitted payload's slot lent
-// for the call, and released once by the release helper.
+// Synchronous typed events: an Event<T> is the runtime's EventCore handle;
+// Subscription, EventScope and EventTrace are its other handles. A handler is
+// the moved closure box the provider retains, invoked through the typed
+// lazy.callback helper with the emitted payload's slot lent for the call, and
+// released once by the release helper.
 
 use jet_foundation.[Span, BodyHandleOp, Type, type_carrier_identity]
 
-// The compiler-known `Event<T>` (Lower Events.jet lower_event_type).
+// The compiler-known `Event<T>`.
 fn ir_event_type(ty: Type) -> Bool Never! {
     if ir_untag(ty) == .Apply(name, args) -> return name == "Event" && args.len() == 1
     false
@@ -16,9 +16,8 @@ fn ir_event_row(m: &IRModule, ty: Type) -> Int Never! {
     ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_jet_event", "jet_rt_handle_clone_jet_event"))
 }
 
-// `core.event.__event_with_policy<T>(policy)` (Lower Events.jet
-// lower_event_with_policy): the provider borrows the policy, which is
-// released here when consumed.
+// `core.event.__event_with_policy<T>(policy)`: the provider borrows the
+// policy, which is released here when consumed.
 fn ir_event_with_policy(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     if !ir_event_type(result_ty) -> return ir_fail_slot(&b, span, "Event.with_policy producing {ir_type_name(result_ty)}")
@@ -31,8 +30,8 @@ fn ir_event_with_policy(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg
     event
 }
 
-// Every `core.event` method row the synchronous provider implements (Lower
-// Events.jet lower_event_method); None leaves any other to ir_handle_method.
+// Every `core.event` method row the synchronous provider implements; None
+// leaves any other to ir_handle_method.
 fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     if operation == {
         .EventMethod(_) -> {}
@@ -63,7 +62,7 @@ fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 }
 
 // A receiver-only method: Unit, an owned exact Int, a Bool or an owned
-// String (Lower Events.jet lower_event_query).
+// String.
 fn ir_event_query(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "{export} with {args.len()} arguments")
     handle :: ir_expr(&m, p, &b, receiver)
@@ -80,9 +79,9 @@ fn ir_event_query(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     result
 }
 
-// on / once / on_priority(scope, (priority,) handler) (Lower Events.jet
-// lower_event_listen): the provider takes the handler's closure box, so a
-// kept handler is cloned for it first; the priority crosses as a native word.
+// on / once / on_priority(scope, (priority,) handler): the provider takes the
+// handler's closure box, so a kept handler is cloned for it first; the
+// priority crosses as a native word.
 fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], prioritized: Bool, once: Bool, span: Span) -> Int Never! {
     if args.len() != (if prioritized -> 3 else -> 2) -> return ir_fail_slot(&b, span, "Event listener registration with {args.len()} arguments")
     handler_ty :: ir_ty(p, b, args[args.len() - 1])
@@ -126,9 +125,9 @@ fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     subscription
 }
 
-// emit(payload) (Lower Events.jet lower_event_emit): the payload's native
-// slot is lent to every handler and a consumed payload is released after
-// the dispatch; the result is the dispatch's EventTrace.
+// emit(payload): the payload's native slot is lent to every handler and a
+// consumed payload is released after the dispatch; the result is the
+// dispatch's EventTrace.
 fn ir_event_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Event.emit with {args.len()} arguments")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)

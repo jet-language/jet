@@ -1,22 +1,22 @@
 // x86-64 code for a whole IR module, and its relocatable object through the
 // existing object writer (JetBackend Image/Object.jet). The writer and its
 // DWARF read an X64ObjectModule (Image/Emission.jet): the IR data rows as
-// LIR data (same ids), then an immortal String header per ConstText row and
+// X64Data (same ids), then an immortal String header per ConstText row and
 // the texts the selector names itself (source paths, stop messages,
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 
 use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
 use jet_backend.[
-    LIRData, LIRDataID, LIRDataReloc, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunctionID, LIRModuleDebug,
-    X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64FunctionSource, X64LineRow, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
+    X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
+    X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
     x64_object_functions_threads, x64_object_main, x64_object_main_debug,
 ]
 
 // The module-wide rows every function's selection reads.
 struct IRX64Tables {
-    // LIR data: the IR data rows (same ids), then headers and texts.
-    data: [LIRData]
+    // The IR data rows (same ids), then headers and texts.
+    data: [X64Data]
     // Byte length of every data row.
     lengths: [Int]
     // Per IR data row: the data row of its immortal String header, -1 when
@@ -27,7 +27,7 @@ struct IRX64Tables {
     // DWARF: the source files (row per distinct path) and a debug type per IR type row.
     files: [String]
     file_rows: [String:Int]
-    debug_types: [LIRDebugType]
+    debug_types: [X64DebugType]
     type_debug: [Int]
 }
 
@@ -38,7 +38,7 @@ struct IRX64Result {
     functions: [X64CompiledFunction]
     debug: [X64FunctionDebug]
     // Per function: the debug variables its ranges index.
-    variables: [[LIRDebugVariable]]
+    variables: [[X64DebugVariable]]
     errors: [String]
     tables: IRX64Tables
     threads: CompilerThreads
@@ -50,37 +50,37 @@ fn ir_x64_add_text(tables: &IRX64Tables, text: String) -> Int Never! {
     id :: tables.data.len()
     bytes :: text.bytes()
     &tables.lengths.push(bytes.len())
-    &tables.data.push(LIRData{id: LIRDataID{value: id}, bytes: bytes, align: 1, relocs: [LIRDataReloc]{}})
+    &tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}})
     tables.texts[text] = id
     id
 }
 
 // The DWARF description of a slot type, by its machine layout.
-fn ir_x64_debug_type(ty: IRType) -> LIRDebugType Never! {
+fn ir_x64_debug_type(ty: IRType) -> X64DebugType Never! {
     if ty.kind == {
-        .Unit -> LIRDebugType{name: "Unit", size: 0, kind: LIRDebugTypeKind.Opaque}
-        .Bool -> LIRDebugType{name: "Bool", size: 1, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Bool}}
-        .Int -> LIRDebugType{name: "Int", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Signed}}
+        .Unit -> X64DebugType{name: "Unit", size: 0, kind: X64DebugTypeKind.Opaque}
+        .Bool -> X64DebugType{name: "Bool", size: 1, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Bool}}
+        .Int -> X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}}
         .Word -> {
             bits :: ir_x64_bits(ir_x64_shape(ty))
-            // Whole bytes, rounded up (Lower Debug.jet lower_debug_word): a U4 is 1 byte.
-            LIRDebugType{name: "{if ty.signed -> "I" else -> "U"}{bits}", size: (bits + 7) /% 8, kind: LIRDebugTypeKind.Base{encoding: if ty.signed -> LIRDebugEncoding.Signed else -> LIRDebugEncoding.Unsigned}}
+            // Whole bytes, rounded up: a U4 is 1 byte.
+            X64DebugType{name: "{if ty.signed -> "I" else -> "U"}{bits}", size: (bits + 7) /% 8, kind: X64DebugTypeKind.Base{encoding: if ty.signed -> X64DebugEncoding.Signed else -> X64DebugEncoding.Unsigned}}
         }
-        .Float -> LIRDebugType{name: "Float", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
-        .Float32 -> LIRDebugType{name: "F32", size: 4, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
-        .Char -> LIRDebugType{name: "Char", size: 4, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Char}}
-        .String -> LIRDebugType{name: "String", size: 8, kind: LIRDebugTypeKind.Opaque}
-        .Pointer -> LIRDebugType{name: "Pointer", size: 8, kind: LIRDebugTypeKind.Pointer{target: -1}}
-        .Aggregate -> LIRDebugType{name: "Aggregate", size: ty.size, kind: LIRDebugTypeKind.Opaque}
+        .Float -> X64DebugType{name: "Float", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Float}}
+        .Float32 -> X64DebugType{name: "F32", size: 4, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Float}}
+        .Char -> X64DebugType{name: "Char", size: 4, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Char}}
+        .String -> X64DebugType{name: "String", size: 8, kind: X64DebugTypeKind.Opaque}
+        .Pointer -> X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
+        .Aggregate -> X64DebugType{name: "Aggregate", size: ty.size, kind: X64DebugTypeKind.Opaque}
     }
 }
 
 fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [LIRData]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [LIRDebugType]{}, type_debug: [Int]{}}
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words; a text row is bytes.
         align :: if m.data_relocs.get(row) != None -> 8 else -> 1
-        &tables.data.push(LIRData{id: LIRDataID{value: row}, bytes: bytes, align: align, relocs: [LIRDataReloc]{}})
+        &tables.data.push(X64Data{id: X64DataID{value: row}, bytes: bytes, align: align, relocs: [X64DataReloc]{}})
         &tables.lengths.push(bytes.len())
         &tables.headers.push(-1)
     }
@@ -105,7 +105,7 @@ fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
         relocs :: m.data_relocs.get(row) ?? next
         loop reloc in relocs {
             target :: if reloc.text -> ir_x64_text_header(&tables, reloc.target) else -> reloc.target
-            &tables.data[row].relocs.push(LIRDataReloc{offset: reloc.offset, target: LIRDataID{value: target}, addend: reloc.addend})
+            &tables.data[row].relocs.push(X64DataReloc{offset: reloc.offset, target: X64DataID{value: target}, addend: reloc.addend})
         }
     }
     loop ty in m.types {
@@ -128,7 +128,7 @@ fn ir_x64_text_header(tables: &IRX64Tables, row: Int) -> Int Never! {
         bytes[8 + index] = U8{length.bit_and(255)}
         length = length >> 8
     }
-    &tables.data.push(LIRData{id: LIRDataID{value: header}, bytes: bytes, align: 8, relocs: [LIRDataReloc]{LIRDataReloc{offset: 0, target: LIRDataID{value: row}, addend: 0}}})
+    &tables.data.push(X64Data{id: X64DataID{value: header}, bytes: bytes, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: row}, addend: 0}}})
     &tables.lengths.push(24)
     tables.headers[row] = header
     header
@@ -160,7 +160,7 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
     workers :: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
-    variables := [[LIRDebugVariable]]{}
+    variables := [[X64DebugVariable]]{}
     errors := [String]{}
     if workers <= 1 {
         loop row in 0..<count {
@@ -198,9 +198,9 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
             &variables.push(^selected.variables)
         } else {
             &row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
-            &functions.push(X64CompiledFunction{id: LIRFunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}})
+            &functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}})
             &debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
-            &variables.push([LIRDebugVariable]{})
+            &variables.push([X64DebugVariable]{})
         }
         row -= 1
     }
@@ -334,12 +334,12 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     if entry < 0 || entry >= owned.program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
     program :: ir_x64_object_module(&owned)
-    main :: x64_object_main(LIRFunctionID{value: entry})
+    main :: x64_object_main(X64FunctionID{value: entry})
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
-    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, owned.threads, debug_info)
+    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, owned.threads, debug_info)
 }
 
 // Order the functions of `compiled` (and their debug rows) for the object's
@@ -399,7 +399,7 @@ fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], deb
     program :: ir_x64_object_module(&owned)
     debug :: compiler_take_rows<X64FunctionDebug>(&owned.debug)
     functions :: compiler_take_rows<X64CompiledFunction>(&owned.functions)
-    globals :: loop row in exports -> X64RuntimeExport{function: LIRFunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
+    globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
     x64_object_functions_threads(program, functions, debug, globals, owned.threads, debug_info)
 }
 
@@ -407,17 +407,17 @@ fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], deb
 // and per IR function its name, file, line and debug variables (taken).
 fn ir_x64_object_module(owned: &IRX64Result) -> X64ObjectModule Never! {
     // Popped in function order.
-    variables := compiler_take_rows<[LIRDebugVariable]>(&owned.variables)
+    variables := compiler_take_rows<[X64DebugVariable]>(&owned.variables)
     &variables.reverse()
     sources := [X64FunctionSource]{}
     loop f in owned.program.functions {
         file :: owned.tables.file_rows.get(f.source_file) ?? -1
-        listed := &variables.pop() ?? [LIRDebugVariable]{}
+        listed := &variables.pop() ?? [X64DebugVariable]{}
         &sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: ^listed})
     }
     X64ObjectModule{
-        data: compiler_take_rows<LIRData>(&owned.tables.data),
-        debug: LIRModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(&owned.tables.files), types: compiler_take_rows<LIRDebugType>(&owned.tables.debug_types)},
+        data: compiler_take_rows<X64Data>(&owned.tables.data),
+        debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(&owned.tables.files), types: compiler_take_rows<X64DebugType>(&owned.tables.debug_types)},
         functions: ^sources,
     }
 }

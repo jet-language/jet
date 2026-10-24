@@ -13,7 +13,7 @@
 // Pointer words in `.data` use R_X86_64_64 in `.rela.data` against the
 // same section symbol. The module data is writable: the entry function fills
 // the String slots of frozen statics with runtime handles before the program
-// runs (Lower/Statics.jet lower_static_fixups); nothing else writes it.
+// runs; nothing else writes it.
 // `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
 // function's frame, source lines and variables.
 
@@ -96,7 +96,7 @@ fn elf64_section_header(bytes: &[U8], name: Int, kind: Int, flags: Int, offset: 
 // libc main transfers its raw argc/argv/envp before jet_rt_main(entry).
 // The push keeps rsp 16-byte aligned at all calls. Host constructors have
 // already run through the runtime object's init array.
-fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
+fn x64_object_main(entry: X64FunctionID) -> X64CompiledFunction Never! {
     code := [U8]{}
     x64_push(&code, X64_RBX)
     arguments_at :: x64_call_rel32(&code)
@@ -110,7 +110,7 @@ fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
     x64_pop(&code, X64_RBX)
     x64_ret(&code)
     relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
-    X64CompiledFunction{id: LIRFunctionID{value: -1}, name: "main", code: code, relocs: relocs}
+    X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code, relocs: relocs}
 }
 
 // `main`'s frame: after `push rbx` the CFA is rsp + 16 with rbx below the

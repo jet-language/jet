@@ -10,9 +10,8 @@ use jet_foundation.[
 ]
 
 // The compiler-owned `Range` record a range value constructs. It has no
-// source declaration; Codegen adds its row to every program
-// (`jet_codegen_compiler_owned_record_definition`) under its bare canonical key.
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
+// source declaration; every program has its row under its bare canonical
+// key.
 IR_RANGE_RECORD :: "Range"
 
 fn ir_range_record_fields() -> [TypeTupleField] Never! {
@@ -32,13 +31,11 @@ struct IRCompilerOwnedRecord {
 
 // Compiler-owned Core records (`ProcessReceipt`, `IOContext`, ...) are checked
 // runtime values with no Jet declaration. Like `Range`, each joins every
-// program as one row under its bare canonical key
-// (`jet_codegen_compiler_owned_record_definition`), so a field projection on
-// one resolves to the same nominal identity as in Rust. Field types are read
-// from the Core record rows (`core_record_field`), never guessed. The rows
-// carry no `MarkerArgInfo.value` (its type is computed from the policy rule
-// argument declarations), so neither does this table.
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_CORE_RECORDS
+// program as one row under its bare canonical key, so a field projection on
+// one resolves to that one nominal identity. Field types are read from the
+// Core record rows (`core_record_field`), never guessed. The rows carry no
+// `MarkerArgInfo.value` (its type is computed from the policy rule argument
+// declarations), so neither does this table.
 IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "PluginFrame", fields: [String]{"function", "component", "offset"}},
     {name: "PluginFault", fields: [String]{"export", "message", "frames"}},
@@ -280,8 +277,7 @@ IR_COMPILER_OWNED_GEOMETRY_POINTS :: comptime { [String]{
     "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta",
 } }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_MATH_RECORDS
-// (each field is the type's scalar, Rust `math_scalar_ty`).
+// Each field is the type's scalar.
 IR_COMPILER_OWNED_MATH_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "F32x4", fields: [String]{"x", "y", "z", "w"}},
     {name: "F64x2", fields: [String]{"x", "y"}},
@@ -397,8 +393,7 @@ fn ir_compiler_owned_named(fields: [TypeTupleField]) -> IRCompilerOwnedPayload N
 
 // The payload of `name.variant` on a COMPILER_OWNED_ENUMS row, written over
 // the row's type parameters; a plain Core enum row's variants are all unit.
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
-// (and jet-sema core_net_error_variants for NetError/NetDNSError).
+// NetError and NetDNSError carry their checked variant payloads.
 fn ir_compiler_owned_enum_payload(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
     bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
     if name == "TaskFailure" || name == "TaskOutcome" {

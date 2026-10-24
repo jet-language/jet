@@ -1,4 +1,4 @@
-// Canonical lowering for closed TIR builtin-method operations.
+// Canonical lowering for closed checked builtin-method operations.
 use jet_foundation.[
     Effect,
     TBuiltinOp,
@@ -27,7 +27,7 @@ fn ir_builtin_untag(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return ir_builtin_untag(inner)
         // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
-        // checked type (a read parameter), which stays on the TIR node.
+        // checked type (a read parameter), which stays on the checked node.
         else -> return ty.copy()
     }
 }

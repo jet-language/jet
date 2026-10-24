@@ -1,13 +1,10 @@
-// The IR builder's closure boxes and Core closure calls (codegen
-// jet_codegen_lower_core_closure_call, Lower Lower.jet:7305): the counted
-// box every function value is, `task` spawns (Lower Tasks.jet
-// lower_task_spawn) and `core.mem.scope.guard` (Lower Closures.jet
-// lower_scope_guard), with the owned runtime Task handle and the ScopeGuard
-// carrier they produce.
+// The IR builder's closure boxes and Core closure calls: the counted box
+// every function value is, `task` spawns and `core.mem.scope.guard`, with the
+// owned runtime Task handle and the ScopeGuard carrier they produce.
 
 use jet_foundation.[Span, BodyCoreClosureKind, BodyLambda, Type, type_carrier_identity]
 
-// The element of a `Task<T>` (Lower Tasks.jet lower_task_element).
+// The element of a `Task<T>`.
 fn ir_task_element(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
         if name == "Task" && args.len() == 1 -> return Val(args[0].copy())
@@ -15,8 +12,7 @@ fn ir_task_element(ty: Type) -> Type? Never! {
     None
 }
 
-// Whether `ty` is the ScopeGuard `core.mem.scope.guard` returns (Lower
-// Closures.jet:512 lower_is_scope_guard).
+// Whether `ty` is the ScopeGuard `core.mem.scope.guard` returns.
 fn ir_scope_guard_type(ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
         .Named(name) -> name == "ScopeGuard"
@@ -26,14 +22,13 @@ fn ir_scope_guard_type(ty: Type) -> Bool Never! {
 }
 
 // The row of a Task handle: an owned runtime JetTask whose drop joins or
-// detaches it (Lower Tasks.jet:46).
+// detaches it.
 fn ir_task_row(m: &IRModule, ty: Type) -> Int Never! {
     ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_task_drop", ""))
 }
 
 // The row of a ScopeGuard: the callback's closure box, whose drop (the
-// generated jet_ir_scope_guard_drop) runs the callback, then retires the box
-// (Lower Closures.jet:510-527: the box reowned as a guard).
+// generated jet_ir_scope_guard_drop) runs the callback, then retires the box.
 fn ir_scope_guard_row(m: &IRModule, ty: Type) -> Int Never! {
     symbol :: "jet_ir_scope_guard_drop"
     if m.function_rows.get(symbol) == None {
@@ -54,8 +49,7 @@ fn ir_scope_guard_row(m: &IRModule, ty: Type) -> Int Never! {
 }
 
 // Retires one reference to the closure box `boxed`; the last owner runs the
-// box's release helper at 16 when it has one (Lower Closures.jet:483
-// lower_closure_box_unref).
+// box's release helper at 16 when it has one.
 fn ir_closure_unref(m: &IRModule, b: &IRBuilder, boxed: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     pointer_row :: ir_pointer_row(&m)
@@ -73,12 +67,12 @@ fn ir_closure_unref(m: &IRModule, b: &IRBuilder, boxed: Int) Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Function values (Lower Closures.jet layout): a heap box with its count
-// word at 0, its code at 8, its release helper at 16 and the captures from
-// 24. Every function value is a counted owner of its box: a copy is one more
-// owner of the same box (jet_rt_native_closure_retain), a drop retires one
-// (jet_ir_closure_drop), and the last owner runs the release helper, which
-// drops the captures the box owns and frees it.
+// Function values: a heap box with its count word at 0, its code at 8, its
+// release helper at 16 and the captures from 24. Every function value is a
+// counted owner of its box: a copy is one more owner of the same box
+// (jet_rt_native_closure_retain), a drop retires one (jet_ir_closure_drop),
+// and the last owner runs the release helper, which drops the captures the
+// box owns and frees it.
 
 // The clone key of a function value row: a copy retains the box (ir_clone).
 fn ir_closure_share() -> String Never! { "#closure.share" }
@@ -127,10 +121,10 @@ fn ir_closure_box(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: [
     boxed
 }
 
-// The release helper of a box of `bytes` bytes with `captures` (Lower
-// Closures.jet lower_closure_release): drops each capture the box owns as
-// an aggregate's glue drops its members (ir_glue_drops), never a held
-// place, then frees the box. One per capture shape.
+// The release helper of a box of `bytes` bytes with `captures`: drops each
+// capture the box owns as an aggregate's glue drops its members
+// (ir_glue_drops), never a held place, then frees the box. One per capture
+// shape.
 fn ir_closure_release(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     owned := [IRCaptureSlot]{}
     key := "#closure.release<{ir_align8(bytes)}"
@@ -179,7 +173,7 @@ fn ir_release_closure(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
 }
 
 // task.release(env): drops the task body's closure box once the task is done
-// with it (Lower Tasks.jet:474 lower_helper_task_release).
+// with it.
 fn ir_task_release_body(m: &IRModule, a: &IRBuilder) Never! {
     pointer_row :: ir_pointer_row(&m)
     env :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "env"))
@@ -213,10 +207,9 @@ fn ir_core_closure_name(kind: BodyCoreClosureKind) -> String Never! {
 }
 
 // `task body` / `group.spawn(body)`: the body becomes a zero-parameter
-// closure whose result is the checked Task element (codegen Expressions.jet:
-// 3698-3727); the runtime takes the box over with its task.body
-// (lazy.callback) and task.release helpers and the result's descriptor
-// (Lower Tasks.jet:316 lower_task_spawn). A grouped spawn joins its group.
+// closure whose result is the checked Task element (3698-3727); the runtime
+// takes the box over with its task.body (lazy.callback) and task.release
+// helpers and the result's descriptor. A grouped spawn joins its group.
 fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: Int?, site: Int, label: String, executable: BodyLambda, span: Span) -> Int Never! {
     task_ty :: ir_subst(m, ty)
     element :: ir_task_element(task_ty) ?? return ir_fail_slot(&b, span, "spawn producing {ir_type_name(ty)}")
@@ -247,8 +240,7 @@ fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: Int
     release :: handed.release
     meta :: ir_lazy_meta(&m, p, &b, element, span)
     if meta < 0 -> return -1
-    // A fallible body's error descriptor shows through Debug (Lower
-    // Tasks.jet:158 lower_task_body_meta).
+    // A fallible body's error descriptor shows through Debug.
     if ir_untag(element) == .Result(_, err) {
         pointer_row :: ir_pointer_row(&m)
         child :: ir_temp(&m, &b, pointer_row)
@@ -293,7 +285,7 @@ fn ir_spawn_label(p: IRProgram, b: IRBuilder, executable: BodyLambda) -> String 
 }
 
 // `core.mem.scope.guard(callback)`: the callback's closure box, reowned as
-// the ScopeGuard whose scope-end drop runs it (Lower Closures.jet:517).
+// the ScopeGuard whose scope-end drop runs it.
 fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
     closure_ty :: ir_lambda_function_type(executable)
     env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
@@ -306,7 +298,7 @@ fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executabl
 }
 
 // `^task.detach()`: the runtime takes the handle over and lets the task run
-// on unsupervised (Lower Tasks.jet:446).
+// on unsupervised.
 fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
     handle :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -315,9 +307,9 @@ fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span
     return -1
 }
 
-// `^task.join()`: the runtime takes the handle over, waits for the task
-// and writes the body's outcome into the Result box (Lower Tasks.jet:455,
-// jet_rt_native_task_join without flattening).
+// `^task.join()`: the runtime takes the handle over, waits for the task and
+// writes the body's outcome into the Result box (jet_rt_native_task_join
+// without flattening).
 fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     result_ty :: ir_subst(m, ty)
     err_ty := Type.Int

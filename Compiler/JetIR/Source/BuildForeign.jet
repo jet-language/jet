@@ -1,7 +1,7 @@
-// Calls of checked foreign functions (Lower CForeign.jet lower_c_import_call):
-// a direct C function is called by its checked symbol, which the program's C
-// closure defines (an `#FFI(c)` body's `jet_inline_jet_ffi_<name>` wrapper);
-// an `#FFI(asm)` function is a leaf whose code is its assembled template.
+// Calls of checked foreign functions: a direct C function is called by its
+// checked symbol, which the program's C closure defines (an `#FFI(c)` body's
+// `jet_inline_jet_ffi_<name>` wrapper); an `#FFI(asm)` function is a leaf
+// whose code is its assembled template.
 
 use jet_backend.[x64_assemble_template]
 use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, decl_table_find]
@@ -188,7 +188,7 @@ fn ir_asm_leaf(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, 
 }
 
 // The template of an `#FFI(asm)` function: the first triple-quoted body
-// within its checked span (Lower InlineAsm.jet lower_asm_source).
+// within its checked span.
 fn ir_asm_source(p: IRProgram, foreign: SemaCheckedForeignFunction) -> String? Never! {
     row :: p.source_rows.get(foreign.source_file) ?? return None
     start :: foreign.span.start

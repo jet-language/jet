@@ -1,14 +1,14 @@
-// Module constants as static data (#5001 frozen statics; Lower Statics.jet):
-// a constant's value is laid out once, at build time, as read-only static
-// objects (IRModule.data_relocs), and every read borrows it. A static List
-// or Map is frozen (capacity 0 over static storage; a Map's entries in its
-// ascending key order), a static Option/Result/enum box carries an immortal
-// (negative) count word 24 bytes before the address its readers hold, and a
-// String is the immortal String of a data row (as ConstText): the runtime's
+// Module constants as static data (#5001 frozen statics): a constant's value
+// is laid out once, at build time, as read-only static objects
+// (IRModule.data_relocs), and every read borrows it. A static List or Map is
+// frozen (capacity 0 over static storage; a Map's entries in its ascending
+// key order), a static Option/Result/enum box carries an immortal (negative)
+// count word 24 bytes before the address its readers hold, and a String is
+// the immortal String of a data row (as ConstText): the runtime's
 // retain/release/unique and every glue's capacity test leave them untouched,
-// a copy shares them, and a write first makes its own copy. Compile-time
-// code runs the same machine code over the same objects, so a constant has
-// one meaning on every tier.
+// a copy shares them, and a write first makes its own copy. Compile-time code
+// runs the same machine code over the same objects, so a constant has one
+// meaning on every tier.
 //
 // The objects' address words are relocations: in an ET_EXEC image (jet and
 // the executables it builds) the linker resolves them, so a read needs no
@@ -156,11 +156,11 @@ fn ir_static_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: Stri
     slot
 }
 
-// The address of module storage `definition` (a mutable module binding;
-// Lower lower_static_storage): one 8-byte data row per declaration in the
-// object's writable data, holding the initial value's word, that every read
-// loads and every assignment stores. As on the old path, storage holds one
-// plain word (a Bool, fixed-width or Char word, or a Float); -1 on failure.
+// The address of module storage `definition` (a mutable module binding): one
+// 8-byte data row per declaration in the object's writable data, holding the
+// initial value's word, that every read loads and every assignment stores.
+// Storage holds one plain word (a Bool, fixed-width or Char word, or a
+// Float); -1 on failure.
 fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
     kind :: m.types[row].kind

@@ -1,17 +1,15 @@
-// The IR builder's `#Transact(name) { .. }` blocks (codegen Statements.jet
-// jet_codegen_lower_transaction, Lower Transaction.jet). The handle is a
-// 24-byte box [committed, commit hooks, rollback hooks], each hook list a
-// chain of 24-byte nodes [closure box, next, result runner] with the newest
-// first; its drop (the generated jet_ir_transaction_drop) runs the commit
-// hooks LIFO when committed, else the rollback hooks LIFO, and releases the
-// other list un-run. A block touching Shared values also owns a runtime Stm,
-// committed at the clean end and rolled back by its drop. The values the
-// block mutates are snapshotted on entry. Every exit that is not the clean
-// end rolls back the same way (#5477): a `return`, a propagated error or a
-// `break`/`next` leaving the block (ir_tx_unwind) and a stop (a panic, a
-// cancellation, process.exit, os.stop: Build.jet ir_stop_return) restore the
-// snapshots, latest first, then drop the Stm and the handle before the
-// exit's own drops.
+// The IR builder's `#Transact(name) { .. }` blocks. The handle is a 24-byte
+// box [committed, commit hooks, rollback hooks], each hook list a chain of
+// 24-byte nodes [closure box, next, result runner] with the newest first; its
+// drop (the generated jet_ir_transaction_drop) runs the commit hooks LIFO
+// when committed, else the rollback hooks LIFO, and releases the other list
+// un-run. A block touching Shared values also owns a runtime Stm, committed
+// at the clean end and rolled back by its drop. The values the block mutates
+// are snapshotted on entry. Every exit that is not the clean end rolls back
+// the same way (#5477): a `return`, a propagated error or a `break`/`next`
+// leaving the block (ir_tx_unwind) and a stop (a panic, a cancellation,
+// process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
+// latest first, then drop the Stm and the handle before the exit's own drops.
 
 use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
 
@@ -49,9 +47,9 @@ fn ir_stm_row(m: &IRModule) -> Int Never! {
     ir_intern_type(&m, "Stm", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_stm_rollback", ""))
 }
 
-// Drop glue of a Transaction (Lower lower_transaction_drop_glue): the chosen
-// list runs, the other is released un-run, and the box is freed. A null
-// handle (one an early exit already dropped) is nothing.
+// Drop glue of a Transaction: the chosen list runs, the other is released
+// un-run, and the box is freed. A null handle (one an early exit already
+// dropped) is nothing.
 fn ir_transaction_drop_body(m: &IRModule, a: &IRBuilder) Never! {
     pointer_row :: ir_pointer_row(&m)
     handle :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "handle"))
@@ -75,13 +73,12 @@ fn ir_transaction_drop_body(m: &IRModule, a: &IRBuilder) Never! {
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
-// Walks the hook list from `head`: each node's callback runs (when `run`)
-// and is released, then the node is freed (Lower lower_transaction_walk).
-// A `guarded` callback (a rollback hook) runs between
-// jet_rt_transaction_hook_enter and _leave (SharedTransactions.jet): masked
-// from the stop being unwound, under its own deadline, and a failure in it
-// is reported as a secondary failure, so the call has no stop check and
-// the walk goes on to the next hook.
+// Walks the hook list from `head`: each node's callback runs (when `run`) and
+// is released, then the node is freed. A `guarded` callback (a rollback hook)
+// runs between jet_rt_transaction_hook_enter and _leave
+// (SharedTransactions.jet): masked from the stop being unwound, under its own
+// deadline, and a failure in it is reported as a secondary failure, so the
+// call has no stop check and the walk goes on to the next hook.
 fn ir_transaction_walk(m: &IRModule, a: &IRBuilder, head: Int, run: Bool, guarded: Bool) Never! {
     node :: ir_temp_like(&m, &a, head)
     ir_emit(&a.f, IROp.Copy, node, head, -1, -1, a.line)
@@ -196,10 +193,10 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
     ir_scope_close(&m, &b)
 }
 
-// `#Shield { .. }` (Lower lower_scope .Shield): the body runs inside the
-// session's nesting Shield depth, entered before it and left after its
-// bindings drop, or by an early exit (ir_tx_unwind); stop points inside it
-// are masked and leaving it delivers what arrived meanwhile.
+// `#Shield { .. }`: the body runs inside the session's nesting Shield depth,
+// entered before it and left after its bindings drop, or by an early exit
+// (ir_tx_unwind); stop points inside it are masked and leaving it delivers
+// what arrived meanwhile.
 fn ir_shield(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _ :: ir_runtime(&m, &b, "jet_rt_session_shield_enter", [Int]{}, -1)
     &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true, deadline: -1})
@@ -211,8 +208,7 @@ fn ir_shield(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
 }
 
-// `#Context(field: value, …) { .. }` (Rust tir_to_mir_stmt ContextBlock,
-// MIRRust MirScopeKind::Context): the guard values run in order; a
+// `#Context(field: value, …) { .. }`: the guard values run in order; a
 // `deadline` (absolute wall milliseconds, Deadline.jet) is installed for the
 // body by jet_ctx_push_deadline, which saves the enclosing one in a stack
 // save area, and jet_ctx_pop_deadline restores it after the body's bindings
@@ -246,8 +242,7 @@ fn ir_context_block(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCont
 }
 
 // Saves the entry value of `snapshot.local` in a generated variable: its
-// Rollback `snapshot` result, else an owned copy (codegen
-// jet_codegen_transaction_save_snapshot).
+// Rollback `snapshot` result, else an owned copy.
 fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransactionSnapshot, span: Span) -> IRTxSnapshot? Never! {
     binding :: ir_lookup_local(b, snapshot.local) ?? {
         ir_fail(&b, span, "transaction snapshot of unknown local {snapshot.local.name}")
@@ -299,7 +294,7 @@ fn ir_tx_method_expr(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, me
     ir_node(&b, ret, NodeKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span)
 }
 
-// Puts the saved value back (codegen jet_codegen_transaction_restore_snapshot).
+// Puts the saved value back.
 fn ir_tx_restore(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: IRTxSnapshot, span: Span) Never! {
     saved :: ir_node(&b, snapshot.saved_ty, NodeKind.Local{local: snapshot.saved}, span)
     if snapshot.rollback == .Val(owner) {
@@ -384,10 +379,10 @@ fn ir_tx_unwind_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span:
     if depth > 0 -> ir_tx_unwind(&m, p, &b, depth, span)
 }
 
-// `name.on_commit(f)` / `name.on_rollback(f)` (Lower lower_transaction_hook):
-// the callback's closure box goes on the front of its list, with the result
-// runner (ir_transaction_hook_runner) of a callback whose result has a drop,
-// else none.
+// `name.on_commit(f)` / `name.on_rollback(f)`: the callback's closure box
+// goes on the front of its list, with the result runner
+// (ir_transaction_hook_runner) of a callback whose result has a drop, else
+// none.
 fn ir_transaction_hook(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_name: String, executable: BodyLambda, commit: Bool, span: Span) -> Int Never! {
     binding :: ir_lookup_binding(b, handle_name) ?? return ir_fail_slot(&b, span, "transaction hook without the handle {handle_name}")
     closure_ty :: ir_lambda_function_type(executable)

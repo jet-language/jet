@@ -1,10 +1,10 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
-// the old path's route table (argument and result carriers, payloads).
+// the route table (argument and result carriers, payloads).
 
 use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, tir_builtin_mutates_receiver, tir_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
-// when full, then stores the element at `len` (Lower lower_helper_list_push).
+// when full, then stores the element at `len`.
 fn ir_list_push(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, value: Int) Never! {
     stride :: ir_list_stride(m, row)
     width :: ir_word_const(&m, &b, stride)
@@ -77,8 +77,8 @@ fn ir_element_option(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, ro
     boxed
 }
 
-// `xs.pop()` (Lower lower_helper_list_pop): the last element moves into an
-// Option box, None for an empty List.
+// `xs.pop()`: the last element moves into an Option box, None for an empty
+// List.
 fn ir_list_pop(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, span: Span) -> Int Never! {
     option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     result :: ir_fresh_temp(&m, &b, option_row)
@@ -99,9 +99,8 @@ fn ir_list_pop(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, r
     result
 }
 
-// `xs.insert(at, value)` (Lower lower_helper_list_insert): a position in
-// 0...len, else the List bounds stop; later elements move up one slot and
-// the value is taken over.
+// `xs.insert(at, value)`: a position in 0...len, else the List bounds stop;
+// later elements move up one slot and the value is taken over.
 fn ir_list_insert(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, position: Int, value: Int, span: Span) Never! {
     index :: ir_native_index(&m, &b, position, span)
     if ir_failed(b) -> return
@@ -126,8 +125,8 @@ fn ir_list_insert(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{at, held, width}, -1)
 }
 
-// `xs.reverse()` in place (Lower Lists.jet lower_helper_list_reverse): the
-// elements' bytes swap pairwise from both ends; nothing is cloned or dropped.
+// `xs.reverse()` in place: the elements' bytes swap pairwise from both ends;
+// nothing is cloned or dropped.
 fn ir_list_reverse(m: &IRModule, b: &IRBuilder, list: Int, row: Int) Never! {
     stride :: ir_list_stride(m, row)
     if stride == 0 -> return
@@ -153,9 +152,9 @@ fn ir_list_swap_bytes(m: &IRModule, b: &IRBuilder, left: Int, right: Int, held: 
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{right, held, width}, -1)
 }
 
-// `xs.__swap(i, j)` (Lower Lists.jet lower_list_method list_swap): both
-// positions in 0..<len, else the List bounds stop; the elements' complete
-// layouts trade places, with no clone, drop or allocation.
+// `xs.__swap(i, j)`: both positions in 0..<len, else the List bounds stop;
+// the elements' complete layouts trade places, with no clone, drop or
+// allocation.
 fn ir_list_swap(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, second: Int, span: Span) Never! {
     left_index :: ir_native_index(&m, &b, first, span)
     right_index :: ir_native_index(&m, &b, second, span)
@@ -173,11 +172,10 @@ fn ir_list_swap(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, se
     ir_list_swap_bytes(&m, &b, left, right, held, width)
 }
 
-// `xs.extend(ys)` (Lower Lists.jet lower_helper_list_extend): an owned
-// source's elements move onto the end of `list` in order and its buffer is
-// retired (freed, its header cleared so its drop releases nothing). A frozen
-// source (cap 0) owns nothing, and a source its holder keeps (`owned` false)
-// stays untouched: their elements are copied (Lower lower_list_make_unique).
+// `xs.extend(ys)`: an owned source's elements move onto the end of `list` in
+// order and its buffer is retired (freed, its header cleared so its drop
+// releases nothing). A frozen source (cap 0) owns nothing, and a source its
+// holder keeps (`owned` false) stays untouched: their elements are copied.
 fn ir_list_extend(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, source: Int, owned: Bool) Never! {
     if !owned -> return ir_list_append(&m, p, &b, list, row, source, false)
     capacity :: ir_load_word(&m, &b, source, 8)
@@ -248,11 +246,10 @@ fn ir_list_append(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     ir_emit(&b.f, IROp.Store, -1, list, 0, total, b.line)
 }
 
-// `xs.try_reserve(additional)` (Lower lower_helper_list_try_reserve): room
-// for `additional` more elements, or `Err(AllocError)` naming the requested
-// bytes with the List untouched. A negative request asks for 0 bytes; one
-// above I64.MAX, or whose bytes would pass I64.MAX, saturates there. The Ok
-// payload is `payload` (-1: Unit).
+// `xs.try_reserve(additional)`: room for `additional` more elements, or
+// `Err(AllocError)` naming the requested bytes with the List untouched. A
+// negative request asks for 0 bytes; one above I64.MAX, or whose bytes would
+// pass I64.MAX, saturates there. The Ok payload is `payload` (-1: Unit).
 fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, additional: Int, payload: Int, span: Span) -> Int Never! {
     err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "try_reserve without its checked Result") }
     if ir_kind_of(m, b, additional) != .Int {
@@ -305,8 +302,7 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     grow :: ir_bool_op(&m, &b, IROp.Gt, required, capacity)
     if unit_element -> ir_emit(&b.f, IROp.Const, grow, 0, -1, -1, b.line)
     ir_open_if(&b.f, grow, b.line)
-    // Geometric growth bounded before the multiply, the request the floor
-    // (Lower lower_list_growth_capacity).
+    // Geometric growth bounded before the multiply, the request the floor.
     grown :: ir_word_op(&m, &b, IROp.Add, capacity, capacity)
     threshold :: ir_word_const(&m, &b, limit /% 2)
     large :: ir_bool_op(&m, &b, IROp.Gt, capacity, threshold)
@@ -356,8 +352,7 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     ir_emit(&b.f, IROp.Copy, result, refused, -1, -1, b.line)
     b.fresh[refused] = false
     ir_else(&b.f, b.line)
-    // A new List of Unit elements holds any count (Lower
-    // lower_helper_try_capacity).
+    // A new List of Unit elements holds any count.
     if unit_element && payload >= 0 {
         unbounded :: ir_word_const(&m, &b, largest)
         ir_emit(&b.f, IROp.Store, -1, list, 8, unbounded, b.line)
@@ -369,9 +364,8 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     result
 }
 
-// `List<T>.try_with_capacity(capacity)` (Lower lower_helper_try_capacity):
-// a new empty List with room for `capacity` elements, or the try_reserve
-// `Err(AllocError)`.
+// `List<T>.try_with_capacity(capacity)`: a new empty List with room for
+// `capacity` elements, or the try_reserve `Err(AllocError)`.
 fn ir_list_try_with_capacity(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "List.try_with_capacity with {args.len()} arguments")
     list_ty :: if ir_untag(ir_subst(m, ty)) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}") }
@@ -384,10 +378,10 @@ fn ir_list_try_with_capacity(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type
     ir_list_try_reserve(&m, p, &b, subst_ty, list, element, capacity, list, span)
 }
 
-// `xs.remove(value)` (the first equal element, None when there is none)
-// and `xs.remove(at)` (a position in 0..<len, else the List bounds stop),
-// Lower lower_helper_list_remove: the element moves into an Option box and
-// every later element moves down one slot.
+// `xs.remove(value)` (the first equal element, None when there is none) and
+// `xs.remove(at)` (a position in 0..<len, else the List bounds stop), the
+// element moves into an Option box and every later element moves down one
+// slot.
 fn ir_list_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, operand: Int, by_slot: Bool, span: Span) -> Int Never! {
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     length :: ir_load_word(&m, &b, list, 0)
@@ -443,15 +437,15 @@ fn ir_list_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int
 }
 
 // `left == right` for two elements: a scalar or String in place, any other
-// type structurally (Lower lower_equal_values, ir_equal).
+// type structurally (ir_equal).
 fn ir_route_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     kind :: ir_kind_of(m, b, left)
     if kind != .Int && kind != .Word && kind != .Bool && kind != .Char && kind != .String -> return ir_equal(&m, p, &b, left, right, span)
     ir_bool_op(&m, &b, IROp.Eq, left, right)
 }
 
-// Builtin methods (codegen ir_builtin_route_plan): Lists inline,
-// Strings through the runtime routes the old path calls.
+// Builtin methods (ir_builtin_route_plan): Lists inline, Strings through
+// their runtime routes.
 fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     if operation == .IterNext -> return ir_lazy_next(&m, p, &b, ty, receiver, span)
@@ -527,12 +521,11 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
             .ExtendList -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "extend without a List")
                 if ir_list_element(&m, p, b, operands[1]) != Val((element)) -> return ir_fail_slot(&b, span, "extend from a List of another element type")
-                // The route consumes the source (codegen list_extend borrows
-                // only the receiver): a moved or fresh List gives up its
-                // elements and buffer; a read of a place its holder keeps (a
-                // field of a borrowed record, say) is left whole and its
-                // elements are copied, as Lower's consumed operand is a copy
-                // of the place.
+                // The route consumes the source and borrows only the
+                // receiver: a moved or fresh List gives up its elements and
+                // buffer; a read of a place its holder keeps (a field of a
+                // borrowed record, say) is left whole and its elements are
+                // copied.
                 owned :: b.fresh[operands[1]] || ir_body_node(p, b, args[0]).kind == .Move(_)
                 ir_list_extend(&m, p, &b, subject, element, operands[1], owned)
                 return -1
@@ -583,7 +576,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
         }
     }
     if kind == .String {
-        // Lower lower_string_method calls these exports directly; every other
+        // These String builtins call their runtime exports directly; every other
         // String builtin crosses its runtime route.
         symbol :: if operation == {
             .LenString -> "jet_char_len"
@@ -638,8 +631,7 @@ fn ir_list_indexed(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     ir_lazy_from_list(&m, p, &b, pairs, result_row, span)
 }
 
-// A builtin method through its canonical route (codegen
-// ir_builtin_route_plan, Lower lower_route_call).
+// A builtin method through its canonical route (ir_builtin_route_plan).
 fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, operands: [Int], span: Span) -> Int Never! {
     if operation == {
         .ListMinMax | .Indexed | .MapToList | .IterSplit | .ToString
@@ -655,9 +647,9 @@ fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     ir_route(&m, p, &b, route.symbol, operands, route.borrow_mask, result, span)
 }
 
-// The List value builtins Lower expands over the borrowed header (Lower
-// Builtins.jet lower_value_builtin): Float max/min and binary_search; None for
-// any other route (the fixed-lane Float sum is ir_list_route's).
+// The List value builtins expanded over the borrowed header: Float max/min
+// and binary_search; None for any other route (the fixed-lane Float sum is
+// ir_list_route's).
 fn ir_list_value_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: String, operands: [Int], span: Span) -> Int? Never! {
     extremum :: symbol == "jet_list_max_float" || symbol == "jet_list_min_float"
     search :: symbol == "jet_list_binary_search"
@@ -678,7 +670,7 @@ fn ir_list_value_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, sy
 }
 
 // Float max/min in an Option box: NaNs order after every number; ties keep
-// the last maximum and the first minimum (Lower lower_helper_float_extremum).
+// the last maximum and the first minimum.
 fn ir_list_float_extremum(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Int, result_row: Int, maximum: Bool) -> Int Never! {
     result :: ir_fresh_temp(&m, &b, result_row)
     ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
@@ -730,7 +722,7 @@ fn ir_list_float_extremum(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, 
 
 // binary_search(needle) over an ascending List: Some(an index whose element
 // equals the needle; which one among duplicates is unspecified), else None
-// (Lower lower_helper_binary_search, Rust slice.binary_search).
+// (Rust slice.binary_search).
 fn ir_list_binary_search(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Int, needle: Int, kind: String, result_row: Int) -> Int Never! {
     result :: ir_fresh_temp(&m, &b, result_row)
     ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
@@ -769,13 +761,12 @@ fn ir_list_binary_search(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, e
     result
 }
 
-// A function value (codegen jet_codegen_lower_fn_value): a named function's
-// closure, a lambda, the value a call returns, or a callable policy applied
-// to a function. A policy is a closure over its parameters whose body calls
-// the policy's generated wrapper with the policy arguments, the function and
-// those parameters, all borrowed (the wrapper's own conventions decide what
-// it keeps); a SendFn is its value as is (Lower Convert.jet forwards the
-// SendFn conversion).
+// A function value: a named function's closure, a lambda, the value a call
+// returns, or a callable policy applied to a function. A policy is a closure
+// over its parameters whose body calls the policy's generated wrapper with
+// the policy arguments, the function and those parameters, all borrowed (the
+// wrapper's own conventions decide what it keeps); a SendFn is its value as
+// is.
 fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFnValueKind, span: Span) -> Int Never! {
     if kind == {
         .NamedFn(function, lambda) -> {
@@ -947,9 +938,8 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
     boxed
 }
 
-// `Atomic.new(value)` (Lower lower_atomic_new): fresh 8-aligned frame
-// storage the runtime initializes with the scalar; an exact Int moves into
-// the word.
+// `Atomic.new(value)`: fresh 8-aligned frame storage the runtime initializes
+// with the scalar; an exact Int moves into the word.
 fn ir_atomic_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [BodyCallArg], span: Span) -> Int Never! {
     scalar :: ir_atomic_scalar(ir_subst(m, ty)) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
     lane :: ir_atomic_lane(scalar) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
@@ -966,16 +956,16 @@ fn ir_atomic_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Bod
     storage
 }
 
-// An Atomic operand the runtime consumes (Lower lower_atomic_taken): an
-// exact Int is passed as an owner of its own, any other lane's scalar as is.
+// An Atomic operand the runtime consumes: an exact Int is passed as an owner
+// of its own, any other lane's scalar as is.
 fn ir_atomic_taken(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, lane: String) -> Int Never! {
     if lane != "int" -> return value
     ir_own(&m, p, &b, value)
 }
 
-// An Atomic method (Lower lower_atomic_method): the borrowed receiver is
-// the word's own storage address, never a copy; each operand moves into the
-// runtime, and a load or the OLD value of an add returns a fresh owner.
+// An Atomic method: the borrowed receiver is the word's own storage address,
+// never a copy; each operand moves into the runtime, and a load or the OLD
+// value of an add returns a fresh owner.
 fn ir_atomic_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     scalar :: ir_atomic_scalar(ir_subst(m, receiver_ty)) ?? return ir_fail_slot(&b, span, "Atomic method {method} on {ir_type_name(receiver_ty)}")
@@ -1007,9 +997,8 @@ fn ir_atomic_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 }
 
 // ---------------------------------------------------------------------------
-// List closure methods (codegen ClosureMethods.jet routes jet_list_map,
-// jet_list_filter, ...), expanded inline over the list with each element
-// passed to the closure box.
+// List closure methods (jet_list_map, jet_list_filter, ...), expanded inline
+// over the list with each element passed to the closure box.
 
 fn ir_call_closure(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_row: Int) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
@@ -1087,8 +1076,7 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
             return result
         }
         // flat_map(f): every element of each List the step produces, in
-        // order, is appended as a copy and the produced List ends (Lower
-        // lower_closure_flat_map).
+        // order, is appended as a copy and the produced List ends.
         .FlatMap -> {
             step_ty :: ir_ty(p, b, args[args.len() - 1])
             part_ty :: ir_closure_result(ir_subst(m, step_ty)) ?? return ir_fail_slot(&b, span, "flat_map callback has no checked single-input type")
@@ -1136,8 +1124,8 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
             ir_emit(&b.f, IROp.Copy, result, count, -1, -1, b.line)
             return result
         }
-        // reduce(initial, f) is the same left fold (Lower lower_closure_method);
-        // a View shares the List header, so its fold walks the same buffer.
+        // reduce(initial, f) is the same left fold; a View shares the List
+        // header, so its fold walks the same buffer.
         .Fold | .Reduce | .ViewFold -> {
             if operands.len() != 2 -> return ir_fail_slot(&b, span, "fold without an initial value")
             accumulator :: ir_temp(&m, &b, result_row)
@@ -1180,7 +1168,7 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
             return result
         }
         // position(f): Some(the first accepted index) in a box holding the
-        // exact Int, else None (Lower lower_closure_search).
+        // exact Int, else None.
         .Position -> {
             int_row :: ir_type_row(&m, Type.Int) ?? 0
             result :: ir_fresh_temp(&m, &b, result_row)
@@ -1201,9 +1189,9 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
         .MinBy | .MaxBy -> return ir_closure_extreme_by(&m, p, &b, result_row, list, element, callback, callback_ty, operation == .MaxBy, span)
         .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare -> return ir_closure_sort(&m, p, &b, ty, list, element, callback, callback_ty, operation, span)
         .UpdateFirst -> {
-            // update_first(predicate, replacement): the closure comes first
-            // (Lower lower_closure_update_first). The first element the
-            // predicate accepts is dropped and replaced in place.
+            // update_first(predicate, replacement): the closure comes first.
+            // The first element the predicate accepts is dropped and replaced
+            // in place.
             if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "update_first without a predicate and a replacement")
             replacement :: ir_adapt(&m, p, &b, operands[1], element, span)
             if ir_failed(b) -> return -1
@@ -1230,9 +1218,8 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
     }
 }
 
-// `xs.group_by(key)` (Lower lower_closure_group_by): each element, in order,
-// appended as a copy to the List under its key, created on first use; the
-// Map keeps its keys ascending.
+// `xs.group_by(key)`: each element, in order, appended as a copy to the List
+// under its key, created on first use; the Map keeps its keys ascending.
 fn ir_closure_group_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: Int, list: Int, element: Int, callback: Int, span: Span) -> Int Never! {
     shape :: ir_map_shape(&m, p, result_row) ?? return ir_fail_slot(&b, span, "group_by into {ir_type_name(m.types[result_row].ty)}")
     if !(ir_untag(m.types[shape.value.ty].ty) == .List(_)) -> return ir_fail_slot(&b, span, "group_by into {ir_type_name(m.types[result_row].ty)}")
@@ -1266,9 +1253,9 @@ fn ir_closure_group_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: In
     result
 }
 
-// `opt.map(f)` (Lower Combinators.jet `jet_option_map_ref`): None stays
-// None; Some lends its payload to the closure, whose result is boxed fresh.
-// The receiver is only read. Sema types the map by the callback's success
+// `opt.map(f)` (`jet_option_map_ref`): None stays None; Some lends its
+// payload to the closure, whose result is boxed fresh. The receiver is only
+// read. Sema types the map by the callback's success
 // (sema_value_method_option_map): where the callback returns a Result the
 // map's payload is its Ok and a failure passes up from the call
 // (D-CALLBACK-ERR1); where it returns an Option, that is the map's result.
@@ -1321,9 +1308,9 @@ fn ir_option_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     result
 }
 
-// `left.zip(right)` (codegen jet_codegen_lower_builtin_option_zip): both
-// present pairs owned copies of the payloads in a new Option box holding the
-// checked two-field tuple; otherwise None. Both operands are only read.
+// `left.zip(right)`: both present pairs owned copies of the payloads in a new
+// Option box holding the checked two-field tuple; otherwise None. Both
+// operands are only read.
 fn ir_option_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Option zip with {args.len()} arguments")
     receiver_ty :: ir_ty(p, b, receiver)
@@ -1376,9 +1363,8 @@ fn ir_option_zip_store(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, of
     if copied -> b.fresh[owned] = false
 }
 
-// `Option.lift2(f, left, right)` (codegen jet_codegen_lower_option_lift2):
-// both present lend their payloads to `f`, whose result is boxed fresh;
-// otherwise None. Both operands are only read.
+// `Option.lift2(f, left, right)`: both present lend their payloads to `f`,
+// whose result is boxed fresh; otherwise None. Both operands are only read.
 fn ir_option_lift2(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function: Int, left: Int, right: Int, span: Span) -> Int Never! {
     result_ty :: if ir_untag(ir_subst(m, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 to {ir_type_name(ty)}") }
     left_checked :: ir_ty(p, b, left)
@@ -1465,10 +1451,10 @@ fn ir_free(m: &IRModule, b: &IRBuilder, address: Int, bytes: Int) Never! {
     _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{address, bytes, align}, -1)
 }
 
-// `xs.min_by(key)` / `xs.max_by(key)` (Lower lower_closure_extreme_by):
-// each key computed once, in order; a tie replaces the best so far (max
-// keeps the best only while key < best, min only while best < key). The
-// result is an Option box holding a copy of the chosen element.
+// `xs.min_by(key)` / `xs.max_by(key)`: each key computed once, in order; a
+// tie replaces the best so far (max keeps the best only while key < best, min
+// only while best < key). The result is an Option box holding a copy of the
+// chosen element.
 fn ir_closure_extreme_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: Int, list: Int, element: Int, callback: Int, closure_ty: Type, maximum: Bool, span: Span) -> Int Never! {
     key_ty :: ir_closure_result(closure_ty) ?? return ir_fail_slot(&b, span, "min_by/max_by key closure without a result type")
     key_row :: ir_value_type(&m, p, key_ty) ?? return ir_type_fail(&b, span, key_ty)
@@ -1531,12 +1517,12 @@ fn ir_closure_extreme_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: 
 }
 
 // `xs.sort_by(key)` / `sort_by_desc(key)`, their fallible `try_` forms and
-// `xs.sort_by(compare)` (Lower lower_closure_sort): every key computed once,
-// in List order, then the same width-doubling stable merge of the positions
-// (a comparator sees (right, left) and the right run wins only on Less);
-// the elements move to their sorted places by bytes. A fallible key's first
-// Err stops before any later key is computed and leaves the List as it was;
-// the method's Result is that Err, else Ok.
+// `xs.sort_by(compare)`: every key computed once, in List order, then the
+// same width-doubling stable merge of the positions (a comparator sees
+// (right, left) and the right run wins only on Less); the elements move to
+// their sorted places by bytes. A fallible key's first Err stops before any
+// later key is computed and leaves the List as it was; the method's Result is
+// that Err, else Ok.
 fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, callback: Int, closure_ty: Type, operation: TClosureOp, span: Span) -> Int Never! {
     by_key :: operation != .SortByCompare
     fallible :: operation == .TrySortBy || operation == .TrySortByDesc
@@ -1775,7 +1761,7 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     return -1
 }
 
-// min(width, remaining) as a native word (Lower lower_sort_run_size).
+// min(width, remaining) as a native word.
 fn ir_sort_run_size(m: &IRModule, b: &IRBuilder, width: Int, remaining: Int) -> Int Never! {
     word_row :: ir_word_row(&m)
     size :: ir_temp(&m, &b, word_row)
@@ -1802,8 +1788,8 @@ fn ir_count_close(m: &IRModule, b: &IRBuilder, index: Int) Never! {
     ir_walk_close(&m, &b, IRWalk{index: index, item: -1})
 }
 
-// `xs.try_map(f)` (Lower lower_closure_try_map): the outputs in order; the
-// first Err stops, drops the produced prefix and becomes the result's Err.
+// `xs.try_map(f)`: the outputs in order; the first Err stops, drops the
+// produced prefix and becomes the result's Err.
 fn ir_closure_try_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, callback: Int, closure_ty: Type, span: Span) -> Int Never! {
     out_ty := Type.Int
     err_ty := Type.Int
@@ -1853,9 +1839,9 @@ fn ir_closure_try_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list:
     result
 }
 
-// `xs.try_filter(f)` (Lower lower_closure_try_filter): copies of the
-// elements whose verdict is Ok(true), in order; the first Err stops, drops
-// the kept prefix and becomes the result's Err.
+// `xs.try_filter(f)`: copies of the elements whose verdict is Ok(true), in
+// order; the first Err stops, drops the kept prefix and becomes the result's
+// Err.
 fn ir_closure_try_filter(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, callback: Int, closure_ty: Type, span: Span) -> Int Never! {
     kept_ty := Type.Int
     err_ty := Type.Int
@@ -1914,10 +1900,10 @@ fn ir_is_null(m: &IRModule, b: &IRBuilder, pointer: Int) -> Int Never! {
     absent
 }
 
-// `Int.from_float(x)` and its fixed-width forms (Lower Convert.jet
-// lower_convert_checked_float): ordered bounds reject NaN and infinity
-// before the truncating conversion; Ok holds the integer, Err the text
-// "value doesn't fit in destination type". An F32 first widens exactly.
+// `Int.from_float(x)` and its fixed-width forms: ordered bounds reject NaN
+// and infinity before the truncating conversion; Ok holds the integer, Err
+// the text "value doesn't fit in destination type". An F32 first widens
+// exactly.
 fn ir_float_to_int(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
     unsupported :: "Prelude conversion float_to_int of this shape is not lowered at O0 yet"
     source :: m.types[b.f.slot_type[value]].kind
@@ -2011,10 +1997,9 @@ fn ir_float_narrow(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Ty
     found
 }
 
-// The Float `floating` truncated to the word row `row` (Lower
-// lower_convert_float_word). The machine conversion is signed 64-bit, so an
-// unsigned 64-bit value at or above 2^63 converts its remainder below 2^63
-// and restores the high bit.
+// The Float `floating` truncated to the word row `row`. The machine
+// conversion is signed 64-bit, so an unsigned 64-bit value at or above 2^63
+// converts its remainder below 2^63 and restores the high bit.
 fn ir_float_word(m: &IRModule, b: &IRBuilder, floating: Int, row: Int, unsigned: Bool) -> Int Never! {
     word :: ir_temp(&m, &b, row)
     if !unsigned {
@@ -2038,19 +2023,16 @@ fn ir_float_word(m: &IRModule, b: &IRBuilder, floating: Int, row: Int, unsigned:
 }
 
 // ---------------------------------------------------------------------------
-// Runtime routes (Lower Routes.jet lower_route_call / lower_route_result):
-// Core calls, Prelude conversions and builtin methods call the runtime's
-// C-ABI export of their route (RuntimeRoutes.jet). Each argument crosses as
-// its route carrier: a Word is the exact-Int carrier word (a fixed-width
-// integer is boxed into one for the call), a List its data pointer and
-// length. A List result comes back as its length with its data in an out
-// slot; an Option or Result result as a tag word with its payload in one
-// zeroed out slot, from which the builder makes its own box.
+// Runtime routes: Core calls, Prelude conversions and builtin methods call
+// the runtime's C-ABI export of their route (RuntimeRoutes.jet). Each
+// argument crosses as its route carrier: a Word is the exact-Int carrier word
+// (a fixed-width integer is boxed into one for the call), a List its data
+// pointer and length. A List result comes back as its length with its data in
+// an out slot; an Option or Result result as a tag word with its payload in
+// one zeroed out slot, from which the builder makes its own box.
 
-// Routes the old path builds inline rather than calling the runtime (Lower
-// Lists.jet list.get / list.index_of / lower_list_reduce_int, Builtins.jet
-// lower_helper_contains, Strings.jet lower_string_cut); None for any other
-// route. Every argument is borrowed.
+// Routes built inline rather than calling the runtime (list.get /
+// list.index_of); None for any other route. Every argument is borrowed.
 fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int? Never! {
     if name == "std::collections::BinaryHeap::new" {
         subst_ty :: ir_subst(m, result)
@@ -2060,8 +2042,8 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         subst_ty :: ir_subst(m, result)
         return Val(ir_set_new(&m, p, &b, inputs, subst_ty, span))
     }
-    // `a.equal(b)` (core.compare eq, Lower lower_core_equal): the values'
-    // structural equality, both borrowed.
+    // `a.equal(b)` (core.compare eq): the values' structural equality, both
+    // borrowed.
     if name == "jet_eq" {
         if inputs.len() != 2 || inputs[0] < 0 || inputs[1] < 0 -> return Val(ir_fail_slot(&b, span, "equal with {inputs.len()} arguments"))
         left_row :: b.f.slot_type[inputs[0]]
@@ -2108,11 +2090,11 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
 // None; `xs.first()` / `xs.last()`: the same at 0 / len - 1;
 // `xs.index_of(item)`: the first equal position as an `Int?` box;
 // `xs.contains(item)`: whether any element is equal; `xs.sum()` /
-// `xs.product()`: the exact Int sum from 0 / product from 1, in order;
-// `xs == ys` (list_equal): equal lengths and elements; `xs.replace(i, v)`
-// (Lower lower_list_method_surface): a copy whose in-range slot holds `v`,
-// an index outside the List dropping `v`; `xs.starts_with(ys)` /
-// `xs.ends_with(ys)`, `xs.min()` / `xs.max()` and `xs.flatten()` below.
+// `xs.product()`: the exact Int sum from 0 / product from 1, in order; `xs ==
+// ys` (list_equal): equal lengths and elements; `xs.replace(i, v)`: a copy
+// whose in-range slot holds `v`, an index outside the List dropping `v`;
+// `xs.starts_with(ys)` / `xs.ends_with(ys)`, `xs.min()` / `xs.max()` and
+// `xs.flatten()` below.
 fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int Never! {
     list :: inputs[0]
     shown :: ir_type_name(m.types[b.f.slot_type[list]].ty)
@@ -2164,7 +2146,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
         if name == "jet_list_first" {
             index = ir_word_const(&m, &b, 0)
         } else if name == "jet_list_last" {
-            // `xs.last()` (Lower Lists.jet `last`): the element at len - 1.
+            // `xs.last()`: the element at len - 1.
             size :: ir_load_word(&m, &b, list, 0)
             one :: ir_word_const(&m, &b, 1)
             index = ir_word_op(&m, &b, IROp.Sub, size, one)
@@ -2202,8 +2184,8 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
 }
 
 // A Float `xs.sum()` (and a Float fold with step `acc + x`): the D-FRED1=A
-// fixed tree (Lower lower_helper_sum_fixed). Item i adds into lane i & 7 in
-// source order, and the lanes combine as ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
+// fixed tree. Item i adds into lane i & 7 in source order, and the lanes
+// combine as ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
 fn ir_list_sum_fixed(m: &IRModule, b: &IRBuilder, list: Int, row: Int, span: Span) -> Int Never! {
     if m.types[row].kind != .Float -> return ir_fail_slot(&b, span, "fixed Float sum of {ir_type_name(m.types[row].ty)}")
     pointer_row :: ir_pointer_row(&m)
@@ -2235,10 +2217,9 @@ fn ir_list_sum_fixed(m: &IRModule, b: &IRBuilder, list: Int, row: Int, span: Spa
     values[0]
 }
 
-// `xs.starts_with(ys)` / `xs.ends_with(ys)` (Lower lower_helper_list_starts_with):
-// false when `ys` is longer, else whether every element of `ys` equals the
-// element of `xs` at the same position from the front / back; an empty
-// `ys` is true.
+// `xs.starts_with(ys)` / `xs.ends_with(ys)`: false when `ys` is longer, else
+// whether every element of `ys` equals the element of `xs` at the same position
+// from the front / back; an empty `ys` is true.
 fn ir_list_affix(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, other: Int, row: Int, result_row: Int, suffix: Bool, span: Span) -> Int Never! {
     found :: ir_fresh_temp(&m, &b, result_row)
     ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
@@ -2266,9 +2247,8 @@ fn ir_list_affix(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, other: In
     found
 }
 
-// `xs.min()` / `xs.max()` (Lower lower_list_method_window): a `T?` box of a
-// copy of the first least / last greatest element in the derived order,
-// None for an empty List.
+// `xs.min()` / `xs.max()`: a `T?` box of a copy of the first least / last
+// greatest element in the derived order, None for an empty List.
 fn ir_list_extreme(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int, greatest: Bool, span: Span) -> Int Never! {
     found :: ir_fresh_temp(&m, &b, result_row)
     ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
@@ -2313,9 +2293,8 @@ fn ir_list_flatten(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     out
 }
 
-// `xs.slice(start, end)` (Lower Lists.jet lower_list_method_window): both
-// bounds clamp into 0..len, an empty window when end <= start, and the
-// window's elements are copied into a new List.
+// `xs.slice(start, end)`: both bounds clamp into 0..len, an empty window when
+// end <= start, and the window's elements are copied into a new List.
 fn ir_list_slice(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int, start_value: Int, end_value: Int, span: Span) -> Int Never! {
     start :: ir_native_index(&m, &b, start_value, span)
     end :: ir_native_index(&m, &b, end_value, span)
@@ -2335,7 +2314,7 @@ fn ir_list_slice(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int,
     ir_list_clone(&m, p, &b, window, row, result_row)
 }
 
-// The native word `value` clamped into low...high (Lower lower_list_clamp).
+// The native word `value` clamped into low...high.
 fn ir_word_clamp(m: &IRModule, b: &IRBuilder, value: Int, low: Int, high: Int) -> Int Never! {
     clamped :: ir_temp_like(&m, &b, value)
     ir_emit(&b.f, IROp.Copy, clamped, value, -1, -1, b.line)
@@ -2350,9 +2329,9 @@ fn ir_word_clamp(m: &IRModule, b: &IRBuilder, value: Int, low: Int, high: Int) -
     clamped
 }
 
-// `order.then(next)` / `order.reverse()` over the Ordering discriminant
-// (Lower.jet lower_ordering_method): `then` keeps a decided order and takes
-// `next` after Equal; `reverse` swaps Less and Greater.
+// `order.then(next)` / `order.reverse()` over the Ordering discriminant:
+// `then` keeps a decided order and takes `next` after Equal; `reverse` swaps
+// Less and Greater.
 fn ir_ordering_method(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], span: Span) -> Int Never! {
     chained :: name == "jet_ordering_then"
     if inputs.len() != (if chained -> 2 else -> 1) || inputs[0] < 0 -> return ir_fail_slot(&b, span, "Ordering method {name} with {inputs.len()} arguments")
@@ -2387,7 +2366,7 @@ fn ir_ordering_method(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, i
 }
 
 // A new List of type row `list_row` holding copies of the elements of the
-// List-family header at `source`, in order (Lower lower_inline_clone).
+// List-family header at `source`, in order.
 fn ir_list_clone(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: Int, list_row: Int) -> Int Never! {
     out :: ir_list_empty(&m, &b, list_row)
     ir_list_append(&m, p, &b, out, row, source, false)
@@ -2429,10 +2408,10 @@ fn ir_list_replace(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     replica
 }
 
-// `text.split_once(sep)` / `text.cut_last(sep)` (Lower lower_string_cut):
-// the text before and after the first / last occurrence of `sep` as an
-// Option of a String pair, None when there is none. The Text adapters make
-// the cut: jet_text_parse_split_once reports whether it found one;
+// `text.split_once(sep)` / `text.cut_last(sep)`: the text before and after
+// the first / last occurrence of `sep` as an Option of a String pair, None
+// when there is none. The Text adapters make the cut:
+// jet_text_parse_split_once reports whether it found one;
 // jet_text_parse_rfind's -1 is the miss, and jet_text_parse_rpartition then
 // cuts at that same last occurrence.
 fn ir_string_cut(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int Never! {
@@ -2502,7 +2481,7 @@ fn ir_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [
 }
 
 // ir_route whose tuple result's kernel items carry the declared `labels`
-// (Lower lower_route_call: core_call_native_return_labels).
+// (core_call_native_return_labels).
 fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name :: ir_route_symbol(symbol)
     if ir_route_inline(&m, p, &b, name, inputs, result, span) == .Val(inlined) -> return inlined
@@ -2534,8 +2513,8 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 } else if kind == .Word {
                     row :: m.types[slot_row]
                     int_row :: ir_type_row(&m, Type.Int) ?? 0
-                    // A U64 word crosses as its owned exact Int (Lower
-                    // lower_convert_u64_exact), as a narrower one does.
+                    // A U64 word crosses as its owned exact Int, as a
+                    // narrower one does.
                     exact :: if !row.signed && row.bits == 64 -> ir_numeric_cast(&m, p, &b, slot, int_row, span) else -> ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{slot}, int_row)
                     if exact < 0 -> return -1
                     &lowered.push(exact)
@@ -2576,8 +2555,8 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 if element == .Handle(handle_name) {
                     // A List of records the program lays out itself crosses
                     // as a buffer of runtime record handles, one per element,
-                    // dropped with the buffer after the call (Lower
-                    // lower_record_list_element: list.record_handles).
+                    // dropped with the buffer after the call
+                    // (list.record_handles).
                     item :: if ir_untag(shown) == .List(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {name} List of {element}") }
                     record :: ir_record_runtime(&m, p, item) ?? return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
                     if record.runtime != handle_name -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
@@ -2593,7 +2572,7 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
             }
             .Handle(_) | .HandleMut(_) -> {
                 // The checked Dyn enum crosses as a runtime tree built for
-                // the call and dropped after it (Lower lower_route_dyn).
+                // the call and dropped after it.
                 if carrier == .Handle(handle_name) {
                     if handle_name == "Dyn" && ir_dyn_def(p, shown) == .Val(dyn_row) {
                         tree :: ir_dyn_to_runtime(&m, p, &b, dyn_row, slot, span)
@@ -2605,15 +2584,15 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 }
                 // A native source record (FileReader, FileWriter) crosses as
                 // its bytes, which are the runtime's shell layout: the route
-                // borrows them, or mutates them in place (Lower passes the
-                // value itself where no record schema converts it).
+                // borrows them, or mutates them in place (the value itself
+                // where no record schema converts it).
                 if kind == .Aggregate && ir_route_shell(&m, p, shown, carrier) {
                     &lowered.push(slot)
                     next
                 }
                 // A record the program lays out itself crosses as a runtime
                 // record handle made for the call and dropped after it
-                // (Lower lower_record_to_runtime: record.out).
+                // (record.out).
                 if !ir_is_handle(m, slot_row) && ir_record_runtime(&m, p, shown) == .Val(record) {
                     made :: ir_record_out(&m, p, &b, shown, slot, span)
                     if made < 0 -> return -1
@@ -2662,7 +2641,7 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
 struct IRRecordHandles { list: Int, item_row: Int, handles: Int, drop: String }
 
 // The buffer of runtime record handles for the records in `list`, one
-// record.out per element (Lower list.record_handles); -1 after a failure.
+// record.out per element; -1 after a failure.
 fn ir_record_handles(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, item: Type, item_row: Int, span: Span) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
     bytes :: ir_record_handles_bytes(&m, &b, list)
@@ -2688,7 +2667,7 @@ fn ir_record_handles_bytes(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never!
 }
 
 // Drops every handle in a route's record-handle buffer, then the buffer
-// (Lower list.record_handles_free).
+// (list.record_handles_free).
 fn ir_record_handles_free(m: &IRModule, b: &IRBuilder, handles: IRRecordHandles) Never! {
     pointer_row :: ir_pointer_row(&m)
     walk :: ir_walk_open(&m, &b, handles.list, handles.item_row)
@@ -2701,7 +2680,7 @@ fn ir_record_handles_free(m: &IRModule, b: &IRBuilder, handles: IRRecordHandles)
     _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{handles.handles, bytes, align}, -1)
 }
 
-// Lower Strings.jet lower_route_symbol: a view route is its owned twin.
+// A view route is its owned twin.
 fn ir_route_symbol(symbol: String) -> String Never! {
     if symbol == "jet_string_after_view" -> return "jet_string_after"
     if symbol == "jet_string_before_view" -> return "jet_string_before"
@@ -2762,9 +2741,8 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         }
     }
     if carrier == .Handle(_) || carrier == .HandleMut(_) {
-        // A native source record's owned shell (Lower
-        // lower_record_from_runtime): its bytes move into fresh storage and
-        // the shell is freed.
+        // A native source record's owned shell: its bytes move into fresh
+        // storage and the shell is freed.
         if m.types[row].kind == .Aggregate && ir_route_shell(&m, p, result, carrier) {
             pointer_row :: ir_pointer_row(&m)
             shell :: ir_runtime(&m, &b, export, args, pointer_row)
@@ -2778,8 +2756,8 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
             return storage
         }
         // A record the program lays out itself crosses as a runtime record
-        // handle, converted into its declared layout (Lower
-        // lower_record_from_runtime: record.in), then dropped.
+        // handle, converted into its declared layout (record.in), then
+        // dropped.
         if !ir_is_handle(m, row) && ir_record_runtime(&m, p, result) != None {
             pointer_row :: ir_pointer_row(&m)
             record :: ir_runtime(&m, &b, export, args, pointer_row)
@@ -2822,10 +2800,10 @@ fn ir_route_list_header(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, dat
     ir_emit(&b.f, IROp.Store, -1, base, offset + 16, data, b.line)
 }
 
-// An owned runtime buffer of one record handle per element (Lower
-// lower_record_list_from_runtime): each element is rebuilt in a native
-// buffer through record.in and its handle released, then the carrier buffer
-// is freed; the List header at `offset` of `base` owns the native buffer.
+// An owned runtime buffer of one record handle per element: each element is
+// rebuilt in a native buffer through record.in and its handle released, then
+// the carrier buffer is freed; the List header at `offset` of `base` owns the
+// native buffer.
 fn ir_record_list_from_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, item: Type, buffer: Int, length: Int, base: Int, offset: Int, span: Span) Never! {
     element_row :: ir_value_type(&m, p, item) ?? return ir_fail(&b, span, "type {ir_type_name(item)}")
     stride :: ir_list_stride(m, element_row)
@@ -2862,8 +2840,8 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     if carrier == .List(element) {
         data :: ir_load_word(&m, &b, out, 0)
         length :: ir_load_word(&m, &b, out, 8)
-        // A List of records arrives as a buffer of record handles (Lower
-        // lower_route_store_payload); any other List is the native buffer.
+        // A List of records arrives as a buffer of record handles; any other
+        // List is the native buffer.
         if element == .Handle(handle_name) {
             item :: if ir_untag(payload) == .List(inner) -> inner else -> { return ir_fail(&b, span, "runtime route List of {element} payload as {payload}") }
             record :: ir_record_runtime(&m, p, item) ?? return ir_fail(&b, span, "runtime route List of {element} payload")
@@ -2889,16 +2867,14 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     if carrier == .Handle(_) || carrier == .HandleMut(_) {
         if !ir_is_handle(m, row) && ir_record_runtime(&m, p, payload) != None -> return ir_route_record_in(&m, p, &b, base, offset, payload, out, span)
         // A handle word that is no record handle points at the declared
-        // value's bytes (Lower lower_route_store_payload's plain arm:
-        // lower_write_at copies an inline struct from it).
+        // value's bytes; an inline struct is copied from it.
         if !ir_is_handle(m, row) && m.types[row].kind != .Aggregate -> return ir_fail(&b, span, "runtime route handle payload as {payload}")
         if m.types[row].kind == .Aggregate {
             source :: ir_temp(&m, &b, row)
             ir_emit(&b.f, IROp.Load, source, out, 0, -1, b.line)
             ir_store_at(&m, p, &b, base, offset, source)
             // A native source record's owned shell: its bytes moved into
-            // the box, so only the shell is freed (Lower record.in clones
-            // them and drops the shell).
+            // the box, so only the shell is freed.
             if ir_route_shell(&m, p, payload, carrier) {
                 size :: m.types[row].size
                 bytes :: ir_word_const(&m, &b, if size < 8 -> 8 else -> size)
@@ -2923,10 +2899,9 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
 }
 
-// Whether `ty` is a native source record (Lower Records.jet
-// lower_native_shell_record) whose runtime handle is the route `carrier`'s:
-// a Core-declared shape with no record schema, which crosses as a heap
-// shell holding its declared bytes.
+// Whether `ty` is a native source record whose runtime handle is the route
+// `carrier`'s: a Core-declared shape with no record schema, which crosses as
+// a heap shell holding its declared bytes.
 fn ir_route_shell(m: &IRModule, p: IRProgram, ty: Type, carrier: IRRouteCarrier) -> Bool Never! {
     carrier_name :: if carrier == {
         .Handle(name) | .HandleMut(name) -> name
@@ -2939,8 +2914,8 @@ fn ir_route_shell(m: &IRModule, p: IRProgram, ty: Type, carrier: IRRouteCarrier)
     ir_record_runtime(&m, p, ty) == None
 }
 
-// The declaration row of the checked Dyn enum `ty` names, through an alias
-// (Lower Dyn.jet lower_dyn_type); None for any other type.
+// The declaration row of the checked Dyn enum `ty` names, through an alias;
+// None for any other type.
 fn ir_dyn_def(p: IRProgram, ty: Type) -> Int? Never! {
     name :: ir_nominal_name(ir_untag(ty)) ?? return None
     row :: ir_type_def(p, name) ?? return None
@@ -2950,11 +2925,11 @@ fn ir_dyn_def(p: IRProgram, ty: Type) -> Int? Never! {
     None
 }
 
-// The read-only storage descriptor of the Dyn enum `row` the runtime walks
-// (Lower Dyn.jet lower_dyn_schema): two header words [box bytes, row count],
-// then per runtime variant, in the runtime's order, [tag, payload offset,
-// boxed, payload bytes, element stride, key offset, value offset, element
-// bytes]. The pointer slot of its data row, or -1 after a failure.
+// The read-only storage descriptor of the Dyn enum `row` the runtime walks:
+// two header words [box bytes, row count], then per runtime variant, in the
+// runtime's order, [tag, payload offset, boxed, payload bytes, element
+// stride, key offset, value offset, element bytes]. The pointer slot of its
+// data row, or -1 after a failure.
 fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
     box_size :: ir_enum_box_size(&m, p, row, [Type]{}) ?? return ir_fail_slot(&b, span, "Dyn marshaling has no box layout")
     names :: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}
@@ -2998,8 +2973,8 @@ fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span
     address
 }
 
-// A runtime tree of the native Dyn `value` (Lower lower_dyn_to_runtime);
-// the caller drops it with jet_rt_handle_drop_dyn. -1 after a failure.
+// A runtime tree of the native Dyn `value`; the caller drops it with
+// jet_rt_handle_drop_dyn. -1 after a failure.
 fn ir_dyn_to_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) -> Int Never! {
     schema :: ir_dyn_schema(&m, p, &b, row, span)
     if schema < 0 -> return -1
@@ -3008,7 +2983,7 @@ fn ir_dyn_to_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value:
 }
 
 // The fresh native Dyn of value row `value_row` for the runtime `tree` a
-// route returned, which is dropped (Lower lower_dyn_from_runtime).
+// route returned, which is dropped.
 fn ir_dyn_from_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, tree: Int, value_row: Int, span: Span) -> Int Never! {
     schema :: ir_dyn_schema(&m, p, &b, row, span)
     if schema < 0 -> return -1
@@ -3017,9 +2992,8 @@ fn ir_dyn_from_runtime(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, tree
     native
 }
 
-// An Option item a route wrote as a selector word at `out` and its payload
-// in the words after (Lower lower_route_store_payload `.Option`): a boxed
-// payload, or null, stored at `offset` of `base`.
+// An Option item a route wrote as a selector word at `out` and its payload in
+// the words after: a boxed payload, or null, stored at `offset` of `base`.
 fn ir_route_store_option(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, some: IRRouteCarrier, out: Int, span: Span) Never! {
     inner :: if ir_untag(payload) == .Option(value) -> value else -> { return ir_fail(&b, span, "runtime route Option payload as {payload}") }
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "runtime route Option payload type {ir_type_name(payload)}")
@@ -3038,7 +3012,7 @@ fn ir_route_store_option(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, o
     ir_emit(&b.f, IROp.Store, -1, base, offset, boxed, b.line)
 }
 
-// Out words a route item takes (Lower lower_route_carrier_slots).
+// Out words a route item takes.
 fn ir_route_carrier_slots(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == .Option(some) -> return 1 + ir_route_carrier_slots(some)
     if carrier == .List(_) -> return 2
@@ -3046,8 +3020,7 @@ fn ir_route_carrier_slots(carrier: IRRouteCarrier) -> Int Never! {
 }
 
 // The kernel item each checked tuple member reads: by label when `labels`
-// names every checked label exactly once, else positionally (Lower
-// lower_route_tuple_order).
+// names every checked label exactly once, else positionally.
 fn ir_route_tuple_order(fields: [TypeTupleField], count: Int, labels: [String]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
@@ -3068,9 +3041,8 @@ fn ir_route_tuple_order(fields: [TypeTupleField], count: Int, labels: [String]) 
     labeled
 }
 
-// A tuple-result route (Lower lower_route_result `.Tuple`): the kernel
-// writes each item through out pointers into one zeroed frame slot, read
-// back into the checked tuple's members.
+// A tuple-result route: the kernel writes each item through out pointers into
+// one zeroed frame slot, read back into the checked tuple's members.
 fn ir_route_tuple(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], items: [IRRouteCarrier], labels: [String], result: Type, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
     fields :: if ir_untag(ir_subst(m, result)) == .Tuple(checked) -> checked else -> { return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}") }
@@ -3099,8 +3071,8 @@ fn ir_route_tuple(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
 }
 
 // A runtime record handle a route wrote to `out` as its record's declared
-// layout at `offset` of `base` (Lower lower_route_store_payload: a route
-// record through record.in); the handle is dropped after.
+// layout at `offset` of `base` (a route record through record.in); the handle
+// is dropped after.
 fn ir_route_record_in(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, out: Int, span: Span) Never! {
     if ir_record_runtime(&m, p, payload) == None -> return ir_fail(&b, span, "runtime route handle payload as {payload}")
     pointer_row :: ir_pointer_row(&m)
@@ -3143,9 +3115,9 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
         ok_ty = success
         err_ty = failure
     } else if export == "jet_int_to_radix" && ir_untag(result) == Type.String && ok == .Text && err == .Text {
-        // Int.to_radix is checked String over the kernel's Text/Text Result
-        // (Lower lower_route_int_radix): the selected text on success, a
-        // numeric stop with the error text on failure.
+        // Int.to_radix is checked String over the kernel's Text/Text Result:
+        // the selected text on success, a numeric stop with the error text on
+        // failure.
         out :: ir_out_slot(&m, &b, 1)
         call_args := args
         &call_args.push(out)
@@ -3192,8 +3164,7 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     boxed
 }
 
-// A Core call (codegen CoreCall -> Lower lower_route_call): its checked
-// arguments to the record's runtime route.
+// A Core call: its checked arguments to the record's runtime route.
 fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
     canonical :: ir_canonical_core_record(record)
     if canonical.module_name == "core.mem" && (canonical.member == "__list_capacity" || canonical.member == "__list_reserve_exact" || canonical.member == "__type_size") {
@@ -3262,10 +3233,10 @@ fn ir_comptime_ambient_refusal(symbol: String) -> String? Never! {
     }
 }
 
-// The raw List layout leaves (Lower lower_encoding_list_leaf):
-// `__type_size<T>()` is T's List stride, `__list_capacity<T>(xs)` the header's
-// capacity, `__list_reserve_exact<T>(&xs, n)` grows the written header to
-// exactly len + n elements (jet_rt_encoding_list_reserve_exact).
+// The raw List layout leaves: `__type_size<T>()` is T's List stride,
+// `__list_capacity<T>(xs)` the header's capacity,
+// `__list_reserve_exact<T>(&xs, n)` grows the written header to exactly len +
+// n elements (jet_rt_encoding_list_reserve_exact).
 fn ir_core_list_leaf(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
     if type_args.len() != 1 -> return ir_fail_slot(&b, span, "raw List layout leaf requires its checked element type")
     element_ty :: ir_subst(m, type_args[0])
@@ -3298,18 +3269,17 @@ fn ir_core_list_leaf(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member
     reserved
 }
 
-// `encoding.from_entries(entries)` (Lower lower_native_value_call): the
-// canonical Dyn's Object over the checked ordered entry List, which the box
-// takes (a read argument is copied).
+// `encoding.from_entries(entries)`: the canonical Dyn's Object over the
+// checked ordered entry List, which the box takes (a read argument is
+// copied).
 fn ir_object_from_entries(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "native value kernel jet_raw_object_from_entries requires one checked argument")
     if ir_dyn_def(p, ty) == None -> return ir_fail_slot(&b, span, "native Object kernel requires the canonical Dyn")
     ir_enum_value(&m, p, &b, ty, "Dyn", "Object", BodyEnumPayload.Positional{args: [BodyEnumArg]{BodyEnumArg{value: args[0]}}}, span)
 }
 
-// `encoding.object_entries(value)` (Lower lower_native_value_call): a View
-// over the canonical Dyn's Object payload, its checked ordered entry List,
-// which the borrowed Dyn keeps.
+// `encoding.object_entries(value)`: a View over the canonical Dyn's Object
+// payload, its checked ordered entry List, which the borrowed Dyn keeps.
 fn ir_object_entries_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "native value kernel jet_raw_object_entries_view requires one checked argument")
     dyn_row :: ir_dyn_def(p, ir_ty(p, b, args[0])) ?? return ir_fail_slot(&b, span, "native Object kernel requires the canonical Dyn")
@@ -3335,10 +3305,9 @@ fn ir_object_entries_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, a
     window
 }
 
-// `tree.len()` (codegen jet_codegen_lower_dyn_operation, Lower lower_dyn_len):
-// the length of an Array/Object/Bytes List or the scalar count of a Text,
-// read in place from the borrowed native Dyn; any other variant stops with
-// "{site}: {kind} has no length" at the checked location.
+// `tree.len()`: the length of an Array/Object/Bytes List or the scalar count
+// of a Text, read in place from the borrowed native Dyn; any other variant
+// stops with "{site}: {kind} has no length" at the checked location.
 fn ir_dyn_len(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, site_text: String, location: TPanicLoc, span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     dyn_row :: ir_dyn_def(p, receiver_ty) ?? return ir_fail_slot(&b, span, "handle method jet_dyn_len on {ir_type_name(receiver_ty)}")
@@ -3427,7 +3396,7 @@ fn ir_route_export(symbol: String) -> String Never! {
 }
 
 // `Int.MAX`, `I32.MIN`, `Float.NAN`, ...: the checked bound as a constant
-// (codegen NumericBounds: ir_numeric_bound_constant).
+// (ir_numeric_bound_constant).
 fn ir_numeric_bound(m: &IRModule, b: &IRBuilder, result: Type, ty: Type, member: String, span: Span) -> Int Never! {
     constant :: ir_numeric_bound_constant(ty, member) ?? return ir_fail_slot(&b, span, "numeric bound {member} of {ir_type_name(ty)}")
     row :: ir_type_row(&m, result) ?? return ir_type_fail(&b, span, result)

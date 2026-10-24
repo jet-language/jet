@@ -1,12 +1,10 @@
-// The IR builder's environment routes (Lower Routes.jet
-// lower_environment_call): the logical environment's getters, mutations,
-// column snapshots, key comparator and seed, whose checked carriers differ
-// from ordinary route calls. Every argument is borrowed.
+// The IR builder's environment routes: the logical environment's getters,
+// mutations, column snapshots, key comparator and seed, whose checked
+// carriers differ from ordinary route calls. Every argument is borrowed.
 
 use jet_foundation.[Span, Type]
 
-// Whether `row` is a compact byte List (`[U8]`, stride 1; Lower
-// lower_environment_bytes).
+// Whether `row` is a compact byte List (`[U8]`, stride 1).
 fn ir_environment_bytes(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     ty :: m.types[row].ty.copy()
     if ir_untag(ty) == .List(element) {
@@ -92,8 +90,7 @@ fn ir_environment_value(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvi
 
 // get_os owns an align-1 raw buffer (data at 0, length at 8 of `out`); a
 // List<U8> owns align-8 storage. The compact bytes are copied into a buffer
-// of their own, then the raw allocation is released once (Lower
-// lower_environment_byte_payload).
+// of their own, then the raw allocation is released once.
 fn ir_environment_byte_payload(m: &IRModule, b: &IRBuilder, boxed: Int, out: Int) Never! {
     data :: ir_load_word(&m, &b, out, 0)
     length :: ir_load_word(&m, &b, out, 8)
@@ -115,7 +112,7 @@ fn ir_environment_byte_payload(m: &IRModule, b: &IRBuilder, boxed: Int, out: Int
 
 // A mutation's status word: >= 0 is Ok (for unset, whether a key was
 // removed), -1 is EnvError.InvalidName, any other negative status
-// EnvError.InvalidValue (Lower lower_environment_status).
+// EnvError.InvalidValue.
 fn ir_environment_status(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     ok_ty := Type.Int
     err_ty := Type.Int

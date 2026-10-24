@@ -1,8 +1,8 @@
-// The IR builder's parallel List methods (Lower Parallel.jet): para_map,
-// para_filter, para_partition and para_fold. The runtime's joined range
-// scheduler (jet_rt_native_para_walk) calls a helper over 64-item ranges;
-// the helper reads its inputs through a frame env the caller lends until
-// every worker has joined, and writes disjoint output slots.
+// The IR builder's parallel List methods: para_map, para_filter,
+// para_partition and para_fold. The runtime's joined range scheduler
+// (jet_rt_native_para_walk) calls a helper over 64-item ranges; the helper
+// reads its inputs through a frame env the caller lends until every worker
+// has joined, and writes disjoint output slots.
 
 use jet_foundation.[Span, Type, TClosureOp, TypeTupleField, type_carrier_identity]
 
@@ -62,8 +62,7 @@ fn ir_para_range_open(m: &IRModule, a: &IRBuilder, begin: Int, end: Int) -> Int 
 
 // para.map(env, begin, end): env lends the closure at 0, the input buffer at
 // 8 and the output buffer at 16. Each item in the range is lent to the
-// closure and its result moves into the item's own output slot (Lower
-// lower_helper_parallel_map).
+// closure and its result moves into the item's own output slot.
 fn ir_para_map_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
     signature :: ir_para_signature(ty) ?? return ir_fail(&a, span, "parallel callback through {ir_type_name(ty)}")
     if signature.params.len() != 1 -> return ir_fail(&a, span, "parallel callback through {ir_type_name(ty)}")
@@ -98,8 +97,7 @@ fn ir_para_map_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: S
 // para.fold(env, begin, end): env lends the seed closure at 0, the step
 // closure at 8, the input buffer at 16 and the accumulator buffer at 24. The
 // range is one 64-item chunk: its accumulator starts from a fresh seed and
-// steps over the chunk's items in source order into slot begin / 64 (Lower
-// lower_helper_parallel_fold).
+// steps over the chunk's items in source order into slot begin / 64.
 fn ir_para_fold_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
     fields :: if ir_untag(ty) == .Tuple(rows) -> rows else -> { return ir_fail(&a, span, "parallel fold through {ir_type_name(ty)}") }
     if fields.len() != 2 -> return ir_fail(&a, span, "parallel fold through {ir_type_name(ty)}")
@@ -155,8 +153,8 @@ fn ir_para_list_clear(m: &IRModule, b: &IRBuilder, list: Int) Never! {
 }
 
 // `xs.para_map(f[, limit])`, `xs.para_filter(f)`, `xs.para_partition(f)` and
-// `xs.para_fold(seed, step, merge)` over the List at `list` (Lower
-// lower_parallel_method). `operands` are the built arguments in order.
+// `xs.para_fold(seed, step, merge)` over the List at `list`. `operands` are
+// the built arguments in order.
 fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], span: Span) -> Int Never! {
     if m.types[element].kind == .Unit -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} over Unit items")
     length :: ir_load_word(&m, &b, list, 0)

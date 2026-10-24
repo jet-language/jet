@@ -12,7 +12,7 @@
 //   the startup object registers the table, so the runtime's unwinder and
 //   debuggers both walk through Jet frames.
 // - `.debug_abbrev`, `.debug_info`: one compile unit covering `.text`; the
-//   types of LIRModuleDebug.types; one subprogram per function (frame base
+//   types of X64ModuleDebug.types; one subprogram per function (frame base
 //   rbp) with its parameters and variables, each located by a location list.
 //   Generated functions (glue, helpers, `main`) are artificial subprograms.
 // - `.debug_line`: one sequence per function with source lines; the row at
@@ -300,7 +300,7 @@ fn dwarf_abbrevs() -> [U8] Never! {
 // ---------------------------------------------------------------------------
 // Types.
 
-fn dwarf_encoding(encoding: LIRDebugEncoding) -> Int Never! {
+fn dwarf_encoding(encoding: X64DebugEncoding) -> Int Never! {
     if encoding == {
         .Signed -> 0x05
         .Unsigned -> 0x07
@@ -317,7 +317,7 @@ fn dwarf_type_ref(info: &[U8], refs: &[Int], rows: &[Int], row: Int) Never! {
     elf64_u32(&info, 0)
 }
 
-fn dwarf_members(info: &[U8], refs: &[Int], rows: &[Int], members: [LIRDebugMember]) Never! {
+fn dwarf_members(info: &[U8], refs: &[Int], rows: &[Int], members: [X64DebugMember]) Never! {
     loop member in members {
         if member.ty < 0 -> next
         dwarf_uleb(&info, DWARF_ABBREV_MEMBER)
@@ -329,7 +329,7 @@ fn dwarf_members(info: &[U8], refs: &[Int], rows: &[Int], members: [LIRDebugMemb
 }
 
 // Every type DIE, in row order; returns each row's DIE offset.
-fn dwarf_types(info: &[U8], types: [LIRDebugType]) -> [Int] Never! {
+fn dwarf_types(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
     offsets := [Int]{}
     refs := [Int]{}
     rows := [Int]{}
@@ -759,7 +759,7 @@ fn dwarf_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: 
     dwarf_uleb(&line, 1)
     dwarf_string(&line, if program.debug.directory == "" -> "." else -> program.debug.directory)
     // Files: (path, string), (directory index, udata). File 0 is the
-    // primary source file; file i + 1 is LIRModuleDebug.files[i].
+    // primary source file; file i + 1 is X64ModuleDebug.files[i].
     paths :: program.debug.files
     dwarf_u8(&line, 2)
     dwarf_uleb(&line, 1)

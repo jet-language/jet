@@ -1,10 +1,10 @@
-// The IR builder's Set<T> and Rank<T> (Lower Sets.jet): the ordered
-// Map<T, Unit> carrier, a 24-byte header (len, cap, data) over the keys in
-// ascending order. A Unit value has no bytes, so an entry is the key alone.
-// Set's iteration order is unspecified, Rank's is the key order; both see the
-// ascending keys. Lookups are the Map's binary search; insertion and equality
-// are helper functions built once per Set type (set.find, set.insert,
-// set.take, set.remove, set.equal), as Lower's glue helpers are.
+// The IR builder's Set<T> and Rank<T>: the ordered Map<T, Unit> carrier, a
+// 24-byte header (len, cap, data) over the keys in ascending order. A Unit
+// value has no bytes, so an entry is the key alone. Set's iteration order is
+// unspecified, Rank's is the key order; both see the ascending keys. Lookups
+// are the Map's binary search; insertion and equality are helper functions
+// built once per Set type (set.find, set.insert, set.take, set.remove,
+// set.equal).
 
 use jet_foundation.[Span, Type, type_carrier_identity]
 
@@ -60,8 +60,8 @@ fn ir_set_call(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, name: St
 }
 
 // Moves the key in at its insertion point and returns true; a key already
-// present keeps its entry, drops the offered one and returns false (Lower
-// lower_set_insert: map.set with a Unit value; Sets.jet:228-241).
+// present keeps its entry, drops the offered one and returns false (map.set
+// with a Unit value).
 fn ir_set_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     a.f.result = bool_row
@@ -94,10 +94,10 @@ fn ir_set_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
     ir_emit(&a.f, IROp.Return, -1, added, -1, -1, a.line)
 }
 
-// The stored key under a borrowed probe: set.take moves it into an Option
-// box (null when absent), set.remove (`option_row` -1) drops it; both close
-// the gap. map.remove cannot express this: it drops the key and returns the
-// Unit value (Lower lower_helper_set_take).
+// The stored key under a borrowed probe: set.take moves it into an Option box
+// (null when absent), set.remove (`option_row` -1) drops it; both close the
+// gap. map.remove cannot express this: it drops the key and returns the Unit
+// value.
 fn ir_set_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, option_row: Int) Never! {
     discard :: option_row < 0
     a.f.result = option_row
@@ -140,8 +140,7 @@ fn ir_set_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
     ir_emit(&a.f, IROp.Return, -1, boxed, -1, -1, a.line)
 }
 
-// Equal lengths and the same key at every position of the ascending entries
-// (Lower lower_helper_set_equal, Sets.jet:441).
+// Equal lengths and the same key at every position of the ascending entries.
 fn ir_set_equal_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, left: Int, right: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     a.f.result = bool_row
@@ -167,7 +166,7 @@ fn ir_set_equal_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
     ir_emit(&a.f, IROp.Return, -1, same, -1, -1, a.line)
 }
 
-// A List of copies of the Set's keys in entry order (Lower lower_set_list).
+// A List of copies of the Set's keys in entry order.
 fn ir_set_list(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set: Int, list_row: Int) -> Int Never! {
     out :: ir_list_empty(&m, &b, list_row)
     walk :: ir_walk_open(&m, &b, set, shape.entry)
@@ -176,8 +175,8 @@ fn ir_set_list(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set
     out
 }
 
-// `rank.first()` / `rank.last()` (Lower set.first / set.last): a copy of the
-// least (greatest) key in an Option box, None when the Rank is empty.
+// `rank.first()` / `rank.last()`: a copy of the least (greatest) key in an
+// Option box, None when the Rank is empty.
 fn ir_set_end(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     result :: ir_fresh_temp(&m, &b, result_row)
@@ -205,7 +204,7 @@ fn ir_set_end(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapS
 }
 
 // `Set.new()` / `Rank.new()` (the Prelude std::collections::HashSet::new /
-// BTreeSet::new route, Lower lower_set_new): an empty header.
+// BTreeSet::new route): an empty header.
 fn ir_set_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 0 -> return ir_fail_slot(&b, span, "Set.new with {inputs.len()} arguments")
     set_row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
@@ -213,10 +212,9 @@ fn ir_set_new(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: 
     ir_list_empty(&m, &b, set_row)
 }
 
-// `Set.from(source)` / `source.to_set()` (Lower lower_set_from, Sets.jet:72):
-// each element inserted in order, later duplicates dropped. A fresh List
-// gives its elements up; any other's are copied. An Iter is drained into a
-// List first, as Iter.to_list is.
+// `Set.from(source)` / `source.to_set()`: each element inserted in order,
+// later duplicates dropped. A fresh List gives its elements up; any other's
+// are copied. An Iter is drained into a List first, as Iter.to_list is.
 fn ir_set_from(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
     set_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     shape :: ir_set_shape(&m, p, set_row) ?? return ir_fail_slot(&b, span, "Set construction of {ir_type_name(ty)}")
@@ -245,7 +243,7 @@ fn ir_set_from(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int,
     set
 }
 
-// A Rank route by its Set equivalent (Lower lower_set_method, Sets.jet:143).
+// A Rank route by its Set equivalent.
 fn ir_set_symbol(symbol: String) -> String Never! {
     if symbol == {
         "jet_sorted_set_from" -> "jet_set_from"
@@ -263,10 +261,9 @@ fn ir_set_symbol(symbol: String) -> String Never! {
     }
 }
 
-// A Set builtin by its route symbol (Lower lower_set_method): from, len,
-// capacity, is_empty, to_list, sort, values, has, insert/add, remove, pop,
-// replace, equal, union and intersection; None when the builder does not
-// lower `symbol` on Sets.
+// A Set builtin by its route symbol: from, len, capacity, is_empty, to_list,
+// sort, values, has, insert/add, remove, pop, replace, equal, union and
+// intersection; None when the builder does not lower `symbol` on Sets.
 fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     symbol :: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
@@ -308,8 +305,7 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
     }
     // `union(other)` is a copy of the receiver with a copy of each key of
     // `other` inserted; `intersection(other)` a new Set of copies of the
-    // receiver's keys `other` holds too, in the receiver's order (Lower
-    // lower_set_method).
+    // receiver's keys `other` holds too, in the receiver's order.
     if symbol == "jet_set_union" || symbol == "jet_set_intersection" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set {route} without an operand"))
         other :: ir_adapt(&m, p, &b, operands[1], set_row, span)

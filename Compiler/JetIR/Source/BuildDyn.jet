@@ -1,11 +1,10 @@
-// The native Dyn tree's handle methods (codegen Data.jet
-// jet_codegen_lower_dyn_operation / jet_codegen_lower_data_handle_method,
-// Lower Dyn.jet). A key lookup scans the borrowed native Object in place; the
-// scalar reads and Field/At cross the encoding.dyn routes, whose Dyn operand
-// ir_route converts to a runtime tree for the call; a path write or a remove
-// lends the receiver place's Dyn to the runtime and stores the rebuilt tree
-// back; `decode<T>()` calls T's Decode implementation, a container's Core
-// decode helper or the runtime's scalar Decode adapter.
+// The native Dyn tree's handle methods. A key lookup scans the borrowed
+// native Object in place; the scalar reads and Field/At cross the
+// encoding.dyn routes, whose Dyn operand ir_route converts to a runtime tree
+// for the call; a path write or a remove lends the receiver place's Dyn to
+// the runtime and stores the rebuilt tree back; `decode<T>()` calls T's
+// Decode implementation, a container's Core decode helper or the runtime's
+// scalar Decode adapter.
 
 use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, tir_generated_local, tir_user_local, StmtKind]
 
@@ -24,8 +23,7 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         .DynIndexAt(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
         else -> {}
     }
-    // The encoding.dyn routes (codegen jet_codegen_data_handle_route and
-    // jet_codegen_lower_dyn_operation): the tree is borrowed, an index moves.
+    // The encoding.dyn routes: the tree is borrowed, an index moves.
     route :: if operation == {
         .DynField | .JSONField -> (symbol: "jet_dyn_field", arity: 1, mask: [Bool]{true, true})
         .DynAt | .JSONAt -> (symbol: "jet_dyn_at", arity: 1, mask: [Bool]{true, false})
@@ -50,10 +48,10 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     Val(ir_route(&m, p, &b, route.symbol, operands, route.mask, ty, span))
 }
 
-// `tree[key]` / `tree[index]` (codegen jet_codegen_lower_dyn_operation): the
-// jet_dyn_index_key / jet_dyn_index_at route gives Ok(a new owner of the
-// entry) or Err(its stop detail), and an Err stops at the index's line, its
-// source quoted with the caret at the line start (DynRuntime.rs).
+// `tree[key]` / `tree[index]`: the jet_dyn_index_key / jet_dyn_index_at route
+// gives Ok(a new owner of the entry) or Err(its stop detail), and an Err
+// stops at the index's line, its source quoted with the caret at the line
+// start (DynRuntime.rs).
 fn ir_dyn_index(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn index with {args.len()} arguments")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -160,9 +158,8 @@ fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_ro
     result
 }
 
-// The receiver place of a Dyn mutation (Lower Dyn.jet lower_dyn_mutation):
-// its storage cell, the native Dyn it held and the runtime tree built from
-// that Dyn for the route.
+// The receiver place of a Dyn mutation: its storage cell, the native Dyn it
+// held and the runtime tree built from that Dyn for the route.
 struct IRDynPlace { cell: Int, current: Int, tree: Int, backs: [IRWriteBack] }
 
 fn ir_dyn_place_open(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, span: Span) -> IRDynPlace? Never! {
@@ -193,10 +190,10 @@ fn ir_dyn_place_close(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, p
     loop back in place.backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
 }
 
-// `tree.a[0].b = value` (codegen DynSetPath, JetRuntime jet_dyn_set_path):
-// the steps cross as one runtime Array of Text keys and Int indexes, the
-// owned value as a runtime tree the route adopts; a refused step stops with
-// the route's "{site}: ..." text at the checked location.
+// `tree.a[0].b = value` (JetRuntime jet_dyn_set_path): the steps cross as one
+// runtime Array of Text keys and Int indexes, the owned value as a runtime
+// tree the route adopts; a refused step stops with the route's "{site}: ..."
+// text at the checked location.
 fn ir_dyn_set_path(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, keys: [Bool], site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != keys.len() + 1 -> return ir_fail_slot(&b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
     value_expr :: args[keys.len()]
@@ -265,11 +262,10 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
     removed
 }
 
-// `tree.decode<T>()` (Lower Codecs.jet lower_codec_decode_into): T's own
-// Decode implementation, called with the tree; a container or Dyn target's
-// Core/Encoding/Encoding.jet decode helper (ir_codec_decode_helper); else the
-// runtime's canonical scalar adapter jet_rt_codec_decode_<scalar>, which
-// borrows the tree.
+// `tree.decode<T>()`: T's own Decode implementation, called with the tree; a
+// container or Dyn target's Core/Encoding/Encoding.jet decode helper
+// (ir_codec_decode_helper); else the runtime's canonical scalar adapter
+// jet_rt_codec_decode_<scalar>, which borrows the tree.
 fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
     concrete :: ir_subst(m, target)
@@ -286,9 +282,9 @@ fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, result_ty, span)
 }
 
-// `FieldError.under(segment, inner)` (Lower Codecs.jet lower_codec_under):
-// Core/Encoding/Encoding.jet __decode_under frames every error of the inner
-// Result under `segment` and passes a success through.
+// `FieldError.under(segment, inner)`: Core/Encoding/Encoding.jet
+// __decode_under frames every error of the inner Result under `segment` and
+// passes a success through.
 fn ir_decode_under(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
     success :: if ir_untag(ir_subst(m, ty)) == {
         .Result(ok, _) -> ok.copy()
@@ -305,9 +301,8 @@ fn ir_codec_arg(value: Int) -> BodyCallArg Never! {
 }
 
 // The Core decode helper for a target with no Decode implementation of its
-// own (Lower lower_helper_codec_decode), and its type arguments: a List
-// (a byte List also takes Bytes and base64 Text), an Option, a String-keyed
-// Map and Dyn itself.
+// own, and its type arguments: a List (a byte List also takes Bytes and
+// base64 Text), an Option, a String-keyed Map and Dyn itself.
 fn ir_codec_decode_helper(p: IRProgram, target: Type) -> (name: String, type_args: [Type])? Never! {
     if ir_dyn_def(p, target) != None -> return Val((name: "__decode_dyn", type_args: [Type]{}))
     if ir_untag(target) == {
@@ -333,8 +328,8 @@ fn ir_codec_decode_key(p: IRProgram, name: String) -> String? Never! {
     None
 }
 
-// The runtime scalar Decode adapter's suffix for `target` (Lower
-// lower_codec_scalar), or None for a non-scalar target.
+// The runtime scalar Decode adapter's suffix for `target`, or None for a
+// non-scalar target.
 fn ir_codec_scalar(target: Type) -> String? Never! {
     if ir_untag(target) == {
         .Int -> Val("int")
@@ -350,13 +345,12 @@ fn ir_codec_scalar(target: Type) -> String? Never! {
     }
 }
 
-// `value.encode()` into a Dyn (codegen jet_codegen_lower_serde_encode): a
-// Dyn is itself, a type with its own Encode implementation calls it, an
-// Int, fixed-width integer, Float, Bool, Char or String value is boxed as its
-// Dyn variant (jet_codegen_data_encode_variant; a Char is the Text of its
-// one character), and a String-keyed Map or a List encodes as an Object or
-// Array of its encoded values (jet_codegen_lower_container_encode). The
-// builtin and typed codec routes have no lowering here.
+// `value.encode()` into a Dyn: a Dyn is itself, a type with its own Encode
+// implementation calls it, an Int, fixed-width integer, Float, Bool, Char or
+// String value is boxed as its Dyn variant (a Char is the Text of its one
+// character), and a String-keyed Map or a List encodes as an Object or Array
+// of its encoded values. The builtin and typed codec routes have no lowering
+// here.
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     concrete :: ir_subst(m, ir_ty(p, b, receiver))
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
@@ -397,9 +391,8 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     ir_dyn_box(&m, p, &b, ty, variant, payload, span)
 }
 
-// A List's `encode()` (codegen jet_codegen_lower_container_encode): the
-// Array of each item's encode(), in order, built by a loop over the list
-// the way ir_dyn_object_encode builds an Object.
+// A List's `encode()`: the Array of each item's encode(), in order, built by
+// a loop over the list the way ir_dyn_object_encode builds an Object.
 fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, element: Type, span: Span) -> Int Never! {
     output_ty :: Type.List{element: ty}
     output_row :: ir_value_type(&m, p, output_ty) ?? return ir_type_fail(&b, span, output_ty)

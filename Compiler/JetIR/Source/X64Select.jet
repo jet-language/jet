@@ -25,15 +25,15 @@
 // call jet_rt_int_clone / the type's drop only for a big integer.
 
 use jet_backend.[
-    LIRDataID,
-    LIRDebugVariable,
-    LIRFunctionID,
     X64Alu,
     X64Cond,
     X64CompiledFunction,
+    X64DataID,
     X64DebugLocation,
+    X64DebugVariable,
     X64FloatOp,
     X64FunctionDebug,
+    X64FunctionID,
     X64LineRow,
     X64Reloc,
     X64RelocTarget,
@@ -194,7 +194,7 @@ struct IRX64Emitter {
 struct IRX64FunctionResult {
     function: X64CompiledFunction
     debug: X64FunctionDebug
-    variables: [LIRDebugVariable]
+    variables: [X64DebugVariable]
     errors: [String]
 }
 
@@ -463,7 +463,7 @@ fn ir_x64_helper(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             .Imm(value) -> x64_mov_ri(&e.code, reg, value)
             .Data(id) -> {
                 at :: x64_lea_rip(&e.code, reg)
-                &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: LIRDataID{value: id}}})
+                &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: X64DataID{value: id}}})
             }
         }
     }
@@ -643,7 +643,7 @@ fn ir_x64_stop_resume(e: &IRX64Emitter, m: IRModule, target: Int) Never! {
 
 fn ir_x64_lea_data(e: &IRX64Emitter, reg: Int, id: Int) Never! {
     at :: x64_lea_rip(&e.code, reg)
-    &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: LIRDataID{value: id}}})
+    &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: X64DataID{value: id}}})
 }
 
 // ---------------------------------------------------------------------------
@@ -1512,7 +1512,7 @@ fn ir_x64_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
     if ty.kind == .String && drop == "jet_rt_string_drop" -> return ir_x64_string_drop(&e, m, f, al, slot)
     // A drop routine the module builds itself (the ScopeGuard drop) is
     // registered under its symbol.
-    if m.function_rows.get(drop) == .Val(id) -> return ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
+    if m.function_rows.get(drop) == .Val(id) -> return ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
     ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: drop}, -1, [Int]{slot}, 0, 1, -1, 0)
 }
 
@@ -1731,7 +1731,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             if m.functions[f.a[at]].asm == .Val(leaf) && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY {
                 if ir_x64_asm_inline(&e, m, f, al, leaf, f.args, f.b[at], f.c[at], dst) -> return
             }
-            ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+            ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
         }
         .CallRuntime -> {
             if f.a[at] < 0 || f.a[at] >= m.names.len() -> return ir_x64_fail(&e, f, at, "runtime name {f.a[at]} is not interned")
@@ -1750,7 +1750,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .CallIndirect -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: ""}, f.a[at], f.args, f.b[at], f.c[at], dst, al.stack[at])
         .FunctionAddress -> {
             reloc_at :: x64_lea_rip(&e.code, X64_RAX)
-            &e.relocs.push(X64Reloc{at: reloc_at, target: X64RelocTarget.Function{id: LIRFunctionID{value: f.a[at]}}})
+            &e.relocs.push(X64Reloc{at: reloc_at, target: X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}})
             ir_x64_store(&e, m, f, al, dst, X64_RAX)
         }
         .DataAddress -> {
@@ -1829,7 +1829,7 @@ fn ir_x64_stop_point(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
             &e.code.push(0x85)
             &e.code.push(0xd2)
         } else {
-            ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
+            ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
             x64_test_rr(&e.code, X64_RAX, X64_RAX)
         }
         site = x64_jcc_rel32(&e.code, X64Cond.NE)
@@ -2031,13 +2031,13 @@ fn ir_x64_same_key(a: [Int], b: [Int]) -> Bool Never! {
 
 // Debug variables and their locations: a register slot over its live range,
 // a frame slot over the whole body.
-fn ir_x64_variables(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, positions: [Int], body: Int, end: Int, variables: &[LIRDebugVariable], ranges: &[X64VariableRange]) Never! {
+fn ir_x64_variables(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     loop slot in 0..<f.slot_type.len() {
         name :: f.slot_name[slot]
         if name < 0 || name >= m.names.len() -> next
         ty :: ir_x64_type(m, f, slot)
         variable :: variables.len()
-        &variables.push(LIRDebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: false})
+        &variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: false})
         if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] || al.frames[slot] != 0 -> next
         if al.regs[slot] >= 0 {
             start :: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot]]
@@ -2100,9 +2100,9 @@ fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     relocs := [X64Reloc]{X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}}}
     name :: if f.symbol != "" -> f.symbol else -> f.key
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: LIRFunctionID{value: row}, name: name, code: ^code, relocs: ^relocs},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^code, relocs: ^relocs},
         debug: X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: ^cfi, ranges: [X64VariableRange]{}},
-        variables: [LIRDebugVariable]{},
+        variables: [X64DebugVariable]{},
         errors: [String]{},
     }
 }
@@ -2151,9 +2151,9 @@ fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64Functio
     }
     name :: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: LIRFunctionID{value: row}, name: name, code: ^code, relocs: [X64Reloc]{}},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^code, relocs: [X64Reloc]{}},
         debug: X64FunctionDebug{lines: ^lines, body: body, cfi: ^cfi, ranges: [X64VariableRange]{}},
-        variables: [LIRDebugVariable]{},
+        variables: [X64DebugVariable]{},
         errors: [String]{},
     }
 }
@@ -2311,12 +2311,12 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     }
     ir_x64_emit_colds(&e, m, f, al, tables, exit)
 
-    variables := [LIRDebugVariable]{}
+    variables := [X64DebugVariable]{}
     ranges := [X64VariableRange]{}
     ir_x64_variables(m, f, al, tables, positions, body, epilogue, &variables, &ranges)
     name :: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: LIRFunctionID{value: row}, name: name, code: ^e.code, relocs: ^e.relocs},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^e.code, relocs: ^e.relocs},
         debug: X64FunctionDebug{lines: ^lines, body: body, cfi: ^cfi, ranges: ^ranges},
         variables: ^variables,
         errors: ^e.errors,

@@ -1,9 +1,8 @@
-// The IR builder's Maps (Lower Maps.jet): a Map is a List of its (key,
-// value) entry tuples kept in ascending key order, the same 24-byte header
-// (len, cap, data); iteration, display and every lookup see the entries in
-// BTreeMap order, and a lookup is a binary search. Its operations are
-// helper functions built once per Map type (map.find, map.set, map.get,
-// map.remove, map.insert), as Lower's glue helpers are.
+// The IR builder's Maps: a Map is a List of its (key, value) entry tuples
+// kept in ascending key order, the same 24-byte header (len, cap, data);
+// iteration, display and every lookup see the entries in BTreeMap order, and
+// a lookup is a binary search. Its operations are helper functions built once
+// per Map type (map.find, map.set, map.get, map.remove, map.insert).
 
 use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, TPanicLoc, TPanicLocal, type_carrier_identity]
 
@@ -55,10 +54,9 @@ fn ir_map_key_kind(m: IRModule, row: Int) -> String Never! {
     }
 }
 
-// True when ir_order_into orders `ty` (Lower lower_order_kind "list",
-// "inline" and "boxed" over a tuple, List or Option; a declared struct or
-// enum, which sema checked Comparable, orders by its helper or its user
-// Comparable impl).
+// True when ir_order_into orders `ty`: a tuple, List or Option, or a
+// declared struct or enum, which sema checked Comparable, by its helper or
+// its user Comparable impl.
 fn ir_ordered_type(ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
         .Int | .String | .Bool | .Char -> true
@@ -76,7 +74,7 @@ fn ir_ordered_type(ty: Type) -> Bool Never! {
     }
 }
 
-// `left < right` and `left == right` for two keys (Lower lower_map_key_order).
+// `left < right` and `left == right` for two keys.
 struct IRMapOrder { less: Int, same: Int }
 
 fn ir_map_order(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
@@ -116,8 +114,8 @@ fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int 
     id
 }
 
-// Binary search over the ascending entries: the entry's index, or
-// -1 - the insertion point when the key is absent (Lower lower_helper_map_find).
+// Binary search over the ascending entries: the entry's index, or -1 - the
+// insertion point when the key is absent.
 fn ir_map_find_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
     a.f.result = ir_word_row(&m)
     length :: ir_load_word(&m, &a, map, 0)
@@ -154,8 +152,7 @@ fn ir_map_find_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
 
 // Moves the key and value in: an existing key keeps its entry key (the
 // incoming one is dropped) and its value is replaced, dropped by map.set and
-// returned in an Option box by map.insert (null when the key was new)
-// (Lower lower_helper_map_insert).
+// returned in an Option box by map.insert (null when the key was new).
 fn ir_map_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, option_row: Int) Never! {
     a.f.result = option_row
     word_row :: ir_word_row(&m)
@@ -206,9 +203,9 @@ fn ir_map_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
     ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
 }
 
-// The value under a borrowed key in an Option box (null when absent):
-// map.get copies it, map.remove moves it out, drops the entry's key and
-// closes the gap (Lower lower_helper_map_take).
+// The value under a borrowed key in an Option box (null when absent): map.get
+// copies it, map.remove moves it out, drops the entry's key and closes the
+// gap.
 fn ir_map_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, option_row: Int, removes: Bool) Never! {
     a.f.result = option_row
     word_row :: ir_word_row(&m)
@@ -260,9 +257,8 @@ fn ir_map_call(m: &IRModule, p: IRProgram, b: &IRBuilder, map_row: Int, name: St
     dst
 }
 
-// Room for one more element of the list at `list`: grows its buffer to
-// twice its capacity (at least 4) when full (Lower lower_list_reserve);
-// returns the length.
+// Room for one more element of the list at `list`: grows its buffer to twice
+// its capacity (at least 4) when full; returns the length.
 fn ir_list_reserve(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Never! {
     stride :: ir_list_stride(m, row)
     width :: ir_word_const(&m, &b, stride)
@@ -290,8 +286,8 @@ fn ir_list_reserve(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Neve
     length
 }
 
-// `[k: v, ...]` (BuildMap): an empty header, then each entry set in order,
-// a later duplicate key replacing the earlier value (Lower lower_build_map).
+// `[k: v, ...]` (BuildMap): an empty header, then each entry set in order, a
+// later duplicate key replacing the earlier value.
 fn ir_map_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, entries: [BodyMapEntry], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map literal of {ir_type_name(ty)}")
@@ -321,9 +317,9 @@ fn ir_line_report(p: IRProgram, b: IRBuilder) -> TPanicLoc Never! {
     ir_report_location(p, TPanicLoc{file: b.f.source_file.copy(), source_line: "", line: b.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}})
 }
 
-// The address of the value stored under `key` in the map at `map`; a
-// missing key stops at the current line with the key's debug text (Lower
-// lower_map_value_address: Core.rs jet_index_map_ref).
+// The address of the value stored under `key` in the map at `map`; a missing
+// key stops at the current line with the key's debug text (Core.rs
+// jet_index_map_ref).
 fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int) -> Int Never! {
     shape :: ir_map_shape(&m, p, row) ?? return -1
     word_row :: ir_word_row(&m)
@@ -416,8 +412,8 @@ fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, ind
     ir_store_at(&m, p, &b, address, 0, result)
 }
 
-// `[k: v, ...]` in display (Lower Display.jet): `[:]` when empty; keys and
-// values render as themselves.
+// `[k: v, ...]` in display: `[:]` when empty; keys and values render as
+// themselves.
 fn ir_render_map(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
     row :: b.f.slot_type[slot]
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "display of {ir_type_name(m.types[row].ty)}")
@@ -444,11 +440,10 @@ fn ir_render_map(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: 
     ir_end(&b.f, b.line)
 }
 
-// A Map builtin by its route symbol (Lower lower_map_method): len, is_empty,
-// has_key, get (an owned copy), insert (the replaced value), remove (the
-// removed value), keys / values (an Iter) and top_n (a ranked List of
-// entries); `ty` is the result type. None when the builder does not lower
-// `symbol` on Maps.
+// A Map builtin by its route symbol: len, is_empty, has_key, get (an owned
+// copy), insert (the replaced value), remove (the removed value), keys /
+// values (an Iter) and top_n (a ranked List of entries); `ty` is the result
+// type. None when the builder does not lower `symbol` on Maps.
 fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     row :: b.f.slot_type[subject]
     shape :: ir_map_shape(&m, p, row) ?? return None
@@ -471,9 +466,9 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         subst_ty :: ir_subst(m, ty)
         return Val(ir_map_top_n(&m, p, &b, subst_ty, shape, subject, operands[1], span))
     }
-    // `equal(other)` is the maps' equality; `merge(other)` (Lower
-    // lower_map_method_more) is a copy of the receiver with each entry of
-    // `other`, in key order, set as a copy: the right side wins.
+    // `equal(other)` is the maps' equality; `merge(other)` is a copy of the
+    // receiver with each entry of `other`, in key order, set as a copy: the
+    // right side wins.
     if symbol == "jet_map_equal" || symbol == "jet_map_merge" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
         other :: ir_adapt(&m, p, &b, operands[1], row, span)
@@ -506,7 +501,7 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         return Val(ir_map_merge_with(&m, p, &b, shape, row, subject, other, operands[2], span))
     }
     // `to_list()` / `items()`: the `(key, value)` entries in key order, as
-    // copies (Lower lower_map_entry_list shares the entry buffer).
+    // copies.
     if symbol == "jet_map_to_list" {
         if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map to_list with {operands.len() - 1} arguments"))
         result_row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
@@ -518,7 +513,7 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         return Val(result)
     }
     // `intersection(other)`: a new Map of copies of the receiver's entries
-    // whose key `other` holds too (Lower lower_map_method_more).
+    // whose key `other` holds too.
     if symbol == "jet_map_intersection" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map intersection without an operand"))
         other :: ir_adapt(&m, p, &b, operands[1], row, span)
@@ -554,9 +549,9 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         b.fresh[owned_value] = false
         return Val(old)
     }
-    // `add_new(key, value)` (Lower lower_map_method_query): inserts only
-    // under a missing key, whether it was missing; the copies made for the
-    // insert are dropped when the key is there.
+    // `add_new(key, value)`: inserts only under a missing key, whether it was
+    // missing; the copies made for the insert are dropped when the key is
+    // there.
     if symbol == "jet_map_add_new" {
         if operands.len() != 3 || operands[2] < 0 -> return Val(ir_fail_slot(&b, span, "map add_new without a value"))
         value :: ir_adapt(&m, p, &b, operands[2], shape.value.ty, span)
@@ -591,9 +586,9 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
     Val(result)
 }
 
-// `map.keys()` / `map.values()` (Lower lower_map_method_more): a List of
-// copies of the entries' keys (values), in key order, handed to the runtime
-// Iter by value; later map writes never reach it.
+// `map.keys()` / `map.values()`: a List of copies of the entries' keys
+// (values), in key order, handed to the runtime Iter by value; later map
+// writes never reach it.
 fn ir_map_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, keys: Bool, span: Span) -> Int Never! {
     member :: if keys -> shape.key else -> shape.value
     item_ty :: m.types[member.ty].ty
@@ -611,10 +606,9 @@ fn ir_map_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, result_row)
 }
 
-// `map.first_key()` / `map.min_value()` / `map.max_value()` (Lower
-// lower_map_method_query): a copy of the chosen key or value in an Option
-// box, None when the map is empty. min keeps the first least value, max the
-// last greatest (Iterator::min / max).
+// `map.first_key()` / `map.min_value()` / `map.max_value()`: a copy of the
+// chosen key or value in an Option box, None when the map is empty. min keeps
+// the first least value, max the last greatest (Iterator::min / max).
 fn ir_map_pick(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, symbol: String, span: Span) -> Int Never! {
     keyed :: symbol == "jet_map_first_key"
     member :: if keyed -> shape.key else -> shape.value
@@ -657,10 +651,10 @@ fn ir_map_pick(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     result
 }
 
-// `map.merge_with(other, conflict)` (Lower lower_map_method_more): a copy of
-// the receiver with each entry of `other`, in key order, set as a copy; a key
-// both hold gets `conflict(key, left value, right value)`, the callback
-// borrowing its arguments, and the left value it replaces ends.
+// `map.merge_with(other, conflict)`: a copy of the receiver with each entry
+// of `other`, in key order, set as a copy; a key both hold gets
+// `conflict(key, left value, right value)`, the callback borrowing its
+// arguments, and the left value it replaces ends.
 fn ir_map_merge_with(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, row: Int, subject: Int, other: Int, callback: Int, span: Span) -> Int Never! {
     word_row :: ir_word_row(&m)
     target :: ir_copy_value(&m, p, &b, subject, span)
@@ -688,10 +682,10 @@ fn ir_map_merge_with(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShap
     target
 }
 
-// `map.top_n(n)` (Lower lower_map_entry_list, list.rank_entries): the
-// entries ordered by descending value, ties by ascending key (a stable
-// insertion order over the entry positions), the first max(n, 0) copied
-// into a new List of `(key, value)` entries.
+// `map.top_n(n)` (list.rank_entries): the entries ordered by descending
+// value, ties by ascending key (a stable insertion order over the entry
+// positions), the first max(n, 0) copied into a new List of `(key, value)`
+// entries.
 fn ir_map_top_n(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, count: Int, span: Span) -> Int Never! {
     value_kind :: ir_map_key_kind(m, shape.value.ty)
     if value_kind == "" || shape.stride %% 8 != 0 -> return ir_fail_slot(&b, span, "Map top_n over {ir_type_name(shape.value_ty)} values is not lowered at O0 yet")
@@ -799,9 +793,9 @@ fn ir_map_top_n(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMa
     result
 }
 
-// `Map.from_keys(keys, default)` (Lower lower_list_method_shape): every key,
-// in List order, set to a copy of the default (a later duplicate key
-// replacing the earlier entry). The caller keeps `keys` and `fallback`.
+// `Map.from_keys(keys, default)`: every key, in List order, set to a copy of
+// the default (a later duplicate key replacing the earlier entry). The caller
+// keeps `keys` and `fallback`.
 fn ir_map_from_keys(m: &IRModule, p: IRProgram, b: &IRBuilder, keys: Int, fallback: Int, result: Type, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
     shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "Map.from_keys into {ir_type_name(result)} is not lowered at O0 yet")
