@@ -1,15 +1,69 @@
-# PORT tests/suite_goldens.rs20-73; current live corpus, exact literal expected bytes.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No snapshot blessing.
-copy: {root}/Examples/suites suite
-mkdir: cache
-capture: n = entries suite ext = "jet" name != "package.jet"
-cap:n: = 8
-for file suite ext = "jet" name != "package.jet" sorted as story
-step: jet run {story.path}
-env: JETPACK_ENV=1
-env: JET_STORE_DIR={work}/cache
-env: NO_COLOR=1
-unset: JETPACK_ENV_DIR
+# Port of tests/suite_goldens.rs::user_story_suite_matches_expected_output.
+# Each Examples/suites/*.jet (package.jet excluded, 8 stories) must run with success and match Examples/suites/expected/<stem>.out byte-for-byte.
+step: bash -c 'test "$(ls {repo}/Examples/suites/*.jet | grep -vc /package.jet$)" = 8'
+cwd: {repo}
 exit: 0
-stdout: = {work}/suite/expected/{story.stem}.out
-end for
+step: jet run {repo}/Examples/suites/dispatch.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/dispatch.out
+step: jet run {repo}/Examples/suites/expense_report.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/expense_report.out
+step: jet run {repo}/Examples/suites/failure.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/failure.out
+step: jet run {repo}/Examples/suites/finite_state.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/finite_state.out
+step: jet run {repo}/Examples/suites/inventory_reorder.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/inventory_reorder.out
+step: jet run {repo}/Examples/suites/ownership.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/ownership.out
+step: jet run {repo}/Examples/suites/support_queue.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/support_queue.out
+step: jet run {repo}/Examples/suites/wire_output.jet
+cwd: {repo}
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {repo}/Examples/suites/expected/wire_output.out

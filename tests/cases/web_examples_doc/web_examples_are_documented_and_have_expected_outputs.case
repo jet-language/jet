@@ -1,0 +1,5 @@
+# Port of tests/web_examples_doc.rs::web_examples_are_documented_and_have_expected_outputs (card #705).
+# Every Examples/features/web/*.jet is named in Docs/spec/reference/web-backend-wasm.md and has a .out, .web.out, or .harness.out golden in Examples/features/expected/web/. Failure stops at the first missing item, as the Rust assert did.
+step: bash -c 'for f in Examples/features/web/*.jet; do n=$(basename "$f"); s=${n%.jet}; grep -qF -- "$n" Docs/spec/reference/web-backend-wasm.md || { echo "$n missing from Docs/spec/reference/web-backend-wasm.md"; exit 1; }; [ -f "Examples/features/expected/web/$s.out" ] || [ -f "Examples/features/expected/web/$s.web.out" ] || [ -f "Examples/features/expected/web/$s.harness.out" ] || { echo "$n has no golden under Examples/features/expected/web/"; exit 1; }; done'
+cwd: {repo}
+exit: 0
