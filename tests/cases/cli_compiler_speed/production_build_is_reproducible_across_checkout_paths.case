@@ -1,8 +1,7 @@
-# tests/cli_compiler_speed.rs::production_build_is_reproducible_across_checkout_paths at tests/cli_compiler_speed.rs:753; hand-port
-# Claim: release run of src/main.jet in two checkouts exits 0 and prints deterministic-build (tests/cli_compiler_speed.rs:774-781)
-# Claim: native binary is byte-identical across the two checkout paths (tests/cli_compiler_speed.rs:795-805)
+# Claim: release run of src/main.jet in two checkouts exits 0 and prints deterministic-build
+# Claim: native binary is byte-identical across the two checkout paths
 # Fixture migrated: package.jet: bare top-level fields, as the repo's own package.jet files (Compiler/JetFoundation/package.jet); the Rust fixture's fields are kept
-# Not ported: generated .jet/build/main.rs byte and SHA-256 comparison (tests/cli_compiler_speed.rs:783-793): reads generated Rust text
+# Not ported: generated .jet/build/main.rs byte and SHA-256 comparison: reads generated Rust text
 fixture: production_build_is_reproducible_across_checkout_paths.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -12,30 +11,30 @@ cwd: left
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:764-781 left build
-stdout: = "deterministic-build\n" # tests/cli_compiler_speed.rs:764-781 left build
+exit: 0 # left build
+stdout: = "deterministic-build\n" # left build
 step: jet build --release src/main.jet
 cwd: left
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:783-805 build writes the native binary compared below
+exit: 0 # build writes the native binary compared below
 step: jet run --release src/main.jet
 cwd: right
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:764-781 right build
-stdout: = "deterministic-build\n" # tests/cli_compiler_speed.rs:764-781 right build
+exit: 0 # right build
+stdout: = "deterministic-build\n" # right build
 step: jet build --release src/main.jet
 cwd: right
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:783-805 build writes the native binary compared below
+exit: 0 # build writes the native binary compared below
 step: sh {work}/step-5.sh
-exit: 0 # tests/cli_compiler_speed.rs:795-805 native binary byte equality
+exit: 0 # native binary byte equality
 step: sh {work}/step-6.sh
-exit: 0 # tests/cli_compiler_speed.rs:795-805 native binary byte equality
+exit: 0 # native binary byte equality
 step: sh {work}/step-7.sh
-exit: 0 # tests/cli_compiler_speed.rs:795-805 native binary byte equality
+exit: 0 # native binary byte equality

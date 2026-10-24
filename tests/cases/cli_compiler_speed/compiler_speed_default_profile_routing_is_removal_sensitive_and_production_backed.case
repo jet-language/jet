@@ -1,9 +1,8 @@
-# tests/cli_compiler_speed.rs::compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed at tests/cli_compiler_speed.rs:378; hand-port
-# Claim: jet run main.jet exits 0 and prints default-profile (tests/cli_compiler_speed.rs:387-408)
-# Claim: jet dev --watch=off main.jet exits 0 and prints default-profile (tests/cli_compiler_speed.rs:388-408)
-# Claim: jet build main.jet succeeds and the built binary prints default-profile (tests/cli_compiler_speed.rs:422-466)
-# Not ported: rustc argv BEGIN/END log via the PATH-shadowed rustc wrapper (tests/cli_compiler_speed.rs:411-466): reads generated rustc argv, no CLI-observable equivalent
-# Not ported: JET_STORE_DIR is set twice in the run loop (tests/cli_compiler_speed.rs:393,396); the fixture uses a single store dir
+# Claim: jet run main.jet exits 0 and prints default-profile
+# Claim: jet dev --watch=off main.jet exits 0 and prints default-profile
+# Claim: jet build main.jet succeeds and the built binary prints default-profile
+# Not ported: rustc argv BEGIN/END log via the PATH-shadowed rustc wrapper: reads generated rustc argv, no CLI-observable equivalent
+# Not ported: JET_STORE_DIR is set twice in the run loop; the fixture uses a single store dir
 fixture: compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -13,21 +12,21 @@ env: JET_STORE_DIR=store
 env: JET_STORE_CAP_BYTES=21474836480
 env: JET_STORE_RESERVE_BYTES=2147483648
 env: NO_COLOR=1
-exit: 0 # tests/cli_compiler_speed.rs:386-408 run routing
-stdout: = "default-profile\n" # tests/cli_compiler_speed.rs:386-408 run routing
+exit: 0 # run routing
+stdout: = "default-profile\n" # run routing
 step: jet dev --watch=off main.jet
 env: JET_STORE_DIR=store
 env: JET_STORE_CAP_BYTES=21474836480
 env: JET_STORE_RESERVE_BYTES=2147483648
 env: NO_COLOR=1
-exit: 0 # tests/cli_compiler_speed.rs:386-408 dev routing
-stdout: = "default-profile\n" # tests/cli_compiler_speed.rs:386-408 dev routing
+exit: 0 # dev routing
+stdout: = "default-profile\n" # dev routing
 step: jet build main.jet
 env: JET_STORE_DIR=store
 env: JET_STORE_CAP_BYTES=21474836480
 env: JET_STORE_RESERVE_BYTES=2147483648
 env: NO_COLOR=1
-exit: 0 # tests/cli_compiler_speed.rs:422-434 default build
+exit: 0 # default build
 step: built
-exit: 0 # tests/cli_compiler_speed.rs:422-466 built binary output
-stdout: = "default-profile\n" # tests/cli_compiler_speed.rs:422-466 built binary output
+exit: 0 # built binary output
+stdout: = "default-profile\n" # built binary output

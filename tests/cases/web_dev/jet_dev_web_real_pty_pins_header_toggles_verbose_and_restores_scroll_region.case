@@ -1,4 +1,3 @@
-# Original tests/web_dev.rs:1330-1492; real original script PTY and exact interaction assertions.
 # PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
 fixture: jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region.fixture
 requires: tool:script
@@ -11,28 +10,28 @@ stderr: null
 step: jet test claims
 env: S5_PHASE=ready
 exit: 0
-await: file terminal.typescript ~ "jet dev  [ready] localhost:{free-port:web} · 1 client" timeout 5s every 50ms # original ed77c235f tests/web_dev.rs:1379-1383 wait_for_file_text helper245-255 tests ready header with 5s deadline and 50ms sleep
+await: file terminal.typescript ~ "jet dev  [ready] localhost:{free-port:web} · 1 client" timeout 5s every 50ms # wait_for_file_text helper245-255 tests ready header with 5s deadline and 50ms sleep
 file: terminal.typescript ~ "watching app.jet · Canvas" # original pinned.contains
 file: terminal.typescript !~ "\u001b[32m" # original NO_COLOR assertion
 send app: "v"
-await: file terminal.typescript ~ "verbose request/rebuild log enabled · press v to collapse" timeout 5s every 50ms # original ed77c235f tests/web_dev.rs:1395-1399 wait_for_file_text helper245-255 tests verbose banner with 5s deadline and 50ms sleep
+await: file terminal.typescript ~ "verbose request/rebuild log enabled · press v to collapse" timeout 5s every 50ms # wait_for_file_text helper245-255 tests verbose banner with 5s deadline and 50ms sleep
 file: terminal.typescript ~ "\u001b[3r" # original verbose.contains
 file: terminal.typescript ~ "\u001b[3;1H" # original verbose.contains
 step: jet test claims
 env: S5_PHASE=request
 exit: 0
-await: file terminal.typescript ~ "GET  /app.js" timeout 5s every 50ms # original ed77c235f tests/web_dev.rs:1406 wait_for_file_text helper245-255 tests request log with 5s deadline and 50ms sleep
+await: file terminal.typescript ~ "GET  /app.js" timeout 5s every 50ms # wait_for_file_text helper245-255 tests request log with 5s deadline and 50ms sleep
 copy: broken.source app.jet
 step: jet test claims
 env: S5_PHASE=error
 exit: 0
-await: file terminal.typescript ~ "missing_hybrid_symbol" timeout 5s every 50ms # original ed77c235f tests/web_dev.rs:1411-1415 wait_for_file_text helper245-255 tests broken symbol with 5s deadline and 50ms sleep
+await: file terminal.typescript ~ "missing_hybrid_symbol" timeout 5s every 50ms # wait_for_file_text helper245-255 tests broken symbol with 5s deadline and 50ms sleep
 file: terminal.typescript ~ "jet dev  [error] E0102" # original verbose PTY diagnostic contains
 file: terminal.typescript ~ "Error [E0102]" # original verbose PTY diagnostic contains
 file: terminal.typescript ~ "Why:" # original verbose PTY diagnostic contains
 file: terminal.typescript ~ "Fix:" # original verbose PTY diagnostic contains
 send app: "v"
-await: file terminal.typescript ~ "\u001b[r\u001b[2J\u001b[H" timeout 5s every 50ms # original ed77c235f tests/web_dev.rs:1425-1429 wait_for_file_text helper245-255 tests collapsed screen reset with 5s deadline and 50ms sleep
+await: file terminal.typescript ~ "\u001b[r\u001b[2J\u001b[H" timeout 5s every 50ms # wait_for_file_text helper245-255 tests collapsed screen reset with 5s deadline and 50ms sleep
 step: jet test claims
 env: S5_PHASE=collapsed
 exit: 0

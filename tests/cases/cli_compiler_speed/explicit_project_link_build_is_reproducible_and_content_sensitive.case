@@ -1,43 +1,42 @@
-# tests/cli_compiler_speed.rs::explicit_project_link_build_is_reproducible_and_content_sensitive at tests/cli_compiler_speed.rs:809; hand-port
-# Claim: release run of src/main.jet with a project C archive exits 0 and prints 42, in both checkouts (tests/cli_compiler_speed.rs:881-897)
-# Claim: after the C archive changes to 43, the release run exits 0 and prints 43 (tests/cli_compiler_speed.rs:921-930)
+# Claim: release run of src/main.jet with a project C archive exits 0 and prints 42, in both checkouts
+# Claim: after the C archive changes to 43, the release run exits 0 and prints 43
 # Fixture migrated: package.jet: bare top-level fields, as the repo's own package.jet files (Compiler/JetFoundation/package.jet); the Rust fixture's fields are kept
 # Not ported: needs-cc
-# Not ported: rustc argv metadata and remap checks on the final main invocation (tests/cli_compiler_speed.rs:899-938): reads generated rustc argv, no CLI-observable equivalent
+# Not ported: rustc argv metadata and remap checks on the final main invocation: reads generated rustc argv, no CLI-observable equivalent
 fixture: explicit_project_link_build_is_reproducible_and_content_sensitive.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: sh {work}/step-1.sh
 cwd: left
-exit: 0 # tests/cli_compiler_speed.rs:821-852 left C archive
+exit: 0 # left C archive
 step: sh {work}/step-2.sh
 cwd: right
-exit: 0 # tests/cli_compiler_speed.rs:821-852 right C archive
+exit: 0 # right C archive
 step: jet run --release src/main.jet
 cwd: left
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:866-888 left link run
-stdout: = "42\n" # tests/cli_compiler_speed.rs:866-888 left link run
+exit: 0 # left link run
+stdout: = "42\n" # left link run
 step: jet run --release src/main.jet
 cwd: right
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:889-897 right link run
-stdout: = "42\n" # tests/cli_compiler_speed.rs:889-897 right link run
+exit: 0 # right link run
+stdout: = "42\n" # right link run
 step: sh {work}/step-5.sh
 cwd: left
-exit: 0 # tests/cli_compiler_speed.rs:921 rewrite archive source to 43
+exit: 0 # rewrite archive source to 43
 step: sh {work}/step-6.sh
 cwd: left
-exit: 0 # tests/cli_compiler_speed.rs:921 rebuild archive
+exit: 0 # rebuild archive
 step: jet run --release src/main.jet
 cwd: left
 env: JET_STORE_DIR=store
 env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
-exit: 0 # tests/cli_compiler_speed.rs:923-930 changed link run
-stdout: = "43\n" # tests/cli_compiler_speed.rs:923-930 changed link run
+exit: 0 # changed link run
+stdout: = "43\n" # changed link run
