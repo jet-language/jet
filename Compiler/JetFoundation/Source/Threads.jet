@@ -79,14 +79,6 @@ fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! {
     bounds
 }
 
-// The part of job `position` under `bounds`, searching down from `part`
-// (jobs leave their list last-first, so the part only ever decreases).
-fn compiler_threads_part_of(bounds: [Int], part: Int, position: Int) -> Int Never! {
-    found := part
-    loop found > 0 && position < bounds[found] -> found -= 1
-    found
-}
-
 // The jobs of the given `weights` in claim order for a dynamically scheduled
 // step: heaviest first, equal weights in job order (a stable merge of the
 // indexes), so a heavy job starts while light ones remain to fill the

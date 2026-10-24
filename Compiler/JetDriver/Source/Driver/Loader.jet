@@ -28,7 +28,7 @@ use jet_foundation.[
     ast_program,
     compiler_threads_admit,
     compiler_threads_failure_text,
-    compiler_threads_part_of,
+    compiler_threads_heaviest_first,
     compiler_threads_partition,
     compiler_threads_single,
     core_bare_source_module,
@@ -3547,10 +3547,9 @@ fn jet_driver_core_private_unit(module_name: String, span: Span) -> Diagnostic? 
 }
 
 // One parse thread's jobs, held last-first; parsed and returned first-first.
-// `threads` is the budget each unit's parse may split across: the calling
-// thread's single part gets the compiler threads; a spawned part (a wave of
-// several parts) parses every unit on its own thread, so no spawned thread
-// spawns.
+// `threads` is the budget each unit's parse may split across: a wave's
+// single part gets the compiler threads; a claimed unit (a wave of several
+// threads) parses on its own thread, so no spawned thread spawns.
 fn jet_driver_parse_part(jobs: [JetDriverParseJob], threads: CompilerThreads) -> [JetDriverParsedUnit] {
     results := [JetDriverParsedUnit]{}
     index := jobs.len()
@@ -3561,24 +3560,55 @@ fn jet_driver_parse_part(jobs: [JetDriverParseJob], threads: CompilerThreads) ->
     results
 }
 
-fn jet_driver_parse_part_single(jobs: [JetDriverParseJob]) -> [JetDriverParsedUnit] {
-    jet_driver_parse_part(jobs, compiler_threads_single())
+// What every parse thread reads: the wave's jobs in `pending` order and the
+// claim order, heaviest first, so the largest files start first and the
+// small ones fill the threads' tails.
+struct JetDriverParseInputs {
+    jobs: [JetDriverParseJob]
+    order: [Int]
 }
 
-// Parses the parts popped from `parts` (first part on top), one task per
-// part and the last part on this thread. Returns each part's results, last
-// part first, so popping yields them in part order.
-fn jet_driver_parse_parts(parts: ^[[JetDriverParseJob]]) -> [[JetDriverParsedUnit]] {
-    remaining := ^parts
-    jobs :: &remaining.pop() ?? return [[JetDriverParsedUnit]]{}
-    if remaining.len() == 0 -> return [[JetDriverParsedUnit]]{jet_driver_parse_part_single(jobs)}
-    parsed := [[JetDriverParsedUnit]]{}
+// The next unclaimed rank, taken with one atomic add under a read guard each
+// thread holds for its run.
+struct JetDriverParseQueue {
+    next: Atomic<Int>
+}
+
+// One claimed job's parse, at its position in the wave.
+struct JetDriverParseClaimed {
+    position: Int
+    unit: JetDriverParsedUnit
+}
+
+// Runs claiming threads `from..<workers`, one task each, and moves every
+// unit a thread parsed into its position's slot of `placed`.
+fn jet_driver_parse_claimers(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>, from: Int, workers: Int, placed: &[JetDriverParsedUnit?]) {
+    if from >= workers -> return
     task.group parse_threads {
-        first :: task jet_driver_parse_part_single(jobs)
-        parsed = jet_driver_parse_parts(^remaining)
-        &parsed.push(^^first.join() ?? panic(compiler_threads_failure_text(err)))
+        head :: task jet_driver_parse_claimed(inputs, queue)
+        jet_driver_parse_claimers(inputs, queue, from + 1, workers, &placed)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            position :: done.position
+            placed[position] = Val(^done.unit)
+        }
     }
-    parsed
+}
+
+// One thread: parses the jobs it claims until none is left.
+fn jet_driver_parse_claimed(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>) -> [JetDriverParseClaimed] {
+    rows :: inputs.guard_read()
+    ranks :: queue.guard_read()
+    claimed := [JetDriverParseClaimed]{}
+    loop {
+        rank :: ranks.value.next.add(1)
+        if rank >= rows.value.order.len() -> break
+        position :: rows.value.order[rank]
+        // Passed straight through: a local binding of a guarded row would copy it.
+        &claimed.push(JetDriverParseClaimed{position: position, unit: jet_driver_parse_one(rows.value.jobs[position], compiler_threads_single())})
+    }
+    claimed
 }
 
 // A parse thread is admitted for at least this much source, so a small
@@ -3639,30 +3669,28 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         &jobs.push(job)
     }
     workers :: compiler_threads_admit(request.compiler_threads, jobs.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
-    parts := [[JetDriverParseJob]]{}
-    if workers <= 1 {
-        &jobs.reverse()
-        &parts.push(^jobs)
-    } else {
-        bounds :: compiler_threads_partition(weights, workers)
-        loop _ in 0..<workers -> &parts.push([JetDriverParseJob]{})
-        part := workers - 1
-        loop {
-            job :: &jobs.pop() ?? break
-            part = compiler_threads_part_of(bounds, part, jobs.len())
-            &parts[part].push(job)
-        }
-        &parts.reverse()
-    }
-    // One part: it parses on this thread, and each unit may split its own
-    // parse across the compiler threads.
-    parsed := if workers <= 1 -> [[JetDriverParsedUnit]]{jet_driver_parse_part(parts[0], request.compiler_threads)} else -> jet_driver_parse_parts(^parts)
     results := [JetDriverParsedUnit]{}
-    loop {
-        done :: &parsed.pop() ?? break
-        &results.extend(done)
+    if workers <= 1 {
+        // One part: it parses on this thread, and each unit may split its own
+        // parse across the compiler threads.
+        &jobs.reverse()
+        results = jet_driver_parse_part(jobs, request.compiler_threads)
+        &results.reverse()
+    } else {
+        // Claimed heaviest first: a static byte partition left most threads
+        // idle while the ones holding the largest files finished.
+        count :: jobs.len()
+        inputs :: shared JetDriverParseInputs{jobs: ^jobs, order: compiler_threads_heaviest_first(weights)}
+        queue :: shared JetDriverParseQueue{next: 0}
+        placed := [JetDriverParsedUnit?]{}
+        loop _ in 0..<count -> &placed.push(None)
+        jet_driver_parse_claimers(inputs, queue, 0, workers, &placed)
+        loop placed.len() > 0 {
+            slot := &placed.pop() ?? break
+            unit := ^slot ?? panic("a parse job's unit left its thread")
+            &results.push(^unit)
+        }
     }
-    &results.reverse()
     // One input-volume delta per completed wave, summed by the trace reader.
     // The byte counters are loaded payloads; `lines` (newlines) and `tokens`
     // (top-level lexer tokens) are what the parses consumed.
