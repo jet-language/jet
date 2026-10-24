@@ -84,6 +84,7 @@ use jet_foundation.[
     core_source_owns_type,
     expr_span,
     builtin_codec_trait_ref,
+    name_count,
     name_find_bytes,
     name_rows,
     name_rows_get,
@@ -91,6 +92,7 @@ use jet_foundation.[
     name_rows_hash,
     name_rows_remove,
     name_rows_set,
+    name_text,
     sema_reserved_type_name,
     symbol_id,
     type_identity,
@@ -3884,18 +3886,31 @@ fn sema_source_words(bytes: [U8], start: Int, end: Int, seen: &[String:Bool], wo
 // sema_source_words over all of `bytes`, keeping only the words `wanted`
 // interns: a word outside it is skipped by its bytes, never built as a
 // String, so `seen` and `words` hold exactly the wanted words
-// sema_source_words would have added, in the same order.
+// sema_source_words would have added, in the same order. A wanted word
+// already met is skipped by its id, so each one is looked up in `seen` once.
+// The byte test is sema_source_word_byte written inline: this loop reads
+// every byte of every namespace member.
 fn sema_source_wanted_words(bytes: [U8], wanted: NameTable, seen: &[String:Bool], words: &[String]) Never! {
+    met := [Bool]{}
+    loop _ in 0..<name_count(wanted) -> &met.push(false)
+    count :: bytes.len()
     cursor := 0
-    loop cursor < bytes.len() {
-        if !sema_source_word_byte(bytes[cursor]) {
+    loop cursor < count {
+        first :: bytes[cursor]
+        cursor += 1
+        if first < (U8{128}) && first != (U8{95}) && (first < (U8{48}) || first > (U8{57})) && (first < (U8{65}) || first > (U8{90})) && (first < (U8{97}) || first > (U8{122})) -> next
+        word_start :: cursor - 1
+        loop cursor < count {
+            byte :: bytes[cursor]
+            if byte < (U8{128}) && byte != (U8{95}) && (byte < (U8{48}) || byte > (U8{57})) && (byte < (U8{65}) || byte > (U8{90})) && (byte < (U8{97}) || byte > (U8{122})) -> break
             cursor += 1
-            next
         }
-        word_start :: cursor
-        loop cursor < bytes.len() && sema_source_word_byte(bytes[cursor]) -> cursor += 1
-        if name_find_bytes(wanted, bytes, word_start, cursor) == None -> next
-        word :: String.from_bytes(bytes.slice(word_start, cursor)) ?? next
+        name :: name_find_bytes(wanted, bytes, word_start, cursor) ?? next
+        id :: Int.from_u32(name.id)
+        if met[id] -> next
+        met[id] = true
+        // The table interned this spelling from a String, so it is its text.
+        word :: name_text(wanted, name)
         if seen.get(word) != None -> next
         seen[word] = true
         &words.push(word)

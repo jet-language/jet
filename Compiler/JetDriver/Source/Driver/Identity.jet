@@ -649,6 +649,14 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
     [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
 }
 
+// A loaded unit's one segment before its parse, `length` source bytes long:
+// `line_starts` stays empty until the parse wave hands over the lexer's
+// newline table (Loader `jet_driver_take_line_starts`), so the catalog
+// never scans a file.
+fn jet_driver_unparsed_source_segments(path: String, length: Int, origin: SemaSourceOrigin) -> [SemaSourceSegment] Never! {
+    [SemaSourceSegment{generated: Span{start: 0, end: length}, source_file: path, source_start: 0, line_starts: [Int]{}, origin: origin}]
+}
+
 // The path a checked source carries through the compile: its source and
 // module identity, MIR source file, panic locations, and diagnostic keys. A
 // file beneath the entry root is named relative to that root, and a file

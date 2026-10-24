@@ -37,6 +37,7 @@ use jet_foundation.[
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
     source_file_id,
+    name_count,
     name_find,
     name_index,
     name_intern,
@@ -1504,7 +1505,7 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
                 module_name: jet_driver_default_module_alias(file.relative_path),
                 path: unit_path,
                 relative_path: file.relative_path,
-                source_segments: jet_driver_source_segments(unit_path, file.source),
+                source_segments: jet_driver_unparsed_source_segments(unit_path, file.source.count_bytes(), SemaSourceOrigin.Snapshot),
                 source_origin: SemaSourceOrigin.Snapshot,
                 in_namespace: package.manifest_path != None && !package.inline_package,
             })
@@ -1539,7 +1540,7 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
             module_name: generated.name,
             path: path,
             relative_path: generated.relative_path,
-            source_segments: jet_driver_core_source_segments(path, generated.source),
+            source_segments: jet_driver_unparsed_source_segments(path, generated.source.count_bytes(), SemaSourceOrigin.CompilerGenerated),
             source_origin: SemaSourceOrigin.CompilerGenerated,
             in_namespace: packages[owner].manifest_path != None && !packages[owner].inline_package,
         })
@@ -2858,7 +2859,21 @@ fn jet_driver_inline_block_end(bytes: [U8], open: Int) -> Int Never! {
 // The start of a `package {` carrier in top-level item position at or after
 // `from`, or -1 (Rust `find_top_level_inline_package`).
 fn jet_driver_inline_top_level_package(bytes: [U8], from: Int) -> Int Never! {
+    if !jet_driver_inline_package_spot(bytes, from) -> return -1
     jet_driver_inline_item_scan(bytes, from, bytes.len()).found
+}
+
+// Whether `package {` opens anywhere at or after `from`. The item scan finds
+// a carrier only where jet_driver_inline_package_open does, so a source with
+// no such spot (most sources that spell `package` at all) skips the scan.
+fn jet_driver_inline_package_spot(bytes: [U8], from: Int) -> Bool Never! {
+    count :: bytes.len()
+    cursor := if from > 0 -> from else -> 0
+    loop cursor + 7 <= count {
+        if bytes[cursor] == (U8{112}) && bytes[cursor + 1] == (U8{97}) && jet_driver_inline_package_open(bytes, cursor) >= 0 -> return true
+        cursor += 1
+    }
+    false
 }
 
 // A top-level item scan of one byte range: the first carrier start in it,
@@ -3006,6 +3021,7 @@ struct JetDriverInlinePart {
 // that did not hands the rest of the bytes to the one-thread scan from
 // its start, where the state is proven by the ranges before it.
 fn jet_driver_inline_top_level_package_threads(bytes: [U8], from: Int, threads: CompilerThreads) -> Int {
+    if !jet_driver_inline_package_spot(bytes, from) -> return -1
     work :: bytes.len() - from
     workers :: compiler_threads_admit(threads, work, work, JET_DRIVER_INLINE_SCAN_MIN_BYTES, 0, 0)
     if workers <= 1 -> return jet_driver_inline_top_level_package(bytes, from)
@@ -3122,12 +3138,14 @@ struct JetDriverCoreIdentifierDemand {
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
-// parse wave reports (SPEED-500K work counters).
+// parse wave reports (SPEED-500K work counters). `line_starts` is the
+// lexer's newline table, which becomes the unit's source segment line table.
 struct JetDriverParsedUnit {
     parsed: ParseResult
     demand: JetDriverCoreIdentifierDemand
     lines: Int{0}
     tokens: Int{0}
+    line_starts: [Int]{[Int]{}}
 }
 
 fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Never! {
@@ -3147,6 +3165,10 @@ struct JetDriverCoreDemandNames {
     regex_name: Int
     bare: [Int]
     bare_alias: [Int]
+    // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
+    // or alias it is, -1 for none, -2 when it names two rows (the scan then
+    // checks every row), so a bare name costs one lookup per identifier.
+    bare_rows: [Int]
     // Ids of the first segments of the Core module paths (`files` for
     // `core.files`), for the qualified-path demand.
     core_segments: [Int]
@@ -3166,6 +3188,12 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
         if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
         &bare_alias.push(alias)
     }
+    bare_rows := [Int]{}
+    loop _ in 0..<name_count(tables.names) -> &bare_rows.push(-1)
+    loop at in 0..<bare.len() {
+        jet_driver_core_demand_bare_row(&bare_rows, bare[at], at)
+        jet_driver_core_demand_bare_row(&bare_rows, bare_alias[at], at)
+    }
     core_segments := [Int]{}
     loop row in CORE_MODULE_EXPORTS {
         parts :: row.module_name.split(".").to_list()
@@ -3173,7 +3201,12 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
         id :: jet_driver_core_demand_name(tables, parts[1])
         if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+}
+
+fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
+    if id < 0 || id >= rows.len() || rows[id] == at -> return
+    rows[id] = if rows[id] == -1 -> at else -> -2
 }
 
 // Interpolation tokens share the enclosing lexed source's spelling/literal table.
@@ -3207,10 +3240,16 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
                 }
             }
             if collect_bare {
-                loop at in 0..<names.bare.len() {
-                    if name == names.bare[at] || name == names.bare_alias[at] {
-                        bare :: CORE_BARE_SOURCE_MODULES[at].name
-                        if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
+                row :: if name >= 0 && name < names.bare_rows.len() -> names.bare_rows[name] else -> -2
+                if row >= 0 {
+                    bare :: CORE_BARE_SOURCE_MODULES[row].name
+                    if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
+                } else if row == -2 {
+                    loop at in 0..<names.bare.len() {
+                        if name == names.bare[at] || name == names.bare_alias[at] {
+                            bare :: CORE_BARE_SOURCE_MODULES[at].name
+                            if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
+                        }
                     }
                 }
             }
@@ -3355,7 +3394,7 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     line_starts :: parser_line_starts(source)
     lines :: line_starts.len() - 1
     parsed :: parse_lexed_with_source(^lexed, source, line_starts)
-    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
+    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
 }
 
 // jet_driver_parse_user_unit on the compiler threads: a large unit lexes in
@@ -3377,7 +3416,7 @@ fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
     demand := ^scanned.demand
     parsed :: parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
-    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
+    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^lexed.line_starts}
 }
 
 // A user source parse: the inline carrier is masked; a structure failure
@@ -3485,7 +3524,7 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity != DIAGNOSTIC_LINT -> &diagnostics.push(diagnostic)
     }
-    JetDriverParsedUnit{parsed: ParseResult{program: ^parsed.program, diagnostics: ^diagnostics}, demand: ^demand, lines: lines, tokens: tokens}
+    JetDriverParsedUnit{parsed: ParseResult{program: ^parsed.program, diagnostics: ^diagnostics}, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^lexed.line_starts}
 }
 
 // The runtime unit row (`core.<area>.runtime.<unit>`) a Core import path
@@ -3735,12 +3774,6 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
     }
     results
 }
-fn jet_driver_core_source_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
-    segments := jet_driver_source_segments(path, source)
-    segments[0].origin = SemaSourceOrigin.CompilerGenerated
-    segments
-}
-
 fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[SourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {
     path :: "{JET_DRIVER_CORE_SOURCE_ROOT}/{relative_path}"
     &generated.push(SourceFile{id: source_file_id(path), path: path, source: source})
@@ -3759,9 +3792,26 @@ fn jet_driver_core_source_unit(module_name: String, relative_path: String, file_
         module_name: module_name,
         path: path,
         relative_path: relative_path,
-        source_segments: jet_driver_core_source_segments(path, source),
+        source_segments: jet_driver_unparsed_source_segments(path, source.count_bytes(), SemaSourceOrigin.CompilerGenerated),
         source_origin: SemaSourceOrigin.CompilerGenerated,
         in_namespace: false,
+    }
+}
+
+// A parsed unit's segment takes the lexer's newline table, so no load step
+// scans the file for newlines a second time.
+fn jet_driver_take_line_starts(segments: &[SemaSourceSegment], line_starts: ^[Int]) {
+    if line_starts.len() == 0 || segments.len() != 1 || segments[0].line_starts.len() != 0 -> return
+    segments[0].line_starts = ^line_starts
+}
+
+// Every unit the load never parsed (or whose parse stopped before lexing)
+// scans its own text for its line table, before anything reads one.
+fn jet_driver_fill_line_starts(request: JetDriverCompileRequest, source_units: &[JetDriverSourceUnit]) {
+    loop index in 0..<source_units.len() {
+        if source_units[index].source_segments.len() != 1 || source_units[index].source_segments[0].line_starts.len() != 0 -> next
+        text :: jet_driver_source_unit_text(request, source_units[index])
+        source_units[index].source_segments[0].line_starts = if text == .Val(value) -> parser_line_starts(value.bytes()) else -> [Int]{0}
     }
 }
 
@@ -3962,6 +4012,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     }
     if jet_driver_has_errors(diagnostics) {
+        jet_driver_fill_line_starts(request, &catalog.source_units)
         return JetDriverLoadResult{
             package_identity: catalog.entry_package_identity,
             packages: catalog.packages,
@@ -4064,6 +4115,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             }
         }
         parsed_unit := &parsed.pop() ?? JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
+        jet_driver_take_line_starts(&source_units[source_unit_index].source_segments, ^parsed_unit.line_starts)
         demand :: ^parsed_unit.demand
         parse_result := ^parsed_unit.parsed
         // Runtime member imports consult shared rows only on the load thread.
@@ -4427,6 +4479,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
     modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, bare_modules)
+    jet_driver_fill_line_starts(request, &source_units)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, generated_records)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
