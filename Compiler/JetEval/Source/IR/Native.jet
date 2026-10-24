@@ -585,8 +585,7 @@ fn jet_eval_native_call(s: &JetEvalIRState, program: JetEvalNativeProgram, item:
     word := cell
     if ty.kind != .Aggregate {
         width :: jet_eval_ir_width(ty)
-        raw :: jet_eval_ir_read(&s, cell, width) ?? return None
-        word = jet_eval_ir_canonical(ty, raw, width)
+        word = jet_eval_ir_load(&s, ty, cell, width) ?? return None
     }
     value :: jet_eval_ir_data(&types.value, layouts.value[0], &s, word, row) ?? return None
     if jet_eval_ir_failed(s) -> return None
@@ -1020,21 +1019,41 @@ fn jet_eval_ir_bytes(s: &JetEvalIRState, pointer: Int, count: Int) -> [U8]? {
 
 // The unsigned little-endian value of `width` bytes at `pointer`.
 fn jet_eval_ir_read(s: &JetEvalIRState, pointer: Int, width: Int) -> Int? {
-    if width == 0 -> return Val(0)
-    bytes :: jet_eval_ir_bytes(&s, pointer, width) ?? return None
-    value := 0
-    index := width - 1
-    loop index >= 0 {
-        value = (value << 8).bit_or(Int.from_u8(bytes[index]))
-        index -= 1
-    }
-    Val(value)
+    jet_eval_ir_read_as(&s, pointer, width, false)
 }
 
 // The signed 64-bit word at `pointer`.
 fn jet_eval_ir_read_word(s: &JetEvalIRState, pointer: Int) -> Int? {
-    raw :: jet_eval_ir_read(&s, pointer, 8) ?? return None
-    Val(jet_eval_ir_wrap(raw, 64, true))
+    jet_eval_ir_read_as(&s, pointer, 8, true)
+}
+
+// The little-endian value of `width` bytes at `pointer`: two's complement
+// when `signed`, else unsigned. Every word of a value read back passes here,
+// so a read within one page takes its bytes from the page in place.
+fn jet_eval_ir_read_as(s: &JetEvalIRState, pointer: Int, width: Int, signed: Bool) -> Int? {
+    if width <= 0 -> return Val(0)
+    if !jet_eval_native_address(&s, pointer, width) -> return None
+    page :: pointer - pointer % JET_EVAL_NATIVE_PAGE
+    if pointer + width > page + JET_EVAL_NATIVE_PAGE {
+        bytes :: jet_eval_ir_bytes(&s, pointer, width) ?? return None
+        return Val(jet_eval_ir_bytes_value(bytes, 0, width, signed))
+    }
+    row :: jet_eval_native_page(&s, page) ?? return None
+    Val(jet_eval_ir_bytes_value(s.pages[row], pointer - page, width, signed))
+}
+
+// The little-endian value of `bytes[at..<at + width]`, accumulated from the
+// top byte down; a signed top byte starts it negative, so a signed word stays
+// in the 64-bit range throughout.
+fn jet_eval_ir_bytes_value(bytes: [U8], at: Int, width: Int, signed: Bool) -> Int Never! {
+    value := Int.from_u8(bytes[at + width - 1])
+    if signed && value >= 128 -> value -= 256
+    index := width - 2
+    loop index >= 0 {
+        value = value * 256 + Int.from_u8(bytes[at + index])
+        index -= 1
+    }
+    value
 }
 
 // Writes `bytes` at `pointer` in the child.
@@ -1162,9 +1181,9 @@ fn jet_eval_ir_width(ty: IRType) -> Int Never! {
     }
 }
 
-// The canonical word of the unsigned `raw` loaded as `width` bytes of `ty`.
-fn jet_eval_ir_canonical(ty: IRType, raw: Int, width: Int) -> Int Never! {
+// The canonical word of the `width` bytes of `ty` at `pointer`: a signed
+// kind's sign-extended, any other's unsigned.
+fn jet_eval_ir_load(s: &JetEvalIRState, ty: IRType, pointer: Int, width: Int) -> Int? {
     signed :: ty.kind == .Int || ty.kind == .Float || (ty.kind == .Word && ty.signed)
-    if !signed || width == 0 -> return raw
-    jet_eval_ir_wrap(raw, 8 * width, true)
+    jet_eval_ir_read_as(&s, pointer, width, signed)
 }

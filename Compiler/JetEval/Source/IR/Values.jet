@@ -244,8 +244,7 @@ fn jet_eval_ir_member_word(m: &IRModule, s: &JetEvalIRState, base: Int, offset: 
     if ty.kind == .Aggregate -> return Val(base + offset)
     width :: jet_eval_ir_width(ty)
     if width == 0 -> return Val(0)
-    raw :: jet_eval_ir_read(&s, base + offset, width) ?? return None
-    Val(jet_eval_ir_canonical(ty, raw, width))
+    jet_eval_ir_load(&s, ty, base + offset, width)
 }
 
 fn jet_eval_ir_fields(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, members: [IRMember]) -> [TComptimeField]? {

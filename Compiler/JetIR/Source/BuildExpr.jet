@@ -848,7 +848,8 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
 // the value, then the read-modify-write through the storage cell.
 fn ir_storage_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op: TBinaryOp?, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
-    definition :: p.constants.get(key) ?? return ir_fail(&b, span, "module storage {key} without a declaration")
+    at :: p.constants.get(key) ?? return ir_fail(&b, span, "module storage {key} without a declaration")
+    definition :: p.constant_defs[at]
     if !definition.is_storage -> return ir_fail(&b, span, "assignment to module constant {definition.name}")
     right :: ir_expr(&m, p, &b, value)
     if ir_failed(b) || right < 0 -> return
@@ -4278,7 +4279,8 @@ fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args
 // at startup borrows the value its cell holds (ir_startup_read).
 fn ir_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if p.rows.get(key) != None -> return ir_function_value(&m, p, &b, ty, key, span)
-    definition :: p.constants.get(key) ?? return ir_fail_slot(&b, span, "constant {key} without a declaration")
+    at :: p.constants.get(key) ?? return ir_fail_slot(&b, span, "constant {key} without a declaration")
+    definition :: p.constant_defs[at]
     if definition.init != None -> return ir_startup_read(&m, p, &b, definition, span)
     if definition.is_storage {
         address :: ir_storage_address(&m, p, &b, definition, span)

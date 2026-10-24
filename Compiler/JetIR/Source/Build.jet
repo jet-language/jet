@@ -193,8 +193,11 @@ struct IRProgram {
     rows: [String:Int]
     types: [TTypeDef]
     type_rows: [String:Int]
-    // Checked constants by key (ConstRef / CtLit values).
-    constants: [String:TConstantDef]
+    // Checked constants (ConstRef / CtLit values): each key's row in
+    // `constant_defs`. A read borrows the row in place; the map holds no
+    // definition, so neither a read nor a landed value copies one.
+    constants: [String:Int]
+    constant_defs: [TConstantDef]
     // The keys of the constants computed at startup (TConstantDef.init),
     // in declaration order: the entry computes each before the program
     // runs (ir_entry_function).
@@ -400,8 +403,8 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
     loop (index, definition) in defs {
         if definition.init != None && constant_rows.get(definition.key) == Val(2 * index) -> &startup.push(definition.key.copy())
     }
-    constants := [String:TConstantDef]{}
-    loop (key, at) in constant_rows -> constants[key] = defs[at /% 2]
+    constants := [String:Int]{}
+    loop (key, at) in constant_rows -> constants[key] = at /% 2
     types := ^type_defs
     ir_add_compiler_owned_types(&types)
     ir_add_union_types(&types, functions)
@@ -446,7 +449,7 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
         if method == "" -> next
         &impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: [String:Int]{}, types: ^types, type_rows: type_rows, constants: constants, startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: [String:Int]{}, types: ^types, type_rows: type_rows, constants: constants, constant_defs: ^defs, startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -633,18 +636,23 @@ fn ir_spawn_sites(functions: [FnBody]) -> [String:Int] Never! {
 // `definition` takes over `p`'s constant rows of its key and its qualified
 // name (a compile-time value landed after the program was declared), each
 // not taken over yet (`taken`, which it joins): a key's first landed row
-// stands.
+// stands. Both keys name the one definition it appends.
 fn ir_program_put_constant(p: &IRProgram, definition: ^TConstantDef, taken: &[String:Bool]) Never! {
     owned := ^definition
     qualified :: "constant:{owned.module_identity}::{owned.name}"
-    if taken.get(qualified) == None {
+    by_name :: taken.get(qualified) == None
+    by_key :: taken.get(owned.key) == None
+    if !by_name && !by_key -> return
+    row :: p.constant_defs.len()
+    if by_name {
         taken[qualified.copy()] = true
-        p.constants[qualified.copy()] = owned.copy()
+        p.constants[qualified.copy()] = row
     }
-    if taken.get(owned.key) == None {
+    if by_key {
         taken[owned.key.copy()] = true
-        p.constants[owned.key.copy()] = ^owned
+        p.constants[owned.key.copy()] = row
     }
+    &p.constant_defs.push(^owned)
 }
 
 // An empty module ready to build `p`'s functions (no function queued yet).
@@ -1027,7 +1035,8 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
         _ :: ir_runtime(&m, &b, "jet_rt_fault_backtrace", [Int]{word}, -1)
     }
     loop constant_key in p.startup {
-        definition :: p.constants.get(constant_key) ?? next
+        at :: p.constants.get(constant_key) ?? next
+        definition :: p.constant_defs[at]
         guard :: ir_startup_guard(&m, p, definition)
         if guard < 0 {
             ir_fail(&b, span, "the startup function of constant {definition.name}")
