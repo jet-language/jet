@@ -8,6 +8,7 @@ use jet_sema.[
     SemaCheckedTextEvaluation,
     SemaComptimeAvailableConstants,
     SemaComptimeDeclarationStage,
+    SemaComptimeGraphFacts,
     SemaComptimeFunctionResult,
     SemaComptimeItemCheck,
     SemaComptimeItemKind,
@@ -53,6 +54,7 @@ use jet_sema.[
     sema_comptime_dependency_cycle_diagnostic,
     sema_comptime_environment,
     sema_comptime_environment_publish_body_values,
+    sema_comptime_fold,
     sema_comptime_graph_apply_sites,
     sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
@@ -96,20 +98,12 @@ use jet_foundation.[
     OutputKind,
     Span,
     SymbolKind,
-    TBuiltinOp,
-    TBinaryOp,
-    TComptimeEnumArg,
-    TComptimeField,
-    TComptimeReport,
     TComptimeValue,
-    BodyEnumPayload,
-    BodyIfCond,
     BodyNode,
     BodyTree,
     NodeKind,
     StmtKind,
     TExprType,
-    TUnaryOp,
     Type,
     FnBody,
     TFunctionRef,
@@ -1640,6 +1634,9 @@ fn jet_driver_run_comptime(
     staged: ^SemaRegistrationGraph,
     // The declaration pass's modules of `staged` (jet_driver_comptime_stage), or empty.
     declared: ^[SemaGraphModuleResult],
+    // The declaration pass's boxed edges and copy facts of `staged`
+    // (SemaComptimeDeclarationStage.graph_facts), or None.
+    graph_facts: ^SemaComptimeGraphFacts?,
     sources: [SemaComptimeItemSource],
     initial_values: [SemaComptimeItemValue],
     initial_functions: [SemaComptimeFunctionResult],
@@ -1655,7 +1652,7 @@ fn jet_driver_run_comptime(
     // place rather than rebuilding it per item, and counted into the run's
     // available constant keys.
     trail := sema_graph_trail_init()
-    environment := sema_comptime_environment(^staged, initial_values, request.trace_sink)
+    environment := sema_comptime_environment(^staged, initial_values, ^graph_facts, request.trace_sink)
     // Retained initialization builds the indexes once. Transfer those owned
     // rows into the program carrier used beside the retargeted environment.
     program := SemaProgramTables{
@@ -1737,8 +1734,9 @@ fn jet_driver_comptime_run(
     // parameter, which also seeds the comptime environment and stays with the caller.
     values := initial_values.copy()
     // The memory plan reads only function declarations, which staged values
-    // never change, so every on-demand function check shares one, built at
-    // the run's first function check (jet_driver_comptime_function_closure).
+    // never change, so every on-demand function check shares one, built by
+    // the main thread while a precheck's threads check, or else at the run's
+    // first function check (jet_driver_comptime_function_closure).
     memory_plan := [SemaFunctionMemoryPlan]{}
     // copy: this run grows its own checked-function list. initial_functions is
     // jet_driver_run_comptime's read parameter, which stays with the caller.
@@ -1813,7 +1811,7 @@ fn jet_driver_comptime_run(
             resolved_count = values.len()
         }
         jet_driver_trace_step_begin(request.trace_sink, "comptime.precheck")
-        prechecks := sema_comptime_precheck_items(&environments, &programs, available, pending, request.compiler_threads)
+        prechecks := sema_comptime_precheck_items(&environments, &programs, available, pending, request.compiler_threads, &memory_plan)
         jet_driver_trace_step_end(request.trace_sink, "comptime.precheck", pending.len())
         &prechecks.reverse()
         prechecked_values :: values.len()
@@ -1942,6 +1940,10 @@ fn jet_driver_comptime_run(
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return result
                 }
+                // A precheck thread folded this same request with no landed
+                // values; that value stands (sema_comptime_fold).
+                folded := ^checked_item.folded
+                checked_item.folded = None
                 comptime_request :: checked_item.request ?? {
                     &diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -1971,7 +1973,8 @@ fn jet_driver_comptime_run(
                     }
                 }
                 if source.kind != SemaComptimeItemKind.CheckedText && comptime_request.calls.len() == 0 {
-                    if jet_driver_comptime_fold(comptime_request.expression.tree, comptime_request.expression.root, values) == .Val(plain) {
+                    if folded == None -> folded = sema_comptime_fold(comptime_request.expression.tree, comptime_request.expression.root, values)
+                    if folded == .Val(plain) {
                         // Behind a batch, the literal's value lands in its turn.
                         if batch.entries.len() > 0 {
                             no_functions := [FnBody]{}
@@ -2263,413 +2266,6 @@ fn jet_driver_comptime_entry_bare(request: SemaComptimeItemRequest, function_key
     if request.expected_type == .Val(expected) -> jet_driver_comptime_reach_type(&reach, expected)
     jet_driver_comptime_reach_expr(&reach, request.expression.tree, request.expression.root)
     !reach.everything && reach.functions.len() == 0
-}
-
-// Rust `plain_literal_value` (Registration/Items.rs) lands a constant whose
-// checked initializer is a plain literal as its own value, unevaluated
-// (#3661: evaluating one lowered, assembled and ran a MIR fragment holding
-// every module's declarations). Rust evaluates every other initializer with
-// its interpreter; Jet's comptime is native only, and a host with no
-// execution child (the bootstrap factory, the native CLI) evaluates nothing.
-// So every value that is literal data folds here: Int, sized-integer
-// (`I64{208}`, `U8{7}`), Float, Bool, Char and string literals, their
-// negation, the checked Int-to-fixed conversion of a literal, lists, struct
-// literals (sema has already filled each omitted field's default), enum
-// constructors with positional or named payloads, `Val(x)` and `None`,
-// constants that already landed, and integer, Float and Bool arithmetic and
-// comparison over them. It reads the same checked facts evaluation does: a
-// `T.$layout` read is the LayoutInfo sema computed for the selected target
-// (a CtLit) and `.size` its field; `x ?? panic(..)` on a present value is
-// that value; a value `if`/else-if chain takes the arm its folded condition
-// selects; shifts stay within the checked width. Aggregates take the shape
-// the evaluator returns: the declared type name, field and named payload
-// labels. A value outside its checked
-// type, a selected arm that stops (`panic`), a division or power, a call,
-// and any other shape is not folded: it is evaluated, and the evaluator
-// reports it.
-fn jet_driver_comptime_fold(tree: BodyTree, expression: Int, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
-    expression_ty :: body_type(tree, expression)
-    if body_node(tree, expression).kind == {
-        .IntLit(value, _) -> return jet_driver_comptime_fold_int(value, expression_ty)
-        .FloatLit(value) -> {
-            if expression_ty == Type.Float -> return Val(TComptimeValue.Float{value: value, bits: 64})
-        }
-        .BoolLit(value) -> return Val(TComptimeValue.Bool{value: value})
-        .CharLit(value) -> return Val(TComptimeValue.Char{value: value})
-        .StrLit(parts) -> {
-            if expression_ty != Type.String -> return None
-            if parts.len() == 0 -> return Val(TComptimeValue.String{value: ""})
-            if parts.len() == 1 {
-                if parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
-            }
-        }
-        // A checked literal that already carries its value (an
-        // integer outside the i64 range is a BigInt constant; a `$` fact read
-        // is its reflection record).
-        .CtLit(value) -> {
-            if jet_driver_comptime_data(value) -> return Val(value)
-        }
-        .Field(receiver, field) -> {
-            folded :: jet_driver_comptime_fold(tree, receiver, values) ?? return None
-            if folded == .Struct(_, fields) {
-                loop member in fields {
-                    if member.name == field.name -> return Val(member.value)
-                }
-            }
-        }
-        .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
-            if then_body.len() != 0 || else_body.len() != 0 -> return None
-            selected :: jet_driver_comptime_fold_condition(tree, cond, values) ?? return None
-            return jet_driver_comptime_fold(tree, if selected -> then_value else -> else_value, values)
-        }
-        .ConstRef(symbol) -> return jet_driver_comptime_landed(values, symbol.key)
-        // Copying a constant's value is that value.
-        .Clone(value, _) | .ExplicitCopy(value) -> return jet_driver_comptime_fold(tree, value, values)
-        .StructLit(fields) -> {
-            type_name :: jet_driver_comptime_type_name(expression_ty) ?? return None
-            folded := [TComptimeField]{}
-            loop field in fields -> &folded.push(TComptimeField{name: field.field.name, value: jet_driver_comptime_fold(tree, field.value, values) ?? return None})
-            return Val(TComptimeValue.Struct{type_name: type_name, fields: folded})
-        }
-        .EnumCtor(_, variant, payload) -> {
-            type_name :: jet_driver_comptime_type_name(expression_ty) ?? return None
-            parts :: variant.key.split(":").to_list()
-            return jet_driver_comptime_fold_enum(tree, type_name, parts[parts.len() - 1], payload, values)
-        }
-        .EnumLit(enum_type, variant, payload) -> return jet_driver_comptime_fold_enum(tree, jet_driver_comptime_leaf_name(enum_type), variant, payload, values)
-        .Present(value) -> {
-            if expression_ty == .Option(_) -> return Val(TComptimeValue.Present{value: jet_driver_comptime_fold(tree, value, values) ?? return None})
-        }
-        .Absent -> {
-            // copy: `inner` is a payload of read parameter `expression`, which keeps the original; field `ty` of the new TComptimeReport.Clean owns this one
-            if expression_ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}})
-        }
-        // `x ?? fallback`: a present value is itself, an absent one takes a
-        // folded value fallback. `String.from_bytes([U8]{…})` is the
-        // generators' spelling of a string holding a control character (no
-        // escape spells NUL): present when the folded bytes are UTF-8.
-        .OrFallback(value, fallback, _) -> {
-            subject :: jet_driver_comptime_fold(tree, value, values) ?? jet_driver_comptime_fold_from_bytes(tree, value, values) ?? return None
-            if subject == .Present(inner) -> return Val(inner)
-            if subject == .Failed(_) {
-                if fallback == .Value(otherwise) -> return jet_driver_comptime_fold(tree, otherwise, values)
-            }
-        }
-        .Unary(op, operand) -> {
-            folded :: jet_driver_comptime_fold(tree, operand, values) ?? return None
-            if op == TUnaryOp.Neg {
-                if folded == .Int(number) -> return jet_driver_comptime_fold_int(0 - number, expression_ty)
-                // `-170141…728` checks as the negation of a BigInt literal.
-                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(0 - (Int.parse(decimal) ?? return None), expression_ty)
-                if folded == .Float(number, bits) {
-                    if bits == 64 && expression_ty == Type.Float -> return Val(TComptimeValue.Float{value: number * -1.0, bits: 64})
-                }
-            }
-            if op == TUnaryOp.Not && expression_ty == Type.Bool {
-                if folded == .Bool(flag) -> return Val(TComptimeValue.Bool{value: !flag})
-            }
-        }
-        // `I64{n}` checked without its head: the checked Int-to-fixed
-        // conversion of a literal, which traps exactly when n is outside.
-        .NumericMethod(receiver, operation) -> {
-            if operation == .CheckedIntToFixed(_, _) {
-                folded :: jet_driver_comptime_fold(tree, receiver, values) ?? return None
-                if folded == .Int(number) -> return jet_driver_comptime_fold_int(number, expression_ty)
-                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(Int.parse(decimal) ?? return None, expression_ty)
-            }
-        }
-        .Binary(op, _, _, lhs, rhs) -> {
-            left :: jet_driver_comptime_fold(tree, lhs, values) ?? return None
-            right :: jet_driver_comptime_fold(tree, rhs, values) ?? return None
-            return jet_driver_comptime_fold_binary(op, expression_ty, left, right)
-        }
-        .List(elements, coercion) -> {
-            if coercion == None -> return jet_driver_comptime_fold_list(tree, elements, values)
-        }
-        .ListLit(elements) -> return jet_driver_comptime_fold_list(tree, elements, values)
-        // An unsuffixed decimal literal checks as `Decimal.from_str("…")`
-        // (sema_expr_decimal_literal); its value is the Core Decimal record.
-        .PreciseBuiltin(type_name, function, args) -> {
-            if type_name == "Decimal" && function == "from_str" && args.len() == 1 {
-                folded :: jet_driver_comptime_fold(tree, args[0], values) ?? return None
-                if folded == .String(text) -> return jet_driver_comptime_decimal(text)
-            }
-        }
-        else -> {}
-    }
-    None
-}
-
-// Core math.jet `__decimal_from_str` over a literal spelling: the record
-// {negative, magnitude, scale} it returns (magnitude unnormalized), or None
-// when it would stop on the text or the exponent is out of reach.
-fn jet_driver_comptime_decimal(text: String) -> TComptimeValue? Never! {
-    bytes :: text.trim().bytes()
-    if bytes.len() == 0 -> return None
-    index := 0
-    negative := false
-    if Int.from_u8(bytes[0]) == 45 || Int.from_u8(bytes[0]) == 43 {
-        negative = Int.from_u8(bytes[0]) == 45
-        index = 1
-    }
-    magnitude := 0
-    digits := 0
-    fractional := 0
-    point := false
-    loop index < bytes.len() && Int.from_u8(bytes[index]) != 101 && Int.from_u8(bytes[index]) != 69 {
-        code :: Int.from_u8(bytes[index])
-        if code == 46 {
-            if point -> return None
-            point = true
-        } else {
-            if code < 48 || code > 57 -> return None
-            digits += 1
-            if digits > 4000 -> return None
-            magnitude = magnitude * 10 + code - 48
-            if point -> fractional += 1
-        }
-        index += 1
-    }
-    if digits == 0 -> return None
-    exponent := 0
-    if index < bytes.len() {
-        index += 1
-        exponent_negative := false
-        if index < bytes.len() && (Int.from_u8(bytes[index]) == 45 || Int.from_u8(bytes[index]) == 43) {
-            exponent_negative = Int.from_u8(bytes[index]) == 45
-            index += 1
-        }
-        start :: index
-        loop index < bytes.len() {
-            code :: Int.from_u8(bytes[index])
-            if code < 48 || code > 57 -> return None
-            exponent = exponent * 10 + code - 48
-            if exponent > 4000 -> return None
-            index += 1
-        }
-        if index == start -> return None
-        if exponent_negative -> exponent = 0 - exponent
-    }
-    places := fractional - exponent
-    loop places < 0 {
-        magnitude = magnitude * 10
-        places += 1
-    }
-    magnitude_value :: if jet_driver_comptime_small_int(magnitude) -> TComptimeValue.Int{value: magnitude} else -> TComptimeValue.BigInt{decimal: "{magnitude}"}
-    Val(TComptimeValue.Struct{type_name: "Decimal", fields: [TComptimeField]{
-        TComptimeField{name: "negative", value: TComptimeValue.Bool{value: negative && magnitude != 0}},
-        TComptimeField{name: "magnitude", value: magnitude_value},
-        TComptimeField{name: "scale", value: TComptimeValue.Int{value: places}},
-    }})
-}
-
-// A landed value is data: no closure anywhere in it.
-fn jet_driver_comptime_data(value: TComptimeValue) -> Bool Never! {
-    if value == {
-        .List(items) -> loop item in items {
-            if !jet_driver_comptime_data(item) -> return false
-        }
-        .Map(entries) -> loop entry in entries {
-            if !jet_driver_comptime_data(entry.value) -> return false
-        }
-        .Struct(_, fields) -> loop field in fields {
-            if !jet_driver_comptime_data(field.value) -> return false
-        }
-        .Enum(_, _, args) -> loop argument in args {
-            if !jet_driver_comptime_data(argument.value) -> return false
-        }
-        .Present(inner) -> return jet_driver_comptime_data(inner)
-        .Failed(report) -> {
-            if report == .Told(inner) -> return jet_driver_comptime_data(inner)
-        }
-        else -> {}
-    }
-    true
-}
-
-// A value `if` condition: a folded Bool, or both halves of `&&`-joined ones.
-fn jet_driver_comptime_fold_condition(tree: BodyTree, cond: BodyIfCond, values: [SemaComptimeItemValue]) -> Bool? Never! {
-    if cond == {
-        .Plain(value) -> {
-            folded :: jet_driver_comptime_fold(tree, value, values) ?? return None
-            if folded == .Bool(flag) -> return Val(flag)
-            None
-        }
-        .And(left, right) -> {
-            if !(jet_driver_comptime_fold_condition(tree, left, values) ?? return None) -> return Val(false)
-            jet_driver_comptime_fold_condition(tree, right, values)
-        }
-        else -> None
-    }
-}
-
-// `String.from_bytes(<folded [U8]>)` as its Result: the decoded text, or a
-// clean failure when the bytes are not UTF-8.
-fn jet_driver_comptime_fold_from_bytes(tree: BodyTree, value: Int, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
-    if body_node(tree, value).kind == .BuiltinMethod(receiver, operation, args) {
-        if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
-        folded :: jet_driver_comptime_fold(tree, receiver, values) ?? return None
-        bytes := [U8]{}
-        if folded == {
-            // A checked `[U8]{"…"}` byte value folds to its bytes.
-            // copy: `values_bytes` is a payload of `folded`, which keeps the original
-            .Bytes(values_bytes) -> bytes = values_bytes.copy()
-            .List(items) -> loop item in items {
-                if item == .Int(number) -> &bytes.push(U8.from_int(number) ?? return None)
-                else -> return None
-            }
-            else -> return None
-        }
-        decoded :: String.from_bytes(bytes) ?? return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "UTF8Error"}}})
-        return Val(TComptimeValue.Present{value: TComptimeValue.String{value: decoded}})
-    }
-    None
-}
-
-fn jet_driver_comptime_fold_list(tree: BodyTree, elements: [Int], values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
-    folded := [TComptimeValue]{}
-    loop element in elements -> &folded.push(jet_driver_comptime_fold(tree, element, values) ?? return None)
-    Val(TComptimeValue.List{values: folded})
-}
-
-fn jet_driver_comptime_fold_enum(tree: BodyTree, type_name: String, variant: String, payload: BodyEnumPayload, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
-    args := [TComptimeEnumArg]{}
-    if payload == {
-        .Unit -> {}
-        .Positional(positional) -> loop argument in positional -> &args.push(TComptimeEnumArg{name: None, value: jet_driver_comptime_fold(tree, argument.value, values) ?? return None})
-        .Named(named) -> loop argument in named -> &args.push(TComptimeEnumArg{name: Val(argument.name), value: jet_driver_comptime_fold(tree, argument.value.value, values) ?? return None})
-    }
-    Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: args})
-}
-
-// The declared (leaf) name of a nominal checked type, the name a landed
-// aggregate carries and constant lowering resolves against its type.
-fn jet_driver_comptime_type_name(ty: Type) -> String? Never! {
-    if ty == {
-        .Named(name) -> Val(jet_driver_comptime_leaf_name(name))
-        .Apply(name, _) -> Val(jet_driver_comptime_leaf_name(name))
-        else -> None
-    }
-}
-
-fn jet_driver_comptime_leaf_name(name: String) -> String Never! {
-    parts :: name.split("::").to_list()
-    parts[parts.len() - 1]
-}
-
-// The value of a constant that already landed in this run.
-fn jet_driver_comptime_landed(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
-    loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key == key -> return Val(value.value)
-    }
-    None
-}
-
-// An integer value of checked type `ty`: any exact Int, or a fixed width of
-// at most 64 bits only when it lies in that type's range.
-fn jet_driver_comptime_fold_int(value: Int, ty: Type) -> TComptimeValue? Never! {
-    if ty == Type.Int {
-        // An exact Int outside the i64 range is a BigInt value.
-        if !jet_driver_comptime_small_int(value) -> return Val(TComptimeValue.BigInt{decimal: "{value}"})
-        return Val(TComptimeValue.Int{value: value})
-    }
-    if ty == .IntN(signed, bits) {
-        if bits < 8 || bits > 64 -> return None
-        low := 0
-        high := 18446744073709551615
-        if bits < 64 {
-            high = (1 << bits) - 1
-            if signed {
-                low = 0 - (1 << (bits - 1))
-                high = (1 << (bits - 1)) - 1
-            }
-        } else if signed {
-            low = -9223372036854775807 - 1
-            high = 9223372036854775807
-        }
-        if value < low || value > high -> return None
-        return Val(TComptimeValue.Int{value: value})
-    }
-    None
-}
-
-fn jet_driver_comptime_fold_binary(op: TBinaryOp, ty: Type, left: TComptimeValue, right: TComptimeValue) -> TComptimeValue? Never! {
-    if left == .Int(a) {
-        if right == .Int(b) {
-            if ty == Type.Bool {
-                if op == {
-                    .Eq -> return Val(TComptimeValue.Bool{value: a == b})
-                    .Ne -> return Val(TComptimeValue.Bool{value: a != b})
-                    .Lt -> return Val(TComptimeValue.Bool{value: a < b})
-                    .Gt -> return Val(TComptimeValue.Bool{value: a > b})
-                    .Le -> return Val(TComptimeValue.Bool{value: a <= b})
-                    .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
-                    else -> return None
-                }
-            }
-            if op == {
-                .Add -> return jet_driver_comptime_fold_int(a + b, ty)
-                .Sub -> return jet_driver_comptime_fold_int(a - b, ty)
-                .Mul -> return jet_driver_comptime_fold_int(a * b, ty)
-                .BitAnd -> return jet_driver_comptime_fold_int(a.bit_and(b), ty)
-                .BitOr -> return jet_driver_comptime_fold_int(a.bit_or(b), ty)
-                .BitXor -> return jet_driver_comptime_fold_int(a.bit_xor(b), ty)
-                // A non-negative value shifted by less than its width; the
-                // result must still fit the checked type.
-                .Shl -> {
-                    if a < 0 || b < 0 || b > 63 -> return None
-                    return jet_driver_comptime_fold_int(a * (1 << b), ty)
-                }
-                .Shr -> {
-                    if a < 0 || b < 0 || b > 63 -> return None
-                    return jet_driver_comptime_fold_int(a /% (1 << b), ty)
-                }
-                else -> return None
-            }
-        }
-        return None
-    }
-    if left == .Float(a, left_bits) {
-        if right == .Float(b, right_bits) {
-            if left_bits != 64 || right_bits != 64 -> return None
-            if ty == Type.Bool {
-                if op == {
-                    .Eq -> return Val(TComptimeValue.Bool{value: a == b})
-                    .Ne -> return Val(TComptimeValue.Bool{value: a != b})
-                    .Lt -> return Val(TComptimeValue.Bool{value: a < b})
-                    .Gt -> return Val(TComptimeValue.Bool{value: a > b})
-                    .Le -> return Val(TComptimeValue.Bool{value: a <= b})
-                    .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
-                    else -> return None
-                }
-            }
-            if ty != Type.Float -> return None
-            if op == {
-                .Add -> return Val(TComptimeValue.Float{value: a + b, bits: 64})
-                .Sub -> return Val(TComptimeValue.Float{value: a - b, bits: 64})
-                .Mul -> return Val(TComptimeValue.Float{value: a * b, bits: 64})
-                else -> return None
-            }
-        }
-        return None
-    }
-    if left == .Bool(a) {
-        if right == .Bool(b) {
-            if ty != Type.Bool -> return None
-            if op == {
-                .And -> return Val(TComptimeValue.Bool{value: a && b})
-                .Or -> return Val(TComptimeValue.Bool{value: a || b})
-                .Eq -> return Val(TComptimeValue.Bool{value: a == b})
-                .Ne -> return Val(TComptimeValue.Bool{value: a != b})
-                else -> return None
-            }
-        }
-    }
-    None
-}
-
-fn jet_driver_comptime_small_int(value: Int) -> Bool Never! {
-    value >= -9223372036854775807 - 1 && value <= 9223372036854775807
 }
 
 fn jet_driver_foreign_provider_owners_valid(
@@ -3804,9 +3400,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     run_staged := ^staged_graph ?? return jet_driver_compile_internal_result(load, trace, "the declaration pass lost its registration graph")
     declared_modules := ^comptime_stage.modules
     comptime_stage.modules = [SemaGraphModuleResult]{}
+    declared_facts := ^comptime_stage.graph_facts
+    comptime_stage.graph_facts = None
     comptime_run := jet_driver_run_comptime(
         ^run_staged,
         ^declared_modules,
+        ^declared_facts,
         comptime_stage.sources,
         [SemaComptimeItemValue]{},
         [SemaComptimeFunctionResult]{},

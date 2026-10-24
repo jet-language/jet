@@ -426,9 +426,12 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     // The run owns this same graph and hands it back on every exit.
     declared_modules := ^stage.modules
     stage.modules = [SemaGraphModuleResult]{}
+    declared_facts := ^stage.graph_facts
+    stage.graph_facts = None
     run := jet_driver_run_comptime(
         ^registration,
         ^declared_modules,
+        ^declared_facts,
         stage.sources,
         initial_values,
         [SemaComptimeFunctionResult]{},

@@ -399,6 +399,17 @@ struct SemaComptimeDeclarationStage {
     // tables, unchanged, handed to the comptime run (jet_driver_run_comptime
     // `staged`) so no one copies it; None once taken.
     graph: SemaRegistrationGraph?{None}
+    // The declaration pass's boxed edges and copy facts of `graph`, handed
+    // with it to the comptime run's environment (sema_comptime_environment)
+    // so it does not compute them again; None once taken.
+    graph_facts: SemaComptimeGraphFacts?{None}
+}
+
+// The facts the program tables derive from a registration graph alone
+// (sema_scope_environment_boxed_edges, sema_copy_facts_table).
+struct SemaComptimeGraphFacts {
+    boxed_edges: [String:[String]]
+    copy_facts: SemaCopyFactsTable
 }
 
 struct SemaComptimeItemCheck {
@@ -407,6 +418,9 @@ struct SemaComptimeItemCheck {
     waiting_dependencies: [String]
     diagnostics: [Diagnostic]
     complete: Bool
+    // A precheck's literal fold of its call-free request with no landed
+    // values (sema_comptime_precheck_fold); None when it did not fold.
+    folded: TComptimeValue?{None}
 }
 
 struct SemaComptimeFunctionResult {
@@ -5921,8 +5935,9 @@ fn sema_comptime_module_sources(program: SemaProgramTables, module_index: Int) -
 // source (its check reads no expression), and every source of a module that
 // cannot be entered or of a wave whose checks admit one thread have no row
 // (None), and the run checks them at their turn. The result has one row per
-// source.
-fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads) -> [SemaComptimeItemCheck?] {
+// source. The calling thread, which waits for the checking threads, builds
+// the run's function memory plan meanwhile when `memory_plan` has none yet.
+fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads, memory_plan: &[SemaFunctionMemoryPlan]) -> [SemaComptimeItemCheck?] {
     checks := [SemaComptimeItemCheck?]{}
     loop _ in 0..<sources.len() -> &checks.push(None)
     // The expression sources of each module, in order of first appearance.
@@ -5951,7 +5966,7 @@ fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs:
     start := 0
     loop start < module_positions.len() {
         end :: sema_comptime_precheck_wave_end(shared_state, module_identities, start)
-        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, available.counted_values, threads, &checks)
+        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, available.counted_values, threads, &checks, &memory_plan)
         start = end
     }
     permit :: shared_state.guard_edit()
@@ -5975,7 +5990,7 @@ fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs:
 // environment, the program tables and the available constants, as a check of
 // a pass of its module alone would. Each check lands in `checks` at its
 // source's position.
-fn sema_comptime_precheck_wave(shared_state: Shared<SemaPrecheckShared>, module_identities: [String], module_positions: [[Int]], start: Int, end: Int, sources: [SemaComptimeItemSource], version: Int, threads: CompilerThreads, checks: &[SemaComptimeItemCheck?]) {
+fn sema_comptime_precheck_wave(shared_state: Shared<SemaPrecheckShared>, module_identities: [String], module_positions: [[Int]], start: Int, end: Int, sources: [SemaComptimeItemSource], version: Int, threads: CompilerThreads, checks: &[SemaComptimeItemCheck?], memory_plan: &[SemaFunctionMemoryPlan]) {
     // Job j checks source positions[j] in entered wave module job_modules[j];
     // firsts[k] is wave module k's first job, its last row the job count.
     positions := [Int]{}
@@ -6014,7 +6029,7 @@ fn sema_comptime_precheck_wave(shared_state: Shared<SemaPrecheckShared>, module_
         }
         plan :: shared SemaPrecheckPlan{positions: ^positions, modules: ^job_modules, order: ^order, next: 0}
         done := [SemaPrecheckDone]{}
-        sema_comptime_precheck_claimers(shared_state, plan, 0, workers, &done)
+        sema_comptime_precheck_claimers(shared_state, plan, 0, workers, &done, &memory_plan)
         loop done.len() > 0 {
             row := &done.pop() ?? break
             checks[row.position] = ^row.check
@@ -6180,18 +6195,34 @@ fn sema_comptime_precheck_thread_probe(environment: SemaScopeEnvironment, source
 }
 
 // Runs claiming threads `from..<workers`, one task each, and moves every
-// check a thread returned into `done`.
-fn sema_comptime_precheck_claimers(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>, from: Int, workers: Int, done: &[SemaPrecheckDone]) {
-    if from >= workers -> return
+// check a thread returned into `done`. The calling thread, left waiting for
+// them, builds the function memory plan if `memory_plan` has none yet.
+fn sema_comptime_precheck_claimers(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>, from: Int, workers: Int, done: &[SemaPrecheckDone], memory_plan: &[SemaFunctionMemoryPlan]) {
+    if from >= workers {
+        if memory_plan.len() == 0 -> sema_comptime_precheck_memory_plan(shared_state, &memory_plan)
+        return
+    }
     task.group sema_precheck_threads {
         head :: task sema_comptime_precheck_claimed(shared_state, plan)
-        sema_comptime_precheck_claimers(shared_state, plan, from + 1, workers, &done)
+        sema_comptime_precheck_claimers(shared_state, plan, from + 1, workers, &done, &memory_plan)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
             row := &claimed.pop() ?? break
             &done.push(^row)
         }
     }
+}
+
+// The function memory plan of the program tables' graph, which staged values
+// never change (sema_function_memory_plan_from_graph).
+fn sema_comptime_precheck_memory_plan(shared_state: Shared<SemaPrecheckShared>, memory_plan: &[SemaFunctionMemoryPlan]) {
+    inputs :: shared_state.guard_read()
+    // Passed straight through: a local binding of a guarded row would copy it.
+    sema_comptime_precheck_memory_plan_of(inputs.value.programs[0], &memory_plan)
+}
+
+fn sema_comptime_precheck_memory_plan_of(program: SemaProgramTables, memory_plan: &[SemaFunctionMemoryPlan]) {
+    if program.registration_graph == .Val(graph) -> &memory_plan.push(sema_function_memory_plan_from_graph(graph))
 }
 
 // One thread: checks the jobs it claims until none is left, each against its
@@ -6218,10 +6249,23 @@ fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, plan
         if sema_host_hook_was_wanted(wanted) {
             &claimed.push(SemaPrecheckDone{position: claim.position, check: None})
         } else {
+            check.folded = sema_comptime_precheck_fold(check, inputs.value.sources[0][claim.position])
             &claimed.push(SemaPrecheckDone{position: claim.position, check: Val(^check)})
         }
     }
     claimed
+}
+
+// The literal fold of a precheck's call-free request, on its own thread, so
+// the driver's turn takes a generated table's value instead of folding it on
+// the main thread. No constant has landed for it: a request that reads one
+// does not fold here and folds at its turn.
+fn sema_comptime_precheck_fold(check: SemaComptimeItemCheck, source: SemaComptimeItemSource) -> TComptimeValue? Never! {
+    if !check.complete || check.waiting_dependencies.len() > 0 || source.kind == SemaComptimeItemKind.CheckedText -> return None
+    if check.request == .Val(request) {
+        if request.calls.len() == 0 -> return sema_comptime_fold(request.expression.tree, request.expression.root, [SemaComptimeItemValue]{})
+    }
+    None
 }
 
 fn sema_comptime_precheck_claim(plan: SemaPrecheckPlan) -> SemaPrecheckClaim {
@@ -6700,6 +6744,8 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     imports := sema_comptime_stage_imports(pass_program)
     taken := ^pass_program.registration_graph
     pass_graph := ^taken ?? panic("the declaration pass lost its registration graph")
+    // The name facts only read the graph: the pass's facts of it stand.
+    graph_facts := SemaComptimeGraphFacts{boxed_edges: ^pass_program.boxed_edges, copy_facts: ^pass_program.copy_facts}
     structure_facts :: sema_name_structure_facts(pass_graph)
     names := sema_name_facts_empty()
     returned := sema_name_build_facts_threads(^pass_graph, &modules, structure_facts, threads, &names)
@@ -6712,6 +6758,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
         diagnostics: diagnostics,
         complete: complete,
         graph: Val(^returned),
+        graph_facts: Val(^graph_facts),
     }
 }
 
@@ -6964,12 +7011,16 @@ fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, val
 // copied here) with `values` applied, and every comptime item and function
 // check re-targets it (sema_scope_environment_enter_probe_module) instead of
 // copying the graph. The caller applies each later value to its graph in
-// place.
-fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
+// place. `graph_facts` are the declaration pass's facts of `graph`
+// (SemaComptimeDeclarationStage.graph_facts), or None; they stand while no
+// value is applied, else the tables derive them again.
+fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], graph_facts: ^SemaComptimeGraphFacts?, trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
     resolved := ^graph
     trail := sema_graph_trail_init()
     sema_comptime_graph_apply_values(&resolved, values, &trail)
-    tables := sema_program_tables_init(Val(^resolved), [TTypeDef]{})
+    reused := ^graph_facts
+    if values.len() > 0 -> reused = None
+    tables := sema_comptime_environment_tables(^resolved, ^reused)
     environment := sema_scope_environment_init("", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.registration_graph = ^tables.registration_graph
     environment.checked_types = ^tables.checked_types
@@ -6983,6 +7034,11 @@ fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptim
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
     environment.comptime_body_publication.item_frontier = values.len()
     ^environment
+}
+
+fn sema_comptime_environment_tables(graph: ^SemaRegistrationGraph, graph_facts: ^SemaComptimeGraphFacts?) -> SemaProgramTables Never! {
+    facts := ^graph_facts ?? return sema_program_tables_init(Val(^graph), [TTypeDef]{})
+    sema_program_tables_with(Val(^graph), [TTypeDef]{}, ^facts.boxed_edges, ^facts.copy_facts)
 }
 
 // Only the staging producer lands rows from its authenticated item frontier.

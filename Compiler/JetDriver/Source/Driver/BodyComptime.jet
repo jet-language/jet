@@ -265,7 +265,7 @@ fn jet_driver_comptime_body_pass(
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(&body_sources, &known, source)
     run := jet_driver_run_comptime(
-        ^registration, [SemaGraphModuleResult]{}, body_sources, values, functions,
+        ^registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
         request, &diagnostics,
     )
     finished_registration := ^run.graph
@@ -334,6 +334,7 @@ fn jet_driver_validate_checked_text(
     run := jet_driver_run_comptime(
         ^registration,
         [SemaGraphModuleResult]{},
+        None,
         sources,
         initial_values,
         initial_functions,
