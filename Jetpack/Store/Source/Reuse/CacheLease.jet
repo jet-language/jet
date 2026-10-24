@@ -5,10 +5,13 @@
 // snapshot file and executable, and the Hangar objects of a Nix closure.
 // Consumers only ever receive descriptor-view paths of those handles.
 //
-// Handles reach a child through `keep_open_for` pins
-// every held handle at its lease slot (`/proc/self/fd/<slot>` on Linux,
-// `/dev/fd/<slot>` elsewhere), so a path swap after verification cannot
-// redirect the consumer. Slots are unique across the process.
+// Rust hands the held handles to a child by clearing close-on-exec, each at
+// its lease slot (`/proc/self/fd/<slot>` on Linux, `/dev/fd/<slot>`
+// elsewhere), so a path swap after verification cannot redirect the
+// consumer. Core cannot pass an open descriptor to a child process, so
+// `keep_open_for` fails closed for a lease that holds handles.
+
+STORE_LEASE_HANDOFF_UNSUPPORTED :: "running a command over a verified cache lease is not supported yet: Core cannot pass the lease's open descriptors to a child process"
 
 // The first descriptor number a lease pins handles at; below it are the
 // standard streams and the descriptors Core itself hands to children.
@@ -47,14 +50,8 @@ struct LeasedDirectory {
     id: FileID
     slot: Int
 
-    // The same witness without the handle, once the handle left the parent.
-    fn detached(self) -> LeasedDirectory Never! {
-        LeasedDirectory{path: self.path, directory: None, id: self.id, slot: self.slot}
-    }
-
-    fn keep_open_for(^self, spec: ProcessSpec) -> ProcessSpec Never! {
-        directory :: self.directory ?? return spec
-        spec.keep_open(^directory, at: Val(self.slot))
+    fn holds_handle(self) -> Bool Never! {
+        self.directory != None
     }
 }
 
@@ -62,13 +59,6 @@ struct LeasedDirectory {
 enum ProjectionHandle {
     Directory(Directory)
     File(FileReader)
-
-    fn keep_open_for(^self, spec: ProcessSpec, slot: Int) -> ProcessSpec Never! {
-        if self == {
-            .Directory(directory) -> spec.keep_open(^directory, at: Val(slot))
-            .File(file) -> spec.keep_open(^file, at: Val(slot))
-        }
-    }
 }
 
 // The stability witness of one projected Nix object: a pinned handle, or
@@ -144,62 +134,36 @@ struct CacheLease {
         self.handed_off = true
     }
 
-    // Rust clears close-on-exec on every lease handle; here the handles are
-    // pinned into the child spec at their slots. The
-    // live lease lock goes with them, so the lease container outlives the
-    // parent while any descendant runs.
-    fn keep_open_for(&self, spec: ProcessSpec) -> ProcessSpec Never! {
+    // Every held handle and the live lease lock must reach the child at its
+    // slot so the child reads the verified bytes and the lease container
+    // outlives the parent. Core cannot pass an open descriptor to a child
+    // process, so a lease that holds any handle refuses the handoff.
+    fn keep_open_for(&self, spec: ProcessSpec) -> ProcessSpec StoreError! {
+        if self.holds_handles() -> return Err(StoreError.Unsupported(STORE_LEASE_HANDOFF_UNSUPPORTED))
         &self.mark_process_handoff()
-        kept := spec
-        if self.live_lock == {
-            .Val(lock) -> {
-                self.live_lock = None
-                kept = lock.keep_open_for(kept)
-            }
-            .None -> {}
+        Ok(spec)
+    }
+
+    fn holds_handles(self) -> Bool Never! {
+        if self.live_lock != None -> return true
+        loop file in self.files {
+            if file.file != None -> return true
         }
-        loop index in 0..<self.files.len() {
-            if self.files[index].file == {
-                .Val(file) -> {
-                    self.files[index].file = None
-                    kept = kept.keep_open(^file, at: Val(self.files[index].slot))
-                }
-                .None -> {}
-            }
-        }
-        loop index in 0..<self.executables.len() {
-            if self.executables[index].file == {
-                .Val(file) -> {
-                    self.executables[index].file = None
-                    kept = kept.keep_open(^file, at: Val(self.executables[index].slot))
-                }
-                .None -> {}
-            }
+        loop file in self.executables {
+            if file.file != None -> return true
         }
         if self.snapshot_dir == {
-            .Val(held) -> {
-                self.snapshot_dir = Val(held.detached())
-                kept = held.keep_open_for(kept)
-            }
+            .Val(held) -> { if held.holds_handle() -> return true }
             .None -> {}
         }
         if self.wrapper_directory_handle == {
-            .Val(held) -> {
-                self.wrapper_directory_handle = Val(held.detached())
-                kept = held.keep_open_for(kept)
-            }
+            .Val(held) -> { if held.holds_handle() -> return true }
             .None -> {}
         }
-        loop index in 0..<self.nix_projection_bindings.len() {
-            if self.nix_projection_bindings[index].handle == {
-                .Val(handle) -> {
-                    self.nix_projection_bindings[index].handle = None
-                    kept = handle.keep_open_for(kept, self.nix_projection_bindings[index].slot)
-                }
-                .None -> {}
-            }
+        loop binding in self.nix_projection_bindings {
+            if binding.handle != None -> return true
         }
-        kept
+        false
     }
 
     fn status(self) -> ConsumptionStatus Never! {
@@ -248,7 +212,7 @@ struct CacheLease {
     // exits, so it may use the canonical Hangar object only while its sealed
     // object and bin directory are still immutable.
     fn parent_shell_bin_dir(self) -> String? Never! {
-        verification :: self.verification
+        verification := self.verification
         bin :: self.bin_relative ?? return None
         if files.is_abs(bin) || store_path_components(bin).contains("..") -> return None
         if self.consumption_status_value != ConsumptionStatus.Consumable || self.expected_digest == "" || self.expected_digest.contains("/") || self.expected_digest.contains("\\") -> return None
@@ -259,8 +223,8 @@ struct CacheLease {
         if object_info.is_symlink || !object_info.is_dir -> return None
         if sys.family() != "windows" && (object_info.mode).bit_and(0o222) != 0 -> return None
         seal :: files.join(files.join(hangar, STORE_SEALS_DIR), self.expected_digest)
-        sealed :: store_check_seal(&verification, expected, hangar) ?? None
-        if sealed != Val(self.expected_digest) -> return None
+        sealed :: store_check_seal(&verification, expected, hangar) ?? return None
+        if sealed != self.expected_digest -> return None
         seal_info :: files.stat(seal) ?? return None
         if !seal_info.is_file -> return None
         bin_path :: files.join(expected, bin)
@@ -461,7 +425,7 @@ struct CacheLease {
     }
 
     fn validate_binding(self, binding: NixProjectionBinding) IOError! {
-        verification :: self.verification
+        verification := self.verification
         info :: files.stat(binding.source)
         if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` is not a regular node")}))
         if binding.pinned_id == {
@@ -646,7 +610,7 @@ fn store_reuse_lexical_normalize(path: String) -> String Never! {
             "" | "." -> {}
             ".." -> {
                 if normal > 0 {
-                    &parts.pop()
+                    _ :: &parts.pop()
                     normal -= 1
                 } else {
                     if !absolute {

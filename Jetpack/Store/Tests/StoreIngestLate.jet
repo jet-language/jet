@@ -110,10 +110,9 @@
 }
 
 fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) Never! {
-    hit :: store_find_verified_by_reference(&verification, roots, reference, expectation) ?? panic("lookup")
-    verified :: hit ?? panic("entry must verify")
+    verified :: store_find_verified_by_reference(&verification, roots, reference, expectation) ?? panic("entry must verify")
     verified.lease.validate() ?? panic("validate")
-    verified.lease.release()
+    ^verified.lease.release()
 }
 
 #Test("store optimizer rejects symlinked object pool without touching outside data") {

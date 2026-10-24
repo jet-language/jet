@@ -46,7 +46,7 @@ fn store_broker_test_serve_once(verification: &StoreVerification, socket: String
 
 fn store_broker_test_serve_result(verification: &StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
     stream :: net.unix_accept(listener) ?? panic("broker accept")
-    if store_broker_serve_connection(&verification, stream, config) == {
+    if store_broker_serve_peer(&verification, stream, config, store_broker_current_uid() ?? panic("current uid")) == {
         .Ok(_) -> ""
         .Err(error) -> error.message()
     }
@@ -182,7 +182,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     files.write(files.join(source, "payload"), "broker payload\n") ?? panic("payload")
     local :: HangarRoots.at(roots.root)
     entry :: (store_ingest_tree(&verification, local, store_broker_test_request("broker-demo", "broker-demo@local", source, "broker promotion test")) ?? panic("ingest")).entry
-    archive :: store_export_unsigned_archive(local, entry.id, true) ?? panic("export")
+    archive :: store_export_unsigned_archive(&verification, local, entry.id, true) ?? panic("export")
     shared_root :: files.join(roots.root, "shared")
     config :: SharedStoreConfig{socket: files.join(roots.root, "broker.sock"), shared_root: shared_root, trust_key: files.join(roots.root, "trust/hangar.key"), grants: files.join(roots.root, "users")}
     key_path :: files.join(roots.root, "broker-key")
@@ -213,7 +213,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     files.create_dir_all(source) ?? panic("source")
     files.write(files.join(source, "payload"), "socket protocol payload\n") ?? panic("payload")
     entry :: (store_ingest_tree(&verification, local, store_broker_test_request("socket-demo", "socket-demo@local", source, "socket protocol test")) ?? panic("ingest")).entry
-    archive :: store_export_unsigned_archive(local, entry.id, true) ?? panic("export")
+    archive :: store_export_unsigned_archive(&verification, local, entry.id, true) ?? panic("export")
     config :: store_broker_test_configure(local)
     shared_root :: config.shared_root
     shared :: HangarRoots.at(shared_root)
@@ -232,7 +232,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 
     // The private owner promotes through the configured socket.
     promoting :: store_broker_test_serve_once(&verification, config.socket, config)
-    assert(store_promote_shared_entry(local, entry) ?? panic("promote"))
+    assert(store_promote_shared_entry(&verification, local, entry) ?? panic("promote"))
     assert_eq(promoting.join() ?? panic("broker task"), "")
     published :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("published")
     store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
@@ -287,7 +287,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     broker :: task {
         loop _ in 0..<2 {
             stream :: net.unix_accept(listener) ?? panic("accept")
-            store_broker_serve_connection(&verification, stream, config) ?? panic("serve")
+            store_broker_serve_peer(&verification, stream, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
         }
     }
     realized :: store_realize_verified(&verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
@@ -298,16 +298,16 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     shared :: HangarRoots.at(config.shared_root)
     published :: store_find_by_reference(&verification, shared, "hello@mine") ?? panic("published")
     store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
-    exported :: store_export_archive(shared, published.id, true, Val(config.trust_key)) ?? panic("export")
+    exported :: store_export_archive(&verification, shared, published.id, true, Val(config.trust_key)) ?? panic("export")
 
     // A reader with the published entry in its shared root reuses it.
     reader :: HangarRoots.at(files.join(roots.root, "reader"))
     reader_config :: store_broker_test_configure(reader)
-    store_import_archive(HangarRoots.at(reader_config.shared_root), exported.bytes, Val(reader_config.trust_key), false) ?? panic("import")
+    store_import_archive(&verification, HangarRoots.at(reader_config.shared_root), exported.bytes, Val(reader_config.trust_key), false) ?? panic("import")
     reader_listener :: net.unix_listen(reader_config.socket) ?? panic("listen")
     reader_broker :: task {
         stream :: net.unix_accept(reader_listener) ?? panic("accept")
-        store_broker_serve_connection(&verification, stream, reader_config) ?? panic("serve")
+        store_broker_serve_peer(&verification, stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
     reused :: store_realize_verified(&verification, reader, store_broker_test_ctx(reader), RealizeRequest.Package{spec: spec, table: table}) ?? panic("reuse")
     assert(reused.source_state() == SourceState.Cached)
@@ -367,50 +367,27 @@ fn store_broker_test_ctx(roots: HangarRoots) -> ProviderCtx Never! {
     }
 }
 
-// The child half of the namespace peer proof: connects when the parent
-// names a socket, otherwise does nothing (Rust `broker_peer_probe_child`).
-#Test("store broker peer probe child") {
-    socket :: sys.get("JET_BROKER_PROBE_SOCKET") ?? return
-    stream :: net.unix_connect(socket) ?? panic("probe connect")
-    net.unix_close(stream).drop("probe close")
-}
-
-// The kernel-reported peer uid of a client in a user namespace is its mapped
-// uid, not the socket mode or the server's uid (Linux only; skipped when a
-// user namespace cannot be created).
-#Test("store broker linux peer credentials prove namespace uid is not socket mode") {
-    if sys.name() != "linux" -> return
+// Core can neither take over a socket-activated listener nor read a socket
+// peer's credentials yet, so the broker service refuses to serve and refuses
+// every connection instead of trusting the socket mode. The Rust namespace
+// peer-uid proof returns with Core peer credentials.
+#Test("store broker fails closed without socket activation and peer credentials") {
     roots :: store_test_temp_roots()
+    verification := StoreVerification.new()
+    if store_serve_shared_store(&verification, HangarRoots.at(files.join(roots.root, "local"))) == {
+        .Ok(_) -> panic("the broker service must not serve without a handed-over listener")
+        .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("not supported yet"), "unexpected broker refusal: {error.message()}")
+    }
     socket :: files.join(roots.root, "peer.sock")
     listener :: net.unix_listen(socket) ?? panic("listen")
-    spawned :: process.cmd([String]{"unshare", "--user", "--map-users=100000,0,1", "--map-groups=100000,0,1", "--", sys.executable()})
-        .env("JET_TEST_FILTER", "store broker peer probe child")
-        .env("JET_BROKER_PROBE_SOCKET", socket)
-        .spawn()
-    if spawned == {
-        .Err(error) -> {
-            print("skipping namespace UID proof: unshare is unavailable ({error})")
-            store_test_drop_roots(roots)
-            return
-        }
-        else -> {}
-    }
-    child := spawned ?? panic("spawn unshare for peer proof")
     accepting :: task { net.unix_accept(listener) }
-    status :: child.wait() ?? panic("probe wait")
-    if !status.success {
-        print("skipping namespace UID proof: unshare could not create the user namespace ({status.code})")
-        store_test_drop_roots(roots)
-        return
+    client :: net.unix_connect(socket) ?? panic("connect")
+    stream :: accepting.join() ?? panic("accept task") ?? panic("accept")
+    config :: store_broker_test_configure(HangarRoots.at(files.join(roots.root, "served")))
+    if store_broker_serve_connection(&verification, stream, config) == {
+        .Ok(_) -> panic("a connection without kernel peer credentials must be refused")
+        .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("peer's credentials"), "unexpected peer refusal: {error.message()}")
     }
-    stream :: accepting.join() ?? panic("accept task") ?? panic("native peer-credential proof did not connect")
-    peer :: net.unix_peer(stream) ?? panic("peer credentials")
-    current :: store_broker_current_uid() ?? panic("current uid")
-    if peer.user == current {
-        print("skipping namespace UID proof: peer UID {peer.user} equals current UID {current}")
-        store_test_drop_roots(roots)
-        return
-    }
-    assert(peer.user != current)
+    net.unix_close(client).drop("client close")
     store_test_drop_roots(roots)
 }

@@ -63,7 +63,7 @@ fn store_nix_store_projection_for_entry_index(roots: HangarRoots, entry: StoreEn
     logical_digests := [String: String]{}
     loop pending.len() > 0 {
         digest :: pending[0]
-        &pending.remove(0)
+        _ :: &pending.remove(0, .Slot)
         if visited.contains(digest) -> next
         &visited.push(digest)
         candidates :: if digest == entry.envelope.output_hash -> [StoreEntry]{entry} else -> index.by_digest.get(digest) ?? return Err(StoreError.Other("Nix closure object `{digest}` is missing from the warm reuse index"))

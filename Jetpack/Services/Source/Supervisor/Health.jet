@@ -48,7 +48,7 @@ fn services_probe_shell(command: String, resolved: ServiceResolved, env: ShellEn
     spec := process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)
     if env == .Val(shell_env) {
         applied := shell_env
-        spec = &applied.apply_to(spec)
+        spec = &applied.apply_to(spec) ?? return false
     }
     services_run_bounded_probe(spec, SERVICES_MAX_READY_PROBE_MS)
 }

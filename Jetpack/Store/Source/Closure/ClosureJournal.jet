@@ -388,7 +388,9 @@ fn store_validates_complete_closure(verification: &StoreVerification, roots: Han
             if !store_path_starts_with(output, "/nix/store") -> return false
             root :: files.join(files.join(roots.hangar_dir(), record.id), STORE_NIX_GC_ROOT)
             if !files.exists(root) -> return false
-            files.canonicalize(root) ?? "" == files.canonicalize(output) ?? ""
+            rooted :: files.canonicalize(root) ?? ""
+            resolved :: files.canonicalize(output) ?? ""
+            rooted == resolved
         }
         else -> false
     }

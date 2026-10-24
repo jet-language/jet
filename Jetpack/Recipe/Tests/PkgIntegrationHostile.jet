@@ -11,7 +11,7 @@ fn recipe_hostile_rows() -> [[String]] {
     loop line in corpus.lines() {
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
-        assert_eq(fields.len(), 4, "malformed hostile corpus row")
+        assert(fields.len() == 4, "malformed hostile corpus row")
         assert(!ids.contains(fields[0]), "hostile corpus repeats case")
         &ids.push(fields[0])
         assert(categories.contains(fields[1]), "unknown hostile category")
@@ -19,7 +19,7 @@ fn recipe_hostile_rows() -> [[String]] {
         assert_eq(fields[3], "blocked-or-unsupported")
         &rows.push(fields)
     }
-    assert_eq(rows.len(), 7, "hostile corpus lost required case")
+    assert(rows.len() == 7, "hostile corpus lost required case")
     loop category in categories {
         found := false
         loop row in rows { if row[1] == category -> found = true }
@@ -37,14 +37,15 @@ fn recipe_hostile_observe(listener: TCPListener, milliseconds: Int, bytes_predic
     loop {
         // Exact WouldBlock polling: deadline0 drains queued sockets; ONLY Timeout polls.
         if &listener.accept(deadline: 0s) == {
-            .Ok(stream) -> {
+            .Ok(accepted) -> {
+                stream := accepted
                 if !bytes_predicate {
-                    hostile_net.tcp_close(stream) ?? panic("drop observer connection")
+                    hostile_net.tcp_close(&stream) ?? panic("drop observer connection")
                     return true
                 }
                 bytes := [U8]{}
                 loop {
-                    if hostile_net.tcp_read_bytes(stream, 8192) == {
+                    if hostile_net.tcp_read_bytes(&stream, 8192) == {
                         .Ok(chunk) -> {
                             if chunk.len() == 0 -> break
                             &bytes.extend(chunk)
@@ -52,7 +53,7 @@ fn recipe_hostile_observe(listener: TCPListener, milliseconds: Int, bytes_predic
                         .Err(_) -> break // Original ignores read_to_end error, retains collected bytes.
                     }
                 }
-                hostile_net.tcp_close(stream) ?? panic("drop observer connection")
+                hostile_net.tcp_close(&stream) ?? panic("drop observer connection")
                 return bytes == "escaped".bytes()
             }
             .Err(error) -> if error == {
@@ -67,15 +68,14 @@ fn recipe_hostile_observe(listener: TCPListener, milliseconds: Int, bytes_predic
 }
 
 fn recipe_hostile_execute(base: String, ctx: RecipeBuildContext, tool: String, args: [String], windows: Bool, id: String) {
-    result :: recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None)
-    if result == {
+    if recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None) == {
         .Ok(report) -> {
             if windows {
                 assert_eq(report.sandbox_class, "windows-appcontainer")
             } else {
                 assert(report.sandbox_class != "non-executing")
                 status :: files.read(files.join(ctx.output_root, "status")) ?? panic("corpus status")
-                assert_eq(status.trim(), "blocked", "corpus attempt must be blocked")
+                assert(status.trim() == "blocked", "corpus attempt must be blocked")
             }
             policies :: [String]{"filesystem=", "process=", "network=", "environment=", "devices=", "resources="}
             loop policy in policies -> assert(report.sandbox_policy.contains(policy), "missing sandbox policy")

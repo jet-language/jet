@@ -79,14 +79,14 @@ fn store_external_root_targets_unlocked(roots: HangarRoots, reference: String, g
     Err(StoreError.NotFound("no Hangar entry matches `{reference}`"))
 }
 
-fn store_external_root_targets_locked(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> [String] StoreError! {
+fn store_external_root_targets_locked(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] StoreError! {
     session :: store_lifecycle_session(&verification, roots)
     graph :: store_lifecycle_closure_graph_unlocked(&verification, roots)
     store_external_root_targets_unlocked(roots, reference, graph)
 }
 
 // Rust `external_root_targets`.
-fn store_external_root_targets(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> [String] ExternalRootError! {
+fn store_external_root_targets(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] ExternalRootError! {
     if store_external_root_targets_locked(&verification, roots, reference) == {
         .Ok(targets) -> Ok(targets)
         .Err(error) -> {
@@ -105,7 +105,7 @@ fn store_external_root_is_missing_reference(error: StoreError, reference: String
 }
 
 // Rust `external_root_closure_size`.
-fn store_external_root_closure_size(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> Int ExternalRootError! {
+fn store_external_root_closure_size(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> Int ExternalRootError! {
     targets :: store_external_root_targets(&verification, roots, reference)
     Ok(targets.len())
 }

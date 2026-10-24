@@ -43,7 +43,7 @@ fn store_migration_find_legacy_source(legacy_source: String) -[FS]> String? Stor
 }
 
 // Rust `migrate_legacy_hangar`: true when a legacy Hangar was migrated.
-fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env]> Bool StoreError! {
+fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env, Time]> Bool StoreError! {
     if !roots.dev_mode -> return Ok(false)
     destination :: roots.hangar_dir()
     parent :: files.dirname(destination)
@@ -150,7 +150,7 @@ fn store_migration_walk_target(start: [String], floor: Int, target: String) -> [
             part == "" || part == "." -> next
             part == ".." -> {
                 if normalized.len() <= floor -> return None
-                &normalized.pop()
+                _ :: &normalized.pop()
             }
             else -> &normalized.push(part)
         }

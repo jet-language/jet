@@ -74,7 +74,7 @@ fn store_test_signed_narinfo(store_path: String, nar_name: String, nar: [U8], re
 // caller shuts the server down with `store_test_stop_cache_server`.
 struct StoreTestCacheServer {
     server: HTTPServer
-    serving: Task
+    serving: Task<Unit>
     endpoint: String
 }
 
@@ -86,17 +86,19 @@ fn store_test_start_cache_server(roots: HangarRoots, routes: [String: [U8]]) -> 
         files.write_bytes(path, route.value) ?? panic("route body")
     }
     mux :: http_server.mux()
-    http_server.static_files(mux, "/", site)
+    mux.get("/*path", (path: String) -> store_nix_test_site_response(site, path))
     server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind cache server")
     address :: server.local_addr() ?? panic("cache server address")
-    serving :: task { server.serve() ?? panic("serve") }
-    time.sleep(time.duration_millis(20))
+    serving :: task {
+        _ :: server.serve() ?? panic("serve")
+    }
+    time.sleep(time.duration_ms(20))
     StoreTestCacheServer{server: server, serving: serving, endpoint: "http://{address}"}
 }
 
-fn store_test_stop_cache_server(cache: StoreTestCacheServer) Never! {
-    _ :: cache.server.shutdown(time.duration_millis(100)) ?? panic("shutdown")
-    cache.serving.join() ?? panic("server task")
+fn store_test_stop_cache_server(^cache: StoreTestCacheServer) Never! {
+    _ :: cache.server.shutdown(time.duration_ms(100)) ?? panic("shutdown")
+    ^cache.serving.join() ?? panic("server task")
 }
 
 // Admit the two-object signed closure (`root` references `leaf`) through
@@ -124,10 +126,10 @@ fn store_test_admit_signed_closure(verification: &StoreVerification, roots: Hang
     files.create_dir_all(files.join(roots.root, "config")) ?? panic("config dir")
     files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
     files.write(files.join(roots.root, "config/nix-cache-v1.endpoint"), cache.endpoint) ?? panic("endpoint")
-    public_key :: crypto.expert.ed25519_public(seed) ?? panic("public key")
+    public_key :: crypto.SigningKey{bytes: seed}.public_key().bytes
     files.write(files.join(roots.root, "trust/nix-cache-v1.ed25519.pub"), "{key_id}:{base64.encode(public_key)}\n") ?? panic("trust key")
     admitted :: store_admit_nix_closure(&verification, roots, [NixOutputRequest]{NixOutputRequest{name: "out", store_path: STORE_TEST_PROJECTION_ROOT}}, false) ?? panic("admit closure")
-    store_test_stop_cache_server(cache)
+    store_test_stop_cache_server(^cache)
     admitted
 }
 

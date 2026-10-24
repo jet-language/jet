@@ -142,7 +142,7 @@ fn env_transition_ensure_new_file(root: String, relative: String) EnvironmentErr
     }
 }
 
-fn env_transition_remove_regular(root: String, path: String) EnvironmentError! -[FS]> {
+fn env_transition_remove_regular(root: String, path: String) EnvironmentError! -[FS, Env]> {
     relative :: env_transition_relative_inside(root, path)
     env_transition_safe_path(root, relative)
     if files.stat(path) == {
@@ -174,7 +174,7 @@ fn env_transition_apply_state(root: String, path: String, state: [U8]?) Environm
     }
 }
 
-fn env_transition_create_real_dirs(root: String, directory: String) EnvironmentError! -[FS]> {
+fn env_transition_create_real_dirs(root: String, directory: String) EnvironmentError! -[FS, Env]> {
     relative :: env_shell_strip_path_prefix(directory, root) ?? return Err(env_transition_error("transition directory escapes the Package root"))
     cursor := root
     loop component in env_transition_components(relative) {
@@ -272,7 +272,7 @@ fn env_transition_read_journal(path: String) -[FS]> TransitionJournal Environmen
         return Err(env_transition_error("journal {path} exceeds the {TRANSITION_MAX_JOURNAL_BYTES}-byte limit"))
     }
     text :: String.from_bytes(bytes) ?? return Err(env_transition_error("journal {path} is not UTF-8"))
-    lines :: text.lines().to_list()
+    lines :: text.lines()
     if lines.len() == 0 || lines[0] != TRANSITION_JOURNAL_HEADER {
         return Err(env_transition_error("journal {path} has an unknown format"))
     }
@@ -354,7 +354,7 @@ fn env_transition_decode_state(value: String?, path: String) -> [U8]? Environmen
     }
     if !valid -> return Err(env_transition_error("journal {path} has invalid file bytes"))
     bytes := [U8]{}
-    loop index in 0..<(hex.len() / 2) {
+    loop index in 0..<(hex.len() /% 2) {
         high :: env_files_hex_value(Int.from_u8(hex[index * 2]))
         low :: env_files_hex_value(Int.from_u8(hex[index * 2 + 1]))
         &bytes.push(U8{high * 16 + low})

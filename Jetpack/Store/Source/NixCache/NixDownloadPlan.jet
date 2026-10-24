@@ -35,41 +35,6 @@ struct NixDownloadPlan {
     }
 }
 
-// Process-local signed metadata from the last plan, keyed by Jetpack root and
-// endpoint (Rust thread-local `PLANNED_NARINFOS`).
-store_nix_planned_narinfos := [String: [String: FetchedInfo]]{}
-
-fn store_nix_planned_key(roots: HangarRoots, endpoint: NixCacheEndpoint) -> String Never! {
-    "{roots.root}\n{endpoint.endpoint}"
-}
-
-fn store_nix_remember_planned_narinfos(roots: HangarRoots, endpoint: NixCacheEndpoint, infos: ^[String: FetchedInfo]) Never! {
-    store_nix_planned_narinfos[store_nix_planned_key(roots, endpoint)] = infos
-}
-
-fn store_nix_planned_narinfos_for(roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String: FetchedInfo] Never! {
-    store_nix_planned_narinfos.get(store_nix_planned_key(roots, endpoint)) ?? [String: FetchedInfo]{}
-}
-
-// Add every reference already known from planned metadata to the queue.
-fn store_nix_expand_planned_closure(queue: &Rank<String>, scheduled: &Rank<String>, infos: [String: FetchedInfo], store_dir: String) NixCacheError! {
-    frontier := queue.copy()
-    loop {
-        store_path :: frontier.first() ?? break
-        &frontier.remove(store_path)
-        info :: infos.get(store_path) ?? next
-        loop name in info.info.references {
-            reference :: "{store_dir}/{name}"
-            store_nix_validate_store_path(reference, store_dir)
-            if !scheduled.has(reference) {
-                &scheduled.add(reference)
-                &queue.add(reference)
-                &frontier.add(reference)
-            }
-        }
-    }
-}
-
 fn store_nix_checked_add(left: Int, right: Int, overflow: String) -> Int NixCacheError! {
     if right > 0 && left > STORE_NIX_INT_MAX - right -> return Err(NixCacheError.new(.Metadata, overflow))
     Ok(left + right)
@@ -102,7 +67,6 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
     scheduled := queue.copy()
     checked := 0
     plan := NixDownloadPlan.empty()
-    planned_infos := [String: FetchedInfo]{}
     store_nix_progress_phase(progress, "Planning")
     store_nix_progress_objects(progress, 0, scheduled.len())
 
@@ -140,8 +104,8 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
         fetched := [String: FetchedInfo]{}
         first_error := NixCacheError?{None}
         loop store_path in pending {
-            lookup :: endpoint.narinfo(store_path, store_dir) ?? {
-                if first_error == None -> first_error = Val(err)
+            lookup :: endpoint.narinfo(store_path, store_dir) ? found -> found ! error -> {
+                if first_error == None -> first_error = Val(error)
                 next
             }
             if lookup == {
@@ -149,11 +113,10 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
                 .None -> if first_error == None -> first_error = Val(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
             }
         }
-        names := fetched.keys()
+        names := fetched.keys().to_list()
         &names.sort()
         loop store_path in names {
             info :: fetched[store_path]
-            planned_infos[store_path] = info.copy()
             file_size :: info.info.file_size ?? return Err(NixCacheError.new(.Metadata, "Nix narinfo has no signed FileSize for download planning"))
             plan.download_bytes = store_nix_checked_add(plan.download_bytes, file_size, "Nix closure download size overflowed")
             plan.disk_bytes = store_nix_checked_add(plan.disk_bytes, info.info.nar_size, "Nix closure on-disk size overflowed")
@@ -177,7 +140,6 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
         }
         if first_error == .Val(error) -> return Err(error)
     }
-    store_nix_remember_planned_narinfos(roots, endpoint, planned_infos)
     &plan.items.sort_by((item: NixPlanItem) -> item.package)
     plan.estimated_seconds = store_nix_estimated_seconds(plan.download_bytes, store_nix_recent_throughput(roots))
     Ok(plan)

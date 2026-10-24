@@ -147,12 +147,13 @@ fn recipe_sandbox_test_exec(tool: String, args: [String]) -> BuildRecipe {
 fn recipe_sandbox_test_unavailable(base: String, ctx: RecipeBuildContext, args: [String], tool: String, marker: String) -[FS, Env, Exec, Net, Rand, Time.Wait]> {
     previous :: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "unavailable")
-    result :: recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None)
-    recipe_sandbox_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-    if result == {
-        .Ok(_) -> panic("an unavailable native backend must fail closed")
-        .Err(error) -> assert_eq(error.code, "E1275")
+    failure :: if recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None) == {
+        .Ok(_) -> String?{None}
+        .Err(error) -> Val(error.code)
     }
+    recipe_sandbox_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+    code :: failure ?? panic("an unavailable native backend must fail closed")
+    assert_eq(code, "E1275")
     assert(!files.exists(marker))
     assert(!files.exists(files.join(ctx.output_root, "marker")))
     files.remove_all(base).drop("test cleanup")

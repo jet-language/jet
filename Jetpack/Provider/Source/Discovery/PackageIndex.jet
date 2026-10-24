@@ -212,7 +212,10 @@ fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason!
 // one exists.
 fn env_discovery_merge_refs(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) Never! -[FS]> {
     loop spec in refs {
-        found :: env_discovery_fixture_version(fixtures, spec) ?? env_discovery_store_version(store_entries, spec)
+        found :: if env_discovery_fixture_version(fixtures, spec) == {
+            .Val(pair) -> Val(pair)
+            .None -> env_discovery_store_version(store_entries, spec)
+        }
         version :: if found == {
             .Val(pair) -> pair.version
             .None -> ""

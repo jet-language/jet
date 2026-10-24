@@ -228,7 +228,7 @@ fn store_cache_read_trust_key(path: String) -> TrustKey StoreError! {
 // Create a fresh 32-byte role key exactly once, owner-only on Unix.
 fn store_cache_write_new_key(path: String) StoreError! {
     store_cache_ensure_parent(path)
-    secret :: random.bytes(32) ?? return Err(StoreError.Other(err.message()))
+    secret :: random.bytes(32) ?? return Err(StoreError.Other("{err}"))
     if store_archive_lstat_ok(path) != None -> return
     out :: files.create(path, if_exists: .Refuse)
     out.write_all(secret)

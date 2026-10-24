@@ -28,7 +28,7 @@ fn cli_cmd_hangar(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         "doctor" -> cli_hangar_doctor(&verification, theme, parsed)
         "path" -> cli_hangar_path(theme, parsed)
         "du" -> if parsed.positional.contains("--all") -> cli_hangar_du_all(theme, parsed) else -> cli_hangar_du(&verification, theme, parsed)
-        "verify" -> cli_hangar_verify(theme, parsed)
+        "verify" -> cli_hangar_verify(&verification, theme, parsed)
         "referrers" -> cli_hangar_referrers(&verification, theme, parsed)
         "register-external-root" -> cli_hangar_register_external_root(&verification, theme, parsed)
         "list-external-roots" -> cli_hangar_list_external_roots(&verification, theme, parsed)
@@ -275,7 +275,7 @@ fn cli_hangar_doctor(verification: &StoreVerification, theme: Theme, parsed: CLI
 
 // `jetpack hangar verify [<digest-or-id-or-archive>]` — with no target,
 // verify every object.
-fn cli_hangar_verify(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_hangar_verify(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     roots :: pkg_resolve_roots()
     key :: parsed.flags.archive_key
     entries :: store_list_for_full_audit(roots) ?? {
@@ -284,7 +284,7 @@ fn cli_hangar_verify(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.
     target :: cli_positional_path_after(parsed, "verify") ?? {
         verified := 0
         loop entry in entries {
-            store_verify_archive(roots, entry.id, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
+            store_verify_archive(&verification, roots, entry.id, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
             verified += 1
         }
         if parsed.flags.json {
@@ -295,7 +295,7 @@ fn cli_hangar_verify(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.
         return EXIT_OK
     }
     if files.is_file(target) {
-        report :: store_verify_archive(roots, target, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
+        report :: store_verify_archive(&verification, roots, target, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
         return cli_hangar_archive_done(theme, parsed, HangarArchiveAction.Verify, report)
     }
     found := StoreEntry?{None}
@@ -308,7 +308,7 @@ fn cli_hangar_verify(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.
     entry :: found ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "no hangar object `{target}`", "verify only checks realized hangar records.", "run `jetpack hangar list` to see ids.")
     }
-    if store_verify_archive(roots, entry.id, key) == {
+    if store_verify_archive(&verification, roots, entry.id, key) == {
         .Ok(report) -> {
             if parsed.flags.json {
                 print(report.json("verify") ?? return cli_status_encoding_error(err))

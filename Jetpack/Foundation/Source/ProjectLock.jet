@@ -122,8 +122,9 @@ fn env_lock_acquire_opened(opened: ^RuntimeLockScope, wait: Duration) -[FS, Env,
     }
 }
 
-// Rust `acquire_lease_lock`. The caller passes the lock to the launched
-// process tree with `RuntimeLock.keep_open_for`.
+// Rust `acquire_lease_lock`. Rust passes the lock to the launched process
+// tree; Core cannot pass an open descriptor to a child, so a lease that
+// holds it refuses the handoff (`CacheLease.keep_open_for`).
 fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_acquire_lock(root, scope)
 }

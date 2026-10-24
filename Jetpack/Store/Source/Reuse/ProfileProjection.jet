@@ -30,7 +30,9 @@ fn store_reuse_copy_open_profile_file(source: FileReader, destination: String) -
     if !info.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile executable is not a regular file")}))
     output := files.create(destination, if_exists: .Refuse)
     hasher := StreamingSHA256.new()
-    loop chunk in input.chunks(65536) {
+    loop {
+        chunk :: input.read(65536)
+        if chunk.len() == 0 -> break
         &hasher.update(chunk)
         &output.write_all(chunk)
     }

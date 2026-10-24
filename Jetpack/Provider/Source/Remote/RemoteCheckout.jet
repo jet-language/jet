@@ -25,7 +25,7 @@ fn provider_source_repo(upstream: String, want_package: String, ctx: ProviderCtx
         return Ok(files.join(files.cwd() ?? "", path))
     }
     if upstream == BATTERIES_UPSTREAM {
-        materialized :: env_battery_materialize_package(ctx.store_dir, want_package) ?? return Err(ProviderError.CoreBuild(err.message()))
+        materialized :: env_battery_materialize_package(ctx.store_dir, want_package) ?? return Err(ProviderError.CoreBuild(err.message))
         return Ok(materialized)
     }
     remote :: RemoteSource.parse(upstream)
@@ -339,8 +339,9 @@ struct HeldDirectoryEntry {
     }
 
     fn from_child(parent: Directory, name: String) -[FS]> HeldDirectoryEntry IOError! {
-        directory :: parent.open_directory(name)
-        Ok(HeldDirectoryEntry{parent, name, directory})
+        owned :: provider_reopen_held_directory(parent)
+        directory :: owned.open_directory(name)
+        Ok(HeldDirectoryEntry{parent: owned, name, directory})
     }
 
     // A CSPRNG-named private directory under `parent`, never reusing or
@@ -379,6 +380,16 @@ fn provider_reject_multiply_linked(info: Stat) IOError! {
     if info.links > 1 {
         return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("multiply linked files are not accepted in a remote checkout")}))
     }
+}
+
+// Core has no directory-handle duplication: reopen the held directory by its
+// path and require the same inode, failing closed when it was replaced.
+fn provider_reopen_held_directory(held: Directory) -[FS]> Directory IOError! {
+    reopened :: provider_open_held_directory(held.path, false)
+    if held.stat().id != reopened.stat().id {
+        return Err(provider_io_error_other(held.path, "held directory was replaced while it was reopened"))
+    }
+    Ok(reopened)
 }
 
 // The same file object: identity, length, link count, and modification time.

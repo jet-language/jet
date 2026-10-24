@@ -11,7 +11,7 @@
 //          generated `fn run()` for the default `jet run` tier (I9)
 //   hosted implementation only + Jetpack/run.jet, for the standalone native
 //          `jetpack` engine binary (`jet build`)
-//   publication  INTERNAL Store implementation closure + the one registered
+//   publication  INTERNAL Engine implementation closure + the one registered
 //                native runtime-pack publisher entry; no test driver
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -31,7 +31,7 @@ const sourceRootDir = resolve(process.env.JETPACK_BOOTSTRAP_SOURCE_ROOT ?? repoR
 // `# == Area ==` sections to assemble (unset: all), and each worker's unit lives
 // in its own scratch directory keyed by source root, selection and worker name.
 const selectedAreas = mode === "publication"
-  ? new Set(execFileSync(process.execPath, [resolve(bootstrapDir, "areas.mjs"), "closure", "Store"], {
+  ? new Set(execFileSync(process.execPath, [resolve(bootstrapDir, "areas.mjs"), "closure", "Engine"], {
     cwd: sourceRootDir,
     env: { ...process.env, JETPACK_BOOTSTRAP_SOURCE_ROOT: sourceRootDir },
     encoding: "utf8",
@@ -155,13 +155,17 @@ async function readManifest(name) {
   const text = mergedManifest(workingText, name);
   const entries = [];
   const misplaced = [];
-  // Section headers look like `# == PackageModel ==`; the name is the text before any `(`.
+  // Section headers look like `# == PackageModel ==`; the name is the text before any `(`. An area that
+  // spans several Jetpack folders names them: `# == Engine (folders: Store, Trust) ==`.
   let section = null;
+  let folders = [];
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
     const sourcePath = rawLine.trim();
-    const header = /^#\s*==\s*([^=(]+?)\s*(?:\(.*\))?\s*==\s*$/.exec(sourcePath);
+    const header = /^#\s*==\s*([^=(]+?)\s*(?:\((.*)\))?\s*==\s*$/.exec(sourcePath);
     if (header !== null) {
       section = header[1];
+      const listed = /^folders:(.*)$/.exec(header[2]?.trim() ?? "");
+      folders = listed ? listed[1].split(",").map((folder) => folder.trim()).filter(Boolean) : [section];
       continue;
     }
     if (sourcePath === "" || sourcePath.startsWith("#")) continue;
@@ -172,12 +176,12 @@ async function readManifest(name) {
       fail(`${where}: expected a repository-relative .jet source path`);
     }
     if (sourcePath !== normalized) fail(`${where}: use the canonical path ${normalized}`);
-    const publicationEntry = sourcePath === PUBLICATION_ENTRY && name === "sources.list" && section === "Store";
+    const publicationEntry = sourcePath === PUBLICATION_ENTRY && name === "sources.list" && section === "Engine";
     if (!publicationEntry && !allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
     const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
-    if (area !== undefined && area !== section) misplaced.push(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
+    if (area !== undefined && !folders.includes(area)) misplaced.push(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
     if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
     if (selectedAreas !== null && !selectedAreas.has(section)) continue;
     // Dependency references have the same live/HEAD rule, never a per-file
@@ -219,7 +223,7 @@ if (sliceFailures.length > 0) fail(`the Jetpack compiler slice drifted from the 
 for (const problem of sliceDrift.filter((problem) => problem.includes("outside the compiler slice"))) console.log(`note: ${problem}`);
 const sources = registeredSources.filter((entry) => mode === "publication" || entry.sourcePath !== PUBLICATION_ENTRY);
 if (mode === "publication" && registeredSources.filter((entry) => entry.sourcePath === PUBLICATION_ENTRY).length !== 1) {
-  fail(`internal publication requires exactly one Store registration of ${PUBLICATION_ENTRY}`);
+  fail(`internal publication requires exactly one Engine registration of ${PUBLICATION_ENTRY}`);
 }
 const tests = await readManifest("tests.list");
 if (selectedAreas !== null) {

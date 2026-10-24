@@ -53,7 +53,7 @@ fn cli_hangar_archive(verification: &StoreVerification, theme: Theme, parsed: CL
             entry :: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar export` needs an entry id, reference, or output digest", "jetpack hangar export <entry> --to <archive.hangar> --yes")
             destination :: parsed.flags.archive_to ?? return cli_hangar_archive_usage(theme, parsed, "`hangar export` needs `--to <archive.hangar>`", "write one signed archive, then import it on the target Hangar")
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) -> return EXIT_OK
-            exported :: store_export_archive(roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            exported :: store_export_archive(&verification, roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             store_write_archive_file(destination, exported.bytes) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, exported.report)
         }
@@ -61,7 +61,7 @@ fn cli_hangar_archive(verification: &StoreVerification, theme: Theme, parsed: CL
             source :: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar import` needs an archive path", "jetpack hangar import <archive.hangar> --yes")
             bytes :: store_read_archive_file(source) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) -> return EXIT_OK
-            report :: store_import_archive(roots, bytes, key, parsed.flags.archive_allow_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            report :: store_import_archive(&verification, roots, bytes, key, parsed.flags.archive_allow_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, report)
         }
         .Dump -> {
@@ -76,7 +76,7 @@ fn cli_hangar_archive(verification: &StoreVerification, theme: Theme, parsed: CL
                 )
             }
             entry :: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar dump` needs an entry id or reference", "jetpack hangar dump <entry> > closure.hangar")
-            exported :: store_export_archive(roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            exported :: store_export_archive(&verification, roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             stdout_handle := term.stdout()
             &stdout_handle.write_bytes(exported.bytes) ?? return cli_hangar_archive_error(theme, parsed, action, StoreError.IO(err))
             EXIT_OK
@@ -87,20 +87,20 @@ fn cli_hangar_archive(verification: &StoreVerification, theme: Theme, parsed: CL
                 return cli_hangar_archive_error(theme, parsed, action, StoreError.InvalidInput("archive from stdin exceeds the 1 GiB Hangar limit"))
             }
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) -> return EXIT_OK
-            report :: store_import_archive(roots, bytes, key, parsed.flags.archive_allow_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            report :: store_import_archive(&verification, roots, bytes, key, parsed.flags.archive_allow_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, report)
         }
         .Copy -> {
             entry :: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar copy` needs an entry id or reference", "jetpack hangar copy <entry> --to <hangar-root> --yes")
             destination :: parsed.flags.archive_to ?? return cli_hangar_archive_usage(theme, parsed, "`hangar copy` needs `--to <hangar-root>`", "copy uses the signed export/import backbone")
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) -> return EXIT_OK
-            report :: store_copy_archive(roots, entry, destination, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            report :: store_copy_archive(&verification, roots, entry, destination, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, report)
         }
         .Sign -> {
             entry :: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar sign` needs an entry id or archive path", "jetpack hangar sign <entry-or-archive> [--to <path>] --yes")
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) -> return EXIT_OK
-            report :: store_sign_archive(roots, entry, parsed.flags.archive_to, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            report :: store_sign_archive(&verification, roots, entry, parsed.flags.archive_to, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, report)
         }
         .Repair -> {

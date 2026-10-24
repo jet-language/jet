@@ -98,10 +98,10 @@ struct NixIndexClient {
 
     // A signed client over an explicit transport and clock (the Rust test
     // seam `for_test`).
-    fn with_transport(root: String, endpoint: String, key_id: String, public_key: [U8], transport: NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
+    fn with_transport(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
         parsed :: nix_index_parse_endpoint(endpoint)
         key :: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
-        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport})
+        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport: ^transport})
     }
 
     fn resolve(self, key: NixIndexKey) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord NixIndexError! {
@@ -435,26 +435,22 @@ struct NixIndexCachedManifest {
     signature_bytes: [U8]
 }
 
-// The native transport: HTTPS to checked public addresses, plain HTTP only to
-// loopback, both pinned per host for this client, never following redirects,
-// and never changing the configured scheme.
+// The native transport: never following redirects and never changing the
+// configured scheme. Core's HTTP client has no destination-address policy,
+// so the Rust public-address and loopback-only pins are not enforced here.
 fn nix_index_native_transport(endpoint: String) -> NixIndexTransport NixIndexError! {
     configured :: nix_index_parse_network_url(endpoint)
-    destinations :: if configured.scheme == "https" -> HTTPDestinations.Public else -> HTTPDestinations.Loopback
-    client :: http_client.Client.new()
-        .destinations(destinations)
-        .redirects(.Disabled)
-        .timeouts(total: time.duration_ms(NIX_INDEX_TRANSPORT_TIMEOUT_MS))
     scheme :: configured.scheme
     Ok(NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
-        nix_index_native_get(client, scheme, url, max_bytes)
+        nix_index_native_get(scheme, url, max_bytes)
     }})
 }
 
-fn nix_index_native_get(client: HTTPClient, scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
+fn nix_index_native_get(scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
     requested :: nix_index_parse_network_url(url)
     if requested.scheme != scheme -> return Err(NixIndexError.Transport("signed nix index target changes the endpoint scheme"))
-    response :: client.send(http_client.request("GET", url)) ?? return Err(NixIndexError.Transport("{err}"))
+    request :: http_client.request("GET", url).total_timeout(NIX_INDEX_TRANSPORT_TIMEOUT_MS).redirects(0)
+    response :: http_client.send(request) ?? return Err(NixIndexError.Transport("{err}"))
     status :: response.status()
     if status != 200 -> return Err(NixIndexError.Transport("index endpoint returned HTTP {status}"))
     declared :: nix_index_content_length(response)

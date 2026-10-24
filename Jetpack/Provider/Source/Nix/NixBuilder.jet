@@ -231,10 +231,15 @@ fn nix_builder_admit(verification: &StoreVerification, roots: HangarRoots, build
     }
     derivation_digest :: pkg_sha256_hex(build.drv_path.bytes())
     producer :: provider_producer_record("nix", build.drv_path, derivation_digest, facts, "nix-derivation:{build.drv_path}", identity, facts) ?? return Err(NativeNixBuildError.Store("producer record: {err.message()}"))
-    bin_output :: build.outputs.get("bin") ?? build.outputs.get("out")
-    bin :: if bin_output == {
-        .Val(output) -> files.join(output.path, "bin")
-        else -> ""
+    bin := ""
+    if build.outputs.get("bin") == {
+        .Val(output) -> bin = files.join(output.path, "bin")
+        .None -> {
+            if build.outputs.get("out") == {
+                .Val(output) -> bin = files.join(output.path, "bin")
+                .None -> {}
+            }
+        }
     }
     realized :: Realized{
         name: nix_builder_name_from_store_path(primary.store_path),

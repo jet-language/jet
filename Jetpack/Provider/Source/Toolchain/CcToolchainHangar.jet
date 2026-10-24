@@ -3,7 +3,7 @@
 // registration and closure admission remain the single write/recording
 // boundary; this file only reads Hangar and re-proves every digest.
 
-fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, hangar_root: String, target: String, allow_fixture: Bool) -[FS, Env]> CcToolchainDescriptor CcToolchainError! {
+fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, hangar_root: String, target: String, allow_fixture: Bool) -[FS, Env, Time]> CcToolchainDescriptor CcToolchainError! {
     normalized :: provider_cc_normalize_target(target)
     roots :: provider_cc_roots_for_hangar(hangar_root)
     entries :: store_list_checked(&verification, roots) ?? {

@@ -127,13 +127,13 @@ fn store_nix_test_bytes_with_nul(before: String, after: String) -> [U8] Never! {
 // An in-memory NAR byte source reading at most `chunk` bytes per call.
 fn store_nix_test_byte_source(bytes: [U8], chunk: Int) -> NarByteSource Never! {
     position :: Cell.new(0)
-    NarByteSource{read: (limit: Int) -> {
+    NarByteSource.reader((limit: Int) -> {
         start :: position.get()
         wanted :: if limit < chunk -> limit else -> chunk
         end :: if start + wanted < bytes.len() -> start + wanted else -> bytes.len()
         position.set(end)
         Ok(bytes.slice(start, end))
-    }}
+    })
 }
 
 fn store_nix_test_request(name: String, store_path: String) -> [NixOutputRequest] Never! {
@@ -725,16 +725,20 @@ struct NixTestProgress {
     store_nix_test_remove_dir(destination)
     // Seal the partially written destination once its payload exists, then
     // keep feeding one byte at a time.
-    inner :: store_nix_test_byte_source(nar, 1)
+    position :: Cell.new(0)
     sealed :: Cell.new(false)
-    reader :: NarByteSource{read: (limit: Int) -> {
+    reader :: NarByteSource.reader((limit: Int) -> {
         if !sealed.get() && files.is_file(files.join(destination, "payload")) {
             files.set_mode(destination, 0o555)
             sealed.set(true)
         }
-        Ok(inner.read(limit))
-    }}
-    error :: store_read_nar_stream(reader, destination, nar.len()) ? stats -> panic("trailing bytes must fail") ! failure -> failure
+        start :: position.get()
+        wanted :: if limit < 1 -> limit else -> 1
+        end :: if start + wanted < nar.len() -> start + wanted else -> nar.len()
+        position.set(end)
+        Ok(nar.slice(start, end))
+    })
+    error :: store_read_nar_stream(^reader, destination, nar.len()) ? stats -> panic("trailing bytes must fail") ! failure -> failure
     assert(error.message().contains("trailing"))
     assert(!files.lexists(destination))
     _ :: store_read_nar_stream(store_nix_test_byte_source(valid_nar, 65536), destination, valid_nar.len()) ?? panic("valid stream")

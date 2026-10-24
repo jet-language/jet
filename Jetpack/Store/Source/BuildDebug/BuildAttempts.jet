@@ -55,7 +55,7 @@ struct BuildAttempt {
     steps: [StepLog]
 
     fn new(package: String, reference: String, provider: String, recipe_hash: String, source_hash: String) -[Env, Time]> BuildAttempt Never! {
-        now :: time.instant().unix_ns
+        now :: time.unix_ns()
         BuildAttempt{
             id: "{recipe_debug_safe_name(package)}-{now}",
             package,
@@ -359,7 +359,7 @@ fn recipe_debug_num_field(object: [String: Dyn], key: String) -> Int Never! {
     value :: object.get(key) ?? return 0
     if value == {
         .Int(number) -> if number >= 0 -> number else -> 0
-        .Float(number) -> if number - number == 0.0 && number >= 0.0 -> number.to_int() else -> 0
+        .Float(number) -> if number - number == 0.0 && number >= 0.0 -> (Int.from_float(math.trunc(number)) ?? 0) else -> 0
         else -> 0
     }
 }

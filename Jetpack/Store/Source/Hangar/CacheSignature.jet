@@ -18,7 +18,7 @@ fn store_verify_configured_signature(roots: HangarRoots, entry: StoreEntry, expe
 
 // Test seam: run `verifier(public key text, message, signature text)` only
 // after the configured key file is present.
-fn store_verify_configured_signature_with(roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, verifier: fn(String, String, String) -> Bool) -> Bool Never! {
+fn store_verify_configured_signature_with(roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, verifier: fn(String, String, String) -[]> Bool Never!) -> Bool Never! {
     text :: files.read(files.join(files.join(roots.root, "trust"), "cache.ed25519.pub")) ?? return false
     verifier(text.trim(), store_cache_signature_message(entry, expectation), entry.envelope.signature.removeprefix("ed25519:"))
 }

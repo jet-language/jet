@@ -215,7 +215,7 @@ fn store_recover_hangar(verification: &StoreVerification, roots: HangarRoots) ->
     protocol :: ExecutableLeaseProtocol.open(roots.root)
     leases :: protocol.recover_stale_leases()
     closure :: store_recover_closure_journal_unlocked(&verification, roots)
-    migrated :: store_migrate_closure_graph_unlocked(&verification, roots)
+    migrated :: store_migrate_closure_graph_unlocked(&verification, roots).migrated
     Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
 }
 
@@ -280,7 +280,8 @@ fn store_parse_decimal(text: String) -> Int? Never! {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(digits) ?? None
+    parsed :: Int.parse(digits) ?? return None
+    Val(parsed)
 }
 
 // Build the store id for a realization: human-readable `<name>-<version>`

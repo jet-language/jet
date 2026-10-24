@@ -63,8 +63,7 @@ fn env_hook_definition_fingerprint(root: String, requested_preset: String?) -[FS
 // Hash the activation plan for both kinds of explicit selection: a named
 // preset inside `env.jet`, and one declared `env.<name>` module.
 fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env, Exec, Time.Wait]> String? Never! {
-    raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return None
-    bytes :: raw ?? return None
+    bytes :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return None
     source :: String.from_bytes(bytes) ?? return None
     if envmodel_evaluate_env_with_selections(source, root, requested_preset, requested_environment) == {
         .Ok(plan) -> return env_hook_fingerprint_from_inputs(root, requested_preset, requested_environment, plan.source_files, plan.lifecycle, plan.files, plan.package_profiles, plan.presets, plan.languages)
@@ -225,7 +224,7 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
         visited[real] = true
     }
     if info.is_dir {
-        &budget.push(inputs, "{kind}:directory:{relative}", "readonly={info.readonly};modified={env_hook_system_time_debug(info.modified)}".bytes())
+        &budget.push(&inputs, "{kind}:directory:{relative}", "readonly={info.readonly};modified={env_hook_system_time_debug(info.modified)}".bytes())
         if budget.exceeded -> return
         children :: files.list_dir(path) ?? {
             &budget.push(&inputs, "{kind}:unreadable:{relative}", [U8]{})
@@ -241,7 +240,7 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
         }
         loop child in children {
             child_relative :: if relative == "" || relative == "." -> child.name else -> "{relative}/{child.name}"
-            env_hook_add_input_path(root, files.join(path, child.name), child_relative, kind, budget, inputs, visited, depth + 1)
+            env_hook_add_input_path(root, files.join(path, child.name), child_relative, kind, &budget, &inputs, &visited, depth + 1)
             if budget.exceeded -> return
         }
         return
@@ -259,13 +258,14 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
         }
         return
     }
-    &budget.push(inputs, "{kind}:special:{relative}", "file-type={info.kind:Debug}".bytes())
+    &budget.push(&inputs, "{kind}:special:{relative}", "file-type={info.kind:Debug}".bytes())
 }
 
 // Rust `Option<SystemTime>` Debug on Unix, the directory modification stamp.
-fn env_hook_system_time_debug(modified: Instant) -> String Never! {
-    seconds :: modified.unix_ns / 1000000000
-    nanos :: modified.unix_ns % 1000000000
+fn env_hook_system_time_debug(modified: DateTime) -> String Never! {
+    ns :: modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    seconds :: ns / 1000000000
+    nanos :: ns % 1000000000
     "Some(SystemTime {{ tv_sec: {seconds}, tv_nsec: {nanos} }})"
 }
 
@@ -315,8 +315,7 @@ fn env_hook_reload_policy(root: String) -[FS, Env, Exec, Time.Wait]> ReloadPolic
 
 // The reload policy of the selected `env.<name>` environment module.
 fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
-    raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
-    bytes :: raw ?? return ReloadPolicy.Prompt
+    bytes :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
     source :: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt
     plan :: envmodel_evaluate_env_with_selections(source, root, None, requested_environment) ?? return ReloadPolicy.Prompt
     plan.lifecycle.reload
@@ -331,7 +330,7 @@ fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int) -[F
     state_path :: files.join(state_dir, ENV_HOOK_RELOAD_STATE_FILE)
     now :: time.unix_ms(time.now())
     if files.read(state_path) == .Ok(state) {
-        lines :: state.lines().to_list()
+        lines :: state.lines()
         if lines.len() >= 2 && lines[0] == hash {
             if Int.parse(lines[1]) == .Ok(started) {
                 elapsed :: if now > started -> now - started else -> 0

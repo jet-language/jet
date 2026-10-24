@@ -26,40 +26,57 @@ fn env_battery_text(path: String, text: String) -> BatteryFile Never! {
     BatteryFile{path, mode: BATTERIES_FILE_MODE, bytes: text.bytes()}
 }
 
+BATTERY_BACKEND_JET :: comptime { embed_file("../../Batteries/backend/backend.jet") }
+BATTERY_BACKEND_PACKAGE :: comptime { embed_file("../../Batteries/backend/package.jet") }
+BATTERY_CLI_JET :: comptime { embed_file("../../Batteries/cli/cli.jet") }
+BATTERY_CLI_PACKAGE :: comptime { embed_file("../../Batteries/cli/package.jet") }
+BATTERY_DATA_JET :: comptime { embed_file("../../Batteries/data/data.jet") }
+BATTERY_DATA_PACKAGE :: comptime { embed_file("../../Batteries/data/package.jet") }
+BATTERY_EMBEDDED_JET :: comptime { embed_file("../../Batteries/embedded/embedded.jet") }
+BATTERY_EMBEDDED_PACKAGE :: comptime { embed_file("../../Batteries/embedded/package.jet") }
+BATTERY_GAMES_REPLAY :: comptime { embed_file("../../Batteries/games/assets/demo.jetreplay") }
+BATTERY_GAMES_ATLAS :: comptime { embed_file("../../Batteries/games/assets/player.atlas") }
+BATTERY_GAMES_JET :: comptime { embed_file("../../Batteries/games/games.jet") }
+BATTERY_GAMES_PACKAGE :: comptime { embed_file("../../Batteries/games/package.jet") }
+BATTERY_GUI_JET :: comptime { embed_file("../../Batteries/gui/gui.jet") }
+BATTERY_GUI_PACKAGE :: comptime { embed_file("../../Batteries/gui/package.jet") }
+BATTERY_WEB_PACKAGE :: comptime { embed_file("../../Batteries/web/package.jet") }
+BATTERY_WEB_JET :: comptime { embed_file("../../Batteries/web/web.jet") }
+
 // Every bundled battery package.
 fn env_battery_packages() -> [BatteryPackage] Never! {
     [BatteryPackage]{
         {slug: "backend", files: [BatteryFile]{
-            env_battery_text("backend.jet", embed_file("../../Batteries/backend/backend.jet")),
-            env_battery_text("package.jet", embed_file("../../Batteries/backend/package.jet")),
+            env_battery_text("backend.jet", BATTERY_BACKEND_JET),
+            env_battery_text("package.jet", BATTERY_BACKEND_PACKAGE),
         }},
         {slug: "cli", files: [BatteryFile]{
-            env_battery_text("cli.jet", embed_file("../../Batteries/cli/cli.jet")),
-            env_battery_text("package.jet", embed_file("../../Batteries/cli/package.jet")),
+            env_battery_text("cli.jet", BATTERY_CLI_JET),
+            env_battery_text("package.jet", BATTERY_CLI_PACKAGE),
         }},
         {slug: "data", files: [BatteryFile]{
-            env_battery_text("data.jet", embed_file("../../Batteries/data/data.jet")),
-            env_battery_text("package.jet", embed_file("../../Batteries/data/package.jet")),
+            env_battery_text("data.jet", BATTERY_DATA_JET),
+            env_battery_text("package.jet", BATTERY_DATA_PACKAGE),
         }},
         {slug: "embedded", files: [BatteryFile]{
-            env_battery_text("embedded.jet", embed_file("../../Batteries/embedded/embedded.jet")),
-            env_battery_text("package.jet", embed_file("../../Batteries/embedded/package.jet")),
+            env_battery_text("embedded.jet", BATTERY_EMBEDDED_JET),
+            env_battery_text("package.jet", BATTERY_EMBEDDED_PACKAGE),
         }},
         {slug: "games", files: [BatteryFile]{
-            env_battery_text("assets/demo.jetreplay", embed_file("../../Batteries/games/assets/demo.jetreplay")),
+            env_battery_text("assets/demo.jetreplay", BATTERY_GAMES_REPLAY),
             BatteryFile{path: "assets/jump.wav", mode: BATTERIES_FILE_MODE, bytes: env_battery_jump_wav()},
-            env_battery_text("assets/player.atlas", embed_file("../../Batteries/games/assets/player.atlas")),
+            env_battery_text("assets/player.atlas", BATTERY_GAMES_ATLAS),
             BatteryFile{path: "assets/player.png", mode: BATTERIES_FILE_MODE, bytes: env_battery_player_png()},
-            env_battery_text("games.jet", embed_file("../../Batteries/games/games.jet")),
-            env_battery_text("package.jet", embed_file("../../Batteries/games/package.jet")),
+            env_battery_text("games.jet", BATTERY_GAMES_JET),
+            env_battery_text("package.jet", BATTERY_GAMES_PACKAGE),
         }},
         {slug: "gui", files: [BatteryFile]{
-            env_battery_text("gui.jet", embed_file("../../Batteries/gui/gui.jet")),
-            env_battery_text("package.jet", embed_file("../../Batteries/gui/package.jet")),
+            env_battery_text("gui.jet", BATTERY_GUI_JET),
+            env_battery_text("package.jet", BATTERY_GUI_PACKAGE),
         }},
         {slug: "web", files: [BatteryFile]{
-            env_battery_text("package.jet", embed_file("../../Batteries/web/package.jet")),
-            env_battery_text("web.jet", embed_file("../../Batteries/web/web.jet")),
+            env_battery_text("package.jet", BATTERY_WEB_PACKAGE),
+            env_battery_text("web.jet", BATTERY_WEB_JET),
         }},
     }
 }

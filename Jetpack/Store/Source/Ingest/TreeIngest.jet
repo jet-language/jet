@@ -271,7 +271,7 @@ store_quarantine_sequence := 0
 // Remove an invalid local cache candidate so provider realization cannot
 // mistake the same tampered directory for a fresh hit. Never removes external
 // outputs such as `/nix/store`; their provider must realize them again.
-fn store_quarantine_invalid_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) StoreError! -[FS, Env, Time]> {
+fn store_quarantine_invalid_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) StoreError! -[IO, FS, Env, Time]> {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     expected_id :: store_expected_entry_id(entry)
     if entry.id != expected_id || !store_is_single_component(entry.id) {
@@ -488,12 +488,12 @@ fn store_ingest_tree(verification: &StoreVerification, roots: HangarRoots, reque
 
 // `store_ingest_tree` with a hook run after each copied child source path
 // (Rust's test-only `with_after_child_copy_hook`, made an explicit argument).
-fn store_ingest_tree_observed(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String))?) -[FS, Env, Time]> IngestedObject IngestError! {
+fn store_ingest_tree_observed(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_ingest_tree_unlocked(&verification, roots, request, after_child_copy)
 }
 
-fn store_ingest_tree_unlocked(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String))?) -[FS, Env, Time]> IngestedObject IngestError! {
+fn store_ingest_tree_unlocked(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     if !request.outputs.has_key("out") -> return Err(IngestError.Invalid("ingest requires a named output `out`"))
     output_names := request.outputs.keys().to_list()
     &output_names.sort()
@@ -543,7 +543,7 @@ fn store_ingest_scrub_failed_stage(hangar: String, stage: String, stamp: String,
     }
 }
 
-fn store_ingest_stage_and_commit(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, output_names: [String], stage: String, after_child_copy: (fn(String))?) -[FS, Env, Time]> IngestedObject IngestError! {
+fn store_ingest_stage_and_commit(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, output_names: [String], stage: String, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     hangar :: roots.hangar_dir()
     named_digests := [String: String]{}
     staged_outs := [String: String]{}
@@ -670,8 +670,10 @@ fn store_copy_semantic_xattrs_node(source: String, destination: String) IngestEr
     names :: pkg_list_xattr_names(source) ?? return Err(IngestError.Invalid(err.message()))
     loop name in names {
         if pkg_is_excluded_xattr(name) -> next
-        stored :: files.extended_attribute(source, name) ?? return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: {err}"))
-        value :: stored ?? return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: attribute is missing"))
+        value :: if files.extended_attribute(source, name) == {
+            .Ok(stored) -> stored ?? return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: attribute is missing"))
+            .Err(error) -> { return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: {error}")) }
+        }
         files.set_extended_attribute(destination, name, value) ?? return Err(IngestError.IO("lsetxattr `{name}` on `{destination}`: {err}"))
     }
 }
@@ -712,7 +714,7 @@ fn store_copy_nofollow_tree(source: String, destination: String) IngestError! -[
     store_copy_nofollow_tree_observed(source, destination, None)
 }
 
-fn store_copy_nofollow_tree_observed(source: String, destination: String, after_child_copy: (fn(String))?) IngestError! -[FS]> {
+fn store_copy_nofollow_tree_observed(source: String, destination: String, after_child_copy: (fn(String) -[FS]>)?) IngestError! -[FS]> {
     info :: store_source_metadata(source)
     before :: store_stable_meta_identity(info)
     if {
@@ -730,7 +732,7 @@ fn store_copy_nofollow_tree_observed(source: String, destination: String, after_
 
 // Copy each child in name order, then require the directory's entry
 // snapshot to be unchanged.
-fn store_copy_nofollow_directory(source: String, destination: String, after_child_copy: (fn(String))?) IngestError! -[FS]> {
+fn store_copy_nofollow_directory(source: String, destination: String, after_child_copy: (fn(String) -[FS]>)?) IngestError! -[FS]> {
     files.create_dir_all(destination)
     children :: store_directory_snapshot(source)
     loop child in children {
@@ -751,7 +753,11 @@ fn store_copy_nofollow_file(source: String, destination: String, expected: files
         return Err(IngestError.Mutated("`{source}` changed before copy"))
     }
     bytes := [U8]{}
-    loop chunk in file.chunks(65536) -> &bytes.extend(chunk)
+    loop {
+        chunk :: file.read(65536) ?? return Err(IngestError.IO("read `{source}`: {err}"))
+        if chunk.len() == 0 -> break
+        &bytes.extend(chunk)
+    }
     after :: file.stat()
     if store_stable_meta_identity(opened) != store_stable_meta_identity(after) {
         return Err(IngestError.Mutated("`{source}` changed while copying"))

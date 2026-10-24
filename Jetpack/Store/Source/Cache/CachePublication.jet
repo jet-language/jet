@@ -819,7 +819,8 @@ fn store_cache_parse_u64(text: String) -> Int? Never! {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(digits)
+    parsed :: Int.parse(digits) ?? return None
+    Val(parsed)
 }
 
 // The receipt to publish: an endpoint's current receipt when it still
@@ -914,7 +915,7 @@ fn store_cache_decode_receipt(bytes: [U8]) -> CacheReceipt StoreError! {
 
 fn store_cache_take_field(fields: &[String: String], name: String) -> String StoreError! {
     value :: fields.get(name) ?? return Err(StoreError.InvalidData("cache trust receipt has no {name} field"))
-    &fields.remove(name)
+    _ :: &fields.remove(name)
     Ok(value)
 }
 

@@ -517,7 +517,7 @@ fn store_explain_package(verification: &StoreVerification, roots: HangarRoots, q
     found :: store_explain_find_entry(entries, query)
     entry :: found ?? return store_explain_without_entry(roots, query, lens)
     reports := [ExplainReport]{}
-    graph :: store_explain_load_graph(roots, &reports)
+    graph :: store_explain_load_graph(&verification, roots, &reports)
     receipt_ok :: store_explain_receipt_projection(roots, entry, graph, &reports)
     provider := store_explain_provider_projection(entry, &reports)
     if provider == {
@@ -547,8 +547,10 @@ fn store_explain_package(verification: &StoreVerification, roots: HangarRoots, q
 // The explanation of a package with only a recorded build attempt.
 fn store_explain_without_entry(roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
     package :: store_explain_package_name(query)
-    latest :: recipe_debug_latest(roots.hangar_dir(), package) ?? return Err(StoreError.Other("could not read build attempt for `{query}`: {err}"))
-    attempt :: latest ?? return Ok(None)
+    attempt :: if recipe_debug_latest(roots.hangar_dir(), package) == {
+        .Ok(latest) -> latest ?? return Ok(None)
+        .Err(error) -> { return Err(StoreError.Other("could not read build attempt for `{query}`: {error}")) }
+    }
     rebuild :: store_explain_rebuild_without_entry(attempt)
     reports :: [ExplainReport]{
         ExplainReport.loss("no realized StoreEntry exists for `{query}`; dependency, closure, and liveness facts are unavailable"),
@@ -607,14 +609,14 @@ fn store_explain_entry_projection(entry: StoreEntry) -> ExplainEntry Never! {
 
 // The closure proof, or at least its structure; each unavailable view is a
 // loss.
-fn store_explain_load_graph(roots: HangarRoots, reports: &[ExplainReport]) -> ClosureGraph? Never! {
-    if store_closure_graph_read_only(roots) == {
+fn store_explain_load_graph(verification: &StoreVerification, roots: HangarRoots, reports: &[ExplainReport]) -> ClosureGraph? Never! {
+    if store_closure_graph_read_only(&verification, roots) == {
         .Ok(graph) -> return Val(graph)
         .Err(error) -> {
             &reports.push(ExplainReport.loss("closure proof is unavailable: {error.message()}"))
         }
     }
-    if store_closure_graph_structure_read_only(roots) == {
+    if store_closure_graph_structure_read_only(&verification, roots) == {
         .Ok(graph) -> Val(graph)
         .Err(error) -> {
             &reports.push(ExplainReport.loss("closure structure is unavailable: {error.message()}"))
@@ -1038,7 +1040,8 @@ fn store_explain_root_phase(phase: RootPhase) -> String Never! {
 
 fn store_explain_nearest_lock() -> String? Never! {
     cwd :: sys.current_dir() ?? return None
-    store_nearest_lock_path(cwd) ?? None
+    path :: store_nearest_lock_path(cwd) ?? return None
+    Val(path)
 }
 
 // Whether the nearest project lock names this package by output hash (or

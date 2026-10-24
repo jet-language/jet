@@ -220,12 +220,11 @@ fn recipe_update_fetch_bytes(endpoint: ToolchainEndpoint, relative: String, limi
 // GET with each redirect hop checked by the toolchain redirect rule, a
 // success status, and a bounded body that must agree with Content-Length.
 fn recipe_update_fetch_http(http: ToolchainHTTPEndpoint, url: String, limit: Int) -[Net, Time.Wait]> [U8] RecipeError! {
-    client :: http_client.Client.new().redirects(.Disabled)
     current := url
     hops := 0
     loop {
-        request :: http_client.request("GET", current).total_timeout(time.duration_seconds(TOOLCHAIN_FETCH_TIMEOUT_SECONDS))
-        response :: client.send(request) ?? return Err(RecipeError.Other("{current}: {err}"))
+        request :: http_client.request("GET", current).total_timeout(TOOLCHAIN_FETCH_TIMEOUT_SECONDS * 1000).redirects(0)
+        response :: http_client.send(request) ?? return Err(RecipeError.Other("{current}: {err}"))
         status :: response.status()
         if status == 301 || status == 302 || status == 303 || status == 307 || status == 308 {
             if hops >= TOOLCHAIN_FETCH_MAX_REDIRECTS -> return Err(RecipeError.Other("{url}: too many redirects (limit {TOOLCHAIN_FETCH_MAX_REDIRECTS})"))
@@ -244,11 +243,9 @@ fn recipe_update_fetch_http(http: ToolchainHTTPEndpoint, url: String, limit: Int
             .Val(length) -> { if length > limit -> return Err(RecipeError.Other("{url}: response exceeds its size bound")) }
             .None -> {}
         }
-        body :: response.body(limit: limit + 1)
         bytes := [U8]{}
-        loop {
-            chunk :: body.read(TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
-            if chunk.len() == 0 -> break
+        loop part in response.body().chunks(TOOLCHAIN_READ_CHUNK) {
+            chunk :: part ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
             loop byte in chunk -> &bytes.push(byte)
             if bytes.len() > limit -> return Err(RecipeError.Other("{url}: response exceeds its size bound"))
         }

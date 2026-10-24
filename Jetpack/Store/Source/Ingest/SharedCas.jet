@@ -139,7 +139,11 @@ fn store_ensure_shared_file(shared: String, key: String, source_path: String, so
     partial :: files.join(shared, ".{key}.partial-{sys.pid()}-{store_next_shared_cas_sequence()}")
     output := files.create(partial, if_exists: .Refuse)
     input := files.open(source_path)
-    loop chunk in &input.chunks(65536) -> &output.write_all(chunk)
+    loop {
+        chunk :: input.read(65536)
+        if chunk.len() == 0 -> break
+        &output.write_all(chunk)
+    }
     &output.fsync()
     files.set_mode(partial, mode)
     files.rename(partial, destination) ?? {

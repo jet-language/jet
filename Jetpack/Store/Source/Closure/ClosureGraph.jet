@@ -768,16 +768,14 @@ fn store_test_backdate_last_used_at(verification: &StoreVerification, roots: Han
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     _ :: store_recover_closure_journal_unlocked(&verification, roots)
     found :: store_list_unlocked(roots)
-    entry := StoreEntry.empty()
-    matched := false
+    matched := StoreEntry?{None}
     loop candidate in found {
         if candidate.id == id {
-            entry = candidate
-            matched = true
+            matched = Val(candidate)
             break
         }
     }
-    if !matched -> return Err(StoreError.Other("no hangar entry `{id}`"))
+    entry := matched ?? return Err(StoreError.Other("no hangar entry `{id}`"))
     entry.last_used_at = last_used_at
     _ :: store_register_entry_unlocked(&verification, roots, entry)
 }

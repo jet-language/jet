@@ -497,7 +497,7 @@ fn services_run_catalog_tool(env: ShellEnv, tool: String, args: [String], data_d
     loop arg in args -> &argv.push(arg)
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)
     shell_env := env
-    spec = &shell_env.apply_to(spec)
+    spec = &shell_env.apply_to(spec) ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err.message()}"))
     receipt :: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))
     if receipt.success -> return
     detail :: receipt.errors.trim()

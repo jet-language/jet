@@ -25,7 +25,7 @@ impl ProviderFactReport {
             }
             if {
                 provider_nix_identity_key(other) != first_key -> &report.losses.push("Nix provider metadata contains multiple package identities; entry {index + 1} needs its own lock record")
-                other != first -> &report.conflicts.push("Nix provider metadata entry {index + 1} conflicts with the first native record")
+                !pkg_json_objects_equal(other, first) -> &report.conflicts.push("Nix provider metadata entry {index + 1} conflicts with the first native record")
                 else -> {}
             }
         }
@@ -62,8 +62,8 @@ impl ProviderFactReport {
         meta_name :: if meta == None -> None else -> provider_nix_string_field(meta_fields, "name", "meta.name", &losses)
         provider_nix_conflicting_values(&conflicts, "Nix metadata declares conflicting package names", [(label: String, value: String?)]{(label: "pname", value: pname), (label: "package", value: package), (label: "meta.name", value: meta_name)})
         if top_name != None && pname != None {
-            top :: top_name ?? ""
-            short :: pname ?? ""
+            top :: top_name
+            short :: pname
             if top != short && provider_nix_version_suffix(top, short) == None -> &conflicts.push("Nix metadata declares conflicting package names: name={top} disagrees with pname={short}")
         }
         top_version :: provider_nix_string_field(object, "version", "version", &losses)
@@ -91,7 +91,7 @@ impl ProviderFactReport {
         loop name.ends_with(".drv") -> name = name.removesuffix(".drv")
         facts.name = name
         version := provider_graph_either(provider_graph_either(top_version, meta_version), path_version)
-        if version == None && top_name != None -> version = provider_nix_version_suffix(top_name ?? "", facts.name)
+        if version == None && top_name != None -> version = provider_nix_version_suffix(top_name, facts.name)
         facts.version = version ?? ""
         top_hash :: provider_nix_hash_field(object, &losses)
         output_hash := String?{None}
@@ -368,7 +368,7 @@ fn provider_nix_hooks(facts: &MetadataFacts, object: [String: Dyn], losses: &[St
         &facts.add_typed_json("provider.nix.hook.{key}", value)
         valid :: if key == {
             "args" -> provider_graph_is_text(value) || provider_graph_is_string_array(value)
-            "hooks" -> provider_graph_is_text(value) || pkg_json_array(value) != None || pkg_json_object(value) != None
+            "hooks" -> provider_graph_is_text(value) || pkg_json_array(value) == .Val(_) || pkg_json_object(value) == .Val(_)
             else -> provider_graph_is_text(value)
         }
         if !valid -> &losses.push("Nix `{key}` hook has an unsupported shape")
@@ -419,7 +419,7 @@ fn provider_nix_string_list_value(value: Dyn, label: String, losses: &[String]) 
         }
         .None -> {}
     }
-    if pkg_json_object(value) != None {
+    if pkg_json_object(value) == .Val(_) {
         if label == {
             "crossSystem" | "features" | "outputs" | "variants" | "signature" | "signatures" | "publicKey" | "public_key" | "signingKey" | "signedBy" | "trustedKeys" -> return [String]{}
             else -> {}
@@ -553,7 +553,7 @@ fn provider_nix_locked_source_identity(locked: [String: Dyn]) -> String? Never! 
         }
     }
     name :: if {
-        owner != None && repo != None -> "{owner ?? ""}/{repo ?? ""}"
+        owner != None && repo != None -> "{owner}/{repo}"
         else -> provider_graph_either(owner, repo) ?? ""
     }
     exact :: revision ?? return None

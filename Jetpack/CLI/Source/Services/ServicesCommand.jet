@@ -256,7 +256,10 @@ fn cli_run_lifecycle_command(theme: Theme, project_dir: String, env: ShellEnv, h
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     spec := process.shell(command).cwd(cwd).stdout(.Capture).stderr(.Capture)
-    spec = if mode.clean -> &env.apply_clean_to(spec.env_clear()) else -> &env.apply_to(spec)
+    spec = &env.apply_in_mode(spec, mode.clean) ?? {
+        theme.error("couldn't run {phase} hook '{hook.name}'", err.message(), "run the hook outside the leased environment until Core can pass descriptors to a child.")
+        return Err(CLIError.Reported(EXIT_USAGE))
+    }
     receipt :: spec.run() ?? {
         theme.error("couldn't run {phase} hook '{hook.name}'", "{err}", "check the hook command and its working directory.")
         return Err(CLIError.Reported(EXIT_USAGE))

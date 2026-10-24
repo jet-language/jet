@@ -29,7 +29,8 @@ struct ShellRunOptions {
     clean: Bool
     // Keep the child's stdout out of a generated shell script.
     silent: Bool
-    // Replace this process with a lease-resolved executable.
+    // Stand in for this process: the exit status is forwarded as a shell
+    // would report the command, a signal death as 128+n.
     replace_process: Bool
 }
 
@@ -68,7 +69,7 @@ struct ShellEnv {
     // Lease descriptors and private wrappers are process-local, so they are
     // replaced by sealed canonical Hangar bin directories; a lease without
     // one makes the whole PATH unavailable.
-    fn composed_path_for_parent(self, base_path: String) -[Env]> String? Never! {
+    fn composed_path_for_parent(self, base_path: String) -[FS, Env, Rand]> String? Never! {
         seen := [String: Bool]{}
         lease_paths := [String: Bool]{}
         lease_bin_dirs := [String]{}
@@ -94,20 +95,28 @@ struct ShellEnv {
     }
 
     // The composed environment over the caller's inherited PATH.
-    fn apply_to(&self, spec: ProcessSpec) -[Env]> ProcessSpec Never! {
+    fn apply_to(&self, spec: ProcessSpec) -[Env]> ProcessSpec StoreError! {
         base :: sys.get("PATH") ?? ""
         &self.apply_to_base(spec, base)
     }
 
     // Only the declared environment and realized PATH. Callers clear the
     // child environment first for clean-shell checks and task probes.
-    fn apply_clean_to(&self, spec: ProcessSpec) -[Env]> ProcessSpec Never! {
+    fn apply_clean_to(&self, spec: ProcessSpec) -[Env]> ProcessSpec StoreError! {
         &self.apply_to_base(spec, env_shell_clean_path())
     }
 
-    // Lease handles travel into the child at their pinned slots
-    // which also records the process handoff.
-    fn apply_to_base(&self, spec: ProcessSpec, base_path: String) -[Env]> ProcessSpec Never! {
+    // `apply_clean_to` over a cleared child environment when `clean`, else
+    // `apply_to`.
+    fn apply_in_mode(&self, spec: ProcessSpec, clean: Bool) -[Env]> ProcessSpec StoreError! {
+        if clean -> return &self.apply_clean_to(spec.env_clear())
+        &self.apply_to(spec)
+    }
+
+    // Lease handles travel into the child at their pinned slots, which also
+    // records the process handoff; a lease whose handles cannot travel
+    // refuses the child.
+    fn apply_to_base(&self, spec: ProcessSpec, base_path: String) -[Env]> ProcessSpec StoreError! {
         out := spec
         loop index in 0..<self.cache_leases.len() {
             out = &self.cache_leases[index].keep_open_for(out)
@@ -117,11 +126,11 @@ struct ShellEnv {
         loop name in self.unset_vars -> out = out.env_remove(name)
         out = out.env(JETPACK_ENV_MARKER, "1").env(JETPACK_REF_VAR, self.refs.join(" "))
         if self.vars.get("JET_ROOT") == .Val(root) -> out = out.env(ENV_HOOK_ACTIVE_DIR_VAR, root)
-        out
+        Ok(out)
     }
 
     // False after reporting the first lease whose verified bytes changed.
-    fn validate_cache(self, theme: Theme) -[IO, Time.Wait]> Bool Never! {
+    fn validate_cache(self, theme: Theme) -[IO, FS, Env, Rand, Time.Wait]> Bool Never! {
         loop lease in self.cache_leases {
             failure :: lease.integrity_failure() ?? next
             store_report_integrity(theme, failure)
@@ -132,43 +141,44 @@ struct ShellEnv {
 
     // Run `cmd_args` inside the composed env and return its exit code. The
     // Jetpack process stays the parent so callers can do post-command work.
-    fn run_command(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_command(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
-    // Replace the Jetpack process with a verified environment command. Only
-    // a lease-resolved executable replaces the process; Nix namespace
-    // projections and ordinary host commands keep the waiting parent.
-    fn exec_command(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    // Stand in for the Jetpack process with a verified environment command
+    // (Rust replaced the process for a lease-resolved executable). Core has
+    // no process replacement, so the command is a waited child whose status,
+    // a signal death as 128+n, becomes this process's exit code.
+    fn exec_command(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: true})
     }
 
     // Run with an explicit working directory; it belongs to the child only.
-    fn run_command_in(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_command_in(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
     // Run while keeping stdout out of a generated shell script; stderr stays
     // visible so a failed task still explains itself.
-    fn run_command_in_silent(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_command_in_silent(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: true, replace_process: false})
     }
 
     // Run with no inherited host variables: only the composed PATH, declared
     // variables, Jet markers, and declared unsets enter the child.
-    fn run_clean_command(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_clean_command(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: true, silent: false, replace_process: false})
     }
 
-    fn run_clean_command_in(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_clean_command_in(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: false, replace_process: false})
     }
 
-    fn run_clean_command_in_silent(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_clean_command_in_silent(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: true, replace_process: false})
     }
 
-    fn run_command_in_mode(&self, cmd_args: [String], cwd: String?, options: ShellRunOptions) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn run_command_in_mode(&self, cmd_args: [String], cwd: String?, options: ShellRunOptions) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         if !self.validate_cache(Theme.resolve_choice(ColorChoice.Never)) -> return 126
         if cmd_args.len() == 0 -> return 0
         program :: cmd_args[0]
@@ -186,7 +196,6 @@ struct ShellEnv {
                 }
             }
         }
-        direct_exec :: options.replace_process && stable_program != None
         launch :: if stable_program == {
             .Val(path) -> ShellLaunch.plain(process.cmd([String]{path}).args_extend(rest))
             .None -> {
@@ -203,21 +212,24 @@ struct ShellEnv {
         defer close(^scratch)
         spec := launch.spec
         if cwd == .Val(directory) -> spec = spec.cwd(directory)
-        spec = if options.clean -> &self.apply_clean_to(spec.env_clear()) else -> &self.apply_to(spec)
+        spec = if &self.apply_in_mode(spec, options.clean) == {
+            .Ok(ready) -> ready
+            .Err(error) -> {
+                Theme.resolve_choice(ColorChoice.Auto).error("could not run `{program}`", error.message(), "run the command outside the leased environment until Core can pass descriptors to a child")
+                return 126
+            }
+        }
         spec = spec.stdin(.Inherit).stderr(.Inherit)
         // Rust discards a silent child's stdout; Core has no null stream, so
         // the bytes are captured and dropped with the receipt.
         spec = if options.silent -> spec.stdout(.Capture) else -> spec.stdout(.Inherit)
         suffix :: if options.clean -> " in a clean env" else -> ""
-        if direct_exec {
-            if spec.replace_process() == {
-                .Err(error) -> Theme.resolve_choice(ColorChoice.Auto).error("could not run `{program}`{suffix}", "{error}", "check that the command exists in this environment and can start")
-                else -> {}
-            }
-            return EXIT_USER_ERROR
-        }
+        // Core has no process replacement (`exec`), so even a lease-resolved
+        // `exec_command` runs as a waited child: it gets a new pid, and a
+        // signal sent to this process is not delivered to it. Its status is
+        // forwarded exactly, a signal death as 128+n like a shell reports.
         if spec.run() == {
-            .Ok(receipt) -> env_shell_exit_code(receipt, 1)
+            .Ok(receipt) -> if options.replace_process -> env_shell_exit_code(receipt, 128 + (receipt.signal ?? 0)) else -> env_shell_exit_code(receipt, 1)
             .Err(error) -> {
                 Theme.resolve_choice(ColorChoice.Auto).error("could not run `{program}`{suffix}", "{error}", "check that the command exists in this environment and can start")
                 EXIT_USER_ERROR
@@ -226,18 +238,18 @@ struct ShellEnv {
     }
 
     // Enter an interactive temporary shell. Returns the child's exit code.
-    fn enter(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn enter(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.enter_with_mode(theme, kind, false)
     }
 
     // Enter an interactive temporary shell with only the composed
     // environment: the explicit `--pure` foreign-environment path. Ordinary
     // Jetpack shells keep the host variables users expect.
-    fn enter_clean(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn enter_clean(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         &self.enter_with_mode(theme, kind, true)
     }
 
-    fn enter_with_mode(&self, theme: Theme, kind: ShellKind, clean: Bool) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    fn enter_with_mode(&self, theme: Theme, kind: ShellKind, clean: Bool) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         if !self.validate_cache(theme) -> return 126
         // The threshold rule, the signature moment of `jet env`: one quiet
         // line in and one mirrored line out, so the temporary shell reads as
@@ -257,7 +269,14 @@ struct ShellEnv {
         }
         scratch := launch.scratch
         spec := launch.spec
-        spec = if clean -> &self.apply_clean_to(spec.env_clear()) else -> &self.apply_to(spec)
+        spec = if &self.apply_in_mode(spec, clean) == {
+            .Ok(ready) -> ready
+            .Err(error) -> {
+                theme.error("could not start `{kind.binary()}`", error.message(), "enter the shell without leased packages until Core can pass descriptors to a child")
+                close(^scratch)
+                return 126
+            }
+        }
         // Keep the user-controlled label out of shell source: the generated
         // prompt reads this value through a fixed, quoted print.
         spec = spec.env(ENV_SHELL_PROMPT_LABEL_ENV, self.label)

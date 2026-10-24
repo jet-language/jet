@@ -26,6 +26,18 @@ fn pkg_json_array(value: Dyn) -> [Dyn]? Never! {
     }
 }
 
+// serde_json object equality: the same names, each value structurally equal
+// with nested object entries in any order.
+fn pkg_json_objects_equal(left: [String: Dyn], right: [String: Dyn]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop key in left.keys() {
+        mine :: left.get(key) ?? return false
+        theirs :: right.get(key) ?? return false
+        if !mine.equal_unordered(theirs) -> return false
+    }
+    true
+}
+
 fn pkg_json_text(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)

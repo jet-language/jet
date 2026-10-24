@@ -115,7 +115,7 @@ fn provider_adapter_cache_expectation(plan: AdapterPlan, table: SourceTable, ctx
     source_ref :: ProviderRef.classify(plan.source) ?? return Err(ProviderError.Adapter("adapter source `{plan.source}` is not a provider ref"))
     staged :: provider_stage_adapter_source(source_ref, ctx)
     recipe :: provider_adapter_recipe_to_build(plan.recipe)
-    source_hash :: provider_tree_fingerprint(staged) ?? return Err(ProviderError.Adapter(err.message()))
+    source_hash :: provider_tree_fingerprint(staged) ?? return Err(ProviderError.Adapter(err.message))
     source_fingerprint :: pkg_try_output_hash_of(staged) ?? return Err(ProviderError.Adapter(err.message()))
     identity_source :: if plan.recipe == {
         .Build(_) -> source_fingerprint

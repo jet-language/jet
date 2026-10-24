@@ -258,7 +258,7 @@ fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: Strin
     services_down_one(host, project_dir, plan)
     samples := [Int]{}
     loop trial in 0..<trials {
-        started :: time.instant().unix_ns
+        started :: time.instant()
         if services_up_one(host, project_dir, env, plan) == .Err(error) {
             return Err(ServicesError.new("ServiceProbe trial {trial}: failed to start: {error.message}"))
         }
@@ -266,7 +266,7 @@ fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: Strin
             services_down_one(host, project_dir, plan)
             return Err(ServicesError.new("ServiceProbe trial {trial}: service did not become ready within {time.duration_as_seconds(timeout)}s"))
         }
-        &samples.push(time.instant().unix_ns - started)
+        &samples.push(started.elapsed().ns)
         services_down_one(host, project_dir, plan)
     }
     Ok(samples)

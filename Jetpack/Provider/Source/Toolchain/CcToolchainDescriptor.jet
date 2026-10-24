@@ -213,31 +213,6 @@ struct CcToolchainDescriptor {
         provider_plain_cache_identity(self.source_fingerprint(), CC_TOOLCHAIN_RECIPE_ID, ctx)
     }
 
-    // The declared-only toolchain spec the build executor consumes: every tool
-    // is a virtual path under read-only mounts of the verified Hangar objects.
-    fn toolchain_spec(self) -> ToolchainSpec Never! {
-        provenance :: BuildProvenance.jetpack_dependency("{CC_TOOLCHAIN_PACKAGE}@{CC_TOOLCHAIN_SOURCE}", LockRecord.new("hangar", self.bundle_sha256))
-        spec := ToolchainSpec.target(self.target, provenance)
-        spec = spec.with_host_triple(self.host)
-        spec = spec.with_sdk(SDKIdentity.new("jet-cc", self.version, provenance))
-        spec = spec.with_linker(LinkerIdentity.new("{self.linker}@{self.linker_sha256}", provenance))
-        spec = spec.with_sysroot(SysrootIdentity.new(self.sysroot, self.sysroot_sha256, provenance))
-        spec = spec.with_tool("cc", self.compiler_virtual_path())
-        spec = spec.with_tool("c++", self.cxx_virtual_path())
-        spec = spec.with_tool("ld", self.linker_virtual_path())
-        spec = spec.declared_only()
-        if self.is_nix_layout() {
-            loop mount in self.mounts {
-                spec = spec.with_read_only_mount_identity(mount.source, mount.destination, mount.digest)
-            }
-            spec = spec.with_read_only_mount_identity(self.compiler_root, self.role_virtual_root(CcToolchainRole.Compiler), self.bundle_sha256)
-            spec = spec.with_read_only_mount_identity(self.linker_root, self.role_virtual_root(CcToolchainRole.Linker), self.linker_root_digest())
-            spec = spec.with_read_only_mount_identity(self.sysroot_root, self.role_virtual_root(CcToolchainRole.Sysroot), self.sysroot_sha256)
-            return spec
-        }
-        spec.with_read_only_mount_identity(self.root, self.virtual_root(), self.bundle_sha256)
-    }
-
     fn is_nix_layout(self) -> Bool Never! {
         self.layout == CcToolchainLayout.NixIndexHangar
     }
@@ -544,7 +519,7 @@ fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
     layout :: producer.facts.get("cc.layout") ?? ""
     if producer.provider == CC_TOOLCHAIN_PRODUCER -> return layout == CC_TOOLCHAIN_FIXTURE_LAYOUT
     if producer.provider == CC_TOOLCHAIN_NIX_PRODUCER {
-        return layout == CC_TOOLCHAIN_NIX_LAYOUT && producer.facts.get("cc.producer") == .Val(producer_name) && producer_name == CC_TOOLCHAIN_PRODUCER
+        return layout == CC_TOOLCHAIN_NIX_LAYOUT && (producer.facts.get("cc.producer") ?? "") == CC_TOOLCHAIN_PRODUCER
     }
     false
 }

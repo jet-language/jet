@@ -494,11 +494,10 @@ fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoots) 
     hangar :: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     stamp :: files.join(hangar, STORE_AUTO_CLEAN_STAMP)
-    now :: time.instant()
     if sys.get("JETPACK_AUTO_CLEAN_ALWAYS") == None {
         if files.stat(stamp) == {
             .Ok(metadata) -> {
-                if now.unix_ns - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
+                if time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
             }
             .Err(_) -> {}
         }

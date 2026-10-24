@@ -275,12 +275,12 @@ fn cli_resolve_channel_with_git(source: ChannelSource) -[Env, Exec, Time.Wait]> 
         }
         .Latest -> {
             tags :: cli_git_ls_remote(url, "refs/tags/*")
-            release_tag :: cli_newest_tag(tags.lines().to_list(), None) ?? return Err(ProviderError.Channel("no release tags found for `{source.base}`"))
+            release_tag :: cli_newest_tag(tags.lines(), None) ?? return Err(ProviderError.Channel("no release tags found for `{source.base}`"))
             Ok("{source.base}#{release_tag}")
         }
         .SemverMask(mask) -> {
             tags :: cli_git_ls_remote(url, "refs/tags/*")
-            release_tag :: cli_newest_tag(tags.lines().to_list(), Val(mask)) ?? return Err(ProviderError.Channel("no tags match `{mask}` for `{source.base}`"))
+            release_tag :: cli_newest_tag(tags.lines(), Val(mask)) ?? return Err(ProviderError.Channel("no tags match `{mask}` for `{source.base}`"))
             Ok("{source.base}#{release_tag}")
         }
     }
@@ -299,7 +299,7 @@ fn cli_git_ls_remote(url: String, pattern: String) -[Env, Exec, Time.Wait]> Stri
     spec :: provider_hardened_git_command().args_extend([String]{"ls-remote", "--refs", "--", url, pattern})
     receipt :: spec.run() ?? return Err(ProviderError.Channel("could not run `git ls-remote`: {err}"))
     if !receipt.success {
-        lines :: receipt.errors.trim().lines().to_list()
+        lines :: receipt.errors.trim().lines()
         reason :: if lines.len() == 0 -> "git ls-remote failed" else -> lines[lines.len() - 1]
         return Err(ProviderError.Channel(reason))
     }

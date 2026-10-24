@@ -36,7 +36,10 @@ struct CoreProvider {
         source_name :: spec.source.label()
         upstream :: table.upstream(source_name) ?? return Err(ProviderError.CoreBuild("source `{source_name}` has no upstream"))
         repo :: provider_source_repo(upstream, spec.package, ctx)
-        canonical_package :: provider_find_canonical_package(repo, spec.package) ?? return Err(ProviderError.CoreBuild(err.message))
+        canonical_package :: if provider_find_canonical_package(repo, spec.package) == {
+            .Ok(found) -> found
+            .Err(error) -> { return Err(ProviderError.CoreBuild(error.message)) }
+        }
         src_dir := ""
         canonical := PackageFacts?{None}
         canonical_kind := PackageKind?{None}
@@ -155,8 +158,10 @@ fn provider_core_discovery_error(repo: String, error: DiscoveryError) -> Provide
 // The legacy repo manifest (`pkg.jet` `packages:` index), if present and
 // valid.
 fn provider_core_legacy_manifest(repo: String) -[FS, Env]> PackageFacts? ProviderError! {
-    loaded :: PackageFacts.load(repo) ?? return Err(ProviderError.CoreBuild("package manifest {pkg_manifest_path_in(repo)} is invalid: {err.message()}"))
-    Ok(loaded)
+    if PackageFacts.load(repo) == {
+        .Ok(loaded) -> Ok(loaded)
+        .Err(error) -> Err(ProviderError.CoreBuild("package manifest {pkg_manifest_path_in(repo)} is invalid: {error.message()}"))
+    }
 }
 
 fn provider_manifest_kind(manifest: PackageFacts?, package: String) -> PackageKind? Never! {
@@ -207,7 +212,7 @@ fn provider_core_resolve_source(spec: RefSpec, table: SourceTable, ctx: Provider
         .Val(package) -> provider_canonical_source_dir(package.root, package.facts)
         .None -> None
     }
-    src_dir :: canonical_dir ?? (pkg_discover_module_in(repo, spec.package) ?? return Err(ProviderReason{message: "could not identify Core source: {err.message()}"}))
+    src_dir :: canonical_dir ?? (pkg_discover_module_in(repo, spec.package) ?? return Err(ProviderReason{message: "could not identify Core source: {err}"}))
     provider_validate_core_source_tree(src_dir)
     canonical :: if found == {
         .Val(package) -> Val(package.facts)
@@ -268,7 +273,7 @@ struct CargoBuildScratch {
             .Err(_) -> {}
         }
         files.create_dir(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
-        started :: time.instant().unix_ns /% 1000000000
+        started :: time.unix_ns() /% 1000000000
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
         Ok(CargoBuildScratch{path})
     }
@@ -307,8 +312,10 @@ impl CargoBuildError -> ProviderError {
 
 // The legacy repo manifest facts for a cache or approval identity.
 fn provider_core_manifest_facts(repo: String) -[FS, Env]> PackageFacts? ProviderReason! {
-    loaded :: PackageFacts.load(repo) ?? return Err(ProviderReason{message: "Core package manifest is invalid: {err.message()}"})
-    Ok(loaded)
+    if PackageFacts.load(repo) == {
+        .Ok(loaded) -> Ok(loaded)
+        .Err(error) -> Err(ProviderReason{message: "Core package manifest is invalid: {error.message()}"})
+    }
 }
 
 // Compile a library package's `Cargo.toml` to an rlib placed inside

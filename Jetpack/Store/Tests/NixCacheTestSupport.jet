@@ -28,7 +28,7 @@ fn store_nix_test_seed(byte: Int) -> [U8] Never! {
 
 // `<key_id>:<base64 public key>\n`, the trust-key file for `seed`.
 fn store_nix_test_public_key_line(key_id: String, seed: [U8]) -> String Never! {
-    public :: crypto.expert.ed25519_public(seed) ?? panic("test public key")
+    public :: crypto.SigningKey{bytes: seed}.public_key().bytes
     "{key_id}:{base64.encode(public)}\n"
 }
 
@@ -78,16 +78,18 @@ struct NixTestCacheServer {
     endpoint: String
     priv site: String
     priv server: HTTPServer
-    priv serving: Task
+    priv serving: Task<Unit>
 
     fn start(site: String, routes: [String: [U8]]) -> NixTestCacheServer Never! {
         store_nix_test_write_site(site, routes)
         mux :: http_server.mux()
-        http_server.static_files(mux, "/", site)
+        mux.get("/*path", (path: String) -> store_nix_test_site_response(site, path))
         server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind test cache")
         address :: server.local_addr() ?? panic("test cache address")
-        serving :: task { server.serve() ?? panic("serve test cache") }
-        time.sleep(time.duration_millis(20))
+        serving :: task {
+            _ :: server.serve() ?? panic("serve test cache")
+        }
+        time.sleep(time.duration_ms(20))
         NixTestCacheServer{endpoint: "http://{address}", site, server, serving}
     }
 
@@ -97,9 +99,16 @@ struct NixTestCacheServer {
     }
 
     fn stop(^self) Never! {
-        _ :: self.server.shutdown(time.duration_millis(100)) ?? panic("stop test cache")
-        self.serving.join() ?? panic("test cache task")
+        _ :: self.server.shutdown(time.duration_ms(100)) ?? panic("stop test cache")
+        ^self.serving.join() ?? panic("test cache task")
     }
+}
+
+// One site file, or 404 when the current routes do not hold it.
+fn store_nix_test_site_response(site: String, relative: String) -[FS, Net]> HTTPResponse HTTPError! {
+    path :: files.join(site, relative)
+    if !files.is_file(path) -> return Ok(http_server.response(404, "not found"))
+    http_server.static_file(path, "application/octet-stream")
 }
 
 fn store_nix_test_write_site(site: String, routes: [String: [U8]]) Never! {

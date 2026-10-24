@@ -127,3 +127,131 @@ authority: {
     assert_eq(edges.facts.get("dependency.object.sha256-abcd"), Val("sources/dep.tar.gz"))
     assert_eq(edges.facts.len(), 1)
 }
+
+fn provider_registry_test_octal(header: &[U8], at: Int, width: Int, value: Int) Never! {
+    remaining := value
+    loop index in 0..<(width - 1) {
+        header[at + width - 2 - index] = U8{48 + remaining %% 8}
+        remaining = remaining /% 8
+    }
+}
+
+// One ustar member: a checksummed header named `name`, then `body` padded to
+// the block size.
+fn provider_registry_test_member(name: String, kind: Int, body: [U8]) -> [U8] Never! {
+    header := [U8]{}
+    loop _ in 0..<512 -> &header.push(U8{0})
+    raw :: name.bytes()
+    loop index in 0..<raw.len() -> header[index] = raw[index]
+    provider_registry_test_octal(&header, 100, 8, 420)
+    provider_registry_test_octal(&header, 124, 12, body.len())
+    header[156] = U8{kind}
+    magic :: "ustar".bytes()
+    loop index in 0..<magic.len() -> header[257 + index] = magic[index]
+    header[263] = U8{48}
+    header[264] = U8{48}
+    loop index in 148..<156 -> header[index] = U8{32}
+    sum := 0
+    loop byte in header -> sum += Int.from_u8(byte)
+    provider_registry_test_octal(&header, 148, 7, sum)
+    header[154] = U8{0}
+    member := header
+    loop byte in body -> &member.push(byte)
+    loop _ in 0..<((512 - body.len() %% 512) %% 512) -> &member.push(U8{0})
+    member
+}
+
+fn provider_registry_test_tar(members: [[U8]]) -> [U8] Never! {
+    archive := [U8]{}
+    loop member in members {
+        loop byte in member -> &archive.push(byte)
+    }
+    loop _ in 0..<1024 -> &archive.push(U8{0})
+    archive
+}
+
+// Validation refuses `archive` with a reason containing `expected`, and
+// extraction refuses it too without writing outside the unpack root.
+fn provider_registry_test_refuses(archive: [U8], expected: String) Never! -[FS]> {
+    dir :: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
+    path :: files.join(dir, "source.tar")
+    files.write_bytes(path, archive) ?? panic("write the archive")
+    if provider_registry_validate_tar_archive(path, false) == {
+        .Ok(_) -> panic("a hostile archive must be refused: {expected}")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains(expected), "unexpected refusal for {expected}: {message}")
+        }
+    }
+    unpack :: files.join(files.join(dir, "deep"), "unpack")
+    files.create_dir_all(unpack) ?? panic("create the unpack directory")
+    if provider_registry_extract_tar(path, false, unpack) == {
+        .Ok(_) -> panic("extraction must refuse a hostile archive: {expected}")
+        .Err(_) -> {}
+    }
+    assert(!files.lexists(files.join(dir, "escape")), "nothing escaped the unpack root")
+    assert(!files.lexists(files.join(files.join(dir, "deep"), "escape")), "nothing escaped the unpack root")
+    files.remove_all(dir) ?? panic("scratch cleanup")
+}
+
+#Test("registry tar reader refuses escaping, absolute, linked, and corrupt members") {
+    unsafe_path :: "unsafe path"
+    links :: "only regular files and directories"
+    body :: "owned\n".bytes()
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("../escape", 48, body)}), unsafe_path)
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/../../escape", 48, body)}), unsafe_path)
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("/tmp/jet-registry-escape", 48, body)}), unsafe_path)
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
+        provider_registry_test_member("pkg/", 53, [U8]{}),
+        provider_registry_test_member("pkg/link", 50, [U8]{}),
+    }), links)
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/hard", 49, [U8]{})}), links)
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/fifo", 54, [U8]{})}), links)
+    // A PAX `path` record and a GNU long name both rename the next member.
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
+        provider_registry_test_member("PaxHeaders/ok", 120, "18 path=../escape\n".bytes()),
+        provider_registry_test_member("pkg/ok", 48, body),
+    }), unsafe_path)
+    long_name := "../escape".bytes()
+    &long_name.push(U8{0})
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
+        provider_registry_test_member("././@LongLink", 76, long_name),
+        provider_registry_test_member("pkg/ok", 48, body),
+    }), unsafe_path)
+    // A PAX record whose length does not cover it exactly.
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
+        provider_registry_test_member("PaxHeaders/ok", 120, "99 path=pkg/ok\n".bytes()),
+        provider_registry_test_member("pkg/ok", 48, body),
+    }), "PAX metadata is malformed")
+    corrupt := provider_registry_test_member("pkg/ok", 48, body)
+    corrupt[0] = U8{113}
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{corrupt}), "not a readable tar archive")
+    // A header that claims more payload than the stream holds.
+    short :: provider_registry_test_member("pkg/ok", 48, body)
+    truncated := provider_registry_test_member("pkg/big", 48, [U8]{})
+    provider_registry_test_octal(&truncated, 124, 12, 4096)
+    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{short, truncated}), "truncated tar payload")
+}
+
+#Test("registry tar reader extracts a gzip archive of files and directories") {
+    dir :: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
+    archive :: provider_registry_test_tar([[U8]]{
+        provider_registry_test_member("pkg/", 53, [U8]{}),
+        provider_registry_test_member("pkg/a.txt", 48, "hello\n".bytes()),
+        provider_registry_test_member("PaxHeaders/long", 120, "25 path=pkg/sub/long.txt\n".bytes()),
+        provider_registry_test_member("pkg/short", 48, "long\n".bytes()),
+    })
+    path :: files.join(dir, "source.tar.gz")
+    files.write_bytes(path, gzip.compress(archive) ?? panic("gzip the archive")) ?? panic("write the archive")
+    provider_registry_validate_tar_archive(path, true) ?? panic("a plain source archive is admitted")
+    listing :: provider_registry_tar_listing(path, true) ?? panic("list the archive")
+    assert_eq(listing.len(), 3)
+    assert_eq(listing[2].name, "pkg/sub/long.txt")
+    unpack :: files.join(dir, "unpack")
+    files.create_dir_all(unpack) ?? panic("create the unpack directory")
+    provider_registry_extract_tar(path, true, unpack) ?? panic("extract the archive")
+    assert_eq(files.read(files.join(unpack, "pkg/a.txt")) ?? panic("read a.txt"), "hello\n")
+    assert_eq(files.read(files.join(unpack, "pkg/sub/long.txt")) ?? panic("read the PAX-named file"), "long\n")
+    assert(!files.lexists(files.join(unpack, "pkg/short")), "the PAX path replaces the header name")
+    files.remove_all(dir) ?? panic("scratch cleanup")
+}

@@ -5,7 +5,7 @@
 
 // The native provider's cache expectation for a toolchain ref: the verified
 // Hangar descriptor's identity, or None when there is none yet.
-fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Time]> CacheExpectation? Never! {
     target :: provider_cc_toolchain_requested_target(spec) ?? return None
     descriptor :: provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) ?? return None
     Val(CacheExpectation{identity: descriptor.cache_identity(ctx), owned_output: Val(descriptor.root), allow_unsigned_local: true})
@@ -31,12 +31,14 @@ fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, specs:
         }
         if ctx.fixtures == {
             .Val(fixtures) -> {
-                manifest :: provider_cc_fixture_manifest(fixtures, target) ?? {
-                    return Err(ProviderError.Unsupported(err.message()))
-                }
-                if manifest != None {
-                    &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
-                    next
+                if provider_cc_fixture_manifest(fixtures, target) == {
+                    .Ok(manifest) -> {
+                        if manifest != None {
+                            &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+                            next
+                        }
+                    }
+                    .Err(error) -> { return Err(ProviderError.Unsupported(error.message())) }
                 }
             }
             .None -> {}
@@ -76,12 +78,14 @@ fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec
     }
     if ctx.fixtures == {
         .Val(fixtures) -> {
-            found :: provider_cc_fixture_manifest(fixtures, target) ?? {
-                return Err(ProviderError.Unsupported(err.message()))
-            }
-            if found == {
-                .Val(manifest) -> return provider_cc_provision_fixture(spec, ctx, manifest)
-                .None -> {}
+            if provider_cc_fixture_manifest(fixtures, target) == {
+                .Ok(found) -> {
+                    if found == {
+                        .Val(manifest) -> return provider_cc_provision_fixture(spec, ctx, manifest)
+                        .None -> {}
+                    }
+                }
+                .Err(error) -> { return Err(ProviderError.Unsupported(error.message())) }
             }
         }
         .None -> {}

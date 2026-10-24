@@ -111,11 +111,11 @@ fn store_verify_cache_entry_with_graph(verification: &StoreVerification, roots: 
         .None -> false
     }
     closure :: output_exists && policy && store_closure_is_reachable(roots, entry) && objects_rehash
-    verification :: CacheVerification{output_exists, output_digest, source, recipe, platform, policy, signature_verified, unsigned_local_allowed, closure}
-    if !verification.trusted() && sys.get("JETPACK_VERIFY_TRACE") != None {
-        term.eprint("VERIFY-TRACE ref={entry.reference} id={entry.id} legs={verification.debug()} hash_probe={store_reuse_hash_probe(&verification, roots, entry)}")
+    outcome :: CacheVerification{output_exists, output_digest, source, recipe, platform, policy, signature_verified, unsigned_local_allowed, closure}
+    if !outcome.trusted() && sys.get("JETPACK_VERIFY_TRACE") != None {
+        term.eprint("VERIFY-TRACE ref={entry.reference} id={entry.id} legs={outcome.debug()} hash_probe={store_reuse_hash_probe(&verification, roots, entry)}")
     }
-    verification
+    outcome
 }
 
 fn store_reuse_output_hash_matches(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
@@ -194,8 +194,10 @@ fn store_reuse_producer_authority_verified(roots: HangarRoots, entry: StoreEntry
 // remote bytes become usable unless `.jet/lock` proves that rung.
 fn store_enforce_manifest_provenance_floor(project: String?, package: String) RealizeError! {
     root :: project ?? return
-    found :: PackageFacts.load(root) ?? return Err(RealizeError.Store(StoreError.Other("package trust manifest could not be loaded: {err.message()}")))
-    manifest :: found ?? return
+    manifest :: if PackageFacts.load(root) == {
+        .Ok(found) -> found ?? return
+        .Err(error) -> { return Err(RealizeError.Store(StoreError.Other("package trust manifest could not be loaded: {error.message()}"))) }
+    }
     trust :: manifest.authority.trust ?? return
     requirement :: trust.require ?? return
     lock :: pkg_lock_load(root) ?? return Err(RealizeError.Integrity(store_reuse_provenance_failure(package, requirement, "{pkg_lock_path(root)} is missing")))
@@ -264,7 +266,8 @@ fn store_reuse_verified_user_profile_batch(verification: &StoreVerification, roo
         if candidate_refs.has_key(reference) -> any_candidate = true
     }
     if !any_candidate -> return None
-    store_reuse_user_profile_batch_locked(&verification, roots, references, local_nix_catalog) ?? None
+    batch :: store_reuse_user_profile_batch_locked(&verification, roots, references, local_nix_catalog) ?? return None
+    batch
 }
 
 fn store_reuse_user_profile_batch_locked(verification: &StoreVerification, roots: HangarRoots, references: [String], local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {

@@ -36,8 +36,8 @@ fn store_reuse_direct_cas_entry(verification: &StoreVerification, roots: HangarR
     seal_info :: files.stat(store_reuse_seal_path(roots, digest)) ?? return false
     if !object_info.is_dir || object_info.is_symlink || !seal_info.is_file -> return false
     if (object_info.mode).bit_and(0o222) != 0 -> return false
-    sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? None
-    sealed == Val((digest))
+    sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? return false
+    sealed == digest
 }
 
 // Rust `snapshot_lease_unlocked`: the caller holds the Hangar lock.
@@ -71,8 +71,7 @@ fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: Hangar
     }
     lease_snapshot_root :: files.join(lease_root, "snapshot")
     snapshot_root :: if direct_cas -> entry.out else -> lease_snapshot_root
-    built :: store_reuse_build_lease(&verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, ^live_lock, snapshot_root, lease_snapshot_root)
-    if built == {
+    if store_reuse_build_lease(&verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, ^live_lock, snapshot_root, lease_snapshot_root) == {
         .Ok(lease) -> Ok(lease)
         .Err(error) -> {
             // The live lock already dropped with the failed build.
@@ -321,7 +320,11 @@ fn store_reuse_executable_lease_members(executables: [SnapshotFile]) -> [LeaseMe
         input := executable.file ?? return Err(StoreError.Other("lease executable `{executable.relative}` lost its handle"))
         &input.seek(0)
         hasher := StreamingSHA256.new()
-        loop chunk in input.chunks(65536) -> &hasher.update(chunk)
+        loop {
+            chunk :: input.read(65536)
+            if chunk.len() == 0 -> break
+            &hasher.update(chunk)
+        }
         &members.push(LeaseMember{name: executable.relative, digest: "sha256-{hasher.finalize_hex()}"})
     }
     Ok(members)
@@ -358,7 +361,7 @@ fn store_reuse_create_exec_wrappers(snapshot_root: String, executables: [Snapsho
     if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(^child, "creating private executable mount"))
     root :: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink("/proc/self/fd/{executable.slot}", files.join(root, executable.relative))
-    &child.stdin.write_text("seal\n")
+    child.stdin.write("seal\n")
     sealed :: store_reuse_keeper_line(&child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
     directory :: store_reuse_hold_directory(root)

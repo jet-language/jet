@@ -7,7 +7,7 @@
 
 // Materialize the bundled battery `slug` under
 // `<store parent>/sources/batteries/<slug>-<key>` and return that directory.
-fn env_battery_materialize_package(store_dir: String, slug: String) -[FS, Rand]> String ProviderReason! {
+fn env_battery_materialize_package(store_dir: String, slug: String) -[FS, Env, Rand]> String ProviderReason! {
     package := BatteryPackage?{None}
     loop candidate in env_battery_packages() {
         if package == None && candidate.slug == slug -> package = Val(candidate)
@@ -86,7 +86,7 @@ fn env_battery_ensure_real_directory(path: String) ProviderReason! -[FS]> {
     if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "embedded battery cache path is not a real directory: {path}"})
 }
 
-fn env_battery_write_package_tree(root: String, package: BatteryPackage) ProviderReason! -[FS]> {
+fn env_battery_write_package_tree(root: String, package: BatteryPackage) ProviderReason! -[FS, Env]> {
     loop file in package.files {
         relative :: env_battery_safe_relative_path(file.path)
         destination :: files.join(root, relative)
@@ -102,13 +102,13 @@ fn env_battery_write_package_tree(root: String, package: BatteryPackage) Provide
 
 // The cache tree holds exactly the bundled files with their bytes and modes,
 // and nothing else.
-fn env_battery_verify_package_tree(root: String, package: BatteryPackage) ProviderReason! -[FS]> {
+fn env_battery_verify_package_tree(root: String, package: BatteryPackage) ProviderReason! -[FS, Env]> {
     seen := [String]{}
     env_battery_verify_directory(root, "", package, &seen)
     if seen.len() != package.files.len() -> return Err(ProviderReason{message: "embedded battery cache is missing files for `{package.slug}`"})
 }
 
-fn env_battery_verify_directory(directory: String, relative: String, package: BatteryPackage, seen: &[String]) ProviderReason! -[FS]> {
+fn env_battery_verify_directory(directory: String, relative: String, package: BatteryPackage, seen: &[String]) ProviderReason! -[FS, Env]> {
     entries :: files.list_dir(directory) ?? return Err(ProviderReason{message: "could not read embedded battery cache {directory}: {err}"})
     loop entry in entries {
         info :: files.stat(entry.path) ?? return Err(ProviderReason{message: "could not inspect embedded battery cache entry {entry.path}: {err}"})

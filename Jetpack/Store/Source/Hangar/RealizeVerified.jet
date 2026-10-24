@@ -39,7 +39,7 @@ enum RealizeRequest {
 // between build/promotion boundaries; a cancelled run never enters Hangar.
 struct IndependentRootOptions {
     retries: Int
-    cancelled: (fn() -> Bool)?
+    cancelled: (fn() -[FS]> Bool)?
 
     fn default() -> IndependentRootOptions Never! {
         IndependentRootOptions{retries: 1, cancelled: None}
@@ -211,7 +211,7 @@ fn store_record_realized_mode_with_fresh_agreement(verification: &StoreVerificat
 
 fn store_record_realized_mode_unlocked(verification: &StoreVerification, roots: HangarRoots, realized: Realized, fresh_action_key: String?) -> StoreEntry StoreError! {
     _ :: ProducerRecord.decode(realized.producer.encode())
-    provider_validate_nix_build_facts(realized.producer)
+    provider_validate_nix_build_facts(realized.producer) ?? return Err(StoreError.Other("{err}"))
     graph :: store_closure_graph_structure_unlocked(&verification, roots)
     store_validate_universe_references(realized.producer.provider, realized.references, graph)
     // Capture named-output identities before projection may move a local
@@ -228,15 +228,13 @@ fn store_record_realized_mode_unlocked(verification: &StoreVerification, roots: 
     }
     _ :: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(&verification, roots)
-    staged :: store_record_realized_in_transaction(roots, realized, graph, named_outputs, &transaction)
-    if staged == {
+    entry :: if store_record_realized_in_transaction(roots, realized, graph, named_outputs, &transaction) == {
+        .Ok(staged) -> staged
         .Err(error) -> {
             &transaction.rollback()
             return Err(error)
         }
-        else -> {}
     }
-    entry :: staged ?? StoreEntry.empty()
     registration_mode :: if realized.producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
     batch := [StoreEntry]{entry}
     _ :: &transaction.commit(&batch, [AdmissionReceipt]{}, None, registration_mode, fresh_action_key)
@@ -270,7 +268,7 @@ fn store_record_realized_in_transaction(roots: HangarRoots, realized: Realized, 
     cache_identity := realized.cache_identity
     if producer.provider == "nix" {
         cache_key :: producer.facts.get("nix.cache.key")
-        if cache_key != None -> cache_identity.policy_fingerprint = cache_key ?? ""
+        if cache_key == .Val(key) -> cache_identity.policy_fingerprint = key
     }
     &producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, cache_identity, realized.references)
     provider_refresh_provider_facts(&producer, realized.reference) ?? return Err(StoreError.Other("{err}"))
@@ -336,10 +334,12 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
     }
 
     candidate :: store_find_by_reference(&verification, roots, reference)
-    if candidate != None && expectation != None {
-        found :: candidate ?? StoreEntry.empty()
-        wanted :: expectation ?? CacheExpectation{identity: CacheIdentity.empty(), owned_output: None, allow_unsigned_local: false}
-        hit :: store_find_verified_by_reference(&verification, roots, reference, wanted) ?? return Err(RealizeError.Store(err))
+    if candidate == .Val(found) {
+    if expectation == .Val(wanted) {
+        hit :: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(RealizeError.Store(error)) }
+        }
         if hit == {
             .Val(verified) -> {
                 store_validate_adapter_request_hook(request, verified.entry, wanted)
@@ -351,7 +351,10 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
                 if cache_bindings.len() > 0 {
                     substituted :: store_try_substitute_invalid_candidate(&verification, roots, found, wanted, cache_bindings) ?? return Err(RealizeError.Store(err))
                     if substituted {
-                        again :: store_find_verified_by_reference(&verification, roots, reference, wanted) ?? return Err(RealizeError.Store(err))
+                        again :: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
+                            .Ok(value) -> value
+                            .Err(error) -> { return Err(RealizeError.Store(error)) }
+                        }
                         if again == {
                             .Val(verified) -> {
                                 store_validate_adapter_request_hook(request, verified.entry, wanted)
@@ -381,12 +384,19 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
             }
         }
     }
+    }
 
     if expectation == {
         .Val(wanted) -> {
-            shared :: store_reuse_shared_entry(&verification, roots, reference, wanted) ?? return Err(RealizeError.Store(err))
+            shared :: if store_reuse_shared_entry(&verification, roots, reference, wanted) == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(RealizeError.Store(error)) }
+            }
             if shared != None {
-                hit :: store_find_verified_by_reference(&verification, roots, reference, wanted) ?? return Err(RealizeError.Store(err))
+                hit :: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
+                    .Ok(value) -> value
+                    .Err(error) -> { return Err(RealizeError.Store(error)) }
+                }
                 if hit == {
                     .Val(verified) -> {
                         store_validate_adapter_request_hook(request, verified.entry, wanted)
@@ -414,14 +424,14 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
     store_require_catalog_permission(realized.producer.facts.get("nix.index.tier"), ctx.allow_local_nix_catalog) ?? return Err(RealizeError.LockedNix(err))
     store_progress_phase(ctx, "Registering")
     recorded :: if prepared.action_key == {
-        .Val(action_key) -> store_record_realized_mode_with_fresh_agreement(&verification, roots, action_key, realized)
-        .None -> store_record_realized_mode(&verification, roots, realized)
+        .Val(action_key) -> store_record_realized_mode_with_fresh_agreement(&verification, roots, action_key, realized) ?? return Err(RealizeError.Store(err))
+        .None -> store_record_realized_mode(&verification, roots, realized) ?? return Err(RealizeError.Store(err))
     }
-    entry := recorded ?? return Err(RealizeError.Store(err))
+    entry := recorded
     entry = provider_record_nix_lock_after_store(&verification, ctx, roots, entry) ?? return Err(RealizeError.Provider(err))
     store_authorize_and_project_realization(ctx, entry)
     if !store_is_private_untrusted_build(realized.producer) {
-        store_promote_shared_entry(roots, entry) ?? return Err(RealizeError.Store(err))
+        store_promote_shared_entry(&verification, roots, entry) ?? return Err(RealizeError.Store(err))
         if realized.source_state == {
             .Built | .Downloaded -> store_publish_realized_to_bound_caches(&verification, roots, entry)
             else -> {}
@@ -498,7 +508,7 @@ fn store_certify_independent_root_build(verification: &StoreVerification, roots:
     entry = provider_record_nix_lock_after_store(&verification, ctx, roots, entry) ?? return Err(RealizeError.Provider(err))
     store_authorize_and_project_realization(ctx, entry)
     if !store_is_private_untrusted_build(realized.producer) {
-        store_promote_shared_entry(roots, entry) ?? return Err(RealizeError.Store(err))
+        store_promote_shared_entry(&verification, roots, entry) ?? return Err(RealizeError.Store(err))
         store_publish_realized_to_bound_caches(&verification, roots, entry)
     }
     store_clear_reproducibility_report(roots, action_key) ?? return Err(RealizeError.Store(err))
@@ -693,9 +703,12 @@ fn store_restore_substituted_candidate(verification: &StoreVerification, roots: 
         &transaction.rollback()
         return Err(error)
     }
-    _ :: &transaction.stage_object(AdmissionObject{source: stage, digest: entry.envelope.output_hash, bytes: size, allow_semantic_xattrs: false, repair_corrupt: false}) ? value -> value ! error -> {
-        &transaction.rollback()
-        return Err(error)
+    if &transaction.stage_object(AdmissionObject{source: stage, digest: entry.envelope.output_hash, bytes: size, allow_semantic_xattrs: false, repair_corrupt: false}) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            &transaction.rollback()
+            return Err(error)
+        }
     }
     batch := [StoreEntry]{entry}
     _ :: &transaction.commit(&batch, [AdmissionReceipt]{}, Val(stage), RegistrationMode.Native, None)
@@ -737,7 +750,7 @@ fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRo
         // provider. It is not a named SourceTable entry.
         default_source :: dependency.source == "" || dependency.source == DEFAULT_SOURCE
         spec :: if {
-            default_source -> RefSpec{source: Source.Jetpack, package: dependency.name, raw: pkg_with_default_source(dependency.name)}
+            default_source -> RefSpec{source: RefSource.Jetpack, package: dependency.name, raw: pkg_with_default_source(dependency.name)}
             else -> RefSpec.classify_in(raw, table) ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{raw}` is not a resolvable package ref: {err}")))
         }
         // Native Nix admission remains in the caller's Hangar even while an
@@ -751,8 +764,10 @@ fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRo
         lease := parts.lease
         receipt :: lease.profile_install_receipt() ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` has no verified executable output: {err}")))
         loop member in receipt.executable_members {
-            found :: lease.executable_for_command(member) ?? return Err(RealizeError.Store(StoreError.IO(err)))
-            path :: found ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` lost executable `{member}` from its verified lease")))
+            path :: if lease.executable_for_command(member) == {
+                .Ok(found) -> found ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` lost executable `{member}` from its verified lease")))
+                .Err(error) -> { return Err(RealizeError.Store(StoreError.IO(error))) }
+            }
             if tools.has_key(member) -> return Err(RealizeError.Provider(ProviderError.Adapter("build dependencies provide the same executable `{member}`")))
             tools[member] = path
         }

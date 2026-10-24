@@ -264,8 +264,10 @@ fn store_canonicalize_local_output_unlocked(verification: &StoreVerification, ro
 fn store_replay_locked_nix_package(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec) -> VerifiedRealization? RealizeError! {
     project :: ctx.project_dir ?? return Ok(None)
     if !files.is_dir(project) -> return Ok(None)
-    locked :: pkg_lock_locked_nix_package_strict(project, spec.raw) ?? return Err(RealizeError.LockedNix(StoreError.Other(err.message())))
-    found :: locked ?? return Ok(None)
+    found :: if pkg_lock_locked_nix_package_strict(project, spec.raw) == {
+        .Ok(locked) -> locked ?? return Ok(None)
+        .Err(error) -> { return Err(RealizeError.LockedNix(StoreError.Other(error.message()))) }
+    }
     lock_digest :: provider_project_lock_digest(ctx.project_dir) ?? return Err(RealizeError.Provider(err))
     // A lock is editable intent, not evidence of index signing. Reuse the
     // original self-verified admission and its canonical Nix paths before
@@ -278,7 +280,7 @@ fn store_replay_locked_nix_package(verification: &StoreVerification, roots: Hang
         return Err(RealizeError.LockedNix(StoreError.Other("locked Nix signed authority is unavailable; cold bytes cannot establish index signing")))
     }
     store_require_catalog_permission(Val(found.envelope.catalog_tier), ctx.allow_local_nix_catalog) ?? return Err(RealizeError.LockedNix(err))
-    imported :: store_import_nix_cas_bundle_checked(project, roots, found.closure.project_cas_bundle, found.closure, found.envelope) ?? return Err(RealizeError.LockedNix(err))
+    imported :: store_import_nix_cas_bundle_checked(&verification, project, roots, found.closure.project_cas_bundle, found.closure, found.envelope) ?? return Err(RealizeError.LockedNix(err))
     entry :: store_record_locked_nix(&verification, roots, found.name, found.version, spec.raw, found.envelope, found.closure, imported.digests, lock_digest) ?? return Err(RealizeError.LockedNix(err))
     store_authorize_and_project_realization(ctx, entry)
     lease :: store_snapshot_lease(&verification, roots, entry) ?? return Err(RealizeError.Store(err))
@@ -306,7 +308,10 @@ fn store_replay_recorded_nix(verification: &StoreVerification, roots: HangarRoot
     if producer.provider != "nix" || candidate.name != found.name || candidate.version != found.version || candidate.reference != spec.raw || candidate.cache_identity.source_fingerprint != found.closure.output || candidate.cache_identity.policy_fingerprint != found.closure.cache_key || admitted != found.closure || admitted_envelope != found.envelope {
         return Err(store_locked_nix_error("locked Nix identity or catalog trust disagrees with recorded Hangar admission"))
     }
-    checked := store_find_verified_user_profile_by_reference(&verification, roots, spec.raw) ?? return Err(RealizeError.Store(err))
+    checked := if store_find_verified_user_profile_by_reference(&verification, roots, spec.raw) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(RealizeError.Store(error)) }
+    }
     if checked == None && !ctx.offline {
         expectation :: CacheExpectation{identity: candidate.cache_identity, owned_output: None, allow_unsigned_local: true}
         // Only closure damage is repairable here. Neither an editable lock
@@ -325,7 +330,10 @@ fn store_replay_recorded_nix(verification: &StoreVerification, roots: HangarRoot
             // The canonical admission transaction checks this original
             // receipt before publishing any repaired object or proof.
             store_admit_nix_closure_with_progress(&verification, roots, requests, false, Val(receipt), ctx.progress) ?? return Err(store_locked_nix_error(err.message()))
-            checked = store_find_verified_user_profile_by_reference(&verification, roots, spec.raw) ?? return Err(RealizeError.Store(err))
+            checked = if store_find_verified_user_profile_by_reference(&verification, roots, spec.raw) == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(RealizeError.Store(error)) }
+            }
         }
     }
     hit := checked ?? return Err(store_locked_nix_error("locked Nix Hangar admission failed integrity or complete closure verification"))
@@ -341,7 +349,10 @@ fn store_replay_recorded_nix(verification: &StoreVerification, roots: HangarRoot
 fn store_refresh_locked_entry(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, project: String, found: (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope), entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
     project_lock :: env_runtime_project_lock(project, "nix-verified-reuse")
     current :: provider_project_lock_digest(Val(project)) ?? return Err(StoreError.Other("{err}"))
-    current_package :: pkg_lock_locked_nix_package_strict(project, spec.raw) ?? return Err(StoreError.Other(err.message()))
+    current_package :: if pkg_lock_locked_nix_package_strict(project, spec.raw) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(StoreError.Other(error.message())) }
+    }
     identity_unchanged :: if current_package == {
         .Val(package) -> package.name == found.name && package.version == found.version && package.closure == found.closure && package.envelope == found.envelope
         .None -> false

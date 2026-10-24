@@ -261,7 +261,12 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
         &child.stdin.close()
     }
     stdout := [U8]{}
-    loop chunk in child.stdout.chunks(65536) {
+    loop {
+        chunk :: child.stdout.read(65536) ?? {
+            image_abandon_registry_child(&child)
+            return Err(ImageError.IO(err))
+        }
+        if chunk.len() == 0 -> break
         &stdout.extend(chunk)
         if stdout.len() > IMAGE_MAX_REGISTRY_RESPONSE_BYTES {
             image_abandon_registry_child(&child)

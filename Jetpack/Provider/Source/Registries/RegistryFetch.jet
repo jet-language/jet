@@ -2,12 +2,12 @@
 // (CRAN, LuaRocks, RubyGems, CPAN, Packagist), ported from
 // jetpack::Provider::fetch.
 //
-// Downloads go through one Core HTTP client that connects only to public
-// addresses follows at most five redirects and only to
-// the authorized hosts ignores ambient proxies, and
-// caps every body. Archives are inspected as streams:
-// raw tar headers through the preflight walker, then entry kinds, names, and
-// sizes through Core's tar reader.
+// Downloads go through one Core HTTP client that follows at most five
+// redirects and only to the authorized hosts, ignores ambient proxies, and
+// caps every body. Core's HTTP client has no destination-address policy, so
+// the Rust public-address pin is not enforced here. Core has no streaming
+// gzip or tar reader: an archive is decoded in memory, its raw headers walked
+// by the preflight, then its members read by the strict local tar reader.
 
 PROVIDER_MAX_DOWNLOAD_BYTES :: 67108864
 PROVIDER_MAX_ARCHIVE_ENTRIES :: 4096
@@ -112,7 +112,7 @@ fn provider_registry_set_mode(path: String, mode: Int, context: String) Registry
     }
 }
 
-fn provider_registry_seal(path: String, context: String) RegistryError! -[FS]> {
+fn provider_registry_seal(path: String, context: String) RegistryError! -[FS, Env]> {
     if store_seal_local_output(path) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(RegistryError.Reason("{context}: {error.message()}"))
@@ -138,7 +138,7 @@ fn provider_registry_archive_root(unpack: String) -[FS]> String RegistryError! {
 // Build scratch under `<store>/<build scratch>/<label>-<pid>-…`. The caller
 // owns cleanup: `guard := RegistryScratch{path: scratch}` then
 // `defer close(^guard)` (Rust `Scratch` drop).
-fn provider_registry_scratch(store: String, label: String, context: String) -[FS, Rand]> String RegistryError! {
+fn provider_registry_scratch(store: String, label: String, context: String) -[FS, Env, Rand]> String RegistryError! {
     parent :: files.join(store, STORE_BUILD_SCRATCH_DIR)
     provider_registry_create_dir_all(parent, context)
     if provider_exclusive_temp_dir(parent, "{label}-{process.current_pid()}-") == {
@@ -260,7 +260,8 @@ fn provider_registry_parse_u64(text: String) -> Int? Never! {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(digits) ?? None
+    parsed :: Int.parse(digits) ?? return None
+    Val(parsed)
 }
 
 fn provider_registry_is_ascii_alnum(code: Int) -> Bool Never! {
@@ -409,7 +410,7 @@ struct RegistryAuthority {
 
     // The configured `authority.providers.<provider>` entry of the project
     // package, else the provider defaults.
-    fn load(ctx: ProviderCtx, provider: String, default_registry: String, default_allow: [String]) -[FS]> RegistryAuthority RegistryError! {
+    fn load(ctx: ProviderCtx, provider: String, default_registry: String, default_allow: [String]) -[FS, Env]> RegistryAuthority RegistryError! {
         registry := default_registry
         allow := default_allow
         deny := [String]{}
@@ -472,15 +473,7 @@ struct RegistryAuthority {
     // destination.
     fn to_path(self, url: String, destination: String, scratch: String) RegistryError! -[Net, Time.Wait, FS]> {
         self.check_url(url)
-        client :: http_client.Client.new()
-            .destinations(.Public)
-            .proxy(.None)
-            .redirects(.Follow{max: PROVIDER_FETCH_MAX_REDIRECTS, to: .Hosts{entries: self.allow}})
-        request :: http_client.request("GET", url).total_timeout(60s)
-        response :: if client.send(request) == {
-            .Ok(sent) -> sent
-            .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
-        }
+        response :: self.get_checked(url)
         status :: response.status()
         if status < 200 || status >= 300 -> return Err(RegistryError.Reason("fetch `{url}` returned HTTP {status}"))
         body_path :: files.join(scratch, "fetch-{provider_registry_stable_suffix(url)}.body")
@@ -488,8 +481,7 @@ struct RegistryAuthority {
             .Ok(writer) -> writer
             .Err(error) -> { return Err(RegistryError.Reason("could not stage fetched bytes: {error}")) }
         }
-        body :: response.body(limit: PROVIDER_MAX_DOWNLOAD_BYTES)
-        if body.copy_to(^out) == {
+        if response.body().copy_to(^out, PROVIDER_MAX_DOWNLOAD_BYTES) == {
             .Ok(_) -> {}
             .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
         }
@@ -506,6 +498,38 @@ struct RegistryAuthority {
             return Err(RegistryError.Reason("authority.providers.{self.provider} does not authorize `{authority}`"))
         }
     }
+
+    // GET `url` without the client following redirects: each hop, at most
+    // PROVIDER_FETCH_MAX_REDIRECTS, is followed here only after its target
+    // passes the same allow/deny check as the first URL.
+    fn get_checked(self, url: String) -[Net, Time.Wait]> HTTPResponse RegistryError! {
+        current := url
+        hops := 0
+        loop {
+            request :: http_client.request("GET", current).total_timeout(60000).redirects(0)
+            response :: if http_client.send(request) == {
+                .Ok(sent) -> sent
+                .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
+            }
+            status :: response.status()
+            if status != 301 && status != 302 && status != 303 && status != 307 && status != 308 -> return Ok(response)
+            if hops >= PROVIDER_FETCH_MAX_REDIRECTS -> return Err(RegistryError.Reason("fetch `{url}` exceeded {PROVIDER_FETCH_MAX_REDIRECTS} redirects"))
+            location :: response.header("location") ?? return Err(RegistryError.Reason("fetch `{current}` redirected without a Location"))
+            current = provider_registry_redirect_target(current, location)
+            self.check_url(current)
+            hops += 1
+        }
+    }
+}
+
+// The absolute HTTPS URL a redirect `location` names from `current`: an
+// absolute, scheme-relative, or root-relative reference; any other relative
+// form is refused rather than resolved.
+fn provider_registry_redirect_target(current: String, location: String) -> String RegistryError! {
+    if location.starts_with("https://") -> return Ok(location)
+    if location.starts_with("//") -> return Ok("https:{location}")
+    if location.starts_with("/") -> return Ok("https://{provider_registry_authority_of(current)}{location}")
+    Err(RegistryError.Reason("redirect from `{current}` must name an absolute or root-relative HTTPS URL"))
 }
 
 // The lowercase host of an HTTPS URL, refusing credentials, non-443 ports,
@@ -601,10 +625,10 @@ fn provider_registry_ensure_download_budget(path: String) RegistryError! -[FS]> 
 // A source archive admitted for extraction: within the download budget,
 // raw headers within the entry, payload, and total budgets, and a listing of
 // only safe relative regular files and directories.
-fn provider_registry_validate_tar_archive(path: String, gzip: Bool) RegistryError! -[FS]> {
-    provider_registry_ensure_download_budget(path)
-    provider_registry_preflight_tar(path, gzip)
-    listing :: provider_registry_tar_listing(path, gzip)
+fn provider_registry_validate_tar_archive(path: String, gzipped: Bool) RegistryError! -[FS]> {
+    stream :: provider_registry_tar_stream(path, gzipped)
+    provider_registry_preflight_tar(stream, gzipped)
+    listing :: provider_registry_tar_entries(stream)
     count := 0
     loop entry in listing {
         count += 1
@@ -629,48 +653,24 @@ fn provider_registry_validate_tar_archive(path: String, gzip: Bool) RegistryErro
     }
 }
 
-// Walk the raw tar headers of the (decoded) archive stream.
-fn provider_registry_preflight_tar(path: String, gzip: Bool) RegistryError! -[FS]> {
+// The decoded tar stream of a source archive, held in memory. A gzip
+// archive decodes through `gzip.decompress`, whose output Core caps at
+// 64 MiB; the download budget bounds the input.
+fn provider_registry_tar_stream(path: String, gzipped: Bool) -[FS]> [U8] RegistryError! {
+    provider_registry_ensure_download_budget(path)
+    raw :: provider_registry_read_bytes(path, "could not open archive")
+    if !gzipped -> return Ok(raw)
+    decoded :: gzip.decompress(raw) ?? return Err(RegistryError.Reason("source is not a readable gzip tar archive"))
+    Ok(decoded)
+}
+
+// Walk the raw tar headers of the decoded archive stream. Past the end
+// marker of a gzip stream at most the pipe capacity may follow.
+fn provider_registry_preflight_tar(stream: [U8], gzipped: Bool) RegistryError! {
     preflight := RegistryTarPreflight.new()
-    if !gzip {
-        file := if files.open(path) == {
-            .Ok(reader) -> reader
-            .Err(error) -> { return Err(RegistryError.Reason("could not open archive: {error}")) }
-        }
-        loop !preflight.done {
-            chunk :: if file.read(PROVIDER_READ_CHUNK) == {
-                .Ok(bytes) -> bytes
-                .Err(error) -> { return Err(RegistryError.Reason("truncated tar header: {error}")) }
-            }
-            if chunk.len() == 0 -> break
-            &preflight.feed(chunk)
-        }
-        return preflight.finish()
-    }
-    unreadable :: "source is not a readable gzip tar archive"
-    file := files.open(path) ?? return Err(RegistryError.Reason(unreadable))
-    plain := gzip.reader(&file)
-    loop !preflight.done {
-        chunk :: if plain.read(PROVIDER_READ_CHUNK) == {
-            .Ok(bytes) -> bytes
-            .Err(_) -> {
-                preflight.finish()
-                return Err(RegistryError.Reason(unreadable))
-            }
-        }
-        if chunk.len() == 0 -> break
-        &preflight.feed(chunk)
-    }
+    &preflight.feed(stream)
     preflight.finish()
-    // The rest of the gzip stream must still decode, and past the end
-    // marker at most the pipe capacity may follow.
-    trailing := preflight.trailing
-    loop {
-        chunk :: plain.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason(unreadable))
-        if chunk.len() == 0 -> break
-        trailing += chunk.len()
-        if trailing > PROVIDER_TAR_TRAILER_BYTES -> return Err(RegistryError.Reason(unreadable))
-    }
+    if gzipped && preflight.trailing > PROVIDER_TAR_TRAILER_BYTES -> return Err(RegistryError.Reason("source is not a readable gzip tar archive"))
 }
 
 // The raw tar header walker (Rust `inspect_tar_stream`), fed decoded bytes in
@@ -804,7 +804,7 @@ fn provider_registry_pax_logical_size(text: String) -> Int? Never! {
 
 // A tar numeric field: base-256 when the high bit is set, else octal text
 // padded with NUL or space.
-fn provider_registry_tar_number(field: [U8]) -> Int RegistryError! {
+fn provider_registry_tar_number(field: View<U8>) -> Int RegistryError! {
     if field.len() > 0 && Int.from_u8(field[0]) >= 128 {
         value := Int.from_u8(field[0]) - 128
         loop index in 1..<field.len() {
@@ -818,7 +818,7 @@ fn provider_registry_tar_number(field: [U8]) -> Int RegistryError! {
     end := field.len()
     loop start < end && (Int.from_u8(field[start]) == 0 || Int.from_u8(field[start]) == 32) -> start += 1
     loop end > start && (Int.from_u8(field[end - 1]) == 0 || Int.from_u8(field[end - 1]) == 32) -> end -= 1
-    text :: String.from_bytes(field[start..<end]) ?? return Err(RegistryError.Reason("tar size is not ASCII"))
+    text :: String.from_bytes(field[start..<end].copy()) ?? return Err(RegistryError.Reason("tar size is not ASCII"))
     digits :: text.removeprefix("+")
     if text == "" -> return Ok(0)
     if digits == "" -> return Err(RegistryError.Reason("tar size is malformed"))
@@ -832,7 +832,7 @@ fn provider_registry_tar_number(field: [U8]) -> Int RegistryError! {
     Ok(value)
 }
 
-// ── Tar listing and extraction through Core's tar reader ──
+// ── Tar listing and extraction through the strict local tar reader ──
 
 enum RegistryTarKind {
     File
@@ -842,94 +842,162 @@ enum RegistryTarKind {
     Special
 }
 
-// One listed archive entry: its stored name, kind, and logical size.
+// One listed archive entry: its stored name, kind, and stored size.
 struct RegistryTarEntry {
     name: String
     kind: RegistryTarKind
     size: Int
 }
 
-fn provider_registry_tar_kind(kind: archive.TarKind) -> RegistryTarKind Never! {
-    if kind == {
-        .File -> RegistryTarKind.File
-        .Directory -> RegistryTarKind.Directory
-        .Symlink(_) -> RegistryTarKind.Symlink
-        .Hardlink(_) -> RegistryTarKind.Hardlink
+// One tar member: its listing entry, permission bits, and the offset of its
+// payload in the decoded stream.
+struct RegistryTarMember {
+    entry: RegistryTarEntry
+    mode: Int
+    start: Int
+}
+
+// The kind of a ustar type flag; an old-style regular entry whose name ends
+// in `/` is a directory.
+fn provider_registry_tar_kind(flag: Int, name: String) -> RegistryTarKind Never! {
+    if flag == {
+        0 | 48 -> if name.ends_with("/") -> RegistryTarKind.Directory else -> RegistryTarKind.File
+        53 -> RegistryTarKind.Directory
+        50 -> RegistryTarKind.Symlink
+        49 -> RegistryTarKind.Hardlink
         else -> RegistryTarKind.Special
     }
 }
 
+// Every member of a decoded tar stream (Rust `tar::Archive::entries`),
+// stopping one past the entry budget so the caller reports it. A PAX `path`
+// record or GNU long name names the next member; global PAX headers and GNU
+// long link names are metadata only. Every header checksum and payload bound
+// is checked against the stream.
+fn provider_registry_tar_members(stream: [U8]) -> [RegistryTarMember] RegistryError! {
+    unreadable :: RegistryError.Reason("source is not a readable tar archive")
+    members := [RegistryTarMember]{}
+    pending_name := String?{None}
+    at := 0
+    loop members.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
+        if at + PROVIDER_TAR_BLOCK > stream.len() -> return Err(unreadable)
+        header :: stream[at..<(at + PROVIDER_TAR_BLOCK)]
+        if provider_registry_tar_zero(header) -> break
+        if !provider_registry_tar_checksum_valid(header) -> return Err(unreadable)
+        stored :: provider_registry_tar_number(header[124..<136])
+        start :: at + PROVIDER_TAR_BLOCK
+        if stored > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES || stored > stream.len() - start -> return Err(unreadable)
+        at = start + (stored + 511) /% 512 * 512
+        flag :: Int.from_u8(header[156])
+        payload :: stream[start..<(start + stored)]
+        if flag == {
+            120 -> {
+                named :: provider_registry_pax_path(payload)
+                if named != None -> pending_name = named
+                next
+            }
+            76 -> {
+                pending_name = Val(provider_registry_tar_text(payload))
+                next
+            }
+            103 | 75 -> next
+            else -> {}
+        }
+        name :: pending_name ?? provider_registry_tar_header_name(header)
+        pending_name = None
+        if name.bytes().len() > PROVIDER_MAX_ARCHIVE_PATH_BYTES -> return Err(RegistryError.Reason("source archive path exceeds {PROVIDER_MAX_ARCHIVE_PATH_BYTES} bytes"))
+        mode :: provider_registry_tar_number(header[100..<108])
+        &members.push(RegistryTarMember{entry: RegistryTarEntry{name, kind: provider_registry_tar_kind(flag, name), size: stored}, mode, start})
+    }
+    if pending_name != None -> return Err(unreadable)
+    Ok(members)
+}
+
+fn provider_registry_tar_zero(header: [U8]) -> Bool Never! {
+    loop byte in header {
+        if Int.from_u8(byte) != 0 -> return false
+    }
+    true
+}
+
+// The ustar header checksum: the byte sum with the checksum field as spaces.
+fn provider_registry_tar_checksum_valid(header: [U8]) -> Bool Never! {
+    recorded :: provider_registry_tar_number(header[148..<156]) ? value -> value ! failed -> return false
+    sum := 0
+    loop index in 0..<PROVIDER_TAR_BLOCK {
+        sum += if index >= 148 && index < 156 -> 32 else -> Int.from_u8(header[index])
+    }
+    sum == recorded
+}
+
+// A NUL-terminated header or long-name field.
+fn provider_registry_tar_text(field: [U8]) -> String RegistryError! {
+    end := 0
+    loop end < field.len() && Int.from_u8(field[end]) != 0 -> end += 1
+    text :: String.from_bytes(field[0..<end]) ?? return Err(RegistryError.Reason("tar entry name is not UTF-8"))
+    Ok(text)
+}
+
+// The header name, joined to the ustar prefix when the header has one.
+fn provider_registry_tar_header_name(header: [U8]) -> String RegistryError! {
+    name :: provider_registry_tar_text(header[0..<100])
+    if header[257..<262] != "ustar".bytes() -> return Ok(name)
+    prefix :: provider_registry_tar_text(header[345..<500])
+    if prefix == "" -> return Ok(name)
+    Ok("{prefix}/{name}")
+}
+
+// The last `path` record of a PAX extended header. Every record must be
+// `<length> <key>=<value>\n` with its length exactly covering it.
+fn provider_registry_pax_path(records: [U8]) -> String? RegistryError! {
+    bad :: RegistryError.Reason("tar PAX metadata is malformed")
+    found := String?{None}
+    at := 0
+    loop at < records.len() {
+        space := at
+        loop space < records.len() && Int.from_u8(records[space]) != 32 -> space += 1
+        if space == records.len() -> return Err(bad)
+        digits :: String.from_bytes(records[at..<space]) ?? return Err(bad)
+        length :: provider_registry_parse_u64(digits) ?? return Err(bad)
+        if length <= space - at + 1 || length > records.len() - at -> return Err(bad)
+        end :: at + length - 1
+        if Int.from_u8(records[end]) != 10 -> return Err(bad)
+        text :: String.from_bytes(records[(space + 1)..<end]) ?? return Err(RegistryError.Reason("tar PAX metadata is not UTF-8"))
+        field :: text.split_once("=") ?? return Err(bad)
+        if field.before == "path" -> found = Val(field.after)
+        at += length
+    }
+    Ok(found)
+}
+
+fn provider_registry_tar_entries(stream: [U8]) -> [RegistryTarEntry] RegistryError! {
+    listing := [RegistryTarEntry]{}
+    loop member in provider_registry_tar_members(stream) -> &listing.push(member.entry)
+    Ok(listing)
+}
+
 // Every entry of the archive (Rust `tar -t[v][z]f`), stopping one past the
 // entry budget so the caller reports it.
-fn provider_registry_tar_listing(path: String, gzip: Bool) -[FS]> [RegistryTarEntry] RegistryError! {
-    unreadable :: "source is not a readable tar archive"
-    file := if files.open(path) == {
-        .Ok(reader) -> reader
-        .Err(error) -> { return Err(RegistryError.Reason("could not inspect source archive: {error}")) }
-    }
-    listing := [RegistryTarEntry]{}
-    if gzip {
-        plain := gzip.reader(&file)
-        tar := archive.tar_reader(&plain)
-        loop listing.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
-            found :: tar.next() ?? return Err(RegistryError.Reason(unreadable))
-            entry :: found ?? break
-            &listing.push(RegistryTarEntry{name: entry.name, kind: provider_registry_tar_kind(entry.kind), size: entry.size})
-        }
-    } else {
-        tar := archive.tar_reader(&file)
-        loop listing.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
-            found :: tar.next() ?? return Err(RegistryError.Reason(unreadable))
-            entry :: found ?? break
-            &listing.push(RegistryTarEntry{name: entry.name, kind: provider_registry_tar_kind(entry.kind), size: entry.size})
-        }
-    }
-    Ok(listing)
+fn provider_registry_tar_listing(path: String, gzipped: Bool) -[FS]> [RegistryTarEntry] RegistryError! {
+    provider_registry_tar_entries(provider_registry_tar_stream(path, gzipped))
 }
 
 // Extract a validated archive of regular files and directories under
 // `destination` (Rust `tar -x[z]f … -C destination` as an unprivileged user:
 // no owners, permission bits under the process umask).
-fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) RegistryError! -[FS]> {
-    file := if files.open(path) == {
-        .Ok(reader) -> reader
-        .Err(error) -> { return Err(RegistryError.Reason("could not open archive: {error}")) }
-    }
-    if gzip {
-        plain := gzip.reader(&file)
-        tar := archive.tar_reader(&plain)
-        loop {
-            found :: tar.next() ?? return Err(RegistryError.Reason("source is not a readable tar archive"))
-            entry :: found ?? break
-            prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
-            target :: prepared ?? next
-            out := if files.create(target, if_exists: .Replace, mode: (entry.mode).bit_and(0o777)) == {
-                .Ok(writer) -> writer
-                .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
-            }
-            loop {
-                chunk :: tar.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
-                if chunk.len() == 0 -> break
-                out.write_all(chunk) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
-            }
+fn provider_registry_extract_tar(path: String, gzipped: Bool, destination: String) RegistryError! -[FS]> {
+    stream :: provider_registry_tar_stream(path, gzipped)
+    members :: provider_registry_tar_members(stream)
+    if members.len() > PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
+    loop member in members {
+        entry :: member.entry
+        prepared :: provider_registry_prepare_entry(entry.name, entry.kind, destination)
+        target :: prepared ?? next
+        out := if files.create(target, if_exists: .Replace, mode: (member.mode).bit_and(0o777)) == {
+            .Ok(writer) -> writer
+            .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
         }
-    } else {
-        tar := archive.tar_reader(&file)
-        loop {
-            found :: tar.next() ?? return Err(RegistryError.Reason("source is not a readable tar archive"))
-            entry :: found ?? break
-            prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
-            target :: prepared ?? next
-            out := if files.create(target, if_exists: .Replace, mode: (entry.mode).bit_and(0o777)) == {
-                .Ok(writer) -> writer
-                .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
-            }
-            loop {
-                chunk :: tar.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
-                if chunk.len() == 0 -> break
-                out.write_all(chunk) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
-            }
-        }
+        out.write_all(stream[member.start..<(member.start + entry.size)]) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
     }
 }
 

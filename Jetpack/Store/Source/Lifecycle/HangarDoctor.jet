@@ -63,7 +63,7 @@ struct DoctorScan {
 }
 
 // Rust `hangar_doctor`.
-fn store_hangar_doctor(verification: &StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
+fn store_hangar_doctor(verification: &StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
     if !repair {
         scan :: store_scan_hangar_doctor(&verification, roots, false)
         return Ok(scan.report)
@@ -86,8 +86,7 @@ fn store_hangar_doctor(verification: &StoreVerification, roots: HangarRoots, rep
     store_paths := requests.keys().to_list()
     &store_paths.sort()
     loop store_path in store_paths {
-        admitted :: store_admit_nix_closure_with_progress(&verification, roots, [NixOutputRequest]{requests[store_path]}, offline, None, None)
-        if admitted == {
+        if store_admit_nix_closure_with_progress(&verification, roots, [NixOutputRequest]{requests[store_path]}, offline, None, None) == {
             .Ok(_) -> {}
             .Err(error) -> repair_errors[store_path] = error.message()
         }

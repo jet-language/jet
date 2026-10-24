@@ -107,7 +107,7 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
             if dependency == index || seen.contains(dependency) -> next
             &seen.push(dependency)
             &dependents[dependency].push(index)
-            indegree[index] += 1
+            indegree[index] = indegree[index] + 1
         }
         &packages.push(checked)
     }
@@ -125,12 +125,12 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
         loop candidate in 0..<ready.len() {
             if ready[candidate] < ready[at] -> at = candidate
         }
-        index :: &ready.remove(at)
+        index :: &ready.remove(at, .Slot) ?? panic("ready member position is in range")
         emitted[index] = true
         &order.push(index)
         next_dependents :: dependents[index]
         loop dependent in next_dependents {
-            indegree[dependent] -= 1
+            indegree[dependent] = indegree[dependent] - 1
             if indegree[dependent] == 0 -> &ready.push(dependent)
         }
     }

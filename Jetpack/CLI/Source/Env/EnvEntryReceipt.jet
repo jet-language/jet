@@ -37,7 +37,7 @@ fn cli_canonical_env_entry(packages: [EnvironmentSelection]) -> [EnvironmentSele
 // Read the receipt; any malformed line makes the whole receipt absent.
 fn cli_read_env_entry_receipt(project_dir: String) -[FS]> EnvEntryReceipt? Never! {
     contents :: files.read(cli_env_entry_receipt_path(project_dir)) ?? return None
-    lines :: contents.lines().to_list()
+    lines :: contents.lines()
     if lines.len() < 2 || lines[0] != ENV_ENTRY_RECEIPT_HEADER -> return None
     stamp_line :: lines[1].split_once("\t") ?? return None
     if stamp_line.before != "stamp" || stamp_line.after == "" -> return None
@@ -84,7 +84,7 @@ fn cli_write_env_entry_receipt(project_dir: String, stamp: String, secret_identi
     path :: cli_env_entry_receipt_path(project_dir)
     parent :: files.dirname(path)
     files.create_dir_all(parent)
-    nonce :: time.instant().unix_ns
+    nonce :: time.unix_ns()
     temporary :: files.join(parent, ".{ENV_ENTRY_RECEIPT_NAME}.{sys.pid()}.{nonce}.tmp")
     text := "{ENV_ENTRY_RECEIPT_HEADER}\nstamp\t{stamp}\nsecrets\t{secret_identity}\n"
     loop package in cli_canonical_env_entry(packages) {

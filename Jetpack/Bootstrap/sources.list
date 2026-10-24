@@ -53,6 +53,8 @@ Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
 Compiler/JetFoundation/Source/Policy/Policy.jet
 Compiler/JetFoundation/Source/Policy/LintPolicy.jet
+Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet
+Compiler/JetFoundation/Source/Policy/MarkerSource.jet
 Compiler/JetFoundation/Source/Evidence/Evidence.jet
 Compiler/JetFoundation/Source/Evidence/TestingComparison.jet
 Compiler/JetFoundation/Source/AST/Expressions.jet
@@ -119,6 +121,7 @@ Jetpack/Foundation/Source/GeneratedNames.jet
 Jetpack/Foundation/Source/ProjectLock.jet
 Jetpack/Foundation/Source/Report.jet
 Jetpack/Foundation/Source/TreeHash.jet
+Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet
 Compiler/JetFoundation/Source/Policy/Authority.jet
 Jetpack/Foundation/Source/NativeSandbox.jet
 Jetpack/Foundation/Source/SandboxPolicy.jet
@@ -325,7 +328,8 @@ Jetpack/TrustRoot/Source/Metadata.jet
 Jetpack/TrustRoot/Source/Canonical.jet
 Jetpack/TrustRoot/Source/TrustEngine.jet
 
-# == Store ==
+# == Engine (folders: Store, Trust, Provider, Environment, Recipe) ==
+# Store, Trust, Recipe, Provider and Environment use each other in a cycle; one area until #4589 breaks it.
 Jetpack/Store/Source/Hangar/StoreError.jet
 Jetpack/Store/Source/Hangar/StoreText.jet
 Jetpack/Store/Source/Lease/ExecutableLeaseProtocol.jet
@@ -397,7 +401,6 @@ Jetpack/Store/Source/Explain/ExplainProfiles.jet
 Jetpack/Store/Source/Explain/PackageWhy.jet
 Jetpack/Store/Source/ArtifactStore/NativeRuntimePack.jet
 
-# == Trust ==
 Jetpack/Trust/Source/Text/TrustText.jet
 Jetpack/Trust/Source/SemanticLock/LockRecord.jet
 Jetpack/Trust/Source/SemanticLock/LockCodec.jet
@@ -417,10 +420,6 @@ Jetpack/Trust/Source/Pin/PinRead.jet
 Jetpack/Trust/Source/Pin/JetPin.jet
 Jetpack/Trust/Source/TrustError.jet
 
-# == Secrets ==
-Jetpack/Secrets/Source/RepoSecrets.jet
-
-# == Provider ==
 Jetpack/Provider/Source/Core/Realized.jet
 Jetpack/Provider/Source/Core/HardenedCommands.jet
 Jetpack/Provider/Source/Core/ProviderJson.jet
@@ -467,7 +466,6 @@ Jetpack/Provider/Source/Registries/CpanRegistry.jet
 Jetpack/Provider/Source/Registries/PackagistRegistry.jet
 Jetpack/Provider/Source/Nix/NixBuilder.jet
 
-# == Environment ==
 Jetpack/Environment/Source/EnvironmentError.jet
 Jetpack/Environment/Source/Shell/BrandedShell.jet
 Jetpack/Environment/Source/Shell/NixProjection.jet
@@ -488,6 +486,19 @@ Jetpack/Environment/Source/Overlay/OverlayLockRecords.jet
 Jetpack/Environment/Source/Transition/PackageSourceEdit.jet
 Jetpack/Environment/Source/Transition/TransitionJournal.jet
 Jetpack/Environment/Source/Transition/TransitionPlan.jet
+Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet
+Jetpack/Recipe/Source/Build/ConfinedFs.jet
+Jetpack/Recipe/Source/Build/Fetch.jet
+Jetpack/Recipe/Source/Build/RecipeValidate.jet
+Jetpack/Recipe/Source/Build/StagedPlanRun.jet
+Jetpack/Recipe/Source/Build/RecipeRun.jet
+Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet
+Jetpack/Recipe/Source/Toolchain/ChannelManifest.jet
+Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet
+Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet
+
+# == Secrets ==
+Jetpack/Secrets/Source/RepoSecrets.jet
 
 # == Services ==
 Jetpack/Services/Source/Catalog/ServiceCatalog.jet
@@ -504,18 +515,6 @@ Jetpack/Image/Source/Oci/Layout.jet
 Jetpack/Image/Source/Oci/Tar.jet
 Jetpack/Image/Source/Oci/Projection.jet
 Jetpack/Image/Source/Oci/Registry.jet
-
-# == Recipe ==
-Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet
-Jetpack/Recipe/Source/Build/ConfinedFs.jet
-Jetpack/Recipe/Source/Build/Fetch.jet
-Jetpack/Recipe/Source/Build/RecipeValidate.jet
-Jetpack/Recipe/Source/Build/StagedPlanRun.jet
-Jetpack/Recipe/Source/Build/RecipeRun.jet
-Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet
-Jetpack/Recipe/Source/Toolchain/ChannelManifest.jet
-Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet
-Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet
 
 # == JetOS ==
 Jetpack/JetOS/Source/Types.jet

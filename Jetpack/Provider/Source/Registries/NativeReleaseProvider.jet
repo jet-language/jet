@@ -35,7 +35,7 @@ struct NativeReleaseFacts {
 }
 
 struct NativeReleaseProvider {
-    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> CacheExpectation? Never! {
         if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_cache_expectation(&verification, spec, ctx)
         provider_native_cache_expectation(spec, table, ctx)
     }
@@ -440,13 +440,9 @@ fn provider_native_fetch_declared_artifact(url: String, destination: String) Reg
 // The native network seam: at most five redirects, a 120 s budget, identity
 // encoding, and a byte cap checked on Content-Length and while streaming into
 // a staging file that must not exist yet.
-fn provider_native_client() -[Net]> HTTPClient Never! {
-    http_client.Client.new().redirects(.Follow{max: NATIVE_FETCH_MAX_REDIRECTS})
-}
-
 fn provider_native_get(url: String, label: String) -[Net, Time.Wait]> HTTPResponse RegistryError! {
-    request :: http_client.request("GET", url).total_timeout(120s).header("Accept-Encoding", "identity")
-    response :: provider_native_client().send(request) ?? return Err(RegistryError.Reason("could not fetch {label}: {err}"))
+    request :: http_client.request("GET", url).total_timeout(120000).redirects(NATIVE_FETCH_MAX_REDIRECTS).header("Accept-Encoding", "identity")
+    response :: http_client.send(request) ?? return Err(RegistryError.Reason("could not fetch {label}: {err}"))
     status :: response.status()
     if status < 200 || status >= 300 -> return Err(RegistryError.Reason("{label} URL returned HTTP {status}"))
     Ok(response)
@@ -467,11 +463,9 @@ fn provider_native_fetch_remote_artifact(url: String, destination: String, label
         .None -> {}
     }
     output := files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Reason("could not create {label} staging file: {err}"))
-    body :: response.body(limit: NATIVE_MAX_ARTIFACT_BYTES + 1)
     total := 0
-    loop {
-        chunk :: body.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
-        if chunk.len() == 0 -> break
+    loop part in response.body().chunks(PROVIDER_READ_CHUNK) {
+        chunk :: part ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
         total += chunk.len()
         if total > NATIVE_MAX_ARTIFACT_BYTES -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
         output.write_all(chunk) ?? return Err(RegistryError.Reason("could not write {label}: {err}"))
@@ -513,11 +507,9 @@ fn provider_native_fetch_bounded_bytes(url: String, limit: Int, label: String) -
         .Val(length) -> { if length > limit -> return Err(RegistryError.Reason("{label} exceeds its size bound")) }
         .None -> {}
     }
-    body :: response.body(limit: limit + 1)
     out := [U8]{}
-    loop {
-        chunk :: body.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
-        if chunk.len() == 0 -> break
+    loop part in response.body().chunks(PROVIDER_READ_CHUNK) {
+        chunk :: part ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
         loop byte in chunk -> &out.push(byte)
         if out.len() > limit -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
     }

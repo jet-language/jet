@@ -59,7 +59,7 @@ fn services_spawn_service_supervisor(project_dir: String, env: ShellEnv, plan: D
     // the detached child must not prompt or replay a trust decision.
     spec := process.cmd([String]{sys.executable(), "services", "up", plan.name, "--trust", "--no-color"}).cwd(project_dir).detached()
     shell_env := env
-    spec = &shell_env.apply_to(spec)
+    spec = &shell_env.apply_to(spec) ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err.message()}"))
     spec = spec.env(SERVICES_SUPERVISOR_ENV, "1")
     spec.spawn() ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err}"))
     dir :: services_service_dir(project_dir, plan.name)
@@ -216,7 +216,7 @@ fn services_service_spec(env: ShellEnv, plan: DevServicePlan, resolved: &Service
     &argv.extend(resolved.run)
     spec := process.cmd(argv).cwd(resolved.data_dir).stdout(.File(^stdout)).stderr(.File(^stderr))
     shell_env := env
-    spec = &shell_env.apply_to(spec)
+    spec = &shell_env.apply_to(spec) ?? return Err(ServicesError.new("couldn't prepare service `{plan.name}`: {err.message()}"))
     spec = spec.env_remove(SERVICES_SUPERVISOR_ENV)
     if authority.unit() == None {
         loop name in names -> spec = spec.env(name, service_env[name])

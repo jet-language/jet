@@ -593,7 +593,9 @@ fn image_read_regular_bounded(path: String, limit: Int) -[FS]> [U8] ImageError! 
     }
     reader := files.open(path, links: .Refuse)
     bytes := [U8]{}
-    loop chunk in reader.chunks(65536) {
+    loop {
+        chunk :: reader.read(65536)
+        if chunk.len() == 0 -> break
         &bytes.extend(chunk)
         if bytes.len() > limit -> return Err(image_invalid("OCI input exceeded its bound while being read"))
     }
