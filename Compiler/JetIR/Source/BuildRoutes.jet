@@ -455,6 +455,13 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     if operation == .Zip(mode, fields, flatten, input_count, fill_mode, field_types) -> return ir_zip(&m, p, &b, ty, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types, span)
     if operation == .Unzip -> return ir_unzip(&m, p, &b, ty, receiver, span)
     if operation == .AtomicMethod(method) -> return ir_atomic_method(&m, p, &b, ty, receiver, method, args, span)
+    // `to_string()` on a non-numeric receiver (String, Bool, ...) is its
+    // Display rendering, as numeric `to_string` and interpolation build it.
+    if operation == .ToString {
+        value :: ir_expr(&m, p, &b, receiver)
+        if ir_failed(b) || value < 0 -> return -1
+        return ir_render(&m, p, &b, receiver_ty, value, IRRender.Display, span)
+    }
     // A write through the receiver reaches it as a write place: each List or
     // Map on a path through an element (`&rows[0].cells.push(x)`) is made its
     // own first, so the write never lands in a buffer another holder shares.
