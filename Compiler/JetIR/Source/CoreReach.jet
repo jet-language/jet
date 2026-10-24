@@ -413,7 +413,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [String:Bool]{}
     loop identity in core_module_identities -> core_modules[identity] = true
-    by_key := [String:Int]{}
+    keyed := [(key: String, at: Int, row: Int)]{}
     reachable := [Bool]{}
     roots := [Int]{}
     weights := [Int]{}
@@ -427,7 +427,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
             &reachable.push(false)
             next
         }
-        _ := &by_key.add(function.key, index)
+        &keyed.push((key: function.key.copy(), at: index, row: index))
         if decl_table_find(decls, function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
         }
@@ -440,6 +440,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
             &weights.push(function.source_span.end - function.source_span.start)
         }
     }
+    by_key := ir_first_rows(^keyed)
     slot :: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(&functions)}, by_key: [[String:Int]]{^by_key}, source_keys: [[String:String]]{^source_keys}, decl_rows: ^decl_rows, roots: ^roots}
     pending := [Int]{}
     loop target in ir_core_reach_root_targets(slot, weights, threads) {

@@ -373,11 +373,13 @@ fn ir_program_new(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef]
 
 // Each key of `entries` to the `row` of its entry with the least `at` (the
 // entries' `at` are distinct): the first row of a key in `at` order. The
-// entries are sorted, so the map fills in ascending key order and every
-// insert appends (a map put in row order shifts every later key).
+// entries are sorted by (key, at), so the map fills in ascending key order
+// and every insert appends (a map put in row order shifts every later key).
+// The order is explicit: a named tuple's fields order by name, so a plain
+// `sort()` would order by `at` first.
 fn ir_first_rows(entries: ^[(key: String, at: Int, row: Int)]) -> [String:Int] Never! {
     order := ^entries
-    &order.sort()
+    &order.sort_by((left: (key: String, at: Int, row: Int), right: (key: String, at: Int, row: Int)) -> (left.key <=> right.key).then(left.at <=> right.at))
     rows := [String:Int]{}
     loop (index, entry) in order {
         if index == 0 || order[index - 1].key != entry.key -> rows[entry.key] = entry.row

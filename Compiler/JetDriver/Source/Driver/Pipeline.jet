@@ -141,7 +141,7 @@ use jet_parser.[
 ]
 
 use jet_eval.[JetEvalComptimeInputAdapter]
-use jet_ir.[IRProgram, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
+use jet_ir.[IRProgram, ir_first_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
 use jet_eval.[
     JetEvalConfig,
     JetEvalIRResult,
@@ -441,8 +441,8 @@ fn jet_driver_entry_selection(load: JetDriverLoadResult) -> JetDriverPackageEntr
 // takes no parameter or one `#CLI` record. None when the program has no
 // executable entry (a diagnostic says why when a binding fails).
 fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaGraphResult, functions: [FnBody], modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> String? {
-    counts := [String:Int]{}
-    loop function in functions -> counts[function.key] = (counts.get(function.key) ?? 0) + 1
+    // One or two keys are read: each is counted over the rows, never a
+    // whole-program count map (a Map filled in row order costs O(N^2) moves).
     loop source_module in semantic_graph.modules {
         loop constant in source_module.constants {
             if constant.declaration.resolved_output == .Val(output) {
@@ -453,7 +453,7 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
                 }
                 owner_identity :: semantic_graph.modules[output.module_id].module_identity
                 function_key :: symbol_id(SymbolKind.Function, owner_identity, "", output.semantic_name).key
-                if (counts.get(function_key) ?? 0) != 1 {
+                if jet_driver_function_key_count(functions, function_key) != 1 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_identity, "E0003", output.definition, "the selected Output entry has no unique checked function identity", "Output entry identity is retained from its registered callable", "retain the canonical function key through checking"))
                     return None
                 }
@@ -489,16 +489,23 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
         return None
     }
     function_key :: symbol_id(SymbolKind.Function, target_module_identity, "", entry.function_name).key
-    if counts.get(function_key) == {
-        .Val(count) -> {
-            if count == 1 -> return Val(function_key)
-            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the declared package entry has no unique checked function identity", "the private entry binding is resolved from its exact registered function symbol", "retain the canonical function key through checking"))
-        }
-        .None -> {
-            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package manifest entry function is not declared in the resolved entry module", "entry resolution uses the explicit `outputs.*.entry` function binding", "declare the selected function in the entry module referenced by the manifest"))
-        }
+    count :: jet_driver_function_key_count(functions, function_key)
+    if count == 1 -> return Val(function_key)
+    if count > 1 {
+        &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the declared package entry has no unique checked function identity", "the private entry binding is resolved from its exact registered function symbol", "retain the canonical function key through checking"))
+    } else {
+        &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package manifest entry function is not declared in the resolved entry module", "entry resolution uses the explicit `outputs.*.entry` function binding", "declare the selected function in the entry module referenced by the manifest"))
     }
     None
+}
+
+// How many checked functions carry `key`.
+fn jet_driver_function_key_count(functions: [FnBody], key: String) -> Int Never! {
+    count := 0
+    loop function in functions {
+        if function.key == key -> count += 1
+    }
+    count
 }
 
 // jet_driver_default_run_entry over the checked functions: the entry
@@ -3811,21 +3818,20 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 // value, an extern) seeds into `solved` is a ceiling fact (E0743), not a
 // required right, so it never widens the authority the application must hold.
 fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_keys: [String]) -> [String] Never! {
-    by_key := [String:Int]{}
-    loop (index, function) in functions {
-        if by_key.get(function.key) == None -> by_key[function.key] = index
-    }
+    keyed := [(key: String, at: Int, row: Int)]{}
+    loop (index, function) in functions -> &keyed.push((key: function.key.copy(), at: index, row: index))
+    by_key :: ir_first_rows(^keyed)
     pending := [Int]{}
     if by_key.get(entry_key) == .Val(entry) -> &pending.push(entry)
     // The program computes its startup constants before the entry runs.
     loop key in startup_keys {
         if by_key.get(key) == .Val(init) -> &pending.push(init)
     }
-    seen := [Int:Bool]{}
+    seen := (loop _ in functions -> false)
     required := [String]{}
     loop pending.len() > 0 {
         index :: &pending.pop() ?? break
-        if seen.get(index) != None -> next
+        if seen[index] -> next
         seen[index] = true
         loop effect_name in functions[index].effects.direct -> &required.push(effect_name)
         loop edge in functions[index].effects.call_edges {
