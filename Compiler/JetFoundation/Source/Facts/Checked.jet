@@ -374,10 +374,10 @@ enum TUnitRoundingMode {
 }
 
 // One row of a function's expression-type column: the type of the nodes
-// whose `id` is `id`.
+// whose `id` is `id`, as its index in the tree's `types` (body_type_intern).
 struct TExprType {
     id: Int
-    ty: Type
+    ty: Int
 }
 
 struct TIntegerWidth {
@@ -862,8 +862,9 @@ enum TFactPurity {
     Impure
 }
 
-// The type a body's sorted rows (BodyTree.expr_types) file for node id `id`.
-fn tir_expr_type(rows: [TExprType], id: Int) -> Type? Never! {
+// The index in the tree's `types` that a body's sorted rows
+// (BodyTree.expr_types) file for node id `id`.
+fn tir_expr_type_id(rows: [TExprType], id: Int) -> Int? Never! {
     low := 0
     high := rows.len()
     loop low < high {

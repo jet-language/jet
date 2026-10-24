@@ -137,6 +137,7 @@ use jet_foundation.[
     StructureFact,
     TLocal,
     body_type,
+    body_type_intern,
 ]
 use jet_parser.[
     parse_source,
@@ -3161,7 +3162,8 @@ fn jet_driver_keep_going_tir_trap(function: FnBody, reason: String) -> FnBody Ne
     if trapped.tree.nodes.len() > 0 && trapped.tree.nodes[0].id <= stop_id -> stop_id = trapped.tree.nodes[0].id - 1
     nodes := [BodyNode]{BodyNode{id: stop_id, kind: NodeKind.Never{reason: reason}, span: function.source_span}}
     loop node in trapped.tree.nodes -> &nodes.push(node)
-    types := [TExprType]{TExprType{id: stop_id, ty: Type.Named{name: "Never"}}}
+    stop_type :: body_type_intern(&trapped.tree, Type.Named{name: "Never"})
+    types := [TExprType]{TExprType{id: stop_id, ty: stop_type}}
     loop row in trapped.tree.expr_types -> &types.push(row)
     trapped.tree.nodes = ^nodes
     trapped.tree.expr_types = ^types

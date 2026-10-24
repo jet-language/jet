@@ -445,6 +445,62 @@ fn symbol_kind_name(kind: SymbolKind) -> String Never! {
     }
 }
 
+// A hash of `ty`'s shape for interning (body_type_intern): equal types hash
+// equal. It reads variants, names and child types and skips spans, contracts
+// and measures, which only the equality check that follows compares.
+fn type_shape_hash(ty: Type) -> Int Never! {
+    Int.from_u64(type_shape_hash_into(U64{0xcbf29ce484222325}, ty).bit_and(U64{0x3fffffff}))
+}
+
+fn type_hash_mix(hash: U64, value: U64) -> U64 Never! {
+    (hash.bit_xor(value)).wrapping_mul(U64{0x100000001b3})
+}
+
+fn type_shape_hash_list(hash: U64, types: [Type]) -> U64 Never! {
+    mixed := hash
+    loop member in types -> mixed = type_shape_hash_into(mixed, member)
+    type_hash_mix(mixed, U64{0x5f})
+}
+
+fn type_shape_hash_into(hash: U64, ty: Type) -> U64 Never! {
+    if ty == {
+        .Int -> type_hash_mix(hash, U64{1})
+        .Float -> type_hash_mix(hash, U64{2})
+        .Bool -> type_hash_mix(hash, U64{3})
+        .String -> type_hash_mix(hash, U64{4})
+        .Char -> type_hash_mix(hash, U64{5})
+        .List(element) -> type_shape_hash_into(type_hash_mix(hash, U64{6}), element)
+        .Map(key, _, value) -> type_shape_hash_into(type_shape_hash_into(type_hash_mix(hash, U64{7}), key), value)
+        .Shared(inner) -> type_shape_hash_into(type_hash_mix(hash, U64{8}), inner)
+        .Option(inner) -> type_shape_hash_into(type_hash_mix(hash, U64{9}), inner)
+        .Result(ok, err) -> type_shape_hash_into(type_shape_hash_into(type_hash_mix(hash, U64{10}), ok), err)
+        .Fn(params, ret, _, _, _, _) -> {
+            mixed :: type_shape_hash_list(type_hash_mix(hash, U64{11}), params)
+            if ret == .Val(value) -> type_shape_hash_into(mixed, value) else -> mixed
+        }
+        .Named(name) -> type_hash_mix(type_hash_mix(hash, U64{12}), name.hash())
+        .Apply(name, args) -> type_shape_hash_list(type_hash_mix(type_hash_mix(hash, U64{13}), name.hash()), args)
+        .TraitObject(bounds) -> {
+            mixed := type_hash_mix(hash, U64{14})
+            loop bound in bounds -> mixed = type_hash_mix(mixed, bound.hash())
+            mixed
+        }
+        .Tuple(fields) -> {
+            mixed := type_hash_mix(hash, U64{15})
+            loop field in fields -> mixed = type_shape_hash_into(type_hash_mix(mixed, field.name.hash()), field.ty)
+            mixed
+        }
+        .FixedList(elem, _) -> type_shape_hash_into(type_hash_mix(hash, U64{16}), elem)
+        .IntN(signed, _) -> type_hash_mix(hash, if signed -> U64{17} else -> U64{18})
+        .InlineRange(base, _, _) -> type_shape_hash_into(type_hash_mix(hash, U64{19}), base)
+        .Float32 -> type_hash_mix(hash, U64{20})
+        .Tagged(_, inner) -> type_shape_hash_into(type_hash_mix(hash, U64{21}), inner)
+        .Union(members) -> type_shape_hash_list(type_hash_mix(hash, U64{22}), members)
+        .Quantity(base, _) -> type_shape_hash_into(type_hash_mix(hash, U64{23}), base)
+        .Measure(_) -> type_hash_mix(hash, U64{24})
+    }
+}
+
 fn type_carrier_identity(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"

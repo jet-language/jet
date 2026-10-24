@@ -52,6 +52,7 @@ use jet_foundation.[
     TExprType,
     Variant,
     body_tree_new,
+    body_type_intern,
 ]
 
 // The flattener's rows go to `tree`. Into the output tree a child is named by
@@ -143,7 +144,8 @@ fn body_flat_expr(value: TExpr, flat: &BodyFlat) -> Int Never! {
     kind :: body_flat_expr_kind(value.kind, &flat)
     id :: if value.id == AST_NODE_GENERATED && !flat.into_arena -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    &flat.tree.expr_types.push(TExprType{id: id, ty: value.ty})
+    ty :: body_type_intern(&flat.tree, value.ty)
+    &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     if flat.into_arena -> return flat.base + flat.tree.nodes.len() - 1
     id
 }
@@ -156,17 +158,19 @@ fn body_flat_arena_node(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never!
         // whose rows this arena does not hold.
         row_index :: index - flat.base
         if row_index < 0 -> panic("body_flat_arena_node: arena row {index} precedes this check's rows")
-        if flat.tree.nodes[row_index].id == value.id && flat.tree.expr_types[row_index].ty == value.ty -> return index
+        if flat.tree.nodes[row_index].id == value.id && flat.tree.types[flat.tree.expr_types[row_index].ty] == value.ty -> return index
         row :: flat.tree.nodes[row_index]
         &flat.tree.nodes.push(BodyNode{id: value.id, kind: row.kind, span: value.span})
-        &flat.tree.expr_types.push(TExprType{id: value.id, ty: value.ty})
+        ty :: body_type_intern(&flat.tree, value.ty)
+        &flat.tree.expr_types.push(TExprType{id: value.id, ty: ty})
         return flat.base + flat.tree.nodes.len() - 1
     }
     row :: flat.arena.nodes[index]
     kind :: body_copy_expr_kind(row.kind, &flat)
     id :: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    &flat.tree.expr_types.push(TExprType{id: id, ty: value.ty})
+    ty :: body_type_intern(&flat.tree, value.ty)
+    &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
 }
 
@@ -183,7 +187,9 @@ fn body_copy_expr(index: Int, flat: &BodyFlat) -> Int Never! {
     kind :: body_copy_expr_kind(row.kind, &flat)
     id :: if row.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> row.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: row.span})
-    &flat.tree.expr_types.push(TExprType{id: id, ty: flat.arena.expr_types[index].ty})
+    arena_type :: flat.arena.types[flat.arena.expr_types[index].ty]
+    ty :: body_type_intern(&flat.tree, arena_type)
+    &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
 }
 

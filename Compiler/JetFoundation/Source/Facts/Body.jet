@@ -9,11 +9,18 @@
 // its TIR name and payload order.
 
 // One function's (or one standalone expression's) flat rows: nodes and the
-// expression-type column sorted by id, statements in post order.
+// expression-type column sorted by id, statements in post order. The
+// expression-type rows name their types by index into `types`, which holds
+// each distinct type once (body_type_intern).
 struct BodyTree {
     nodes: [BodyNode]
     stmts: [StmtKind]
     expr_types: [TExprType]
+    types: [Type]{[Type]{}}
+    // Each type's type_shape_hash, and open-addressing slots over them:
+    // 0 is empty, otherwise the type's index plus one.
+    type_hashes: [Int]{[Int]{}}
+    type_slots: [Int]{[Int]{}}
 }
 
 // One expression: its node id, its checked form and its source span. Its type
@@ -48,7 +55,48 @@ fn body_node(tree: BodyTree, id: Int) -> BodyNode Never! {
 
 // The checked type of node `id`.
 fn body_type(tree: BodyTree, id: Int) -> Type Never! {
-    tir_expr_type(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
+    tree.types[body_type_id(tree, id)]
+}
+
+// The index in `tree.types` of node `id`'s checked type.
+fn body_type_id(tree: BodyTree, id: Int) -> Int Never! {
+    tir_expr_type_id(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
+}
+
+BODY_TYPE_INITIAL_SLOTS :: 16
+
+// The index of `ty` in `tree.types`, added on first sight: equal types
+// share one index, so a row stores an Int and the tree one copy per type.
+fn body_type_intern(tree: &BodyTree, ty: Type) -> Int Never! {
+    hash :: type_shape_hash(ty)
+    if tree.type_slots.len() == 0 -> body_type_slots_grow(&tree, BODY_TYPE_INITIAL_SLOTS)
+    mask :: tree.type_slots.len() - 1
+    slot := hash.bit_and(mask)
+    loop tree.type_slots[slot] != 0 {
+        index :: tree.type_slots[slot] - 1
+        if tree.type_hashes[index] == hash && tree.types[index] == ty -> return index
+        slot = (slot + 1).bit_and(mask)
+    }
+    index :: tree.types.len()
+    // copy: `ty` is the caller's read value; the tree's type list owns this one
+    &tree.types.push(ty.copy())
+    &tree.type_hashes.push(hash)
+    tree.type_slots[slot] = index + 1
+    if (index + 1) * 2 > mask -> body_type_slots_grow(&tree, (mask + 1) * 2)
+    index
+}
+
+// Rebuilds the slots at `capacity` (a power of two) from the stored hashes.
+fn body_type_slots_grow(tree: &BodyTree, capacity: Int) Never! {
+    slots := [Int]{}
+    loop _ in 0..<capacity -> &slots.push(0)
+    mask :: capacity - 1
+    loop index in 0..<tree.types.len() {
+        slot := tree.type_hashes[index].bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = index + 1
+    }
+    tree.type_slots = ^slots
 }
 
 // Statement `index`.

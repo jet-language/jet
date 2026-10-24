@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, tir_expr_type, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt]
+use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, body_type_intern]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -1143,10 +1143,10 @@ fn ir_body_stmt(p: IRProgram, b: IRBuilder, index: Int) -> StmtKind Never! {
 fn ir_ty(p: IRProgram, b: IRBuilder, value: Int) -> Type Never! {
     if value <= IR_FIRST_NODE_ID {
         loop row in b.made.expr_types {
-            if row.id == value -> return row.ty.copy()
+            if row.id == value -> return b.made.types[row.ty].copy()
         }
     } else if b.row >= 0 {
-        if tir_expr_type(p.functions[b.row].tree.expr_types, value) == .Val(ty) -> return ty
+        return body_type(p.functions[b.row].tree, value)
     }
     panic("{b.f.name}: node {value} has no expression-type row")
 }
@@ -1156,7 +1156,8 @@ fn ir_ty(p: IRProgram, b: IRBuilder, value: Int) -> Type Never! {
 fn ir_node(b: &IRBuilder, ty: Type, kind: NodeKind, span: Span) -> Int Never! {
     id :: b.next_node
     b.next_node -= 1
-    &b.made.expr_types.push(TExprType{id: id, ty: ty})
+    row :: body_type_intern(&b.made, ty)
+    &b.made.expr_types.push(TExprType{id: id, ty: row})
     &b.made.nodes.push(BodyNode{id: id, kind: kind, span: span})
     id
 }
