@@ -142,6 +142,7 @@ fn store_canonical_producer(provider: String, immutable_source: String, source_d
 
 // Whether a producer was built as a private untrusted build.
 fn store_is_private_untrusted_build(producer: ProducerRecord) -> Bool Never! {
+    // workaround #5940(c): no `== Val(CONST)`.
     (producer.facts.get("build.trust") ?? "") == STORE_PRIVATE_UNTRUSTED_BUILD
 }
 

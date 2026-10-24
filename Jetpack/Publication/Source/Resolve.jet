@@ -163,7 +163,16 @@ fn publication_solve_registry_state(state: PublicationSolverState, candidates: [
     }
     low_first :: mode == PublicationResolveMode.Lowest || (mode == PublicationResolveMode.LowestDirect && direct.contains(package))
     preserve_lock :: mode == PublicationResolveMode.Conservative && !update_scope.contains(package)
-    &viable.sort_by((left: Int, right: Int) -> publication_candidate_order(live[left], live[right], preferred, lock, preserve_lock, low_first))
+    // A stable insertion sort of the indices; a `sort_by` lambda would take `live`.
+    loop next_index in 1..<viable.len() {
+        at := next_index
+        loop at > 0 && publication_candidate_order(live[viable[at - 1]], live[viable[at]], preferred, lock, preserve_lock, low_first) == Ordering.Greater {
+            held :: viable[at]
+            viable[at] = viable[at - 1]
+            viable[at - 1] = held
+            at -= 1
+        }
+    }
     if viable.len() == 0 -> return Err(PublicationDiagnosticError{diagnostic: publication_proof_diagnostic(package, requirements, "no published candidate satisfies every requirement")})
     branches := [String]{}
     loop index in viable {

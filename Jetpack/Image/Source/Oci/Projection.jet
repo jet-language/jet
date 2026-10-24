@@ -50,7 +50,7 @@ fn image_write_projection_report(layout: String, manifest_digest: String, report
     document := [String: Dyn]{}
     document["schema"] = Dyn.Text("jet.image.projection")
     document["version"] = Dyn.Int(1)
-    document["manifest"] = Dyn.Text(manifest_digest)
+    document["manifest"] = Dyn.Text(manifest_digest.copy())
     document["included"] = image_report_values(report.included)
     document["changed"] = image_report_values(report.changed)
     document["omitted"] = image_report_values(report.omitted)
@@ -70,9 +70,9 @@ fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -
     document := [String: Dyn]{}
     document["schema"] = Dyn.Text("jet.image.plan")
     document["version"] = Dyn.Int(1)
-    document["manifest"] = Dyn.Text(manifest_digest)
-    document["source"] = Dyn.Text(plan.source)
-    document["platform"] = Dyn.Text(plan.platform)
+    document["manifest"] = Dyn.Text(manifest_digest.copy())
+    document["source"] = Dyn.Text(plan.source.copy())
+    document["platform"] = Dyn.Text(plan.platform.copy())
     document["user"] = Dyn.Int(plan.user)
     document["entrypoint"] = image_json_strings(plan.entrypoint)
     document["expose"] = Dyn.Array(expose)
@@ -81,7 +81,7 @@ fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -
     document["layers"] = image_report_values(plan.layer_paths)
     document["services"] = image_report_values(plan.services)
     document["base"] = Dyn.Text(if plan.base -> "local" else -> "none")
-    document["lock"] = Dyn.Text(plan.lock)
+    document["lock"] = Dyn.Text(plan.lock.copy())
     document["ownership"] = image_ownership(plan)
     image_json_text(Dyn.Object(document))
 }
@@ -95,7 +95,7 @@ fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan
     document := [String: Dyn]{}
     document["schema"] = Dyn.Text("jet.image.dossier")
     document["version"] = Dyn.Int(1)
-    document["manifest"] = Dyn.Text(manifest_digest)
+    document["manifest"] = Dyn.Text(manifest_digest.copy())
     document["secret_policy"] = Dyn.Text("runtime-mount-or-reference-only")
     document["classification"] = Dyn.Object(classification)
     document["ownership"] = image_ownership(plan)

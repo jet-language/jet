@@ -251,7 +251,7 @@ struct ServiceSocketReservation {
     }
 
     // Rust `Drop`: remove every reserved path.
-    fn abandon(^self) -[FS]> {
+    fn abandon(^self) Never! -[FS]> {
         loop path in self.paths -> services_remove_quiet(path)
     }
 }
@@ -261,7 +261,7 @@ fn services_prepare_sockets(project_dir: String, sockets: [String]) -[FS, Env, N
     reservation := ServiceSocketReservation{paths: [String]{}, listeners: [UnixListener]{}}
     loop socket in sockets {
         if services_reserve_socket(project_dir, socket, &reservation) == .Err(error) {
-            reservation.abandon()
+            ^reservation.abandon()
             return Err(error)
         }
     }

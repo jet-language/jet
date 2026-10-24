@@ -31,8 +31,7 @@ fn services_test_host() -> ServiceHost {
 }
 
 fn services_test_read_pid(dir: String) -> Int? {
-    persisted :: services_read_process_state(dir) ?? return None
-    record :: persisted ?? return None
+    record :: services_read_process_state(dir) ?? return None
     if record == {
         .Verified(state) -> Val(state.pid)
         .LegacyPID(pid) -> Val(pid)
@@ -516,12 +515,30 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
 #Test("current process start identity is stable") {
     pid :: sys.pid()
-    first :: (services_process_start_identity(pid) ?? panic("probe")) ?? panic("own identity")
-    second :: (services_process_start_identity(pid) ?? panic("probe")) ?? panic("own identity")
+    first :: services_process_start_identity(pid) ?? panic("own identity")
+    second :: services_process_start_identity(pid) ?? panic("own identity")
     assert_eq(first, second)
-    own :: process.identity(pid) ?? panic("own process identity")
-    identity :: own ?? panic("own process is running")
-    assert(services_process_matches_start(ServiceProcessState{pid, start_identity: first, containment: identity.containment}) ?? panic("match own identity"))
+    assert(first.starts_with("linux-proc-start:"), first)
+    assert(services_process_matches_start(ServiceProcessState{pid, start_identity: first, containment: None}) ?? panic("match own identity"))
+    assert(!(services_process_matches_start(ServiceProcessState{pid, start_identity: "linux-proc-start:0", containment: None}) ?? panic("probe a stale identity")))
+}
+
+#Test("service log redirect keeps argv with spaces, quotes and a leading dash") {
+    if sys.is_windows() -> return
+    dir :: services_test_scratch("log-redirect")
+    stdout_path :: files.join(dir, "stdout.log")
+    stderr_path :: files.join(dir, "stderr.log")
+    run :: [String]{"sh", "-c", "printf '%s|' \"$@\"; printf 'err' >&2", "sh", "a b", "it's \"q\"", "-dash", "--", "$HOME"}
+    argv :: services_log_redirect_argv(stdout_path, stderr_path, run) ?? panic("redirect argv")
+    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run redirected command")
+    assert(receipt.success, "redirected command must succeed")
+    assert_eq(files.read(stdout_path) ?? panic("read stdout log"), "a b|it's \"q\"|-dash|--|$HOME|")
+    assert_eq(files.read(stderr_path) ?? panic("read stderr log"), "err")
+}
+
+#Test("windows guardian authority fails closed without Core containment") {
+    error :: services_test_value_error(services_attach_authority(ServiceAuthority.WindowsGuardianJobObject{guardian: "Local\\Jetpack-test"}))
+    assert_eq(error, SERVICES_GUARDIAN_UNAVAILABLE)
 }
 
 #Test("pid publication failure kills and reaps child") {

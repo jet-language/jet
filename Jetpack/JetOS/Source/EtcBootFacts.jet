@@ -232,3 +232,20 @@ fn jetos_write_boot_payload(boot_dir: String, system: SystemPlan, boot: JetOSBoo
         }
     }
 }
+
+// root_projection.rs copy_file_replace: best-effort removal of the
+// destination, a native copy that never creates parents, then the source's
+// permission bits with the write bits set (Rust `set_readonly(false)`).
+fn jetos_copy_file_replace(source: String, destination: String) IOError! -[FS]> {
+    if files.remove(destination) == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+    parent :: files.dirname(destination)
+    if !files.is_dir(parent) {
+        return Err(IOError.NotFound(IOContext{operation: .Write, resource: Val(destination), os_code: None, cause: Val("parent directory `{parent}` does not exist")}))
+    }
+    mode :: (files.stat(source).mode).bit_and(0o7777)
+    files.copy(source, destination)
+    files.set_mode(destination, mode.bit_or(0o222))
+}

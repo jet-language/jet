@@ -83,6 +83,7 @@ struct NixTestCacheServer {
     fn start(site: String, routes: [String: [U8]]) -> NixTestCacheServer Never! {
         store_nix_test_write_site(site, routes)
         mux :: http_server.mux()
+        // workaround #5940(a): a catch-all route, not `http_server.static_files`.
         mux.get("/*path", (path: String) -> store_nix_test_site_response(site, path))
         server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind test cache")
         address :: server.local_addr() ?? panic("test cache address")

@@ -33,8 +33,7 @@ fn services_health_one_with_env(project_dir: String, env: ShellEnv?, plan: DevSe
     if !plan.enable -> return ServiceHealth.Disabled
     dir :: services_service_dir(project_dir, plan.name)
     if files.is_file(services_supervisor_error_path(dir)) -> return ServiceHealth.Unhealthy
-    persisted :: services_read_process_state(dir) ?? return ServiceHealth.NotRunning
-    record :: persisted ?? return ServiceHealth.NotRunning
+    record :: services_read_process_state(dir) ?? return ServiceHealth.NotRunning
     state :: services_verified_state(record) ?? return ServiceHealth.NotRunning
     if !(services_process_matches_start(state) ?? false) -> return ServiceHealth.NotRunning
     resolved :: services_resolve(project_dir, plan) ?? return ServiceHealth.Unhealthy
@@ -96,7 +95,7 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     host := authority
     port := 80
     if authority.cut_last(":") == .Val(parts) {
-        if Int.parse(parts.after) == .Val(parsed) {
+        if Int.parse(parts.after) == .Ok(parsed) {
             if parsed >= 0 && parsed <= 65535 {
                 host = parts.before
                 port = parsed
@@ -105,7 +104,7 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     }
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address :: net.socket_addr_parse("{host}:{port}") ?? return false
-    stream :: net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
+    stream := net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
     net.set_read_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
     net.set_write_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
     crlf :: "{env_shell_control(13)}\n"
@@ -138,7 +137,7 @@ fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: Dev
         .Err(_) -> false
     }
     stable_since := Int?{None}
-    deadline :: services_now_ms() + timeout.ns / 1000000
+    deadline :: services_now_ms() + timeout.ns /% 1000000
     loop {
         if services_supervisor_failure(project_dir, plan) != None -> return false
         if services_health_one_with_env(project_dir, env, plan) == ServiceHealth.Healthy {

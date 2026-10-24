@@ -1,6 +1,6 @@
 // Source/Publish/Registry.rs:21-27,1671-2230. Immutable OCI evidence.
 // JSON is the canonical Compiler protocol kernel (#3598); native held IO
-// remains #3593 and exact InvalidData #4409. Artifacts/Fetch composition #4262
+// remains #3593 and InvalidData is CORE-GAPS 11. Artifacts/Fetch composition #4262
 // supplies publication_artifact_path/publication_load_publish_lock and the
 // shared publication_ensure_real_directory; no substitute artifact provider.
 // Staging belongs solely to Foundation's protected publisher: no second
@@ -19,11 +19,8 @@ struct PublicationOCIDescriptor {
     digest: String
     size: Int
 }
-fn publication_oci_context(path: String, detail: String) -> IOContext Never! {
-    IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(detail)}
-}
 fn publication_invalid_oci(detail: String) -> IOError Never! {
-    IOError.InvalidData(publication_oci_context("", detail))
+    publication_read_error(.InvalidInput, "", detail)
 }
 fn publication_validate_oci_digest(value: String) IOError! {
     if !value.starts_with("sha256-") -> return Err(publication_invalid_oci("OCI referrer subject is not a sha256- digest"))
@@ -168,7 +165,7 @@ fn publication_oci_check_existing(path: String, bytes: [U8], label: String) -[FS
     }
     if info.is_symlink || !info.is_file -> return Err(publication_invalid_oci("{label} path is not a regular file"))
     existing :: publication_read_oci_file(path, PUBLICATION_MAX_OCI_REFERRER_BYTES)
-    if existing != bytes -> return Err(IOError.AlreadyExists(publication_oci_context(path, "immutable {label} changed")))
+    if existing != bytes -> return Err(publication_read_error(.AlreadyExists, path, "immutable {label} changed"))
     Ok(true)
 }
 fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOError! -[FS, Env, Time]> {
@@ -176,7 +173,7 @@ fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOError!
     if publication_oci_check_existing(path, bytes, label) -> return
     parent :: files.dirname(path)
     // Rust's single relative basename has an empty (but present) parent.
-    if path == "" || path == "/" -> return Err(IOError.InvalidInput(publication_oci_context(path, "{label} has no parent")))
+    if path == "" || path == "/" -> return Err(publication_read_error(.InvalidInput, path, "{label} has no parent"))
     files.create_dir_all(parent)
     publication_ensure_real_directory(parent, "OCI referrer parent")
     authority :: foundation_open_directory_authority(parent, true)
@@ -254,12 +251,12 @@ fn publication_oci_unavailable(error: IOError, detail: String) -> IOError Never!
         .PermissionDenied(context) -> IOError.PermissionDenied(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .AlreadyExists(context) -> IOError.AlreadyExists(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .InvalidInput(context) -> IOError.InvalidInput(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
-        .InvalidData(context) -> IOError.InvalidData(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .TimedOut(context) -> IOError.TimedOut(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Cancelled(context) -> IOError.Cancelled(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Closed(context) -> IOError.Closed(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Protocol(context) -> IOError.Protocol(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Other(context) -> IOError.Other(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
+        .Unsupported(context) -> IOError.Unsupported(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         // Canonical Core's ResourceLimit is ProcessResourceLimit, not IOContext.
         // Preserve its typed identity; context attachment remains gated #3593.
         .ResourceLimit(_) -> error

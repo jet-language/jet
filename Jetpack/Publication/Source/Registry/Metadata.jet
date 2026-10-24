@@ -1,7 +1,7 @@
 // Source/Publish/Registry.rs:2397-2804. Metadata changes no artifact bytes:
 // canonical is only the one-line lock field; the artifact reader/hash binds
 // the original bytes. Protocol JSON and SemVer have their canonical owners.
-// Gates: JSON #3598/#4262; SemVer #4414/#4303; InvalidData #4409;
+// Gates: JSON #3598/#4262; SemVer #4414/#4303; InvalidData (CORE-GAPS 11);
 // held Foundation file authority #3593; no separate artifact IO mechanism.
 PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE :: "registry.json"
 PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES :: 1048576
@@ -244,5 +244,5 @@ fn publication_validate_registry_dependency_name(name: String) IOError! {
     }
 }
 fn publication_invalid_registry_metadata(detail: String) -> IOError Never! {
-    IOError.InvalidData(IOContext{operation: .Read, resource: Val(PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE), os_code: None, cause: Val(detail)})
+    publication_read_error(.InvalidInput, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE, detail)
 }

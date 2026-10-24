@@ -60,11 +60,12 @@ fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]
     }
     parsed :: publication_registry_host_and_port(authority) ?? return Err(pkg_fetch_git_bad(err.detail))
     if parsed.host == "" || parsed.host.starts_with("-") || parsed.host.contains("@") || parsed.host.contains("\\") -> return Err(pkg_fetch_git_bad("the URL has no valid host"))
-    loop character in parsed.host.chars() { if character.is_whitespace() -> return Err(pkg_fetch_git_bad("the URL has an invalid host")) }
+    host_words :: trust_text_words(parsed.host)
+    if host_words.len() != 1 || host_words[0] != parsed.host -> return Err(pkg_fetch_git_bad("the URL has an invalid host"))
     port :: parsed.port ?? if scheme == "https" -> 443 else if scheme == "http" -> 80 else if scheme == "git" -> 9418 else -> 22
     answers :: publication_dns.jet_http_build_resolve(parsed.host, port) ?? return Err(pkg_fetch_git_bad("could not resolve the destination: {err}"))
     if !publication_addresses_public(answers) -> return Err(pkg_fetch_git_bad("the destination resolves to a non-public address"))
-    transport :: PublicationRegistryTransport.Network(scheme, parsed.host, port, parsed.port != None, answers[0])
+    transport :: PublicationRegistryTransport.Network{scheme: scheme, host: parsed.host, port: port, explicit_port: parsed.port != None, address: answers[0]}
     Ok(PackageFetchGitTransport{network: Val(transport), local: None, remote: transport.remote(url)})
 }
 fn pkg_fetch_git_command(transport: PackageFetchGitTransport) -[FS, Env, Exec]> ProcessSpec PackageFetchError! {
@@ -76,7 +77,7 @@ fn pkg_fetch_git_resolve_ref(transport: PackageFetchGitTransport, selector: Stri
     pkg_fetch_git_revision(selector, false)
     receipt :: pkg_fetch_git_command(transport).args_extend([String]{"ls-remote", "--exit-code", "--", transport.remote, selector}).run() ?? return Err(pkg_fetch_git_bad("couldn't resolve Git ref: {err}"))
     if !receipt.success -> return Err(pkg_fetch_git_bad("couldn't resolve git ref `{selector}` at `{transport.remote}`"))
-    fields :: receipt.output.split_whitespace().to_list()
+    fields :: trust_text_words(receipt.output)
     if fields.len() == 0 -> return Err(pkg_fetch_git_bad("git ref `{selector}` not found"))
     pkg_fetch_git_revision(fields[0], true)
     Ok(fields[0])
@@ -91,12 +92,11 @@ fn pkg_fetch_git_snapshot(transport: PackageFetchGitTransport, url: String, revi
     parent :: foundation_open_directory_authority(parent_path, true) ?? return Err(pkg_fetch_git_bad("couldn't create git cache directory: {err}"))
     if parent.child(prefix) == {
         .Ok(existing) -> return pkg_source_snapshot_authority(existing) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
-        .Err(error) -> if error != .NotFound(_) -> return Err(pkg_fetch_git_bad("couldn't open git cache: {error}"))
+        .Err(error) -> if !(error == .NotFound(_)) -> return Err(pkg_fetch_git_bad("couldn't open git cache: {error}"))
     }
     stage :: parent.private_child("fetch") ?? return Err(pkg_fetch_git_bad("couldn't create temporary git cache: {err}"))
     stage_name :: files.basename(stage.path())
-    result :: pkg_fetch_git_populate(transport, stage, revision)
-    if result == .Err(error) {
+    if pkg_fetch_git_populate(transport, stage, revision) == .Err(error) {
         parent.remove_tree(stage_name).drop("remove the owned failed Git staging directory")
         return Err(error)
     }
@@ -112,7 +112,7 @@ fn pkg_fetch_git_snapshot(transport: PackageFetchGitTransport, url: String, revi
         .Err(error) -> {
             close(^snapshot)
             parent.remove_tree(stage_name).drop("remove losing owned Git staging directory")
-            if error != .AlreadyExists(_) -> return Err(pkg_fetch_git_bad("couldn't publish git cache: {error}"))
+            if !(error == .AlreadyExists(_)) -> return Err(pkg_fetch_git_bad("couldn't publish git cache: {error}"))
             winner :: parent.child(prefix) ?? return Err(pkg_fetch_git_bad("couldn't open concurrent git cache: {err}"))
             pkg_source_snapshot_authority(winner) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
         }
@@ -123,8 +123,8 @@ fn pkg_fetch_git_populate(transport: PackageFetchGitTransport, stage: Foundation
     receipt :: clone.args_extend([String]{"clone", "--quiet", "--", transport.remote, "."}).run() ?? return Err(pkg_fetch_git_bad("failed to clone: {err}"))
     if !receipt.success -> return Err(pkg_fetch_git_bad("failed to clone `{transport.remote}`"))
     checkout :: stage.process_directory(provider_hardened_git_command(), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git checkout authority: {err}"))
-    receipt :: checkout.args_extend([String]{"checkout", "--quiet", revision}).run() ?? return Err(pkg_fetch_git_bad("couldn't check out revision: {err}"))
-    if !receipt.success -> return Err(pkg_fetch_git_bad("couldn't check out revision `{revision}`"))
+    checked :: checkout.args_extend([String]{"checkout", "--quiet", revision}).run() ?? return Err(pkg_fetch_git_bad("couldn't check out revision: {err}"))
+    if !checked.success -> return Err(pkg_fetch_git_bad("couldn't check out revision `{revision}`"))
     stage.revalidate() ?? return Err(pkg_fetch_git_bad("Git cache authority changed: {err}"))
 }
 fn pkg_fetch_git_node(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, url: String, selector: GitSelector, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
@@ -150,7 +150,7 @@ fn pkg_fetch_git_node(verification: &StoreVerification, roots: HangarRoots, cont
     rev :: revision ?? panic("Git revision resolution is exhaustive")
     snapshot :: pkg_fetch_git_snapshot(transport, url, rev)
     locked :: LockedRevision{rev: rev, tree_hash: snapshot.content_hash, last_modified: time.unix_ns() /% 1000000000}
-    result :: pkg_fetch_source_node(&verification, roots, context, &resolver, name, .Git(url, pkg_lock_git_selector_str(selector)), Val(locked), snapshot, chain)
+    result :: pkg_fetch_source_node(&verification, roots, context, &resolver, name, .Git{url: url, selector: pkg_lock_git_selector_str(selector)}, Val(locked), snapshot, chain)
     close(^snapshot)
     result
 }

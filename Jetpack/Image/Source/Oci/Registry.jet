@@ -96,7 +96,7 @@ fn image_parse_registry_reference(reference: String) -> RegistryReference ImageE
     authority :: host_split.before
     if !image_registry_authority_is_safe(authority) -> return Err(image_invalid("OCI registry reference has an unsafe host"))
     parts := host_split.after.split("/").to_list()
-    leaf :: parts.pop() ?? ""
+    leaf :: &parts.pop() ?? ""
     if leaf == "" -> return Err(image_invalid("OCI registry reference has no image name"))
     loop part in parts {
         if part == "" -> return Err(image_invalid("OCI registry repository has an empty path component"))
@@ -254,11 +254,11 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
     if request.body != None -> spec = spec.stdin(.Stream)
     child := spec.spawn() ?? return Err(image_invalid("OCI registry adapter could not start: {err}"))
     if request.body == .Val(body) {
-        if &child.stdin.write_all(body) == .Err(error) {
+        if child.stdin.write_all(body) == .Err(error) {
             image_abandon_registry_child(&child)
             return Err(ImageError.IO(error))
         }
-        &child.stdin.close()
+        child.stdin.close()
     }
     stdout := [U8]{}
     loop {
@@ -273,7 +273,7 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
             return Err(image_invalid("OCI registry response exceeded its bound"))
         }
     }
-    receipt :: &child.wait()
+    receipt :: child.wait()
     stderr :: image_bounded_bytes_text(receipt.errors.bytes())
     if !receipt.success && stdout.len() == 0 -> return Ok(RegistryResponse{status: 0, headers: [U8]{}, stderr})
     separator := stdout.len() - 1
@@ -288,8 +288,8 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
 
 // Rust `child.kill(); child.wait()` after an abandoned exchange.
 fn image_abandon_registry_child(child: &ProcessChild) -[Exec, Time.Wait]> {
-    image_kill_quiet(child)
-    child.wait() ?? return
+    image_kill_quiet(&child)
+    _ :: child.wait() ?? return
 }
 
 fn image_kill_quiet(child: &ProcessChild) -[Exec]> {
@@ -308,9 +308,9 @@ fn image_header_value(headers: [U8], wanted: String) -> String? Never! {
         colon := 0
         loop colon < line.len() && Int.from_u8(line[colon]) != 58 -> colon += 1
         if colon >= line.len() -> next
-        name :: String.from_bytes(line[0..<colon]) ?? next
+        name :: String.from_bytes(line[0..<colon].copy()) ?? next
         if pkg_ascii_lower(name.trim()) != wanted_lower -> next
-        return Val(String.from_bytes_lossy(line[(colon + 1)..<line.len()]).trim())
+        return Val(String.from_bytes_lossy(line[(colon + 1)..<line.len()].copy()).trim())
     }
     None
 }

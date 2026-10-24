@@ -170,7 +170,7 @@ fn publication_validate_registry_transport(registry: PublicationRegistryConfig) 
         .Network(scheme, host, port, explicit_port) -> {
             answers :: publication_dns.jet_http_build_resolve(host, port) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "could not resolve registry host: {err}")})
             if !publication_addresses_public(answers) -> return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "registry host resolves to a non-public address")})
-            Ok(PublicationRegistryTransport.Network(scheme, host, port, explicit_port, answers[0]))
+            Ok(PublicationRegistryTransport.Network{scheme: scheme, host: host, port: port, explicit_port: explicit_port, address: answers[0]})
         }
     }
 }

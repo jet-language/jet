@@ -276,7 +276,7 @@ enum ServicePresetKind {
 
     // The foreground start command for `port`, keeping state in `data_dir`.
     fn run(self, port: Int, data_dir: String) -> [String] Never! {
-        data :: data_dir
+        data :: data_dir.copy()
         if self == {
             .Redis -> [String]{"redis-server", "--bind", "127.0.0.1", "--port", "{port}", "--daemonize", "no", "--dir", data}
             .Postgres -> [String]{"postgres", "-D", data, "-h", "127.0.0.1", "-p", "{port}"}

@@ -86,6 +86,7 @@ fn store_test_start_cache_server(roots: HangarRoots, routes: [String: [U8]]) -> 
         files.write_bytes(path, route.value) ?? panic("route body")
     }
     mux :: http_server.mux()
+    // workaround #5940(a): a catch-all route, not `http_server.static_files`.
     mux.get("/*path", (path: String) -> store_nix_test_site_response(site, path))
     server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind cache server")
     address :: server.local_addr() ?? panic("cache server address")

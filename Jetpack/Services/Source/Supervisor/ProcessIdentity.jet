@@ -1,7 +1,8 @@
 // Process identity, liveness, and group stop for supervised services. A
 // saved PID alone can later name a stranger's program, so every liveness
-// claim and every signal first checks the saved start identity
-// (`process.identity`, `process.find`, RunningProcess).
+// claim and every signal first checks the saved start identity. Core has no
+// process start identity or lookup (CORE-GAPS 9a/9b), so on Linux both are
+// read from /proc here, with Rust's exact token; other hosts fail closed.
 // Core starts every child in its own process group so
 // the direct `run:` command leads its group and a stop reaches its helpers.
 
@@ -9,6 +10,7 @@ SERVICES_AUTHORITY_STOP_TIMEOUT_MS :: 3000
 SERVICES_AUTHORITY_STOP_POLL_MS :: 25
 SERVICES_DEFAULT_GRACE_MS :: 3000
 SERVICES_MAX_READY_PROBE_MS :: 750
+SERVICES_GUARDIAN_UNAVAILABLE :: "service guardian job objects are unavailable: Core has no process containment"
 
 // Which stop request to send.
 enum StopAction {
@@ -32,17 +34,51 @@ enum ServiceHost {
     InProcess
 }
 
-// The platform-tagged start token of `pid`, or None when no such process.
-fn services_process_start_identity(pid: Int) -[Env]> String? ServicesError! {
-    found :: process.identity(pid) ?? return Err(ServicesError.new("couldn't probe service process identity {pid}: {err}"))
-    identity :: found ?? return Ok(None)
-    Ok(Val(identity.start))
+// One /proc/<pid>/stat record: the state letter (field 3) and the start
+// token from starttime (field 22). Fields are counted after the LAST `)`
+// because `comm` (field 2) may hold spaces and parentheses. None when no
+// such process (ENOENT, or ESRCH while procfs resolves the entry).
+struct ServicesProcStat {
+    state: String
+    start: String
 }
 
-// Whether the process named by `state` is still the same live process.
-fn services_process_alive(state: ServiceProcessState) -[Exec, Env]> Bool ServicesError! {
-    found :: process.find(state.identity()) ?? return Err(ServicesError.new("couldn't probe service process {state.pid}: {err}"))
-    Ok(found != None)
+fn services_read_proc_stat(pid: Int) -[FS]> ServicesProcStat? ServicesError! {
+    path :: "/proc/{pid}/stat"
+    stat :: if services_read_text_bounded(path, SERVICES_MAX_STATE_BYTES) == {
+        .Ok(text) -> text
+        .Err(error) -> {
+            if services_is_not_found(error) -> return Ok(None)
+            return Err(ServicesError.new("couldn't read service process identity `{path}`: {error}"))
+        }
+    }
+    fields :: stat.cut_last(")") ?? return Err(ServicesError.new("service process identity for {pid} is malformed"))
+    words :: trust_text_words(fields.after)
+    if words.len() < 20 -> return Err(ServicesError.new("service process identity for {pid} is incomplete"))
+    start :: if Int.parse(words[19]) == {
+        .Ok(value) -> value
+        .Err(_) -> -1
+    }
+    if start < 0 -> return Err(ServicesError.new("service process identity for {pid} has an invalid start time"))
+    Ok(Val(ServicesProcStat{state: words[0].copy(), start: "linux-proc-start:{words[19]}"}))
+}
+
+// The platform-tagged start token of `pid` (Rust `process_start_identity`),
+// or None when no such process.
+fn services_process_start_identity(pid: Int) -[FS, Env]> String? ServicesError! {
+    if !sys.is_linux() -> return Err(ServicesError.new("service process identity is unavailable on this platform"))
+    found :: services_read_proc_stat(pid)
+    record :: found ?? return Ok(None)
+    Ok(Val(record.start))
+}
+
+// Whether the process named by `state` is still the same live process: its
+// start identity matches and it is not a zombie.
+fn services_process_alive(state: ServiceProcessState) -[FS, Env]> Bool ServicesError! {
+    if !sys.is_linux() -> return Err(ServicesError.new("service process liveness is unavailable on this platform"))
+    found :: services_read_proc_stat(state.pid)
+    record :: found ?? return Ok(false)
+    Ok(record.start == state.start_identity && record.state != "Z")
 }
 
 // The start identity must match before liveness is even asked.
@@ -52,7 +88,7 @@ fn services_process_matches_start_with(expected: String, identity: fn() -> Strin
     alive()
 }
 
-fn services_process_matches_start(state: ServiceProcessState) -[Exec, Env]> Bool ServicesError! {
+fn services_process_matches_start(state: ServiceProcessState) -[FS, Env]> Bool ServicesError! {
     services_process_matches_start_with(state.start_identity, () -> services_process_start_identity(state.pid), () -> services_process_alive(state))
 }
 
@@ -128,20 +164,18 @@ fn services_run_authority_stop_action(state: ServiceProcessState, action: StopAc
             receipt :: process.cmd([String]{"systemctl", "--user", "kill", "--kill-who=all", "--signal={signal}", unit}).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't run service authority {signal}: {err}"))
             if !receipt.success -> return Err(ServicesError.new("service authority {signal} exited with {env_shell_exit_status_text(receipt)}"))
         }
-        .WindowsGuardianJobObject(_) -> {
-            // The guardian Job Object stays reachable while it has live members.
-            found :: process.find(state.identity()) ?? return Err(ServicesError.new("couldn't open service guardian job: {err}"))
-            running :: found ?? return
-            result :: if action == StopAction.Term -> running.terminate() else -> running.kill()
-            if result == .Err(error) -> return Err(ServicesError.new("couldn't stop service guardian job: {error}"))
-        }
+        .WindowsGuardianJobObject(_) -> Err(ServicesError.new(SERVICES_GUARDIAN_UNAVAILABLE))
         .TestProcessGroup -> {
-            // A live leader stops through its verified identity; a group whose
-            // leader already exited is signalled by process group number.
-            found :: process.find(state.identity()) ?? return services_run_stop_action(state.pid, action)
-            running :: found ?? return services_run_stop_action(state.pid, action)
-            result :: if action == StopAction.Term -> running.terminate() else -> running.kill()
-            if result == .Err(error) -> return Err(ServicesError.new("couldn't run service {action.signal_name()}: {error}"))
+            // The group is signalled by its number. The leader's identity is
+            // re-checked right before the signal: a live process with another
+            // start identity owns the PID now and is never signalled. A group
+            // whose leader already exited is still signalled. The window
+            // between this check and `kill` is the PID-reuse window Rust had.
+            found :: services_read_proc_stat(state.pid)
+            if found == .Val(record) {
+                if record.start != state.start_identity -> return Err(ServicesError.new("service process {state.pid} no longer has its recorded start identity"))
+            }
+            services_run_stop_action(state.pid, action)
         }
         .Unsupported -> Err(ServicesError.new("service authority is unavailable"))
     }
@@ -181,8 +215,7 @@ fn services_persisted_authority_is_active(state: ServiceProcessState, authority:
         }
         .WindowsGuardianJobObject(_) -> {
             if !sys.is_windows() -> return Ok(false)
-            found :: process.find(state.identity()) ?? return Err(ServicesError.new("couldn't inspect service guardian: {err}"))
-            Ok(found != None)
+            Err(ServicesError.new(SERVICES_GUARDIAN_UNAVAILABLE))
         }
         .Unsupported -> Ok(false)
     }
@@ -285,7 +318,7 @@ fn services_abandon_child(child: &ProcessChild) -[Exec, Time.Wait]> {
 
 // Milliseconds on the host clock, for bounded waits.
 fn services_now_ms() -[Time]> Int Never! {
-    time.unix_ns() / 1000000
+    time.unix_ns() /% 1000000
 }
 
 // The platform authority for one service generation. On Linux the service
@@ -318,14 +351,12 @@ fn services_unit_safe_name(name: String) -> String Never! {
     out.join("")
 }
 
-// Bind the spawned child to its authority. On Windows the guardian is the
-// Job Object Core created for the child, named in its identity.
-fn services_attach_authority(authority: ServiceAuthority, identity: ProcessIdentity) -> ServiceAuthority ServicesError! {
+// Bind the spawned child to its authority. A Windows guardian needs the Job
+// Object Core would create for the child; Core has no process containment
+// (CORE-GAPS 9d), so it fails closed.
+fn services_attach_authority(authority: ServiceAuthority) -> ServiceAuthority ServicesError! {
     if authority == {
-        .WindowsGuardianJobObject(_) -> {
-            guardian :: identity.containment ?? return Err(ServicesError.new("couldn't assign service to its guardian job object: the child has no containment"))
-            Ok(ServiceAuthority.WindowsGuardianJobObject{guardian: guardian})
-        }
+        .WindowsGuardianJobObject(_) -> Err(ServicesError.new(SERVICES_GUARDIAN_UNAVAILABLE))
         .Unsupported -> Err(ServicesError.new("service authority is unavailable"))
         else -> Ok(authority)
     }

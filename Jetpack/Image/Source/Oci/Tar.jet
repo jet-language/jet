@@ -1,27 +1,65 @@
 // The deterministic uncompressed layer tar (Rust `build_tar`). Every entry is
-// a regular file with mtime 0 (the Unix epoch), uid/gid 0, and no owner names,
-// written in the caller's (already path-sorted) order, then the two zero
-// end-of-archive blocks. Core's tar writer owns the ustar
-// header encoding and checksum; the layer streams through a stage file beside
-// the layout because Core has no in-memory byte writer.
-
-// Build one layer tar from `layer_files` through the stage file `stage`, which
-// never outlives the call.
-fn image_build_tar(layer_files: [LayerFile], stage: String) -[FS]> [U8] ImageError! {
-    image_remove_stale_temporary(stage)
-    bytes :: image_write_tar_stage(layer_files, stage) ?? {
-        image_remove_quiet(stage)
-        return Err(err)
-    }
-    image_remove_quiet(stage)
-    Ok(bytes)
+// a ustar regular file with mtime 0 (the Unix epoch), uid/gid 0, and no owner
+// names, written in the caller's (already path-sorted) order, then the two
+// zero end-of-archive blocks. Core's tar writer (`archive.tar_add`) fixes every
+// mode at 0644, so the header is encoded here, field for field as in Rust; a
+// path longer than the 100-byte name field is truncated, as there.
+fn image_build_tar(layer_files: [LayerFile]) -> [U8] Never! {
+    out := [U8]{}
+    loop file in layer_files -> image_write_tar_entry(&out, file)
+    loop _ in 0..<1024 -> &out.push(U8{0})
+    out
 }
 
-fn image_write_tar_stage(layer_files: [LayerFile], stage: String) -[FS]> [U8] ImageError! {
-    writer := files.create(stage, if_exists: .Refuse, links: .Refuse)
-    layer := archive.tar_writer(&writer)
-    loop file in layer_files -> &layer.add_file(file.path, file.data, mode: file.mode)
-    &layer.finish()
-    &writer.fsync()
-    Ok(files.read_bytes(stage))
+fn image_write_tar_entry(out: &[U8], file: LayerFile) Never! {
+    header := [U8]{}
+    loop _ in 0..<512 -> &header.push(U8{0})
+    image_tar_set(&header, 0, 100, file.path.bytes())
+    image_tar_set(&header, 100, 8, image_tar_octal(file.mode, 7))
+    image_tar_set(&header, 108, 8, image_tar_octal(0, 7))
+    image_tar_set(&header, 116, 8, image_tar_octal(0, 7))
+    image_tar_set(&header, 124, 12, image_tar_octal(file.data.len(), 11))
+    image_tar_set(&header, 136, 12, image_tar_octal(0, 11))
+    header[156] = U8{48}
+    image_tar_set(&header, 257, 6, [U8]{U8{117}, U8{115}, U8{116}, U8{97}, U8{114}, U8{0}})
+    image_tar_set(&header, 263, 2, [U8]{U8{48}, U8{48}})
+    // The checksum field reads as spaces while summing, then holds six octal
+    // digits, a NUL, and a space.
+    loop i in 148..<156 -> header[i] = U8{32}
+    checksum := 0
+    loop byte in header -> checksum += Int.from_u8(byte)
+    field := image_tar_octal(checksum, 6)
+    &field.push(U8{32})
+    image_tar_set(&header, 148, 8, field)
+    loop byte in header -> &out.push(byte)
+    loop byte in file.data -> &out.push(byte)
+    padding :: (512 - file.data.len() % 512) % 512
+    loop _ in 0..<padding -> &out.push(U8{0})
+}
+
+// Copy `bytes` into `header[offset..<offset + length]`, truncated to `length`;
+// the rest of the field stays NUL.
+fn image_tar_set(header: &[U8], offset: Int, length: Int, bytes: [U8]) Never! {
+    count :: if bytes.len() < length -> bytes.len() else -> length
+    loop i in 0..<count -> header[offset + i] = bytes[i]
+}
+
+// `value` as at least `digits` zero-padded octal digits, then a NUL.
+fn image_tar_octal(value: Int, digits: Int) -> [U8] Never! {
+    reversed := [U8]{}
+    rest := value
+    loop {
+        &reversed.push(U8{48 + rest.bit_and(7)})
+        rest = rest >> 3
+        if rest == 0 -> break
+    }
+    loop reversed.len() < digits -> &reversed.push(U8{48})
+    out := [U8]{}
+    index := reversed.len() - 1
+    loop index >= 0 {
+        &out.push(reversed[index])
+        index -= 1
+    }
+    &out.push(U8{0})
+    out
 }

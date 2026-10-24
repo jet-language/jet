@@ -16,10 +16,6 @@ struct ServiceProcessState {
     start_identity: String
     containment: String?
 
-    fn identity(self) -> ProcessIdentity Never! {
-        ProcessIdentity{pid: self.pid, start: self.start_identity, containment: self.containment}
-    }
-
     fn encode(self) -> String Never! {
         text := "version=1\npid={self.pid}\nstart={self.start_identity}\n"
         if self.containment == .Val(name) -> text = "{text}containment={name}\n"
@@ -263,7 +259,7 @@ fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? Servic
         }
     }
     trimmed :: text.trim()
-    if Int.parse(trimmed) == .Val(legacy) {
+    if Int.parse(trimmed) == .Ok(legacy) {
         if legacy <= 0 || legacy > 4294967295 -> return Err(invalid)
         return Ok(Val(PersistedProcessState.LegacyPID(legacy)))
     }

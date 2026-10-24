@@ -101,8 +101,11 @@ fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: ShellEn
             // durable evidence; only a still-running failed service is cleaned.
             still_running :: services_health_one_with_env(project_dir, Val(env), plan).is_running()
             if !was_running && supervisor_error == None && still_running -> &cleanup_indexes.push(index)
-            cleanup :: services_down_ordered(host, project_dir, plans, cleanup_indexes)
-            cleanup_failed :: if cleanup == .Err(_) -> true else -> false
+            cleanup :: if services_down_ordered(host, project_dir, plans, cleanup_indexes) == {
+                .Ok(_) -> ServicesError?{None}
+                .Err(failure) -> Val(failure)
+            }
+            cleanup_failed :: cleanup != None
             if !was_running && !cleanup_failed {
                 dir :: services_service_dir(project_dir, plan.name)
                 if services_read_lifecycle(dir) == .Ok(found) {
@@ -112,7 +115,8 @@ fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: ShellEn
                     }
                 }
             }
-            return Err(services_with_cleanup(ServicesError.new(current_error), cleanup))
+            if cleanup == .Val(failure) -> return Err(ServicesError.new("{current_error}; cleanup failed: {failure.message}"))
+            return Err(ServicesError.new(current_error))
         }
         services_mark_lifecycle_ready(project_dir, plan)
         if !was_running -> &started.push(index)
@@ -291,7 +295,7 @@ fn services_logs(project_dir: String, name: String) -[FS]> String Never! {
 // Structured lifecycle facts for `services health --json`; the state file
 // stays the source of truth.
 fn services_lifecycle_json(project_dir: String, name: String) -[FS]> String? ServicesError! {
-    found :: services_read_lifecycle(services_service_dir(project_dir, name)) ?? return Ok(None)
+    found :: services_read_lifecycle(services_service_dir(project_dir, name))
     facts :: found ?? return Ok(None)
     authority :: services_authority_from_lifecycle(facts) ?? return Ok(None)
     after := [Dyn]{}

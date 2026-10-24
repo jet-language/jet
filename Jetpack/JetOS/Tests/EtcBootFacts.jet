@@ -120,7 +120,7 @@ fn jetos_identity_test_system(options: [OptionPlan]) -> SystemPlan Never! {
 
 // The lease is created by Store's real snapshot path; no test lease/carrier
 // replaces the production ownership, identity, or validation mechanism.
-fn jetos_identity_test_realized(verification: &StoreVerification, root: String, name: String, original: String, projection: String?) -[FS, Env, Exec, Rand, Time.Wait]> JetOSRealizedPackage Never! {
+fn jetos_identity_test_realized(verification: &StoreVerification, root: String, name: String, original: String, projection: String?) -[FS, Env, Exec, Rand, Time]> JetOSRealizedPackage Never! {
     entry :: StoreEntry{id: "identity-fixture", name: name, version: "1", reference: "kernel@jetpack", out: files.join(root, "missing-output"), bin: "", rlib: "", envelope: Envelope.empty(), cache_identity: CacheIdentity.empty(), references: [String]{}, named_outputs: [String: String]{}, platform_artifact_kind: "", producer_record: "", receipt: "", realized_at: 0, last_used_at: 0}
     lease :: store_snapshot_lease(&verification, HangarRoots.at(root), entry) ?? panic("create real snapshot lease")
     JetOSRealizedPackage{entry: entry, lease: lease, original_out: original, original_reference_text: "original@jetpack", consumption_override: projection}

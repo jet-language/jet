@@ -23,10 +23,7 @@ fn image_test_spec(layer_files: [LayerFile]) -> OCIBuildSpec {
 }
 
 fn image_test_tar(layer_files: [LayerFile]) -> [U8] {
-    dir :: image_test_dir("jet-oci-test-tar-")
-    tar :: image_build_tar(layer_files, files.join(dir, ".layer.tar.partial")) ?? panic("build tar")
-    image_remove_all_quiet(dir)
-    tar
+    image_build_tar(layer_files)
 }
 
 fn image_test_build(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {

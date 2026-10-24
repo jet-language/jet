@@ -686,6 +686,7 @@ fn provider_luarocks_manifest_versions(raw: String, name: String) -> [String] Re
     versions := [String]{}
     cursor := package
     loop {
+        // workaround #5940(b): no `a ?? b ?? break` chain.
         open := provider_registry_find(cursor, "[\"", 0) ?? -1
         if open < 0 -> open = provider_registry_find(cursor, "['", 0) ?? -1
         if open < 0 -> break
