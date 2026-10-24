@@ -1,0 +1,59 @@
+fn first(n: Int) -> Int? {
+    if n > 2 -> return None
+    Val(n)
+}
+
+fn walk() {
+    i := 0
+    loop {
+        a :: first(i) ?? first(i + 1) ?? break
+        print("one {a}")
+        i += 1
+    }
+    after := 1
+    print("after {after}")
+    j := 0
+    loop {
+        b :: first(j) ?? first(j + 5) ?? first(j + 6) ?? {
+            print("stop {j}")
+            break
+        }
+        print("two {b}")
+        j += 1
+    }
+    done := 2
+    print("done {done}")
+    k := 0
+    loop {
+        c :: first(k) ?? {
+            print("miss {k}")
+            first(k + 9) ?? break
+        }
+        print("three {c}")
+        k += 1
+    }
+    later := 3
+    print("later {later}")
+    outer :: loop {
+        m := 0
+        loop {
+            d :: first(m) ?? first(m + 7) ?? break(outer)
+            print("four {d}")
+            m += 1
+        }
+    }
+    last := 4
+    print("last {last}")
+    p := 0
+    loop {
+        g :: if p < 9 -> first(p) ?? first(p + 8) ?? break else -> 0
+        print("five {g}")
+        p += 1
+    }
+    fin := 5
+    print("fin {fin}")
+}
+
+fn run() {
+    walk()
+}

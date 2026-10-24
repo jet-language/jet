@@ -2779,20 +2779,31 @@ fn sema_stmt_refutable_label_is_nested(nested_labels: [String], name: String) ->
 }
 
 // A `?? break` fallback leaves the enclosing loop exactly like a statement
-// `break`, so it counts as a reachable loop exit.
+// `break`, so it counts as a reachable loop exit. The `break` can sit at any
+// depth of the fallback: `??` is right-associative, so `a ?? b ?? break` is
+// `a ?? (b ?? break)` with the exit in a value fallback, and a block
+// fallback's final value or a `return` value can hold a chain of its own.
 fn sema_stmt_refutable_fallback_can_break(fallback: OrFallback, nested_labels: [String], allow_unlabelled: Bool) -> Bool Never! {
     if fallback == {
         .Break(_) -> allow_unlabelled
         .BreakLabel(name, _) -> !sema_stmt_refutable_label_is_nested(nested_labels, name)
-        .Block(body, _, _) -> sema_stmt_refutable_loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+        .Value(value) -> sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabelled)
+        .Block(body, value, _) -> sema_stmt_refutable_loop_body_can_break_inner(body, nested_labels, allow_unlabelled) || sema_stmt_refutable_optional_expr_can_break(value, nested_labels, allow_unlabelled)
+        .Return(value, _) -> sema_stmt_refutable_optional_expr_can_break(value, nested_labels, allow_unlabelled)
         else -> false
     }
+}
+
+fn sema_stmt_refutable_optional_expr_can_break(value: Expr?, nested_labels: [String], allow_unlabelled: Bool) -> Bool Never! {
+    if value == .Val(expr) -> return sema_stmt_refutable_expr_can_break(expr, nested_labels, allow_unlabelled)
+    false
 }
 
 fn sema_stmt_refutable_expr_can_break(expr: Expr, nested_labels: [String], allow_unlabelled: Bool) -> Bool Never! {
     if expr == {
         .Paren(inner, _, _) -> sema_stmt_refutable_expr_can_break(inner, nested_labels, allow_unlabelled)
         .OrFallback(value, fallback, _, _, _) -> sema_stmt_refutable_fallback_can_break(fallback, nested_labels, allow_unlabelled) || sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabelled)
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> sema_stmt_refutable_expr_can_break(cond, nested_labels, allow_unlabelled) || sema_stmt_refutable_loop_body_can_break_inner(then_body, nested_labels, allow_unlabelled) || sema_stmt_refutable_expr_can_break(then_value, nested_labels, allow_unlabelled) || sema_stmt_refutable_loop_body_can_break_inner(else_body, nested_labels, allow_unlabelled) || sema_stmt_refutable_expr_can_break(else_value, nested_labels, allow_unlabelled)
         else -> false
     }
 }
