@@ -4,9 +4,10 @@
 #Export(c) fn jet_string_count_bytes(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_len(value)) }
 
 // `s.hash()`: the U64 bits of a non-cryptographic hash of the UTF-8 bytes,
-// read in place (no copy). Whole little-endian words, then each tail byte,
-// are folded by multiply-xorshift; murmur3's fmix64 finishes.
-// Equal strings hash equal; values are stable within one process run only.
+// read in place (no copy). Whole little-endian words, then the tail bytes
+// packed into one last word, are folded by multiply-xorshift; murmur3's
+// fmix64 finishes. Equal strings hash equal; values are stable within one
+// process run only.
 #Export(c) fn jet_string_hash(value: I64) -> I64 {
     data :: rt_text_data(value)
     len :: rt_text_len(value)
@@ -17,9 +18,15 @@
         hash = rt_text_hash_fold(hash, rt_text_word(data + at))
         at += I64{8}
     }
-    loop at < len {
-        hash = rt_text_hash_fold(hash, rt_text_byte(data + at))
-        at += I64{1}
+    if at < len {
+        tail := I64{0}
+        shift := I64{0}
+        loop at < len {
+            tail = tail.bit_or(rt_text_byte(data + at) << shift)
+            shift += I64{8}
+            at += I64{1}
+        }
+        hash = rt_text_hash_fold(hash, tail)
     }
     hash = hash.bit_xor((hash >> I64{33}).bit_and(I64{2147483647}))
     hash = wrapping(hash * I64{-49064778989728563})

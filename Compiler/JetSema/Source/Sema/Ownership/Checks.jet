@@ -51,6 +51,10 @@ use jet_foundation.[
     Pattern,
     TCaptureFacts,
     pattern_binding_names,
+    NameRows,
+    name_rows,
+    name_rows_get_text,
+    name_rows_set,
 ]
 
 enum SemaOwnershipReferenceKind {
@@ -232,8 +236,9 @@ struct SemaOwnershipState {
     close_owners: [SemaOwnershipCloseOwner]
     // Only the parameter symbol of this exact consuming Close body is exempt.
     close_receiver_key: String
-    // Indices over declarations and references; previous rows link equal keys.
-    key_slots: [String:Int]
+    // Indices over declarations and references (key slots over interned
+    // keys, A1); previous rows link equal keys.
+    key_slots: NameRows
     key_facts: [SemaOwnershipKeyFacts]
     declaration_previous: [Int]
     // Scope buckets may hold stale rows; readers check the declaration itself.
@@ -387,7 +392,7 @@ fn sema_ownership_state_init() -> SemaOwnershipState Never! {
         persist_roots: [String]{},
         close_owners: [SemaOwnershipCloseOwner]{},
         close_receiver_key: "",
-        key_slots: [String:Int]{},
+        key_slots: name_rows(),
         key_facts: [SemaOwnershipKeyFacts]{},
         declaration_previous: [Int]{},
         active_rows: [[Int]]{},
@@ -689,21 +694,21 @@ fn sema_ownership_enter_scope(state: &SemaOwnershipState) Never! {
 // a declaration row on the undo trail while a fork is open.
 
 fn sema_ownership_key_slot(state: &SemaOwnershipState, key: String) -> Int Never! {
-    if state.key_slots.get(key) == .Val(slot) -> return slot
+    if name_rows_get_text(state.key_slots, key) == .Val(slot) -> return slot
     slot :: state.key_facts.len()
-    state.key_slots[key] = slot
+    name_rows_set(&state.key_slots, key, slot)
     &state.key_facts.push(SemaOwnershipKeyFacts{first: -1, last: -1, references: 0, writes: 0})
     slot
 }
 
 // The first (or last) declaration row of `key`, -1 for none.
 fn sema_ownership_first_row(state: SemaOwnershipState, key: String) -> Int Never! {
-    slot :: state.key_slots.get(key) ?? return -1
+    slot :: name_rows_get_text(state.key_slots, key) ?? return -1
     state.key_facts[slot].first
 }
 
 fn sema_ownership_last_row(state: SemaOwnershipState, key: String) -> Int Never! {
-    slot :: state.key_slots.get(key) ?? return -1
+    slot :: name_rows_get_text(state.key_slots, key) ?? return -1
     state.key_facts[slot].last
 }
 
@@ -726,7 +731,7 @@ fn sema_ownership_note_undo(state: &SemaOwnershipState, row: Int) Never! {
 // The counts the full recount gives `row`: the first row of a key holds
 // every reference to the key, any later row of the same key none.
 fn sema_ownership_canonical_counts(state: SemaOwnershipState, row: Int) -> SemaOwnershipKeyFacts Never! {
-    slot :: state.key_slots.get(state.declarations[row].key) ?? return SemaOwnershipKeyFacts{first: -1, last: -1, references: 0, writes: 0}
+    slot :: name_rows_get_text(state.key_slots, state.declarations[row].key) ?? return SemaOwnershipKeyFacts{first: -1, last: -1, references: 0, writes: 0}
     facts :: state.key_facts[slot]
     if facts.first != row -> return SemaOwnershipKeyFacts{first: facts.first, last: facts.last, references: 0, writes: 0}
     facts
@@ -751,7 +756,7 @@ fn sema_ownership_truncate_declarations(state: &SemaOwnershipState, count: Int) 
         row :: state.declarations.len() - 1
         fact :: &state.declarations.pop() ?? return
         previous :: &state.declaration_previous.pop() ?? -1
-        slot :: state.key_slots.get(fact.key) ?? next
+        slot :: name_rows_get_text(state.key_slots, fact.key) ?? next
         state.key_facts[slot].last = previous
         if state.key_facts[slot].first == row -> state.key_facts[slot].first = -1
     }
@@ -771,7 +776,7 @@ fn sema_ownership_truncate_references(state: &SemaOwnershipState, count: Int) Ne
     loop state.references.len() > count {
         reference :: &state.references.pop() ?? return
         if state.anchors.slots.get(reference.use_span.start) == .Val(anchor_slot) -> _ := &state.anchors.rows[anchor_slot].pop()
-        slot :: state.key_slots.get(reference.def_key) ?? next
+        slot :: name_rows_get_text(state.key_slots, reference.def_key) ?? next
         state.key_facts[slot].references -= 1
         if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes -= 1
     }
@@ -2460,7 +2465,7 @@ fn sema_ownership_binding_for_expr(state: &SemaOwnershipState, expr: Expr, scope
 // scanning the whole table, which holds every module-level symbol; a root bound
 // under another name falls back to the scan.
 fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
-    if scopes.name_slots.get(place.root) == .Val(slot) {
+    if sema_scope_name_slot(scopes, place.root) == .Val(slot) {
         loop position in scopes.name_positions[slot] {
             if scopes.bindings[position].symbol.id.key == place.root_key -> return scopes.bindings[position].symbol.kind == SymbolKind.Constant
         }

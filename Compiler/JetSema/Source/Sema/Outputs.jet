@@ -133,7 +133,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             &references.push(sema_output_import_reference(owner, owner.module_identity, name, binding.span, binding.visibility))
         } else {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, name)
-            if owner.import_binding_rows.get(name) == .Val(binding_row) {
+            if sema_registration_import_binding_named(owner, name) == .Val(binding_row) {
                 imported :: owner.imports[binding_row.import_index]
                 binding :: imported.bindings[binding_row.binding]
                 &references.push(sema_output_import_reference(owner, binding.target_module_identity, name, binding.symbol.span, imported.visibility))
@@ -206,7 +206,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             imported :: owner.imports[index]
             root_target = Val(imported.target_module_identity.copy())
             &references.push(sema_output_import_reference(owner, imported.target_module_identity, path.root, imported.declaration.alias_span, imported.visibility))
-        } else if owner.import_binding_rows.get(path.root) == .Val(binding_row) {
+        } else if sema_registration_import_binding_named(owner, path.root) == .Val(binding_row) {
             imported :: owner.imports[binding_row.import_index]
             binding :: imported.bindings[binding_row.binding]
             if binding.symbol.kind == SymbolKind.Import || binding.symbol.kind == SymbolKind.Module {

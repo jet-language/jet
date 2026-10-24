@@ -236,7 +236,7 @@ fn sema_call_never_type_args_valid(signature: Type, generic_params: [SemaInferen
 // (`funcs.get(name)`) is the call target even when a nearer value binding
 // shares the name; only without one does the nearer binding decide.
 fn sema_call_declared_function_index(scopes: SemaScopeTable, name: String) -> Int? {
-    slot :: scopes.name_slots.get(name) ?? return None
+    slot :: sema_scope_name_slot(scopes, name) ?? return None
     found := Int?{None}
     loop index in scopes.name_positions[slot] {
         if scopes.bindings[index].symbol.kind == SymbolKind.Function -> found = Val(index)

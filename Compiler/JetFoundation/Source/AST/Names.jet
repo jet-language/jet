@@ -132,3 +132,96 @@ fn name_table_grow(table: &NameTable) Never! {
     table.slots = ^slots
     table.mask = mask
 }
+
+// The low 30 bits of `text.hash()`: a small Int whose low bits index slots.
+// A lookup computes it once (in place, no byte copy) and passes it with the
+// spelling to every `NameRows` it visits.
+fn name_rows_hash(text: String) -> Int Never! {
+    Int.from_u64(text.hash().bit_and(U64{0x3fffffff}))
+}
+
+// A String -> Int map (A1): open addressing over each key's `s.hash()`.
+// A lookup hashes its key once and compares one candidate instead of
+// binary-searching String keys, and one hash serves every map a lookup
+// visits. Values are non-negative rows; -1 marks a removed key.
+struct NameRows {
+    texts: [String]
+    hashes: [Int]
+    rows: [Int]
+    // Open-addressing slots: 0 is empty, otherwise the key index plus one.
+    slots: [Int]
+    mask: Int
+}
+
+NAME_ROWS_INITIAL_SLOTS :: 16
+
+fn name_rows() -> NameRows Never! {
+    slots := [Int]{}
+    loop _ in 0..<NAME_ROWS_INITIAL_SLOTS -> &slots.push(0)
+    NameRows{texts: [String]{}, hashes: [Int]{}, rows: [Int]{}, slots: slots, mask: NAME_ROWS_INITIAL_SLOTS - 1}
+}
+
+// The key index of `text` (whose name_rows_hash is `hash`), if the map ever
+// held it.
+fn name_rows_key(map: NameRows, text: String, hash: Int) -> Int? Never! {
+    slot := hash.bit_and(map.mask)
+    loop map.slots[slot] != 0 {
+        key :: map.slots[slot] - 1
+        if map.hashes[key] == hash && map.texts[key] == text -> return Val(key)
+        slot = (slot + 1).bit_and(map.mask)
+    }
+    None
+}
+
+// Binds `text` to `row` (>= 0), replacing any earlier value.
+fn name_rows_set(map: &NameRows, text: String, row: Int) Never! {
+    hash :: name_rows_hash(text)
+    if name_rows_key(map, text, hash) == .Val(key) {
+        map.rows[key] = row
+        return
+    }
+    key :: map.texts.len()
+    // copy: the map keeps its own key; `text` stays with the caller.
+    &map.texts.push(text.copy())
+    &map.hashes.push(hash)
+    &map.rows.push(row)
+    if (key + 1) * 2 > map.mask {
+        name_rows_grow(&map)
+        return
+    }
+    slot := hash.bit_and(map.mask)
+    loop map.slots[slot] != 0 -> slot = (slot + 1).bit_and(map.mask)
+    map.slots[slot] = key + 1
+}
+
+// Rebuilds the slots at twice the capacity from the stored hashes.
+fn name_rows_grow(map: &NameRows) Never! {
+    capacity :: (map.mask + 1) * 2
+    mask :: capacity - 1
+    slots := [Int]{}
+    loop _ in 0..<capacity -> &slots.push(0)
+    loop key in 0..<map.texts.len() {
+        slot := map.hashes[key].bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = key + 1
+    }
+    map.slots = ^slots
+    map.mask = mask
+}
+
+// The value of `text` (whose name_rows_hash is `hash`), if bound.
+fn name_rows_get(map: NameRows, text: String, hash: Int) -> Int? Never! {
+    key :: name_rows_key(map, text, hash) ?? return None
+    if map.rows[key] < 0 -> return None
+    Val(map.rows[key])
+}
+
+fn name_rows_get_text(map: NameRows, text: String) -> Int? Never! {
+    name_rows_get(map, text, name_rows_hash(text))
+}
+
+// Unbinds `text`; its key stays for a later `name_rows_set`.
+fn name_rows_remove(map: &NameRows, text: String) Never! {
+    key :: name_rows_key(map, text, name_rows_hash(text)) ?? return
+    map.rows[key] = -1
+}

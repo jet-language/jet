@@ -38,6 +38,7 @@ use jet_foundation.[
     name_find,
     name_index,
     name_intern,
+    name_rows_get_text,
     name_table,
     Param,
     Program,
@@ -4133,7 +4134,7 @@ fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegis
         }
     }
     if derive_wave -> return jobs
-    module_index :: graph.module_rows.get(source_module.module_identity) ?? -1
+    module_index :: name_rows_get_text(graph.module_rows, source_module.module_identity) ?? -1
     loop (implementation_index, implementation) in source_module.impls {
         if codec_wave {
             if graph.codec_wave_rows.get("{module_index}:{implementation_index}") == None -> next
@@ -5502,7 +5503,7 @@ fn sema_graph_module_rollback(module_row: &SemaRegistrationModule, mark: SemaGra
     loop module_row.program.items.len() > mark.program_items -> _ := &module_row.program.items.pop()
     loop module_row.exports.len() > mark.exports -> _ := &module_row.exports.pop()
     if !appended || name == "" -> return
-    _ := &module_row.symbol_positions.remove(name)
+    sema_registration_forget_symbol_position(&module_row, name)
     _ := &module_row.declaration_positions.remove(name)
 }
 

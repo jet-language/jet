@@ -46,6 +46,10 @@ use jet_foundation.[
     Func,
     Namespace,
     StateTransition,
+    NameRows,
+    name_rows,
+    name_rows_get_text,
+    name_rows_set,
 ]
 
 enum SemaKnowledgePlane {
@@ -673,9 +677,9 @@ struct SemaScopeTable {
     frames: [SemaScopeFrame]
     bindings: [SemaScopeBinding]
     // Binding positions per name, ascending: `name_slots` maps a name to its
-    // row in `name_positions`. Every push goes through
+    // row in `name_positions` (interned spellings, A1). Every push goes through
     // sema_scope_push_binding, so name resolution never rescans `bindings`.
-    name_slots: [String:Int]
+    name_slots: NameRows
     name_positions: [[Int]]
     loop_labels: [SemaScopeLoopLabel]
     hardware_transfers: [SemaHardwareDMATransferFact]
@@ -1391,7 +1395,7 @@ fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
         saved: SemaScopeTable{
             frames: [SemaScopeFrame]{},
             bindings: [SemaScopeBinding]{},
-            name_slots: [String:Int]{},
+            name_slots: name_rows(),
             name_positions: [[Int]]{},
             loop_labels: table.loop_labels.copy(),
             hardware_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
@@ -1427,7 +1431,7 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     }
     loop table.bindings.len() > mark.bindings {
         last :: table.bindings.len() - 1
-        if table.name_slots.get(table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
+        if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
         _ := &table.bindings.pop()
     }
     loop table.frames.len() > mark.frames -> _ := &table.frames.pop()
@@ -1473,7 +1477,7 @@ fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
-        name_slots: [String:Int]{},
+        name_slots: name_rows(),
         name_positions: [[Int]]{},
         loop_labels: [SemaScopeLoopLabel]{},
         hardware_transfers: [SemaHardwareDMATransferFact]{},
@@ -1602,7 +1606,7 @@ fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool Neve
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
 fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
-    if table.name_slots.get(symbol.name) == .Val(slot) {
+    if sema_scope_name_slot(table, symbol.name) == .Val(slot) {
         loop index in table.name_positions[slot] {
             binding :: table.bindings[index]
             if binding.frame == 0 && !binding.compiler_builtin -> return false
@@ -1804,17 +1808,22 @@ fn sema_scope_pop_loop_label(table: &SemaScopeTable) Never! {
 // Appends one binding and records its position under its name.
 fn sema_scope_push_binding(table: &SemaScopeTable, binding: SemaScopeBinding) Never! {
     position :: table.bindings.len()
-    if table.name_slots.get(binding.symbol.name) == .Val(slot) {
+    if sema_scope_name_slot(table, binding.symbol.name) == .Val(slot) {
         &table.name_positions[slot].push(position)
     } else {
-        &table.name_slots.add(binding.symbol.name, table.name_positions.len()).drop("the lookup above proved this name has no slot")
+        name_rows_set(&table.name_slots, binding.symbol.name, table.name_positions.len())
         &table.name_positions.push([Int]{position})
     }
     &table.bindings.push(binding)
 }
 
+// The `name_positions` row of `name`, if any binding ever had that name.
+fn sema_scope_name_slot(table: SemaScopeTable, name: String) -> Int? Never! {
+    name_rows_get_text(table.name_slots, name)
+}
+
 fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
-    slot :: table.name_slots.get(name) ?? return None
+    slot :: sema_scope_name_slot(table, name) ?? return None
     frame := table.current
     loop frame >= 0 {
         cursor := table.name_positions[slot].len() - 1
@@ -1834,7 +1843,7 @@ fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
 // or staged symbol's span may come from another file, so position never
 // hides them.
 fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
-    slot :: table.name_slots.get(name) ?? return None
+    slot :: sema_scope_name_slot(table, name) ?? return None
     frame := table.current
     loop frame >= 0 {
         module_frame :: table.frames[frame].parent < 0

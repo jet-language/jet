@@ -48,7 +48,7 @@ fn sema_expression_lambda_binding_frame(name: String, use_span: Span, frame: Int
     selected_frame := -1
     selected_start := -1
     // Only bindings named `name` can match; visit them in table order.
-    slot :: scopes.name_slots.get(name) ?? return selected_frame
+    slot :: sema_scope_name_slot(scopes, name) ?? return selected_frame
     loop position in 0..<scopes.name_positions[slot].len() {
         binding :: scopes.bindings[scopes.name_positions[slot][position]]
         if (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.span.start <= use_span.start && binding.symbol.span.start >= selected_start {

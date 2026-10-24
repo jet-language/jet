@@ -553,7 +553,7 @@ fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: Strin
 }
 
 fn sema_taint_namespace_module(graph: SemaRegistrationGraph, module_index: Int, name: String) -> String Never! {
-    if graph.modules[module_index].symbol_positions.get(name) != None -> return ""
+    if sema_registration_module_has_name(graph.modules[module_index], name) -> return ""
     owner :: sema_registration_namespace_owner(graph, module_index, name) ?? return ""
     graph.modules[owner.module_index].module_identity
 }

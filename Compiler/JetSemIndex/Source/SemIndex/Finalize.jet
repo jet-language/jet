@@ -22,13 +22,14 @@ use jet_sema.[
     SemaCompilerModuleSource,
     SemaGraphResult,
     SemaRegistrationGraph,
+    sema_registration_module_index,
 ]
 use jet_pkg_model.[EffectBudgetProgram, PackageEffectSummary]
 
 // The outward caller retains the original-bundle row list. Registration/name
 // indices are joined by identity, never by source position or loaded ordinal.
 fn semindex_loaded_registration_index(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
-    registration.module_rows.get(source.module_identity) ?? panic("loaded semantic-index module must be registered")
+    sema_registration_module_index(registration, source.module_identity) ?? panic("loaded semantic-index module must be registered")
 }
 
 // Rust module_index/position uses the FIRST display-or-alias loaded module.

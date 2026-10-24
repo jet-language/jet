@@ -2562,7 +2562,7 @@ fn sema_expr_declares_inherent_method(environment: SemaScopeEnvironment, program
 // Rust `funcs.get(name)`: some declared function (local or imported) has
 // this name in any frame, even when a nearer binding shadows it.
 fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bool Never! {
-    slot :: scopes.name_slots.get(name) ?? return false
+    slot :: sema_scope_name_slot(scopes, name) ?? return false
     loop index in scopes.name_positions[slot] {
         if scopes.bindings[index].symbol.kind == SymbolKind.Function -> return true
     }

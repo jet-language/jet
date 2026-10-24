@@ -8,7 +8,7 @@ use jet_foundation.[
     NameFacts,
     Span,
 ]
-use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, sema_registration_module_index]
 
 // Rust's display_type closure, shared with S15's signature projection.
 fn semantic_display_type(names: NameFacts, module_index: Int, name: String) -> String Never! {
@@ -49,7 +49,7 @@ fn semindex_build_semantic_symbol_index(db: SymbolDB, registration: SemaRegistra
         sources[source.display] = source_index
         source_rows[semindex_loaded_registration_index(registration, source)] = source_index
     }
-    entry_index :: registration.module_rows.get(registration.entry_module_identity) ?? panic("checked semantic-symbol graph has no entry module")
+    entry_index :: sema_registration_module_index(registration, registration.entry_module_identity) ?? panic("checked semantic-symbol graph has no entry module")
     scopes :: LexicalScopeIndex.new(db)
     loop def in db.defs {
         // Anchors remain in db.defs for rename/reference alignment. Imports
@@ -151,7 +151,7 @@ fn semantic_render_trait_contracts(contracts: [TraitContractFact], declaration: 
 fn semantic_imported_module_index(registration: SemaRegistrationGraph, module_index: Int, declaration_span: Span) -> Int? Never! {
     module_ref :: registration.modules[module_index]
     loop edge in registration.edges {
-        if edge.source_module_identity == module_ref.module_identity && edge.declaration.span == declaration_span -> return registration.module_rows.get(edge.target_module_identity)
+        if edge.source_module_identity == module_ref.module_identity && edge.declaration.span == declaration_span -> return sema_registration_module_index(registration, edge.target_module_identity)
     }
     None
 }

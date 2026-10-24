@@ -73,6 +73,7 @@ use jet_sema.[
     sema_name_facts_empty,
     sema_name_structure_facts,
     sema_registration_lookup_counts,
+    sema_registration_module_index,
     sema_registration_original_error_module,
     sema_registration_prepare_graph,
     SEMA_PRELUDE_ERROR_SOURCE_PATH,
@@ -337,7 +338,7 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
             next
         }
         unit :: load.source_units[unit_index]
-        registered_index :: if checked_projection -> registration.module_rows.get(graph_module.module_identity) ?? -1 else -> index
+        registered_index :: if checked_projection -> sema_registration_module_index(registration, graph_module.module_identity) ?? -1 else -> index
         if registered_index < 0 || registered_index >= registration.modules.len() -> return [JetDriverDocModule]{}
         registered :: registration.modules[registered_index]
         path := unit.path

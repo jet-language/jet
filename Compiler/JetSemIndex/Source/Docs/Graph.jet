@@ -10,7 +10,7 @@
 use core.text as doc_text
 use core.files.runtime.kernel_path_components as doc_os_path
 use jet_foundation.[Span, foundation_json_quote]
-use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, sema_registration_module_index]
 use jet_pkg_model.[EffectProjection, pkg_render_effect_projection_object]
 use jetpack_foundation.[StatusEnvelope, StatusFields]
 
@@ -124,7 +124,7 @@ fn build_doc_graph(registration: SemaRegistrationGraph, module_sources: [SemaCom
     graph
 }
 fn doc_loaded_registration_index(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
-    registration.module_rows.get(source.module_identity) ?? panic("loaded documentation module must be registered")
+    sema_registration_module_index(registration, source.module_identity) ?? panic("loaded documentation module must be registered")
 }
 
 // Stable rendering order is separate from checked module/source collection
