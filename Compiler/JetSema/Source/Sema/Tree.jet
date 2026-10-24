@@ -174,13 +174,13 @@ fn tir_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Ne
     if key.kind == {
         .IntLit(value, _) -> Val("int:{value}")
         .StrLit(value) -> Val("text:{value}")
-        // A scalar literal is a flat row (sema_node).
+        // A scalar literal or a constant reference is a flat row (sema_node).
         .Flat(index) -> if context.arena.tree.nodes[index - context.arena.base].kind == {
             .BoolLit(value) -> Val("bool:{value}")
             .CharLit(value) -> Val("char:{value}")
+            .ConstRef(symbol) -> Val("constant:{symbol.key}")
             else -> None
         }
-        .ConstRef(symbol) -> Val("constant:{symbol.key}")
         .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
         .Unary(op, value) -> {
             if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
@@ -287,7 +287,6 @@ enum TExprKind {
     Local(local: TLocal)
     InlineBlock(body: [TStmt])
     CtLit(value: TComptimeValue)
-    ConstRef(symbol: SymbolID)
     Call(callee: SymbolID, type_args: [Type], args: [TCallArg])
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
@@ -874,26 +873,6 @@ struct TParameter {
 enum TPlace {
     Local(local: TLocal)
     Expr(value: TExpr)
-}
-
-fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
-    if expression.kind == {
-        .Local(local) -> {
-            if local.address_lifetime != None -> return local.address_lifetime ?? TAddressLifetime.Unknown
-            if local.persist_key != None -> return TAddressLifetime.Static
-            return TAddressLifetime.Stack
-        }
-        .ConstRef(_) -> return TAddressLifetime.Static
-        .Field(receiver, _) -> return tir_expr_address_lifetime(receiver)
-        .Index(base, _, _, _, _, _) -> return tir_expr_address_lifetime(base)
-        .Slice(base, _, _, _, _) -> return tir_expr_address_lifetime(base)
-        .PoolSlot(_, _, _, _, _, _) -> return TAddressLifetime.Heap
-        .Borrow(_, _) -> return TAddressLifetime.Borrowed
-        .RawAddressOf(_) | .RawOf(_) | .Deref(_) | .PtrFromAddr(_, _) -> return TAddressLifetime.Foreign
-        .DistinctCtor(argument) | .DistinctRaw(argument) -> return tir_expr_address_lifetime(argument)
-        else -> {}
-    }
-    TAddressLifetime.Unknown
 }
 
 fn tir_each_pattern_child(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {

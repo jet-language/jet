@@ -3511,7 +3511,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(&state, scopes.bindings[read_index].symbol.id.key) != None {
         &diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)"))
     }
-    value :: sema_expr_check_ident(name, span, expected, environment, program, &scopes, &diagnostics) ?? {
+    value :: sema_expr_check_ident(name, span, expected, environment, program, &scopes, &context, &diagnostics) ?? {
         if !sema_has_error_since(diagnostics, diagnostics_before) -> sema_check_unsupported(&context, "`{name}` (read at offset {span.start}) has no checked type")
         return None
     }
@@ -3578,7 +3578,7 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
     sema_expr_expected_owned(sema_tir_node(Type.String, TExprKind.StrLit{parts: tir_parts}, span), expected, environment, program, &diagnostics)
 }
 
-fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     index :: sema_scope_resolve_index(scopes, name) ?? {
         &diagnostics.push(sema_unknown_name(name, span))
         return None
@@ -3594,7 +3594,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
-        value :: sema_tir_node(ty, TExprKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
+        value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     result

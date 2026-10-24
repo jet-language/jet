@@ -88,12 +88,12 @@ fn sema_services_valid_name(value: String) -> Bool Never! {
     }
     true
 }
-fn sema_services_const_symbol(value: TExpr) -> SymbolID? {
-    return if value.kind == {
-        // copy: `symbol` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
-        .ConstRef(symbol) -> Val(symbol.copy())
-        else -> None
+fn sema_services_const_symbol(value: TExpr, context: SemaCheckContext) -> SymbolID? {
+    if value.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.base].kind == .ConstRef(symbol) {
+        // copy: `symbol` is a payload of the context's arena row, which keeps the original; the Val carrier owns this one
+        return Val(symbol.copy())
     }
+    None
 }
 
 fn sema_services_valid_string_list(expression: Expr, require_nonempty: Bool) -> Bool Never! {
@@ -393,7 +393,7 @@ fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value
         }
         if !valid -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
         handler := values[1]
-        handler_symbol :: sema_services_const_symbol(handler)
+        handler_symbol :: sema_services_const_symbol(handler, context)
         registered_function := false
         if program.registration_graph == .Val(graph) {
             resolved := sema_registration_lookup_name(graph, environment.module_identity, handler_name)

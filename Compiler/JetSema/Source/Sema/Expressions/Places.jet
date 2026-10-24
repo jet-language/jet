@@ -366,7 +366,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     // A compiler-owned reflection record (`RANGE.start`,
     // `EXACTNESS.kind`) exists only as a compile-time value; its rows are typed
     // for prepared-constant paths, which codegen folds to their values.
-    reflection :: sema_fact_reflection_field(base, member, span)
+    reflection :: sema_fact_reflection_field(base, member, span, context)
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, &diagnostics)
     // A builtin Core record (`ProcessReceipt.success`, `IOContext.operation`)
     // has no Jet declaration; its fields are the generated Core record rows.
@@ -519,7 +519,7 @@ fn sema_expression_module_constant(alias: String, member: String, span: Span, ex
             sema_check_unsupported(&context, "constant `{alias}.{member}` (read at offset {span.start}) has no staged compile-time value")
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        value :: sema_tir_node(ty, TExprKind.ConstRef{symbol: resolved.symbol.id}, span)
+        value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: resolved.symbol.id}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: false, value: None}

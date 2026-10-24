@@ -454,7 +454,7 @@ fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts Never! {
     return TEffectFacts{direct: direct, solved: direct, call_edges: [String]{}, maximal: effect_row == None, direct_spans: spans}
 }
 
-fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) -> TLambda? {
+fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span, context: SemaCheckContext) -> TLambda? {
     params := [Type]{}
     ret := Type?{None}
     if signature == {
@@ -468,7 +468,11 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) ->
     captures := [TCapture]{}
     capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
     if value.kind == {
-        .ConstRef(_) -> {}
+        // A function or constant reference is a flat row (sema_node).
+        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.base].kind == {
+            .ConstRef(_) -> {}
+            else -> return None
+        }
         .Local(local) -> {
             &captures.push(TCapture{source: local.name, local: local, ty: signature})
             &capture_facts.moved.push(local.name)
@@ -740,7 +744,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    lambda := if body.kind == {.Lambda(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
+    lambda := if body.kind == {.Lambda(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span, context) ?? {
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }}

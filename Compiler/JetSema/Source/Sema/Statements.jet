@@ -3719,7 +3719,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     if op != None {
         operator :: op
         // The storage reads as its constant reference (sema_expr_check_ident).
-        read :: sema_tir_node(required, TExprKind.ConstRef{symbol: symbol.id}, name_span)
+        read :: sema_node(&context, required, NodeKind.ConstRef{symbol: symbol.id}, name_span)
         if sema_stmt_policy_compound(operator, required, read, checked, line, span, context) == .Val(policed) {
             value = policed
             tir_op = None
@@ -4624,8 +4624,11 @@ fn sema_stmt_policy_compound(op: BinOp, ty: Type, read: TExpr, value: TExpr, lin
 // locals, constants and literals, and fields and plain indexes of them.
 fn sema_stmt_pure_place(place: TExpr, context: SemaCheckContext) -> Bool {
     if place.kind == {
-        .Local(_) | .ConstRef(_) | .IntLit(_, _) -> return true
-        .Flat(index) -> return context.arena.tree.nodes[index - context.arena.base].kind == .BoolLit(_)
+        .Local(_) | .IntLit(_, _) -> return true
+        .Flat(index) -> return if context.arena.tree.nodes[index - context.arena.base].kind == {
+            .BoolLit(_) | .ConstRef(_) -> true
+            else -> false
+        }
         .Field(receiver, _) -> return sema_stmt_pure_place(receiver, context)
         .Index(base, index, _, _, checked_call, _) -> return checked_call == None && sema_stmt_pure_place(base, context) && sema_stmt_pure_place(index, context)
         .Binary(_, _, _, lhs, rhs) -> return sema_stmt_pure_place(lhs, context) && sema_stmt_pure_place(rhs, context)
