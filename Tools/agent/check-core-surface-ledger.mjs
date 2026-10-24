@@ -1358,11 +1358,6 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.devtools" && member === "__publish_payload") return null;
   if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"])) return null;
   if (moduleName === "core.web.store" && member === "__facts_snapshot") return null;
-  if (moduleName === "core.web.table" && coreCallOneOf(member, ["__columns", "__replace_columns", "__state", "__set_state", "__alias",
-    "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
-    "__commit_keys", "__loading_store", "__error_store", "__page_store",
-    "__state_store", "__has_key", "__page_accessor_keys", "__page_keys", "__page_replace_keys",
-    "__column_info", "__cell", "__rows", "__row_key", "__make_page"])) return null;
   if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
     "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;
   if (moduleName === "core.mod" && coreCallOneOf(member, ["__read_context", "__stage_context"])) return "FS";

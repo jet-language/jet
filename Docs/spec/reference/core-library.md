@@ -3650,6 +3650,10 @@ its module functions. Mutating source query, form, table, virtual viewport, and
 store calls take explicit write access. Source table pages keep typed row values
 and separate stable row keys, with `total_rows`, `page_index`, `page_size`, and
 `page_count` facts. Form action failures are a declared `#Error` domain.
+A table holds its columns' projection functions and its server loader, which
+cannot be duplicated, so its configuring and mutating calls (`with_column`,
+`with_server_page`, `sort_by`, `paginate`, selection, focus, and page moves)
+edit the table in place and return no second table.
 `with_server_page` retains its typed `WebTableError!` loader without fetching.
 Each server-mode `page_state` call passes the current requested boundary to
 that loader, validates its row keys and boundary, and preserves the remote

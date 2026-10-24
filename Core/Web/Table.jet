@@ -3,8 +3,6 @@ use core as core
 
 C_MAX_TABLE_PAGE_SIZE :: 4096
 
-C_MAX_TABLE_COLUMNS :: 256
-
 C_MAX_TABLE_ROWS :: 1048576
 C_MAX_TABLE_INDEX :: 2147483647
 
@@ -67,51 +65,52 @@ struct WebTableState {
 }
 
 struct WebTable<T> {
+    name: String
     columns: [WebTableColumn<T>]
     rows: [WebTableRow<T>]
     state: WebTableState
+    // Zero or one typed server loader; `with_server_page` replaces it.
+    server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]
 
-    fn with_column(self, col: WebTableColumn<T>) -> WebTable<T> Never! {
-        with_column<T>(&self, col)
+    fn with_column(&self, col: ^WebTableColumn<T>) Never! {
+        with_column<T>(&self, ^col)
     }
-    fn paginate(self, index: Int, size: Int) -> WebTable<T> Never! {
+    fn paginate(&self, index: Int, size: Int) Never! {
         paginate<T>(&self, index, size)
     }
-    fn page(self) -> WebTablePage<T> String! {
-        runtime_page<T>(self)
+    fn page(self) -> WebTablePage<T> WebTableError! {
+        page_state<T>(self)
     }
 }
 
-fn new<T>(columns: String, rows: [T]) -> WebTable<T> Never! {
-    cols := parse_columns<T>(columns)
+// WebTable.rs:250-280: a new table is named, has no columns, and keys its
+// rows by position unless a key function is given.
+fn new<T>(name: String, rows: [T]) -> WebTable<T> Never! {
     keyed := [WebTableRow<T>]{ }
     loop i in 0..<rows.len() -> &keyed.push(WebTableRow<T>{key: "{i}", value: rows[i]})
-    WebTable<T>{columns: cols, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
+    WebTable<T>{name: name, columns: [WebTableColumn<T>]{ }, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
 }
 
-fn new_keyed<T, E>(columns: String, rows: [T], key_fn: fn(T) -> String E!) -> WebTable<T> E! {
-    cols := parse_columns<T>(columns)
+fn new_keyed<T, E>(name: String, rows: [T], key_fn: fn(T) -> String E!) -> WebTable<T> E! {
     keyed := [WebTableRow<T>]{ }
     loop row in rows -> &keyed.push(WebTableRow<T>{key: key_fn(row), value: row})
-    WebTable<T>{columns: cols, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
+    WebTable<T>{name: name, columns: [WebTableColumn<T>]{ }, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
 }
 
 fn column<T>(name: String, label: String, project: ^fn(T) -> String Never!) -> WebTableColumn<T> Never! {
-    WebTableColumn<T>{name: name, label: label, project: project}
+    WebTableColumn<T>{name: name, label: label, project: ^project}
 }
 
-fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T> Never! {
-    // WebTable.rs:381-385: append without validation, copying configuration
-    // while retaining the shared state and callable identities.
-    columns := core.web.table.__columns(table)
-    &columns.push(col)
-    core.web.table.__replace_columns(table, columns)
+// A table holds its columns' projection functions, which Jet cannot
+// duplicate, so configuring and mutating calls edit the table in place
+// through write access instead of returning a second table.
+fn with_column<T>(table: &WebTable<T>, col: ^WebTableColumn<T>) Never! {
+    &table.columns.push(^col)
 }
 
-fn with_server_page<T>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T> WebTableError!) -> WebTable<T> Never! {
-    table.server_page = [fn(WebTableState) -> WebTablePage<T> WebTableError!]{fetch}
+fn with_server_page<T>(table: &WebTable<T>, fetch: ^fn(WebTableState) -> WebTablePage<T> WebTableError!) Never! {
+    table.server_page = [fn(WebTableState) -> WebTablePage<T> WebTableError!]{^fetch}
     table.state.page_mode = WebTablePageMode.Server
-    table.copy()
 }
 
 fn state<T>(table: WebTable<T>) -> WebTableState Never! { table.state }
@@ -199,26 +198,20 @@ fn page<T>(rows: [T], index: Int, size: Int) -> WebTablePage<T> WebTableError! {
     Ok(WebTablePage<T>{rows: out, row_keys: keys, page_index: index, page_size: size, total_rows: rows.len(), page_count: (rows.len() + size - 1) /% size})
 }
 
-fn sort_by<T>(table: &WebTable<T>, name: String, direction: WebTableSortDirection) -> WebTable<T> Never! {
+fn sort_by<T>(table: &WebTable<T>, name: String, direction: WebTableSortDirection) Never! {
     table.state.sort = WebTableSort{column: name, descending: direction == WebTableSortDirection.Descending}
     table.state.page_index = 0
-    table.copy()
 }
 
-fn filter_by<T>(table: &WebTable<T>, name: String, value: String) -> WebTable<T> Never! {
+fn filter_by<T>(table: &WebTable<T>, name: String, value: String) Never! {
     table.state.filter = WebTableFilter{column: name, value: value}
     table.state.page_index = 0
-    table.copy()
 }
 
-fn paginate<T>(table: &WebTable<T>, index: Int, size: Int) -> WebTable<T> Never! {
-    // WebTable.rs:506-511: preserve all state except the clamped boundary;
-    // set_state owns reactive invalidation, not the source DTO's fields.
-    state := core.web.table.__state(table)
-    state.page_index = page_index(index)
-    state.page_size = page_size(size)
-    core.web.table.__set_state(table, state)
-    core.web.table.__alias(table)
+// WebTable.rs:506-511: keep every other state field and clamp the boundary.
+fn paginate<T>(table: &WebTable<T>, index: Int, size: Int) Never! {
+    table.state.page_index = page_index(index)
+    table.state.page_size = page_size(size)
 }
 
 fn set_rows<T>(table: &WebTable<T>, rows: [T]) WebTableError! {
@@ -232,7 +225,7 @@ fn set_rows<T>(table: &WebTable<T>, rows: [T]) WebTableError! {
     return Ok()
 }
 
-fn set_selected<T>(table: &WebTable<T>, key: String, on: Bool) -> WebTable<T> WebTableError! {
+fn set_selected<T>(table: &WebTable<T>, key: String, on: Bool) WebTableError! {
     if !has_key<T>(table.rows, key) -> return Err(WebTableError.NotFound)
     selected := [String]{ }
     loop item in table.state.selected {
@@ -240,10 +233,9 @@ fn set_selected<T>(table: &WebTable<T>, key: String, on: Bool) -> WebTable<T> We
     }
     if on -> &selected.push(key)
     table.state.selected = selected
-    Ok(table.copy())
 }
 
-fn toggle_selection<T>(table: &WebTable<T>, key: String) -> WebTable<T> WebTableError! {
+fn toggle_selection<T>(table: &WebTable<T>, key: String) WebTableError! {
     enabled := true
     loop item in table.state.selected {
         if item == key -> enabled = false
@@ -251,15 +243,13 @@ fn toggle_selection<T>(table: &WebTable<T>, key: String) -> WebTable<T> WebTable
     set_selected<T>(&table, key, enabled)
 }
 
-fn focus<T>(table: &WebTable<T>, key: String) -> WebTable<T> WebTableError! {
+fn focus<T>(table: &WebTable<T>, key: String) WebTableError! {
     if !has_key<T>(table.rows, key) -> return Err(WebTableError.NotFound)
     table.state.focus = key
-    Ok(table.copy())
 }
 
-fn clear_focus<T>(table: &WebTable<T>) -> WebTable<T> Never! {
+fn clear_focus<T>(table: &WebTable<T>) Never! {
     table.state.focus = ""
-    table.copy()
 }
 
 fn focused_key<T>(table: WebTable<T>) -> String? Never! {
@@ -267,9 +257,8 @@ fn focused_key<T>(table: WebTable<T>) -> String? Never! {
     Val(table.state.focus)
 }
 
-fn clear_selection<T>(table: &WebTable<T>) -> WebTable<T> Never! {
+fn clear_selection<T>(table: &WebTable<T>) Never! {
     table.state.selected = [String]{ }
-    table.copy()
 }
 
 fn selected_keys<T>(table: WebTable<T>) -> [String] Never! { table.state.selected }
@@ -344,7 +333,7 @@ fn remove_row<T>(table: &WebTable<T>, key: String) -> T WebTableError! {
     table.state.selected = selected
     if table.state.focus == key -> table.state.focus = ""
     if table.state.page_index > 0 {
-        visible := projected_rows<T>(table.copy())
+        visible := projected_rows<T>(table)
         page_size := table.state.page_size
         if page_size < 1 -> page_size = 25
         if page_size > C_MAX_TABLE_PAGE_SIZE -> page_size = C_MAX_TABLE_PAGE_SIZE
@@ -356,28 +345,25 @@ fn remove_row<T>(table: &WebTable<T>, key: String) -> T WebTableError! {
     Ok(removed)
 }
 
-fn first_page<T>(table: &WebTable<T>) -> WebTable<T> Never! {
+fn first_page<T>(table: &WebTable<T>) Never! {
     table.state.page_index = 0
-    table.copy()
 }
 
-fn next_page<T>(table: &WebTable<T>) -> WebTable<T> Never! {
+fn next_page<T>(table: &WebTable<T>) Never! {
     if table.state.page_size < 1 -> table.state.page_size = 25
     if table.state.page_size > C_MAX_TABLE_PAGE_SIZE -> table.state.page_size = C_MAX_TABLE_PAGE_SIZE
-    rows := projected_rows<T>(table.copy())
+    rows := projected_rows<T>(table)
     pages := (rows.len() + table.state.page_size - 1) /% table.state.page_size
     if pages < 1 -> pages = 1
     if table.state.page_index + 1 < pages -> table.state.page_index = table.state.page_index + 1
-    table.copy()
 }
 
-fn last_page<T>(table: &WebTable<T>) -> WebTable<T> WebTableError! {
+fn last_page<T>(table: &WebTable<T>) WebTableError! {
     if table.state.page_size < 1 || table.state.page_size > C_MAX_TABLE_PAGE_SIZE -> return Err(WebTableError.Invalid)
-    rows := projected_rows<T>(table.copy())
+    rows := projected_rows<T>(table)
     pages := (rows.len() + table.state.page_size - 1) /% table.state.page_size
     if pages < 1 -> pages = 1
     table.state.page_index = pages - 1
-    Ok(table.copy())
 }
 
 fn visible_rows<T>(table: WebTable<T>, plan: WebVirtualPlan) -> [WebTableRow<T>] WebTableError! {
@@ -452,40 +438,8 @@ fn contains_key(items: [String], key: String) -> Bool Never! {
     }
     false
 }
-fn has_control_text(text: String) -> Bool {
-    loop b in text.bytes() {
-        n :: Int.from_u8(b)
-        if n < 32 || n == 127 -> return true
-    }
-    false
-}
-
 fn default_state() -> WebTableState {
     WebTableState{sort: WebTableSort{column: "", descending: false}, filter: WebTableFilter{column: "", value: ""}, page_index: 0, page_size: 25, selected: [String]{ }, focus: "", page_mode: WebTablePageMode.Client}
-}
-fn parse_columns<T>(text: String) -> [WebTableColumn<T>] {
-    out := [WebTableColumn<T>]{ }
-    loop raw_name in split_commas(text) {
-        name :: trim(raw_name)
-        if out.len() >= C_MAX_TABLE_COLUMNS -> next
-        if name.len() > 0 && name.len() <= 128 && !has_control_text(name) -> &out.push(WebTableColumn<T>{name: name.copy(), label: name.copy(), project: default_project})
-    }
-    out
-}
-fn default_project<T: Printable>(value: T) -> String Never! { "{value}" }
-
-fn split_commas(text: String) -> [String] {
-    raw := text.bytes()
-    out := [String]{ }
-    start := 0
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{44}) {
-            &out.push(slice_text(text, start, i))
-            start = i + 1
-        }
-    }
-    if start <= raw.len() -> &out.push(slice_text(text, start, raw.len()))
-    out
 }
 
 fn copy_values<T>(values: [T]) -> [T] {
@@ -494,42 +448,11 @@ fn copy_values<T>(values: [T]) -> [T] {
     out
 }
 
-fn copy_columns<T>(columns: [WebTableColumn<T>]) -> [WebTableColumn<T>] {
-    out := [WebTableColumn<T>]{ }
-    loop column in columns -> &out.push(column)
-    out
-}
-
-fn trim(text: String) -> String {
-    raw := text.bytes()
-    start := 0
-    end := raw.len()
-    loop start < end {
-        n :: Int.from_u8(raw[start])
-        if n == 32 || n == 9 -> start = start + 1 else -> break
-    }
-    loop end > start {
-        n :: Int.from_u8(raw[end - 1])
-        if n == 32 || n == 9 -> end = end - 1 else -> break
-    }
-    slice_text(text, start, end)
-}
 fn has_key<T>(rows: [WebTableRow<T>], key: String) -> Bool Never! {
     loop row in rows {
         if row.key == key -> return true
     }
     false
-}
-
-fn slice_text(text: String, start: Int, end: Int) -> String {
-    raw := text.bytes()
-    out := [U8]{ }
-    i := start
-    loop {
-        if i < 0 || i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
-        i = i + 1
-    }
 }
 
 // Rust WebTable::paginate clamps size to 1..10000, including nonpositive
@@ -549,259 +472,4 @@ fn page_size(size: Int) -> Int Never! {
     assert_eq(page_size(-1), 1)
     assert_eq(page_size(4097), 4097)
     assert_eq(page_size(10001), 10000)
-}
-
-// WebTable.rs:514-605. Source owns request boundaries, stale-response policy,
-// success/error publication order, and client materialization. Leaves lend
-// runtime state or invoke the existing checked callbacks.
-fn runtime_page<T>(table: WebTable<T>) -> WebTablePage<T> String! {
-    state :: core.web.table.__state(table)
-    query :: core.web.table.__query_facts(state)
-    has_loader :: core.web.table.__has_loader(table)
-    if query.server && !has_loader {
-        error :: "server table state requires a page loader"
-        core.web.table.__loading_store(table, false)
-        core.web.table.__page_store(table, None)
-        core.web.table.__error_store(table, error)
-        return Err(error)
-    }
-    if has_loader {
-        generation :: core.web.table.__generation(table, true)
-        core.web.table.__loading_store(table, true)
-        core.web.table.__error_store(table, "")
-        loaded :: core.web.table.__invoke_loader(table, state)
-        current :: core.web.table.__generation(table, false)
-        if current != generation || !core.web.table.__state_equal(core.web.table.__state(table), state) {
-            if current == generation -> core.web.table.__loading_store(table, false)
-            return Err("server table page response is stale")
-        }
-        validated :: if loaded == {
-            .Ok(page) -> {
-                facts :: core.web.table.__page_facts(page)
-                if {
-                    facts.index != query.index || facts.size != query.size -> Err("server table page response does not match the requested boundary")
-                    else -> validate_runtime_page<T>(table, page)
-                }
-            }
-            .Err(error) -> Err(error)
-        }
-        if core.web.table.__generation(table, false) != generation || !core.web.table.__state_equal(core.web.table.__state(table), state) -> return Err("server table page response is stale")
-        if validated == {
-            .Ok(checked) -> {
-                page :: checked.page
-                keys :: checked.keys
-                // WebTable.rs:296-311: cross-page collision is distinct from
-                // per-page validation; decide it in Jet while the raw gate
-                // lends each existing page's keys under one lock.
-                accepted :: core.web.table.__commit_keys(table, page, (other_page: Int, other_keys: [String]) -> {
-                    if other_page != query.index {
-                        loop key in other_keys {
-                            if keys.get(key) != None -> return Err("server table response duplicates a row key across pages")
-                        }
-                    }
-                    Ok()
-                })
-                if accepted == .Err(error) {
-                    core.web.table.__loading_store(table, false)
-                    core.web.table.__page_store(table, None)
-                    core.web.table.__error_store(table, error)
-                    return Err(error)
-                }
-                core.web.table.__loading_store(table, false)
-                publish_runtime_page<T>(table, state, page)
-                Ok(page)
-            }
-            .Err(error) -> {
-                core.web.table.__loading_store(table, false)
-                core.web.table.__page_store(table, None)
-                core.web.table.__error_store(table, error)
-                Err(error)
-            }
-        }
-    } else {
-        materialized :: materialize_runtime_page<T>(table, state)
-        if materialized == {
-            .Ok(page) -> {
-                publish_runtime_page<T>(table, state, page)
-                Ok(page)
-            }
-            .Err(error) -> {
-                core.web.table.__page_store(table, None)
-                core.web.table.__error_store(table, error)
-                Err(error)
-            }
-        }
-    }
-}
-
-fn publish_runtime_page<T>(table: WebTable<T>, state: WebTableState, page: WebTablePage<T>) Never! {
-    facts :: core.web.table.__page_facts(page)
-    canonical := state
-    canonical.page_index = facts.index
-    canonical.page_size = facts.size
-    core.web.table.__state_store(table, canonical)
-    core.web.table.__page_store(table, Val(page))
-    core.web.table.__error_store(table, "")
-}
-
-fn validate_runtime_page<T>(table: WebTable<T>, page: WebTablePage<T>) -> (page: WebTablePage<T>, keys: [String:Bool]) String! {
-    facts :: core.web.table.__page_facts(page)
-    if facts.total < 0 -> return Err("server table page has negative total_rows")
-    if facts.size < 1 || facts.size > 10000 -> return Err("server table page_size must be between 1 and 10000")
-    if facts.index < 0 -> return Err("server table page has negative page_index")
-    if facts.rows > facts.size -> return Err("server table returned more rows than page_size")
-    count :: if facts.total == 0 -> 0 else -> table_sat_add(facts.total, facts.size - 1) /% facts.size
-    if facts.count != count -> return Err("server table page_count does not match total_rows")
-    if count == 0 {
-        if facts.index != 0 || facts.rows != 0 || facts.keys != 0 -> return Err("empty server table page has invalid page_index, rows, or keys")
-    } else if facts.index >= count -> return Err("server table page_index is out of range")
-    if facts.total > 0 && facts.rows == 0 -> return Err("non-empty server table result returned an empty page")
-    if count > 0 && table_sat_add(facts.index, 1) < count && facts.rows != facts.size -> return Err("non-final server table pages must be full")
-    canonical := page
-    if core.web.table.__has_key(table) {
-        canonical = core.web.table.__page_accessor_keys(table, canonical)
-    } else if facts.keys == 0 && facts.rows > 0 {
-        start :: table_sat_mul(facts.index, facts.size)
-        keys := [String]{}
-        loop offset in 0..<facts.rows -> &keys.push("index:{table_sat_add(start, offset)}")
-        canonical = core.web.table.__page_replace_keys(canonical, keys)
-    }
-    keys :: core.web.table.__page_keys(canonical)
-    if keys.len() != facts.rows -> return Err("server table row_keys must align with rows")
-    seen :: validate_runtime_keys(keys)
-    Ok((page: canonical, keys: seen))
-}
-
-fn runtime_key_valid(key: String) -> Bool Never! {
-    key != "" && key.bytes().len() <= 256 && !core.text.has_control(key)
-}
-
-fn validate_runtime_keys(keys: [String]) -> [String:Bool] String! {
-    seen := [String:Bool]{}
-    loop key in keys {
-        if !runtime_key_valid(key) -> return Err("table row key must be non-empty, bounded, and printable")
-        if seen.get(key) != None -> return Err("table row key `{key}` is duplicated")
-        _ :: &seen.add(key, true)
-    }
-    Ok(seen)
-}
-
-fn runtime_column<T>(columns: [WebTableColumn<T>], name: String, operation: String) -> WebTableColumn<T> String! {
-    loop column in columns {
-        if column.name == name -> return Ok(column)
-    }
-    Err("table {operation} column `{name}` has no accessor")
-}
-
-fn materialize_runtime_page<T>(table: WebTable<T>, state: WebTableState) -> WebTablePage<T> String! {
-    // WebTable.rs:1440-1476: validate columns before invoking row keys.
-    columns :: core.web.table.__columns(table)
-    seen := [String:Bool]{}
-    loop column in columns {
-        info :: core.web.table.__column_info(column)
-        if !runtime_key_valid(info.name) -> return Err("table column name must be non-empty, bounded, and printable")
-        if !runtime_key_valid(info.cell_type) -> return Err("table column cell type must be non-empty, bounded, and printable")
-        if seen.get(info.name) != None -> return Err("table column `{info.name}` is duplicated")
-        _ :: &seen.add(info.name, true)
-    }
-    rows :: core.web.table.__rows(table)
-    has_key :: core.web.table.__has_key(table)
-    keys := [String]{}
-    loop i in 0..<rows.len() {
-        key :: if has_key -> core.web.table.__row_key(table, rows[i]) else -> "index:{i}"
-        &keys.push(key)
-    }
-    _ :: validate_runtime_keys(keys)
-    query :: core.web.table.__query_facts(state)
-    order := [Int]{}
-    if query.filter == Val(filter) {
-        column :: runtime_column<T>(columns, filter.column, "filter")
-        loop i in 0..<rows.len() {
-            if core.text.parse.contains(core.web.table.__cell(column, rows[i]), filter.value) -> &order.push(i)
-        }
-    } else {
-        loop i in 0..<rows.len() -> &order.push(i)
-    }
-    if query.sort == Val(sort) {
-        column :: runtime_column<T>(columns, sort.column, "sort")
-        stable_runtime_order<T>(&order, rows, column, sort.descending)
-    }
-    // WebTable.rs:1616-1657: clamp the page to its computed last boundary.
-    size :: page_size(query.size)
-    total :: order.len()
-    count :: if total == 0 -> 0 else -> table_sat_add(total, size - 1) /% size
-    index := page_index(query.index)
-    if count == 0 -> index = 0 else if index >= count -> index = count - 1
-    start :: table_sat_mul(index, size)
-    finish := table_sat_add(start, size)
-    if finish > total -> finish = total
-    values := [T]{}
-    page_keys := [String]{}
-    loop i in start..<finish {
-        &values.push(rows[order[i]])
-        &page_keys.push(keys[order[i]])
-    }
-    Ok(core.web.table.__make_page(values, page_keys, total, index, size, count))
-}
-
-// Stable bottom-up merge of indices: O(n log n), one Int scratch buffer, no
-// copies of row payloads during ordering. Equal cells retain their source order.
-fn stable_runtime_order<T>(order: &[Int], rows: [T], column: WebTableColumn<T>, descending: Bool) Never! {
-    n :: order.len()
-    scratch := [Int]{}
-    loop i in 0..<n -> &scratch.push(0)
-    width := 1
-    loop width < n {
-        begin := 0
-        loop begin < n {
-            middle := table_sat_add(begin, width)
-            if middle > n -> middle = n
-            end := table_sat_add(middle, width)
-            if end > n -> end = n
-            left := begin
-            right := middle
-            destination := begin
-            loop destination < end {
-                take_left := right == end
-                if left < middle && right < end {
-                    a :: core.web.table.__cell(column, rows[order[left]])
-                    b :: core.web.table.__cell(column, rows[order[right]])
-                    take_left = if descending -> a >= b else -> a <= b
-                }
-                if left == middle -> take_left = false
-                if take_left {
-                    scratch[destination] = order[left]
-                    left += 1
-                } else {
-                    scratch[destination] = order[right]
-                    right += 1
-                }
-                destination += 1
-            }
-            begin = end
-        }
-        loop i in 0..<n -> order[i] = scratch[i]
-        if width > n /% 2 -> break
-        width = width * 2
-    }
-}
-
-fn table_sat_add(a: Int, b: Int) -> Int Never! {
-    if a > 9223372036854775807 - b -> return 9223372036854775807
-    a + b
-}
-
-fn table_sat_mul(a: Int, b: Int) -> Int Never! {
-    if a > 9223372036854775807 /% b -> return 9223372036854775807
-    a * b
-}
-
-#Test("runtime table validation reports shipped key failures") {
-    assert(!runtime_key_valid(""))
-    assert(runtime_key_valid("λ"))
-    if validate_runtime_keys([String]{"same", "same"}) == {
-        .Ok(_) -> panic("duplicate key accepted")
-        .Err(error) -> assert_eq(error, "table row key `same` is duplicated")
-    }
-    assert_eq(table_sat_mul(9223372036854775807, 10000), 9223372036854775807)
 }
