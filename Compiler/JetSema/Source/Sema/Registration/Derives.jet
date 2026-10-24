@@ -1596,10 +1596,6 @@ fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnos
 // ---------------------------------------------------------------------------
 // Built-in providers (Rust `Registration/Derives.rs`).
 
-// The built-in providers, parsed when the compiler is built; every expansion
-// reads them in place.
-SEMA_DERIVE_BUILTIN_PROVIDERS :: comptime { sema_derive_builtin_providers() }
-
 fn sema_derive_builtin_providers() -> [DeriveDef] {
     parsed :: parse_source(SEMA_PRELUDE_DERIVE_SOURCE.bytes())
     providers := [DeriveDef]{}
@@ -2064,11 +2060,12 @@ fn sema_derive_expand_builtin_items(items: &[Item], diagnostics: &[Diagnostic]) 
     facts :: sema_derive_item_index(items)
     auto_equatable :: sema_derive_auto_selected(items, facts, "Equatable")
     auto_comparable :: sema_derive_auto_selected(items, facts, "Comparable")
+    providers := [DeriveDef]?{None}
     generated := [Item]{}
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.
     loop index in 0..<items.len() {
-        blocks :: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, &generated, &diagnostics)
+        blocks :: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, &providers, &generated, &diagnostics)
         if blocks.len() == 0 -> next
         if &items[index] == .Struct(definition) {
             loop block in blocks -> &definition.trait_impls.push(block)
@@ -2082,14 +2079,15 @@ fn sema_derive_expand_builtin_items(items: &[Item], diagnostics: &[Diagnostic]) 
 
 // The derived trait impls of a struct or enum `item`, in trait order. A
 // distinct's impls join `generated` as separate impl items instead.
-fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equatable: [String:Bool], auto_comparable: [String:Bool], generated: &[Item], diagnostics: &[Diagnostic]) -> [TraitImplBlock] {
+fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equatable: [String:Bool], auto_comparable: [String:Bool], providers: &[DeriveDef]?, generated: &[Item], diagnostics: &[Diagnostic]) -> [TraitImplBlock] {
     blocks := [TraitImplBlock]{}
     if item == {
         .Struct(definition) -> {
             equatable :: sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
             comparable :: sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
             if !equatable && !comparable -> return ^blocks
-            available :: SEMA_DERIVE_BUILTIN_PROVIDERS
+            if providers == None -> providers = Val(sema_derive_builtin_providers())
+            available :: providers ?? [DeriveDef]{}
             owner_type :: sema_derive_owner_type(definition.name, definition.type_params)
             type_info :: sema_derive_struct_type_info(definition)
             loop trait_name in sema_derive_builtin_traits() {
@@ -2103,7 +2101,8 @@ fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equat
             equatable :: sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
             comparable :: sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
             if !equatable && !comparable -> return ^blocks
-            available :: SEMA_DERIVE_BUILTIN_PROVIDERS
+            if providers == None -> providers = Val(sema_derive_builtin_providers())
+            available :: providers ?? [DeriveDef]{}
             owner_type :: sema_derive_owner_type(definition.name, definition.type_params)
             type_info :: sema_derive_enum_type_info(definition)
             loop trait_name in sema_derive_builtin_traits() {
@@ -2119,7 +2118,8 @@ fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equat
             if definition.base == .Named(base) {
                 if facts.distincts.get(base) != None -> return ^blocks
             }
-            available :: SEMA_DERIVE_BUILTIN_PROVIDERS
+            if providers == None -> providers = Val(sema_derive_builtin_providers())
+            available :: providers ?? [DeriveDef]{}
             owner_type :: Type.Named{name: definition.name}
             type_info :: sema_derive_distinct_type_info(definition)
             loop trait_name in sema_derive_builtin_traits() {
