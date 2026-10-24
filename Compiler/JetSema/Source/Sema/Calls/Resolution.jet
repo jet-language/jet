@@ -232,25 +232,16 @@ fn sema_call_never_type_args_valid(signature: Type, generic_params: [SemaInferen
     true
 }
 
-// Rust `infer_call` (`direct_calls.rs`): a declared function named `name`
-// (`funcs.get(name)`) is the call target even when a nearer value binding
-// shares the name; only without one does the nearer binding decide.
-fn sema_call_declared_function_index(scopes: SemaScopeTable, name: String) -> Int? {
-    slot :: sema_scope_name_slot(scopes, name) ?? return None
-    found := Int?{None}
-    loop index in scopes.name_positions[slot] {
-        if scopes.bindings[index].symbol.kind == SymbolKind.Function -> found = Val(index)
-    }
-    found
-}
-
+// A call resolves a lexical value binding before a same-named file function,
+// so the nearest binding of `name` decides. A value binding that is not a
+// function is E0803 even when a declared function of the same name is visible
+// further out.
 fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest :: sema_scope_resolve_index(scopes, name) ?? {
         &diagnostics.push(sema_call_unknown_function(name, span))
         return None
     }
-    index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
-    symbol :: sema_scope_binding_symbol(environment, scopes, index)
+    symbol :: sema_scope_binding_symbol(environment, scopes, nearest)
     if symbol.kind != SymbolKind.Function {
         ty :: symbol.ty ?? {
             &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
@@ -306,8 +297,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
 fn sema_call_direct_type_arg_mismatch_signature(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
     if type_args.len() == 0 -> return None
     nearest :: sema_scope_resolve_index(scopes, name) ?? return None
-    index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
-    symbol :: sema_scope_binding_symbol(environment, scopes, index)
+    symbol :: sema_scope_binding_symbol(environment, scopes, nearest)
     if symbol.kind != SymbolKind.Function -> return None
     generic_params :: sema_inference_type_params(sema_scope_declaration_function_type_params(environment, program, symbol.id))
     if generic_params.len() == 0 || generic_params.len() == type_args.len() -> return None
