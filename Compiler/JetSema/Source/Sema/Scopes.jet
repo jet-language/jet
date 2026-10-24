@@ -453,7 +453,7 @@ struct SemaScopeEnvironment {
     checked_type_name_slots: [String:Int]{[String:Int]{}}
     checked_type_name_rows: [[Int]]{[[Int]]{}}
     boxed_edges: [String:[String]]{[String:[String]]{}}
-    copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}}}
+    copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[(known: Bool, value: Bool)]]{}}}
     declarations: [SemaScopeDeclaration]
     generic_params: [TGenericParam]
     // One publication survives probe retargets. The selected view may be empty
@@ -482,8 +482,8 @@ struct SemaScopeEnvironment {
 // User bodies consume the selected machine fact, never a host OS guess.
 fn sema_scope_environment_no_os(environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_module_is_core_source(environment.module_identity) -> return false
-    graph :: environment.registration_graph ?? return false
-    graph.target_machine.no_os
+    if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
+    false
 }
 
 // The declaration scope of one module for compile-time probes (dependency
@@ -732,6 +732,10 @@ struct SemaScopeTable {
     // function type stayed in the environment's `module_scope`
     // (sema_scope_light_copy). Empty for every other table.
     light_types: [Bool]{[Bool]{}}
+    // A contract condition is written above the parameters it reads and is
+    // checked again at each call site, whose spans name another place, so
+    // its names resolve without the declared-before-use position rule.
+    position_free: Bool{false}
 }
 
 struct SemaScopeBindingUndo {
@@ -851,11 +855,12 @@ fn sema_scope_environment_init(module_identity: String, package_identity: String
     }
 }
 
-// The boxed field edges of `graph`, read in place: matching the owned graph
-// parameter against `.Val(…)` would copy the whole graph first.
+// The boxed field edges of `graph`, read in place through the `.Val(…)`
+// pattern on the parameter; binding `value :: graph ?? …` copies the whole
+// graph.
 fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
-    value :: graph ?? return [String:[String]]{}
-    sema_checked_program_boxed_edges(value)
+    if graph == .Val(value) -> return sema_checked_program_boxed_edges(value)
+    [String:[String]]{}
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
@@ -1419,6 +1424,7 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         open_marks: source.open_marks,
         location_function: source.location_function,
         light_types: source.light_types.copy(),
+        position_free: source.position_free,
     }
 }
 
@@ -1876,7 +1882,8 @@ fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
 }
 
 // The binding of `name` visible at `use_span`. Inside a body a binding is
-// visible only after its declaration. Module-level bindings (the root frame:
+// visible only after its declaration, except in a position-free table (a
+// contract condition). Module-level bindings (the root frame:
 // items and imports) are visible everywhere in the module, and an imported
 // or staged symbol's span may come from another file, so position never
 // hides them.
@@ -1890,7 +1897,7 @@ fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Sp
             index :: table.name_positions[slot][cursor]
             // Read the row through its place: binding it copied the whole row
             // (its Symbol's Strings) for every candidate.
-            if table.bindings[index].frame == frame && (module_frame || table.bindings[index].symbol.span.start <= use_span.start) -> return Val(index)
+            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) -> return Val(index)
             cursor -= 1
         }
         frame = table.frames[frame].parent

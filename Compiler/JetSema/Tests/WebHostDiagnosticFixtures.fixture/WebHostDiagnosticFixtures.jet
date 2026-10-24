@@ -6,7 +6,7 @@ fn wh_expect(usage: String) Never! {
     if diagnostics.len() != 1 -> panic("host refusal diagnostic count: {usage}")
     diagnostic :: diagnostics[0]
     operation :: usage.replace("::", ".")
-    if diagnostic.code != "E-WEB-TIR-UNSUPPORTED" || diagnostic.span != None -> panic("wrong host refusal identity: {usage}")
+    if diagnostic.code != "E-WEB-UNSUPPORTED" || diagnostic.span != None -> panic("wrong host refusal identity: {usage}")
     if diagnostic.what != "Web output cannot compile `{operation}` yet." -> panic("wrong host refusal operation: {usage}")
     if diagnostic.why != "this Core operation needs a host provider that the browser target does not supply" -> panic("wrong host refusal reason: {usage}")
     if diagnostic.fix != "move this operation behind a native or server boundary" -> panic("wrong host refusal repair: {usage}")

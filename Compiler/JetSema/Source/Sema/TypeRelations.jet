@@ -40,6 +40,7 @@ use jet_foundation.[
     core_source_owns_type,
     type_name,
     core_identity_in_module,
+    is_compute_tensor_family,
 ]
 
 fn sema_type_is_core_view_generic(ty: Type) -> Bool Never! {
@@ -434,6 +435,7 @@ fn sema_type_assignable(required: Type, offered: Type) -> Bool Never! {
     // Value-slot comparison is recursive: callable metadata may differ at any
     // container depth, but required labels, effects and view origins still hold.
     if sema_type_carrier_compatible(required, offered) -> return sema_type_obligations_satisfy(required, offered)
+    if sema_type_compute_tensor_compatible(required, offered) -> return true
     if required == {
         .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)
         .Union(members) -> loop member in members {
@@ -442,6 +444,17 @@ fn sema_type_assignable(required: Type, offered: Type) -> Bool Never! {
         else -> {}
     }
     false
+}
+
+// Rust `Type::compute_tensor_compatible`: the erased `Tensor` spelling is the
+// storage boundary, so it meets every Tensor-family type (the shaped `Vec` and
+// `Matrix` aliases included) in either direction; two shaped types stay exact.
+fn sema_type_compute_tensor_compatible(required: Type, offered: Type) -> Bool Never! {
+    (sema_type_is_erased_tensor(required) && is_compute_tensor_family(offered)) || (sema_type_is_erased_tensor(offered) && is_compute_tensor_family(required))
+}
+
+fn sema_type_is_erased_tensor(ty: Type) -> Bool Never! {
+    ty == (Type.Named{name: "Tensor"}) || ty == (Type.Named{name: "<corelib>/core.compute::Tensor"})
 }
 
 // The registered row of a type symbol, by SymbolId key (the first registered
@@ -1000,8 +1013,9 @@ fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementa
 
 fn sema_type_graph_impl_matches_nominal(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> Bool? {
     if implementation.target_identity_key == nominal.identity_key -> return Val(true)
-    nominal_module :: nominal.symbol.module_name
-    if implementation.target_module_identity == (Val(nominal_module)) && implementation.target_type_name == nominal.symbol.name -> return Val(true)
+    if implementation.target_module_identity == .Val(target_module) {
+        if target_module == nominal.symbol.module_name && implementation.target_type_name == nominal.symbol.name -> return Val(true)
+    }
     if !graph.impl_traits_indexed {
         target_key :: sema_type_graph_impl_target_nominal_key(graph, implementation) ?? return None
         return Val(target_key == nominal.symbol.id.key)

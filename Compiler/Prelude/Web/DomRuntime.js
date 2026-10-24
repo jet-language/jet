@@ -809,7 +809,6 @@ export function jetAppFactsJson(app) {
   const queries = Array.isArray(graph?.queries) ? graph.queries : [];
   return jetWebJsonStringify({
     hydration: checked.hydration,
-    shared_tir: true,
     routes,
     actions,
     queries,

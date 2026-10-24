@@ -2614,8 +2614,7 @@ fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: T
     own_close := false
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == .Val(row) {
-            nominal :: graph.modules[row.module_index].nominals[row.row]
-            own_close = sema_copy_nominal_has_impl(program.registration_graph, nominal, "Close").value
+            own_close = sema_copy_nominal_close(program.registration_graph, program.copy_facts, graph.modules[row.module_index].nominals[row.row], row).value
         }
     }
     if ty == .Named(name) {

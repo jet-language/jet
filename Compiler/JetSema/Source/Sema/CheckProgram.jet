@@ -120,7 +120,7 @@ fn sema_web_host_check_core_usage(target_name: String, used_core: [String], diag
     loop usage in used_core {
         if !unsupported.contains(usage) -> next
         operation :: usage.replace("::", ".")
-        &diagnostics.push(sema_error_optional("E-WEB-TIR-UNSUPPORTED", None,
+        &diagnostics.push(sema_error_optional("E-WEB-UNSUPPORTED", None,
             "Web output cannot compile `{operation}` yet.",
             "this Core operation needs a host provider that the browser target does not supply",
             "move this operation behind a native or server boundary"))
@@ -1586,29 +1586,27 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
         bound_index := 0
         loop bound_index < parameter.bounds.len() {
             bound := parameter.bounds[bound_index]
-            if graph_option == None {
-                complete = false
-                bound_index += 1
-                next
-            }
-            graph :: graph_option
-            // Rust registers a generic bound as its written name and never
-            // rejects an unregistered one at the declaration (tests/ui
-            // embedded_generic_method_scope: `T: Clone`); such a bound has no
-            // trait identity to carry, so a complete graph drops it.
-            resolved :: sema_type_graph_bound_symbol(graph, module_identity, bound) ?? {
-                if !graph.complete -> complete = false
-                bound_index += 1
-                next
-            }
-            if sema_resolved_kind(graph, resolved) != SymbolKind.Trait {
-                &diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
-                complete = false
-                bound_index += 1
-                next
-            }
-            &bounds.push(sema_resolved_id(graph, resolved))
             bound_index += 1
+            // The graph is read in place through the `.Val(…)` pattern on the
+            // parameter; binding it to a local copies the whole graph.
+            if graph_option == .Val(graph) {
+                // Rust registers a generic bound as its written name and never
+                // rejects an unregistered one at the declaration (tests/ui
+                // embedded_generic_method_scope: `T: Clone`); such a bound has no
+                // trait identity to carry, so a complete graph drops it.
+                resolved :: sema_type_graph_bound_symbol(graph, module_identity, bound) ?? {
+                    if !graph.complete -> complete = false
+                    next
+                }
+                if sema_resolved_kind(graph, resolved) != SymbolKind.Trait {
+                    &diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
+                    complete = false
+                    next
+                }
+                &bounds.push(sema_resolved_id(graph, resolved))
+            } else {
+                complete = false
+            }
         }
         &params.push(TGenericParam{name: parameter.name, bounds: bounds})
         index += 1
@@ -3729,14 +3727,16 @@ fn sema_pass_facts(graph: ^SemaRegistrationGraph, threads: CompilerThreads, jobs
     sema_pass_facts_take(shared_state)
 }
 
-// Computes job `job`'s fact of `graph` into its field of `facts`.
+// Computes job `job`'s fact of `graph` into its field of `facts`. The graph
+// is read in place through the `.Val(…)` pattern on the parameter.
 fn sema_pass_fact_run(job: Int, graph: SemaRegistrationGraph?, facts: &SemaPassFacts) Never! {
-    registered :: graph ?? return
-    if {
-        job == SEMA_PASS_FACT_BOXED_EDGES -> { facts.boxed_edges = sema_scope_environment_boxed_edges(graph) }
-        job == SEMA_PASS_FACT_COPY -> { facts.copy_facts = sema_copy_facts_table(graph) }
-        job == SEMA_PASS_FACT_FIXED_LENGTH -> { facts.fixed_length_write_params = sema_fixed_length_write_params_in_graph(registered) }
-        else -> { facts.memory_plan = sema_function_memory_plan_from_graph(registered) }
+    if graph == .Val(registered) {
+        if {
+            job == SEMA_PASS_FACT_BOXED_EDGES -> { facts.boxed_edges = sema_checked_program_boxed_edges(registered) }
+            job == SEMA_PASS_FACT_COPY -> { facts.copy_facts = sema_copy_facts_table(graph) }
+            job == SEMA_PASS_FACT_FIXED_LENGTH -> { facts.fixed_length_write_params = sema_fixed_length_write_params_in_graph(registered) }
+            else -> { facts.memory_plan = sema_function_memory_plan_from_graph(registered) }
+        }
     }
 }
 

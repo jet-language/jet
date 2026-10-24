@@ -175,8 +175,8 @@ fn sema_inference_unify_inner(context: SemaInferenceContext, expected: Type, fou
 }
 
 fn sema_inference_bound_value(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, actual: Type, bound: String) -> Bool? {
-    graph_value :: graph ?? return None
-    sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
+    if graph == .Val(graph_value) -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
+    None
 }
 
 fn sema_inference_assignable(graph: SemaRegistrationGraph?, context: SemaInferenceContext, required: Type, offered: Type) -> Bool Never! {

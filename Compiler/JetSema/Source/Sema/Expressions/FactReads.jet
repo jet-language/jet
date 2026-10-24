@@ -719,25 +719,26 @@ fn sema_fact_build_setting_value(setting: SemaBuildSetting, span: Span, environm
     }
     variant := raw
     if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
-    graph :: program.registration_graph ?? return None
-    row :: sema_type_resolve_nominal_row(graph, Type.Named{name: ty}, environment.module_identity) ?? {
-        &diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` is not a declared fieldless enum", span))
-        return None
-    }
-    nominal :: graph.modules[row.module_index].nominals[row.row]
-    if nominal.kind != SemaRegistrationNominalKind.Enum {
-        &diagnostics.push(sema_fact_build_setting_invalid(setting, "settings use Bool, Int, Char, String, or a fieldless enum type", span))
-        return None
-    }
-    loop row_variant in nominal.variants {
-        if row_variant.symbol.name != variant -> next
-        if row_variant.payload == {
-            .Unit -> {}
-            else -> break
+    if program.registration_graph == .Val(graph) {
+        row :: sema_type_resolve_nominal_row(graph, Type.Named{name: ty}, environment.module_identity) ?? {
+            &diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` is not a declared fieldless enum", span))
+            return None
         }
-        return Val(SemaFactReadValue{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: [TComptimeEnumArg]{}}})
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.kind != SemaRegistrationNominalKind.Enum {
+            &diagnostics.push(sema_fact_build_setting_invalid(setting, "settings use Bool, Int, Char, String, or a fieldless enum type", span))
+            return None
+        }
+        loop row_variant in nominal.variants {
+            if row_variant.symbol.name != variant -> next
+            if row_variant.payload == {
+                .Unit -> {}
+                else -> break
+            }
+            return Val(SemaFactReadValue{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: [TComptimeEnumArg]{}}})
+        }
+        &diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` has no fieldless variant `{variant}`", span))
     }
-    &diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` has no fieldless variant `{variant}`", span))
     None
 }
 

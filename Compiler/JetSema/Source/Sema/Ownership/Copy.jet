@@ -121,41 +121,60 @@ fn sema_copy_walk() -> SemaCopyWalk Never! {
 // The untainted copy facts of every non-generic, non-trait nominal, by
 // registration row (`rows[module_index][row]`). They are computed once per
 // program tables, with one shared walk. A None row (generic, trait or
-// tainted) is walked by each query.
+// tainted) is walked by each query. `close` holds every nominal row's
+// sema_copy_nominal_has_impl(…, "Close") answer, which the walk and the
+// ownership Close-owner check read once per visited nominal.
 struct SemaCopyFactsTable {
     rows: [[SemaCopyTypeFacts?]]
+    close: [[(known: Bool, value: Bool)]]
 }
 
 fn sema_copy_facts_table_empty() -> SemaCopyFactsTable Never! {
-    SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}}
+    SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[(known: Bool, value: Bool)]]{}}
 }
 
-// The graph is read in place: matching the parameter against `.Val(…)` in a
-// caller would copy the whole graph first.
+// The graph is read in place through the `.Val(…)` pattern on the parameter;
+// binding `registered :: graph` (with or without `??`) copies the whole
+// graph.
 fn sema_copy_facts_table(graph: SemaRegistrationGraph?) -> SemaCopyFactsTable Never! {
-    registered :: graph ?? return sema_copy_facts_table_empty()
-    none :: sema_copy_facts_table_empty()
-    rows := [[SemaCopyTypeFacts?]]{}
-    walk := sema_copy_walk()
-    loop module_index in 0..<registered.modules.len() {
-        module_rows := [SemaCopyTypeFacts?]{}
-        loop row in 0..<registered.modules[module_index].nominals.len() {
-            entry := SemaCopyTypeFacts?{None}
-            if registered.modules[module_index].nominals[row].generic_params.len() == 0 && registered.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.Trait {
-                walk.tainted = false
-                facts :: sema_copy_nominal_facts(registered.modules[module_index].nominals[row], Type.Named{name: registered.modules[module_index].nominals[row].symbol.name}, graph, none, -1, [TGenericParam]{}, &walk)
-                if !walk.tainted -> entry = Val(facts)
-            }
-            &module_rows.push(entry)
+    if graph == .Val(registered) {
+        close := [[(known: Bool, value: Bool)]]{}
+        loop module_index in 0..<registered.modules.len() {
+            &close.push((loop nominal in registered.modules[module_index].nominals -> sema_copy_nominal_has_impl(graph, nominal, "Close")))
         }
-        &rows.push(module_rows)
+        table := SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: ^close}
+        rows := [[SemaCopyTypeFacts?]]{}
+        walk := sema_copy_walk()
+        loop module_index in 0..<registered.modules.len() {
+            module_rows := [SemaCopyTypeFacts?]{}
+            loop row in 0..<registered.modules[module_index].nominals.len() {
+                entry := SemaCopyTypeFacts?{None}
+                if registered.modules[module_index].nominals[row].generic_params.len() == 0 && registered.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.Trait {
+                    walk.tainted = false
+                    facts :: sema_copy_nominal_facts(registered.modules[module_index].nominals[row], SemaRegistrationRowRef{module_index: module_index, row: row}, Type.Named{name: registered.modules[module_index].nominals[row].symbol.name}, graph, table, -1, [TGenericParam]{}, &walk)
+                    if !walk.tainted -> entry = Val(facts)
+                }
+                &module_rows.push(entry)
+            }
+            &rows.push(module_rows)
+        }
+        table.rows = ^rows
+        return ^table
     }
-    SemaCopyFactsTable{rows: rows}
+    sema_copy_facts_table_empty()
 }
 
 fn sema_copy_table_facts(table: SemaCopyFactsTable, row: SemaRegistrationRowRef) -> SemaCopyTypeFacts? Never! {
     if row.module_index >= table.rows.len() || row.row >= table.rows[row.module_index].len() -> return None
     table.rows[row.module_index][row.row]
+}
+
+// Whether the nominal at `row` implements Close: the table's answer, or a
+// scan of the graph's impls when the table has no such row (an empty table
+// before the program facts are computed).
+fn sema_copy_nominal_close(graph: SemaRegistrationGraph?, table: SemaCopyFactsTable, nominal: SemaRegistrationNominal, row: SemaRegistrationRowRef) -> (known: Bool, value: Bool) Never! {
+    if row.module_index < table.close.len() && row.row < table.close[row.module_index].len() -> return table.close[row.module_index][row.row]
+    sema_copy_nominal_has_impl(graph, nominal, "Close")
 }
 
 fn sema_copy_walk_key(identity: String, actual: Type) -> String Never! {
@@ -195,11 +214,13 @@ fn sema_copy_apply_is_canonical_task(
     graph: SemaRegistrationGraph?,
     caller: Int,
 ) -> Bool Never! {
-    if name != "Task" || graph == None -> return false
-    registered :: graph ?? return false
-    if sema_type_resolve_nominal_row_at(registered, ty, caller) != None -> return false
-    owner :: sema_registration_core_builtin_owner(registered, name) ?? return false
-    owner.ownership == TDeclarationOwnership.Owned
+    if name != "Task" -> return false
+    if graph == .Val(registered) {
+        if sema_type_resolve_nominal_row_at(registered, ty, caller) != None -> return false
+        owner :: sema_registration_core_builtin_owner(registered, name) ?? return false
+        return owner.ownership == TDeclarationOwnership.Owned
+    }
+    false
 }
 
 fn sema_copy_apply_is_dynamic_loan(name: String) -> Bool Never! {
@@ -311,38 +332,41 @@ fn sema_copy_foreign_handle_facts(
 // impl whose declared trait name or registered trait symbol spells it, and
 // whose target resolves to the nominal. With the registration index built,
 // only that name's impl rows are read (the same rows the full scan would
-// accept, in the same order); before then every impl is scanned.
+// accept, in the same order); before then every impl is scanned. The graph
+// and its impl rows are read in place through the `.Val(…)` pattern on the
+// parameter.
 fn sema_copy_nominal_has_impl(
     graph: SemaRegistrationGraph?,
     nominal: SemaRegistrationNominal,
     trait_name: String,
 ) -> (known: Bool, value: Bool) Never! {
-    if graph == None -> return (known: false, value: false)
-    registered :: graph
-    if registered.impl_traits_indexed {
-        if registered.impl_trait_name_slots.get(trait_name) == .Val(found) {
-            loop impl_row in registered.impl_trait_name_buckets[found] {
-                target_matches :: sema_type_graph_impl_matches_nominal(registered, registered.modules[impl_row.module_index].impls[impl_row.row], nominal) ?? next
+    if graph == .Val(registered) {
+        if registered.impl_traits_indexed {
+            if registered.impl_trait_name_slots.get(trait_name) == .Val(found) {
+                loop impl_row in registered.impl_trait_name_buckets[found] {
+                    target_matches :: sema_type_graph_impl_matches_nominal(registered, registered.modules[impl_row.module_index].impls[impl_row.row], nominal) ?? next
+                    if target_matches -> return (known: true, value: true)
+                }
+            }
+            return (known: registered.complete, value: false)
+        }
+        loop graph_module in registered.modules {
+            loop implementation in graph_module.impls {
+                trait_matches := false
+                if implementation.trait_name == .Val(implementation_trait) {
+                    if implementation_trait == trait_name -> trait_matches = true
+                }
+                if implementation.trait_symbol == .Val(trait_symbol) {
+                    if trait_symbol.name == trait_name -> trait_matches = true
+                }
+                if !trait_matches -> next
+                target_matches :: sema_type_graph_impl_matches_nominal(registered, implementation, nominal) ?? next
                 if target_matches -> return (known: true, value: true)
             }
         }
         return (known: registered.complete, value: false)
     }
-    loop graph_module in registered.modules {
-        loop implementation in graph_module.impls {
-            trait_matches := false
-            if implementation.trait_name == .Val(implementation_trait) {
-                if implementation_trait == trait_name -> trait_matches = true
-            }
-            if implementation.trait_symbol == .Val(trait_symbol) {
-                if trait_symbol.name == trait_name -> trait_matches = true
-            }
-            if !trait_matches -> next
-            target_matches :: sema_type_graph_impl_matches_nominal(registered, implementation, nominal) ?? next
-            if target_matches -> return (known: true, value: true)
-        }
-    }
-    (known: registered.complete, value: false)
+    (known: false, value: false)
 }
 
 fn sema_copy_generic_bound(param: TGenericParam, bound_name: String) -> Bool Never! {
@@ -489,7 +513,7 @@ fn sema_copy_named_facts(
                 if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.ForeignHandle -> return known
                 return SemaCopyTypeFacts{copyable: sema_copy_copyable_scalar(ty), cloneable: known.cloneable, heap: known.heap, observable_clock: known.observable_clock, resource: known.resource, dynamic_loan: known.dynamic_loan, complete: known.complete}
             }
-            return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, table, caller, generic_params, &walk)
+            return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, &walk)
         }
     }
     // Core-only naming does not remove the runtime enum's Copy capability.
@@ -547,6 +571,7 @@ fn sema_copy_core_row_facts(
 
 fn sema_copy_nominal_facts(
     nominal: SemaRegistrationNominal,
+    row: SemaRegistrationRowRef,
     actual: Type,
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
@@ -576,7 +601,7 @@ fn sema_copy_nominal_facts(
     bindings_result :: sema_copy_generic_bindings(nominal, actual)
     bindings :: bindings_result.bindings
     complete := bindings_result.complete
-    resource_impl :: sema_copy_nominal_has_impl(graph, nominal, "Close")
+    resource_impl :: sema_copy_nominal_close(graph, table, nominal, row)
     resource := resource_impl.value
     if !resource_impl.known -> complete = false
     if sema_module_is_core_source(nominal.symbol.module_name) && sema_copy_named_is_builtin_resource(nominal.symbol.name) -> resource = true
@@ -652,7 +677,7 @@ fn sema_copy_apply_facts(
     if graph == .Val(registered) {
         if !name.contains("::") -> walk.tainted = true
         if sema_type_resolve_nominal_row_at(registered, ty, caller) == .Val(row) {
-            nominal_facts :: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, table, caller, generic_params, &walk)
+            nominal_facts :: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, &walk)
             return SemaCopyTypeFacts{
                 copyable: sema_copy_copyable_scalar(ty),
                 cloneable: nominal_facts.cloneable && nested.cloneable,

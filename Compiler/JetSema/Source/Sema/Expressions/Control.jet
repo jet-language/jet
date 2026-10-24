@@ -498,12 +498,13 @@ fn sema_failure_declared_conversion(source: Type, target: Type, environment: Sem
 // generated name no source spells, so the namespace never binds it into this file's
 // scope; the package is still one namespace, so its routine applies here.
 fn sema_failure_namespace_conversion(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
-    graph :: program.registration_graph ?? return None
     if !sema_registration_package_is_namespace(environment.package_identity) || environment.module_identity.starts_with("<corelib>/") -> return None
-    loop module_row in graph.modules {
-        if module_row.package_identity != environment.package_identity -> next
-        loop function in module_row.functions {
-            if function.symbol.name == name -> return Val(function.symbol.id.key)
+    if program.registration_graph == .Val(graph) {
+        loop module_row in graph.modules {
+            if module_row.package_identity != environment.package_identity -> next
+            loop function in module_row.functions {
+                if function.symbol.name == name -> return Val(function.symbol.id.key)
+            }
         }
     }
     None
@@ -1655,16 +1656,19 @@ fn sema_expression_pattern_binding_sources(shape: TPatternShape, subject_ty: Typ
                     .Bind(member, local, span) -> if local == name -> &sources.push(Expr.Field{base: source, member: member, span: span, id: AST_NODE_GENERATED})
                     .Nested(member, nested, span) -> {
                         projected :: Expr.Field{base: source, member: member, span: span, id: AST_NODE_GENERATED}
-                        graph :: program.registration_graph ?? return
-                        row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return
-                        nominal :: graph.modules[row.module_index].nominals[row.row]
-                        names :: loop parameter in nominal.generic_params -> parameter.name
-                        actuals :: sema_pattern_subject_args(subject_ty)
-                        ty := subject_ty
-                        loop registered in nominal.fields {
-                            if registered.symbol.name == member -> ty = sema_inference_substitute_type(registered.ty, names, actuals)
+                        if program.registration_graph == .Val(graph) {
+                            row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return
+                            nominal :: graph.modules[row.module_index].nominals[row.row]
+                            names :: loop parameter in nominal.generic_params -> parameter.name
+                            actuals :: sema_pattern_subject_args(subject_ty)
+                            ty := subject_ty
+                            loop registered in nominal.fields {
+                                if registered.symbol.name == member -> ty = sema_inference_substitute_type(registered.ty, names, actuals)
+                            }
+                            sema_expression_pattern_binding_sources(nested.shape, ty, projected, name, environment, program, &sources, &diagnostics)
+                        } else {
+                            return
                         }
-                        sema_expression_pattern_binding_sources(nested.shape, ty, projected, name, environment, program, &sources, &diagnostics)
                     }
                     else -> {}
                 }
