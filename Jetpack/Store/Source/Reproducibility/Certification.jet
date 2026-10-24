@@ -477,23 +477,23 @@ fn store_repro_remove_report(roots: HangarRoots, action_key: String) StoreError!
 
 fn store_repro_report_json(action_key: String, left_action_key: String, right_action_key: String, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord, difference: FirstDifference) -> String Never! {
     report :: Dyn.Object([String: Dyn]{
-        "action_key": Dyn.Text(action_key),
+        "action_key": Dyn.Text(action_key.copy()),
         "first_difference": Dyn.Object([String: Dyn]{
             "kind": Dyn.Text(difference.kind.label()),
-            "left": Dyn.Text(difference.left),
-            "path": Dyn.Text(difference.path),
-            "right": Dyn.Text(difference.right),
+            "left": Dyn.Text(difference.left.copy()),
+            "path": Dyn.Text(difference.path.copy()),
+            "right": Dyn.Text(difference.right.copy()),
         }),
         "left": store_repro_side_json(left, left_producer, left_action_key),
         "producer_action": Dyn.Object([String: Dyn]{
-            "left_action_key": Dyn.Text(left_action_key),
-            "left_provider": Dyn.Text(left_producer.provider),
-            "left_source_digest": Dyn.Text(left_producer.source_digest),
-            "left_source": Dyn.Text(left_producer.immutable_source),
-            "right_action_key": Dyn.Text(right_action_key),
-            "right_provider": Dyn.Text(right_producer.provider),
-            "right_source_digest": Dyn.Text(right_producer.source_digest),
-            "right_source": Dyn.Text(right_producer.immutable_source),
+            "left_action_key": Dyn.Text(left_action_key.copy()),
+            "left_provider": Dyn.Text(left_producer.provider.copy()),
+            "left_source_digest": Dyn.Text(left_producer.source_digest.copy()),
+            "left_source": Dyn.Text(left_producer.immutable_source.copy()),
+            "right_action_key": Dyn.Text(right_action_key.copy()),
+            "right_provider": Dyn.Text(right_producer.provider.copy()),
+            "right_source_digest": Dyn.Text(right_producer.source_digest.copy()),
+            "right_source": Dyn.Text(right_producer.immutable_source.copy()),
         }),
         "right": store_repro_side_json(right, right_producer, right_action_key),
         "schema": Dyn.Text(STORE_REPRO_REPORT_SCHEMA),
@@ -504,13 +504,13 @@ fn store_repro_report_json(action_key: String, left_action_key: String, right_ac
 
 fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> Dyn Never! {
     Dyn.Object([String: Dyn]{
-        "action_key": Dyn.Text(action_key),
+        "action_key": Dyn.Text(action_key.copy()),
         "capabilities": Dyn.Text(producer.facts.get("build.capabilities") ?? ""),
         "entry": Dyn.Text(store_repro_report_entry_id(entry, action_key)),
-        "output_hash": Dyn.Text(entry.envelope.output_hash),
-        "platform": Dyn.Text(entry.envelope.platform),
+        "output_hash": Dyn.Text(entry.envelope.output_hash.copy()),
+        "platform": Dyn.Text(entry.envelope.platform.copy()),
         "producer_facts": store_repro_text_object(producer.facts),
-        "provenance": Dyn.Text(entry.envelope.provenance),
+        "provenance": Dyn.Text(entry.envelope.provenance.copy()),
         "replay_facts": store_repro_text_object(producer.plan.facts()),
         "source_fingerprint": Dyn.Text(entry.cache_identity.source_fingerprint),
         "recipe_fingerprint": Dyn.Text(entry.cache_identity.recipe_fingerprint),
@@ -607,7 +607,7 @@ fn store_repro_report_file_stem(action_key: String) -> String Never! {
             if !is_hex -> valid = false
         }
     }
-    if valid -> return action_key
+    if valid -> return action_key.copy()
     "sha256-{crypto.sha256(raw).hex()}"
 }
 

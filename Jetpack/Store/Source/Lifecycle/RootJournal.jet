@@ -119,14 +119,14 @@ fn store_lifecycle_apply_or_compact(roots: HangarRoots, state: &[String: Lifecyc
         store_lifecycle_compact_if_needed(roots, state)
         return
     }
-    store_lifecycle_apply_entry(state, entry)
+    store_lifecycle_apply_entry(&state, entry)
     store_lifecycle_persist_entry(roots, entry, state, control)
 }
 
 // Apply and persist `entry` unless it is already durable.
 fn store_lifecycle_apply_if_new(roots: HangarRoots, state: &[String: LifecycleRoot], entry: LifecycleJournalEntry) StoreError! -[FS, Env]> {
     if store_lifecycle_entry_already_applied(state, entry) -> return
-    store_lifecycle_apply_entry(state, entry)
+    store_lifecycle_apply_entry(&state, entry)
     store_lifecycle_persist_entry(roots, entry, state, LifecycleWriteControl.none())
 }
 
@@ -452,7 +452,7 @@ fn store_lifecycle_require_known_target(target: String, known: [String]) StoreEr
 // Rust `apply_entry`: one state transition with its invariants.
 fn store_lifecycle_apply_entry(state: &[String: LifecycleRoot], entry: LifecycleJournalEntry) StoreError! {
     if entry == {
-        .Prepare(identity, proposed, protected, metadata, revision, at) -> store_lifecycle_apply_prepare(state, identity, proposed, protected, metadata, revision, at)
+        .Prepare(identity, proposed, protected, metadata, revision, at) -> store_lifecycle_apply_prepare(&state, identity, proposed, protected, metadata, revision, at)
         .Commit(id, incarnation, witness, at) -> {
             key :: id.as_str()
             if !state.has_key(key) -> return Err(StoreError.InvalidData("commit references an unknown lifecycle root"))

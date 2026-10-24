@@ -56,15 +56,15 @@ fn store_nix_expand_planned_closure(queue: &Rank<String>, scheduled: &Rank<Strin
     frontier := queue.copy()
     loop {
         store_path :: frontier.first() ?? break
-        frontier.remove(store_path)
+        &frontier.remove(store_path)
         info :: infos.get(store_path) ?? next
         loop name in info.info.references {
             reference :: "{store_dir}/{name}"
             store_nix_validate_store_path(reference, store_dir)
             if !scheduled.has(reference) {
-                scheduled.add(reference)
-                queue.add(reference)
-                frontier.add(reference)
+                &scheduled.add(reference)
+                &queue.add(reference)
+                &frontier.add(reference)
             }
         }
     }
@@ -80,7 +80,7 @@ fn store_nix_take_wave(queue: &Rank<String>, limit: Int) -> [String] Never! {
     wave := [String]{}
     loop wave.len() < limit {
         store_path :: queue.first() ?? break
-        queue.remove(store_path)
+        &queue.remove(store_path)
         &wave.push(store_path)
     }
     wave
@@ -97,7 +97,7 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
     queue := Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
-        queue.add(store_path)
+        &queue.add(store_path)
     }
     scheduled := queue.copy()
     checked := 0
@@ -117,8 +117,8 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
                     &plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state: .Cached, download_bytes: 0, disk_bytes: existing.unpacked_bytes})
                     loop reference in existing.references {
                         if !scheduled.has(reference) {
-                            scheduled.add(reference)
-                            queue.add(reference)
+                            &scheduled.add(reference)
+                            &queue.add(reference)
                         }
                     }
                     checked += 1
@@ -168,8 +168,8 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
                 reference :: "{store_dir}/{name}"
                 store_nix_validate_store_path(reference, store_dir)
                 if !scheduled.has(reference) {
-                    scheduled.add(reference)
-                    queue.add(reference)
+                    &scheduled.add(reference)
+                    &queue.add(reference)
                 }
             }
             checked += 1

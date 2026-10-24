@@ -36,7 +36,7 @@ struct CacheTransferReport {
 
     // `jet.status/v1` for a cache transfer operation.
     fn json(self, operation: String) -> String ReportError! {
-        fields :: StatusFields.new().with("operation", Dyn.Text(operation)).with("role", Dyn.Text(self.role)).with("mirror", Dyn.Text(self.mirror)).with("entry", Dyn.Text(self.entry)).with("output_hash", Dyn.Text(self.output_hash)).with("nar_hash", Dyn.Text(self.nar_hash)).with("signed_fingerprint", Dyn.Text(self.signed_fingerprint)).with("builder", Dyn.Text(self.builder)).with("provenance", Dyn.Text(self.provenance)).with("witness", report_optional_text(self.witness)).with("receipt_version", report_optional_int(self.receipt_version)).with("receipt_expires_unix", report_optional_int(self.receipt_expires_unix)).with("credential_provider", report_optional_text(self.credential_provider)).with("bytes", Dyn.Int(self.bytes))
+        fields :: StatusFields.new().with("operation", Dyn.Text(operation.copy())).with("role", Dyn.Text(self.role.copy())).with("mirror", Dyn.Text(self.mirror.copy())).with("entry", Dyn.Text(self.entry.copy())).with("output_hash", Dyn.Text(self.output_hash.copy())).with("nar_hash", Dyn.Text(self.nar_hash.copy())).with("signed_fingerprint", Dyn.Text(self.signed_fingerprint.copy())).with("builder", Dyn.Text(self.builder.copy())).with("provenance", Dyn.Text(self.provenance.copy())).with("witness", report_optional_text(self.witness)).with("receipt_version", report_optional_int(self.receipt_version)).with("receipt_expires_unix", report_optional_int(self.receipt_expires_unix)).with("credential_provider", report_optional_text(self.credential_provider)).with("bytes", Dyn.Int(self.bytes))
         StatusEnvelope.new(operation, true).with_fields(fields).json()
     }
 }
@@ -49,7 +49,7 @@ struct CacheStageReport {
     bytes: Int
 
     fn json(self, operation: String) -> String ReportError! {
-        fields :: StatusFields.new().with("operation", Dyn.Text(operation)).with("role", Dyn.Text(self.role)).with("destination", Dyn.Text(self.destination)).with("entries", Dyn.Int(self.entries)).with("bytes", Dyn.Int(self.bytes))
+        fields :: StatusFields.new().with("operation", Dyn.Text(operation.copy())).with("role", Dyn.Text(self.role.copy())).with("destination", Dyn.Text(self.destination.copy())).with("entries", Dyn.Int(self.entries)).with("bytes", Dyn.Int(self.bytes))
         StatusEnvelope.new(operation, true).with_fields(fields).json()
     }
 }
@@ -914,7 +914,7 @@ fn store_cache_decode_receipt(bytes: [U8]) -> CacheReceipt StoreError! {
 
 fn store_cache_take_field(fields: &[String: String], name: String) -> String StoreError! {
     value :: fields.get(name) ?? return Err(StoreError.InvalidData("cache trust receipt has no {name} field"))
-    fields.remove(name)
+    &fields.remove(name)
     Ok(value)
 }
 

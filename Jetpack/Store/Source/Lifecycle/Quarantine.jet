@@ -53,7 +53,7 @@ fn store_quarantine_malformed_objects(verification: &StoreVerification, roots: H
     if objects.len() == 0 -> return Ok(0)
     permissions := MovePathPermissions.default()
     moved :: store_quarantine_move_objects(&verification, roots, objects, &permissions)
-    restored :: permissions.restore()
+    restored :: &permissions.restore()
     if moved == {
         .Ok(count) -> {
             restored ?? return Err(err)

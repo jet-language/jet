@@ -362,7 +362,7 @@ fn store_reuse_create_exec_wrappers(snapshot_root: String, executables: [Snapsho
     sealed :: store_reuse_keeper_line(&child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
     directory :: store_reuse_hold_directory(root)
-    &child.stdin.close()
+    child.stdin.close()
     receipt :: child.wait()
     if !receipt.success -> return Err(StoreError.Other("private executable mount keeper failed"))
     files.remove_dir(mountpoint)

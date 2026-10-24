@@ -510,7 +510,7 @@ fn store_migrate_closure_graph_unlocked_ignoring(verification: &StoreVerificatio
     graph := store_closure_graph_structure_read_only(&verification, roots)
     deleted := graph.deleted_records.copy()
     loop id in ignored {
-        graph.records.remove(id).drop("an ignored id may have no record")
+        &graph.records.remove(id).drop("an ignored id may have no record")
         &deleted.push(id)
     }
     graph.deleted_records = store_sorted_unique(deleted)

@@ -87,10 +87,10 @@ fn store_recover_repair_quarantine_unlocked(verification: &StoreVerification, ro
     store_ensure_real_directory(objects, "Hangar object pool")
     permissions := MovePathPermissions.default()
     recovered :: store_archive_recover_quarantine_entries(&verification, roots, quarantine, objects, &permissions) ? count -> count ! error -> {
-        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+        &permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
         return Err(error)
     }
-    permissions.restore()
+    &permissions.restore()
     Ok(recovered)
 }
 
@@ -279,10 +279,10 @@ fn store_archive_repair_unlocked(verification: &StoreVerification, roots: Hangar
     had_object :: store_archive_lstat(object_path) != None
     permissions := MovePathPermissions.default()
     report :: store_archive_repair_swap(roots, archive, object_path, backup, quarantine, had_object, &permissions) ? value -> value ! error -> {
-        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+        &permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
         return Err(error)
     }
-    permissions.restore() ?? return Err(StoreError.Other("repair succeeded; restoring Hangar permissions failed: {err.message()}"))
+    &permissions.restore() ?? return Err(StoreError.Other("repair succeeded; restoring Hangar permissions failed: {err.message()}"))
     Ok(report)
 }
 
@@ -360,7 +360,7 @@ fn store_archive_repair_rollback(error: StoreError, object_path: String, backup:
             &rollback_errors.push("quarantined output remains at `{backup}`")
         }
     }
-    if rollback_errors.len() == 0 -> return error
+    if rollback_errors.len() == 0 -> return error.copy()
     detail :: rollback_errors.join("; ")
     error.with_message("{error.message()}; repair rollback: {detail}")
 }
@@ -907,7 +907,7 @@ fn store_archive_signing_key(roots: HangarRoots, requested: String?, create: Boo
 
 // A path-like request names a key file; a bare name is `<root>/trust/<name>.key`.
 fn store_archive_key_path(roots: HangarRoots, requested: String) -> String Never! {
-    if store_archive_path_components(requested).len() > 1 || requested.starts_with("/") || files.is_file(requested) -> return requested
+    if store_archive_path_components(requested).len() > 1 || requested.starts_with("/") || files.is_file(requested) -> return requested.copy()
     files.join(files.join(roots.root, "trust"), "{requested}.key")
 }
 
@@ -1115,7 +1115,7 @@ fn store_archive_with_extension(path: String, extension: String) -> String Never
 // `path`'s parent directory, or `fallback` when it has none.
 fn store_archive_parent_or(path: String, fallback: String) -> String Never! {
     parent :: files.dirname(path)
-    if parent == "" -> return fallback
+    if parent == "" -> return fallback.copy()
     parent
 }
 

@@ -15,7 +15,7 @@ struct WhyLocation {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["path"] = Dyn.Text(self.path)
+        object["path"] = Dyn.Text(self.path.copy())
         object["line"] = store_explain_optional_int(self.line)
         object["text"] = if self.text == {
             .Val(text) -> Dyn.Text(text)
@@ -113,28 +113,28 @@ struct PackageWhy {
         requesting["env_file"] = self.requesting.env_file.to_tree()
         requesting["lock_file"] = self.requesting.lock_file.to_tree()
         origin := [String: Dyn]{}
-        origin["catalog"] = Dyn.Text(self.origin.catalog)
-        origin["endpoint"] = Dyn.Text(self.origin.endpoint)
-        origin["cache_endpoint"] = Dyn.Text(self.origin.cache_endpoint)
-        origin["signature_chain"] = Dyn.Text(self.origin.signature_chain)
-        origin["source"] = Dyn.Text(self.origin.source)
-        origin["source_digest"] = Dyn.Text(self.origin.source_digest)
+        origin["catalog"] = Dyn.Text(self.origin.catalog.copy())
+        origin["endpoint"] = Dyn.Text(self.origin.endpoint.copy())
+        origin["cache_endpoint"] = Dyn.Text(self.origin.cache_endpoint.copy())
+        origin["signature_chain"] = Dyn.Text(self.origin.signature_chain.copy())
+        origin["source"] = Dyn.Text(self.origin.source.copy())
+        origin["source_digest"] = Dyn.Text(self.origin.source_digest.copy())
         trust := [String: Dyn]{}
-        trust["grade"] = Dyn.Text(self.trust.grade)
-        trust["reason"] = Dyn.Text(self.trust.reason)
+        trust["grade"] = Dyn.Text(self.trust.grade.copy())
+        trust["reason"] = Dyn.Text(self.trust.reason.copy())
         disk := [String: Dyn]{}
         disk["bytes"] = store_explain_optional_int(self.disk.bytes)
         disk["objects"] = Dyn.Int(self.disk.objects)
         payload := [String: Dyn]{}
-        payload["query"] = Dyn.Text(self.query)
-        payload["package"] = Dyn.Text(self.package)
+        payload["query"] = Dyn.Text(self.query.copy())
+        payload["package"] = Dyn.Text(self.package.copy())
         payload["available"] = Dyn.Bool(self.available)
         payload["requesting"] = Dyn.Object(requesting)
         payload["origin"] = Dyn.Object(origin)
         payload["trust"] = Dyn.Object(trust)
         payload["disk"] = Dyn.Object(disk)
         payload["dependents"] = pkg_json_texts(self.dependents)
-        payload["receipt"] = Dyn.Text(self.receipt)
+        payload["receipt"] = Dyn.Text(self.receipt.copy())
         StatusEnvelope.new("why", true).with_field("why", Dyn.Object(payload)).json()
     }
 

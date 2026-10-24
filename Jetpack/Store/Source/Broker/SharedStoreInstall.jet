@@ -62,7 +62,7 @@ fn store_broker_layout(roots: HangarRoots) -> BrokerLayout {
 }
 
 fn store_broker_absolute_path(path: String) -> String {
-    if files.is_abs(path) -> return path
+    if files.is_abs(path) -> return path.copy()
     files.join(sys.current_dir() ?? ".", path)
 }
 
@@ -253,7 +253,7 @@ fn store_broker_parent_or_root(path: String) -> String Never! {
 
 // Rust `systemd_escape_path`.
 fn store_broker_systemd_escape_path(path: String) -> String Never! {
-    &path.replace("\\", "\\\\").replace(" ", "\\x20")
+    path.replace("\\", "\\\\").replace(" ", "\\x20")
 }
 
 fn store_broker_socket_unit_text(config: SharedStoreConfig, admin: Bool) -> String Never! {

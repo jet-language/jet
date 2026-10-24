@@ -77,7 +77,7 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     if info.is_dir {
         entries := files.list_dir(path)
         &entries.sort_by((entry: files.DirEntry) -> entry.name)
-        loop entry in entries -> store_share_node(entry.path, shared, used, report)
+        loop entry in entries -> store_share_node(entry.path, shared, &used, &report)
         return
     }
     if !info.is_file -> return

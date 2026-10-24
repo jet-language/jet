@@ -190,7 +190,7 @@ fn store_nix_cas_visit(key: String, edges: [String: [String]], visiting: &[Strin
     visiting[key] = true
     references :: edges.get(key) ?? return Err(StoreError.InvalidData("Nix closure manifest has a missing graph node"))
     loop reference in references -> store_nix_cas_visit(reference, edges, &visiting, &reachable)
-    visiting.remove(key)
+    &visiting.remove(key)
     reachable[key] = true
 }
 
