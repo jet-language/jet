@@ -23,17 +23,17 @@ fn require_unsupported(value: CtValue, reason: String) Never! {
 #Test("comptime_json") {
     numbers :: [Float]{math.nan(), math.infinity(), -math.infinity()}
     loop number in numbers {
-        value :: CtValue.Float(CtFloat.F64(number))
+        value :: CtValue.Float{value: CtFloat.F64{value: number}}
         require_unsupported(value, "JSON cannot encode a non-finite Float")
-        require_unsupported(CtValue.List([CtValue]{value}), "JSON cannot encode a non-finite Float")
+        require_unsupported(CtValue.List{values: [CtValue]{value}}, "JSON cannot encode a non-finite Float")
     }
-    require_unsupported(CtValue.Map([CtMapEntry]{CtMapEntry{key: CtKey.Int(1), value: CtValue.Int(2)}}), "JSON cannot encode non-text map keys")
-    assert_eq(ast_comptime_value_json(CtValue.Char('\n')) ?? panic("Char JSON"), "\"\\n\"")
-    assert_eq(ast_comptime_value_json(CtValue.Char('"')) ?? panic("Char JSON"), "\"\\\"\"")
+    require_unsupported(CtValue.Map{entries: [CtMapEntry]{CtMapEntry{key: CtKey.Int{value: 1}, value: CtValue.Int{value: 2}}}}, "JSON cannot encode non-text map keys")
+    assert_eq(ast_comptime_value_json(CtValue.Char{value: '\n'}) ?? panic("Char JSON"), "\"\\n\"")
+    assert_eq(ast_comptime_value_json(CtValue.Char{value: '"'}) ?? panic("Char JSON"), "\"\\\"\"")
     bytes := [U8]{}
     loop byte in 0..<32 -> &bytes.push(U8{byte})
     controls :: String.from_bytes(bytes) ?? panic("C0 text")
-    encoded :: ast_comptime_value_json(CtValue.Str(controls)) ?? panic("C0 JSON")
+    encoded :: ast_comptime_value_json(CtValue.Str{value: controls}) ?? panic("C0 JSON")
     assert_eq(encoded, foundation_json_quote(controls))
     assert(encoded.contains("\\u001f"))
 }

@@ -20,14 +20,13 @@ fn evidence_report_require(ok: Bool, name: String) Never! {
     evidence_report_require(decoded.records == report.records && decoded.derivations == report.derivations, "canonical derivation round trip")
     rows :: evidence_report_query(decoded, Val("addition"))
     evidence_report_require(rows.len() == 1 && rows[0].outcome == EvidenceOutcome.Passed, "claim projection")
-    empty :: evidence_report_from_bytes([U8]{}, U64.MAX)
-    refused :: if empty == {
+    // A matched call is consumed here instead of propagating its error.
+    refused :: if evidence_report_from_bytes([U8]{}, U64.MAX) == {
         .Ok(_) -> false
         .Err(_) -> true
     }
     evidence_report_require(refused, "truncated bytes refused")
-    invalid :: evidence_record_with_expectation(record, EvidenceExpectation.ExpectedFailure)
-    valid :: if invalid == {
+    valid :: if evidence_record_with_expectation(record, EvidenceExpectation.ExpectedFailure) == {
         .Ok(_) -> true
         .Err(_) -> false
     }

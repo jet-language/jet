@@ -123,12 +123,11 @@ fn cli_metadata_wasm(record: [U8], count: Int) -> [U8] Never! {
     out
 }
 fn cli_metadata_accept(bytes: [U8], expected: CLICommandSchema) Never! {
-    actual :: read_executable(bytes.view(0..<bytes.len()), JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
+    actual :: read_executable(bytes[0..<bytes.len()], JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
     cli_metadata_require(actual == expected, "cross-format record round trip")
 }
 fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never! {
-    actual :: read_executable(bytes.view(0..<bytes.len()), maximum)
-    refused :: if actual == {
+    refused :: if read_executable(bytes[0..<bytes.len()], maximum) == {
         .Err(error) -> error == expected
         .Ok(_) -> false
     }
@@ -141,7 +140,7 @@ fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never
     hidden.scope = JobScope.Internal
     schema :: CLICommandSchema{entry_type: "Options", description: Val("example"), inputs: [CLIInputSchema]{input}, commands: [CLISubcommandSchema]{CLISubcommandSchema{name: "send", description: None, inputs: [CLIInputSchema]{}}}, jobs: [JobFact]{job, job, hidden}, standard: true, version: Val("1.2.3")}
     record :: encode_record(schema)
-    decoded :: decode_record(record.view(0..<record.len())) ?? panic("decode fixture")
+    decoded :: decode_record(record[0..<record.len()]) ?? panic("decode fixture")
     cli_metadata_require(decoded == schema, "all v8 fields round trip")
     cli_metadata_require(decoded.root_completion_words() == [String]{"--help", "--verbose", "-v", "--quiet", "-q", "--color", "--version", "output-file", "--output-file", "-o"}, "root completion order")
     cli_metadata_require(decoded.job_completion_words() == [String]{"release", "release"}, "visible duplicate jobs retained")
