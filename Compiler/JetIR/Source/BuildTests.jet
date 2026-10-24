@@ -192,11 +192,13 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
     } else if row < 0 || m.types[row].kind == .Unit {
         operands :: ir_args(&b.f, no_args)
         ir_emit(&b.f, IROp.Call, -1, body, operands, 0, b.line)
+        ir_stop_check(&m, &b)
     } else {
         ty :: m.types[row].ty.copy()
         result :: ir_temp(&m, &b, row)
         operands :: ir_args(&b.f, no_args)
         ir_emit(&b.f, IROp.Call, result, body, operands, 0, b.line)
+        ir_stop_check(&m, &b)
         if ir_untag(ty) == {
             .Result(_, err_ty) -> {
                 // A kept `T Never!` carrier never holds an Err.
@@ -345,6 +347,7 @@ fn ir_test_call_override(m: &IRModule, b: &IRBuilder, override: Int) Never! {
     result :: if row < 0 || m.types[row].kind == .Unit -> -1 else -> ir_temp(&m, &b, row)
     operands :: ir_args(&b.f, [Int]{suite})
     ir_emit(&b.f, IROp.Call, result, override, operands, 1, b.line)
+    ir_stop_check(&m, &b)
     ir_test_drop(&m, &b, result)
     _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_jet_test_suite", [Int]{suite}, -1)
 }
@@ -366,6 +369,7 @@ fn ir_test_check(m: &IRModule, p: IRProgram, check: IROutputCheck, function: Int
         result :: if row < 0 || m.types[row].kind == .Unit -> -1 else -> ir_temp(&m, &b, row)
         operands :: ir_args(&b.f, [Int]{})
         ir_emit(&b.f, IROp.Call, result, function, operands, 0, b.line)
+        ir_stop_check(&m, &b)
         if result >= 0 && m.types[row].kind == .Bool {
             bool_row :: ir_type_row(&m, Type.Bool) ?? 0
             rejected :: ir_temp(&m, &b, bool_row)
@@ -456,6 +460,7 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
         loop helper in check_helpers {
             operands :: ir_args(&b.f, [Int]{})
             ir_emit(&b.f, IROp.Call, -1, helper, operands, 0, b.line)
+            ir_stop_check(&m, &b)
         }
         ir_end(&b.f, b.line)
     }

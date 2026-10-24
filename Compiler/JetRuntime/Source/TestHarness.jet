@@ -1,12 +1,31 @@
 // The native test harness boundary: unit invocation, the task adapter, and the
 // record-file I/O the generated harness main uses. Tests run in order on the
 // calling thread: spawn runs the unit and parks its outcome, join hands it on.
-// A trap that ends the process is attributed by the host's fatal-child rerun.
+// A fault that ends the process is attributed by the host's fatal-child rerun.
 
-// `invoke(env)` returns null for success or one owned diagnostic String.
+// `invoke(env)` returns null for success or one owned diagnostic String. It
+// runs under its own root, as jet_rt_main runs the entry (Main.jet): a stop in
+// the test (a panic, a failed assert) is published there, every generated
+// frame leaves by its stop edge, and the stop's rendered report is the test's
+// failure; the stopped invoke wrote no result. A stop without a report
+// (process.exit) ends the process: it is published again on the enclosing root.
 #Export(c) fn jet_rt_test_unit(name: I64, expected: Bool, env: I64, invoke: I64) -> I64 {
     jet_rt_test_capture_begin()
-    error :: coll_call1(invoke, env)
+    save :: jet_rt_alloc(I64{40}, I64{8})
+    root :: jet_rt_root_begin(save)
+    returned :: coll_call1(invoke, env)
+    record :: jet_rt_root_take_stop(root, save + I64{32})
+    jet_rt_root_leave(root, save)
+    error := returned
+    if (record != I64{0}) {
+        error = scheduler_stop_take_message(record)
+        scheduler_stop_drop(record)
+        if (error == I64{0}) {
+            _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, trap_word(save + I64{32}))
+            error = test_text_new(I64{0})
+        }
+    }
+    jet_rt_free(save, I64{40}, I64{8})
     stdout :: jet_rt_test_capture_take()
     skipped :: jet_rt_test_take_whole_skip()
     jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
