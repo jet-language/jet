@@ -65,6 +65,7 @@ fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     if !any -> return None
     out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
     out.inline_always = caller.inline_always
+    out.symbol_hash = caller.symbol_hash
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
     loop value in caller.args -> &out.args.push(value)

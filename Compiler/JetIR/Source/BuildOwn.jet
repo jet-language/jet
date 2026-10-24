@@ -353,7 +353,7 @@ fn ir_box_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> 
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("unique", helper_key, "jet_ir_box_unique_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_box_unique_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     boxed :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "boxed"))
@@ -510,7 +510,7 @@ fn ir_drop_glues(m: &IRModule, p: IRProgram) Never! {
 fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     key :: ir_drop_key(m, row)
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("drop", key, "jet_ir_drop_{ir_key_hash(key)}", "", 0))
+    &m.functions.push(ir_hashed_function("drop", key, "jet_ir_drop_", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
@@ -613,7 +613,7 @@ fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int 
     if known >= 0 -> return known
     entry :: ir_counted_entry(&m, p, row) ?? return -1
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("unique", helper_key, "jet_ir_unique_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_unique_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     header :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "header"))
@@ -707,7 +707,7 @@ fn ir_copy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Ne
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("copy", helper_key, "jet_ir_copy_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("copy", helper_key, "jet_ir_copy_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
@@ -848,7 +848,7 @@ fn ir_close_glue(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_on
         return -1
     }
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("close", key, "jet_ir_close_{ir_key_hash(key)}", "", 0))
+    &m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     m.function_rows[key] = id
     m.close_glue[key] = id
     a := ir_builder_new(m.functions[id].copy())
@@ -1063,7 +1063,7 @@ fn ir_part_close_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, mem
     }
     if known != -3 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("close", key, "jet_ir_close_{ir_key_hash(key)}", "", 0))
+    &m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     m.function_rows[key] = id
     m.close_glue[key] = id
     a := ir_builder_new(m.functions[id].copy())

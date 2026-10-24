@@ -70,7 +70,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[Type, TypeTable, sha256_bytes, sha256_hex, sha256_hex_bytes]
+use jet_foundation.[Type, TypeTable, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
 
 enum IROp {
     Nop
@@ -170,6 +170,8 @@ enum IRSlotKind { Param Local Temp }
 // code is the template's (X64Select.jet ir_x64_asm_function).
 // `inline_always` marks a function its source marks `#Inline(Always)`, the
 // callees the `inline: always_marked` build option inlines (OptInline.jet).
+// `symbol_hash` is the stable id of `key` that ends `symbol` (0: the symbol
+// carries no hash; ir_hashed_function).
 struct IRFunction {
     name: String
     key: String
@@ -193,6 +195,7 @@ struct IRFunction {
     open: [Int]
     asm: IRAsmLeaf?
     inline_always: Bool
+    symbol_hash: U64
 }
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is
@@ -329,11 +332,24 @@ fn ir_row_key(m: IRModule, row: Int) -> String Never! {
     m.type_keys[row].copy()
 }
 
-// A symbol suffix naming `key` by content (the first 16 hex digits of its
-// SHA-256), so a helper's or instance's symbol does not depend on the order
-// the build reached it in.
-fn ir_key_hash(key: String) -> String Never! {
-    sha256_hex(key).slice(0, 16)
+// A function whose symbol is `prefix` and then its key's 64-bit stable
+// FNV-1a id as 16 lowercase hex digits, so a helper's or instance's symbol
+// does not depend on the order the build reached it in. Two keys can hash
+// alike; ir_merge stops the build when two merged functions do.
+fn ir_hashed_function(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
+    hash :: stable_id("ir.symbol", key)
+    symbol := List<U8>.try_with_capacity(prefix.len() + 16) ?? panic("symbol allocation failed")
+    loop byte in prefix.bytes() -> &symbol.push(byte)
+    // Most significant nibble first: each rotate brings the next one down.
+    rest := hash
+    loop _ in 0..<16 {
+        rest = rest.rotate_left(4)
+        nibble :: Int.from_u64(rest.bit_and(U64{15}))
+        &symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
+    }
+    made := ir_function_new(name, key, String.from_bytes(symbol) ?? panic("symbol bytes are UTF-8"), source_file, line)
+    made.symbol_hash = hash
+    made
 }
 
 fn ir_intern_name(m: &IRModule, text: String) -> Int Never! {
@@ -373,7 +389,7 @@ fn ir_function_new(name: String, key: String, symbol: String, source_file: Strin
         param_count: 0, result: -1,
         slot_type: [Int]{}, slot_kind: [IRSlotKind]{}, slot_name: [Int]{}, slot_line: [Int]{},
         op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, code_line: [Int]{}, args: [Int]{},
-        open: [Int]{}, asm: None, inline_always: false,
+        open: [Int]{}, asm: None, inline_always: false, symbol_hash: U64{0},
     }
 }
 

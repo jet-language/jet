@@ -32,7 +32,7 @@ fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: Str
     kind :: if m.types[elem_row].kind == .Float -> "float" else -> ir_map_key_kind(m, elem_row)
     id :: m.functions.len()
     symbol :: name.split(".").to_list().join("_")
-    &m.functions.push(ir_function_new(name, key, "jet_ir_{symbol}_{ir_key_hash(key)}", "", 0))
+    &m.functions.push(ir_hashed_function(name, key, "jet_ir_{symbol}_", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     heap :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "heap"))

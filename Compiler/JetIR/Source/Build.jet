@@ -746,7 +746,7 @@ fn ir_function_row_id(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -
     instance :: "{function.key}<{spelled.join(", ")}>"
     if m.instances.get(instance) == .Val(known) -> return Val(known)
     id :: m.functions.len()
-    made := ir_function_new(function.name, instance, "{ir_symbol_name(function)}__{ir_key_hash(instance)}", function.source_file, function.line)
+    made := ir_hashed_function(function.name, instance, "{ir_symbol_name(function)}__", function.source_file, function.line)
     made.inline_always = function.is_inline_always
     &m.functions.push(^made)
     m.function_rows[instance] = id

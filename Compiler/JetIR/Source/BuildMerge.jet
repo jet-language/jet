@@ -146,6 +146,19 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
     loop (group, id) in g.function_ids {
         if id >= 0 -> out.function_rows[g.function_keys[group].copy()] = id
     }
+    // A hashed symbol ends with its key's 64-bit stable id (IR.jet
+    // ir_hashed_function). Two keys can hash alike, which would name two
+    // functions with one symbol: that stops the build. Keys are compared
+    // only when two hashes meet.
+    hashed := [U64:Int]{}
+    loop (id, f) in out.functions {
+        if (f.symbol_hash == U64{0}) -> next
+        if hashed.get(f.symbol_hash) == .Val(other) {
+            if out.functions[other].key != f.key -> panic("internal error: the symbol hash of {out.functions[other].key} and {f.key} is the same")
+            next
+        }
+        hashed[f.symbol_hash] = id
+    }
     out
 }
 

@@ -135,7 +135,7 @@ fn ir_transaction_hook_runner(m: &IRModule, row: Int) -> Int Never! {
     known :: m.function_rows.get(key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("transaction.hook.run", key, "jet_ir_transaction_hook_run_{ir_key_hash(key)}", "", 0))
+    &m.functions.push(ir_hashed_function("transaction.hook.run", key, "jet_ir_transaction_hook_run_", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     boxed :: ir_new_slot(&a, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "boxed"))

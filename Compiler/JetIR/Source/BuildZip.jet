@@ -283,7 +283,7 @@ fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, param
     boxed :: ir_closure_box(&m, &b, row, 24, [IRCaptureSlot]{})
     id :: m.functions.len()
     key :: "{b.f.key}#{role}@{span.start}"
-    &m.functions.push(ir_function_new("{b.f.name}.{role}@{span.start}", key, "{b.f.symbol}__{role}_{ir_key_hash(key)}", b.f.source_file, b.line))
+    &m.functions.push(ir_hashed_function("{b.f.name}.{role}@{span.start}", key, "{b.f.symbol}__{role}_", b.f.source_file, b.line))
     &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{}, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)

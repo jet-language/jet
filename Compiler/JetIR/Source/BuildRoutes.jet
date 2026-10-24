@@ -937,7 +937,7 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
     ir_store_at(&m, p, &b, boxed, 24, slot)
     id :: m.functions.len()
     key :: "{b.f.key}#fn_widen@{span.start}.{b.f.op.len()}"
-    &m.functions.push(ir_function_new("{b.f.name}.fn_widen@{span.start}", key, "{b.f.symbol}__fn_widen_{ir_key_hash(key)}", b.f.source_file, b.line))
+    &m.functions.push(ir_hashed_function("{b.f.name}.fn_widen@{span.start}", key, "{b.f.symbol}__fn_widen_", b.f.source_file, b.line))
     &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)

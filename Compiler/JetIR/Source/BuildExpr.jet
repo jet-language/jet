@@ -4152,7 +4152,7 @@ fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLa
     occurrence :: b.lambdas.get(base_key) ?? 0
     b.lambdas[base_key] = occurrence + 1
     lambda_key :: if occurrence == 0 -> base_key else -> "{base_key}#{occurrence}"
-    &m.functions.push(ir_function_new("{b.f.name}.lambda@{lambda.source_span.start}", lambda_key, "{b.f.symbol}__lambda_{ir_key_hash(lambda_key)}", b.f.source_file, b.line))
+    &m.functions.push(ir_hashed_function("{b.f.name}.lambda@{lambda.source_span.start}", lambda_key, "{b.f.symbol}__lambda_", b.f.source_file, b.line))
     &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)
@@ -4418,7 +4418,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         }
         target :: ir_function_id(&m, p, key, [Type]{}) ?? return ir_fail_slot(&b, span, "named function {function.name} as a value")
         adapter = m.functions.len()
-        &m.functions.push(ir_function_new("{function.name}.value", adapter_key, "{ir_symbol_name(function)}__value_{ir_key_hash(adapter_key)}", function.source_file, function.line))
+        &m.functions.push(ir_hashed_function("{function.name}.value", adapter_key, "{ir_symbol_name(function)}__value_", function.source_file, function.line))
         m.function_rows[adapter_key] = adapter
         a := ir_builder_new(m.functions[adapter].copy())
         a.line = function.line

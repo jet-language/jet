@@ -26,7 +26,7 @@ fn ir_set_helper(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int 
     shape :: ir_set_shape(&m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
     id :: m.functions.len()
     symbol :: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
-    &m.functions.push(ir_function_new(name, key, "jet_ir_set_{symbol}_{ir_key_hash(key)}", "", 0))
+    &m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
     m.function_rows[key] = id
     a := ir_builder_new(m.functions[id].copy())
     set :: ir_new_slot(&a, set_row, IRSlotKind.Param, ir_intern_name(&m, "set"))

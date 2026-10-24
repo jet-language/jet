@@ -761,7 +761,7 @@ fn ir_record_in_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span
     }
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("record.in", helper_key, "jet_ir_record_in_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("record.in", helper_key, "jet_ir_record_in_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     pointer_row :: ir_pointer_row(&m)
@@ -1395,7 +1395,7 @@ fn ir_render_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builder
     }
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("render", helper_key, "jet_ir_render_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("render", helper_key, "jet_ir_render_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     value :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
@@ -1978,7 +1978,7 @@ fn ir_order_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Sp
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("order", helper_key, "jet_ir_order_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("order", helper_key, "jet_ir_order_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     left :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "left"))
@@ -2288,7 +2288,7 @@ fn ir_equal_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Sp
     known :: m.function_rows.get(helper_key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
-    &m.functions.push(ir_function_new("equal", helper_key, "jet_ir_equal_{ir_key_hash(helper_key)}", "", 0))
+    &m.functions.push(ir_hashed_function("equal", helper_key, "jet_ir_equal_", "", 0))
     m.function_rows[helper_key] = id
     a := ir_builder_new(m.functions[id].copy())
     left :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "left"))
