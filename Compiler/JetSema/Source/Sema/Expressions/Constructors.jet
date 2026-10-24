@@ -297,12 +297,12 @@ fn sema_atomic_field_inner(ty: Type) -> Type? Never! {
 
 // Reuse the canonical Atomic.new row so typed field construction reaches the
 // same MIR carrier as an explicit constructor, without rechecking/moving twice.
-fn sema_atomic_field_initializer(field_ty: Type, value: TExpr, source: Expr) -> TExpr? {
+fn sema_atomic_field_initializer(field_ty: Type, value: TExpr, source: Expr, context: &SemaCheckContext) -> TExpr? {
     inner :: sema_atomic_field_inner(field_ty) ?? return Val(value)
     row :: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
     argument :: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     bindings :: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
-    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{^argument}, bindings, value.span) ?? return None
+    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{^argument}, bindings, value.span, &context) ?? return None
     Val(sema_tir_expr(field_ty, kind, value.span))
 }
 
@@ -330,7 +330,7 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
     &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: symbol, kind: "field"})
     reference := sema_expression_field_ref(symbol, Val(owner.id), field_ty)
     reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner.id, field.name)
-    initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value) ?? return None else -> checked
+    initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
 
@@ -533,7 +533,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     if type_name == "" && contextual_allowed && variant == "None" && args.len() == 0 {
-        return sema_expression_absent(span, expected, &diagnostics)
+        return sema_expression_absent(span, expected, &context, &diagnostics)
     }
     // Leading-dot Result cases are contextual only when the expected type
     // is a Result; a declared enum's `.Ok` / `.Err` remains its own case.

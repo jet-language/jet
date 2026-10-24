@@ -8,6 +8,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     FunctionDefaultRef,
+    NodeKind,
     ParamZone,
     Span,
     Symbol,
@@ -501,7 +502,7 @@ fn sema_call_try_stream_handle_static(owner: String, method: String, args: [Call
             else -> values[0] = sema_tir_node(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
         }
     }
-    unit_receiver := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    unit_receiver := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
     value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

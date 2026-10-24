@@ -170,12 +170,16 @@ struct TMapPatternEntry {
 }
 
 // Logical key identity ignores source spelling and resolved constant aliases.
-fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
+fn tir_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Never! {
     if key.kind == {
         .IntLit(value, _) -> Val("int:{value}")
         .StrLit(value) -> Val("text:{value}")
-        .BoolLit(value) -> Val("bool:{value}")
-        .CharLit(value) -> Val("char:{value}")
+        // A scalar literal is a flat row (sema_node).
+        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.base].kind == {
+            .BoolLit(value) -> Val("bool:{value}")
+            .CharLit(value) -> Val("char:{value}")
+            else -> None
+        }
         .ConstRef(symbol) -> Val("constant:{symbol.key}")
         .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
         .Unary(op, value) -> {
@@ -279,12 +283,8 @@ struct TUnitRounding { mode: TUnitRoundingMode, digits: TExpr }
 
 enum TExprKind {
     IntLit(value: Int, width: TIntegerWidth?)
-    FloatLit(value: Float)
-    BoolLit(value: Bool)
-    CharLit(value: Int)
     StrLit(parts: [TStrPart])
     Local(local: TLocal)
-    Unit
     InlineBlock(body: [TStmt])
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
@@ -353,7 +353,6 @@ enum TExprKind {
     RawOf(value: TExpr)
     DistinctRaw(value: TExpr)
     Present(value: TExpr)
-    Absent
     Ok(value: TExpr)
     Err(value: TExpr)
     OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: TLocal?)

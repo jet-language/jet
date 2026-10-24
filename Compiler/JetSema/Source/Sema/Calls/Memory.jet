@@ -82,8 +82,8 @@ fn sema_call_memory_static_arity(name: String, method: String, args: [CallArg], 
     return false
 }
 
-fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Int? {
-    comptime_value :: sema_expr_comptime_value(checked)
+fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> Int? {
+    comptime_value :: sema_expr_comptime_value(checked, context)
     if comptime_value == .Val(value) {
         number :: if value == {
             .Int(number) -> Val(number)
@@ -165,7 +165,7 @@ fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], 
                 checked :: sema_check_expression(argument.expr, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 if {
                     name == "Fixed" && method == "new" -> {
-                        size_value := sema_call_memory_compiletime_int(argument.expr, checked, environment, program, scopes)
+                        size_value := sema_call_memory_compiletime_int(argument.expr, checked, environment, program, scopes, context)
                         if size_value == None {
                             staged := sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), argument.span, span)
                             if staged == {

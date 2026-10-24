@@ -15,6 +15,7 @@ use jet_foundation.[
     ExprField,
     Field,
     FunctionDefaultRef,
+    NodeKind,
     ParamZone,
     Span,
     StrPart,
@@ -93,8 +94,8 @@ fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironmen
     }
 }
 
-fn sema_call_http_unit_receiver(span: Span) -> TExpr Never! {
-    sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+fn sema_call_http_unit_receiver(span: Span, context: &SemaCheckContext) -> TExpr Never! {
+    sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
 }
 
 fn sema_call_http_static_rust_type(type_name: String) -> String Never! {
@@ -285,7 +286,7 @@ fn sema_call_try_http_static(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if target.type_name == "HTTPClientType" {
-        value := sema_tir_node(Type.Named{name: "HTTPClient"}, TExprKind.HandleMethod{receiver: sema_call_http_unit_receiver(span), operation: THandleOp.HTTPClientNew, args: [TExpr]{}}, span)
+        value := sema_tir_node(Type.Named{name: "HTTPClient"}, TExprKind.HandleMethod{receiver: sema_call_http_unit_receiver(span, &context), operation: THandleOp.HTTPClientNew, args: [TExpr]{}}, span)
         sema_call_http_record_effect("Net", "HTTPClient.new", value.ty, span, environment, program, &scopes, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }

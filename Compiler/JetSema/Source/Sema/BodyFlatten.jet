@@ -398,12 +398,8 @@ fn body_flat_context_guard(value: TContextGuard, flat: &BodyFlat) -> BodyContext
 fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
     if value == {
         .IntLit(f_value, f_width) -> NodeKind.IntLit{value: f_value, width: f_width}
-        .FloatLit(f_value) -> NodeKind.FloatLit{value: f_value}
-        .BoolLit(f_value) -> NodeKind.BoolLit{value: f_value}
-        .CharLit(f_value) -> NodeKind.CharLit{value: f_value}
         .StrLit(f_parts) -> NodeKind.StrLit{parts: body_flat_list_str_part(f_parts, &flat)}
         .Local(f_local) -> NodeKind.Local{local: f_local}
-        .Unit -> NodeKind.Unit
         .InlineBlock(f_body) -> NodeKind.InlineBlock{body: body_flat_list_stmt(f_body, &flat)}
         .CtLit(f_value) -> NodeKind.CtLit{value: f_value}
         .ConstRef(f_symbol) -> NodeKind.ConstRef{symbol: f_symbol}
@@ -471,7 +467,6 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .RawOf(f_value) -> NodeKind.RawOf{value: body_flat_expr(f_value, &flat)}
         .DistinctRaw(f_value) -> NodeKind.DistinctRaw{value: body_flat_expr(f_value, &flat)}
         .Present(f_value) -> NodeKind.Present{value: body_flat_expr(f_value, &flat)}
-        .Absent -> NodeKind.Absent
         .Ok(f_value) -> NodeKind.Ok{value: body_flat_expr(f_value, &flat)}
         .Err(f_value) -> NodeKind.Err{value: body_flat_expr(f_value, &flat)}
         .OrFallback(f_value, f_fallback, f_ambient_err) -> NodeKind.OrFallback{value: body_flat_expr(f_value, &flat), fallback: body_flat_or_fallback(f_fallback, &flat), ambient_err: f_ambient_err}

@@ -782,7 +782,7 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
             complete = false
             next
         }, env, program)
-        if tir_pattern_key_identity(key) == .Val(identity) {
+        if tir_pattern_key_identity(key, context) == .Val(identity) {
             if keys.contains(identity) {
                 &diagnostics.push(sema_error("E0117", entry.span, "this map pattern repeats a key", "each key can appear only once in a pattern", "remove the repeated key"))
                 complete = false

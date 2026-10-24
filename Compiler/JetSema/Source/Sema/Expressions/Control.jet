@@ -12,6 +12,7 @@ use jet_foundation.[
     Lambda,
     LambdaBody,
     NamedSpan,
+    NodeKind,
     OrFallback,
     PatSlot,
     Pattern,
@@ -157,14 +158,14 @@ fn sema_expression_present(value: Expr, span: Span, expected: Type?, environment
     sema_expr_expected_owned(sema_tir_node(result_ty ?? Type.Option{inner: payload.ty}, TExprKind.Present{value: payload}, span), expected, environment, program, &diagnostics)
 }
 
-fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_absent(span: Span, expected: Type?, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     required :: expected ?? {
         &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
         return None
     }
     normalized :: sema_expr_unwrap_tag(required)
     if normalized == {
-        .Option(_) -> Val(sema_tir_node(normalized, TExprKind.Absent, span))
+        .Option(_) -> Val(sema_node(&context, normalized, NodeKind.Absent, span))
         else -> {
             &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
             None
@@ -1165,7 +1166,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     } else {
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
     }
-    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(checked_route.payload, TExprKind.Unit, span)}
+    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_node(&context, checked_route.payload, NodeKind.Unit, span)}
     // (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
     // first its Result route (where `err` is bound and a value fallback is
@@ -1302,11 +1303,11 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             sema_scope_rollback(&scopes, block_mark)
             if {
                 checked_block.value.len() == 0 && tail_value != None -> {
-                    fallback_tir = Val(TOrFallback.Value{value: tail_value ?? sema_tir_node(fallback_payload, TExprKind.Unit, block_span)})
+                    fallback_tir = Val(TOrFallback.Value{value: tail_value ?? sema_node(&context, fallback_payload, NodeKind.Unit, block_span)})
                 }
                 else -> {
                     block_values := checked_block.value
-                    if tail_value != None -> &block_values.push(TStmt.ExprStmt{value: tail_value ?? sema_tir_node(fallback_payload, TExprKind.Unit, block_span), span: expr_span(tail ?? Expr.Unit{span: block_span, id: AST_NODE_GENERATED})})
+                    if tail_value != None -> &block_values.push(TStmt.ExprStmt{value: tail_value ?? sema_node(&context, fallback_payload, NodeKind.Unit, block_span), span: expr_span(tail ?? Expr.Unit{span: block_span, id: AST_NODE_GENERATED})})
                     fallback_expr :: sema_tir_node(fallback_payload, TExprKind.InlineBlock{body: block_values}, block_span)
                     fallback_tir = Val(TOrFallback.Value{value: fallback_expr})
                 }

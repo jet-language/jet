@@ -10,6 +10,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     FunctionDefaultRef,
+    NodeKind,
     ParamZone,
     Span,
     SymbolKind,
@@ -187,7 +188,7 @@ fn sema_ui_handle_typed_arg(arg: CallArg, ty: Type, environment: SemaScopeEnviro
 }
 
 fn sema_ui_handle_optional_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expression_absent_none(arg.expr) -> return Val(sema_tir_node(Type.Option{inner: ty}, TExprKind.Absent, arg.span))
+    if sema_expression_absent_none(arg.expr) -> return Val(sema_node(&context, Type.Option{inner: ty}, NodeKind.Absent, arg.span))
     value :: sema_ui_handle_typed_arg(arg, ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     return Val(sema_tir_node(Type.Option{inner: ty}, TExprKind.Present{value: value}, value.span))
 }

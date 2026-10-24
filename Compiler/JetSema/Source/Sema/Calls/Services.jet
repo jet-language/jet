@@ -11,6 +11,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     FunctionDefaultRef,
+    NodeKind,
     ParamZone,
     Span,
     SymbolID,
@@ -746,7 +747,7 @@ fn sema_call_try_job_queue_method(receiver: Expr, receiver_value: TExpr, method:
     sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), environment, program, &diagnostics)
     payload :: sema_check_expression(updated_args[1].expr, Val(payload_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
     last_type :: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
-    last :: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed else -> sema_tir_node(last_type, TExprKind.Absent, span)
+    last :: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed else -> sema_node(&context, last_type, NodeKind.Absent, span)
     parameter_types :: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
     params :: sema_services_method_params(parameter_types, [AccessConvention]{})
     ownership :: sema_ownership_check_method_call(&state, "JobQueue.{method}", receiver, AccessConvention.Write, params, &updated_args, scopes, span, &diagnostics)

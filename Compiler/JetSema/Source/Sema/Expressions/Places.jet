@@ -394,7 +394,7 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         return None
     }
     // `$package.*` / `$build.*` fold from the build snapshot.
-    build_fact :: sema_fact_build_read(base, member, span, expected, environment, program, &diagnostics)
+    build_fact :: sema_fact_build_read(base, member, span, expected, environment, program, &context, &diagnostics)
     if build_fact.handled -> return build_fact.value
     // `subject.$fact` reads a compiler-held plane.
     if member.starts_with("$") {

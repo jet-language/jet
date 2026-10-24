@@ -595,6 +595,13 @@ fn sema_stmt_rebind_switch_arms(arms: [SwitchArm], subject_span: Span, replaceme
 // TStmt.If carries statement arms; value-producing if expressions need an
 // InlineBlock consumer and therefore stay incomplete in this Sema slice.
 
+// The type of a checked loop condition; an unchecked one reads as Bool.
+fn sema_stmt_condition_type(condition: TExpr?) -> Type Never! {
+    // copy: the condition keeps its type; the caller compares or reports this one.
+    if condition == .Val(value) -> return value.ty.copy()
+    Type.Bool
+}
+
 fn sema_stmt_check_unit_branch(body: [Stmt], value_expr: Expr, bindings: [SemaConditionBinding], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], owner: String, loop_depth: Int) -> SemaStatementResult {
     sema_scope_enter(&scopes, &state, owner)
     sema_expression_declare_condition_bindings(bindings, &scopes, &state, true, &diagnostics)
@@ -605,11 +612,11 @@ fn sema_stmt_check_unit_branch(body: [Stmt], value_expr: Expr, bindings: [SemaCo
         if {
             checked_value == None -> result.complete = false
             else -> {
-                value :: checked_value ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, value_span)
-                if value.kind == {
-                    .Unit -> {}
-                    else -> &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
-                }
+                value :: checked_value ?? sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, value_span)
+                // A `()` value statement does nothing.
+                unit := false
+                if value.kind == .Flat(index) -> unit = context.arena.tree.nodes[index - context.arena.base].kind == .Unit
+                if !unit -> &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
             }
         }
     }
@@ -2743,7 +2750,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Value(value) -> {
             checked := sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if checked != None {
-                item :: checked ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(value))
+                item :: checked ?? sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(value))
                 result.tir = Val(TOrFallback.Value{value: item})
                 &result.statements.push(TStmt.ExprStmt{value: item, span: expr_span(value)})
             }
@@ -3523,8 +3530,8 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
-    value := sema_expr_comptime_value(init)
-    if value == None -> value = sema_fact_constant_path_value(init)
+    value := sema_expr_comptime_value(init, context)
+    if value == None -> value = sema_fact_constant_path_value(init, context)
     ty := init.ty
     init_span :: expr_span(binding.init)
     if value == None {
@@ -4601,7 +4608,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
 // first (a call on its path); those keep the compound form, which JetIR
 // checks for overflow (BuildTypes ir_assign_overflow).
 fn sema_stmt_policy_compound(op: BinOp, ty: Type, read: TExpr, value: TExpr, line: Int, span: Span, context: SemaCheckContext) -> TExpr? {
-    if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Pow) && ty == .IntN(_, _) && sema_stmt_pure_place(read) && context.arithmetic_policy == .Val(policy) {
+    if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Pow) && ty == .IntN(_, _) && sema_stmt_pure_place(read, context) && context.arithmetic_policy == .Val(policy) {
         operation :: if op == {
             .Add -> ArithmeticOperation.Add
             .Sub -> ArithmeticOperation.Sub
@@ -4615,13 +4622,14 @@ fn sema_stmt_policy_compound(op: BinOp, ty: Type, read: TExpr, value: TExpr, lin
 
 // Whether reading the place `place` again yields what the first read did:
 // locals, constants and literals, and fields and plain indexes of them.
-fn sema_stmt_pure_place(place: TExpr) -> Bool {
+fn sema_stmt_pure_place(place: TExpr, context: SemaCheckContext) -> Bool {
     if place.kind == {
-        .Local(_) | .ConstRef(_) | .IntLit(_, _) | .BoolLit(_) -> return true
-        .Field(receiver, _) -> return sema_stmt_pure_place(receiver)
-        .Index(base, index, _, _, checked_call, _) -> return checked_call == None && sema_stmt_pure_place(base) && sema_stmt_pure_place(index)
-        .Binary(_, _, _, lhs, rhs) -> return sema_stmt_pure_place(lhs) && sema_stmt_pure_place(rhs)
-        .Unary(_, operand) -> return sema_stmt_pure_place(operand)
+        .Local(_) | .ConstRef(_) | .IntLit(_, _) -> return true
+        .Flat(index) -> return context.arena.tree.nodes[index - context.arena.base].kind == .BoolLit(_)
+        .Field(receiver, _) -> return sema_stmt_pure_place(receiver, context)
+        .Index(base, index, _, _, checked_call, _) -> return checked_call == None && sema_stmt_pure_place(base, context) && sema_stmt_pure_place(index, context)
+        .Binary(_, _, _, lhs, rhs) -> return sema_stmt_pure_place(lhs, context) && sema_stmt_pure_place(rhs, context)
+        .Unary(_, operand) -> return sema_stmt_pure_place(operand, context)
         else -> return false
     }
 }
@@ -5609,7 +5617,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     }
                     .In(collection_expr, step_expr) -> {
                         collection_value := sema_check_expression(collection_expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                        collection :: collection_value ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(collection_expr))
+                        collection :: collection_value ?? sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(collection_expr))
                         step_value := TExpr?{None}
                         if step_expr != None {
                             step_value = sema_stmt_check_source_stride(step_expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -5786,8 +5794,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 init_tir := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_tir := sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_valid := cond_tir != None
-                if cond_tir != None && (cond_tir ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool {
-                    cond_ty :: (cond_tir ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
+                if cond_tir != None && sema_stmt_condition_type(cond_tir) != Type.Bool {
+                    cond_ty :: sema_stmt_condition_type(cond_tir)
                     &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                     cond_valid = false
                 }
@@ -5832,8 +5840,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     cond == None -> {
                         complete = false
                     }
-                    (cond ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool -> {
-                        cond_ty :: (cond ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
+                    sema_stmt_condition_type(cond) != Type.Bool -> {
+                        cond_ty :: sema_stmt_condition_type(cond)
                         &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                         complete = false
                     }
@@ -6263,8 +6271,8 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
         &diagnostics.push(sema_stmt_prep_if_not_bool(cond_span))
         return false
     }
-    value := sema_expr_comptime_value(condition)
-    if value == None -> value = sema_fact_constant_path_value(condition)
+    value := sema_expr_comptime_value(condition, context)
+    if value == None -> value = sema_fact_constant_path_value(condition, context)
     if value == None {
         staged :: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), cond_span, span)
         if staged == .Val(body_value) {

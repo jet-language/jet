@@ -6,6 +6,7 @@ use jet_foundation.[
     CallArg,
     Diagnostic,
     Expr,
+    NodeKind,
     TargetDMAOperation,
     TargetDMAOperationFact,
     TargetDMAOwner,
@@ -462,6 +463,6 @@ fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args: [Ca
     is_dma_start := method == "start" && is_dma_receiver
     is_register := (method == "read" || method == "write" || method == "set" || method == "clear") && sema_hardware_board_path(receiver, environment, program, scopes) != None
     if !is_dma_start && !is_register -> return None
-    synthetic := sema_tir_node(Type.Named{name: "__JetHardwareReceiver"}, TExprKind.Unit, expr_span(receiver))
+    synthetic := sema_node(&context, Type.Named{name: "__JetHardwareReceiver"}, NodeKind.Unit, expr_span(receiver))
     sema_call_try_hardware_method(receiver, synthetic, method, args, transfer_fact, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }

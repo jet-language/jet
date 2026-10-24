@@ -786,7 +786,7 @@ fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [Ca
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(&context, span)
-        value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+        value := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {

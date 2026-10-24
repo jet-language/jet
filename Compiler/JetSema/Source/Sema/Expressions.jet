@@ -415,10 +415,10 @@ fn sema_expr_precise_integer(value: TExpr, type_name_value: String, span: Span) 
     None
 }
 
-fn sema_expr_precise_complex(value: TExpr, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_precise_complex(value: TExpr, span: Span, line: Int, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_expr_is_numeric(value.ty) -> return None
     real :: sema_expr_numeric_literal_conversion(value, Type.Float, span, line, &diagnostics) ?? return None
-    imaginary := sema_tir_node(Type.Float, TExprKind.FloatLit{value: 0.0}, span)
+    imaginary := sema_node(&context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
     Val(sema_tir_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary}}, span))
 }
 
@@ -1127,7 +1127,7 @@ fn sema_expr_precise_orders_by_compare(op: BinOp, lhs: Type, rhs: Type) -> Bool 
     name == "Decimal" || name == "Fraction"
 }
 
-fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     left_name := sema_expr_precise_name(lhs.ty)
     right_name := sema_expr_precise_name(rhs.ty)
     if left_name == None && right_name == None -> return None
@@ -1137,11 +1137,11 @@ fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span,
     rname := right_name
     if {
         lname == (Val("Complex")) && rname == None && sema_expr_is_numeric(rhs.ty) -> {
-            right = sema_expr_precise_complex(rhs, span, line, &diagnostics) ?? return None
+            right = sema_expr_precise_complex(rhs, span, line, &context, &diagnostics) ?? return None
             rname = Val("Complex")
         }
         rname == (Val("Complex")) && lname == None && sema_expr_is_numeric(lhs.ty) -> {
-            left = sema_expr_precise_complex(lhs, span, line, &diagnostics) ?? return None
+            left = sema_expr_precise_complex(lhs, span, line, &context, &diagnostics) ?? return None
             lname = Val("Complex")
         }
         lname != None && rname == None && lname != (Val("Complex")) -> {
@@ -1611,10 +1611,12 @@ fn sema_expr_unit_conversion_method(fact: SemaRegistrationUnitFact) -> String Ne
     snake := String.from_bytes(output) ?? leaf
     "from_{snake}"
 }
-fn sema_expr_unit_concrete_value(value: TExpr) -> Float? {
+fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Float? {
     if value.kind == {
         .IntLit(number, _) -> return Val(Float.from_int(number))
-        .FloatLit(number) -> return Val(number)
+        .Flat(index) -> {
+            if context.arena.tree.nodes[index - context.arena.base].kind == .FloatLit(number) -> return Val(number)
+        }
         .CtLit(comptime_value) -> {
             if comptime_value == {
                 .Int(number) -> return Val(Float.from_int(number))
@@ -1624,21 +1626,25 @@ fn sema_expr_unit_concrete_value(value: TExpr) -> Float? {
         }
         .Unary(op, operand) -> {
             if op == TUnaryOp.Neg {
-                concrete :: sema_expr_unit_concrete_value(operand) ?? return None
+                concrete :: sema_expr_unit_concrete_value(operand, context) ?? return None
                 return Val(-concrete)
             }
         }
-        .UnitConvert(argument, _, _, _, _, _, _, _) -> return sema_expr_unit_concrete_value(argument)
+        .UnitConvert(argument, _, _, _, _, _, _, _) -> return sema_expr_unit_concrete_value(argument, context)
         .MethodCall(_, method, _, args) -> {
             if method.name == "from_float" && args.len() == 1 {
                 argument := args[0].value
                 if argument.kind == {
-                    .FloatLit(number) -> return Val(number)
+                    .Flat(index) -> {
+                        if context.arena.tree.nodes[index - context.arena.base].kind == .FloatLit(number) -> return Val(number)
+                    }
                     .IntLit(number, _) -> return Val(Float.from_int(number))
                     .Unary(op, operand) -> {
                         if op == TUnaryOp.Neg {
                             if operand.kind == {
-                                .FloatLit(number) -> return Val(-number)
+                                .Flat(index) -> {
+                                    if context.arena.tree.nodes[index - context.arena.base].kind == .FloatLit(number) -> return Val(-number)
+                                }
                                 .IntLit(number, _) -> return Val(-Float.from_int(number))
                                 else -> {}
                             }
@@ -1683,7 +1689,7 @@ fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact
     }
     if !sema_expr_unit_is_symbolic(source) && !sema_expr_unit_is_symbolic(destination) && !sema_expr_unit_conversion_total(source, destination) {
         exact := false
-        concrete := sema_expr_unit_concrete_value(value)
+        concrete := sema_expr_unit_concrete_value(value, context)
         if concrete != None {
             exact = sema_expr_unit_exact_proof(concrete ?? 0.0, source, destination, environment, program, context) ?? return false
         }
@@ -2312,15 +2318,21 @@ fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, program
     target.declaration.is_comptime
 }
 
-fn sema_expr_comptime_value(value: TExpr) -> TComptimeValue? {
+fn sema_expr_comptime_value(value: TExpr, context: SemaCheckContext) -> TComptimeValue? {
     if value.kind == {
         .IntLit(number, _) -> {
             return Val(TComptimeValue.Int{value: number})
         }
-        .FloatLit(number) -> return Val(TComptimeValue.Float{value: number, bits: if value.ty == Type.Float32 -> 32 else -> 64})
-        .BoolLit(boolean) -> return Val(TComptimeValue.Bool{value: boolean})
-        .CharLit(character) -> return Val(TComptimeValue.Char{value: character})
-        .Unit -> return Val(TComptimeValue.Unit)
+        // A scalar literal is a flat row (sema_node).
+        .Flat(index) -> {
+            if context.arena.tree.nodes[index - context.arena.base].kind == {
+                .FloatLit(number) -> return Val(TComptimeValue.Float{value: number, bits: if value.ty == Type.Float32 -> 32 else -> 64})
+                .BoolLit(boolean) -> return Val(TComptimeValue.Bool{value: boolean})
+                .CharLit(character) -> return Val(TComptimeValue.Char{value: character})
+                .Unit -> return Val(TComptimeValue.Unit)
+                else -> return None
+            }
+        }
         // copy: `comptime_value` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
         .CtLit(comptime_value) -> return Val(comptime_value.copy())
         .StrLit(parts) -> {
@@ -2336,39 +2348,39 @@ fn sema_expr_comptime_value(value: TExpr) -> TComptimeValue? {
         .List(values, _) -> {
             output := [TComptimeValue]{}
             loop element in values {
-                &output.push(sema_expr_comptime_value(element) ?? return None)
+                &output.push(sema_expr_comptime_value(element, context) ?? return None)
             }
             return Val(TComptimeValue.List{values: output})
         }
         .ListLit(values) -> {
             output := [TComptimeValue]{}
             loop element in values {
-                &output.push(sema_expr_comptime_value(element) ?? return None)
+                &output.push(sema_expr_comptime_value(element, context) ?? return None)
             }
             return Val(TComptimeValue.List{values: output})
         }
         .Present(inner) | .Ok(inner) -> {
-            converted :: sema_expr_comptime_value(inner) ?? return None
+            converted :: sema_expr_comptime_value(inner, context) ?? return None
             return Val(TComptimeValue.Present{value: converted})
         }
         else -> None
     }
 }
 
-fn sema_expr_comptime_args(args: [TCallArg], receiver: TExpr?) -> [TComptimeValue]? {
+fn sema_expr_comptime_args(args: [TCallArg], receiver: TExpr?, context: SemaCheckContext) -> [TComptimeValue]? {
     output := [TComptimeValue]{}
     if receiver != None {
         receiver_value :: receiver
-        &output.push(sema_expr_comptime_value(receiver_value) ?? return None)
+        &output.push(sema_expr_comptime_value(receiver_value, context) ?? return None)
     }
-    loop arg in args -> &output.push(sema_expr_comptime_value(arg.value) ?? return None)
+    loop arg in args -> &output.push(sema_expr_comptime_value(arg.value, context) ?? return None)
     Val(output)
 }
 
-fn sema_expr_comptime_call_args(value: TExpr) -> [TComptimeValue]? {
+fn sema_expr_comptime_call_args(value: TExpr, context: SemaCheckContext) -> [TComptimeValue]? {
     if value.kind == {
-        .Call(_, _, args) -> return sema_expr_comptime_args(args, None)
-        .MethodCall(receiver, _, _, args) -> return sema_expr_comptime_args(args, Val(receiver))
+        .Call(_, _, args) -> return sema_expr_comptime_args(args, None, context)
+        .MethodCall(receiver, _, _, args) -> return sema_expr_comptime_args(args, Val(receiver), context)
         else -> None
     }
 }
@@ -2398,7 +2410,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     if scopes.comptime_execution_depth > 0 -> return true
     if !sema_expr_comptime_target_declared(environment, program, &scopes, symbol) -> return true
     target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return true
-    args :: sema_expr_comptime_call_args(checked.value) ?? {
+    args :: sema_expr_comptime_call_args(checked.value, context) ?? {
         &diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred MIR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
     }
@@ -2833,7 +2845,7 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     scalar_ty :: if measured_crossing -> Type.Result{ok: Type.Float, err: Type.String} else -> result_ty
     value := sema_tir_node(scalar_ty, TExprKind.UnitConvert{argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
     if measured_crossing {
-        relative :: sema_tir_node(Type.Float, TExprKind.FloatLit{value: relative_uncertainty ?? 0.0}, conversion_span)
+        relative :: sema_node(&context, Type.Float, NodeKind.FloatLit{value: relative_uncertainty ?? 0.0}, conversion_span)
         value = sema_expression_measurement_source_call("__measurement_result", [TExpr]{value, relative}, result_ty, conversion_span, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     }
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
@@ -3452,7 +3464,7 @@ fn sema_expr_check_expiring_secret_with(receiver: Expr, receiver_value: TExpr, s
         &diagnostics.push(sema_error("E0201", method_span, "an ExpiringSecret loan cannot escape its callback", "the callback receives a temporary read-only loan; returning a secret would create another owned credential outside the expiry boundary", "return a non-secret result such as a signature, public key, status, or response"))
         result = Type.Named{name: "Unit"}
     }
-    Val(sema_tir_node(Type.Result{ok: result, err: Type.Named{name: "Expired"}}, TExprKind.Unit, method_span))
+    Val(sema_node(&context, Type.Result{ok: result, err: Type.Named{name: "Expired"}}, NodeKind.Unit, method_span))
 }
 
 fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -3489,7 +3501,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
                 }
                 &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
                 if !sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return None
-                prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
+                prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program, &context) ?? return None
                 return sema_expr_expected_owned(^prepared, expected, environment, program, &diagnostics)
             }
         }
@@ -3668,13 +3680,13 @@ fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {
     sema_tir_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span)
 }
 
-fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if raw == .Val(text) {
         if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected_owned(sema_expr_decimal_literal(text, span), expected, environment, program, &diagnostics)
     }
     ty := Type.Float
     if expected == (Val(Type.Float32)) || (is_f32 && expected != (Val(Type.Float))) -> ty = Type.Float32
-    sema_expr_expected_owned(sema_tir_node(ty, TExprKind.FloatLit{value: value}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_node(&context, ty, NodeKind.FloatLit{value: value}, span), expected, environment, program, &diagnostics)
 }
 
 // The opposite Dyn operand contextualizes a fractional literal without
@@ -3818,7 +3830,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     checked_rhs :: sema_check_expression(right, rhs_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     // A fractional literal before a Dyn operand is a Float, not a Decimal.
     if sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment, program)) && sema_dyn_float_literal_value(left) == .Val(number) {
-        checked_lhs = sema_tir_node(Type.Float, TExprKind.FloatLit{value: number}, checked_lhs.span)
+        checked_lhs = sema_node(&context, Type.Float, NodeKind.FloatLit{value: number}, checked_lhs.span)
     }
     // `x == 5` holds only when the optional `x` holds 5, and
     // `x != 5` is its opposite. The plain side lifts once, so the comparison
@@ -3885,7 +3897,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             operand := operands[index]
             if operand.ty != Type.Float && sema_expr_numeric_widening_to(operand.ty, Type.Float) != None -> operand = sema_expr_numeric_literal_conversion(operand, Type.Float, span, line, &diagnostics) ?? return None
             if operand.ty == Type.Float {
-                zero :: sema_tir_node(Type.Float, TExprKind.FloatLit{value: 0.0}, span)
+                zero :: sema_node(&context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
                 operand = sema_expression_measurement_source_call("__measurement_new", [TExpr]{operand, zero}, measured_type, span, environment, program) ?? return None
             }
             if !type_identity_equal(operand.ty, measured_type) {
@@ -3982,7 +3994,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         if op == BinOp.Compare -> return sema_expr_expected(comparison, expected, environment, program, &diagnostics)
         return sema_expr_expected_owned(sema_expr_operator_ordering_test(op, comparison, span, line), expected, environment, program, &diagnostics)
     }
-    precise := sema_expr_check_precise_binary(op, lhs, rhs, span, line, &diagnostics)
+    precise := sema_expr_check_precise_binary(op, lhs, rhs, span, line, &context, &diagnostics)
     if precise != None -> return sema_expr_expected(precise ?? lhs, expected, environment, program, &diagnostics)
     if sema_expr_precise_name(lhs.ty) != None || sema_expr_precise_name(rhs.ty) != None {
         return None
@@ -4177,17 +4189,20 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
             return sema_expr_expected_owned(^literal, expected, environment, program, &diagnostics)
         }
         ty := sema_expr_expected_type(ast_comptime_value_type(value), environment, program)
+        if value == .Bool(flag) -> return sema_expr_expected_owned(sema_node(&context, ty, NodeKind.BoolLit{value: flag}, span), expected, environment, program, &diagnostics)
+        if value == .Unit -> return sema_expr_expected_owned(sema_node(&context, ty, NodeKind.Unit, span), expected, environment, program, &diagnostics)
+        if value == .Char(character) {
+            code :: sema_checked_const_char("{character}") ?? return None
+            return sema_expr_expected_owned(sema_node(&context, ty, NodeKind.CharLit{value: code}, span), expected, environment, program, &diagnostics)
+        }
+        if value == .Float(float_value) {
+            bits :: if float_value == {
+                .F32(number) | .F64(number) -> number
+            }
+            return sema_expr_expected_owned(sema_node(&context, ty, NodeKind.FloatLit{value: bits}, span), expected, environment, program, &diagnostics)
+        }
         kind := if value == {
-            .Float(float_value) -> if float_value == {
-                .F32(bits) | .F64(bits) -> TExprKind.FloatLit{value: bits}
-            }
-            .Bool(flag) -> TExprKind.BoolLit{value: flag}
-            .Char(character) -> {
-                code :: sema_checked_const_char("{character}") ?? return None
-                TExprKind.CharLit{value: code}
-            }
             .Str(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
-            .Unit -> TExprKind.Unit
             .Enum(type_name, variant, args) -> if args.len() == 0 -> TExprKind.EnumLit{enum_type: type_name, variant: variant, payload: TEnumPayload.Unit} else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
             else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
         }
@@ -4216,9 +4231,9 @@ fn sema_expression_todo(expected: Type?, span: Span, context: &SemaCheckContext)
 fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     return if expr == {
         .Int(value, span, width, raw, _) -> sema_expr_integer_literal(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, program, &diagnostics)
-        .Float(value, span, is_f32, raw, _) -> sema_expr_float_literal(value, is_f32, raw, span, expected, environment, program, &diagnostics)
-        .Bool(value, span, _) -> sema_expr_expected_owned(sema_tir_node(Type.Bool, TExprKind.BoolLit{value: value}, span), expected, environment, program, &diagnostics)
-        .Unit(span, _) -> sema_expr_expected_owned(sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), expected, environment, program, &diagnostics)
+        .Float(value, span, is_f32, raw, _) -> sema_expr_float_literal(value, is_f32, raw, span, expected, environment, program, &context, &diagnostics)
+        .Bool(value, span, _) -> sema_expr_expected_owned(sema_node(&context, Type.Bool, NodeKind.BoolLit{value: value}, span), expected, environment, program, &diagnostics)
+        .Unit(span, _) -> sema_expr_expected_owned(sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span), expected, environment, program, &diagnostics)
         .Str(parts, span, _) -> sema_expr_check_string(parts, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Ident(name, span, _) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4249,8 +4264,8 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
 // The less common expression forms (sema_check_expression_inner).
 fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     return if expr == {
-        .Absent(span, _) -> sema_expression_absent(span, expected, &diagnostics)
-        .Char(value, span, _) -> sema_expression_char(value, span, expected, environment, program, &diagnostics)
+        .Absent(span, _) -> sema_expression_absent(span, expected, &context, &diagnostics)
+        .Char(value, span, _) -> sema_expression_char(value, span, expected, environment, program, &context, &diagnostics)
         .StrMatchLit(_, span, _) -> {
             &diagnostics.push(sema_error("E0112", span, "a pattern literal is only valid as a `take_pattern` argument", "this string has typed holes (`{{name:Type}}`), which only `take_pattern` understands", "call it as `cursor.take_pattern(\"…\")`, or drop the `:Type` for an ordinary interpolated string"))
             None
@@ -4259,7 +4274,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             &diagnostics.push(sema_error("E0112", span, "a binary pattern literal is only valid as a `take_pattern` argument", "this `[U8].{{\"…\"}}` literal has typed holes (`{{name:U<width>}}`), which only `take_pattern` understands", "call it as `reader.take_pattern([U8].{{\"…\"}})`"))
             None
         }
-        .UnitLit(raw, int_value, float_value, suffix, suffix_span, span, _) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, &diagnostics)
+        .UnitLit(raw, int_value, float_value, suffix, suffix_span, span, _) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, &context, &diagnostics)
         .Ident(name, span, _) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         .ComptimeName(name, span, value, _) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, &scopes, &state, &context, &diagnostics)
         .Paren(value, span, _) -> {

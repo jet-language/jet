@@ -11,6 +11,7 @@ use jet_foundation.[
     Expr,
     FrameSchedule,
     FunctionDefaultRef,
+    NodeKind,
     Span,
     SymbolKind,
     Type,
@@ -89,7 +90,7 @@ fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args:
         target.type_name == "Replay" -> Type.Named{name: "GameReplay"}
         else -> Type.Named{name: "GameBackend"}
     }
-    receiver_value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    receiver_value := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
     if expected_arity == 1 {
         value :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if target.type_name == "Replay" {
