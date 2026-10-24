@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1205,
+  "total": 1166,
   "counts": {
-    "Compiler": 561,
+    "Compiler": 522,
     "Core": 204,
     "Examples": 39,
     "Jetpack": 10,
@@ -1130,279 +1130,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 752,
       "column": 5,
       "reason": "Win32 consumes borrowed C-layout disposition record"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 154,
-      "column": 9,
-      "reason": "fchmod retries EINTR on the same retained descriptor; first noninterrupted native error survives cleanup"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 164,
-      "column": 9,
-      "reason": "canonical selected-target file sync uses F_FULLFSYNC on Apple, fsync elsewhere; std sync_all retries EINTR"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 202,
-      "column": 9,
-      "reason": "owned Unix descriptor is released exactly once, never retried"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 214,
-      "column": 9,
-      "reason": "drop releases flock on this held open-file description before close"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 224,
-      "column": 5,
-      "reason": "NUL-terminated component payload lives across synchronous openat/mkdirat; parent fd is retained"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 248,
-      "column": 9,
-      "reason": "absolute root uses nofollow/directory flags; std OpenOptions retries EINTR, unlike the explicit component openat calls"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 281,
-      "column": 5,
-      "reason": "canonical dup_cloexec preserves std try_clone's CLOEXEC and open-file description, without re-resolving pathname"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 288,
-      "column": 9,
-      "reason": "exclusive nonblocking flock on the held directory, exactly the Rust lock scope"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 302,
-      "column": 5,
-      "reason": "history file is opened nofollow relative to the retained directory descriptor"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 323,
-      "column": 13,
-      "reason": "mutable native loan covers initialized destination payload only; EINTR retries the same live buffer without regrowth"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 350,
-      "column": 9,
-      "reason": "write borrows the remaining original payload, with no slice allocation; handles short writes and EINTR"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 373,
-      "column": 5,
-      "reason": "create-new nofollow temp is confined to held directory; NUL buffers live throughout synchronous calls"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 381,
-      "column": 9,
-      "reason": "error cleanup unlinks only the pid/counter temp under the held root; it must not replace the captured original error"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 391,
-      "column": 5,
-      "reason": "persist file bytes before atomic held-root rename, then persist the directory; capture each failure before cleanup"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 401,
-      "column": 5,
-      "reason": "clear unlinks only the retained-root child; ENOENT still requires directory sync"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 415,
-      "column": 9,
-      "reason": "owned full-width HANDLE is closed exactly once; cleanup cannot replace the already captured primary error"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 443,
-      "column": 5,
-      "reason": "OVERLAPPED event is a real null native pointer, with native-width zeroed internal words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 451,
-      "column": 9,
-      "reason": "unlock the same retained handle and one-byte range/zero offsets before closing it; unlock failure is ignored on drop as in Rust"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 473,
-      "column": 5,
-      "reason": "CreateFileW borrows NUL-terminated UTF16, preserves raw surrogates, uses full-width native handle and share read/write/delete"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 487,
-      "column": 5,
-      "reason": "original reparse check uses untransformed raw UTF16 for attributes and OPEN_REPARSE_POINT CreateFileW, then closes the checked full-width HANDLE"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 507,
-      "column": 9,
-      "reason": "create only this normal path component; a racing existing object remains a native create error exactly as Rust"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 543,
-      "column": 5,
-      "reason": "size query uses null UTF16 buffer; native result is checked before allocation"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 551,
-      "column": 5,
-      "reason": "GetFinalPathNameByHandleW fills one live initialized UTF16 buffer; zero/out-of-capacity result is checked before reading"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 562,
-      "column": 5,
-      "reason": "canonical C-layout handle information is read only after native success from its live initialized out slot"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 583,
-      "column": 5,
-      "reason": "native NT relative open is rooted at held directory HANDLE with share-all/open-reparse semantics; child is a single internal component"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 631,
-      "column": 9,
-      "reason": "native-width zeroed OVERLAPPED locks one byte exclusively/immediately; no pathname lock or overlapped async IO"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 658,
-      "column": 9,
-      "reason": "ReadFile writes bounded live payload/count slot; null OVERLAPPED is synchronous and native-width selected"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 683,
-      "column": 9,
-      "reason": "WriteFile borrows remaining original bytes without slice copy and a live written-count slot; short writes advance once"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 726,
-      "column": 5,
-      "reason": "canonical C header and inline UTF16 tail occupy SAME aligned live storage; held directory HANDLE is the rename root"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 744,
-      "column": 5,
-      "reason": "FILE_DISPOSITION_INFO is exactly one initialized byte and applies to the verified HANDLE, not its mutable pathname"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 763,
-      "column": 5,
-      "reason": "FlushFileBuffers persists the held temp file before replacement"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/HistoryHost.jet",
-      "line": 845,
-      "column": 17,
-      "reason": "after replacement, persist held directory; native flush failure cannot delete committed destination"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 742,
-      "column": 9,
-      "reason": "owned descriptor closes exactly once on every unwind/error rail; std File drop ignores close errors and does not retry"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 768,
-      "column": 9,
-      "reason": "each openat borrows terminated component bytes and retains every parent owner through the final operation; #4494/#4500"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 782,
-      "column": 5,
-      "reason": "final openat is NOFOLLOW+CLOEXEC and descriptor-relative; capture errno before parent cleanup"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 807,
-      "column": 13,
-      "reason": "read fills initialized output storage in place, retries only EINTR, and retains payload loan through native call"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 832,
-      "column": 9,
-      "reason": "write borrows original remaining bytes, handles short writes/EINTR, and captures errno before close"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 865,
-      "column": 5,
-      "reason": "mkdirat creates mode0777 subject to native umask relative to held parent; errno survives cleanup"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRepl/Console/Repl/TurnFacts.jet",
-      "line": 874,
-      "column": 5,
-      "reason": "unlinkat retries AT_REMOVEDIR ONLY after original EISDIR, never after other errors; retains same parent/name"
     },
     {
       "package": "Compiler",
@@ -8664,13 +8391,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 561 |
+| Compiler | 522 |
 | Core | 204 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
 | tests | 383 |
-| **total** | **1205** |
+| **total** | **1166** |
 
 ### Regions
 
@@ -8806,45 +8533,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 681:5 | "Win32 writes exactly the C-layout attribute tag record" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 738:5 | "aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 752:5 | "Win32 consumes borrowed C-layout disposition record" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 154:9 | "fchmod retries EINTR on the same retained descriptor; first noninterrupted native error survives cleanup" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 164:9 | "canonical selected-target file sync uses F_FULLFSYNC on Apple, fsync elsewhere; std sync_all retries EINTR" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 202:9 | "owned Unix descriptor is released exactly once, never retried" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 214:9 | "drop releases flock on this held open-file description before close" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 224:5 | "NUL-terminated component payload lives across synchronous openat/mkdirat; parent fd is retained" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 248:9 | "absolute root uses nofollow/directory flags; std OpenOptions retries EINTR, unlike the explicit component openat calls" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 281:5 | "canonical dup_cloexec preserves std try_clone's CLOEXEC and open-file description, without re-resolving pathname" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 288:9 | "exclusive nonblocking flock on the held directory, exactly the Rust lock scope" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 302:5 | "history file is opened nofollow relative to the retained directory descriptor" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 323:13 | "mutable native loan covers initialized destination payload only; EINTR retries the same live buffer without regrowth" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 350:9 | "write borrows the remaining original payload, with no slice allocation; handles short writes and EINTR" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 373:5 | "create-new nofollow temp is confined to held directory; NUL buffers live throughout synchronous calls" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 381:9 | "error cleanup unlinks only the pid/counter temp under the held root; it must not replace the captured original error" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 391:5 | "persist file bytes before atomic held-root rename, then persist the directory; capture each failure before cleanup" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 401:5 | "clear unlinks only the retained-root child; ENOENT still requires directory sync" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 415:9 | "owned full-width HANDLE is closed exactly once; cleanup cannot replace the already captured primary error" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 443:5 | "OVERLAPPED event is a real null native pointer, with native-width zeroed internal words" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 451:9 | "unlock the same retained handle and one-byte range/zero offsets before closing it; unlock failure is ignored on drop as in Rust" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 473:5 | "CreateFileW borrows NUL-terminated UTF16, preserves raw surrogates, uses full-width native handle and share read/write/delete" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 487:5 | "original reparse check uses untransformed raw UTF16 for attributes and OPEN_REPARSE_POINT CreateFileW, then closes the checked full-width HANDLE" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 507:9 | "create only this normal path component; a racing existing object remains a native create error exactly as Rust" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 543:5 | "size query uses null UTF16 buffer; native result is checked before allocation" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 551:5 | "GetFinalPathNameByHandleW fills one live initialized UTF16 buffer; zero/out-of-capacity result is checked before reading" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 562:5 | "canonical C-layout handle information is read only after native success from its live initialized out slot" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 583:5 | "native NT relative open is rooted at held directory HANDLE with share-all/open-reparse semantics; child is a single internal component" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 631:9 | "native-width zeroed OVERLAPPED locks one byte exclusively/immediately; no pathname lock or overlapped async IO" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 658:9 | "ReadFile writes bounded live payload/count slot; null OVERLAPPED is synchronous and native-width selected" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 683:9 | "WriteFile borrows remaining original bytes without slice copy and a live written-count slot; short writes advance once" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 726:5 | "canonical C header and inline UTF16 tail occupy SAME aligned live storage; held directory HANDLE is the rename root" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 744:5 | "FILE_DISPOSITION_INFO is exactly one initialized byte and applies to the verified HANDLE, not its mutable pathname" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 763:5 | "FlushFileBuffers persists the held temp file before replacement" |
-| Compiler | Compiler/JetRepl/Console/Repl/HistoryHost.jet | 845:17 | "after replacement, persist held directory; native flush failure cannot delete committed destination" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 742:9 | "owned descriptor closes exactly once on every unwind/error rail; std File drop ignores close errors and does not retry" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 768:9 | "each openat borrows terminated component bytes and retains every parent owner through the final operation; #4494/#4500" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 782:5 | "final openat is NOFOLLOW+CLOEXEC and descriptor-relative; capture errno before parent cleanup" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 807:13 | "read fills initialized output storage in place, retries only EINTR, and retains payload loan through native call" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 832:9 | "write borrows original remaining bytes, handles short writes/EINTR, and captures errno before close" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 865:5 | "mkdirat creates mode0777 subject to native umask relative to held parent; errno survives cleanup" |
-| Compiler | Compiler/JetRepl/Console/Repl/TurnFacts.jet | 874:5 | "unlinkat retries AT_REMOVEDIR ONLY after original EISDIR, never after other errors; retains same parent/name" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 123:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 159:5 | "the caller has removed this mapping from all heap lists and no payload remains live" |

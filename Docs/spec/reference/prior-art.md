@@ -960,7 +960,7 @@ Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths
 - kmp-first-app — https://kotlinlang.org/docs/multiplatform/multiplatform-create-first-app.html
 - kmp-hot-reload — https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html
 
-### data (40 sources)
+### data (38 sources)
 
 - jupyter-architecture — https://docs.jupyter.org/en/latest/projects/architecture/content-architecture.html
 - jupyter-notebook — https://jupyter-notebook.readthedocs.io/en/stable/notebook.html
@@ -1000,8 +1000,6 @@ Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths
 - jet-data-stats — Core/Data/Data.jet
 - jet-data-tests — tests/dataflow_stream.rs
 - jet-data-evaluator — Compiler/JetEval/Source/Evaluator.jet
-- jet-notebook — Compiler/JetRepl/Console/Notebook/Document.jet
-- jet-notebook-trust — Compiler/JetRepl/Console/Notebook/Trust.jet
 
 ### cli (31 sources)
 
