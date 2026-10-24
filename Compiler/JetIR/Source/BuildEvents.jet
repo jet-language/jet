@@ -111,15 +111,13 @@ fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     }
     closure :: ir_expr(&m, p, &b, args[args.len() - 1])
     if ir_failed(b) || closure < 0 -> return -1
-    held :: if b.fresh[closure] -> closure else -> ir_copy_value(&m, p, &b, closure, span)
-    if ir_failed(b) -> return -1
-    b.fresh[held] = false
+    handed :: ir_closure_handover(&m, p, &b, closure, span)
+    if handed.held < 0 -> return -1
+    held :: handed.held
     invoke_id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if invoke_id < 0 -> return -1
     invoke :: ir_lazy_address(&m, &b, invoke_id)
-    release_id :: ir_lazy_helper(&m, p, &b, "release", closure_ty, span)
-    if release_id < 0 -> return -1
-    release :: ir_lazy_address(&m, &b, release_id)
+    release :: handed.release
     once_word :: ir_word_const(&m, &b, if once -> 1 else -> 0)
     subscription :: ir_runtime(&m, &b, "jet_event_listen", [Int]{event, scope, priority, once_word, held, invoke, release}, row)
     b.fresh[subscription] = true

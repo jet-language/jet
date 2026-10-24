@@ -186,11 +186,8 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
         return Val(ir_mark_counted(&m, interned))
     }
     if ty == .Map(_, _, _) -> return ir_map_row(&m, p, ty, laying)
-    if ty == .Fn(_, _, _, _, _, _) {
-        // A closure box pointer (Lower Closures.jet): reference count at 0,
-        // code address at 8, release helper at 16, captures from 24.
-        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
-    }
+    // A counted closure box pointer (BuildCoreClosures.jet ir_closure_row).
+    if ty == .Fn(_, _, _, _, _, _) -> return Val(ir_closure_row(&m, ty))
     if ty == .TraitObject(_) {
         // A trait value box pointer (Lower Traits.jet): the concrete
         // payload's key word at 0, the payload from 8.

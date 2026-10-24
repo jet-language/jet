@@ -52,7 +52,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
             if mapped.closure < 0 -> return -1
             meta :: ir_lazy_meta(&m, p, &b, target, span)
             if meta < 0 -> return -1
-            release :: ir_word_const(&m, &b, 0)
+            release :: mapped.release
             iter_row :: ir_value_type(&m, p, Type.Apply{name: "Iter", args: [Type]{target}}) ?? return ir_type_fail(&b, span, target)
             source :: columns[index]
             columns[index] = ir_runtime(&m, &b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row)
@@ -108,7 +108,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
         result_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
         meta :: ir_lazy_meta(&m, p, &b, row_type, span)
         if meta < 0 -> return -1
-        release :: ir_word_const(&m, &b, 0)
+        release :: joined.release
         right :: columns[index]
         call_args := [Int]{left, right}
         symbol := "jet_rt_native_iter_zip"
@@ -244,6 +244,8 @@ fn ir_zip_local(b: &IRBuilder, name: String, ty: Type, span: Span) -> Int Never!
 struct IRZipAdapter {
     closure: Int
     callback: Int
+    // The release helper of `closure`, which the zip node owns.
+    release: Int
 }
 
 // A capture-free closure over `params` returning `body` (codegen
@@ -251,7 +253,7 @@ struct IRZipAdapter {
 // source lambda (ir_lambda), and its lazy.callback. `role` keeps the
 // callbacks of one zip apart.
 fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, params: [Type], names: [String], ret: Type, body: Int, span: Span) -> IRZipAdapter Never! {
-    failed :: IRZipAdapter{closure: -1, callback: -1}
+    failed :: IRZipAdapter{closure: -1, callback: -1, release: -1}
     closure_ty :: Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     row :: ir_value_type(&m, p, closure_ty) ?? {
         _ :: ir_type_fail(&b, span, closure_ty)
@@ -278,11 +280,7 @@ fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, param
         frozen_captures: [String]{},
         uses_stack_sentry: false,
     }
-    boxed :: ir_box_alloc(&m, &b, 24, row)
-    one :: ir_word_const(&m, &b, 1)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 0, one, b.line)
-    none :: ir_word_const(&m, &b, 0)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 16, none, b.line)
+    boxed :: ir_closure_box(&m, &b, row, 24, [IRCaptureSlot]{})
     id :: m.functions.len()
     key :: "{b.f.key}#{role}@{span.start}"
     &m.functions.push(ir_function_new("{b.f.name}.{role}@{span.start}", key, "{b.f.symbol}__{role}_{ir_key_hash(key)}", b.f.source_file, b.line))
@@ -294,7 +292,9 @@ fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, param
     ir_emit(&b.f, IROp.Store, -1, boxed, 8, code, b.line)
     helper :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if helper < 0 -> return failed
-    IRZipAdapter{closure: boxed, callback: ir_lazy_address(&m, &b, helper)}
+    handed :: ir_closure_handover(&m, p, &b, boxed, span)
+    if handed.held < 0 -> return failed
+    IRZipAdapter{closure: handed.held, callback: ir_lazy_address(&m, &b, helper), release: handed.release}
 }
 
 // The stop context of a strict zip (codegen jet_codegen_builtin_zip_context_args):

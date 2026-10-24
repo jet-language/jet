@@ -496,11 +496,17 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     }
     if element >= 0 {
         if operation == {
-            .LenList -> return ir_load_at(&m, &b, subject, 0, int_row)
+            .LenList -> {
+                length :: ir_load_at(&m, &b, subject, 0, int_row)
+                ir_release(&m, &b, subject)
+                return length
+            }
             .IsEmpty -> {
                 length :: ir_load_word(&m, &b, subject, 0)
                 zero :: ir_word_const(&m, &b, 0)
-                return ir_bool_op(&m, &b, IROp.Eq, length, zero)
+                empty :: ir_bool_op(&m, &b, IROp.Eq, length, zero)
+                ir_release(&m, &b, subject)
+                return empty
             }
             .Push -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "push without a value")
@@ -569,7 +575,9 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
                 ir_render_push_value(&m, p, &b, builder, walk.item, IRRender.Show, span)
                 ir_walk_close(&m, &b, walk)
                 string_row :: ir_string_row(&m)
-                return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+                joined :: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+                loop operand in operands -> ir_release(&m, &b, operand)
+                return joined
             }
             else -> {}
         }
@@ -919,16 +927,14 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
         frozen_captures: [String]{},
         uses_stack_sentry: false,
     }
-    boxed :: ir_box_alloc(&m, &b, 32, row)
-    one :: ir_word_const(&m, &b, 1)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 0, one, b.line)
-    none :: ir_word_const(&m, &b, 0)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 16, none, b.line)
+    // The box owns the widened function value at 24.
+    captures :: [IRCaptureSlot]{IRCaptureSlot{name: inner_name, offset: 24, row: have, by_ref: false}}
+    boxed :: ir_closure_box(&m, &b, row, 32, captures)
     ir_store_at(&m, p, &b, boxed, 24, slot)
     id :: m.functions.len()
     key :: "{b.f.key}#fn_widen@{span.start}.{b.f.op.len()}"
     &m.functions.push(ir_function_new("{b.f.name}.fn_widen@{span.start}", key, "{b.f.symbol}__fn_widen_{ir_key_hash(key)}", b.f.source_file, b.line))
-    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{IRCaptureSlot{name: inner_name, offset: 24, row: have, by_ref: false}}, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
+    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)
     code :: ir_temp(&m, &b, pointer_row)
@@ -1035,7 +1041,16 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         &operands.push(slot)
     }
     if operands.len() == 0 -> return ir_fail_slot(&b, span, "closure method without a closure")
-    if operation == .ParaMap || operation == .ParaFilter || operation == .ParaPartition || operation == .ParaFold -> return ir_closure_parallel(&m, p, &b, ty, list, element, operation, operands, span)
+    parallel :: operation == .ParaMap || operation == .ParaFilter || operation == .ParaPartition || operation == .ParaFold
+    result :: if parallel -> ir_closure_parallel(&m, p, &b, ty, list, element, operation, operands, span) else -> ir_closure_list_method(&m, p, &b, ty, list, element, operation, operands, args, span)
+    // The method only lends its closures.
+    loop slot in operands -> ir_release_closure(&m, &b, slot)
+    result
+}
+
+// The List closure method `operation` over `list` (elements `element`) with
+// its evaluated arguments `operands`.
+fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], args: [Int], span: Span) -> Int Never! {
     callback :: operands[operands.len() - 1]
     callback_ty :: ir_ty(p, b, args[args.len() - 1])
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -1296,6 +1311,7 @@ fn ir_option_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     b.fresh[option] = owned_option
     ir_release(&m, &b, option)
     ir_end(&b.f, b.line)
+    ir_release(&m, &b, callback)
     b.fresh[result] = true
     result
 }

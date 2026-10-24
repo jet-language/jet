@@ -1479,8 +1479,9 @@ fn ir_x64_transfer(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloca
     ty :: ir_x64_type(m, f, src)
     drop :: m.types[f.slot_type[src]].drop
     // An aggregate slot holds its storage's address: a Copy aliases it. A
-    // box's builder copies it by retaining (ir_clone); its Copy aliases too.
-    if f.op[at] == .Copy && drop != "" && ty.kind != .Aggregate && m.types[f.slot_type[src]].clone != ir_box_share() {
+    // box or a function value is copied by its builder retaining it
+    // (ir_clone); its Copy aliases too.
+    if f.op[at] == .Copy && drop != "" && ty.kind != .Aggregate && !ir_clone_shares(m.types[f.slot_type[src]].clone) {
         if ty.kind == .Int {
             ir_x64_load(&e, m, f, al, src, X64_RAX)
             ir_x64_int_route(&e, "jet_rt_int_clone", X64_RAX)

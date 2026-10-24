@@ -406,18 +406,24 @@ fn ir_box_take(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, offset: In
 }
 
 // A new owner of the value in `slot` (type row `row`, which has a clone):
-// its runtime clone, or for a box one more owner of the same box (a null
-// box stays null).
+// its runtime clone, or for a box or a function value one more owner of the
+// same box (a null box stays null).
 fn ir_clone(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! {
     symbol :: m.types[row].clone
-    if symbol != ir_box_share() -> return ir_runtime(&m, &b, symbol, [Int]{slot}, row)
+    if !ir_clone_shares(symbol) -> return ir_runtime(&m, &b, symbol, [Int]{slot}, row)
     shared :: ir_fresh_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Move, shared, slot, -1, -1, b.line)
     present :: ir_option_is_some(&m, &b, slot)
     ir_open_if(&b.f, present, b.line)
-    _ :: ir_runtime(&m, &b, "jet_rt_block_retain", [Int]{slot}, -1)
+    _ :: ir_runtime(&m, &b, if symbol == ir_box_share() -> "jet_rt_block_retain" else -> "jet_rt_native_closure_retain", [Int]{slot}, -1)
     ir_end(&b.f, b.line)
     shared
+}
+
+// Whether a clone key copies by sharing: the copy is the same box with one
+// more owner (its IR Copy aliases).
+fn ir_clone_shares(symbol: String) -> Bool Never! {
+    symbol == ir_box_share() || symbol == ir_closure_share()
 }
 
 // Builds the glue of every aggregate row whose drop names one and that has

@@ -576,9 +576,11 @@ fn ir_lazy_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: 
             id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
             if id < 0 -> return -1
             callback :: ir_lazy_address(&m, &b, id)
-            release :: ir_word_const(&m, &b, 0)
+            handed :: ir_closure_handover(&m, p, &b, operands[1], span)
+            if handed.held < 0 -> return -1
+            release :: handed.release
             &call_args.push(operands[0])
-            &call_args.push(operands[1])
+            &call_args.push(handed.held)
             &call_args.push(callback)
             &call_args.push(release)
         }
@@ -750,9 +752,9 @@ fn ir_lazy_closure_receiver(receiver_ty: Type, operation: TClosureOp) -> Bool Ne
 
 // `iter.map(f)`, `list.filter_map(f)`, ...: the runtime adapter over the
 // source Iter (a List source first becomes one) with the closure box, its
-// lazy.callback and the output descriptor (LazyIter.jet:547
-// lower_lazy_closure_method, :871 lower_lazy_scan). An IR closure box is
-// never freed, so the adapter gets no release helper.
+// lazy.callback, its release helper (the adapter owns the box) and the
+// output descriptor (LazyIter.jet:547 lower_lazy_closure_method, :871
+// lower_lazy_scan).
 fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     receiver_type :: ir_ty(p, b, receiver)
     receiver_ty :: ir_subst(m, receiver_type)
@@ -789,12 +791,15 @@ fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
         source = ir_lazy_from_list(&m, p, &b, source, pointer_row, span)
         if source < 0 -> return -1
     }
-    closure :: ir_expr(&m, p, &b, closure_expr)
-    if ir_failed(b) || closure < 0 -> return -1
+    expr_closure :: ir_expr(&m, p, &b, closure_expr)
+    if ir_failed(b) || expr_closure < 0 -> return -1
     id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if id < 0 -> return -1
     callback :: ir_lazy_address(&m, &b, id)
-    release :: ir_word_const(&m, &b, 0)
+    handed :: ir_closure_handover(&m, p, &b, expr_closure, span)
+    if handed.held < 0 -> return -1
+    closure :: handed.held
+    release :: handed.release
     if scans {
         elem :: ir_iter_element(result_ty) ?? return ir_fail_slot(&b, span, "Iter scan has no checked output element")
         output_meta :: ir_lazy_meta(&m, p, &b, elem, span)
@@ -880,6 +885,7 @@ fn ir_lazy_search(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
     ir_release(&m, &b, source)
+    ir_release(&m, &b, callback)
     if !position -> return decided
     // Some(index) is a box holding the exact Int; None is null.
     result :: ir_fresh_temp(&m, &b, result_row)
@@ -1189,6 +1195,7 @@ fn ir_shared_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         b.fresh[result] = true
     }
     ir_release(&m, &b, shared)
+    ir_release(&m, &b, closure)
     result
 }
 

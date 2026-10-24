@@ -1,0 +1,23 @@
+# #5909: every function value is a counted owner of its closure box, and the
+# last owner frees the box with its captures. The program builds millions of
+# closures per move site and panics when its peak RSS grows with the round
+# count; the checksums catch a box freed while an owner still calls it.
+fixture: closure_boxes_free_at_their_last_owner.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step aot: built
+stdin: null
+limit: time=120
+exit: 0
+stdout: = closure_boxes_free_at_their_last_owner.stdout.expected
+stderr: empty
+step: jet run main.jet
+stdin: null
+limit: time=120
+exit: 0
+stdout: = closure_boxes_free_at_their_last_owner.stdout.expected
+stderr: empty

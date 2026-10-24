@@ -1,0 +1,281 @@
+// #5909: every closure box is counted and freed with its captures when its
+// last owner ends. Each scenario runs `warm` rounds, reads the peak resident
+// set (VmHWM), runs 8 * `warm` more rounds and reads it again: a box (or a
+// capture) that outlives its last owner grows the peak with the round count.
+// The checksums catch a box freed while an owner still calls it.
+package {
+    name: "closure_boxes_free_at_their_last_owner"
+    authority: { allow: [Env, FS.Read, IO, Mem.Alloc, Time.Wait] }
+}
+
+use core.event as event
+use core.files as files
+use core.mem.scope as scope
+use core.sys as os
+
+#Error
+enum Reject {
+    Odd
+}
+
+struct Worker {
+    step: fn(Int) -> Int
+}
+
+// Grows more than this (kB) over the measured rounds: a leak.
+GROWTH_KB :: 8192
+
+fn peak_kb() -> Int {
+    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with("VmHWM:") -> next
+        loop field in line.slice(6, line.len()).trim().split(" ") {
+            if field.len() > 0 -> return Int.parse(field.copy()) ?? panic("VmHWM field")
+        }
+    }
+    panic("no VmHWM line")
+}
+
+fn measure(name: String, scenario: fn(Int, Int) -> Int, warm: Int) {
+    first :: scenario(0, warm)
+    before :: peak_kb()
+    second :: scenario(warm, 9 * warm)
+    grown :: peak_kb() - before
+    if grown > GROWTH_KB -> panic("{name}: peak RSS grew {grown} kB over {8 * warm} rounds")
+    print("{name}: flat, checksum {first + second}")
+}
+
+fn add_one(n: Int) -> Int { n + 1 }
+
+fn apply(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+
+fn make_adder(data: [Int], k: Int) -> fn(Int) -> Int { (n: Int) -> n + k + data[k % 3] }
+
+fn each_checked(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
+    total := 0
+    loop value in values {
+        total += handler(value) ?? 1
+    }
+    total
+}
+
+fn by_value(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    name :: "capture"
+    total := 0
+    loop i in from..<to {
+        f :: (x: Int) -> x + data[x % 3] + name.len()
+        total += f(i)
+    }
+    total
+}
+
+fn by_write_var(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        count := 0
+        apply((x: Int) -> {
+            count += x + data[x % 3]
+            count
+        }, i)
+        total += count
+    }
+    total
+}
+
+fn named_value(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        total += apply(add_one, i)
+        f :: add_one
+        total += apply(f, i)
+    }
+    total
+}
+
+fn copied(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        f :: (x: Int) -> x + data[x % 3]
+        held :: [fn(Int) -> Int]{f, (x: Int) -> x * data[0]}
+        total += held[1](i) + held[0](i) + held.len()
+    }
+    total
+}
+
+fn in_struct(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        worker :: Worker{step: (x: Int) -> x + data[x % 3]}
+        total += worker.step(i)
+    }
+    total
+}
+
+fn returned(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        adder :: make_adder(data, i)
+        total += adder(1)
+    }
+    total
+}
+
+fn in_map(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        handlers :: [String:fn(Int) -> Int]{"add": (x: Int) -> x + data[x % 3], "one": (x: Int) -> x + 1}
+        f :: handlers.get("add").or_err("missing add") ?? panic("missing add")
+        total += f(i)
+    }
+    total
+}
+
+fn widened(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        name :: "widened"
+        checked :: each_checked(data, (value: Int) -> value + name.len() + i)
+        total += checked
+    }
+    total
+}
+
+fn zipped(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        loop row in zip(a: data, b: data, c: data) -> total += row.a + row.c
+        loop row in data.zip_pad([i], fill: 0) -> total += row.b
+    }
+    total
+}
+
+fn lazy_chain(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        mapped :: data.lazy().map((x: Int) -> x + i).filter((x: Int) -> x % 2 == 0).to_list()
+        total += mapped.len()
+        first :: data[0]
+        total += data.map((x: Int) -> x * first).len()
+        last :: data[2]
+        loop x in data.lazy().map((x: Int) -> x + last).take(2) -> total += x
+    }
+    total
+}
+
+fn option_map(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        held :: Int?{Val(i)}
+        total += held.map((x: Int) -> x + data[x % 3]) ?? 0
+    }
+    total
+}
+
+fn merge_with(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        left := [String:Int]{}
+        left["k"] = i
+        right := [String:Int]{}
+        right["k"] = 2
+        merged :: left.merge(right, (key: String, a: Int, b: Int) -> key.len() + a + b + data[0])
+        total += merged["k"]
+    }
+    total
+}
+
+fn tasks(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        handle :: task data[i % 3] + i
+        total += ^handle.join() ?? 0
+    }
+    total
+}
+
+fn guarded(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        guarded_round(data, i, &total)
+    }
+    total
+}
+
+fn guarded_round(data: [Int], i: Int, total: &Int) {
+    _guard :: scope.guard(() -> total += data[i % 3])
+    total += 1
+}
+
+fn hooks(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        total += hooked(data, i) ?? 0
+    }
+    total
+}
+
+fn hooked(data: [Int], i: Int) -> Int Reject! {
+    #Transact(tx) {
+        tx.on_commit(() -> settle(data[i % 3]))
+        tx.on_rollback(() -> settle(data[(i + 1) % 3]))
+        if i % 2 == 1 -> return Err(Reject.Odd)
+    }
+    Ok(i)
+}
+
+// The hooks' body: infallible, so a hook returns no Result box.
+fn settle(value: Int) Never! {
+    if value > 3 -> panic("hook saw {value}")
+}
+
+fn listened(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        app :: event.scope()
+        clicks :: event.new<Int>()
+        clicks.on(app, (n: Int) -> settle(data[n % 3]))
+        total += clicks.emit(i % 7).delivered() + clicks.listener_count()
+        app.cancel()
+    }
+    total
+}
+
+fn run() {
+    // The exit queue owns this box until the process ends: one owner, run
+    // once, then released (a double release would trap at exit).
+    data :: [Int]{1, 2, 3}
+    #Unsafe("the exit callback only reads its captured List") {
+        os.atexit(() -> settle(data[0]))
+    }
+    measure("capture by value", by_value, 400000)
+    measure("capture by write var", by_write_var, 400000)
+    measure("named fn value", named_value, 400000)
+    measure("copied and listed", copied, 200000)
+    measure("stored in a struct", in_struct, 400000)
+    measure("returned from a fn", returned, 400000)
+    measure("stored in a map", in_map, 100000)
+    measure("widened fn value", widened, 100000)
+    measure("zip adapters", zipped, 100000)
+    measure("lazy and list adapters", lazy_chain, 100000)
+    measure("option map", option_map, 400000)
+    measure("map merge_with", merge_with, 100000)
+    measure("sent to a task", tasks, 20000)
+    measure("scope guard", guarded, 400000)
+    measure("transaction hook", hooks, 200000)
+    measure("event listener", listened, 50000)
+}

@@ -4095,11 +4095,11 @@ fn ir_window_subject(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, plac
 }
 
 // ---------------------------------------------------------------------------
-// Closures (Lower Closures.jet layout): a heap box with its reference count
-// at 0, its code address at 8, a release helper at 16 (none yet) and the
-// captures from 24. The code takes the box as its hidden first parameter. A
-// capture the body writes is held by address: its variable becomes a frame
-// cell from the closure's creation on.
+// Closures (Lower Closures.jet layout): a counted box (ir_closure_box) with
+// its code at 8 and the captures from 24. The code takes the box as its
+// hidden first parameter. A capture the body writes is held by address: its
+// variable becomes a frame cell from the closure's creation on. Any other
+// capture is a copy the box owns until its release helper drops it.
 //
 // The lambda's function is keyed by its enclosing function, its own source
 // span and its occurrence there: the merge shares functions by key, and the
@@ -4118,11 +4118,7 @@ fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLa
         &captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref})
         offset += size
     }
-    boxed :: ir_box_alloc(&m, &b, offset, row)
-    one :: ir_word_const(&m, &b, 1)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 0, one, b.line)
-    none :: ir_word_const(&m, &b, 0)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 16, none, b.line)
+    boxed :: ir_closure_box(&m, &b, row, offset, captures)
     loop (index, capture) in lambda.captures {
         slot :: captures[index]
         source :: if ir_lookup_binding(b, capture.source) != None -> capture.source else -> capture.local.name
@@ -4131,7 +4127,8 @@ fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLa
             address :: if binding.indirect >= 0 || m.types[slot.row].kind == .Aggregate -> binding.slot else -> ir_cell_binding(&m, &b, source)
             ir_emit(&b.f, IROp.Store, -1, boxed, slot.offset, address, b.line)
         } else {
-            // A capture copies the variable, which stays its own owner.
+            // A capture copies the variable, which stays its own owner;
+            // the box owns the copy.
             captured :: ir_read_binding(&m, &b, binding)
             kept :: if m.types[b.f.slot_type[captured]].kind == .Aggregate -> ir_copy_value(&m, p, &b, captured, span) else -> captured
             ir_store_at(&m, p, &b, boxed, slot.offset, kept)
@@ -4256,9 +4253,8 @@ fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args
     }
     start :: ir_args(&b.f, slots)
     ir_emit(&b.f, IROp.CallIndirect, dst, code, start, slots.len(), b.line)
-    loop (index, slot) in slots {
-        if index > 0 -> ir_release(&m, &b, slot)
-    }
+    // The call only lends its box and its arguments.
+    loop slot in slots -> ir_release(&m, &b, slot)
     ir_stop_check(&m, &b)
     dst
 }
@@ -4438,11 +4434,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         ir_emit(&a.f, IROp.Return, -1, result, -1, -1, a.line)
         m.functions[adapter] = ^a.f
     }
-    boxed :: ir_box_alloc(&m, &b, 24, row)
-    one :: ir_word_const(&m, &b, 1)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 0, one, b.line)
-    none :: ir_word_const(&m, &b, 0)
-    ir_emit(&b.f, IROp.Store, -1, boxed, 16, none, b.line)
+    boxed :: ir_closure_box(&m, &b, row, 24, [IRCaptureSlot]{})
     pointer_row :: ir_pointer_row(&m)
     code :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.FunctionAddress, code, adapter, -1, -1, b.line)
