@@ -303,7 +303,7 @@ fn semindex_query_test_scalar_consumers(index: SemIndex, expected_name: String, 
     assert_eq(index.effect_projection.required_effects, [String]{"IO"})
     assert_eq(index.effect_projection.granted_effects, [String]{"Net"})
     assert_eq(index.effect_projection.denied_effects, [String]{"IO"})
-    assert_eq(index.effect_projection.authority, "package.jet authority.holds")
+    assert_eq(index.effect_projection.authority, "package.jet authority")
 }
 
 #Test("semindex_scalar_consumers_read_retained_owner_and_updated_policy") {
@@ -313,16 +313,16 @@ fn semindex_query_test_scalar_consumers(index: SemIndex, expected_name: String, 
     &index.set_effect_projection(pkg_project_application_effects([String]{"IO"}, None))
     facts := PackageFacts.default()
     facts.name = "first"
-    facts.authority.holds.allow = Val([String]{"Net"})
-    facts.authority.holds.deny = Val([String]{"IO"})
+    facts.authority.allow = Val([String]{"Net"})
+    facts.authority.deny = Val([String]{"IO"})
     &index.attach_package_facts(^facts)
     &index.attach_workspace_overlay_policy(OverlayPolicy{allow_unfree: [String]{"first", "first"}, build_deny: [String]{},
         build_grants: [BuildGrant]{}, overlays: [OverlaySet]{}})
     semindex_query_test_scalar_consumers(index, "first", [String]{"first", "first"})
     replacement := PackageFacts.default()
     replacement.name = "replacement"
-    replacement.authority.holds.allow = Val([String]{"Net"})
-    replacement.authority.holds.deny = Val([String]{"IO"})
+    replacement.authority.allow = Val([String]{"Net"})
+    replacement.authority.deny = Val([String]{"IO"})
     &index.attach_package_facts(^replacement)
     &index.attach_workspace_overlay_policy(OverlayPolicy{allow_unfree: [String]{}, build_deny: [String]{},
         build_grants: [BuildGrant]{}, overlays: [OverlaySet]{}})

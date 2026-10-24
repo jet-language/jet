@@ -258,7 +258,7 @@ const peak = (name, rounds) => {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'unit.jet'), program(shapes[name], rounds));
   // The closure shape's call is effect-generic, so the program holds every effect.
-  fs.writeFileSync(path.join(dir, 'package.jet'), 'name: "write_drops"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] }\n}\n');
+  fs.writeFileSync(path.join(dir, 'package.jet'), 'name: "write_drops"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time]\n}\n');
   execFileSync(jet, ['build', 'unit.jet'], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] });
   const timing = path.join(dir, 'run.time');
   execFileSync(time, ['-v', '-o', timing, path.join(dir, '.jet/build/unit')], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] });

@@ -20,7 +20,7 @@ AUTHORITY_EXEC_ARGS_LEAF :: "Exec.Args"
 AUTHORITY_AMBIENT_BASIC_EFFECTS :: comptime { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
 // ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
 AUTHORITY_APPLICATION_DEFAULT :: "application default"
-// ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.holds.
+// ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.
 AUTHORITY_PACKAGE_DEFAULT :: "package.jet default"
 // The deny-only stop root.
 AUTHORITY_PANIC_ROOT :: "Panic"
@@ -228,7 +228,7 @@ struct ApplicationAuthority {
         ApplicationAuthority.beginner_floor(AUTHORITY_APPLICATION_DEFAULT)
     }
 
-    // #3718: the same floor for a package.jet that writes no `authority.holds`.
+    // #3718: the same floor for a package.jet that writes no `authority`.
     fn package_default() -> ApplicationAuthority Never! {
         ApplicationAuthority.beginner_floor(AUTHORITY_PACKAGE_DEFAULT)
     }
@@ -242,11 +242,16 @@ struct ApplicationAuthority {
         }
     }
 
-    // Project parsed `authority.holds` rows; unknown spellings are dropped.
+    // Project parsed `authority` rows; unknown spellings are dropped. A
+    // written allow row adds to the beginner floor (D-AUTH-AMBIENT3=A); a
+    // floor right leaves only through `deny`, which wins over every allow.
     fn from_policy(allow: [String]?, deny: [String]?, authority: String) -> ApplicationAuthority Never! {
+        granted := [String]{}
+        loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> &granted.push(name)
+        loop name in (allow ?? [String]{}) -> &granted.push(name)
         ApplicationAuthority{
             required_effects: [String]{},
-            granted_effects: authority_parse_rights(allow ?? [String]{}),
+            granted_effects: authority_parse_rights(granted),
             denied_effects: authority_parse_rights(deny ?? [String]{}),
             authority: authority
         }
@@ -258,17 +263,15 @@ struct ApplicationAuthority {
         self.authority.starts_with(AUTHORITY_APPLICATION_DEFAULT)
     }
 
-    // A beginner floor (manifest-less or a manifest with no holds). A written
-    // grant replaces the floor, so it must name every required effect.
-    fn is_beginner_floor(self) -> Bool Never! {
-        self.is_application_default() || self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT)
-    }
-
-    // Deny-only rights never appear in a positive grant.
+    // The `allow:` row a program writes: every required right the floor does
+    // not already hold. Deny-only rights never appear in a positive grant.
     fn inline_allow_row(self) -> [String] Never! {
+        floor :: authority_holds(AUTHORITY_AMBIENT_BASIC_EFFECTS)
         out := [String]{}
         loop effect_name in self.required_effects {
-            if !authority_is_deny_only(effect_name) -> &out.push(effect_name)
+            if authority_is_deny_only(effect_name) -> next
+            if authority_answer(floor, [String]{}, effect_name) == AuthorityVerdict.Allowed -> next
+            &out.push(effect_name)
         }
         authority_holds(out)
     }
@@ -297,17 +300,16 @@ struct ApplicationAuthority {
     }
 
     // The one-line policy fix from the complete undecided set. Denied effects
-    // are never turned into an allow suggestion; a beginner floor is replaced
-    // by the grant it teaches, so that grant names the complete row.
+    // are never turned into an allow suggestion; the floor stays granted
+    // beside a written row, so the row names only the undecided rights.
     fn policy_fix(self) -> String Never! {
         undecided :: self.undecided_effects()
         if undecided.len() > 0 && self.is_application_default() {
-            return "declare the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
+            return "declare `allow: [{undecided.join(", ")}]` under `authority` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
         }
         policy_step :: if {
-            undecided.len() == 0 -> "adjust the denial in `authority.holds.deny`"
-            self.is_beginner_floor() -> "add the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in `package.jet`"
-            else -> "add `allow: [{undecided.join(", ")}]` under `authority.holds` in `package.jet`"
+            undecided.len() == 0 -> "adjust the denial in `authority.deny`"
+            else -> "add `allow: [{undecided.join(", ")}]` under `authority` in `package.jet`"
         }
         "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
     }

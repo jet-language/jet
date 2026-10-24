@@ -17,7 +17,7 @@ const runtime = join(dirname(jet), "jet-runtime");
 const key = readFileSync(join(runtime, "native.key"), "utf8").trim();
 assert.ok(existsSync(join(runtime, key, "jet_runtime.pack.o")), "native CLI must have its admitted pack");
 const shared = readFileSync(join(repo, "tests/fixtures/native_inline_c_shared_state.jet"), "utf8");
-const manifest = name => 'name: "' + name + '"\nversion: "0.0.1"\nauthority: { holds: { allow: [FFI.C, IO, Mem.Alloc] } }\n';
+const manifest = name => 'name: "' + name + '"\nversion: "0.0.1"\nauthority: { allow: [FFI.C, IO, Mem.Alloc] }\n';
 function build(name, source) {
   const cwd = join(out, name); mkdirSync(cwd, { recursive: true });
   writeFileSync(join(cwd, "main.jet"), source);

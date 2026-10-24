@@ -631,7 +631,7 @@ them for a test harness). The readable stream is written through
 Before `jet build` or `jet run` writes anything, the Jet host checks the
 application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
 the checked entry's solved effect row against the beginner floor (`IO`,
-`Mem.Alloc`, `Exec.Args`), the entry package's `authority.holds` (from
+`Mem.Alloc`, `Exec.Args`), the entry package's `authority` (from
 `package.jet` or the entry's leading inline `package { … }` block, which the
 Jet loader reads with the same field parser and masks before parsing), and the
 `--allow=`/`--deny=` rows of the invocation, where `-A` allows every right and
@@ -669,7 +669,7 @@ harness exit (the Rust host's outcome for a package without a claims floor).
 
 `jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes the
 same project the Rust host writes (CmdCompile.rs `run_new`): `package.jet`
-with the template's authority holds, `.jet/lock` with the running toolchain
+with the template's `authority: { allow: [...] }` row, `.jet/lock` with the running toolchain
 pin and the build stamp (the git revision when the folder is inside a
 repository), the template's `run.jet`, the four comment-only `@*.jet` command
 homes for `overrides`, and `.gitignore`, then the status lines on stderr

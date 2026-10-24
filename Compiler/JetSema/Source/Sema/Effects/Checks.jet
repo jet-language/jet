@@ -704,6 +704,13 @@ fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String], pa
     diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
+// A package `authority.deny` row reached by one of the package's functions.
+fn sema_effect_package_denied_diagnostic(node: SemaEffectNode, reached: [String], denied: String) -> Diagnostic {
+    reached_list :: sema_effect_show(reached)
+    diagnostic :: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which the package denies with `authority: {{ deny: [{denied}] }}`", "a package `deny` row means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop `{denied}` from `authority.deny`")
+    diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
+}
+
 fn sema_effect_pure_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
     sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
 }
@@ -2189,7 +2196,9 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
 // onto `modules` at the end. The effect sites of every module's functions are
 // collected at once on up to `threads` compiler threads
 // (sema_effect_collect_threads); the result is the same for any thread count.
-fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^SemaEffectPrepared, package_memory_denials: [String], threads: CompilerThreads) -> SemaEffectGraphResult {
+// `package_denials` is the root package's `authority.deny` row; `denial_modules`
+// marks, by graph module index, the modules that row binds.
+fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], threads: CompilerThreads) -> SemaEffectGraphResult {
     owned_prepared := ^prepared
     diagnostics := ^owned_prepared.diagnostics
     nodes := ^owned_prepared.nodes
@@ -2312,15 +2321,31 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     }
     // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
     // function, including otherwise unreferenced bodies, not just entry.
-    loop name in package_memory_denials {
+    loop name in package_denials {
         fact :: sema_effect_memory_fact(name) ?? next
-        declaration :: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: "package.jet", provenance: "manifest denial `authority: {{ holds: {{ deny: [{name}] }} }}`"}
+        declaration :: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: "package.jet", provenance: "manifest denial `authority: {{ deny: [{name}] }}`"}
         &memory_facts.declarations.push(declaration)
         loop root in 0..<nodes.len() {
             memory_diagnostics := [Diagnostic]{}
             projection :: sema_effect_memory_project(nodes, calls.node_by_key, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, &memory_diagnostics)
             &memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
             sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[root].module_index].source_segments, ^memory_diagnostics)
+        }
+    }
+    // A package's every other denial is a compile-time prohibition on its
+    // own functions, exactly as if each wrote `-[!E]>` (D-AUTHORITY-DENYROW1=A);
+    // memory denials are the facts above.
+    loop name in package_denials {
+        if sema_effect_memory_fact(name) != None -> next
+        denied :: sema_effect_parse_name(name) ?? next
+        loop node_index in 0..<nodes.len() {
+            graph_module :: inputs[nodes[node_index].module_index].module_index
+            if graph_module >= denial_modules.len() || !denial_modules[graph_module] -> next
+            reached :: sema_effect_covered(solved[node_index], [String]{denied})
+            if reached.len() == 0 -> next
+            denial_diagnostics := [Diagnostic]{}
+            &denial_diagnostics.push(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied))
+            sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^denial_diagnostics)
         }
     }
     loop module_index in 0..<inputs.len() {

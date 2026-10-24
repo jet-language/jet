@@ -57,7 +57,7 @@ An effect projection has four separate roles at the application boundary:
 | `required_effects` | Effects reached by the selected entry, computed by sema. |
 | `granted_effects` | Effects allowed by the effective application or dependency policy. |
 | `denied_effects` | Effects explicitly refused by that policy. |
-| `authority` | The identity of the policy source, such as `package.jet authority.holds`. |
+| `authority` | The identity of the policy source, such as `package.jet authority`. |
 
 These roles are facts, not synonyms: a required effect can be granted, denied,
 or undecided, while an authority name identifies the policy source and is not an

@@ -23,7 +23,7 @@ fn pkg_remove_dep(raw: String, name: String) -> String Never! {
     pkg_edit_remove_from_block(raw, "deps", name)
 }
 
-// Add one effect root to `authority.holds.allow`.
+// Add one effect root to `authority.allow`.
 fn pkg_add_authority_hold(raw: String, input: String) -> String Never! {
     right :: input.trim()
     if right == "" -> return raw.copy()
@@ -38,45 +38,37 @@ fn pkg_add_authority_hold(raw: String, input: String) -> String Never! {
     if authority_line < 0 -> return pkg_edit_append_authority_hold(raw, right)
     authority :: pkg_edit_block_line_range(lines, "authority") ?? return raw
     authority_inline :: pkg_edit_inline_block_bounds(lines[authority_line], "authority")
-    holds_line := -1
+    allow_line := -1
     if authority_inline != None {
-        holds_line = authority_line
+        allow_line = authority_line
     } else {
         loop index in authority.start..<authority.end {
-            if lines[index].trim_start().starts_with("holds:") {
-                holds_line = index
+            if lines[index].trim_start().starts_with("allow:") {
+                allow_line = index
                 break
             }
         }
     }
     out := lines
-    if holds_line < 0 {
-        if authority_inline == .Val(bounds) {
-            out[authority_line] = pkg_edit_insert_inline_field(out[authority_line], bounds.start, bounds.end, "holds: {{ allow: [", right)
-        } else {
-            indent :: pkg_edit_body_indent(out, authority.start, authority.end, out[authority_line])
-            out = pkg_edit_insert_line(out, authority.end, "{indent}holds: {{ allow: [{right}] }},")
+    if allow_line >= 0 {
+        if pkg_edit_add_to_inline_list(out[allow_line], "allow", right) == .Val(updated) {
+            out[allow_line] = updated
+            return pkg_edit_restore_newline(raw, out)
         }
+    }
+    if authority_inline == .Val(bounds) {
+        out[authority_line] = pkg_edit_insert_inline_field(out[authority_line], bounds.start, bounds.end, "allow: [", right)
         return pkg_edit_restore_newline(raw, out)
     }
-    if pkg_edit_add_to_inline_list(out[holds_line], "allow", right) == .Val(updated) {
-        out[holds_line] = updated
-        return pkg_edit_restore_newline(raw, out)
-    }
-    if pkg_edit_inline_block_bounds(out[holds_line], "holds") == .Val(bounds) {
-        out[holds_line] = pkg_edit_insert_inline_field(out[holds_line], bounds.start, bounds.end, "allow: [", right)
-        return pkg_edit_restore_newline(raw, out)
-    }
-    holds :: pkg_edit_block_line_range_between(out, "holds", authority.start, authority.end) ?? return raw
-    indent :: pkg_edit_body_indent(out, holds.start, holds.end, out[holds_line])
-    pkg_edit_restore_newline(raw, pkg_edit_insert_line(out, holds.end, "{indent}allow: [{right}],"))
+    indent :: pkg_edit_body_indent(out, authority.start, authority.end, out[authority_line])
+    pkg_edit_restore_newline(raw, pkg_edit_insert_line(out, authority.end, "{indent}allow: [{right}],"))
 }
 
 fn pkg_edit_append_authority_hold(raw: String, right: String) -> String Never! {
     out := pkg_binder_lines(raw)
     if raw != "" && !raw.ends_with("\n") -> &out.push("")
     &out.push("authority: {{")
-    &out.push("    holds: {{ allow: [{right}] }},")
+    &out.push("    allow: [{right}],")
     &out.push("}}")
     pkg_edit_restore_newline(raw, out)
 }

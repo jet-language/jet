@@ -83,6 +83,7 @@ use jet_sema.[
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
+    sema_effect_builtin_leaf_unknown,
     sema_effect_parse_name,
     sema_effect_root,
     sema_registration_unit_family_type_names,
@@ -205,7 +206,7 @@ fn jet_driver_manifest_matching_bracket(tokens: [Token], start: Int, limit: Int)
 }
 
 fn jet_driver_authority_diagnostic(span: Span, detail: String) -> Diagnostic {
-    jet_driver_diagnostic("E1221", span, "`package.jet` has a malformed `authority:` block", detail, "`authority:` declares package holds, needs, grants, trust, and providers using canonical rights")
+    jet_driver_diagnostic("E1221", span, "the package's `authority:` block is malformed", detail, "`authority:` declares `allow`, `deny`, `needs`, `grants`, `trust`, and `providers` using canonical rights")
 }
 
 fn jet_driver_is_ui_capability(name: String) -> Bool Never! {
@@ -266,7 +267,7 @@ fn jet_driver_parse_authority_needs(source: String, tokens: [Token], tables: Tok
     needs
 }
 
-struct JetDriverAuthorityHolds {
+struct JetDriverAuthorityBound {
     allow: [String]?
     deny: [String]?
 }
@@ -287,7 +288,7 @@ fn jet_driver_manifest_item_span(tokens: [Token], start_index: Int, next_index: 
 }
 
 fn jet_driver_manifest_panic_grant(field: String, span: Span) -> Diagnostic {
-    jet_driver_diagnostic("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from `{field}`; to forbid stops, list it in `authority.holds.deny`")
+    jet_driver_diagnostic("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from `{field}`; to forbid stops, list it in `authority.deny`")
 }
 
 fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], tables: TokenTables, start_index: Int, close_index: Int, span: Span, field: String, diagnostics: &[Diagnostic]) -> JetDriverParsedAuthorityList {
@@ -311,8 +312,9 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
         if {
             name.len() == 0 -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
             sema_effect_parse_name(sema_effect_root(name)) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
+            sema_effect_builtin_leaf_unknown(name) -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a declared leaf of `{sema_effect_root(name)}` (see the closed vocabulary in Prelude/Effects.jet)"))
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> &diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
-            name.contains("(") && !field.ends_with("deny") -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.holds.deny` list - use `Mem.Alloc(above: 65536)` there"))
+            name.contains("(") && !field.ends_with("deny") -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
             name.contains("(") && sema_effect_parse_name(name) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> &names.push(name)
         }
@@ -329,54 +331,42 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
     JetDriverParsedAuthorityList{values: Val(names), next_index: list_close + 1}
 }
 
-fn jet_driver_parse_authority_holds(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> JetDriverAuthorityHolds {
-    result := JetDriverAuthorityHolds{allow: None, deny: None}
-    holds_seen := false
+// `allow:` and `deny:` sit directly in the `authority:` record.
+//
+// Seed bridge: Compiler/JetCli/package.jet keeps `holds: { allow, deny }` because the seed
+// that builds the compiler reads only that spelling, so `holds` is read here (and passed by
+// jet_driver_validate_authority_fields) as the same record. Delete `holds_open`, the `holds`
+// validator arm, and flatten that manifest, with the next seed rotation.
+fn jet_driver_parse_authority_bound(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> JetDriverAuthorityBound {
+    result := JetDriverAuthorityBound{allow: None, deny: None}
+    allow_seen := false
+    deny_seen := false
+    holds_open := false
+    nesting := 0
     index := open_index + 1
     loop index < close_index {
-        if tokens[index].kind == TOKEN_IDENT && token_decoded(tables, tokens[index]) == "holds" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
-            if holds_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` is declared more than once"))
-            holds_seen = true
-            holds_open_index := index + 2
-            if holds_open_index < close_index && tokens[holds_open_index].kind == TOKEN_DOT -> holds_open_index += 1
-            holds_close :: jet_driver_manifest_matching_brace(tokens, holds_open_index) ?? {
-                &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` must be a closed record"))
-                index += 1
+        token :: tokens[index]
+        if (nesting == 0 || (holds_open && nesting == 1)) && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
+            field :: token_decoded(tables, token)
+            if nesting == 0 && field == "holds" -> holds_open = true
+            if field == "allow" || field == "deny" {
+                if field == "allow" {
+                    if allow_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.allow` is declared more than once"))
+                    allow_seen = true
+                } else {
+                    if deny_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.deny` is declared more than once"))
+                    deny_seen = true
+                }
+                parsed :: jet_driver_parse_authority_effect_list(source, tokens, tables, index + 2, close_index, span, "authority.{field}", &diagnostics)
+                if field == "allow" -> result.allow = parsed.values else -> result.deny = parsed.values
+                index = parsed.next_index
                 next
             }
-            allow_seen := false
-            deny_seen := false
-            hold_index := holds_open_index + 1
-            loop hold_index < holds_close {
-                if {
-                    hold_index + 1 < holds_close && tokens[hold_index].kind == TOKEN_IDENT && tokens[hold_index + 1].kind == TOKEN_COLON -> {
-                        hold_name :: token_decoded(tables, tokens[hold_index])
-                        list_start :: hold_index + 2
-                        if hold_name == {
-                            "allow" -> {
-                                if allow_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds.allow` is declared more than once"))
-                                allow_seen = true
-                                parsed :: jet_driver_parse_authority_effect_list(source, tokens, tables, list_start, holds_close, span, "authority.holds.allow", &diagnostics)
-                                result.allow = parsed.values
-                                hold_index = parsed.next_index
-                            }
-                            "deny" -> {
-                                if deny_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds.deny` is declared more than once"))
-                                deny_seen = true
-                                parsed :: jet_driver_parse_authority_effect_list(source, tokens, tables, list_start, holds_close, span, "authority.holds.deny", &diagnostics)
-                                result.deny = parsed.values
-                                hold_index = parsed.next_index
-                            }
-                            else -> {
-                                &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` only accepts `allow:` and `deny:`"))
-                                hold_index += 1
-                            }
-                        }
-                    }
-                    else -> hold_index += 1
-                }
-            }
-            index = holds_close
+        }
+        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN -> nesting += 1
+        if token.kind == TOKEN_RBRACE || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RPAREN {
+            if nesting > 0 -> nesting -= 1
+            if nesting == 0 -> holds_open = false
         }
         index += 1
     }
@@ -389,8 +379,16 @@ fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, op
         token :: tokens[index]
         if nesting == 0 && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             field :: token_decoded(tables, token)
-            if field != "needs" && field != "holds" {
-                &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.{field}` is not supported by the current compiler package-policy boundary"))
+            // `trust` (D-AUTHORITY-MANIFEST1, `require:` from D-BOUND-PROV1) is
+            // Jetpack's: fetch, verified reuse and the lock enforce it, so the
+            // compiler accepts the record. `grants` and `providers` have no
+            // enforcing consumer yet and stay refused rather than silently inert.
+            if field == {
+                "allow" | "deny" | "needs" | "trust" -> {}
+                "grants" | "providers" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.{field}` is not supported by the current compiler package-policy boundary"))
+                // Seed bridge (see jet_driver_parse_authority_bound): delete with the next seed rotation.
+                "holds" -> {}
+                else -> &diagnostics.push(jet_driver_authority_diagnostic(span, "unknown `authority` field `{field}` - allowed: `allow`, `deny`, `needs`, `grants`, `trust`, `providers`"))
             }
         }
         if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN -> nesting += 1
@@ -1109,9 +1107,9 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                                     authority_close :: authority_close_index ?? authority_open_index
                                     jet_driver_validate_authority_fields(tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
                                     authority_needs = jet_driver_parse_authority_needs(source, tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
-                                    authority_holds :: jet_driver_parse_authority_holds(source, tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
-                                    authority_allow = authority_holds.allow
-                                    authority_deny = authority_holds.deny
+                                    authority_bound :: jet_driver_parse_authority_bound(source, tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
+                                    authority_allow = authority_bound.allow
+                                    authority_deny = authority_bound.deny
                                     index = authority_close
                                 }
                             }
@@ -1234,27 +1232,11 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     if name.len() == 0 {
         // An inline body words it as the canonical Package field parser does.
         missing_name :: if inline_carrier != None -> "Package needs a `name` field" else -> "package manifest has no name"
-        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", missing_name, "a package dependency identity requires a declared name", "add `name: \"package_name\"` to package.jet"))
+        name_fix :: if inline_carrier != None -> "add `name: \"package_name\"` to the `package {{ }}` block" else -> "add `name: \"package_name\"` to package.jet"
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", missing_name, "a package dependency identity requires a declared name", name_fix))
     }
-    // A malformed inline body is one E1362 at the body (Rust Loader: the field
-    // failure becomes the diagnostic's why). A Panic grant (E0751) is a rights
-    // finding at its own entry, not a malformed field, so it stays as reported.
-    if inline_carrier == .Val(carrier) {
-        if jet_driver_has_field_errors_since(diagnostics, manifest_diagnostic_start) {
-            field_failure := ""
-            kept := [Diagnostic]{}
-            loop diagnostic_index in manifest_diagnostic_start..<diagnostics.len() {
-                if {
-                    diagnostics[diagnostic_index].severity != DIAGNOSTIC_ERROR || diagnostics[diagnostic_index].code == "E0751" -> &kept.push(diagnostics[diagnostic_index])
-                    field_failure.len() == 0 -> field_failure = diagnostics[diagnostic_index].what
-                    else -> {}
-                }
-            }
-            loop diagnostics.len() > manifest_diagnostic_start -> _ := &diagnostics.pop()
-            loop diagnostic in kept -> &diagnostics.push(diagnostic)
-            &diagnostics.push(jet_driver_diagnostic("E1362", Span{start: carrier.block.body_start, end: carrier.block.body_end}, "the inline Package body is malformed", field_failure, "fix the inline Package fields, then retry"))
-        }
-    }
+    // An inline `package {}` body is the package.jet body: its field errors
+    // are the same diagnostics, reported at the carrier file.
     diagnostic_index := manifest_diagnostic_start
     loop diagnostic_index < diagnostics.len() {
         diagnostics[diagnostic_index] = diagnostic_with_source_path(diagnostics[diagnostic_index], manifest_path, 0)
@@ -1262,13 +1244,6 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     }
     identity :: jet_driver_package_identity(name, version ?? "")
     JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs, settings: ^settings, profile_settings: ^profile_settings}
-}
-
-fn jet_driver_has_field_errors_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
-    loop index in start..<diagnostics.len() {
-        if diagnostics[index].severity == DIAGNOSTIC_ERROR && diagnostics[index].code != "E0751" -> return true
-    }
-    false
 }
 
 // The source text of tokens `start..<end` (comments dropped), and a lone

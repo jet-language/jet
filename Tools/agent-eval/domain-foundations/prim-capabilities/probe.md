@@ -74,7 +74,7 @@ A package cannot bind a directory authority to ordinary `core.files` calls. `pkg
 ```text
 $ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs
 Error [E1803]: Application authority is undecided for `FS`
-Why: required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs, IO, Mem.Alloc; denied_effects=; denied_required_effects=none; undecided_effects=FS; authority=package.jet authority.holds
+Why: required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs, IO, Mem.Alloc; denied_effects=; denied_required_effects=none; undecided_effects=FS; authority=package.jet authority
 ```
 
 With broad `[FS, IO, Mem.Alloc]`, the same path-only program reads both `inside-capability` and `outside-capability`. `crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:835-844` confirms `jet_std_fs_read` takes only a path. A library can manually validate paths; the shipped no-follow root boundary is only on `plugin.load` for WASM artifacts.

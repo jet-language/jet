@@ -43,7 +43,7 @@ SCRATCH = Path.home() / ".cache/jet-dev/enumset-bench"
 PHASES = ("construction", "update", "membership", "setops", "iteration", "conversion")
 JET_ARMS = ("jet_set_enum", "jet_bits", "jet_int_mask", "jet_packed_fields")
 RUST_ARMS = ("rust_native", "rust_btreeset")
-PACKAGE = 'name: "enumset_bench"\nversion: "0.1.0"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Time]\n    }\n}\n'
+PACKAGE = 'name: "enumset_bench"\nversion: "0.1.0"\nauthority: {\n    \n        allow: [IO, Mem.Alloc, Time]\n\n}\n'
 
 
 def full_mask(k: int) -> str:

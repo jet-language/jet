@@ -248,16 +248,19 @@ fn jet_cli_rights_declared(view: JetCLICallableView) -> JetCLIRightsRow Never! {
 
 // The bundle's `package_guarantees.application_authority` (Loader.rs
 // `package_guarantees_for_manifest` over Authority.rs `from_policy`): a
-// manifest's written `authority.holds` rows under `<manifest> authority.holds`
-// (no beginner floor), else the application default; `required` is the
-// entry's solved effect row.
+// manifest's written `authority` rows under `<manifest> authority`, its allow
+// row added to the beginner floor (D-AUTH-AMBIENT3=A), else the application
+// default; `required` is the entry's solved effect row.
 fn jet_cli_rights_authority(result: JetDriverCompileResult) -> JetCLIAuthority Never! {
     authority := jet_cli_application_authority(result, None)
     policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
     if policy.manifest_path == .Val(manifest) {
-        authority.granted = jet_cli_policy_effects(policy.allow ?? [String]{})
+        granted := [String]{}
+        loop right in JET_CLI_AMBIENT_BASIC_EFFECTS -> &granted.push(right)
+        loop right in jet_cli_policy_effects(policy.allow ?? [String]{}) -> &granted.push(right)
+        authority.granted = jet_cli_sorted_set(granted)
         authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
-        authority.authority = "{manifest} authority.holds"
+        authority.authority = "{manifest} authority"
     }
     authority
 }

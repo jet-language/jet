@@ -92,7 +92,7 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
 }
 
 #Test("semindex_authority_preserves_vector_order_duplicates_and_null_bounds") {
-    authority :: PackageAuthority{holds: AuthorityHolds{allow: None, deny: Val([String]{})}, needs: [String]{"Net"}, grants: [PackageGrant]{
+    authority :: PackageAuthority{allow: None, deny: Val([String]{}), needs: [String]{"Net"}, grants: [PackageGrant]{
         PackageGrant{package: "z", rights: [String]{"IO", "IO"}},
         PackageGrant{package: "a", rights: [String]{}},
         PackageGrant{package: "z", rights: [String]{"FS"}},
@@ -100,7 +100,7 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
         {provider: "remote", registry: "https://host/raw", allow: [String]{"b", "a", "b"}, deny: [String]{}},
         {provider: "remote", registry: "other", allow: [String]{}, deny: [String]{"x"}},
     }}
-    assert_eq(semindex_json_package_authority(authority), `{"holds":{"allow":null,"deny":[]},"grants":{"z":["IO","IO"],"a":[],"z":["FS"]},"trust":null,"providers":{"remote":{"registry":"https://host/raw","allow":["b","a","b"],"deny":[]},"remote":{"registry":"other","allow":[],"deny":["x"]}}}`)
+    assert_eq(semindex_json_package_authority(authority), `{"allow":null,"deny":[],"grants":{"z":["IO","IO"],"a":[],"z":["FS"]},"trust":null,"providers":{"remote":{"registry":"https://host/raw","allow":["b","a","b"],"deny":[]},"remote":{"registry":"other","allow":[],"deny":["x"]}}}`)
     trust :: TrustPolicy{default: None, ci_prompt: Val(TrustDecision.Deny), services: [ServiceTrust]{ServiceTrust{service: "z", decision: TrustDecision.Prompt}, ServiceTrust{service: "z", decision: TrustDecision.Allow}}, require: None}
     with_trust := authority.copy()
     with_trust.trust = Val(trust)
@@ -112,8 +112,8 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
         .Ok(_) -> { panic("canonical Report accepted duplicate grants") }
     }
     unique := PackageAuthority.default()
-    unique.holds.allow = Val([String]{"IO", "IO"})
-    unique.holds.deny = Val([String]{})
+    unique.allow = Val([String]{"IO", "IO"})
+    unique.deny = Val([String]{})
     semindex_package_status_consumer(semindex_json_package_authority(unique), semindex_status_package_authority(unique) ?? panic("unique authority"), true)
     trust_only := PackageAuthority.default()
     trust_only.trust = Val(trust)
@@ -172,7 +172,7 @@ fn semindex_package_codec_test_package_fixture() -> [String] Never! {
         `name: "demo"
 version: "0.1.0"
 jet: "0.4"
-authority: { holds: { allow: [FS], deny: [Net] }, grants: { "textkit": [IO] } }
+authority: { allow: [FS], deny: [Net], grants: { "textkit": [IO] } }
 services: { cache: { enable: true, ports: [6379], ready: "ping" } }
 environments: { dev: Environment{ tools: ["git"], services: { cache: { enable: true, ports: [6379] } }, secrets: { token: "x" } } }
 configs: ["release.jet"]
@@ -192,7 +192,7 @@ fn semindex_package_codec_test_shared_package(facts: PackageFacts, index_json: S
     found := false
     loop origin in facts.provenance["outputs.app"] { if origin.ends_with("release.jet") -> found = true }
     assert(found)
-    fields :: [String]{`"package_facts"`, `"semantic_digest":"`, `"jet":"0.4"`, `"services":{"cache"`, `"environments":{"dev"`, `"defaults":{"run":"app"}`, `"resolved_config_paths":["release.jet"]`, `"inline_configs":{"dev"`, `"kind":"executable"`, `"authority":{"holds":{"allow":["FS"],"deny":["Net"]},"grants":{"textkit":["IO"]}`, `"required_effects":[]`, `"granted_effects":["FS"]`, `"denied_effects":["Net"]`, `"authority":"package.jet authority.holds"`}
+    fields :: [String]{`"package_facts"`, `"semantic_digest":"`, `"jet":"0.4"`, `"services":{"cache"`, `"environments":{"dev"`, `"defaults":{"run":"app"}`, `"resolved_config_paths":["release.jet"]`, `"inline_configs":{"dev"`, `"kind":"executable"`, `"authority":{"allow":["FS"],"deny":["Net"],"grants":{"textkit":["IO"]}`, `"required_effects":[]`, `"granted_effects":["FS"]`, `"denied_effects":["Net"]`, `"authority":"package.jet authority"`}
     loop field in fields -> assert(index_json.contains(field))
     assert(index_json.contains("release.jet"))
 }

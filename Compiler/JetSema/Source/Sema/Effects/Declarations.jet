@@ -29,6 +29,21 @@ fn sema_effect_builtin_leaves() -> [String] Never! {
     [String]{"DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit", "Exec.Args", "Time.Wait", "FFI.Go", "FFI.Java", "FFI.DotNet", "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal", "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R", "FFI.Com", "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave"}
 }
 
+// A dotted right under a root whose leaves the Prelude closes (`FS.Bogus`)
+// names no declared leaf (D-EFF2). Parameters (`Mem.Alloc(above: N)`) and a
+// resource qualifier (`FS.Read:/data`) are not part of the leaf name.
+fn sema_effect_builtin_leaf_unknown(name: String) -> Bool Never! {
+    bare :: name.split("(").to_list()[0].split(":").to_list()[0].trim()
+    member :: sema_effect_leaf_member(bare) ?? return false
+    root :: sema_effect_root(bare)
+    closed := false
+    loop leaf in sema_effect_builtin_leaves() {
+        if leaf == bare -> return false
+        if sema_effect_root(leaf) == root -> closed = true
+    }
+    closed && member != ""
+}
+
 fn sema_effect_leaf_member(name: String) -> String? {
     root :: sema_effect_root(name)
     prefix :: "{root}."

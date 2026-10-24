@@ -4,7 +4,7 @@
 // jet-pkg-model EffectBudget.rs `project_application_effects` and
 // `application_policy_diagnostic`). The program's required effects are the
 // direct effects of every function the checked entry reaches; its policy is the beginner floor, the
-// entry package's `authority.holds`, and the `--allow`/`--deny`/`-A` rows of this
+// entry package's `authority`, and the `--allow`/`--deny`/`-A` rows of this
 // invocation. A script (a file whose first line is a `#!/...` launch line)
 // runs as `-A` runs a program. A required right the policy denies, or one it leaves
 // undecided, stops the command with E1803 before anything is built.
@@ -18,6 +18,7 @@ use jet_foundation.[
     diagnostic_from_registry,
 ]
 use jet_sema.[
+    sema_effect_builtin_leaf_unknown,
     sema_effect_grantable_roots,
 ]
 
@@ -26,6 +27,7 @@ use jet_sema.[
 JET_CLI_AMBIENT_BASIC_EFFECTS :: [String]{"IO", "Mem.Alloc", "Exec.Args"}
 JET_CLI_APPLICATION_DEFAULT :: "application default"
 JET_CLI_PACKAGE_DEFAULT :: "package.jet default"
+JET_CLI_INLINE_PACKAGE_DEFAULT :: "inline Package default"
 
 // One application's authority: the sema fact (`required`) and the policy
 // facts (`granted`, `denied`, and the policy's name), each a sorted set.
@@ -106,7 +108,9 @@ fn jet_cli_parse_right(raw: String) -> String? Never! {
     if root == "Panic" && right != "Panic" -> return None
     parts :: right.split(".").to_list()
     if parts.len() == 1 -> return Val(root)
-    Val("{root}{right.slice(parts[0].len()..<right.len())}")
+    canonical :: "{root}{right.slice(parts[0].len()..<right.len())}"
+    if sema_effect_builtin_leaf_unknown(canonical) -> return None
+    Val(canonical)
 }
 
 // Authority.rs `covers`: a bound covers itself and every descendant; a
@@ -160,11 +164,15 @@ fn jet_cli_policy_authority(required: [String], authority_policy: JetDriverAutho
     policy :: authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
     if policy.manifest_path != None {
         if policy.allow == None && policy.deny == None {
-            authority.authority = JET_CLI_PACKAGE_DEFAULT
+            authority.authority = if policy.inline_package -> JET_CLI_INLINE_PACKAGE_DEFAULT else -> JET_CLI_PACKAGE_DEFAULT
         } else {
-            authority.granted = jet_cli_policy_effects(policy.allow ?? [String]{})
+            // A written allow row adds to the floor (D-AUTH-AMBIENT3=A); deny still wins.
+            granted := [String]{}
+            loop right in JET_CLI_AMBIENT_BASIC_EFFECTS -> &granted.push(right)
+            loop right in jet_cli_policy_effects(policy.allow ?? [String]{}) -> &granted.push(right)
+            authority.granted = jet_cli_sorted_set(granted)
             authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
-            authority.authority = if policy.inline_package -> "inline Package authority.holds" else -> "package.jet authority.holds"
+            authority.authority = if policy.inline_package -> "inline Package authority" else -> "package.jet authority"
         }
     }
     authority
@@ -212,21 +220,19 @@ fn jet_cli_is_application_default(authority: JetCLIAuthority) -> Bool Never! {
 }
 
 // A program with no package.jet: the default, or a file's leading
-// `package { … }` block that writes `authority.holds`.
+// `package { … }` block that writes `authority`.
 fn jet_cli_is_manifest_less(authority: JetCLIAuthority) -> Bool Never! {
     jet_cli_is_application_default(authority) || authority.authority.starts_with("inline Package")
 }
 
-fn jet_cli_is_beginner_floor(authority: JetCLIAuthority) -> Bool Never! {
-    jet_cli_is_application_default(authority) || authority.authority.starts_with(JET_CLI_PACKAGE_DEFAULT)
-}
-
-// The complete `allow:` row a beginner-floor program must write. Deny-only
-// rights never appear in a positive grant (Authority.rs `inline_allow_row`).
+// The `allow:` row a program writes: every required right the floor does not
+// already hold (D-AUTH-AMBIENT3=A). Deny-only rights never appear in a
+// positive grant (Authority.rs `inline_allow_row`).
 fn jet_cli_inline_allow_row(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
-        if !authority_is_deny_only(right) -> &rights.push(right)
+        if authority_is_deny_only(right) || jet_cli_covers_any(JET_CLI_AMBIENT_BASIC_EFFECTS, right) -> next
+        &rights.push(right)
     }
     rights
 }
@@ -272,6 +278,7 @@ fn jet_cli_policy_owner(authority: JetCLIAuthority) -> String Never! {
         jet_cli_is_application_default(authority) -> "the default for a file with no package block"
         name.starts_with(JET_CLI_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
         name.starts_with("package.jet") -> "package.jet"
+        name.starts_with(JET_CLI_INLINE_PACKAGE_DEFAULT) -> "this file's package block (which has no authority block)"
         name.starts_with("inline Package") -> "this file's package block"
         name.starts_with("jet repl") || name.starts_with("REPL") -> "this REPL session"
         else -> "`{name}`"
@@ -299,23 +306,18 @@ fn jet_cli_policy_why(authority: JetCLIAuthority) -> String Never! {
 }
 
 // Authority.rs `policy_fix`. A program with no package.jet edits its leading
-// `package { … }` block, and the row it writes replaces the floor or the
-// written row, so it names every required effect (spec "Application
-// authority"). `jet fix --all` inserts a missing block only.
+// `package { … }` block. The floor stays granted beside a written row
+// (D-AUTH-AMBIENT3=A), so the row names only the undecided rights.
+// `jet fix --all` inserts a missing block only.
 fn jet_cli_policy_fix(authority: JetCLIAuthority) -> String Never! {
     undecided :: jet_cli_undecided(authority)
     if undecided.len() > 0 && jet_cli_is_application_default(authority) {
-        return "declare the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
+        return "declare `allow: [{undecided.join(", ")}]` under `authority` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
     }
     if undecided.len() > 0 && jet_cli_is_manifest_less(authority) {
-        return "write the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in this file's leading `package {{ … }}` block; otherwise approve the exact operation once in an interactive terminal"
+        return "add `allow: [{undecided.join(", ")}]` under `authority` in this file's leading `package {{ … }}` block; otherwise approve the exact operation once in an interactive terminal"
     }
-    step := ""
-    if {
-        undecided.len() == 0 -> step = "adjust the denial in `authority.holds.deny`"
-        jet_cli_is_beginner_floor(authority) -> step = "add the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in `package.jet`"
-        else -> step = "add `allow: [{undecided.join(", ")}]` under `authority.holds` in `package.jet`"
-    }
+    step :: if undecided.len() == 0 -> "adjust the denial in `authority.deny`" else -> "add `allow: [{undecided.join(", ")}]` under `authority` in `package.jet`"
     "{step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
 }
 

@@ -315,11 +315,11 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
             "`{field}` moved into `{replacement}` in the one `authority:` block.",
             "write `{replacement}` inside `authority: {{ … }}`")
         .BadMemoryPolicy(detail) -> {
-            if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.holds.deny`") {
+            if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.deny`") {
                 return diagnostic_from_registry("E1206", None,
                     "`{PACKAGE_FILE}` names an unknown memory floor",
-                    "{detail}; memory floors belong in `authority.holds.deny`.",
-                    "write the denial in `authority.holds.deny` inside `authority: {{ holds: {{ deny: […] }} }}`")
+                    "{detail}; memory floors belong in `authority.deny`.",
+                    "write the denial in `authority.deny` inside `authority: {{ deny: […] }}`")
             }
             pkg_e1206("memory policy is malformed: {detail}")
         }
@@ -349,7 +349,7 @@ fn pkg_e1221(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1221", None,
         "`{PACKAGE_FILE}` has a malformed `{MANIFEST_BLOCK_AUTHORITY}` block",
         detail,
-        "`{MANIFEST_BLOCK_AUTHORITY}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
+        "`{MANIFEST_BLOCK_AUTHORITY}: {{ allow: […], deny: […], grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
 }
 
 fn pkg_e1206(detail: String) -> Diagnostic Never! {

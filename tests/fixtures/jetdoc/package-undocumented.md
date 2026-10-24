@@ -4,7 +4,7 @@ Generated from the checked semantic graph.
 
 ## Effect Roles
 
-required effects: none; granted effects: none; denied effects: none; authority: package.jet authority.holds
+required effects: none; granted effects: none; denied effects: none; authority: package.jet authority
 
 ## Modules
 

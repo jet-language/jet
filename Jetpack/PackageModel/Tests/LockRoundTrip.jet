@@ -3,7 +3,7 @@
 // diagnostics, and the on-disk recorders and bounded reader/writer.
 // Helpers live in LockEnvelope.jet.
 use jet_pkg_model.[
-    AuthorityHolds, BuildGrant, BuildStamp, ComptimeInput, DependencyProvenance, ForeignLanguage,
+    BuildGrant, BuildStamp, ComptimeInput, DependencyProvenance, ForeignLanguage,
     LockEnvelope, LockError, LockSource, LockedBrowser, LockedBuildContribution, LockedPackage,
     LockedRevision, LockedSourceChannel, LockedToolchain, LockedWorkspaceMember, NixClosureRecord,
     OverlayPolicy, OverlaySet, OverrideEnv, PKG_MAX_LOCK_BYTES, PKG_MAX_LOCK_VALUE_BYTES,
@@ -337,7 +337,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 
 #Test("lock roundtrips the manifest authority shape") {
     authority :: PackageAuthority{
-        holds: AuthorityHolds{allow: Val([String]{"Net"}), deny: Val([String]{"Exec"})},
+        allow: Val([String]{"Net"}),
+        deny: Val([String]{"Exec"}),
         needs: [String]{"FS.Read", "Net.Connect"},
         grants: [PackageGrant]{PackageGrant{package: "image-codec", rights: [String]{"FS.Read"}}},
         trust: Val(TrustPolicy{
@@ -352,7 +353,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
     lock.authority = Val(authority)
     raw :: pkg_lock_write(lock)
     assert(raw.contains("authority = {{"))
-    assert(raw.contains("holds: {{"))
+    assert(raw.contains("allow: [\"Net\"]"))
+    assert(!raw.contains("holds"))
     assert(raw.contains("needs:"))
     assert(raw.contains("grants: {{"))
     assert(raw.contains("trust: {{"))

@@ -39,5 +39,5 @@ const fixtureName = webHost ? "WebHostDiagnosticFixtures" : "ReturnDiagnosticFix
 const fixtures = readFileSync(join(repo, `Compiler/JetSema/Tests/${fixtureName}.fixture/${fixtureName}.jet`), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), foundation + "\n" + builders.join("\n") + "\n" + fixtures);
-writeFileSync(join(out, "project/package.jet"), 'name: "return_diagnostic_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');
+writeFileSync(join(out, "project/package.jet"), 'name: "return_diagnostic_fixtures"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc] }\n');
 console.log(`${out}/project/src/compiler.jet`);

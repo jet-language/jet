@@ -73,5 +73,5 @@ const parts = [
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
-writeFileSync(`${outDir}/package.jet`, `name: "jet_backend_link_runtime"\nversion: "0.1.0"\nauthority: { holds: { allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem.Alloc, Time] } }\n`);
+writeFileSync(`${outDir}/package.jet`, `name: "jet_backend_link_runtime"\nversion: "0.1.0"\nauthority: { allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem.Alloc, Time] }\n`);
 console.log(`${outDir}/unit.jet`);

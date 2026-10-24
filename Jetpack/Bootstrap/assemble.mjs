@@ -62,9 +62,9 @@ const packageSource = [
   'version: "0.1.0"',
   'edition: "2026"',
   "authority: {",
-  "    holds: {",
-  "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]",
-  "    }",
+  "    ",
+    "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]",
+    "    ",
   "}",
   "",
 ].join("\n");

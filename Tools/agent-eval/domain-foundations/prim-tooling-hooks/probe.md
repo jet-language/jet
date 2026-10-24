@@ -17,7 +17,7 @@ I built a Jet build hook that calls `core.compiler.lex`, `parse`, and `check`, t
 See `gaps.json`: runtime compiler facts are unavailable (E0956); graph/receipt diffs are not a stable in-process API; generated-module builds are not idempotent (E3510 on the second build).
 
 ## Friction and defects
-`jet inspect graph pkg/run.jet` fails E0956 because the inspect evaluator cannot execute the same `core.compiler` calls that full `jet build` accepts. Package `authority.holds` did not remove the need for `--allow-net` for the load run. Without that flag the run timed out in HTTP transport. The load runner therefore proves the path only with an explicit CLI grant.
+`jet inspect graph pkg/run.jet` fails E0956 because the inspect evaluator cannot execute the same `core.compiler` calls that full `jet build` accepts. Package `authority` did not remove the need for `--allow-net` for the load run. Without that flag the run timed out in HTTP transport. The load runner therefore proves the path only with an explicit CLI grant.
 
 ## Research mined
 `Docs/spec/architecture.md` (compiler seam and build graph), `Docs/spec/observability.md` (record/replay), and reports in `~/.cache/jet-dev/dx2/compilers-language-tooling/`, `build-systems-monorepo/`, and `testing-qa-automation/`. The deleted syntax-tree ballot (`D-M-SYNTAX-TREE1`) confirms that current parse facts are top-level items/spans, not a lossless incremental edit tree; the deleted receipts ballot (`D-M-RECEIPTS1`) confirms replay is receipt-backed.

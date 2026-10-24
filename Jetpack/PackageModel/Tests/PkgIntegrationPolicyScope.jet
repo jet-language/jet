@@ -29,7 +29,7 @@ use jet_foundation.[PolicyKey, PolicyValue]
 }
 
 #Test("manifest memory denial uses the effects rights tree") {
-    package :: PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ deny: [Mem.Alloc(above: 65536)] }} }}\n", "test") ?? panic("memory denial parse")
+    package :: PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: {{ deny: [Mem.Alloc(above: 65536)] }}\n", "test") ?? panic("memory denial parse")
     assert_eq(package.effects_deny, Val([String]{"Mem.Alloc(above: 65536)"}))
 }
 

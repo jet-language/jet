@@ -42,7 +42,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
 #Test("conventional and inline entry carriers have identical composed facts") {
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("composed-parity")
-    body :: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ holds: {{ allow: [IO] }} }}\npolicy: {{ unsafe: .Deny }}\ndev :: Config{{ services: {{ db: {{}} }} }}\n"
+    body :: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ allow: [IO] }}\npolicy: {{ unsafe: .Deny }}\ndev :: Config{{ services: {{ db: {{}} }} }}\n"
     entry_names :: [String]{"inline", "extracted"}
     loop name in entry_names {
         dir :: files.join(root, name)
@@ -341,7 +341,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     if !sys.is_unix() -> return
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("shared-package")
-    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }}, needs: [UI.FontShaping] }}\n")
+    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO], needs: [UI.FontShaping] }}\n")
     pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
     files.set_mode(root, 0o777) ?? panic("chmod shared")
     expected :: files.canonicalize(root) ?? panic("canonical root")

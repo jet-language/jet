@@ -9896,7 +9896,7 @@ and D-SHAPE8 as lowerings. D-TXN1-4 and D-BOUND-UNDO1 unchanged. Precondition: a
 purity, replayable, comptime, and invocation cases through both the old walkers and the row walker and shows
 identical verdicts before the old walkers are deleted. 
 - **D-RIGHTS-CLI1=B —** allow and deny take comma-separated effect names, roots or leaves. The words match
-authority.holds in package.jet. Precedence: names expand to their leaves first, then deny wins; naming the
+authority in package.jet. Precedence: names expand to their leaves first, then deny wins; naming the
 same effect in both flags is a usage error. Jet reads these two flags before the program's own flags; a
 program passes literal --allow to itself after --. The old twenty flags stop with a message that prints the
 exact replacement. **Technical:** --allow=FS.Read,Time --deny=Net. Amends the D-CLI-GLOBAL1 flag set; reserves

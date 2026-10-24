@@ -26,7 +26,7 @@ if (mode === "assemble") {
     const project = join(out, "atomic-fields");
     mkdirSync(join(project, "src"), { recursive: true });
     writeFileSync(join(project, "src/compiler.jet"), production + fixture + `\nfn run() {\n${calls}\n    print("atomic-field parity: ${cases.length} cases")\n}\n`);
-    writeFileSync(join(project, "package.jet"), 'name: "atomic_fields"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }\n');
+    writeFileSync(join(project, "package.jet"), 'name: "atomic_fields"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }\n');
     console.log(join(project, "src/compiler.jet"));
 } else {
     const receipts = [];

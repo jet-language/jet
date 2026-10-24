@@ -216,25 +216,25 @@ fn provider_normalized_manifest_semantics(manifest: PackageFacts?) -> String Nev
     &facts.build_profiles.sort_by(profile -> profile.name)
     &facts.authority.grants.sort_by(grant -> grant.package)
     loop index in 0..<facts.authority.grants.len() -> &facts.authority.grants[index].rights.sort()
-    if facts.authority.holds.allow == {
+    if facts.authority.allow == {
         .Val(effects) -> {
             sorted := effects
             &sorted.sort()
-            facts.authority.holds.allow = Val(sorted)
+            facts.authority.allow = Val(sorted)
         }
         .None -> {}
     }
-    if facts.authority.holds.deny == {
+    if facts.authority.deny == {
         .Val(effects) -> {
             sorted := effects
             &sorted.sort()
-            facts.authority.holds.deny = Val(sorted)
+            facts.authority.deny = Val(sorted)
         }
         .None -> {}
     }
     facts.grants = facts.authority.grants
-    facts.effects_allow = facts.authority.holds.allow
-    facts.effects_deny = facts.authority.holds.deny
+    facts.effects_allow = facts.authority.allow
+    facts.effects_deny = facts.authority.deny
     if facts.authority.trust == {
         .Val(policy) -> {
             sorted := policy

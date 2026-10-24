@@ -10,17 +10,17 @@ step: jet review {work}/m1/base/run.jet {work}/m1/head/run.jet --json
 exit: 0
 capture: changes_m1 = text stdout.after_first("\"authority\":{\"changes\":[").split("]}", 0)
 cap:changes_m1: count "\"status\":" = 1 # original ed77c235f tests/review.rs:706-710/718-721 authority slice matches status needle count one
-cap:changes_m1: ~ "\"status\":\"narrowed\",\"key\":\"build_flag:security:package:authority.holds.allow\"" # Original contains predicate.
+cap:changes_m1: ~ "\"status\":\"narrowed\",\"key\":\"build_flag:security:package:authority.allow\"" # Original contains predicate.
 stdout: ~ "\"verdict\":\"reviewable\"" # Original contains predicate.
 step: jet review {work}/m2/base/run.jet {work}/m2/head/run.jet --json
 exit: 0
 capture: changes_m2 = text stdout.after_first("\"authority\":{\"changes\":[").split("]}", 0)
 cap:changes_m2: count "\"status\":" = 1 # original ed77c235f tests/review.rs:706-710/718-721 authority slice matches status needle count one
-cap:changes_m2: ~ "\"status\":\"widened\",\"key\":\"build_flag:security:package:authority.holds.allow\"" # Original contains predicate.
+cap:changes_m2: ~ "\"status\":\"widened\",\"key\":\"build_flag:security:package:authority.allow\"" # Original contains predicate.
 stdout: ~ "\"verdict\":\"authority widened\"" # Original contains predicate.
 step: jet review {work}/m3/base/run.jet {work}/m3/head/run.jet --json
 exit: 0
 capture: changes_m3 = text stdout.after_first("\"authority\":{\"changes\":[").split("]}", 0)
 cap:changes_m3: count "\"status\":" = 1 # original ed77c235f tests/review.rs:706-710/718-721 authority slice matches status needle count one
-cap:changes_m3: ~ "\"status\":\"changed\",\"key\":\"build_flag:security:package:authority.holds.allow\"" # Original contains predicate.
+cap:changes_m3: ~ "\"status\":\"changed\",\"key\":\"build_flag:security:package:authority.allow\"" # Original contains predicate.
 stdout: ~ "\"verdict\":\"authority widened\"" # Original contains predicate.

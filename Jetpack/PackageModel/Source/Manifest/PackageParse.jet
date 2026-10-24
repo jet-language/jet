@@ -219,13 +219,13 @@ impl PackageFacts {
     }
 
     fn apply_authority(&self, authority: AuthorityBlock) Never! {
-        if authority.holds.allow != None || authority.holds.deny != None {
+        if authority.allow != None || authority.deny != None {
             self.effects_enabled = true
-            self.effects_allow = authority.holds.allow
-            self.effects_deny = authority.holds.deny
+            self.effects_allow = authority.allow
+            self.effects_deny = authority.deny
         }
         if authority.grants.len() > 0 -> self.grants = authority.grants
-        self.authority = PackageAuthority{holds: authority.holds, needs: authority.needs, grants: authority.grants, trust: authority.trust, providers: authority.providers}
+        self.authority = PackageAuthority{allow: authority.allow, deny: authority.deny, needs: authority.needs, grants: authority.grants, trust: authority.trust, providers: authority.providers}
     }
 }
 

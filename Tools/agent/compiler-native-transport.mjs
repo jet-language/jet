@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, r
 import { basename, dirname, join, resolve } from 'node:path';
 import { parseRuntimeExports, runtimeLifecycleList } from './runtime-route-abi.mjs';
 
-export const nativeTransportPackage = 'name: "compiler_registry_transport"\nversion: "0.0.1"\nedition: "2028"\nauthority: { holds: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] } }\n';
+export const nativeTransportPackage = 'name: "compiler_registry_transport"\nversion: "0.0.1"\nedition: "2028"\nauthority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }\n';
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 export function nativeCommandProblem(run) {

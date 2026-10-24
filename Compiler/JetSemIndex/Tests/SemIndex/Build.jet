@@ -160,14 +160,14 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
         semindex_build_test_hover("main.jet", 6, 8, "struct Café"),
     }
     facts := PackageFacts.default()
-    facts.authority.holds.allow = Val([String]{"Net"})
-    facts.authority.holds.deny = Val([String]{"IO"})
+    facts.authority.allow = Val([String]{"Net"})
+    facts.authority.deny = Val([String]{"IO"})
     &db.attach_package_facts(^facts)
     projection :: db.index.effect_projection
     assert_eq(projection.required_effects, [String]{"IO"})
     assert_eq(projection.granted_effects, [String]{"Net"})
     assert_eq(projection.denied_effects, [String]{"IO"})
-    assert_eq(projection.authority, "package.jet authority.holds")
+    assert_eq(projection.authority, "package.jet authority")
     assert(db.index.package_facts != None)
     assert_eq(db.defs.len(), 1)
     assert_eq(db.defs[0].identity, "instance:retained")

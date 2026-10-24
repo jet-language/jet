@@ -7,14 +7,14 @@
 // the policy source. Consumers never infer one role from another. Effect sets
 // are sorted, duplicate-free `[String]` (Foundation `authority_holds`).
 use jet_foundation.[
-    ApplicationAuthority, Diagnostic, Span, authority_holds, authority_parse_rights,
+    ApplicationAuthority, Diagnostic, Span, authority_holds,
     diagnostic_from_registry, diagnostic_with_detail, diagnostic_with_rights,
     diagnostic_with_source_derived_suggestion,
 ]
 use jetpack_foundation.[ReportError, StatusEnvelope]
 use core.files as files
 
-EFFECT_AUTHORITY_PACKAGE_HOLDS :: "package.jet authority.holds"
+EFFECT_AUTHORITY_PACKAGE :: "package.jet authority"
 EFFECT_AUTHORITY_PACKAGE_GRANTS :: "package.jet authority.grants"
 EFFECT_STATUS_ACTION :: "build.effects"
 
@@ -62,20 +62,15 @@ struct ScriptEntry {
 }
 
 // Project the application policy without changing the sema effect fact. A
-// manifest-less program, and a manifest that writes no `authority.holds`
-// (#3718), receive 's beginner basics; written holds replace
-// that default with exactly the written policy.
+// manifest-less program, and a manifest that writes no `authority`
+// (#3718), receive the beginner floor; a written allow row adds to that
+// floor and a written deny row removes from it (D-AUTH-AMBIENT3=A).
 fn pkg_project_application_effects(required_effects: [String], manifest: PackageFacts?) -> EffectProjection Never! {
     facts :: manifest ?? return pkg_effect_floor_projection(required_effects, ApplicationAuthority.ambient_basics())
-    if facts.authority.holds.allow == None && facts.authority.holds.deny == None {
+    if facts.authority.allow == None && facts.authority.deny == None {
         return pkg_effect_floor_projection(required_effects, ApplicationAuthority.package_default())
     }
-    EffectProjection{
-        required_effects: required_effects,
-        granted_effects: authority_parse_rights(facts.authority.holds.allow ?? [String]{}),
-        denied_effects: authority_parse_rights(facts.authority.holds.deny ?? [String]{}),
-        authority: EFFECT_AUTHORITY_PACKAGE_HOLDS
-    }
+    pkg_effect_floor_projection(required_effects, ApplicationAuthority.from_policy(facts.authority.allow, facts.authority.deny, EFFECT_AUTHORITY_PACKAGE))
 }
 
 fn pkg_effect_floor_projection(required_effects: [String], floor: ApplicationAuthority) -> EffectProjection Never! {
@@ -125,7 +120,7 @@ fn pkg_application_policy_diagnostic(projection: EffectProjection, denied: [Stri
 // name is the file stem, or `script` when the stem is not a plain name.
 fn pkg_inline_authority_package(path: String, allow: [String]) -> String Never! {
     name :: pkg_effect_script_name(path)
-    "package {{\n    name: \"{name}\"\n    authority: {{ holds: {{ allow: [{allow.join(", ")}] }} }}\n}}\n\n"
+    "package {{\n    name: \"{name}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
 }
 
 fn pkg_effect_script_name(path: String) -> String Never! {

@@ -824,7 +824,7 @@ function writeWorkloadPackage(project, task, sourcePath) {
     path.join(project, "package.jet"),
     "name: \"compiled-workload\"\n" +
       "version: \"0.1.0\"\n" +
-      "authority: { holds: { allow: [" + allow + "] } }\n",
+      "authority: { allow: [" + allow + "] }\n",
   );
 }
 

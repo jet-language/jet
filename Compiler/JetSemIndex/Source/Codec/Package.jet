@@ -99,7 +99,7 @@ fn semindex_json_package_authority(authority: PackageAuthority) -> String Never!
         &providers.push("{foundation_json_quote(provider.provider)}:{{\"registry\":{foundation_json_quote(provider.registry)},\"allow\":{semindex_json_string_array(provider.allow)},\"deny\":{semindex_json_string_array(provider.deny)}}}")
     }
     // Rust's wire deliberately omits the model's needs field.
-    "{{\"holds\":{{\"allow\":{semindex_json_optional_strings(authority.holds.allow)},\"deny\":{semindex_json_optional_strings(authority.holds.deny)}}},\"grants\":{{{grants.join(",")}}},\"trust\":{trust},\"providers\":{{{providers.join(",")}}}}}"
+    "{{\"allow\":{semindex_json_optional_strings(authority.allow)},\"deny\":{semindex_json_optional_strings(authority.deny)},\"grants\":{{{grants.join(",")}}},\"trust\":{trust},\"providers\":{{{providers.join(",")}}}}}"
 }
 
 // Rust json_string_map/json_service/json_services.
@@ -331,7 +331,7 @@ fn semindex_status_package_authority(authority: PackageAuthority) -> StatusValue
             .with("allow", semindex_status_strings(provider.allow)).with("deny", semindex_status_strings(provider.deny))))
     }
     Ok(StatusValue.Object(StatusFields.new()
-        .with("holds", StatusValue.Object(StatusFields.new().with("allow", semindex_status_optional_strings(authority.holds.allow)).with("deny", semindex_status_optional_strings(authority.holds.deny))))
+        .with("allow", semindex_status_optional_strings(authority.allow)).with("deny", semindex_status_optional_strings(authority.deny))
         .with("grants", StatusValue.Object(grants)).with("trust", trust).with("providers", StatusValue.Object(providers))))
 }
 fn semindex_status_string_map(values: [String: String]) -> StatusValue ReportError! {

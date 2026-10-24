@@ -30,5 +30,5 @@ const runtimeSource = readFileSync(join(repo, "tests/fixtures/fmt_import_c_bindi
 const constants = `\nPC_MARKER_SOURCE :: comptime { ${literal(source)} }\nPC_MARKER_STATUS :: comptime { [String:String]{${rows.join(",\n")}} }\nPC_FMT_RUNTIME_SOURCE :: comptime { ${literal(runtimeSource)} }\n`;
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), unit + constants + fixtures);
-writeFileSync(join(out, "project/package.jet"), 'name: "parser_contract_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');
+writeFileSync(join(out, "project/package.jet"), 'name: "parser_contract_fixtures"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc] }\n');
 console.log(`${out}/project/src/compiler.jet (${rows.length} marker statuses)`);

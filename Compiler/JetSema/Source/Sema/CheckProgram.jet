@@ -8093,10 +8093,13 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy :: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
-    package_memory_denials :: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
+    package_denials :: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
+    // The root package's `authority.deny` row binds the root package's own modules.
+    denial_modules := [Bool]{}
+    loop graph_module in final_graph.modules -> &denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_memory_denials, threads)
+    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false

@@ -1458,7 +1458,7 @@ function coreCallEffectLeafFor(moduleName, member) {
   if (moduleName === "core.process" && member === "__with_directory_raw") return "FS.Read";
   if (moduleName === "core.service" && member === "state_store") return "FS.Read";
   if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS.Read";
-  if (moduleName === "core.time" && coreCallOneOf(member, ["sleep", "sleep_until"])) return "Time.Wait";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["sleep", "sleep_until", "__sleep_ns"])) return "Time.Wait";
   if (moduleName === "core.tasks" && coreCallOneOf(member, ["yield_now", "__yield_now"])) return "Time.Wait";
   if (moduleName === "core.files" && member === "scope") return "FS.Read";
   // A file operation names the one leaf it needs, so `--allow=FS.Read`

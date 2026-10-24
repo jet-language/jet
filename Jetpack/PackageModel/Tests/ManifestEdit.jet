@@ -6,12 +6,12 @@ use jet_pkg_model.[
 ]
 
 #Test("authority hold edit preserves comments and reparses") {
-    raw :: "name: \"app\"\nversion: \"0.1.0\"\n\n// keep this review note\nauthority: {{\n    holds: {{ allow: [FS] }},\n}}\n"
+    raw :: "name: \"app\"\nversion: \"0.1.0\"\n\n// keep this review note\nauthority: {{\n    allow: [FS],\n}}\n"
     updated :: pkg_add_authority_hold(raw, "Net")
     assert(updated.contains("// keep this review note"))
     assert(updated.contains("allow: [FS, Net]"))
     facts :: PackageFacts.parse(updated, "package.jet") ?? panic("the comment-preserving authority edit must remain valid")
-    assert_eq(facts.authority.holds.allow, Val([String]{"FS", "Net"}))
+    assert_eq(facts.authority.allow, Val([String]{"FS", "Net"}))
 }
 
 #Test("block line range checks started state for hostile nesting") {

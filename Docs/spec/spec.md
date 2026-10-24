@@ -1652,26 +1652,30 @@ default and does not alter these sema facts.
 
 ### Application authority
 
-A manifest-less program, and a `package.jet` that writes no
-`authority.holds`, receive the beginner grant `IO`, `Mem.Alloc`, and
-`Exec.Args`. This covers output, ordinary allocation, and argument reads. It
-never covers the `Exec` root, which also starts processes. Written
-`authority.holds` replace that default with exactly the written policy. A deny
-wins over a grant, and the floor does not silently grant filesystem, network,
-process, or other roots. An undecided or denied required effect stops before
-host state changes with E1803, whose Why is one plain sentence naming what the
-program does; the required, granted, denied, and policy-identity facts stay
-separate in its structured detail for `--json` (D-AUTH-AMBIENT1). In a
-terminal, a run with undecided authority first lists each one in plain words
-and asks `Run it? [Y/n/always]`: Enter runs once, `n` stops with exit code 1,
-and `always` writes the complete grant into the script's package block or
-`package.jet` (D-SCRIPT-CONFIRM1). Without a terminal the run stops with
-E1803 and its Fix names the exact `--allow` command. A program without
-`package.jet` has no manifest to edit, so its E1803 names the complete
-required row and carries the leading inline `package { … }` block
-(D-ECO-INLINEPACKAGE1) that declares it; because the block replaces the
-beginner default, the row lists every required effect, not only the
-undecided ones. Rights widen only by a written word, so the edit is graded
+Every program holds the beginner floor `IO`, `Mem.Alloc`, and `Exec.Args`,
+whether it is manifest-less, has a `package.jet` that writes no `authority`,
+or writes an `authority` block. This covers output, ordinary allocation, and
+argument reads. It never covers the `Exec` root, which also starts processes.
+A written `allow` row adds rights to the floor; a floor right leaves only
+through `deny`, and a deny wins over every grant (D-AUTH-AMBIENT3). The floor
+never silently grants filesystem, network, process, or other roots. Each
+`deny` entry of a package is also a whole-program prohibition, exactly as if
+every function of the package wrote `-[!E]>`: `jet check`, `jet build`, and
+`jet run` report a function that reaches a denied right with E0749
+(D-AUTHORITY-DENYROW1). An undecided required effect, or one a command-line
+`--deny` removes, stops before host state changes with E1803, whose Why is
+one plain sentence naming what the program does; the required, granted,
+denied, and policy-identity facts stay separate in its structured detail for
+`--json` (D-AUTH-AMBIENT1). In a terminal, a run with undecided authority
+first lists each one in plain words and asks `Run it? [Y/n/always]`: Enter
+runs once, `n` stops with exit code 1, and `always` writes the grant into the
+script's package block or `package.jet` (D-SCRIPT-CONFIRM1). Without a
+terminal the run stops with E1803 and its Fix names the exact `--allow`
+command. A program without `package.jet` has no manifest to edit, so its
+E1803 names the undecided rights and carries the leading inline
+`package { … }` block (D-ECO-INLINEPACKAGE1) that declares them; the floor
+stays granted beside that row, so the row lists only the rights the floor
+does not hold. Rights widen only by a written word, so the edit is graded
 `needs-review` and `jet fix --all` inserts it (D-RIGHTS-DIAG1).
 
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
@@ -4356,9 +4360,12 @@ and LSP mask only those bytes, preserving offsets; they do not reimplement
 Package fields. `priv(package) module` keeps package-scoped privacy.
 
 Only one inline block may appear, and it must precede every other top-level
-declaration. A byte-zero `#!/...` launch header may precede it. A malformed
-or unbalanced block is E1362, a non-leading block is E1360, and a duplicate is
-E1361. Coexistence with a project `package.jet` is E1363. The file otherwise
+declaration. A byte-zero `#!/...` launch header may precede it. An
+unbalanced block is E1362, a non-leading block is E1360, and a duplicate is
+E1361. A balanced block's field errors are the diagnostics `package.jet`
+reports for the same body (an `authority:` field error is E1221 at the
+carrier file), never a generic wrapper. Coexistence with a project
+`package.jet` is E1363. The file otherwise
 has normal single-file package context and does not create a synthetic
 manifest (D-ECO-INLINEPACKAGE1).
 

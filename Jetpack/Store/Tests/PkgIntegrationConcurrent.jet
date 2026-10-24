@@ -44,7 +44,7 @@ fn store_concurrent_original() {
     right :: files.tmpdir("concurrent-build-right-") ?? panic("right scratch")
     scratches :: [String]{left, right}
     loop scratch in scratches {
-        files.write(files.join(scratch, "package.jet"), "name: \"concurrent-build\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n") ?? panic("package source")
+        files.write(files.join(scratch, "package.jet"), "name: \"concurrent-build\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO] }}\n") ?? panic("package source")
         files.write(files.join(scratch, "main.jet"), "\nfn run() {{\n    print(\"shared store\")\n}}\n") ?? panic("main source")
     }
     store :: files.join(left, "store")
