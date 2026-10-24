@@ -34,12 +34,13 @@ use jet_foundation.[
     Marker,
     MetaAttr,
     NamedSpan,
+    NameRows,
     NameTable,
-    name_count,
-    name_find,
     name_index,
     name_intern,
+    name_rows,
     name_rows_get_text,
+    name_rows_set,
     name_table,
     Param,
     Program,
@@ -1463,6 +1464,15 @@ fn sema_check_sort_view_summary_jobs(jobs: &[Int], environment: SemaScopeEnviron
     }
     sorted :: loop position in order -> jobs[position]
     loop index in 0..<count -> jobs[index] = sorted[index]
+}
+
+// Module `module_index`'s view summary jobs (sema_check_view_summary_jobs) in
+// their run order (sema_check_sort_view_summary_jobs). Both read only the
+// graph.
+fn sema_check_sorted_view_summary_jobs(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> [Int] {
+    jobs := sema_check_view_summary_jobs(environment, program, module_index)
+    sema_check_sort_view_summary_jobs(&jobs, environment, program, module_index)
+    jobs
 }
 
 fn sema_check_nominal_positions(nominals: [SemaRegistrationNominal]) -> [String:Int] Never! {
@@ -3800,10 +3810,10 @@ fn sema_pass_facts_claimed(shared_state: Shared<SemaPassFactsShared>, queue: Sha
 // check discards its diagnostics and other products and publishes only the
 // return-view provenance into `scopes`. A round that reproduces the previous
 // round's per-job provenance is the fixed point; jobs + 1 rounds is the upper
-// bound, and no jobs means no summary checks.
-fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) {
-    summary_jobs := sema_check_view_summary_jobs(environment, program, module_index)
-    sema_check_sort_view_summary_jobs(&summary_jobs, environment, program, module_index)
+// bound, and no jobs means no summary checks. `view_jobs`: the jobs a
+// declaration check found ahead (SemaDeclarationCheck), else None.
+fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) {
+    summary_jobs :: if view_jobs == .Val(found) -> found.copy() else -> sema_check_sorted_view_summary_jobs(environment, program, module_index)
     summary_functions_checked := 0
     return_view_rows := [String:Int]{}
     previous_round := [ViewProvenanceMap?]{}
@@ -4400,13 +4410,13 @@ fn sema_check_module_summary_scope_init(environment: SemaScopeEnvironment, progr
     panic("an owning registered-module pass lost its registration graph")
 }
 
-fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, program: &SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaScopeTable {
+fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, program: &SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaScopeTable {
     scopes := sema_check_module_summary_scope_init(environment, program, module_index)
     // copy: a handle copy (Shared facts plus length and frontier ints): the summary scopes read a
     // frozen prefix while environment.comptime_body_publication keeps advancing.
     body_values := environment.comptime_body_publication.copy()
     sema_scope_environment_enter_module(&environment, program, module_index, ^body_values)
-    sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
+    sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
     ^scopes
 }
 
@@ -4624,6 +4634,8 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
     started := ^ready.started
     ready.started = None
     precomputed :: started != None
+    // The view summary jobs the declaration check found ahead, if any.
+    view_jobs :: if started == .Val(check) -> check.view_summary_jobs.copy() else -> [Int]?{None}
     module_result := sema_check_registration_module_started(environment, program, module_index, values, ^started, &scopes, count_work, &items_scanned)
     // The original declaration/header boundary: do not substitute the probe
     // reset, which deliberately clears real else-arm/debug-site source facts.
@@ -4647,7 +4659,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
             scopes = &ready.scopes.pop() ?? sema_scope_init(module_identity)
         } else {
             if precomputed -> sema_check_registration_module_scopes(program, module_index, &scopes)
-            sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
+            sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
         }
         if memo == None -> memo = sema_incremental_module(session, environment, program, &scopes)
         scopes_changed := false
@@ -4789,43 +4801,41 @@ fn sema_name_owner_index(graph: SemaRegistrationGraph) -> [String:String] Never!
     names
 }
 
-// The declarations a call fact can name: `keys` interns each symbol ID
-// (an open-addressing hash, so indexing never shifts a sorted entry list)
-// and `rows[id]` is the declaration row of that ID, or -1 while unindexed
-// (`name_table()` interns "" as id 0 before any symbol).
+// The declarations a call fact can name: `keys` maps each symbol ID to its
+// declaration row (an open-addressing hash over the key's `s.hash()`, so
+// indexing never shifts a sorted entry list or copies a key's bytes).
 struct SemaNameSymbolIndex {
-    keys: NameTable
-    rows: [Int]
+    keys: NameRows
     declarations: [SemaNameResolvedDeclaration]
 }
 
 fn sema_name_index_symbol(index: &SemaNameSymbolIndex, symbol: Symbol, kind: String) Never! {
-    id :: name_index(name_intern(&index.keys, symbol.id.key))
-    if id == index.rows.len() -> &index.rows.push(-1)
-    if index.rows[id] >= 0 -> return
-    index.rows[id] = index.declarations.len()
+    if name_rows_get_text(index.keys, symbol.id.key) != None -> return
+    name_rows_set(&index.keys, symbol.id.key, index.declarations.len())
     &index.declarations.push(SemaNameResolvedDeclaration{symbol: symbol, kind: kind})
 }
 
 // The declaration row of `key`, or -1.
 fn sema_name_symbol_row(index: SemaNameSymbolIndex, key: String) -> Int Never! {
-    name :: name_find(index.keys, key) ?? return -1
-    index.rows[name_index(name)]
+    row :: name_rows_get_text(index.keys, key) ?? return -1
+    row
 }
 
-// Whether `key` (never empty) is new to `seen`, recording it: the first row
-// with a key is kept and every later one dropped, as a seen map did, without
-// a sorted key list that each insert shifts.
-fn sema_name_first_seen(seen: &NameTable, key: String) -> Bool Never! {
-    before :: name_count(seen)
-    _ :: name_intern(&seen, key)
-    name_count(seen) != before
+// Whether `name` is new among module `module_index`'s rows, recording it in
+// `seen` (one map per module index, grown on demand): the first row of a
+// module and name is kept and every later one dropped, as a seen map of
+// `module|name` keys did, without formatting a key per row.
+fn sema_name_first_in_module(seen: &[NameRows], module_index: Int, name: String) -> Bool Never! {
+    loop seen.len() <= module_index -> &seen.push(name_rows())
+    if name_rows_get_text(seen[module_index], name) != None -> return false
+    name_rows_set(&seen[module_index], name, 0)
+    true
 }
 
 // Every declaration a call fact can name, keyed by symbol ID. The first
 // declaration in graph order wins, as the ordered search did.
 fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> SemaNameSymbolIndex Never! {
-    index := SemaNameSymbolIndex{keys: name_table(), rows: [Int]{-1}, declarations: [SemaNameResolvedDeclaration]{}}
+    index := SemaNameSymbolIndex{keys: name_rows(), declarations: [SemaNameResolvedDeclaration]{}}
     loop graph_module_index in 0..<graph.modules.len() {
         loop symbol_index in 0..<graph.modules[graph_module_index].symbols.len() {
             sema_name_index_symbol(&index, graph.modules[graph_module_index].symbols[symbol_index], if {
@@ -4850,13 +4860,12 @@ fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> SemaNameSymbolIndex N
 
 fn sema_name_first_declarations(rows: ^[NameDeclaration]) -> [NameDeclaration] Never! {
     owned_rows := ^rows
-    seen := name_table()
+    seen := [NameRows]{}
     kept := [NameDeclaration]{}
     &owned_rows.reverse()
     loop owned_rows.len() > 0 {
         row := &owned_rows.pop() ?? break
-        key :: "{row.module_index}|{row.name}"
-        if !sema_name_first_seen(&seen, key) -> next
+        if !sema_name_first_in_module(&seen, row.module_index, row.name) -> next
         &kept.push(^row)
     }
     kept
@@ -4864,13 +4873,12 @@ fn sema_name_first_declarations(rows: ^[NameDeclaration]) -> [NameDeclaration] N
 
 fn sema_name_first_aliases(rows: ^[NameAlias]) -> [NameAlias] Never! {
     owned_rows := ^rows
-    seen := name_table()
+    seen := [NameRows]{}
     kept := [NameAlias]{}
     &owned_rows.reverse()
     loop owned_rows.len() > 0 {
         row := &owned_rows.pop() ?? break
-        key :: "{row.module_index}|{row.name}"
-        if !sema_name_first_seen(&seen, key) -> next
+        if !sema_name_first_in_module(&seen, row.module_index, row.name) -> next
         &kept.push(^row)
     }
     kept
@@ -6515,6 +6523,8 @@ fn sema_comptime_add_meta_sources(sources: &SemaComptimeSourceList, graph: SemaR
     }
 }
 
+// Only a function's `#Meta` fields are sources, so the caller formats the
+// owner key of a function with a `#Meta` alone (sema_comptime_function_has_sources).
 fn sema_comptime_add_function_sources(sources: &SemaComptimeSourceList, graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, function: Func, owner_key: String) {
     // A function or method marker sits on a dynamic site: Rust
     // `CheckerMarkers::resolve_static_rule_products` (`static_product_site`)
@@ -6522,6 +6532,11 @@ fn sema_comptime_add_function_sources(sources: &SemaComptimeSourceList, graph: S
     // arguments may be menu words (`#Inline(Always)`, `#Job(.Dev)`) or name
     // locals; ordinary marker validation reads those arguments instead.
     sema_comptime_add_meta_sources(&sources, graph, source_module.module_identity, owner_key, function.meta)
+}
+
+// Whether sema_comptime_add_function_sources adds any source for `function`.
+fn sema_comptime_function_has_sources(function: Func) -> Bool Never! {
+    function.meta != None
 }
 
 fn sema_comptime_nominal_position(source_module: SemaRegistrationModule, name: String) -> Int? {
@@ -6534,6 +6549,7 @@ fn sema_comptime_nominal_position(source_module: SemaRegistrationModule, name: S
 fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, item: Item) {
     if item == {
         .Func(function) -> {
+            if !sema_comptime_function_has_sources(function) -> return
             owner_key := symbol_id(SymbolKind.Function, source_module.module_identity, "", function.name).key
             sema_comptime_add_function_sources(&sources, graph, source_module, function, owner_key)
         }
@@ -6565,9 +6581,13 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                     loop marker in field.serde_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, symbol.id.key, marker, None)
                 }
             }
-            loop function in definition.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+            loop function in definition.methods {
+                if sema_comptime_function_has_sources(function) -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+            }
             loop block in definition.trait_impls {
-                loop function in block.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+                loop function in block.methods {
+                    if sema_comptime_function_has_sources(function) -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+                }
             }
         }
         .Enum(definition) -> {
@@ -6591,9 +6611,13 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                 }
                 loop marker in variant.serde_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, "{nominal.symbol.id.key}::{variant.name}", marker, None)
             }
-            loop function in definition.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+            loop function in definition.methods {
+                if sema_comptime_function_has_sources(function) -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+            }
             loop block in definition.trait_impls {
-                loop function in block.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+                loop function in block.methods {
+                    if sema_comptime_function_has_sources(function) -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+                }
             }
         }
         .Impl(definition) -> {
@@ -6818,11 +6842,13 @@ fn sema_check_declarations_in_shared(shared_state: Shared<SemaCheckShared>, modu
 SEMA_DECLARATION_MIN_BYTES_PER_THREAD :: 65536
 
 // The declaration check of the module at `position` of a checked module list
-// (sema_check_declaration_module) and the program items it scanned.
+// (sema_check_declaration_module), the program items it scanned and, for a
+// body pass (not `foreign`), the module's view summary jobs.
 struct SemaDeclarationCheck {
     position: Int
     module_result: SemaGraphModuleResult
     items_scanned: Int
+    view_summary_jobs: [Int]?
 }
 
 // A module's declaration check under `values`: its declarations and program
@@ -6830,14 +6856,18 @@ struct SemaDeclarationCheck {
 // sema_check_registration_module makes of a module besides its bodies. Each
 // reads only the graph and the program tables, never the entered module of
 // `environment`, so the modules' checks are independent of each other and of
-// their order.
+// their order. A body pass's check also finds the module's view summary jobs
+// (sema_check_sorted_view_summary_jobs), which read only the graph, so its
+// summary scopes need not search for them on the calling thread.
 fn sema_check_declaration_module(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, position: Int, values: [SemaComptimeItemValue], foreign: Bool) -> SemaDeclarationCheck {
     scopes := sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
     module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
     items_scanned := 0
     sema_check_registration_module_program(environment, program, module_index, scopes, &module_result, true, &items_scanned)
     if foreign -> sema_check_registration_module_foreign(environment, program, module_index, &module_result)
-    SemaDeclarationCheck{position: position, module_result: ^module_result, items_scanned: items_scanned}
+    view_summary_jobs := [Int]?{None}
+    if !foreign -> view_summary_jobs = Val(sema_check_sorted_view_summary_jobs(environment, program, module_index))
+    SemaDeclarationCheck{position: position, module_result: ^module_result, items_scanned: items_scanned, view_summary_jobs: ^view_summary_jobs}
 }
 
 // The declaration check (sema_check_declaration_module) of every module of
@@ -7253,7 +7283,7 @@ fn sema_compute_module_owns_site(module_result: SemaGraphModuleResult, span: Spa
 // written, and nothing else owns its return protocol (the Rust reference's
 // `failure_inference_candidate`).
 fn sema_failure_inference_candidate(func: Func) -> Bool Never! {
-    if sema_failure_contract_source(func.return_type) != "implicit default !Err" -> return false
+    if !sema_failure_contract_is_default(func.return_type) -> return false
     if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
     !func.compiler_generated && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
 }
@@ -7447,14 +7477,19 @@ struct SemaFinalizeChecked {
 // read the existing Env/Shared owner, then join before that owner is recovered.
 // Returning the actual graph keeps failure projection/rechecks on the same
 // registered rows rather than on a second snapshot.
-fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+// `carried`: the pass facts (sema_pass_facts) of `graph` from the previous
+// pass, its one row, when none of the graph rows they read changed since (a
+// derive wave only selects demanded methods), else empty; the pass leaves
+// its facts there for the next one.
+fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
     // A codec wave (sema_codec_waves) checks only the generated codecs it
     // filled, and a derive wave (sema_derive_waves) only the derived methods
     // demanded, into the modules' existing results.
     codec_wave :: graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0
-    facts := sema_pass_facts_new()
-    owned := sema_pass_facts(^graph, threads, SEMA_PASS_FACT_JOBS, &facts)
+    fresh :: carried.len() == 0
+    facts := &carried.pop() ?? sema_pass_facts_new()
+    owned := if fresh -> sema_pass_facts(^graph, threads, SEMA_PASS_FACT_JOBS, &facts) else -> SemaRegistrationGraph?{Val(^graph)}
     memory_plan := ^facts.memory_plan
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
@@ -7525,7 +7560,17 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
     environment_out := sema_check_shared_take_environment(shared_state)
     program_out := sema_check_shared_take_program(shared_state)
+    memory_plan_out := sema_check_shared_take_memory_plan(shared_state)
     sema_comptime_body_work_flush(environment_out.comptime_body_publication, trace_sink, phase)
+    &carried.push(SemaPassFacts{
+        memory_plan: ^memory_plan_out,
+        fixed_length_write_params: ^environment_out.fixed_length_write_params,
+        boxed_edges: ^program_out.boxed_edges,
+        copy_facts: ^program_out.copy_facts,
+    })
+    environment_out.fixed_length_write_params = [String]{}
+    program_out.boxed_edges = [String:[String]]{}
+    program_out.copy_facts = sema_copy_facts_table_empty()
     // No guard or worker survives here. Leave the consumed environment slot
     // empty only after all joins and before returning its one graph owner.
     graph_out := ^program_out.registration_graph
@@ -7630,7 +7675,16 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
     workers :: compiler_threads_admit(threads, jobs.len(), body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
     prepared := [SemaPreparedBodies]{}
     if workers > 1 {
-        prepared = sema_check_body_wave_prepare(shared_state, host_hooks, ^module_indexes, firsts, ^jobs, ^job_modules, ^order, workers, comptime_functions, comptime_rows, phase, trace_sink)
+        // Each wave module's view summary jobs its declaration check found
+        // ahead; `starts` holds them last module first.
+        view_jobs := [[Int]?]{}
+        loop wave_module in 0..<(end - start) {
+            slot :: starts.len() - 1 - wave_module
+            found := [Int]?{None}
+            if slot >= 0 && starts[slot].position == start + wave_module -> found = starts[slot].view_summary_jobs.copy()
+            &view_jobs.push(^found)
+        }
+        prepared = sema_check_body_wave_prepare(shared_state, host_hooks, ^module_indexes, firsts, ^jobs, ^job_modules, ^order, workers, comptime_functions, comptime_rows, view_jobs, phase, trace_sink)
     } else {
         loop _ in start..<end -> &prepared.push(sema_check_prepared_none())
     }
@@ -7652,7 +7706,7 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
 
 // The prepared bodies of a body wave's modules (sema_check_body_wave), last
 // module first, as the wave's module checks pop them.
-fn sema_check_body_wave_prepare(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_indexes: ^[Int], firsts: [Int], jobs: ^[SemaBodyJob], job_modules: ^[Int], order: ^[Int], workers: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> [SemaPreparedBodies] {
+fn sema_check_body_wave_prepare(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_indexes: ^[Int], firsts: [Int], jobs: ^[SemaBodyJob], job_modules: ^[Int], order: ^[Int], workers: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [[Int]?], counter_phase: String, trace_sink: CompilerTraceSink?) -> [SemaPreparedBodies] {
     module_count :: module_indexes.len()
     wave_jobs := ^jobs
     wave_job_modules := ^job_modules
@@ -7670,7 +7724,7 @@ fn sema_check_body_wave_prepare(shared_state: Shared<SemaCheckShared>, host_hook
         &method_firsts.push(wave_jobs.len())
         loop rank in firsts[wave_module]..<firsts[wave_module + 1] -> &wave_order.push(top_order[rank])
         if firsts[wave_module + 1] > firsts[wave_module] {
-            scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_indexes[wave_module], comptime_functions, comptime_rows, counter_phase, trace_sink)
+            scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_indexes[wave_module], comptime_functions, comptime_rows, view_jobs[wave_module], counter_phase, trace_sink)
             entered := environment.copy()
             // The method jobs the module check would hand a method wave
             // (sema_check_registration_module), selected against the same
@@ -7770,7 +7824,7 @@ fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: 
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, counter_phase, trace_sink)
+    scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink)
     memo := sema_incremental_module(session, environment, program, &scopes)
     queries := sema_incremental_registered_job_queries(memo, module_index, memory_plan, jobs, environment, program)
     sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
@@ -7798,7 +7852,7 @@ fn sema_check_codec_module_in_shared(shared_state: Shared<SemaCheckShared>, host
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, counter_phase, trace_sink)
+    scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink)
     keep_going :: sema_check_registered_keep_going(environment, program)
     scanned := 0
     jobs :: sema_check_registered_method_jobs(environment, program, module_index, &scanned, false)
@@ -7983,7 +8037,7 @@ fn sema_finalize_registration_graph(graph: ^SemaRegistrationGraph, resolved: ^Se
 // codecs, so waves repeat until no requirement is new; a program that reaches
 // no generated codec runs none. The counters compare the generated codec
 // impls registered (candidates) with those that got a body.
-fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := ^owned
     candidates :: graph.codec_method_rows.len()
     generated := 0
@@ -7993,7 +8047,9 @@ fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, value
         if affected.len() == 0 -> break
         generated += graph.codec_wave_rows.len()
         waves += 1
-        checked := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.codecs", trace_sink, &modules)
+        // The filled bodies change the rows the pass facts read.
+        carried = [SemaPassFacts]{}
+        checked := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.codecs", trace_sink, &carried, &modules)
         graph = ^checked
         graph.codec_wave_rows = [String:Bool]{}
     }
@@ -8011,7 +8067,7 @@ fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, value
 // bodies compare their fields, so they may demand more; waves repeat until
 // none is new. Derived `equal`/`compare` bodies call no codec, so no codec
 // wave follows. A program that compares no compiler-owned type runs none.
-fn sema_derive_waves(owned: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+fn sema_derive_waves(owned: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := ^owned
     checked := 0
     waves := 0
@@ -8030,7 +8086,7 @@ fn sema_derive_waves(owned: ^SemaRegistrationGraph, values: [SemaComptimeItemVal
         checked += wave.len()
         waves += 1
         graph.derive_wave_rows = ^wave
-        result := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.derives", trace_sink, &modules)
+        result := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.derives", trace_sink, &carried, &modules)
         graph = ^result
         graph.derive_wave_rows = [String:Bool]{}
     }
@@ -8080,12 +8136,16 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     resolved_graph.derive_checked = [String:Bool]{}
     all_modules :: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
-    body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules)
+    // The body pass's facts serve the codec and derive waves after it while
+    // the graph rows they read stay unchanged (sema_finalize_check_modules).
+    carried := [SemaPassFacts]{}
+    body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &carried, &modules)
     // Demand: only the generated codecs a requirement reached
     // get bodies, checked into their modules' results before the failure solve,
     // and only the derived methods of compiler-owned modules a check reached.
-    after_codec_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
-    after_body_graph := sema_derive_waves(^after_codec_graph, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
+    after_codec_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &carried, &modules)
+    after_body_graph := sema_derive_waves(^after_codec_graph, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &carried, &modules)
+    carried = [SemaPassFacts]{}
     // #3708: every body is checked, so the failure solve finds the
     // unannotated functions that can never fail.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)
@@ -8106,7 +8166,9 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     final_graph := if {
         recheck.len() > 0 -> {
             rechecked := [SemaGraphModuleResult]{}
-            after_recheck_graph := sema_finalize_check_modules(^after_body_graph, values, comptime_functions, checked_types, recheck, false, hook_access, threads, None, "sema.recheck", trace_sink, &rechecked)
+            // The projected contracts change the rows the pass facts read.
+            recheck_facts := [SemaPassFacts]{}
+            after_recheck_graph := sema_finalize_check_modules(^after_body_graph, values, comptime_functions, checked_types, recheck, false, hook_access, threads, None, "sema.recheck", trace_sink, &recheck_facts, &rechecked)
             // One rechecked result per `recheck` row, in order: each moves
             // into its module's slot, last row first.
             loop rechecked.len() > 0 {
@@ -8144,7 +8206,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     effect_inputs := [SemaEffectModuleInput]{}
     effect_prepared := sema_effect_prepared_empty()
     liveness := sema_finalize_side_liveness_empty()
-    final_graph = sema_finalize_side_checks(^final_graph, &modules, threads, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness)
+    taint_prepared := [SemaTaintPrepared]{}
+    final_graph = sema_finalize_side_checks(^final_graph, &modules, threads, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness, &taint_prepared)
     if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy :: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
@@ -8206,7 +8269,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     // destination is reported, whatever else the bundle reported.
     if trace_sink == .Val(sink) -> sink.begin("sema.taint", "", -1, -1)
     taint_diagnostics := [Diagnostic]{}
-    final_graph = sema_taint_check_graph(^final_graph, diagnostics, threads, &taint_diagnostics)
+    taint_catalog := &taint_prepared.pop() ?? panic("the side checks left no taint catalog")
+    final_graph = sema_taint_check_graph(^final_graph, ^taint_catalog, diagnostics, threads, &taint_diagnostics)
     if trace_sink == .Val(sink) -> sink.end("sema.taint", taint_diagnostics.len())
     loop diagnostic in taint_diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
@@ -8531,11 +8595,13 @@ fn sema_finalize_core_claim(queue: SemaFinalizeCoreQueue) -> Int {
 // The finalization's read-only checks before the effect pass: each reads
 // the final graph and the checked modules and writes neither, so they run
 // side by side on compiler threads. Jobs are numbered in the serial order
-// their results join in; threads claim them heaviest first (the liveness
-// walk, the effect parts, then the declaration checks). Effect part `k`
-// reads the effect inputs and builds the effect-graph rows
-// (sema_effect_prepare_module) of the k-th of SEMA_FINALIZE_SIDE_EFFECT_PARTS
-// consecutive module ranges.
+// their results join in; threads claim them heaviest first (the taint
+// catalog, the liveness walk, the effect parts, then the declaration
+// checks). Effect part `k` reads the effect inputs and builds the
+// effect-graph rows (sema_effect_prepare_module) of the k-th of
+// SEMA_FINALIZE_SIDE_EFFECT_PARTS consecutive module ranges. The taint job
+// builds the tag dataflow's catalog (sema_taint_prepare), which the taint
+// walk after the effect pass reads.
 SEMA_FINALIZE_SIDE_INLINE_ALWAYS :: 0
 SEMA_FINALIZE_SIDE_SCRIPT_ENTRIES :: 1
 SEMA_FINALIZE_SIDE_DECLARED_LEAVES :: 2
@@ -8543,7 +8609,8 @@ SEMA_FINALIZE_SIDE_AUTHORITY_HANDLES :: 3
 SEMA_FINALIZE_SIDE_EFFECT_FIRST :: 4
 SEMA_FINALIZE_SIDE_EFFECT_PARTS :: 4
 SEMA_FINALIZE_SIDE_LIVENESS :: 8
-SEMA_FINALIZE_SIDE_JOBS :: 9
+SEMA_FINALIZE_SIDE_TAINT :: 9
+SEMA_FINALIZE_SIDE_JOBS :: 10
 // A program of fewer modules per admitted thread checks them on the calling
 // thread.
 SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD :: 16
@@ -8556,7 +8623,8 @@ struct SemaFinalizeSideShared {
 }
 
 // One side check's result: a declaration check's diagnostics and whether it
-// found any, an effect part's inputs and graph rows, or the liveness verdicts.
+// found any, an effect part's inputs and graph rows, the liveness verdicts,
+// or the taint catalog (the one row of `taint`).
 struct SemaFinalizeSide {
     job: Int
     found: Bool
@@ -8564,10 +8632,11 @@ struct SemaFinalizeSide {
     effect_inputs: [SemaEffectModuleInput]
     effect_prepared: SemaEffectPrepared
     liveness: SemaLivenessResult
+    taint: [SemaTaintPrepared]
 }
 
 fn sema_finalize_side_new(job: Int) -> SemaFinalizeSide {
-    SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, effect_prepared: sema_effect_prepared_empty(), liveness: sema_finalize_side_liveness_empty()}
+    SemaFinalizeSide{job: job, found: false, diagnostics: [Diagnostic]{}, effect_inputs: [SemaEffectModuleInput]{}, effect_prepared: sema_effect_prepared_empty(), liveness: sema_finalize_side_liveness_empty(), taint: [SemaTaintPrepared]{}}
 }
 
 fn sema_finalize_side_liveness_empty() -> SemaLivenessResult {
@@ -8577,15 +8646,15 @@ fn sema_finalize_side_liveness_empty() -> SemaLivenessResult {
 // Runs every side check, on threads when the program is large enough, and
 // joins them in order: the declaration checks' diagnostics onto
 // `diagnostics` (any found leaves the graph incomplete), the effect inputs
-// onto `effect_inputs` with their graph rows in `effect_prepared`, and the
-// liveness verdicts into `liveness`.
-fn sema_finalize_side_checks(graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult) -> SemaRegistrationGraph {
+// onto `effect_inputs` with their graph rows in `effect_prepared`, the
+// liveness verdicts into `liveness`, and the taint catalog onto `taint`.
+fn sema_finalize_side_checks(graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult, taint: &[SemaTaintPrepared]) -> SemaRegistrationGraph {
     owned := ^graph
     sides := [SemaFinalizeSide]{}
     workers :: compiler_threads_admit(threads, SEMA_FINALIZE_SIDE_JOBS, modules.len(), SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD, 0, 0)
     if workers <= 1 {
         loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(sema_finalize_side_run(job, owned, modules))
-        sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness)
+        sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness, &taint)
         return owned
     }
     loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> &sides.push(sema_finalize_side_new(job))
@@ -8594,7 +8663,7 @@ fn sema_finalize_side_checks(graph: ^SemaRegistrationGraph, modules: &[SemaGraph
     queue :: shared SemaFinalizeCoreQueue{next: 0}
     sema_finalize_side_claimers(shared_state, queue, 0, workers, &sides)
     returned := sema_finalize_side_take(shared_state, &modules)
-    sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness)
+    sema_finalize_side_join(^sides, &diagnostics, &complete, &effect_inputs, &effect_prepared, &liveness, &taint)
     returned
 }
 
@@ -8607,6 +8676,7 @@ fn sema_finalize_side_run(job: Int, graph: SemaRegistrationGraph, modules: [Sema
         job == SEMA_FINALIZE_SIDE_DECLARED_LEAVES -> { side.found = sema_effect_check_declared_leaves(graph, &side.diagnostics) }
         job == SEMA_FINALIZE_SIDE_AUTHORITY_HANDLES -> { side.found = sema_effect_check_authority_handles(graph, &side.diagnostics) }
         job == SEMA_FINALIZE_SIDE_LIVENESS -> { side.liveness = sema_liveness_structure(graph, modules) }
+        job == SEMA_FINALIZE_SIDE_TAINT -> { &side.taint.push(sema_taint_prepare(graph)) }
         else -> {
             part :: job - SEMA_FINALIZE_SIDE_EFFECT_FIRST
             first :: part * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
@@ -8615,7 +8685,7 @@ fn sema_finalize_side_run(job: Int, graph: SemaRegistrationGraph, modules: [Sema
                 source_index :: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
                 input := sema_effect_module_input(graph.modules[source_index], module_index)
                 // Input positions count from the part's first input; the join shifts them.
-                sema_effect_prepare_module(&side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len())
+                sema_effect_prepare_module(&side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls)
                 &side.effect_inputs.push(^input)
             }
         }
@@ -8624,7 +8694,7 @@ fn sema_finalize_side_run(job: Int, graph: SemaRegistrationGraph, modules: [Sema
 }
 
 // Joins the side checks in job order.
-fn sema_finalize_side_join(sides: ^[SemaFinalizeSide], diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult) {
+fn sema_finalize_side_join(sides: ^[SemaFinalizeSide], diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult, taint: &[SemaTaintPrepared]) {
     owned := ^sides
     &owned.reverse()
     loop owned.len() > 0 {
@@ -8636,6 +8706,7 @@ fn sema_finalize_side_join(sides: ^[SemaFinalizeSide], diagnostics: &[Diagnostic
         if side.job == SEMA_FINALIZE_SIDE_LIVENESS {
             liveness = ^side.liveness
         }
+        &taint.extend(^side.taint)
     }
 }
 

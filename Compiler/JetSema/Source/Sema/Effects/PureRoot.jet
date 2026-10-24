@@ -11,6 +11,8 @@ use jet_foundation.[
     body_each_stmt_child,
     body_node,
     diagnostic_with_rights,
+    name_rows,
+    name_rows_set,
 ]
 
 struct SemaPureRootPosition {
@@ -110,12 +112,13 @@ fn sema_pure_root_function(root: String, modules: [SemaGraphModuleResult], decls
 // `decls` is the run's declaration table, which direct callees name.
 fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResult], decls: DeclTable) -> [Diagnostic] {
     positions := [String:SemaPureRootPosition]{}
-    node_by_key := [String:Int]{}
+    node_by_key := name_rows()
     loop module_index in 0..<modules.len() {
         loop function_index in 0..<modules[module_index].functions.len() {
             key :: modules[module_index].functions[function_index].key
             positions[key] = SemaPureRootPosition{module_index: module_index, function_index: function_index}
-            node_by_key[key] = node_by_key.len()
+            distinct :: node_by_key.texts.len()
+            name_rows_set(&node_by_key, key, distinct)
         }
     }
     position :: positions.get(entry_key) ?? return [Diagnostic]{}

@@ -446,11 +446,14 @@ struct DeclRow {
 }
 
 // Rows in registration order (module order, then each module's callables in
-// row order). `by_key` holds each key's first row once `decl_table_index`
-// ran; a later row of a key (a redeclaration) is kept but never found.
+// row order). `by_key` maps each key to the position in `ids` of its first
+// row once `decl_table_index` ran (A1: one hash of the key and one candidate
+// compare per lookup, not a binary search of the key texts); a later row of a
+// key (a redeclaration) is kept but never found.
 struct DeclTable {
     rows: Rows<DeclRow>{Rows<DeclRow>{}}
-    by_key: [String:DeclID]{[String:DeclID]{}}
+    by_key: NameRows{name_rows()}
+    ids: [DeclID]{[DeclID]{}}
     // Rows added since the last `decl_table_index`.
     pending: [DeclTableEntry]{[DeclTableEntry]{}}
 }
@@ -467,20 +470,21 @@ fn decl_table_add(table: &DeclTable, symbol: Symbol) -> DeclID Never! {
     id
 }
 
-// Keys the pending rows. A Map is a sorted entry list, so the rows are
-// merge-sorted once by (key, row) and every insert of a new key appends.
+// Keys the pending rows. They are in row order, so the first row of each key
+// is the first one met, and a key an earlier index keyed keeps its row.
 fn decl_table_index(table: &DeclTable) Never! {
     if table.pending.len() == 0 -> return
-    order := compiler_take_rows<DeclTableEntry>(&table.pending)
-    &order.sort_by((left: DeclTableEntry, right: DeclTableEntry) -> (left.key <=> right.key).then(left.id.row.index() <=> right.id.row.index()))
-    // The first row of each key wins; the entries' keys move into the map.
-    loop entry in ^order {
-        if table.by_key.get(entry.key) == None -> table.by_key[entry.key] = entry.id
+    entries := compiler_take_rows<DeclTableEntry>(&table.pending)
+    loop entry in entries {
+        if name_rows_get_text(table.by_key, entry.key) != None -> next
+        name_rows_set(&table.by_key, entry.key, table.ids.len())
+        &table.ids.push(entry.id)
     }
 }
 
 fn decl_table_find(table: DeclTable, key: String) -> DeclID? Never! {
-    table.by_key.get(key)
+    position :: name_rows_get_text(table.by_key, key) ?? return None
+    Val(table.ids[position])
 }
 
 fn decl_id_index(id: DeclID) -> Int Never! {

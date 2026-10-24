@@ -1516,33 +1516,55 @@ fn sema_taint_join_reports(reports: &[Diagnostic], existing_diagnostics: [Diagno
 // source to walk.
 SEMA_TAINT_MIN_BYTES_PER_THREAD :: 65536
 
-// The bundle's tag dataflow (the Rust reference's `check_fact_tags_and_states`
-// taint walk): one indexed catalog of tags, callables and fields, then every
-// function, method, test and conversion body walked once. Appends the new
-// reports to `reports`; `existing_diagnostics` (the bundle's reports so far)
-// settles switch coverage and is never repeated. A module's walk reads only
-// the graph, the catalog and `existing_diagnostics`, so the modules are
-// walked on up to `threads` compiler threads, claimed heaviest source first,
-// each module's reports kept apart and joined in module order: the reports
-// read exactly as one thread's walk of every module in order. The graph
-// moves into the threads' shared state and back; it is returned.
-fn sema_taint_check_graph(graph: ^SemaRegistrationGraph, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaRegistrationGraph {
-    owned := ^graph
-    catalog := sema_taint_catalog_init()
-    sema_taint_collect_items(&catalog, owned)
-    sema_taint_collect_tag_declarations(&catalog, owned, &reports)
-    sema_taint_register_scrubbers(catalog, owned, &reports)
-    weights := [Int]{}
-    work := 0
-    loop module_index in 0..<owned.modules.len() {
+// The tag dataflow's catalog of tags, callables and fields, the reports
+// building it raised, and each module's walk weight (its items' source
+// bytes). It reads only the graph's function, type, extern and tag items,
+// which nothing after the failure projection rewrites, so the finalization
+// builds it beside its other read-only checks (sema_finalize_side_checks).
+struct SemaTaintPrepared {
+    catalog: SemaTaintCatalog
+    reports: [Diagnostic]
+    weights: [Int]
+}
+
+fn sema_taint_prepared_empty() -> SemaTaintPrepared Never! {
+    SemaTaintPrepared{catalog: sema_taint_catalog_init(), reports: [Diagnostic]{}, weights: [Int]{}}
+}
+
+fn sema_taint_prepare(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
+    prepared := sema_taint_prepared_empty()
+    sema_taint_collect_items(&prepared.catalog, graph)
+    sema_taint_collect_tag_declarations(&prepared.catalog, graph, &prepared.reports)
+    sema_taint_register_scrubbers(prepared.catalog, graph, &prepared.reports)
+    loop module_index in 0..<graph.modules.len() {
         weight := 0
-        loop item in owned.modules[module_index].program.items {
+        loop item in graph.modules[module_index].program.items {
             span :: sema_compiler_index_item_span(item)
             weight += span.end - span.start
         }
-        &weights.push(weight)
-        work += weight
+        &prepared.weights.push(weight)
     }
+    prepared
+}
+
+// The bundle's tag dataflow (the Rust reference's `check_fact_tags_and_states`
+// taint walk) over `prepared` (sema_taint_prepare of `graph`): its reports
+// first, then every function, method, test and conversion body walked once.
+// Appends the new reports to `reports`; `existing_diagnostics` (the bundle's
+// reports so far) settles switch coverage and is never repeated. A module's
+// walk reads only the graph, the catalog and `existing_diagnostics`, so the
+// modules are walked on up to `threads` compiler threads, claimed heaviest
+// source first, each module's reports kept apart and joined in module order:
+// the reports read exactly as one thread's walk of every module in order. The
+// graph moves into the threads' shared state and back; it is returned.
+fn sema_taint_check_graph(graph: ^SemaRegistrationGraph, prepared: ^SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaRegistrationGraph {
+    owned := ^graph
+    taken := ^prepared
+    catalog := ^taken.catalog
+    &reports.extend(^taken.reports)
+    weights :: ^taken.weights
+    work := 0
+    loop weight in weights -> work += weight
     workers :: compiler_threads_admit(threads, weights.len(), work, SEMA_TAINT_MIN_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 {
         state := SemaTaintFlowState{catalog: ^catalog, module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, existing_diagnostics: existing_diagnostics}

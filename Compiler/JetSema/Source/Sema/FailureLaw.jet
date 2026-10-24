@@ -31,6 +31,7 @@ use jet_foundation.[
     core_module_export,
     core_module_has_type,
     diagnostic_registry_row,
+    name_rows,
     diagnostic_with_edit_grade,
     expr_span,
     symbol_id,
@@ -374,7 +375,7 @@ fn sema_prelude_conversion_demands(module_identity: String, functions: [FnBody],
     walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
     walk :: SemaEffectWalk.PreludeDemands{state: walk_state}
     nodes := [SemaEffectNode]{}
-    facts :: SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
+    facts :: SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: name_rows()}
     ignored := [Diagnostic]{}
     loop (position, function) in functions {
         if walked.get(position) == .Val(demands) {
