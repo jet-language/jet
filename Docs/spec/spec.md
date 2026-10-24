@@ -3662,6 +3662,26 @@ cannot splice a recursive callee, a callee that writes a parameter, an
 flag writes `--inline=always_marked`. Example:
 [`Examples/features/tooling/build_inline`](../../Examples/features/tooling/build_inline/run.jet).
 
+### Fault reports and unreached functions
+
+`backtrace` (stock `full`) says what a native fault report prints after its
+first line. `full` prints every Jet frame with its file and line, read from the
+image's debug info. `brief` prints only the faulting frame. A stack-overflow
+report names the innermost Jet function and its line under both `full` and
+`brief`. `off` prints no frame: the report is the stop line alone, for example
+`Stop [E3012]: Stack overflow`. Naming frames needs `debug_info`, so writing
+`backtrace: full` (in a profile, in `fn build` or as `--backtrace=full`)
+together with `debug_info: false` is refused with E2104. The stock `full` under
+`debug_info: false` prints the return addresses instead.
+
+`dead_code` (stock `remove`) says whether the image keeps functions the entry
+never reaches. `remove` builds only the reached ones. `keep` also builds every
+non-generic function of the package's own modules, so the image carries them
+(a generic function is still built only for the instances a call reaches).
+`fn build` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
+flags write `--backtrace=brief` and `--dead-code=keep`. Example:
+[`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
+
 ### Language server
 
 `jet self lsp` speaks JSON-RPC over standard input and output. It uses the same
@@ -4457,6 +4477,11 @@ toolchain and probe identity. `b.plan()` or `b.plan(default)` hands one
 canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.toolchain(name, target_triple)` records target identity. `b.probe` supports
 `find_program`, `pkg_config`, and `header` probes.
+`b.args()` returns the words after `--` on the command line as a `[String]`
+(`jet build -- release-notes` gives `["release-notes"]`; no `--` gives
+`[]`), so a build entry can choose its default target or options from them.
+A `jet build` that runs no `fn build`, such as `jet build main.jet -- a`,
+refuses the words with E2104 instead of dropping them.
 
 ```jet
 fn build(b: Build) -[Exec, FS]> {
@@ -4496,11 +4521,18 @@ sandbox is E3505, not an unsandboxed run. Build authority uses the same
 effectful action or probe is inside an active `#Impure("reason")` region;
 signature declaration and effective grant are checked before execution.
 
-`b.generate(name) { ... }` materializes
+`b.generate(name) { ... }` produces the module
 `.jet/generated/<package>/<name>.jet`. Action outputs ending in `.jet` follow
 the same path. Built-in derives, user derives, and build entries share one
 checked expansion pass. Build-only entries and imported build entries are
 removed before runtime code generation, so build handles never reach rustc.
+The `write_generated` build option (stock `off`) says whether `jet build`
+writes each generated module to that path under the package root for
+inspection: `on` writes them, `off` writes none. It is the profile field
+`write_generated: on`, the flag `--write-generated=on` (which replaces the
+retired `--emit-generated`) and the `fn build` call `b.write_generated(.On)`.
+Example:
+[`Examples/features/tooling/build_write_generated`](../../Examples/features/tooling/build_write_generated/run.jet).
 
 Generation is additive with one owner per managed path. Generated modules are
 ordered in dependency rounds using ordinary quoted-file imports; a later round

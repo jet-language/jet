@@ -1,0 +1,23 @@
+// What a fault report shows, and whether unreached functions stay:
+//   jet run run.jet                          backtrace: full, dead_code: remove (the stock)
+//   jet run --profile=terse run.jet          backtrace: off, dead_code: keep, from the profile
+//   jet build --backtrace=brief run.jet      a fault report names only the faulting frame
+//   jet build --dead-code=keep run.jet       `describe` is built into the image too
+// This program never faults, so it prints the same under every value.
+fn describe(steps: Int) -> String {
+    "took {steps} steps"
+}
+
+fn collatz(start: Int) -> Int {
+    n := start
+    steps := 0
+    loop n != 1 {
+        n = if n % 2 == 0 -> n /% 2 else -> 3 * n + 1
+        steps += 1
+    }
+    steps
+}
+
+fn run() {
+    print("collatz 27: {collatz(27)}")
+}

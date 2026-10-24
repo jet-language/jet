@@ -1,0 +1,25 @@
+// `run` reaches `used` only. `dead_code: keep` also builds `report` and
+// `tally` (the generic `largest` is built per instance, and none is reached).
+fn used(n: Int) -> Int {
+    n * 2
+}
+
+fn report(rows: [String]) -> String {
+    out := ""
+    loop row in rows -> out = "{out}{row.len()}:{row};"
+    "report {out}"
+}
+
+fn tally(values: [Int]) -> Int {
+    total := 0
+    loop value in values -> total += value * value
+    total
+}
+
+fn largest<T: Comparable>(a: T, b: T) -> T {
+    if a > b -> a else -> b
+}
+
+fn run() {
+    print("used: {used(21)}")
+}

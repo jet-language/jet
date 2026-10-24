@@ -66,8 +66,9 @@ enum JetCLIPlan {
     // `invocation` holds the `--allow`/`--deny` rows.
     Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
     // A package build its `fn build(b: Build)` in `file` configures; its
-    // option calls join `options` as their `fn build` layer.
-    BuildPackage(file: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
+    // option calls join `options` as their `fn build` layer, and its
+    // `b.args()` returns `build_args` (the words after `--`).
+    BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints.
@@ -681,7 +682,7 @@ fn jet_cli_doc(jet_argv: [String], args: [String], color: Bool, quiet: Bool, jso
 
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
-    "--lib", "--verify", "--sbom", "--import", "--emit-generated", "--set",
+    "--lib", "--verify", "--sbom", "--import", "--set",
     "--builder", "--locked", "-p", "--output", "--gate",
 }
 
@@ -813,11 +814,11 @@ fn jet_cli_with_build_options(plan: ^JetCLIPlan, jet_argv: [String], quiet: Bool
                 .Selected(options, notes) -> return JetCLIPlan.Build{file: ^file, source: ^source, color: color, options: ^options, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
             }
         }
-        .BuildPackage(file, color, _, threads, invocation, notice) -> {
+        .BuildPackage(file, color, _, build_args, threads, invocation, notice) -> {
             source :: cli_files.read(file) ?? ""
             if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
-                .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: ^file, color: color, options: ^options, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
+                .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: ^file, color: color, options: ^options, build_args: ^build_args, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
             }
         }
         .Run(file, source, color, _, verbose, threads, program_args, invocation, notice, watch) -> {
@@ -902,13 +903,15 @@ fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFl
 }
 
 // `jet build <file>` under its build options (jet_cli_build_options). The
-// flags above and every `--target` machine are not ported yet.
-fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    jet_cli_with_build_options(jet_cli_build_entry(jet_argv, args, color, quiet, threads), jet_argv, quiet)
+// flags above and every `--target` machine are not ported yet. The words
+// after `--` (`passthrough`) go to the package's `fn build` (`b.args()`).
+fn jet_cli_build(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    jet_cli_with_build_options(jet_cli_build_entry(jet_argv, args, passthrough, color, quiet, threads), jet_argv, quiet)
 }
 
-// The `jet build` plan at the stock options, its entry resolved.
-fn jet_cli_build_entry(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+// The `jet build` plan at the stock options, its entry resolved. Words after
+// `--` are refused when no `fn build` runs to read them.
+fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
     loop argument in jet_argv {
         head :: argument.split("=").to_list()[0]
@@ -932,7 +935,7 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], color: Bool, quiet: B
         // members are runnable (`jet build Compiler/`).
         if !jet_argv.contains("--show-default") && jet_cli_option_value(jet_argv, "-p") == None {
             if jet_cli_command_override(directory, "build", color) == {
-                .Entry(found) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: ""}
+                .Entry(found) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: ""}
                 .Refused(plan) -> return ^plan
                 .Absent -> {}
             }
@@ -941,7 +944,8 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], color: Bool, quiet: B
         resolved :: jet_cli_resolve_bare_entry("build", directory, jet_cli_option_value(jet_argv, "-p"), !jet_argv.contains("--show-default"), color, &notices)
         if resolved == {
             .Entry(found) -> {
-                if (found.callable ?? "") == "build" -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notices.join("")}
+                if (found.callable ?? "") == "build" -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join("")}
+                if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
                 planned :: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), false)
                 if planned == .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice}
                 return planned
@@ -951,11 +955,18 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], color: Bool, quiet: B
         }
     }
     entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads, false)
+    if (passthrough ?? [String]{}).len() > 0 && entry == .Check(file, _, _, _, _, _, _, _) -> return jet_cli_build_args_refused(file, color)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice}
         else -> {}
     }
     entry
+}
+
+// `jet build <entry> -- words` where no `fn build` runs: nothing reads the
+// words, so they are refused, never dropped.
+fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `fn build`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `@build.jet` declares `fn build(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // The jet flags `jet run` honors. Any other registered flag on a run is
@@ -1657,7 +1668,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "fuzz" -> return jet_cli_fuzz_command(jet_argv, args, color, quiet)
         "explain" -> return jet_cli_explain(jet_argv, args, color, json)
         "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
-        "build" -> return jet_cli_build(jet_argv, args, color, quiet, threads)
+        "build" -> return jet_cli_build(jet_argv, args, passthrough, color, quiet, threads)
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         // Stock `jet dev`: the `jet run` entry, rebuilt and rerun on every source change.
         // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.

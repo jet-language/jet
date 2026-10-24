@@ -48,6 +48,19 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // picks them by size, always_marked takes only the `#Inline(Always)` ones,
     // past the size limits, and off inlines nothing.
     {name: "inline", kind: BuildOptionKind.Choice, values: [String]{"auto", "always_marked", "off"}, stock_build: "auto", stock_run: "auto", removes_check: [String]{}, help: "Which calls the optimizer inlines: auto, always_marked or off"},
+    // What a native fault report prints after its first line (JetRuntime
+    // Fault.jet): full the Jet frames (function and file:line), brief only the
+    // faulting frame, off none. Naming a frame needs the image's debug info, so
+    // `backtrace: full` written with `debug_info: false` is refused (E2104).
+    {name: "backtrace", kind: BuildOptionKind.Choice, values: [String]{"full", "brief", "off"}, stock_build: "full", stock_run: "full", removes_check: [String]{}, help: "What a fault report shows of the stack: full, brief or off"},
+    // remove builds only the functions the entry reaches (the stock); keep
+    // also builds every other non-generic function of the built package, so the
+    // image carries each one (a debugger or a profiler can name it).
+    {name: "dead_code", kind: BuildOptionKind.Choice, values: [String]{"remove", "keep"}, stock_build: "remove", stock_run: "remove", removes_check: [String]{}, help: "Whether the image keeps the package's unreached functions: remove or keep"},
+    // on writes each source `fn build` generates (`b.generate`) to its
+    // `.jet/generated/<package>/<name>.jet` path under the package root for
+    // inspection; off (the stock) writes none.
+    {name: "write_generated", kind: BuildOptionKind.Choice, values: [String]{"off", "on"}, stock_build: "off", stock_run: "off", removes_check: [String]{}, help: "Whether fn build's generated sources are written to .jet/generated/: off or on"},
 } }
 
 // The Jai build options Jet refuses, each with the law that leaves nothing for
@@ -265,7 +278,25 @@ fn build_options_resolve(command: String, profile: String, written: [BuildOption
         }
         &values.push(current)
     }
+    // A full backtrace names frames from the DWARF that `debug_info: false`
+    // leaves out; the stock `full` degrades to addresses, a written one is
+    // refused.
+    backtrace :: values[build_option_index("backtrace")].copy()
+    debug_info :: values[build_option_index("debug_info")].copy()
+    if backtrace.layer != BuildOptionLayer.Stock && backtrace.value == "full" && debug_info.value == "false" {
+        backtrace_place :: if backtrace.site == "" -> "`{backtrace.written}`" else -> "`{backtrace.written}` {backtrace.site}"
+        debug_place :: if debug_info.site == "" -> "`{debug_info.written}`" else -> "`{debug_info.written}` {debug_info.site}"
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{backtrace_place} needs debug info, which {debug_place} leaves out", fix: "write `backtrace: brief` or `backtrace: off`, or drop `debug_info: false`"}
+    }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: command, profile: profile, written: written, values: values}, notes: notes}
+}
+
+// The position of row `name` in JET_BUILD_OPTIONS.
+fn build_option_index(name: String) -> Int Never! {
+    loop at in 0..<JET_BUILD_OPTIONS.len() {
+        if JET_BUILD_OPTIONS[at].name == name -> return at
+    }
+    panic("build option `{name}` is not a row of JET_BUILD_OPTIONS")
 }
 
 // `options` with the `fn build` layer `code` placed between its profile

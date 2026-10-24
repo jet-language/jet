@@ -156,6 +156,8 @@ struct BuildSessionState {
     options: [BuildSessionOption]
     // The target `b.default(t)` selected, or -1 for every target.
     default_target: Int
+    // The words after `--` on `jet build`, which `b.args()` returns.
+    args: [String]
     start: Int
     end: Int
 }
@@ -169,13 +171,19 @@ fn build_session_new(session_id: Int, package: String, compiler_version: String,
         toolchains: [BuildSessionToolchain]{{name: "host", role: "host", host_triple: "host", target_triple: "host", sdk: None, linker: None, sysroot: None}},
         signing: [BuildSessionSigning]{}, probes: [BuildSessionProbe]{}, plugins: [BuildSessionPlugin]{},
         generated: [BuildSessionGeneratedModule]{}, contributions: [BuildSessionContribution]{},
-        diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, options: [BuildSessionOption]{}, default_target: -1, start: 0, end: 0,
+        diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, options: [BuildSessionOption]{}, default_target: -1, args: [String]{}, start: 0, end: 0,
     }}
 }
 
 fn build_session_abort(session: &BuildSession) Never! {
     permit := session.storage.guard_edit()
     permit.value.active = false
+}
+
+// The words after `--` on `jet build` (`b.args()`); a new session has none.
+fn build_session_set_args(session: &BuildSession, args: [String]) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.args = args.copy()
 }
 
 // runtime_bridge.rs `build_diag`: a generated-source cycle is E3511, every
@@ -354,13 +362,17 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
         if args.len() != 1 -> return build_session_fail(state, "`b.generate` requires a name and typed item block")
         name :: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
         source :: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
-        path :: ".jet/generated/{state.package}/{build_session_safe_name(name)}.jet"
+        path :: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
         return build_session_add_generated(&state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None})
     }
     if method == "default" {
         if args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
         state.default_target = build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
+    if method == "args" {
+        if args.len() != 0 -> return build_session_fail(state, "`b.args` takes no arguments")
+        return BuildSessionReply.Value{value: BuildSessionValue.List{values: loop word in state.args -> BuildSessionValue.Text{value: word.copy()}}}
     }
     if method == "plan" {
         if args.len() > 1 -> return build_session_fail(state, "`b.plan` accepts zero or one default target")
@@ -407,6 +419,15 @@ fn build_session_set_option(state: &BuildSessionState, args: [BuildSessionValue]
     }
     &state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end})
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// The `<package>` directory of `.jet/generated/<package>/`: the package name
+// of a loader identity (`package:15:write_generated:0.1.0`, written by
+// Loader.jet's jet_driver_package_identity), else the session's package as given.
+fn build_session_package_dir(package: String) -> String {
+    parts :: package.split(":").to_list()
+    if parts.len() >= 3 && parts[0] == "package" && (Int.parse(parts[1]) ?? -1) == parts[2].len() -> return parts[2].copy()
+    package.copy()
 }
 
 fn build_session_safe_name(name: String) -> String {

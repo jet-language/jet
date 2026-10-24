@@ -4013,8 +4013,14 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     loop root_index in 0..<request.authorized_sources.roots.len() -> &namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
     module_edges := jet_driver_module_edges()
-    // Exact virtual text records; these are never added to disk authorities.
-    core_generated := [SourceFile]{}
+    // Exact virtual text records; these are never added to disk authorities:
+    // the embedded Core modules as they load, and every module `fn build`
+    // generated (jet_driver_build_source_catalog gave each a unit at this path).
+    generated_records := [SourceFile]{}
+    loop generated in request.generated_modules {
+        path :: jet_driver_generated_module_path(generated.package_identity, generated.relative_path)
+        &generated_records.push(SourceFile{id: source_file_id(path), path: path, source: generated.source.copy()})
+    }
     bare_modules := [String]{}
     pending_index := 0
     // The current parse wave's results, last-first: every unit queued when
@@ -4082,7 +4088,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                 if !demand.bare_names.contains(bare.name) -> next
                 module_name :: core_bare_source_module(bare.name) ?? next
                 if !bare_modules.contains(module_name) -> &bare_modules.push(module_name)
-                owner_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+                owner_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
                 if owner_index == .Val(index) {
                     if !queued[index] {
                         queued[index] = true
@@ -4093,7 +4099,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         }
         if demand.math_abs_receiver {
             if !bare_modules.contains("core.math") -> &bare_modules.push("core.math")
-            owner_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            owner_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if owner_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
@@ -4105,7 +4111,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         // source, even when the caller has no explicit core.regex import.
         if demand.regex_literal {
             if !bare_modules.contains("core.regex") -> &bare_modules.push("core.regex")
-            regex_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.regex", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            regex_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.regex", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if regex_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
@@ -4117,7 +4123,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         // formatter, even when the caller has no explicit core.text.fmt import.
         if demand.format_selector {
             if !bare_modules.contains("core.text.fmt") -> &bare_modules.push("core.text.fmt")
-            fmt_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.text.fmt", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            fmt_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.text.fmt", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if fmt_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
@@ -4128,7 +4134,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         // The optional-to-failure view calls the ordinary Core source body,
         // even when the caller has no explicit core.prelude import.
         if demand.option_or_err {
-            prelude_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            prelude_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if prelude_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
@@ -4167,7 +4173,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                 .Module(name, span) -> {
                     core_module :: jet_driver_core_import_module(scoped.declaration)
                     if core_module == .Val(core_name) {
-                        target_index = jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, span, &diagnostics)
+                        target_index = jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, span, &diagnostics)
                     } else if is_core {
                         // Reserved parts have exact catalog identities, not a
                         // public Core path or a package dependency name.
@@ -4179,7 +4185,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                                     break
                                 }
                             }
-                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source()))
+                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &generated_records, row.module_name, row.path, row_index, row.source()))
                             break
                         }
                         if target_index == None {
@@ -4254,7 +4260,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                     if row.owner == "" && row.module_name == module_name && (!row.runtime || importer_core) -> sourced = true
                 }
                 if !sourced -> next
-                path_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+                path_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
                 if path_index == .Val(index) {
                     if !queued[index] {
                         queued[index] = true
@@ -4325,7 +4331,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                                     break
                                 }
                             }
-                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source()))
+                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &generated_records, row.module_name, row.path, row_index, row.source()))
                             if target_index == .Val(core_index) && !queued[core_index] {
                                 queued[core_index] = true
                                 &pending.push(core_index)
@@ -4340,7 +4346,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                             // Rust reports an unknown selective Core path per
                             // member, naming `core.x.member`, at the module path.
                             unknown := [Diagnostic]{}
-                            target_index = jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, module_alias_span, &unknown)
+                            target_index = jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, module_alias_span, &unknown)
                             if unknown.len() > 0 {
                                 loop selected in selected_items -> &diagnostics.push(jet_driver_unknown_core_module("{core_name}.{selected.original}", module_alias_span, "import"))
                             }
@@ -4367,7 +4373,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                             }
                             if !sourced -> next
                             if !bare_modules.contains(submodule) -> &bare_modules.push(submodule)
-                            submodule_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, submodule, importer_core, entry_module, entry_index ?? 0, module_alias_span, &diagnostics) ?? next
+                            submodule_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, submodule, importer_core, entry_module, entry_index ?? 0, module_alias_span, &diagnostics) ?? next
                             if !queued[submodule_index] {
                                 queued[submodule_index] = true
                                 &pending.push(submodule_index)
@@ -4416,7 +4422,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
     modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, bare_modules)
-    provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
+    provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, generated_records)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     if failed_stage == None && !jet_driver_expand_imported_marker_groups(&modules, &resolved_imports, source_units, provenance.files, &diagnostics, request.trace_sink) {
@@ -4433,7 +4439,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         modules: modules,
         imports: resolved_imports,
         source_files: provenance.files,
-        generated_source_files: core_generated,
+        generated_source_files: generated_records,
         diagnostics: diagnostics,
         failed_stage: failed_stage,
         complete: complete,

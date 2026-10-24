@@ -870,16 +870,18 @@ fn jet_cli_native_level(options: BuildOptions) -> Int Never! {
 // The runtime checks the native build keeps: the `bounds` option's mode in
 // the modules of the built package (the compile's package identity). Every
 // other module, a dependency's or Core's, keeps the fatal check its writer
-// built it with.
+// built it with. `dead_code: keep` builds every function of those modules;
+// `backtrace` goes to the runtime.
 fn jet_cli_ir_checks(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs, options: BuildOptions) -> IRChecks Never! {
     bounds :: build_options_value(options, "bounds")
+    dead_code :: build_options_value(options, "dead_code")
     modules := [String:Bool]{}
-    if bounds != "fatal" {
+    if bounds != "fatal" || dead_code == "keep" {
         loop graph_module in inputs.modules {
             if graph_module.package_identity == result.package_identity -> modules[graph_module.module_identity.copy()] = true
         }
     }
-    ir_checks_of(bounds, modules)
+    ir_checks_of(bounds, build_options_value(options, "backtrace"), dead_code, modules)
 }
 
 // D-GATE-LAW1: a resolved build option value that removes a runtime check
@@ -2224,7 +2226,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -2245,9 +2247,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             jet_cli_write_notice(notice)
             output = jet_cli_compile_build(file, source, color, options, threads, invocation, trace_sink)
         }
-        .BuildPackage(file, color, options, threads, invocation, notice) -> {
+        .BuildPackage(file, color, options, build_args, threads, invocation, notice) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_build_package(file, color, options, threads, invocation, trace_sink)
+            output = jet_cli_build_package(file, color, options, build_args, threads, invocation, trace_sink)
         }
         .Run(file, source, color, options, verbose, threads, program_args, invocation, notice, watch) -> {
             jet_cli_write_notice(notice)

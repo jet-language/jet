@@ -9,6 +9,8 @@
 //   SIGBUS) and the Jet frames (function and file:line), then the signal's
 //   default action ends the process: status 128 + signal, with a core dump
 //   where enabled, exactly as without the report.
+// How much of the stack follows a report's first line is the image's
+// `backtrace` build option (fault_backtrace).
 // Jet frames come from the image's DWARF (.debug_info subprograms,
 // .debug_line rows; Image/Dwarf.jet writes both). Under `jet run` the image is
 // the loader's mapping (HOST_AT_IMAGE), else /proc/self/exe mapped read-only,
@@ -22,6 +24,16 @@ fn rt_fault_signal_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) 
 // The main thread's alternate stack (fault_stack_start); its word 24 is the
 // claim of the one report a process prints.
 fault_main_stack := I64{0}
+
+// The `backtrace` build option of the running image (0 full, 1 brief, 2 off;
+// JetIR IRBacktrace): what a report prints after its first line. Full lists
+// the Jet frames; brief only the faulting frame (a stack overflow names its
+// innermost Jet function either way); off no frame.
+fault_backtrace := I64{0}
+
+// The image's entry passes a `brief` or `off` backtrace before it runs
+// anything else (JetIR ir_entry_function).
+#Export(c) fn jet_rt_fault_backtrace(mode: I64) { fault_backtrace = mode }
 
 // The handler for the four fatal signals, and the calling thread's
 // alternate stack. jet_rt_main calls it once per entry; a loaded-image host
@@ -125,21 +137,24 @@ fn fault_overflow(s: I64, rip: I64, rbp: I64, rsp: I64) {
             steps += I64{1}
         }
     }
-    alloc_check_say(rt_static_text("Stop [E3012]: Stack overflow in `"))
-    if found {
-        fault_write_string(fault_word(s + I64{104}))
-    } else {
-        alloc_check_say(rt_static_text("??"))
-    }
-    alloc_check_say(rt_static_text("`"))
-    // No Jet frame named (an image without debug info, or a foreign frame):
-    // the faulting pc.
-    if !found {
-        alloc_check_say(rt_static_text(" at "))
-        alloc_check_hex(rip)
+    alloc_check_say(rt_static_text("Stop [E3012]: Stack overflow"))
+    if (fault_backtrace != I64{2}) {
+        alloc_check_say(rt_static_text(" in `"))
+        if found {
+            fault_write_string(fault_word(s + I64{104}))
+        } else {
+            alloc_check_say(rt_static_text("??"))
+        }
+        alloc_check_say(rt_static_text("`"))
+        // No Jet frame named (an image without debug info, or a foreign
+        // frame): the faulting pc.
+        if !found {
+            alloc_check_say(rt_static_text(" at "))
+            alloc_check_hex(rip)
+        }
     }
     alloc_check_say(rt_static_text("\n"))
-    if found && fault_file(s, fault_word(s + I64{120})) {
+    if found && (fault_backtrace != I64{2}) && fault_file(s, fault_word(s + I64{120})) {
         line :: fault_word(s + I64{128})
         alloc_check_say(rt_static_text("  --> "))
         fault_write_string(fault_word(s + I64{176}))
@@ -193,12 +208,17 @@ fn fault_report(s: I64, signal: I64, address: I64, rip: I64, rbp: I64, rsp: I64)
         alloc_check_say(rt_static_text(" at address "))
         alloc_check_hex(address)
     }
+    if (fault_backtrace == I64{2}) {
+        alloc_check_say(rt_static_text("\n"))
+        return
+    }
     alloc_check_say(rt_static_text("\nBacktrace:\n"))
     if (s == I64{0}) -> return
     // An image without .debug_info (`debug_info: false`) names no function:
     // the faulting pc and the return addresses of the frame walk print.
     if (fault_word(s + I64{24}) == I64{0}) {
         fault_address_line(rip)
+        if (fault_backtrace == I64{1}) -> return
         frame := fault_first_frame(rbp, rsp)
         steps := I64{0}
         loop frame != (I64{0}) && steps < (I64{64}) {
@@ -211,6 +231,7 @@ fn fault_report(s: I64, signal: I64, address: I64, rip: I64, rbp: I64, rsp: I64)
     // The faulting frame always prints (?? when it is not a Jet function);
     // its callers print when they are Jet functions.
     if !fault_frame_line(s, rip, I64{0}) -> alloc_check_say(rt_static_text("  ??\n"))
+    if (fault_backtrace == I64{1}) -> return
     frame := fault_first_frame(rbp, rsp)
     steps := I64{0}
     shown := I64{0}

@@ -227,6 +227,14 @@ fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
     permit :: plan.storage.guard_read()
     build_session_project(permit.value)
 }
+// Every module `fn build` generated, selected or not (`write_generated: on`
+// writes them all for inspection), in path order.
+fn build_plan_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
+    permit :: plan.storage.guard_read()
+    generated := permit.value.generated.copy()
+    &generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
+    generated
+}
 fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit :: plan.storage.guard_read()
     selected_targets := [Int]{}

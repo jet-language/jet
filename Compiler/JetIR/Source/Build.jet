@@ -132,29 +132,47 @@ struct IRDeferredCall { at: Int, key: String, function: Int{-1}, args: [Type]{[T
 // access; Off drops the check.
 enum IRBoundsMode { Fatal Report Off }
 
-// The runtime checks a program keeps. `bounds` holds in the functions of
-// `modules` (module identities: the code the built package wrote). Every
-// other function keeps Fatal, so a dependency's function, generic or not,
-// keeps its writer's check wherever it is instantiated or inlined.
+// The runtime checks a program keeps, and what else of the build options the
+// builder reads. `bounds` holds in the functions of `modules` (module
+// identities: the code the built package wrote). Every other function keeps
+// Fatal, so a dependency's function, generic or not, keeps its writer's check
+// wherever it is instantiated or inlined. `backtrace` is the `backtrace`
+// build option (ir_entry_function passes it to the runtime); `keep` the
+// `dead_code: keep` option: every non-generic function of `modules` is built
+// as a root next to the entry (ir_build_program).
 struct IRChecks {
     bounds: IRBoundsMode
     modules: [String:Bool]
+    backtrace: IRBacktrace
+    keep: Bool
 }
+
+// The `backtrace` build option: what a native fault report prints after its
+// first line (JetRuntime Fault.jet). Its word is the order here, the value
+// jet_rt_fault_backtrace takes.
+enum IRBacktrace { Full Brief Off }
 
 fn ir_checks_stock() -> IRChecks Never! {
-    IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}}
+    IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}, backtrace: IRBacktrace.Full, keep: false}
 }
 
-// The checks of a resolved `bounds` value (`fatal`, `report` or `off`) over
-// `modules`.
-fn ir_checks_of(bounds: String, modules: [String:Bool]) -> IRChecks Never! {
+// The checks of the resolved `bounds` value (`fatal`, `report` or `off`),
+// `backtrace` value (`full`, `brief` or `off`) and `dead_code` value
+// (`remove` or `keep`) over `modules`.
+fn ir_checks_of(bounds: String, backtrace: String, dead_code: String, modules: [String:Bool]) -> IRChecks Never! {
     mode :: if bounds == {
         "fatal" -> IRBoundsMode.Fatal
         "report" -> IRBoundsMode.Report
         "off" -> IRBoundsMode.Off
         else -> panic("`{bounds}` is not a value of the `bounds` build option")
     }
-    IRChecks{bounds: mode, modules: modules}
+    trace :: if backtrace == {
+        "full" -> IRBacktrace.Full
+        "brief" -> IRBacktrace.Brief
+        "off" -> IRBacktrace.Off
+        else -> panic("`{backtrace}` is not a value of the `backtrace` build option")
+    }
+    IRChecks{bounds: mode, modules: modules, backtrace: trace, keep: dead_code == "keep"}
 }
 
 // The bounds mode of checked function `row` (-1: glue, Fatal).
@@ -228,7 +246,7 @@ struct IRProgram {
     // returns tell the runtime the process is ending (ir_emit_return).
     entry: Int{-1}
     // The runtime checks the built functions keep (ir_bounds_mode).
-    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}}}
+    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}, backtrace: IRBacktrace.Full, keep: false}}
 }
 
 // A Display, Printable, Close or user Comparable implementation: the
@@ -888,7 +906,9 @@ fn ir_symbol_name(function: FnBody) -> String Never! {
 // in module order; `sources` the checked source files' text by path (the
 // source locations of journeys and contract reports); `foreign` the checked
 // foreign functions; `checks` the runtime checks the program's functions
-// keep (ir_bounds_mode).
+// keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
+// non-generic function of checks.modules is a root too, so the image carries
+// the package's unreached functions.
 fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
@@ -899,6 +919,14 @@ fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImpl
     }
     p.entry = row
     roots := [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
+    if p.checks.keep {
+        loop kept in 0..<p.functions.len() {
+            function :: p.functions[kept]
+            if kept == row || p.checks.modules.get(function.module_identity) == None -> next
+            if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 -> next
+            &roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
+        }
+    }
     ir_build_waves(^p, ^roots, true, threads)
 }
 
@@ -929,10 +957,12 @@ fn ir_build_roots_in(program: ^IRProgram, root_keys: [String], threads: Compiler
 IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
 
 // The function the executable starts: `entry` itself when it takes nothing,
-// returns nothing and the program computes no constant at startup,
-// otherwise a generated `entry` function. It first computes every constant
-// computed at startup (p.startup, through ir_startup_guard), then calls
-// `entry` and handles its failure carrier as Lower's entry helper does
+// returns nothing, the program computes no constant at startup and the
+// `backtrace` build option is the stock `full`, otherwise a generated
+// `entry` function. It first passes a `brief` or `off` backtrace to the
+// runtime (jet_rt_fault_backtrace, the IRBacktrace word), computes every
+// constant computed at startup (p.startup, through ir_startup_guard), then
+// calls `entry` and handles its failure carrier as Lower's entry helper does
 // (Lower/Entry.jet lower_entry_function): an `Err` ends the process with the
 // error's report and exit status 1 (the default `Err` through
 // jet_rt_entry_error_exit_err, any other error through its Printable text
@@ -940,7 +970,7 @@ IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
 // success drops the result and returns.
 fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row :: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full) -> return entry
     ty :: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key :: "{m.functions[entry].key}#entry"
     id :: m.functions.len()
@@ -949,6 +979,11 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[entry].line
     span :: Span{start: 0, end: 0}
+    if p.checks.backtrace != .Full {
+        mode :: if p.checks.backtrace == .Brief -> 1 else -> 2
+        word :: ir_word_const(&m, &b, mode)
+        _ :: ir_runtime(&m, &b, "jet_rt_fault_backtrace", [Int]{word}, -1)
+    }
     loop constant_key in p.startup {
         definition :: p.constants.get(constant_key) ?? next
         guard :: ir_startup_guard(&m, p, definition)

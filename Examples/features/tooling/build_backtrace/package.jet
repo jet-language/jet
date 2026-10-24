@@ -1,0 +1,13 @@
+// #5005: two Choice build options. `backtrace` (stock full) says what a native
+// fault report prints after its first line: full the Jet frames, brief only
+// the faulting frame, off none. `dead_code` (stock remove) says whether the
+// image keeps the package's functions the entry never reaches. The same rows
+// are the flags `--backtrace=off` and `--dead-code=keep` and the `fn build`
+// calls `b.backtrace(.Off)` and `b.dead_code(.Keep)`.
+name: "build_backtrace_example"
+version: "0.1.0"
+edition: "2026"
+
+build: {
+    terse: Build{ backtrace: off, dead_code: keep },
+}

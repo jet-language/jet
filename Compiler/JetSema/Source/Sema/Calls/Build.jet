@@ -76,6 +76,7 @@ fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildCo
         }
         method == "error" && arity == 5 -> parameters = [Type]{Type.Named{name: "SourceSpan"}, Type.String, Type.String, Type.String, Type.String}
         method == "default" && arity == 1 -> parameters = [Type]{target}
+        method == "args" && arity == 0 -> result = strings
         method == "plan" && (arity == 0 || arity == 1) -> {
             if arity == 1 -> &parameters.push(target)
             result = sema_build_result("BuildPlan")
@@ -97,6 +98,7 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
     if method == "default" -> return "1"
+    if method == "args" -> return "0"
     if method == "find" || method == "embed" -> return "1"
     if method == "error" -> return "5"
     "2"
