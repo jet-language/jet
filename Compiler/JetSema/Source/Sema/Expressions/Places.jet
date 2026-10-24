@@ -34,6 +34,13 @@ use jet_foundation.[
     tir_symbol_local,
     type_name,
     EffectRowEntry,
+    ForKind,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
+    Stmt,
+    ast_empty_lambda_meta,
 ]
 use jet_lexer.[Token]
 use jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
@@ -459,7 +466,8 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     checked_base_value :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     context.suppress_partial_move_root_read = previous_root_read
     if checked_base_value == .Val(probe_value) {
-        rewritten :: sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
+        rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
+        if rewritten == None -> rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, &scopes)
         if rewritten == .Val(generated) {
             sema_check_context_rollback(&context, base_context_mark)
             sema_scope_rollback(&scopes, base_scope_mark)
@@ -494,6 +502,29 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     // Lambda capture moves ask whether the captured field is a copy type.
     sema_ownership_note_place_type(&state, span, value.ty)
     Val(value)
+}
+
+// D-COLUMNS1 field view: `table.field` on a Core `Rows<T>` (`ty`) is the
+// field of every row in row order, generated as the collecting loop
+// `loop __row in table.__rows -> __row.field` (the parser's own shape for
+// it). None for any other base or for the table's own field.
+fn sema_expression_rows_view(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Expr? {
+    if member == "__rows" -> return None
+    if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
+        if args.len() != 1 || !sema_expression_rows_type(name, "Rows", environment, program, &scopes) -> return None
+    } else {
+        return None
+    }
+    row :: Expr.Ident{name: "__row", span: span, id: AST_NODE_GENERATED}
+    item :: Expr.Field{base: row, member: member, span: span, id: AST_NODE_GENERATED}
+    rows :: Expr.Field{base: base.copy(), member: "__rows", span: span, id: AST_NODE_GENERATED}
+    label :: NamedSpan{name: "__jet_collect_loop_{span.start}", span: span}
+    body :: [Stmt]{Stmt.Yield{value: item, span: Span{start: span.start, end: span.start}}}
+    walk :: Stmt.For{var: "__row", var_span: span, var2: None, kind: ForKind.In{collection: rows, step: None}, body: body, span: span, arrow_body: false, label: Val(label), auto_vectorization: None}
+    meta := ast_empty_lambda_meta()
+    meta.collecting_loop = true
+    lambda :: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Block{body: [Stmt]{walk}}, span: span, meta: meta}
+    Val(Expr.CallValue{callee: Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}, args: [CallArg]{}, span: span, id: AST_NODE_GENERATED})
 }
 
 fn sema_expression_struct_static_member_error(type_name: String, member: String, states: [String], span: Span) -> Diagnostic Never! {

@@ -1,0 +1,30 @@
+// D-COLUMNS1=A: `Rows<T>` is an add-only table of rows reached through the
+// 4-byte `Row<T>` handles `add` returns. `table[row]` reads and writes one
+// row, `table.field` views one field of every row in row order, and a
+// handle only indexes a table of its own row type.
+use core.collections.[Rows, Row]
+
+struct Node { line: Int, kind: Int }
+struct Ty { size: Int }
+
+fn total_lines(nodes: Rows<Node>) -> Int {
+    total := 0
+    loop line in nodes.line -> total += line
+    total
+}
+
+fn run() {
+    nodes := Rows<Node>{}
+    first :: &nodes.add(Node{line: 3, kind: 1})
+    second :: &nodes.add(Node{line: 7, kind: 2})
+    print("{nodes.len()} rows, second at {second.index()}")
+    nodes[second].line = 9
+    nodes[first] = Node{line: 4, kind: 5}
+    print("first: line {nodes[first].line} kind {nodes[first].kind}")
+    print("kinds {nodes.kind}, lines total {total_lines(nodes)}")
+    types := Rows<Ty>{}
+    word :: &types.add(Ty{size: 8})
+    print("type {word.index()} is {types[word].size} bytes, empty {types.is_empty()}")
+    frozen :: freeze(nodes)
+    print("frozen lines {frozen.line}")
+}

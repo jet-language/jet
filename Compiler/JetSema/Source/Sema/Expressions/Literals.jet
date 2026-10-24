@@ -806,6 +806,12 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                 slot :: sema_tir_node(args[0], TExprKind.PoolSlot{pool: checked_base, id: checked_index, mutable: false, field: None, line: location.line, source_line: location.source_line}, span)
                 return sema_expr_expected_owned(^slot, expected, environment, program, &diagnostics)
             }
+            // D-COLUMNS1: `table[row]` on a Core `Rows<T>` reads (or, as an
+            // assignment place, writes) the row its own `Row<T>` names: the
+            // table's row list indexed by the handle's 4-byte slot.
+            if args.len() == 1 && sema_expression_rows_type(name, "Rows", environment, program, &scopes) {
+                return sema_expression_rows_index(checked_base, checked_index, args[0], expr_span(index), span, expected, environment, program, &scopes, &context, &diagnostics)
+            }
         }
         .String -> {
             &diagnostics.push(sema_error("E0503", span, "strings are not indexed with `[ ]`", "text is counted in characters, while brackets index storage positions", "use `.chars()` or slice the string with a Range"))
@@ -820,6 +826,41 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     kind :: sema_expression_index_kind(resolved_kind, base_ty)
     value :: sema_tir_node(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Whether the applied type `name` is Core's `kind` (`Rows` or `Row`,
+// D-COLUMNS1) rather than a user type spelled the same: its struct declares
+// the reserved field `__rows` (`__slot` for `Row`), which only Core may name.
+fn sema_expression_rows_type(name: String, kind: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    owner := sema_expression_type_symbol(&scopes, environment, program, name)
+    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, name)
+    symbol :: owner ?? return false
+    declared :: sema_scope_declaration_struct(environment, program, symbol.id) ?? return false
+    fields :: loop field in declared.fields -> field.name
+    fields.contains(if kind == "Rows" -> "__rows" else -> "__slot")
+}
+
+// `table[row]` on a `Rows<T>` (`element` is T): the table's row list indexed
+// by the handle's slot. A handle of another row type is E0112.
+fn sema_expression_rows_index(table: TExpr, row: TExpr, element: Type, row_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    handle := Type?{None}
+    if sema_expr_unwrap_tag(row.ty) == .Apply(row_name, row_args) {
+        if row_args.len() == 1 && sema_expression_rows_type(row_name, "Row", environment, program, &scopes) -> handle = Val(row_args[0])
+    }
+    if handle == .Val(handled) {
+        if type_identity_equal(handled, element) {
+            rows :: sema_expression_field_checked(table, "__rows", span, None, environment, program, &scopes, &context, &diagnostics) ?? return None
+            slot :: sema_expression_field_checked(row, "__slot", row_span, None, environment, program, &scopes, &context, &diagnostics) ?? return None
+            position :: sema_expr_numeric_conversion(slot, Type.Int, row_span, sema_source_line_at(environment.source_segments, row_span) ?? 0) ?? return None
+            kind :: sema_expression_index_kind(IndexKind.List, rows.ty)
+            value :: sema_tir_node(element, TExprKind.Index{base: rows, index: position, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
+            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        }
+    }
+    // The core.collections types by their own names, not module-qualified.
+    shown :: if handle == .Val(handled) -> "Row<{type_name(handled)}>" else -> type_name(row.ty)
+    &diagnostics.push(sema_error("E0112", row_span, "{shown} cannot index Rows<{type_name(element)}>", "a `Row<T>` handle reaches only a row of a `Rows<T>` table of the same row type", "index with the `Row<{type_name(element)}>` this table's `.add(...)` returned"))
+    None
 }
 
 fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

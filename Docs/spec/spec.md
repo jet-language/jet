@@ -1441,6 +1441,18 @@ See [`entity_world.jet`](../../Examples/features/memory/entity_world.jet) and
 [`entity_tree.jet`](../../Examples/features/memory/entity_tree.jet) for pool
 links and nested writes (D-POOLID-API1).
 
+`Rows<T>` (`core.collections`) is an add-only table and `Row<T>` its 4-byte
+row handle. `&rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`
+reads or writes that row (`rows[row].f = v` too); `rows.f` is a read-only
+`[F]` of field `f` of every row, in row order; `row.index()` is the row's
+position as an `Int`; `freeze(rows)` snapshots the table. There is no remove,
+insert, or sort, so a handle never goes stale and needs no generation. A handle
+indexes only a table of its own row type: `Row<Node>` indexing a `Rows<Ty>` is
+E0112 at compile time. `add` panics past 4,294,967,295 rows. Row fields are
+meant to be scalars or `Row` handles, which a later column layout keeps one
+array per field (D-COLUMNS1). See
+[`rows.jet`](../../Examples/features/collections/rows.jet).
+
 ### Transitive memory facts
 
 Memory floors are effect-row prohibitions, not `#Policy` settings. Sema checks

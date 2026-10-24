@@ -42,6 +42,37 @@ struct Chain {
     layers: [Layer]
 }
 
+/// A handle to one row of a `Rows<T>`: its 4-byte position in that table.
+/// A handle only indexes a table of the same row type (D-COLUMNS1).
+struct Row<T> {
+    __slot: U32
+
+    /// The row's position in its table: 0 for the first `add`.
+    fn index(self) -> Int Never! { Int.from_u32(self.__slot) }
+}
+
+/// An add-only table of `T` rows, reached through the `Row<T>` handles `add`
+/// returns: `table[row]` reads and writes a row, `table.field` views one
+/// field of every row. Rows are never removed, inserted or reordered, so a
+/// handle stays valid for the table's life (D-COLUMNS1).
+struct Rows<T> {
+    __rows: [T]{[]}
+
+    /// Appends `value` and returns its handle. Panics past 4294967295 rows.
+    fn add(&self, value: T) -> Row<T> Never! {
+        count :: self.__rows.len()
+        if count >= 4294967295 -> panic("Rows.add: a table holds at most 4294967295 rows")
+        slot :: U32.from_int(count) ?? panic("Rows.add: a table holds at most 4294967295 rows")
+        &self.__rows.push(value)
+        Row<T>{__slot: slot}
+    }
+
+    /// How many rows the table holds.
+    fn len(self) -> Int Never! { self.__rows.len() }
+
+    fn is_empty(self) -> Bool Never! { self.__rows.len() == 0 }
+}
+
 fn copy_ints(xs: [Int]) -> [Int] {
     out := [Int]{}
     loop x in xs -> &out.push(x)
