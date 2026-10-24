@@ -306,13 +306,47 @@ fn sema_atomic_field_initializer(field_ty: Type, value: TExpr, source: Expr, con
     Val(sema_tir_expr(field_ty, kind, value.span))
 }
 
+// One struct field as a literal of its owner fills it: its type with the
+// owner's generic arguments substituted, whether that type is a string view,
+// the field's symbol and whether its edge is boxed.
+struct SemaStructFieldFact {
+    field_ty: Type
+    string_view: Bool
+    symbol: Symbol
+    boxed: Bool
+}
+
+fn sema_expression_struct_field_fact(field: Field, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaStructFieldFact {
+    field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), names, args)
+    field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, field.name)
+    symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner.module_name, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+    SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name)}
+}
+
+// The facts of a non-generic struct's fields, in declaration order, from the
+// index this returns in `context.struct_field_facts`: the first literal of the
+// struct this check meets resolves them, and every later one (a list of
+// thousands of record rows) reads them back.
+fn sema_expression_struct_field_facts(owner: Symbol, fields: [Field], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) -> Int {
+    if context.struct_field_fact_rows.get(owner.id.key) == .Val(known) -> return known
+    first :: context.struct_field_facts.len()
+    loop field in fields -> &context.struct_field_facts.push(sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program))
+    context.struct_field_fact_rows[owner.id.key] = first
+    first
+}
+
 // One struct field initializer, written or a declared default, checked
 // against the field type with the owner's generic arguments substituted. Its
 // move is recorded at this point of the literal's evaluation order.
 fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
-    field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), names, args)
+    fact :: sema_expression_struct_field_fact(field, owner, names, args, environment, program)
+    sema_expression_struct_field_checked(fact, field_value, field_reference_span, atomic_payload, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_expression_struct_field_checked(fact: SemaStructFieldFact, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
+    field_ty :: fact.field_ty
     expected_ty :: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
-    string_view :: sema_stmt_string_view_type(field_ty)
+    string_view :: fact.string_view
     if !string_view -> sema_copy_site_check_field(field_value, environment, program, scopes, &tail_store, &context, &diagnostics)
     checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(expected_ty), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     checked :: checked_value ?? return None
@@ -325,11 +359,9 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
         return None
     }
     if !string_view && !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-    field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, field.name)
-    symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner.module_name, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
-    &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: symbol, kind: "field"})
-    reference := sema_expression_field_ref(symbol, Val(owner.id), field_ty)
-    reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner.id, field.name)
+    &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: fact.symbol, kind: "field"})
+    reference := sema_expression_field_ref(fact.symbol, Val(owner.id), field_ty)
+    reference.boxed = fact.boxed
     initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
@@ -459,12 +491,20 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     }
     supplied := [Bool]{}
     loop _ in struct_def.fields -> &supplied.push(false)
+    // Each written field's declaration index; fields are mostly written in
+    // declaration order, so the one after the previous match is tried first.
+    positions := [Int]{}
     loop source in fields {
         found := -1
-        loop (index, declared) in struct_def.fields {
-            if declared.name == source.name {
-                found = index
-                break
+        next_index :: if positions.len() == 0 -> 0 else -> positions[positions.len() - 1] + 1
+        if next_index < struct_def.fields.len() && struct_def.fields[next_index].name == source.name {
+            found = next_index
+        } else {
+            loop (index, declared) in struct_def.fields {
+                if declared.name == source.name {
+                    found = index
+                    break
+                }
             }
         }
         if found < 0 {
@@ -476,19 +516,26 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             return None
         }
         supplied[found] = true
+        &positions.push(found)
     }
     // Rust `check_struct_lit`: supplied fields are checked (and their moves
     // recorded) in the order they are written, then omitted fields take their
     // defaults in declaration order. The TIR keeps that order, so lowering
-    // evaluates the initializers exactly as written.
+    // evaluates the initializers exactly as written. A non-generic struct's
+    // field facts are resolved once per check (sema_expression_struct_field_facts).
+    facts :: if names.len() == 0 -> sema_expression_struct_field_facts(owner, struct_def.fields, environment, program, &context) else -> -1
     values := [TStructFieldValue]{}
-    loop source in fields {
-        loop field in struct_def.fields {
-            if field.name != source.name -> next
-            checked :: sema_expression_struct_field_value(field, source.value, source.name_span, true, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-            &values.push(checked)
-            break
+    loop (written, source) in fields {
+        position :: positions[written]
+        checked := TStructFieldValue?{None}
+        if facts >= 0 {
+            fact :: context.struct_field_facts[facts + position]
+            checked = sema_expression_struct_field_checked(fact, source.value, source.name_span, true, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        } else {
+            checked = sema_expression_struct_field_value(struct_def.fields[position], source.value, source.name_span, true, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
+        value :: checked ?? return None
+        &values.push(value)
     }
     loop (index, field) in struct_def.fields {
         if supplied[index] -> next
