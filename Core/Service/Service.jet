@@ -917,7 +917,7 @@ fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError! {
                 .Ok(consumed) -> { if consumed -> return Ok() }
             }
         } else {
-            core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+            workflow_advance(&tree, index, false, 0)
         }
         if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow step follows a terminal workflow outcome"))
         if core.service.__workflow_steps_len(tree, index) >= 100000 -> return Err(ServiceError.Policy("workflow step history limit exceeded"))
@@ -961,7 +961,7 @@ fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: Str
             .None -> {}
         }
         if !replaying {
-            core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+            workflow_advance(&tree, index, false, 0)
         } else {
             if core.service.__workflow_event_at(tree, index, core.service.__workflow_cursor_at(tree, index)) == {
                 .Val(actual) -> {
@@ -977,7 +977,7 @@ fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: Str
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
-        core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        workflow_advance(&tree, index, false, 0)
         return Ok(TaskStatus.Running)
     }
 }
@@ -1005,7 +1005,7 @@ fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, outcome
         }
         if core.service.__workflow_outcome_at(tree, index) != None || workflow_activity_result(tree, index, key) != None -> return Err(ServiceError.Policy("workflow activity retry follows a terminal activity"))
         if activity.attempt >= activity.max_attempts -> return Err(ServiceError.Policy("workflow activity retry limit exhausted"))
-        if !replaying -> core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        if !replaying -> workflow_advance(&tree, index, false, 0)
         next_attempt :: activity.attempt + 1
         payload :: "workflow-activity-retry:{run_id}:{next_attempt}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
         if core.service.__workflow_append(&tree, ^payload) == {
@@ -1051,7 +1051,7 @@ fn workflow_activity_complete(tree: &ServiceTree, run_id: Int, key: String, outc
             }
             .None -> {}
         }
-        if !replaying -> core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        if !replaying -> workflow_advance(&tree, index, false, 0)
         payload :: "workflow-activity-done:{run_id}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
         if core.service.__workflow_append(&tree, ^payload) == {
             .Err(error) -> return Err(error)

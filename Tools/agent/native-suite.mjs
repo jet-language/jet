@@ -12,6 +12,7 @@ export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node =
         ['agent-doc-flags', 'check-agent-doc-flags.mjs', []],
         ['decision-index', 'decision-index.mjs', ['--check']],
         ['core-coverage', 'core-coverage-census.mjs', ['--check']],
+        ['core-module-check', 'core-module-check.mjs', ['--check']],
     ].map(([scope, file, args]) => ({ scope, command: node, args: [join(root, 'Tools/agent', file), ...args], cwd: root, kind: 'gate', documents: {} }));
     for (const suite of suites) {
         if (suite !== 'registries') {

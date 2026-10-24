@@ -118,9 +118,11 @@ fn batch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Ne
 }
 
 fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
-    // WebStore.rs:594-595: one reactive transaction, label set, no changed
-    // field names, root replacement; the runtime gate defers reentrant events.
-    core.web.store.__transact(store, "set", [String]{}, (state) -> state = value)
+    // WebStore.rs:594-595: the transaction of update/batch with label set, no
+    // changed field names, and the root replaced.
+    before :: get<T>(store.copy())
+    store.state = reactive.set(store.state, value)
+    record<T>(&store, "set", [String]{}, before)
 }
 
 fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
@@ -300,10 +302,12 @@ fn trim<T>(store: &WebStore<T>) Never! {
     if store.event_log.len() > store.history_limit -> store.event_log = tail<WebStoreEvent>(store.event_log, store.history_limit)
 }
 
-fn tail<T>(values: [T], count: Int) -> [T] Never! {
+// `U`, not `T`: `trim` calls this with `WebStoreTransaction<T>`, and the
+// solver reads a callee parameter spelled like the caller's as a cycle.
+fn tail<U>(values: [U], count: Int) -> [U] Never! {
     start := values.len() - count
     if start < 0 -> start = 0
-    out := [T]{ }
+    out := [U]{ }
     loop i in start..<values.len() -> &out.push(values[i])
     out
 }

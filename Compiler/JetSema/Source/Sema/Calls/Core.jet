@@ -521,11 +521,14 @@ fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, progra
 // Rust `core_module_path_from_receiver` + `infer_core_call`: a call through a
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
-// submodule itself would.
+// submodule itself would, including the `core.mem` Shared sites.
 fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, program, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return None
+    if module_name == "core.mem" {
+        if shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
+    }
     sema_call_core_resolve_route(environment, program, module_name, member, type_args, actual_arity, first_is_move, span, &diagnostics)
 }
 
@@ -1114,25 +1117,13 @@ fn sema_call_core_global_shared(lifetime: SharedLifetime, member: String, type_a
     if scopes.bindings[nearest].symbol.kind != SymbolKind.Function -> return sema_call_core_shared_reject(member, span, &diagnostics)
     target :: sema_call_resolve_direct(name, [Type]{}, environment, program, &scopes, args[0].span, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if target.generic_params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
-    same_module := false
-    loop declaration_index in 0..<environment.declarations.len() {
-        if environment.declarations[declaration_index].symbol_id != target.symbol.id -> next
-        if environment.declarations[declaration_index].item == .Func(function) {
-            same_module = function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
-            break
-        }
-    }
-    if !same_module -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    if !sema_call_core_shared_initializer_declared(environment, program, target) -> return sema_call_core_shared_reject(member, span, &diagnostics)
     params :: sema_call_params_from_type(target.signature) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
     call :: Call{name: name, name_span: span, type_args: [Type]{}, args: [CallArg]{}}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, None, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if checked.facts.failure_carrier != TFailureCarrier.Infallible -> return sema_call_core_shared_reject(member, span, &diagnostics)
-    shared :: if checked.value.ty == {
-        .Shared(_) -> true
-        else -> false
-    }
-    if !shared -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    published :: sema_call_core_shared_success(checked.value.ty) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     before :: context.call_facts.len()
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, checked, &diagnostics) -> return None
     if context.call_facts.len() != before + 1 -> panic("checked Core publication call has no effect obligation")
@@ -1140,8 +1131,51 @@ fn sema_call_core_global_shared(lifetime: SharedLifetime, member: String, type_a
     context.call_facts[before].shared_member = member
     context.call_facts[before].shared_source = environment.module_identity
     initializer :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
-    value :: sema_node(&context, checked.value.ty, NodeKind.GlobalShared{initializer: initializer, lifetime: lifetime}, span)
+    value :: sema_node(&context, published, NodeKind.GlobalShared{initializer: initializer, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Rust `infer_global_shared` reads the initializer from this module's own
+// items: a zero-parameter, non-generic, non-extern function. A checked Core
+// module keeps its functions as registration-graph rows, not in
+// `environment.declarations`; both are read in place.
+fn sema_call_core_shared_initializer_declared(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallDirectTarget) -> Bool Never! {
+    if target.symbol.module_name != environment.module_identity -> return false
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_callable_row(graph, target.symbol.id.key) == .Val(row) {
+            if row == {
+                .Function(module_index, index) -> return sema_call_core_shared_initializer_shape(graph.modules[module_index].functions[index].declaration)
+                else -> return false
+            }
+        }
+    }
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id != target.symbol.id -> next
+        if environment.declarations[declaration_index].item == .Func(function) -> return sema_call_core_shared_initializer_shape(function)
+        return false
+    }
+    false
+}
+
+fn sema_call_core_shared_initializer_shape(function: Func) -> Bool Never! {
+    function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
+}
+
+// Rust `FailureContract::ProvenUnreachable`/`InferredNever`: the call of a
+// `Shared<T> Never!` initializer keeps its `Never` carrier; the published
+// value is its success type.
+fn sema_call_core_shared_success(ty: Type) -> Type? Never! {
+    if ty == {
+        .Shared(_) -> Val(ty.copy())
+        .Result(ok, err) -> {
+            if err != (Type.Named{name: "Never"}) -> return None
+            if ok == {
+                .Shared(_) -> Val(ok.copy())
+                else -> None
+            }
+        }
+        else -> None
+    }
 }
 
 fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

@@ -17,7 +17,7 @@ const external = mkdtempSync(join(base, 'verify-native-evidence-'));
 const put = (name, content) => { const path = join(sandbox, name); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content, { mode: 0o755 }); };
 try {
     for (const path of ['Tools/agent/verify-full.sh', 'Tools/agent/verify-full.mjs', 'Tools/agent/native-suite.mjs']) put(path, readFileSync(join(repo, path)));
-    for (const gate of ['closeout-gate', 'check-unsafe-ratchet', 'check-agent-doc-flags', 'decision-index', 'core-coverage-census']) put(`Tools/agent/${gate}.mjs`, `if (process.env.FIXTURE_MODE === 'closeout' && ${JSON.stringify(gate)} === 'closeout-gate') process.exit(3);\n`);
+    for (const gate of ['closeout-gate', 'check-unsafe-ratchet', 'check-agent-doc-flags', 'decision-index', 'core-coverage-census', 'core-module-check']) put(`Tools/agent/${gate}.mjs`, `if (process.env.FIXTURE_MODE === 'closeout' && ${JSON.stringify(gate)} === 'closeout-gate') process.exit(3);\n`);
     put('Tools/ci/test-shards.sh', '#!/usr/bin/env bash\nprintf "%s\\n" golden ui cases registries\n');
     put('Tools/agent/proof-source.mjs', `import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';

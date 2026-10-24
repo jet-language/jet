@@ -11,15 +11,12 @@ package {
 use core as core
 use core.math as math
 
-// C: the observations are private. All Float arithmetic below keeps the
-// existing measured-value constructor, operator and observation surface.
-struct Measurement<T: Debug> {
+// C: the observations are private. Display, operators and the
+// observation methods route through the `__measurement_*` helpers below,
+// which this module also calls directly on its own values.
+struct Measurement<T> {
     value: T
     uncertainty: T
-
-    impl Display {
-        fn display(self) -> String { "{self.value:Debug} ± {self.uncertainty:Debug}" }
-    }
 }
 
 fn __measurement_new(value: Float, uncertainty: Float) -> Measurement<Float> Never! {
@@ -79,10 +76,10 @@ fn __measurement_result<E>(value: Float E!, relative: Float) -> Measurement<Floa
 fn from(magnitude: Float, unit: Float) -> Measurement<Float> Never! {
     // Measurements carry an SI value and uncertainty; the unit scale is
     // applied at construction because the carrier has no unit field.
-    measurement(magnitude * unit, uncertainty: 0.0)
+    __measurement_new(magnitude * unit, 0.0)
 }
 
-fn si(magnitude: Float) -> Measurement<Float> Never! { measurement(magnitude, uncertainty: 0.0) }
+fn si(magnitude: Float) -> Measurement<Float> Never! { __measurement_new(magnitude, 0.0) }
 
 NANO :: 0.000000001
 
@@ -99,20 +96,19 @@ MEGA :: 1000000.0
 GIGA :: 1000000000.0
 
 fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> Never! {
-    uncertainty := m.uncertainty() * math.abs_float(factor)
-    measurement(m.value() * factor, uncertainty: uncertainty)
+    __measurement_new(m.value * factor, m.uncertainty * math.abs_float(factor))
 }
 
-fn add(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { a + b }
+fn add(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { __measurement_add(a, b) }
 
-fn sub(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { a - b }
+fn sub(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { __measurement_sub(a, b) }
 
 fn mul(a: Measurement<Float>, n: Float) -> Measurement<Float> Never! {
-    a * measurement(n, uncertainty: Float{0.0})
+    __measurement_mul(a, __measurement_new(n, 0.0))
 }
 
 fn div(a: Measurement<Float>, n: Float) -> Measurement<Float> Never! {
-    a / measurement(n, uncertainty: Float{0.0})
+    __measurement_div(a, __measurement_new(n, 0.0))
 }
 
 fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Never! {
@@ -123,18 +119,18 @@ fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Never! 
     factor :: Float{1.0} / new_unit
     if !math.is_finite(factor) -> return m.copy()
     converted := scale(m, factor)
-    if !math.is_finite(converted.value()) || !math.is_finite(converted.uncertainty()) -> return m.copy()
+    if !math.is_finite(converted.value) || !math.is_finite(converted.uncertainty) -> return m.copy()
     converted
 }
 
-fn to_si(m: Measurement<Float>) -> Float Never! { m.value() }
+fn to_si(m: Measurement<Float>) -> Float Never! { m.value }
 
 fn abs(m: Measurement<Float>) -> Measurement<Float> Never! {
-    if m.value() < (Float{0.0}) -> return measurement(Float{0.0} - m.value(), uncertainty: m.uncertainty())
+    if m.value < (Float{0.0}) -> return __measurement_new(Float{0.0} - m.value, m.uncertainty)
     m.copy()
 }
 
-fn show(m: Measurement<Float>) -> String Never! { "{m.value()} ± {m.uncertainty()}" }
+fn show(m: Measurement<Float>) -> String Never! { "{m.value} ± {m.uncertainty}" }
 
 METER :: 1.0
 // British spellings remain source-compatible with the original Core surface.

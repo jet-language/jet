@@ -30,7 +30,7 @@ impl WebVirtualWindow {
         self.visible_count() <= if maximum < 0 -> 0 else -> maximum
     }
     fn with_measurement(self, index: Int, size: Int) -> WebVirtualWindow Never! {
-        if index < 0 || index >= self.total_count || size <= 0 -> return self
+        if index < 0 || index >= self.total_count || size <= 0 -> return self.copy()
         count :: sat_add(self.measured_count, 1)
         total :: sat_add(sat_mul(self.estimated_item_size, self.measured_count), size)
         estimate := if count == 0 || (total == -9223372036854775808 && count == -1) -> self.estimated_item_size else -> total /% count

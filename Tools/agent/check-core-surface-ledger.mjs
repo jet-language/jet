@@ -1357,7 +1357,7 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.log" && member === "__metric_publish") return null;
   if (moduleName === "core.devtools" && member === "__publish_payload") return null;
   if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"])) return null;
-  if (moduleName === "core.web.store" && coreCallOneOf(member, ["__transact", "__facts_snapshot"])) return null;
+  if (moduleName === "core.web.store" && member === "__facts_snapshot") return null;
   if (moduleName === "core.web.table" && coreCallOneOf(member, ["__columns", "__replace_columns", "__state", "__set_state", "__alias",
     "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
     "__commit_keys", "__loading_store", "__error_store", "__page_store",
