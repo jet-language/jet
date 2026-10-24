@@ -126,11 +126,11 @@ fn env_hook_fingerprint_from_inputs(root: String, requested_preset: String?, req
 
 fn env_hook_finish_definition_fingerprint(root: String, requested_preset: String?, requested_environment: String?, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> String? Never! {
     project_files :: [String]{UNIFIED_LOCK_FILE, PACKAGE_FILE}
-    loop relative in project_files -> env_hook_add_input(root, relative, "project", budget, inputs)
+    loop relative in project_files -> env_hook_add_input(root, relative, "project", &budget, &inputs)
     host :: sys.get("HOSTNAME") ?? ""
     user :: sys.get("USER") ?? (sys.get("USERNAME") ?? "")
     selection :: "preset={requested_preset ?? ""};environment={requested_environment ?? ""};host={host};user={user}"
-    &budget.push(inputs, "selection", selection.bytes())
+    &budget.push(&inputs, "selection", selection.bytes())
     if budget.exceeded -> return None
     ordered := inputs
     &ordered.sort_by((left: DefinitionInput, right: DefinitionInput) -> (left.name <=> right.name).then(left.bytes <=> right.bytes))
@@ -185,7 +185,7 @@ fn env_hook_normal_component_count(path: String) -> Int Never! {
 fn env_hook_add_input(root: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> {
     if budget.exceeded -> return
     if files.is_absolute(relative) || env_hook_has_parent_component(relative) {
-        &budget.push(inputs, "{kind}:unsafe:{relative}", [U8]{})
+        &budget.push(&inputs, "{kind}:unsafe:{relative}", [U8]{})
         return
     }
     if env_hook_normal_component_count(relative) > MAX_TREE_DEPTH {
@@ -195,7 +195,7 @@ fn env_hook_add_input(root: String, relative: String, kind: String, budget: &Fin
     path :: files.join(root, relative)
     root_real :: files.canonicalize(root) ?? root
     visited := [String: Bool]{}
-    env_hook_add_input_path(root_real, path, relative, kind, budget, inputs, &visited, 0)
+    env_hook_add_input_path(root_real, path, relative, kind, &budget, &inputs, &visited, 0)
 }
 
 fn env_hook_add_input_path(root: String, path: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], visited: &[String: Bool], depth: Int) -[FS, Env]> {
@@ -205,21 +205,21 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
         return
     }
     info :: files.stat(path) ?? {
-        &budget.push(inputs, "{kind}:missing:{relative}", [U8]{})
+        &budget.push(&inputs, "{kind}:missing:{relative}", [U8]{})
         return
     }
     if info.is_symlink {
         target :: files.read_link(path) ?? ""
-        &budget.push(inputs, "{kind}:symlink:{relative}", target.bytes())
+        &budget.push(&inputs, "{kind}:symlink:{relative}", target.bytes())
         return
     }
     if files.canonicalize(path) == .Ok(real) {
         if !env_hook_path_within(real, root) {
-            &budget.push(inputs, "{kind}:unsafe:{relative}", real.bytes())
+            &budget.push(&inputs, "{kind}:unsafe:{relative}", real.bytes())
             return
         }
         if visited.has_key(real) {
-            &budget.push(inputs, "{kind}:cycle:{relative}", [U8]{})
+            &budget.push(&inputs, "{kind}:cycle:{relative}", [U8]{})
             return
         }
         visited[real] = true
@@ -228,7 +228,7 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
         &budget.push(inputs, "{kind}:directory:{relative}", "readonly={info.readonly};modified={env_hook_system_time_debug(info.modified)}".bytes())
         if budget.exceeded -> return
         children :: files.list_dir(path) ?? {
-            &budget.push(inputs, "{kind}:unreadable:{relative}", [U8]{})
+            &budget.push(&inputs, "{kind}:unreadable:{relative}", [U8]{})
             return
         }
         if children.len() > MAX_TREE_FILES {
@@ -251,11 +251,11 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
         if env_hook_read_nofollow(path, MAX_TREE_FILE_BYTES) == {
             .Ok(read) -> {
                 if read == {
-                    .Val(bytes) -> &budget.push(inputs, "{kind}:file:{relative}", bytes)
+                    .Val(bytes) -> &budget.push(&inputs, "{kind}:file:{relative}", bytes)
                     .None -> budget.exceeded = true
                 }
             }
-            .Err(_) -> &budget.push(inputs, "{kind}:unreadable:{relative}", [U8]{})
+            .Err(_) -> &budget.push(&inputs, "{kind}:unreadable:{relative}", [U8]{})
         }
         return
     }
@@ -291,10 +291,10 @@ fn env_hook_collect_definition_files(root: String, current: String, budget: &Fin
                 budget.exceeded = true
                 return
             }
-            env_hook_collect_definition_files(root, path, budget, inputs, depth + 1)
+            env_hook_collect_definition_files(root, path, &budget, &inputs, depth + 1)
         } else if info.is_file && entry.name.ends_with(".{FILE_EXT}") {
             relative :: env_hook_relative_to(path, root)
-            env_hook_add_input(root, relative, "source", budget, inputs)
+            env_hook_add_input(root, relative, "source", &budget, &inputs)
         }
         if budget.exceeded -> return
     }

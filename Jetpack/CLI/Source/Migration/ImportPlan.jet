@@ -200,10 +200,10 @@ fn cli_import_source_path_for_finding(source: String, fallback: String) -> Strin
         "" | "provider.native_document" | "reference.provider" | "reference.selector" -> true
         else -> source.starts_with("package.json.")
     }
-    if fallback.trim() != "" && internal -> return fallback
+    if fallback.trim() != "" && internal -> return fallback.copy()
     if source.trim() == "" {
         if fallback.trim() == "" -> return "provider facts"
-        return fallback
+        return fallback.copy()
     }
-    source
+    source.copy()
 }

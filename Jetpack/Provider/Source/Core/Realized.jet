@@ -257,7 +257,7 @@ struct DownloadPlan {
 
     fn extend(&self, other: DownloadPlan) Never! {
         if other.estimated_seconds != None -> self.estimated_seconds = other.estimated_seconds
-        loop item in other.items -> self.add_item(item)
+        loop item in other.items -> &self.add_item(item)
     }
 
     fn add_nix(&self, nix: NixDownloadPlan) Never! {
@@ -268,7 +268,7 @@ struct DownloadPlan {
                 .Cached -> PlanState.Cached
                 .Repaired -> PlanState.Repaired
             }
-            self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
+            &self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
         }
     }
 }

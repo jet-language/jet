@@ -307,7 +307,7 @@ fn cli_cc_normalize_output_path(raw: String, project_root: String, build_root: S
 // Rewrite an option operand, keeping an attached option prefix (`-oout.o`).
 fn cli_cc_replace_option_operand(argument: String, option: String, value: String) -> String Never! {
     if argument.starts_with(option) && argument.removeprefix(option) != "" -> return "{option}{value}"
-    value
+    value.copy()
 }
 
 fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String CLIToolError! {
@@ -403,7 +403,7 @@ fn cli_cc_replace_extension(path: String, extension: String) -> String Never! {
         .None -> ""
     }
     name :: halves?.after ?? path
-    if name == "" || name == ".." -> return path
+    if name == "" || name == ".." -> return path.copy()
     stem :: if name.cut_last(".") == {
         .Val(parts) -> if parts.before == "" -> name else -> parts.before
         .None -> name

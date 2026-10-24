@@ -500,13 +500,13 @@ fn build_strip_path_prefix(path: String, prefix: String) -> [String]? Never! {
 // (the sandbox projects the mounts); macOS and Windows translate only the
 // declared mount paths at the adapter boundary.
 fn build_runtime_toolchain_arguments(plan: HermeticBuildPlan, handle: ToolchainHandle, args: [String]) -[Env]> [String] Never! {
-    if sys.is_linux() -> return args
+    if sys.is_linux() -> return args.copy()
     toolchain :: plan.toolchain(handle) ?? return args
     loop argument in args -> build_runtime_toolchain_argument(toolchain, argument)
 }
 
 fn build_runtime_toolchain_environment(plan: HermeticBuildPlan, handle: ToolchainHandle, env: [String: String]) -[Env]> [String: String] Never! {
-    if sys.is_linux() -> return env
+    if sys.is_linux() -> return env.copy()
     toolchain :: plan.toolchain(handle) ?? return env
     out := [String: String]{}
     loop key in env.keys() -> out[key] = build_runtime_toolchain_argument(toolchain, env[key])
@@ -520,7 +520,7 @@ fn build_runtime_toolchain_argument(toolchain: HermeticBuildToolchain, argument:
         if !argument.starts_with(prefix) -> next
         if build_runtime_mount_path(toolchain, argument.removeprefix(prefix)) == .Val(path) -> return "{prefix}{path}"
     }
-    argument
+    argument.copy()
 }
 
 fn build_runtime_mount_path(toolchain: HermeticBuildToolchain, value: String) -> String? Never! {

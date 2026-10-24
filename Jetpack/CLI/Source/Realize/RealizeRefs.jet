@@ -211,7 +211,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
     // Tier 2 (erase live regions before diagnostics). A `Silent`
     // caller owns the aggregate line, which its progress sink redraws while
     // this call runs; clear only the spinner/ledger path up front.
-    if style != RowStyle.Silent -> cli_clear_live_region(live)
+    if style != RowStyle.Silent -> cli_clear_live_region(&live)
     // A TTY gets a live spinner that the final ledger row replaces; without
     // one (piped output, NO_COLOR) the plain status line stands instead.
     spinner := Spinner?{None}
@@ -235,7 +235,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
     if scope == RealizeScope.Use || project_metadata_missing {
         recorded_reuse = store_find_verified_user_profile_by_reference(&verification, roots, spec.raw) ?? {
             cli_stop_spinner(^spinner)
-            cli_clear_live_region(live)
+            cli_clear_live_region(&live)
             cli_report_realize_error(theme, RealizeError.Store(err))
             return RefOutcome.Failed
         }
@@ -263,7 +263,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
     if project_dir == .Val(project) -> locked_pin = pkg_lock_nix_realization(project, spec.raw) != None
     if flags.offline && uses_nix && offline_fixtures == None && !cache_candidate_ok && !indexed_nix && !locked_pin {
         cli_stop_spinner(^spinner)
-        cli_clear_live_region(live)
+        cli_clear_live_region(&live)
         cli_report_offline_nix(theme, spec)
         return RefOutcome.Failed
     }
@@ -287,7 +287,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
                     }
                 } else {
                     cli_stop_spinner(^spinner)
-                    cli_clear_live_region(live)
+                    cli_clear_live_region(&live)
                     ProviderError.NixIndex(error).report(theme)
                     return RefOutcome.Failed
                 }
@@ -302,14 +302,14 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
         .Ok(found) -> {
             if found == .Val(identity) {
                 cli_stop_spinner(^spinner)
-                cli_clear_live_region(live)
+                cli_clear_live_region(&live)
                 env_warn_sandbox_fallback(theme)
                 if trust_gate_build_identity(theme, trust_store_path(), project_dir ?? ".", identity, flags.trust) != None -> return RefOutcome.Failed
             }
         }
         .Err(reason) -> {
             cli_stop_spinner(^spinner)
-            cli_clear_live_region(live)
+            cli_clear_live_region(&live)
             ProviderError.SandboxUnavailable("could not establish the exact Core Cargo build identity: {reason.message}").report(theme)
             return RefOutcome.Failed
         }

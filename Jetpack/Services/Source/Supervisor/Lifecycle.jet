@@ -49,7 +49,7 @@ fn services_up_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: 
 
 fn services_reap_child(child: ^ProcessChild) -[Exec, Time.Wait]> {
     running := child
-    &running.wait().drop("the reaper only collects the exit status")
+    running.wait().drop("the reaper only collects the exit status")
 }
 
 // Re-execute this program as the detached supervisor of `plan`, then wait
@@ -129,7 +129,7 @@ fn services_start_one_with_recovery(host: ServiceHost, project_dir: String, env:
 fn services_launch(project_dir: String, env: ShellEnv, plan: DevServicePlan, resolved: &ServiceResolved, authority: ServiceAuthority, lifecycle: &LifecycleFacts) -[FS, Env, Exec, Net, Rand, Time.Wait]> StartedService? ServicesError! {
     allocated :: services_allocate_ports(resolved.ports)
     sockets :: services_prepare_sockets(project_dir, plan.sockets)
-    spec :: services_service_spec(env, plan, resolved, authority, allocated.ports, sockets.paths) ?? {
+    spec :: services_service_spec(env, plan, &resolved, authority, allocated.ports, sockets.paths) ?? {
         sockets.abandon()
         return Err(err)
     }
@@ -229,7 +229,7 @@ fn services_service_spec(env: ShellEnv, plan: DevServicePlan, resolved: &Service
 fn services_publish_identity(child: &ProcessChild, identity: ProcessIdentity, path: String, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
     state :: ServiceProcessState{pid: identity.pid, start_identity: identity.start, containment: identity.containment}
     if services_write_atomic(path, state.encode().bytes()) == .Err(error) {
-        cleanup :: services_cleanup_child_with_authority(child, authority)
+        cleanup :: services_cleanup_child_with_authority(&child, authority)
         return Err(ServicesError.new("couldn't publish service process state to `{path}`: {error}{cleanup}"))
     }
     Ok(state)
@@ -277,16 +277,16 @@ fn services_monitor_service(host: ServiceHost, first: StartedService, project_di
                 services_finish_supervisor(host, project_dir, plan, &started, Val(error.message))
                 return
             }
-            &started.child.wait().drop("the stopped child is reaped")
+            started.child.wait().drop("the stopped child is reaped")
             services_finish_supervisor(host, project_dir, plan, &started, None)
             return
         }
-        exited :: &started.child.exited() ?? {
+        exited :: started.child.exited() ?? {
             services_finish_supervisor(host, project_dir, plan, &started, Val("supervisor could not inspect service: {err}"))
             return
         }
         if exited {
-            receipt :: &started.child.wait() ?? {
+            receipt :: started.child.wait() ?? {
                 services_finish_supervisor(host, project_dir, plan, &started, Val("supervisor could not inspect service: {err}"))
                 return
             }
@@ -332,7 +332,7 @@ fn services_monitor_service(host: ServiceHost, first: StartedService, project_di
                     return
                 }
                 if services_stop_started_process(&started, plan.shutdown) == .Err(error) {
-                    if &started.child.exited() == {
+                    if started.child.exited() == {
                         .Ok(done) -> {
                             if !done {
                                 services_finish_supervisor(host, project_dir, plan, &started, Val(error.message))
@@ -345,7 +345,7 @@ fn services_monitor_service(host: ServiceHost, first: StartedService, project_di
                         }
                     }
                 }
-                &started.child.wait().drop("the replaced child is reaped")
+                started.child.wait().drop("the replaced child is reaped")
                 restarts += 1
                 time.sleep(time.duration_ms(services_restart_delay(budget.backoff_ms, budget.exponential, restarts)))
                 if !services_restart_generation(host, project_dir, env, plan, "watch-restart", watched, &started, &stamps, "service watch restart did not produce a running process") -> return
@@ -366,13 +366,13 @@ fn services_restart_generation(host: ServiceHost, project_dir: String, env: Shel
                 if services_watch_stamps(project_dir, watched) == {
                     .Ok(fresh) -> stamps = fresh
                     .Err(error) -> {
-                        services_finish_supervisor(host, project_dir, plan, started, Val(error.message))
+                        services_finish_supervisor(host, project_dir, plan, &started, Val(error.message))
                         return false
                     }
                 }
                 return true
             }
-            services_finish_supervisor(host, project_dir, plan, started, Val(missing))
+            services_finish_supervisor(host, project_dir, plan, &started, Val(missing))
             false
         }
         .Err(error) -> {
@@ -458,7 +458,7 @@ fn services_finish_supervisor(host: ServiceHost, project_dir: String, plan: DevS
         }
     }
     preserve_terminal_state :: if existing == .Val(facts) -> services_is_terminal_evidence(facts) else -> false
-    if services_stop_supervisor_authority(host, project_dir, plan, started) == .Err(cleanup_error) {
+    if services_stop_supervisor_authority(host, project_dir, plan, &started) == .Err(cleanup_error) {
         if preserve_terminal_state -> return
         message :: if error == .Val(text) -> "{text}; supervisor cleanup failed: {cleanup_error.message}" else -> "supervisor cleanup failed: {cleanup_error.message}"
         services_write_atomic(services_supervisor_error_path(dir), message.bytes()).drop("supervisor error evidence is best-effort")
@@ -518,7 +518,7 @@ fn services_stop_dependents(project_dir: String, dependency: String, visited: &[
     }
     &dependents.sort()
     loop name in dependents {
-        services_stop_dependents(project_dir, name, visited)
+        services_stop_dependents(project_dir, name, &visited)
         dir :: services_service_dir(project_dir, name)
         found :: services_read_lifecycle(dir) ?? next
         facts :: found ?? next
@@ -571,7 +571,7 @@ fn services_collect_watch_stamps(project_dir: String, path: String, limit: Int, 
     info :: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
-            if services_is_not_found(error) -> return services_push_watch_stamp(entries, limit, "{path}\tmissing")
+            if services_is_not_found(error) -> return services_push_watch_stamp(&entries, limit, "{path}\tmissing")
             return Err(ServicesError.new("couldn't inspect watched path `{path}`: {error}"))
         }
     }
@@ -591,7 +591,7 @@ fn services_collect_watch_stamps(project_dir: String, path: String, limit: Int, 
         &children.push(entry.path)
     }
     &children.sort()
-    loop child in children -> services_collect_watch_stamps(project_dir, child, limit, depth + 1, entries)
+    loop child in children -> services_collect_watch_stamps(project_dir, child, limit, depth + 1, &entries)
 }
 
 fn services_push_watch_stamp(entries: &[String], limit: Int, stamp: String) ServicesError! {
@@ -717,7 +717,7 @@ fn services_stop_supervisor_authority(host: ServiceHost, project_dir: String, pl
         .Ok(matches) -> {
             if matches {
                 live_attempted = true
-                if services_stop_started_process(started, Val(ShutdownPolicy.Kill)) == .Err(error) -> live_error = Val(error)
+                if services_stop_started_process(&started, Val(ShutdownPolicy.Kill)) == .Err(error) -> live_error = Val(error)
             }
         }
         .Err(error) -> {

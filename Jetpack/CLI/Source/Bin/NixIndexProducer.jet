@@ -499,11 +499,11 @@ fn cli_nix_index_collect_named_strings(value: Dyn, field: String, values: &[Stri
                         .None -> {}
                     }
                 }
-                cli_nix_index_collect_named_strings(entry.value, field, values)
+                cli_nix_index_collect_named_strings(entry.value, field, &values)
             }
         }
         .Array(items) -> {
-            loop item in items -> cli_nix_index_collect_named_strings(item, field, values)
+            loop item in items -> cli_nix_index_collect_named_strings(item, field, &values)
         }
         else -> {}
     }
@@ -514,10 +514,10 @@ fn cli_nix_index_collect_store_paths(value: Dyn, paths: &[String]) Never! {
     if value == {
         .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> &paths.push(text)
         .Array(items) -> {
-            loop item in items -> cli_nix_index_collect_store_paths(item, paths)
+            loop item in items -> cli_nix_index_collect_store_paths(item, &paths)
         }
         .Object(fields) -> {
-            loop entry in fields -> cli_nix_index_collect_store_paths(entry.value, paths)
+            loop entry in fields -> cli_nix_index_collect_store_paths(entry.value, &paths)
         }
         else -> {}
     }
@@ -555,7 +555,7 @@ fn cli_nix_index_collect_json_files(path: String, found: &[String]) CLIToolError
     }
     if !metadata.is_dir -> return Err(CLIToolError.new("Hydra build input `{path}` is not a file or directory"))
     entries :: files.list_dir(path) ?? return Err(CLIToolError.new("read Hydra build input: {err}"))
-    loop entry in entries -> cli_nix_index_collect_json_files(entry.path, found)
+    loop entry in entries -> cli_nix_index_collect_json_files(entry.path, &found)
 }
 
 // The first non-negative integer named by one of `names`, searching nested

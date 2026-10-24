@@ -52,7 +52,7 @@ fn services_visit_dependency(index: Int, plans: [DevServicePlan], indexes: [Stri
     loop dependency in dependencies {
         dependency_index :: indexes.get(dependency) ?? return Err(ServicesError.new("service `{plan.name}` depends on unknown service `{dependency}`"))
         if !plans[dependency_index].enable -> return Err(ServicesError.new("service `{plan.name}` depends on disabled service `{dependency}`"))
-        services_visit_dependency(dependency_index, plans, indexes, states, stack, order)
+        services_visit_dependency(dependency_index, plans, indexes, &states, &stack, &order)
     }
     &stack.pop().drop("the visited name leaves the path")
     states[index] = 2
@@ -123,7 +123,7 @@ fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: ShellEn
 // `error`, with the cleanup failure appended when the rollback also failed.
 fn services_with_cleanup(error: ServicesError, cleanup: ServicesError!) -> ServicesError Never! {
     if cleanup == .Err(failure) -> return ServicesError.new("{error.message}; cleanup failed: {failure.message}")
-    error
+    error.copy()
 }
 
 // Stop a dependency-first selection in reverse. A dependent that cannot be

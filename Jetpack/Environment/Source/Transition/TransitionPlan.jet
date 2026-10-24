@@ -162,7 +162,7 @@ struct TransitionPlan {
                 .Err(read_error) -> &failures.push("{change.relative} could not be inspected during rollback: {read_error.message()}")
             }
         }
-        if failures.len() == 0 -> return error
+        if failures.len() == 0 -> return error.copy()
         env_transition_error("{error.message()}; rollback was incomplete: {failures.join("; ")}")
     }
 }

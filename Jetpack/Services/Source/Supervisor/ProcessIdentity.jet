@@ -261,12 +261,12 @@ fn services_run_bounded_probe(spec: ProcessSpec, timeout_ms: Int) -[Env, Exec, T
     child := spec.spawn() ?? return false
     deadline :: services_now_ms() + bounded
     loop {
-        exited :: &child.exited() ?? {
+        exited :: child.exited() ?? {
             services_abandon_child(&child)
             return false
         }
         if exited {
-            receipt :: &child.wait() ?? return false
+            receipt :: child.wait() ?? return false
             return receipt.success
         }
         if services_now_ms() >= deadline {

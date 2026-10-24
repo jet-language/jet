@@ -695,7 +695,7 @@ fn provider_luarocks_manifest_versions(raw: String, name: String) -> [String] Re
     &versions.sort_by((left: String, right: String) -> provider_luarocks_compare_versions(left, right))
     unique := [String]{}
     loop version in versions {
-        if unique.len() == 0 || unique[unique.len() - 1] != version -> &unique.push(version)
+        if unique.len() == 0 || unique[unique.len() - 1] != version -> unique.push(version)
     }
     if unique.len() == 0 -> return Err(RegistryError.Reason("LuaRocks manifest has no versions for `{name}`"))
     Ok(unique)

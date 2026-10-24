@@ -152,7 +152,7 @@ fn cli_make_profile_projection_read_only(path: String) CLIError! -[FS]> {
 
 // A write refused by permissions becomes the E1340 managed-tool failure.
 fn cli_managed_tool_write_error(bin: String, path: String, error: CLIError) -> CLIError Never! {
-    if !error.is_permission_denied() -> return error
+    if !error.is_permission_denied() -> return error.copy()
     CLIError.ManagedTool("managed tool `{bin}` cannot write `{path}`: {error.message()}")
 }
 

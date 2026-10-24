@@ -77,9 +77,9 @@ struct ToolGenerationTool {
             (key: "store_root", value: self.store_root)
         }
         loop field in fields -> &out.push("      \"{field.key}\": {cli_json_quote(field.value)},\n")
-        cli_profile_string_array_line(out, "bins", self.bins, true)
-        cli_profile_string_array_line(out, "members", self.members, true)
-        cli_profile_string_array_line(out, "projection_hashes", self.projection_hashes, false)
+        cli_profile_string_array_line(&out, "bins", self.bins, true)
+        cli_profile_string_array_line(&out, "members", self.members, true)
+        cli_profile_string_array_line(&out, "projection_hashes", self.projection_hashes, false)
         &out.push(if last -> "    }}\n" else -> "    }},\n")
     }
 
@@ -203,7 +203,7 @@ fn cli_physical_bin_name(logical: String) -[Env]> String {
 // Windows appends `.exe` unless the name already ends with it in any case.
 fn cli_physical_bin_name_for(logical: String, windows: Bool) -> String Never! {
     if windows && !pkg_ascii_lower(logical).ends_with(".exe") -> return "{logical}.exe"
-    logical
+    logical.copy()
 }
 
 // One normal path component of `[A-Za-z0-9_.+-]`, not a Windows device name
@@ -303,7 +303,7 @@ fn cli_profile_string_array_line(out: &[String], key: String, values: [String], 
 
 // One JSON string literal.
 fn cli_json_quote(value: String) -> String Never! {
-    pkg_json_render(Dyn.Text(value))
+    pkg_json_render(Dyn.Text(value.copy()))
 }
 
 // `[a,b]` of JSON string literals, no spaces.

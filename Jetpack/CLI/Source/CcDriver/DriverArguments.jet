@@ -449,7 +449,7 @@ struct CcResponseExpansion {
 
     fn run(args: [String], current_dir: String, scope_roots: [String]) -[FS]> [String] CLIToolError! {
         expansion := CcResponseExpansion{expanded: [String]{}, stack: [String]{}, file_count: 0}
-        expansion.expand(args, current_dir, scope_roots, 0)
+        &expansion.expand(args, current_dir, scope_roots, 0)
         Ok(expansion.expanded)
     }
 
@@ -479,7 +479,7 @@ struct CcResponseExpansion {
             bytes :: cli_cc_read_bounded_response_file(canonical)
             words :: cli_cc_parse_response_words(bytes, raw_path)
             nested_base :: cli_cc_path_parent(canonical) ?? base_dir
-            self.expand(words, nested_base, scope_roots, depth + 1)
+            &self.expand(words, nested_base, scope_roots, depth + 1)
             self.stack.remove_value(canonical)
         }
     }

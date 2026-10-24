@@ -125,7 +125,7 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
         loop candidate in 0..<ready.len() {
             if ready[candidate] < ready[at] -> at = candidate
         }
-        index :: ready.remove(at)
+        index :: &ready.remove(at)
         emitted[index] = true
         &order.push(index)
         next_dependents :: dependents[index]
@@ -256,7 +256,7 @@ fn env_close_under_dependents(root: String, plan: WorkspacePlan, seeds: [String]
     out := seeds
     stack := seeds
     loop stack.len() > 0 {
-        name :: stack.pop() ?? break
+        name :: &stack.pop() ?? break
         dependents :: reverse.get(name) ?? next
         loop dependent in dependents {
             if !out.contains(dependent) {
