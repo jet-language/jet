@@ -305,7 +305,7 @@ fn pipeline_secrets(specs: I64, count: I64) -> I64 {
 fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_text_len(builder)) }
 #Export(c) fn jet_std_process_pipeline(specs: I64, length: I64, ok: I64, err: I64) -> I64 {
     count :: if (specs == I64{0} || length <= I64{0}) -> I64{0} else -> length
-    if (count == I64{0}) -> return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, I64{0}, I64{0}, jet_rt_string_clone(rt_static_text("process.pipeline needs at least one command")), err)
+    if (count == I64{0}) -> return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, rt_static_text("process.pipeline([])"), I64{0}, jet_rt_string_clone(rt_static_text("process.pipeline needs at least one command")), err)
     at := I64{0}
     loop at < count {
         if (fd_word(fd_word(specs, at * I64{8}), PROCESS_SPEC_POLICY_WIRE) != I64{0}) -> return host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process.pipeline")), jet_rt_string_clone(rt_static_text("authority-bound pipelines need one auditable launch transaction; refusing before spawn")), err)

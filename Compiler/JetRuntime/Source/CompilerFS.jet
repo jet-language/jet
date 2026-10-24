@@ -5,7 +5,7 @@ fn compiler_fs_error(kind: I64, operation: I64, path: I64, code: I64, cause: I64
     value :: jet_rt_alloc(I64{56}, I64{8})
     rt_text_store(value, kind)
     rt_text_store(value + I64{8}, operation)
-    rt_text_store(value + I64{16}, jet_rt_string_clone(path))
+    rt_text_store(value + I64{16}, if (path == I64{0}) -> I64{0} else -> jet_rt_string_clone(path))
     rt_text_store(value + I64{24}, if (code == I64{0}) -> I64{0} else -> I64{1})
     rt_text_store(value + I64{32}, code)
     rt_text_store(value + I64{40}, cause)

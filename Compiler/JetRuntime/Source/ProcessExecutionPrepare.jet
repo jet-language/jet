@@ -3,11 +3,17 @@ fn process_execution_first(spec: I64) -> I64 {
     cmd :: fd_word(spec, PROCESS_SPEC_CMD)
     if (fd_word(cmd, I64{0}) == I64{0}) -> { I64{0} } else -> { fd_word(fd_word(cmd, I64{16}), I64{0}) }
 }
+// The resource an error names: the program, or for an empty command (which
+// has none) the empty `process.cmd([])` itself.
+fn process_execution_resource(spec: I64) -> I64 {
+    first :: process_execution_first(spec)
+    if (first == I64{0}) -> rt_static_text("process.cmd([])") else -> first
+}
 fn process_execution_error(spec: I64, operation: I64, cause: I64, err: I64) -> I64 {
-    host_io_other_take(operation, process_optional_text_clone(process_execution_first(spec)), cause, err)
+    host_io_other_take(operation, jet_rt_string_clone(process_execution_resource(spec)), cause, err)
 }
 fn process_execution_invalid(spec: I64, cause: I64, err: I64) -> I64 {
-    compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, process_execution_first(spec), I64{0}, jet_rt_string_clone(cause), err)
+    compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, process_execution_resource(spec), I64{0}, jet_rt_string_clone(cause), err)
 }
 fn process_execution_has(text: I64, byte: I64) -> Bool {
     at := I64{0}
@@ -257,7 +263,10 @@ fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
     fd_put(facts, I64{24}, if (process_execution_has(first, I64{47})) -> { I64{0} } else -> { I64{1} })
     mechanical :: process_execution_pack(spec)
     child :: jet_process_spawn_raw(mechanical, facts, argv, envp, I64{0}, facts + I64{32})
-    if (child == I64{0}) -> _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, host_errno_cause(fd_word(facts, I64{40})), err)
+    // The child reports a failed launch (exec, cwd, descriptor, limit) as its
+    // errno through HostSpawn's CLOEXEC pipe; the kind follows that errno as
+    // file I/O's does (ENOENT NotFound, EACCES PermissionDenied, ...).
+    if (child == I64{0}) -> _ := compiler_fs_errno(HOST_IO_OP_RESOLVE, process_execution_resource(spec), fd_word(facts, I64{40}), err)
     jet_rt_free(mechanical, I64{216}, I64{8})
     process_execution_nul_drop(candidate_columns, candidates)
     process_execution_nul_drop(argv, words)

@@ -1897,6 +1897,14 @@ fn run() -[Exec, Time.Wait]> {
 | `ProcessReceipt` | type | The immutable result of a run, including status, output, policy digests, backend, authority, descendants, limits, and redaction facts. |
 | `ProcessSpec` | type | The executable, arguments, stream policy, authority, terminal policy, limits, and detachment policy for a child. |
 
+A child that cannot start is an `IOError`, never a receipt: its kind
+follows the launch's OS error the way a file operation's does (`NotFound`
+for a missing program, `PermissionDenied` for one that may not be run,
+`Other` for the rest), with operation `.Resolve`, the program as its
+resource and the OS error code. An empty command (`process.cmd([])`) or an
+empty `process.pipeline([])` is `InvalidInput` naming that empty call. A
+program that starts and then exits nonzero, 127 included, is a receipt.
+
 #### Building a process policy
 
 `ProcessSpec` builder methods return a modified specification. `.arg(value)`

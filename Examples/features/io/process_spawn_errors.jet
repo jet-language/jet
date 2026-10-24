@@ -1,0 +1,41 @@
+// A process that cannot start is a typed IOError, never a receipt and never
+// a crash. The child's failed exec reaches the parent as its errno, so a
+// missing program is NotFound and names the program; an empty command or an
+// empty pipeline is InvalidInput naming the empty call.
+package {
+    name: "process_spawn_errors"
+    edition: "2026"
+    authority: { allow: [Exec, IO, Time.Wait] }
+}
+
+use core.process as process
+
+fn kind(error: IOError) -> String {
+    if error == {
+        .InvalidInput(_) -> "InvalidInput"
+        .NotFound(_) -> "NotFound"
+        .PermissionDenied(_) -> "PermissionDenied"
+        .TimedOut(_) -> "TimedOut"
+        .Cancelled(_) -> "Cancelled"
+        .Closed(_) -> "Closed"
+        .Protocol(_) -> "Protocol"
+        .Other(_) -> "Other"
+        .ResourceLimit(_) -> "ResourceLimit"
+    }
+}
+
+fn report(label: String, spec: ProcessSpec) -[Exec, IO, Time.Wait]> {
+    receipt :: process.run_spec(spec) ?? {
+        print("{label}: {kind(err)}: {err}")
+        return
+    }
+    print("{label}: ran, exit {receipt.code}")
+}
+
+fn run() -[Exec, IO, Time.Wait]> {
+    report("missing program", process.cmd(["/nonexistent/jet-no-such"]))
+    report("missing on PATH", process.cmd(["jet-no-such-program-5921"]))
+    report("empty command", process.cmd([]))
+    // A program that starts and then fails is a receipt, not an error.
+    report("exit 127 from sh", process.cmd(["sh", "-c", "exit 127"]))
+}

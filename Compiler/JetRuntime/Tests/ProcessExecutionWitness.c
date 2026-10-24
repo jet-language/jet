@@ -35,6 +35,7 @@ typedef struct JetAuthority JetAuthority;
 #define STREAM_CAPTURE 2
 // HOST_IO_KIND_*: INVALID_INPUT=0 NOT_FOUND=1 RESOURCE_LIMIT=8 OTHER=7.
 #define KIND_INVALID_INPUT 0
+#define KIND_NOT_FOUND 1
 #define KIND_OTHER 7
 #define KIND_RESOURCE_LIMIT 8
 // HOST_IO_OP_*: CLOSE=5 RESOLVE=6.
@@ -68,6 +69,7 @@ extern int64_t jet_process_child_wait(ProcessChild *, ProcessReceipt **, IOError
 extern int64_t jet_process_child_id(ProcessChild *);
 extern void jet_rt_handle_drop_process_child(ProcessChild *);
 extern void jet_rt_handle_drop_process_receipt(ProcessReceipt *);
+extern int64_t jet_std_process_pipeline(Spec *const *, int64_t, ProcessReceipt **, IOError **);
 extern void jet_rt_handle_drop_io_error(IOError *);
 extern int64_t jet_rt_world_new(void);
 extern void jet_rt_world_enter(int64_t, int64_t *);
@@ -286,26 +288,41 @@ int main(int argc, char **argv, char **envp) {
         jet_rt_handle_drop_process_spec(s);
     }
 
-    // 9. Missing executable: spawn failure carries the errno cause.
+    // 9. Missing executable: the child's exec errno (HostSpawn's CLOEXEC
+    // pipe) is the error's kind, code and cause, naming the program.
     {
         Spec *s = SPEC("/nonexistent/jet-no-such");
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         int64_t ok = jet_process_spec_run(s, &r, &e);
         check(ok == 0 && r == NULL && e != NULL, "missing executable is error");
+        check(e->kind == KIND_NOT_FOUND && e->operation == OP_RESOLVE, "missing executable is NotFound/Resolve");
+        check(e->has_code == 1 && e->code == 2, "missing executable carries ENOENT");
+        check(eq(e->resource, "/nonexistent/jet-no-such"), "missing executable names the program");
         check(has(e->cause, " (os error 2)"), "missing executable errno cause");
         jet_rt_handle_drop_io_error(e);
         jet_rt_handle_drop_process_spec(s);
     }
 
-    // 10. Empty command.
+    // 10. Empty command: InvalidInput/Resolve naming the empty command (it
+    // has no program to name).
     {
         Spec *s = spec_of(NULL, 0);
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         int64_t ok = jet_process_spec_run(s, &r, &e);
+        check(ok == 0 && e != NULL && eq(e->resource, "process.cmd([])"), "empty command names process.cmd([])");
         expect_error(ok, e, KIND_INVALID_INPUT, OP_RESOLVE, "process command needs at least one word");
         jet_rt_handle_drop_process_spec(s);
+    }
+
+    // 10b. Empty pipeline: InvalidInput/Resolve naming process.pipeline([]).
+    {
+        ProcessReceipt *r = NULL;
+        IOError *e = NULL;
+        int64_t ok = jet_std_process_pipeline(NULL, 0, &r, &e);
+        check(ok == 0 && e != NULL && eq(e->resource, "process.pipeline([])"), "empty pipeline names process.pipeline([])");
+        expect_error(ok, e, KIND_INVALID_INPUT, OP_RESOLVE, "process.pipeline needs at least one command");
     }
 
     // 11. NUL byte inside a command word: Other/Resolve.
