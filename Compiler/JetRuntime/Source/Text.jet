@@ -369,18 +369,34 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     rt_text_header_free(value)
 }
 
-// Equal and ordered comparisons skip equal 8-byte words, then decide on the
-// first differing byte, exactly as the byte-by-byte scan would.
+// Equal and ordered comparisons skip equal 8-byte words. In the first word
+// that differs, the first differing byte is the lowest nonzero byte of the
+// two words' XOR (little-endian), found by halving, so it is the byte the
+// byte-by-byte scan would stop at. Offsets stay within `len`, so the sums
+// wrap unchecked.
 fn rt_text_first_difference(left: I64, right: I64, len: I64) -> I64 {
     // Shared owners (and a text compared with itself) hold one buffer.
     if (left == right) -> return len
     at := I64{0}
-    words :: len - len % I64{8}
-    loop at < words && rt_text_word(left + at) == rt_text_word(right + at) {
-        at += I64{8}
+    words :: wrapping(len - len.bit_and(I64{7}))
+    loop at < words {
+        diff := rt_text_word(wrapping(left + at)).bit_xor(rt_text_word(wrapping(right + at)))
+        if (diff != I64{0}) {
+            if (diff.bit_and(I64{4294967295}) == I64{0}) {
+                at = wrapping(at + I64{4})
+                diff = diff >> I64{32}
+            }
+            if (diff.bit_and(I64{65535}) == I64{0}) {
+                at = wrapping(at + I64{2})
+                diff = diff >> I64{16}
+            }
+            if (diff.bit_and(I64{255}) == I64{0}) -> at = wrapping(at + I64{1})
+            return at
+        }
+        at = wrapping(at + I64{8})
     }
-    loop at < len && rt_text_byte(left + at) == rt_text_byte(right + at) {
-        at += I64{1}
+    loop at < len && rt_text_byte(wrapping(left + at)) == rt_text_byte(wrapping(right + at)) {
+        at = wrapping(at + I64{1})
     }
     at
 }
