@@ -103,10 +103,34 @@ fn sema_copy_type_facts_known(
 // being decided (a cycle), or a name only the caller's scope resolves (a bare
 // or unresolved name). Untainted facts are the same in every query, which is
 // what lets sema_copy_facts_table keep them per nominal row.
+//
+// The table's walk (`table`) settles cycles instead of tainting them. It
+// finds the strongly connected components of the instantiations it visits
+// (Tarjan: `visits` numbers each one on entry, `low` is the lowest number the
+// current one reaches back to). The `path_*` rows mirror the nominals on the
+// path; `path_self` records an instantiation that reaches itself directly.
+// An instantiation whose cycle closes further up keeps provisional facts in
+// `finished`, its number in `pending`, and its parts in `scc`. When the
+// component's first instantiation finishes, its members are combined again
+// from their parts until no fact changes. Every member then holds the facts
+// its whole cycle decides: an `or` fact (heap, clock, dynamic loan) holds if a
+// part it reaches holds it, and an `and` fact (cloneable, complete) holds
+// unless a part it reaches refutes it. That is the answer a query's walk
+// gives when it starts at that member. Reaching another instantiation of a
+// generic on the path still taints.
 struct SemaCopyWalk {
     active: [String]
     finished: [String:SemaCopyWalkRow]
     tainted: Bool
+    table: Bool
+    visits: Int
+    low: Int
+    path_ids: [String]
+    path_keys: [String]
+    path_index: [Int]
+    path_self: [Bool]
+    pending: [String:Int]
+    scc: [SemaCopySccMember]
 }
 
 struct SemaCopyWalkRow {
@@ -114,16 +138,42 @@ struct SemaCopyWalkRow {
     tainted: Bool
 }
 
+// One instantiation of an unfinished component: its walk key and number, and
+// what sema_copy_nominal_combine needs to combine its facts again.
+struct SemaCopySccMember {
+    key: String
+    index: Int
+    actual: Type
+    declared: [Type]
+    distinct: Bool
+    resource: Bool
+    complete: Bool
+}
+
 fn sema_copy_walk() -> SemaCopyWalk Never! {
-    SemaCopyWalk{active: [String]{}, finished: [String:SemaCopyWalkRow]{}, tainted: false}
+    SemaCopyWalk{
+        active: [String]{},
+        finished: [String:SemaCopyWalkRow]{},
+        tainted: false,
+        table: false,
+        visits: 0,
+        low: 0,
+        path_ids: [String]{},
+        path_keys: [String]{},
+        path_index: [Int]{},
+        path_self: [Bool]{},
+        pending: [String:Int]{},
+        scc: [SemaCopySccMember]{},
+    }
 }
 
 // The untainted copy facts of every non-generic, non-trait nominal, by
 // registration row (`rows[module_index][row]`). They are computed once per
-// program tables, with one shared walk. A None row (generic, trait or
-// tainted) is walked by each query. `close` holds every nominal row's
-// sema_copy_nominal_has_impl(…, "Close") answer, which the walk and the
-// ownership Close-owner check read once per visited nominal.
+// program tables, with one shared table walk, which settles recursive
+// nominals. A None row (generic, trait or tainted) is walked by each query.
+// `close` holds every nominal row's sema_copy_nominal_has_impl(…, "Close")
+// answer, which the walk and the ownership Close-owner check read once per
+// visited nominal.
 struct SemaCopyFactsTable {
     rows: [[SemaCopyTypeFacts?]]
     close: [[(known: Bool, value: Bool)]]
@@ -145,6 +195,7 @@ fn sema_copy_facts_table(graph: SemaRegistrationGraph?) -> SemaCopyFactsTable Ne
         table := SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: ^close}
         rows := [[SemaCopyTypeFacts?]]{}
         walk := sema_copy_walk()
+        walk.table = true
         loop module_index in 0..<registered.modules.len() {
             module_rows := [SemaCopyTypeFacts?]{}
             loop row in 0..<registered.modules[module_index].nominals.len() {
@@ -500,8 +551,12 @@ fn sema_copy_named_facts(
         // serves both.
         resolved :: sema_type_graph_lookup_symbol_at(registered, caller, name)
         // Only a canonical `module::Name` that resolves names one symbol from
-        // every caller; any other name is the caller's scope's reading.
-        if resolved == None || !name.contains("::") -> walk.tainted = true
+        // every caller; any other name is the caller's scope's reading. The
+        // table's walk has no caller: it reads the parts of a nominal, which
+        // resolved in the nominal's own module. Only a compiler-owned, Core or
+        // unresolved name stays bare there, and it means the same from no
+        // caller as it did in that module.
+        if !walk.table && (resolved == None || !name.contains("::")) -> walk.tainted = true
         if resolved == .Val(found) {
             if sema_resolved_kind(registered, found) == SymbolKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
         }
@@ -581,7 +636,7 @@ fn sema_copy_nominal_facts(
 ) -> SemaCopyTypeFacts Never! {
     key :: nominal.identity_key
     if walk.active.contains(key) {
-        walk.tainted = true
+        if !walk.table || !sema_copy_walk_back_edge(&walk, key, actual) -> walk.tainted = true
         return sema_copy_type_facts_known(false, true, false, false, false, false, true)
     }
     if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
@@ -593,11 +648,26 @@ fn sema_copy_nominal_facts(
     finished_key :: sema_copy_walk_key(key, actual)
     if walk.finished.get(finished_key) == .Val(known) {
         if known.tainted -> walk.tainted = true
+        if walk.table {
+            if walk.pending.get(finished_key) == .Val(pending_index) {
+                if pending_index < walk.low -> walk.low = pending_index
+            }
+        }
         return known.facts
     }
     outer_tainted :: walk.tainted
     walk.tainted = false
+    outer_low :: walk.low
+    index :: walk.visits
     &walk.active.push(key)
+    if walk.table {
+        walk.visits += 1
+        walk.low = index
+        &walk.path_ids.push(key)
+        &walk.path_keys.push(finished_key)
+        &walk.path_index.push(index)
+        &walk.path_self.push(false)
+    }
     bindings_result :: sema_copy_generic_bindings(nominal, actual)
     bindings :: bindings_result.bindings
     complete := bindings_result.complete
@@ -605,11 +675,41 @@ fn sema_copy_nominal_facts(
     resource := resource_impl.value
     if !resource_impl.known -> complete = false
     if sema_module_is_core_source(nominal.symbol.module_name) && sema_copy_named_is_builtin_resource(nominal.symbol.name) -> resource = true
+    distinct :: nominal.kind == SemaRegistrationNominalKind.Distinct
+    declared_types := sema_copy_nominal_declared_types(nominal, bindings, graph)
+    result := sema_copy_nominal_combine(actual, declared_types, distinct, resource, complete, graph, table, caller, generic_params, &walk)
+    _ := &walk.active.pop()
+    if walk.table {
+        _ := &walk.path_ids.pop()
+        _ := &walk.path_keys.pop()
+        _ := &walk.path_index.pop()
+        self_loop :: &walk.path_self.pop() ?? false
+        member := SemaCopySccMember{key: finished_key, index: index, actual: actual, declared: ^declared_types, distinct: distinct, resource: resource, complete: complete}
+        return sema_copy_scc_finish(^member, ^result, self_loop, outer_tainted, outer_low, graph, table, caller, generic_params, &walk)
+    }
+    walk.finished[finished_key] = SemaCopyWalkRow{facts: result, tainted: walk.tainted}
+    walk.tainted = outer_tainted || walk.tainted
+    result
+}
+
+// A nominal's facts from its declared part types and its own capabilities.
+fn sema_copy_nominal_combine(
+    actual: Type,
+    declared_types: [Type],
+    distinct: Bool,
+    resource: Bool,
+    complete_parts: Bool,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
     cloneable := true
     heap := false
     clock := false
     dynamic_loan := false
-    declared_types :: sema_copy_nominal_declared_types(nominal, bindings, graph)
+    complete := complete_parts
     loop declared in declared_types {
         nested :: sema_copy_type_facts(declared, graph, table, caller, generic_params, &walk)
         cloneable = cloneable && nested.cloneable
@@ -618,9 +718,9 @@ fn sema_copy_nominal_facts(
         dynamic_loan = dynamic_loan || nested.dynamic_loan
         complete = complete && nested.complete
     }
-    if nominal.kind == SemaRegistrationNominalKind.Distinct -> cloneable = true
+    if distinct -> cloneable = true
     if resource -> cloneable = false
-    result :: SemaCopyTypeFacts{
+    SemaCopyTypeFacts{
         copyable: sema_copy_copyable_scalar(actual),
         cloneable: cloneable,
         heap: heap,
@@ -629,9 +729,91 @@ fn sema_copy_nominal_facts(
         dynamic_loan: dynamic_loan,
         complete: complete,
     }
-    _ := &walk.active.pop()
-    walk.finished[finished_key] = SemaCopyWalkRow{facts: result, tainted: walk.tainted}
-    walk.tainted = outer_tainted || walk.tainted
+}
+
+// A table walk reaching a nominal on its path: the same instantiation is a
+// cycle, which lowers `low` to that instantiation's number; another
+// instantiation of the same generic is not, and taints as in a query.
+fn sema_copy_walk_back_edge(walk: &SemaCopyWalk, key: String, actual: Type) -> Bool Never! {
+    finished_key :: sema_copy_walk_key(key, actual)
+    position := walk.path_ids.len() - 1
+    loop position >= 0 {
+        if walk.path_ids[position] == key {
+            if walk.path_keys[position] != finished_key -> return false
+            if walk.path_index[position] < walk.low -> walk.low = walk.path_index[position]
+            if position == walk.path_ids.len() - 1 -> walk.path_self[position] = true
+            return true
+        }
+        position -= 1
+    }
+    false
+}
+
+fn sema_copy_facts_same(left: SemaCopyTypeFacts, right: SemaCopyTypeFacts) -> Bool Never! {
+    left.copyable == right.copyable && left.cloneable == right.cloneable && left.heap == right.heap && left.observable_clock == right.observable_clock && left.resource == right.resource && left.dynamic_loan == right.dynamic_loan && left.complete == right.complete
+}
+
+// Finishes one instantiation of a table walk. One whose walk reached further
+// up the path joins the open component (`scc`) with provisional facts. The
+// first instantiation of a component (or one that reaches itself) closes it:
+// its members are combined again from their parts, reading each other's
+// latest facts, until no fact changes. The provisional facts start at the
+// neutral end (no `or` fact, every `and` fact), so each round only moves a
+// fact away from it and the rounds end. A tainted component is not settled:
+// no table row keeps facts that read it.
+fn sema_copy_scc_finish(
+    member: ^SemaCopySccMember,
+    result: ^SemaCopyTypeFacts,
+    self_loop: Bool,
+    outer_tainted: Bool,
+    outer_low: Int,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    tainted :: walk.tainted
+    low :: walk.low
+    walk.finished[member.key] = SemaCopyWalkRow{facts: result, tainted: tainted}
+    walk.tainted = outer_tainted || tainted
+    if low < member.index {
+        walk.pending[member.key] = member.index
+        &walk.scc.push(^member)
+        walk.low = if outer_low < low -> outer_low else -> low
+        return result
+    }
+    walk.low = outer_low
+    root_index :: member.index
+    root_key :: member.key
+    members := [SemaCopySccMember]{}
+    loop walk.scc.len() > 0 && walk.scc[walk.scc.len() - 1].index > root_index {
+        open := &walk.scc.pop() ?? break
+        _ := &walk.pending.remove(open.key)
+        // Every member reaches the root, so a tainted root taints them all.
+        if tainted {
+            if walk.finished.get(open.key) == .Val(provisional) -> walk.finished[open.key] = SemaCopyWalkRow{facts: provisional.facts, tainted: true}
+        }
+        &members.push(^open)
+    }
+    if tainted || (members.len() == 0 && !self_loop) -> return result
+    &members.push(^member)
+    changed := true
+    loop changed {
+        changed = false
+        loop member_index in 0..<members.len() {
+            facts :: sema_copy_nominal_combine(members[member_index].actual, members[member_index].declared, members[member_index].distinct, members[member_index].resource, members[member_index].complete, graph, table, caller, generic_params, &walk)
+            if walk.finished.get(members[member_index].key) == .Val(previous) {
+                if !sema_copy_facts_same(previous.facts, facts) {
+                    walk.finished[members[member_index].key] = SemaCopyWalkRow{facts: facts, tainted: false}
+                    changed = true
+                }
+            }
+        }
+    }
+    walk.low = outer_low
+    walk.tainted = outer_tainted
+    if walk.finished.get(root_key) == .Val(settled) -> return settled.facts
     result
 }
 
@@ -675,7 +857,8 @@ fn sema_copy_apply_facts(
         return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
     }
     if graph == .Val(registered) {
-        if !name.contains("::") -> walk.tainted = true
+        // A bare head taints a query, not the table's walk (sema_copy_named_facts).
+        if !walk.table && !name.contains("::") -> walk.tainted = true
         if sema_type_resolve_nominal_row_at(registered, ty, caller) == .Val(row) {
             nominal_facts :: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, &walk)
             return SemaCopyTypeFacts{
@@ -688,7 +871,7 @@ fn sema_copy_apply_facts(
                 complete: nominal_facts.complete && nested.complete,
             }
         }
-        walk.tainted = true
+        if !walk.table -> walk.tainted = true
     }
     if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller) {
         return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
