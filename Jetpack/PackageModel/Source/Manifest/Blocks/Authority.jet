@@ -145,18 +145,6 @@ fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
         if entry.key == {
             AUTHORITY_FIELD_ALLOW -> authority.allow = Val(pkg_authority_effect_list("authority.allow", entry.value.trim()))
             AUTHORITY_FIELD_DENY -> authority.deny = Val(pkg_authority_effect_list("authority.deny", entry.value.trim()))
-            // Seed bridge: Compiler/JetCli/package.jet keeps `holds: { allow, deny }` because the
-            // seed that builds the compiler reads only that spelling. Delete this arm, and flatten
-            // that manifest, with the next seed rotation.
-            "holds" -> {
-                loop held in pkg_authority_entries(pkg_authority_object_body(entry.value, "holds")) {
-                    if held.key == {
-                        AUTHORITY_FIELD_ALLOW -> authority.allow = Val(pkg_authority_effect_list("authority.allow", held.value.trim()))
-                        AUTHORITY_FIELD_DENY -> authority.deny = Val(pkg_authority_effect_list("authority.deny", held.value.trim()))
-                        else -> return Err(pkg_authority_bad("unknown `authority` field `{held.key}`"))
-                    }
-                }
-            }
             AUTHORITY_FIELD_NEEDS -> {
                 if pkg_parse_authority_needs(entry.value) == {
                     .Ok(needs) -> authority.needs = needs

@@ -332,23 +332,16 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
 }
 
 // `allow:` and `deny:` sit directly in the `authority:` record.
-//
-// Seed bridge: Compiler/JetCli/package.jet keeps `holds: { allow, deny }` because the seed
-// that builds the compiler reads only that spelling, so `holds` is read here (and passed by
-// jet_driver_validate_authority_fields) as the same record. Delete `holds_open`, the `holds`
-// validator arm, and flatten that manifest, with the next seed rotation.
 fn jet_driver_parse_authority_bound(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> JetDriverAuthorityBound {
     result := JetDriverAuthorityBound{allow: None, deny: None}
     allow_seen := false
     deny_seen := false
-    holds_open := false
     nesting := 0
     index := open_index + 1
     loop index < close_index {
         token :: tokens[index]
-        if (nesting == 0 || (holds_open && nesting == 1)) && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
+        if nesting == 0 && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             field :: token_decoded(tables, token)
-            if nesting == 0 && field == "holds" -> holds_open = true
             if field == "allow" || field == "deny" {
                 if field == "allow" {
                     if allow_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.allow` is declared more than once"))
@@ -366,7 +359,6 @@ fn jet_driver_parse_authority_bound(source: String, tokens: [Token], tables: Tok
         if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN -> nesting += 1
         if token.kind == TOKEN_RBRACE || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RPAREN {
             if nesting > 0 -> nesting -= 1
-            if nesting == 0 -> holds_open = false
         }
         index += 1
     }
@@ -386,8 +378,7 @@ fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, op
             if field == {
                 "allow" | "deny" | "needs" | "trust" -> {}
                 "grants" | "providers" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.{field}` is not supported by the current compiler package-policy boundary"))
-                // Seed bridge (see jet_driver_parse_authority_bound): delete with the next seed rotation.
-                "holds" -> {}
+                "holds" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` is gone: write `allow:` and `deny:` directly inside `authority:`"))
                 else -> &diagnostics.push(jet_driver_authority_diagnostic(span, "unknown `authority` field `{field}` - allowed: `allow`, `deny`, `needs`, `grants`, `trust`, `providers`"))
             }
         }
