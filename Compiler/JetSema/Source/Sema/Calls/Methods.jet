@@ -11,6 +11,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Func,
+    NodeKind,
     Span,
     SymbolID,
     SymbolKind,
@@ -940,7 +941,10 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
                 &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }}
-            if method != "mount" -> value = sema_tir_node(checked.ty, TExprKind.HostBorrowCallback{callable: checked, params: params}, checked.span)
+            if method != "mount" {
+                callable_row :: sema_arena_adopt(&context, checked)
+                value = sema_node(&context, checked.ty, NodeKind.HostBorrowCallback{callable: callable_row, params: params}, checked.span)
+            }
             value = sema_tir_node(value.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: value}}, value.span)
             if has_binding -> binding = sema_app_route_binding(method, argument.expr, environment, program, scopes, context.host_hooks)
         }

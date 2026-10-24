@@ -104,7 +104,7 @@ fn sema_node(context: &SemaCheckContext, ty: Type, kind: ^NodeKind, span: Span) 
     row_type :: type_table_intern(&context.arena.tree.types, ty)
     &context.arena.tree.expr_types.push(TExprType{id: AST_NODE_GENERATED, ty: row_type})
     // copy: the row keeps its type; the handle carries its own.
-    TExpr{ty: ty.copy(), kind: .Flat(index: context.arena.base + context.arena.tree.nodes.len() - 1), span: span}
+    TExpr{ty: ty.copy(), kind: .Flat(index: context.arena.tree.node_base + context.arena.tree.nodes.len() - 1), span: span}
 }
 
 // The arena row index of checked child `value`, for a flat node's kind: a
@@ -121,7 +121,7 @@ fn sema_arena_adopt(context: &SemaCheckContext, value: TExpr) -> Int Never! {
 // types, so each moved type row is interned again here.
 fn sema_arena_take_back(context: &SemaCheckContext, rows: ^BodyFlat) Never! {
     nested := ^rows
-    if nested.base != context.arena.base + context.arena.tree.nodes.len() || nested.stmt_base != context.arena.stmt_base + context.arena.tree.stmts.len() -> panic("sema_arena_take_back: the enclosing check built nodes while a nested check ran")
+    if nested.tree.node_base != context.arena.tree.node_base + context.arena.tree.nodes.len() || nested.tree.stmt_base != context.arena.tree.stmt_base + context.arena.tree.stmts.len() -> panic("sema_arena_take_back: the enclosing check built nodes while a nested check ran")
     compiler_transfer_rows<BodyNode>(&context.arena.tree.nodes, &nested.tree.nodes)
     loop row in nested.tree.expr_types {
         ty :: type_table_intern(&context.arena.tree.types, nested.tree.types.types[row.ty])
@@ -1620,7 +1620,7 @@ fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Flo
     if value.kind == {
         .IntLit(number, _) -> return Val(Float.from_int(number))
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.base].kind == .FloatLit(number) -> return Val(number)
+            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .FloatLit(number) -> return Val(number)
         }
         .CtLit(comptime_value) -> {
             if comptime_value == {
@@ -1641,14 +1641,14 @@ fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Flo
                 argument := args[0].value
                 if argument.kind == {
                     .Flat(index) -> {
-                        if context.arena.tree.nodes[index - context.arena.base].kind == .FloatLit(number) -> return Val(number)
+                        if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .FloatLit(number) -> return Val(number)
                     }
                     .IntLit(number, _) -> return Val(Float.from_int(number))
                     .Unary(op, operand) -> {
                         if op == TUnaryOp.Neg {
                             if operand.kind == {
                                 .Flat(index) -> {
-                                    if context.arena.tree.nodes[index - context.arena.base].kind == .FloatLit(number) -> return Val(-number)
+                                    if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .FloatLit(number) -> return Val(-number)
                                 }
                                 .IntLit(number, _) -> return Val(-Float.from_int(number))
                                 else -> {}
@@ -2338,7 +2338,7 @@ fn sema_expr_comptime_value(value: TExpr, context: SemaCheckContext) -> TComptim
         }
         // A scalar literal is a flat row (sema_node).
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.base].kind == {
+            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
                 .FloatLit(number) -> return Val(TComptimeValue.Float{value: number, bits: if value.ty == Type.Float32 -> 32 else -> 64})
                 .BoolLit(boolean) -> return Val(TComptimeValue.Bool{value: boolean})
                 .CharLit(character) -> return Val(TComptimeValue.Char{value: character})

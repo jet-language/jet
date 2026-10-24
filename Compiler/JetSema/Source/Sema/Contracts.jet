@@ -614,7 +614,7 @@ fn sema_contract_expr_proven(expr: TExpr, environment: SemaScopeEnvironment, pro
     if expr.kind == {
         // A literal condition is a flat `BoolLit` row (sema_node).
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.base].kind == .BoolLit(value) -> return value
+            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .BoolLit(value) -> return value
             false
         }
         .Binary(op, _, _, left, right) -> if op == {

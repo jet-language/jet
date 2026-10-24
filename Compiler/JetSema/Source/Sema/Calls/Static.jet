@@ -779,7 +779,10 @@ fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environm
         &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`Option.lift2`'s first argument must be a function, got {sema_type_show(function.ty)}", "`Option.lift2(f, a, b)` needs `f: fn(T, U) R`", "pass a two-argument function or lambda"))
         return failed
     }
-    value :: sema_tir_node(result_ty, TExprKind.OptionLift2{function: function, left: left_value, right: right_value}, span)
+    function_row :: sema_arena_adopt(&context, function)
+    left_row :: sema_arena_adopt(&context, left_value)
+    right_row :: sema_arena_adopt(&context, right_value)
+    value :: sema_node(&context, result_ty, NodeKind.OptionLift2{function: function_row, left: left_row, right: right_row}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
 }
 
@@ -1003,7 +1006,8 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     }
     fallible :: base_fallible || (facts.range != None && !literal_in_range)
     result :: if fallible -> Type.Result{ok: success, err: Type.String} else -> success
-    converted :: sema_tir_node(result, TExprKind.DistinctConvert{owner: owner.id, argument: argument, operation: operation, range: facts.range, fallible: fallible}, span)
+    argument_row :: sema_arena_adopt(&context, argument)
+    converted :: sema_node(&context, result, NodeKind.DistinctConvert{owner: owner.id, argument: argument_row, operation: operation, range: facts.range, fallible: fallible}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 

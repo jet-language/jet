@@ -52,7 +52,6 @@ use jet_foundation.[
     TGenericParam,
     THardwareCall,
     TIndexKind,
-    TIntegerBounds,
     TIntegerWidth,
     TLetTy,
     TListPatternRest,
@@ -176,7 +175,7 @@ fn tir_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Ne
         .IntLit(value, _) -> Val("int:{value}")
         .StrLit(value) -> Val("text:{value}")
         // A scalar literal or a constant reference is a flat row (sema_node).
-        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.base].kind == {
+        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
             .BoolLit(value) -> Val("bool:{value}")
             .CharLit(value) -> Val("char:{value}")
             .ConstRef(symbol) -> Val("constant:{symbol.key}")
@@ -292,7 +291,6 @@ enum TExprKind {
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
     DistinctCtor(argument: TExpr)
-    DistinctConvert(owner: SymbolID, argument: TExpr, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
     TraitBox(value: TExpr, target: Type)
     UnitConvert(argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
     MathBuiltin(type_name: String, function: String, args: [TExpr])
@@ -314,7 +312,6 @@ enum TExprKind {
     Tuple(values: [TExpr])
     List(values: [TExpr], trait_coercion: Type?)
     Map(entries: [TMapEntry])
-    EnumCtor(owner: SymbolID, variant: SymbolID, payload: TEnumPayload)
     Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier)
     TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
     Lambda(value: TLambda)
@@ -325,28 +322,21 @@ enum TExprKind {
     LayoutLiteral(value: TExpr)
     LayoutCompare(op: TBinaryOp, lhs: TExpr, rhs: TExpr)
     SharedGuardValue(guard: TExpr)
-    SharedGuardMap(guard: TExpr, path: [TFieldRef], editable: Bool)
-    SharedGuardSplit(guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool)
     SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
-    ConditionNotify(condition: TExpr, all: Bool)
     CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier)
     HostCall(call: THostCall)
     AllocNew(ctor: TAllocCtor, args: [TCallArg])
     EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
     JSONLit(variant: String, arg: TExpr?, clone_arg: Bool)
-    DBValueLit(variant: String, arg: TExpr?, clone_arg: Bool)
     ListLit(values: [TExpr])
     ListSpread(parts: [TListSpreadPart])
     MapLit(entries: [TMapEntry])
     PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
-    MathLaneIndex(lane_type: String, base: TExpr, index: TExpr, line: Int)
-    MathSwizzleRead(type_name: String, receiver: TExpr, lanes: [Int])
     // #4318: `fact` is the sema decision behind the copy; MIR keeps it on Copy.
     Clone(value: TExpr, fact: CopyFact)
     ExplicitCopy(value: TExpr)
     MaterializeView(value: TExpr)
     StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
-    DecodeUnder(segment: TExpr, inner: TExpr)
     BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr])
     IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
     ResultHandler(subject: TExpr, ok_pattern: TPattern, ok_body: [TStmt], ok_value: TExpr, err_pattern: TPattern, err_body: [TStmt], err_value: TExpr, terminal: TExpr)
@@ -359,9 +349,7 @@ enum TExprKind {
     OptField(base: TExpr, member: String, flatten: Bool)
     OptMethodCall(base: TExpr, binding: TLocal, call: TExpr, flatten: Bool)
     PatternMatches(subject: TExpr, pattern: TPattern)
-    OptionLift2(function: TExpr, left: TExpr, right: TExpr)
     ClosureMethod(receiver: TExpr, operation: TClosureOp, args: [TExpr])
-    HostBorrowCallback(callable: TExpr, params: [Type])
     NumericMethod(receiver: TExpr, operation: TNumericOp)
     NumericBinaryMethod(receiver: TExpr, operation: TNumericOp, argument: TExpr)
     OverflowOpt(prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr)
@@ -372,7 +360,6 @@ enum TExprKind {
     TaskGroupAny(tasks: TExpr)
     SelectRecv(builder: TExpr, channel: TExpr)
     SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
-    SelectWait(builder: TExpr, nonblocking: Bool)
     FnValue(kind: TFnValueKind)
     // A node the checker built as row `index` of its arena (sema_node): the
     // row's NodeKind holds the node, with arena row indices as children.
@@ -1211,7 +1198,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(receiver)
             loop argument in args -> visit(argument.value)
         }
-        .DistinctCtor(argument) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> visit(argument)
+        .DistinctCtor(argument) | .TraitBox(argument, _) -> visit(argument)
         .UnitConvert(argument, _, _, rounding, _, _, _, _) -> {
             visit(argument)
             if rounding == Val(rounding_value) -> visit(rounding_value.digits)
@@ -1249,7 +1236,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(entry.key)
             visit(entry.value)
         }
-        .EnumCtor(_, _, payload) | .EnumLit(_, _, payload) -> {
+        .EnumLit(_, _, payload) -> {
             if payload == {
                 .Positional(args) -> loop argument in args -> visit(argument.value)
                 .Named(fields) -> loop field in fields -> visit(field.value.value)
@@ -1271,17 +1258,14 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(rhs)
         }
         .SharedGuardValue(guard) -> visit(guard)
-        .SharedGuardMap(guard, _, _) -> visit(guard)
-        .SharedGuardSplit(guard, _, _, _) -> visit(guard)
         .SharedGuardWait(guard, condition, predicate) -> {
             visit(guard)
             visit(condition)
             tir_each_lambda_child(predicate, visit)
         }
-        .ConditionNotify(condition, _) -> visit(condition)
         .CoreCall(_, args, _, _, _, _) -> loop value in args -> visit(value)
         .HostCall(call) -> tir_each_host_call_child(call, visit)
-        .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
+        .JSONLit(_, argument, _) -> {
             if argument == Val(argument_value) -> visit(argument_value)
         }
         .AllocNew(_, args) -> loop argument in args -> visit(argument.value)
@@ -1291,17 +1275,8 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(pool)
             visit(id)
         }
-        .MathLaneIndex(_, base, index, _) -> {
-            visit(base)
-            visit(index)
-        }
-        .MathSwizzleRead(_, receiver, _) -> visit(receiver)
         .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> visit(value)
         .StaticCall(_, _, _, _, args) -> loop argument in args -> visit(argument.value)
-        .DecodeUnder(segment, inner) -> {
-            visit(segment)
-            visit(inner)
-        }
         .BuiltinMethod(receiver, _, args) -> {
             visit(receiver)
             loop value in args -> visit(value)
@@ -1336,16 +1311,10 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(subject)
             tir_each_pattern_child(pattern, visit)
         }
-        .OptionLift2(function, left, right) -> {
-            visit(function)
-            visit(left)
-            visit(right)
-        }
         .ClosureMethod(receiver, _, args) -> {
             visit(receiver)
             loop value in args -> visit(value)
         }
-        .HostBorrowCallback(callable, _) -> visit(callable)
         .NumericMethod(receiver, _) -> visit(receiver)
         .NumericBinaryMethod(receiver, _, argument) -> {
             visit(receiver)
@@ -1370,7 +1339,6 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(duration)
             if value == Val(nested) -> visit(nested)
         }
-        .SelectWait(builder, _) -> visit(builder)
         .FnValue(kind) -> tir_each_fn_value_child(kind, visit)
         else -> {}
     }

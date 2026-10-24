@@ -18,7 +18,14 @@ use jet_foundation.[
     Lambda,
     LambdaBody,
     LambdaParam,
+    BodyIfCond,
+    BodyPattern,
+    BodyTree,
     NodeKind,
+    body_each_if_cond_child,
+    body_each_node_kind_child,
+    body_each_pattern_child,
+    body_each_stmt_child,
     NamedSpan,
     OrFallback,
     Pattern,
@@ -615,7 +622,7 @@ fn sema_stmt_check_unit_branch(body: [Stmt], value_expr: Expr, bindings: [SemaCo
                 value :: checked_value ?? sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, value_span)
                 // A `()` value statement does nothing.
                 unit := false
-                if value.kind == .Flat(index) -> unit = context.arena.tree.nodes[index - context.arena.base].kind == .Unit
+                if value.kind == .Flat(index) -> unit = context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .Unit
                 if !unit -> &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
             }
         }
@@ -1349,13 +1356,14 @@ fn sema_stmt_for_in_body_mentions(state: SemaOwnershipState, references_before: 
 // state is dropped: `loop x in s.xs { if c { f(&s, x); return } }` looked
 // stable, lowered an in-place walk, and rustc rejected the `&mut s` call
 // that also borrows `s.xs[i]` (E0502).
-fn sema_stmt_for_in_tir_mentions(statements: [TStmt], key: String) -> Bool Never! {
+// `arena` holds the rows of the body's flat nodes (sema_node).
+fn sema_stmt_for_in_tir_mentions(statements: [TStmt], key: String, arena: BodyTree) -> Bool Never! {
     if sema_stmt_for_in_tir_assigns(statements, key) -> return true
     found := false
     loop statement in statements {
         if found -> break
         tir_each_stmt_child(statement, (child: TExpr) -> {
-            if !found && sema_stmt_for_in_tir_expr_names(child, key) -> found = true
+            if !found && sema_stmt_for_in_tir_expr_names(child, key, arena) -> found = true
         })
     }
     found
@@ -1368,8 +1376,9 @@ fn sema_stmt_for_in_tir_local_is(local: TLocal, key: String) -> Bool Never! {
 
 // A local read, an address of the whole local, or a lambda capture of it;
 // `tir_each_expr_child` covers every nested expression.
-fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool Never! {
+fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String, arena: BodyTree) -> Bool Never! {
     if value.kind == {
+        .Flat(index) -> return sema_stmt_for_in_row_names(arena, index, key)
         .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
         .RawAddressOf(place) -> {
             if place == .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
@@ -1386,7 +1395,31 @@ fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool Never! {
     }
     found := false
     tir_each_expr_child(value, (child: TExpr) -> {
-        if !found && sema_stmt_for_in_tir_expr_names(child, key) -> found = true
+        if !found && sema_stmt_for_in_tir_expr_names(child, key, arena) -> found = true
+    })
+    found
+}
+
+// sema_stmt_for_in_tir_expr_names of node row `index` of `tree`.
+fn sema_stmt_for_in_row_names(tree: BodyTree, index: Int, key: String) -> Bool Never! {
+    if tree.nodes[index - tree.node_base].kind == {
+        .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
+        .RawAddressOf(place) -> {
+            if place == .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
+        }
+        .Lambda(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tir_local_is(capture.local, key) -> return true
+            }
+        }
+        .InlineBlock(body) -> {
+            if sema_stmt_for_in_row_assigns(tree, body, key) -> return true
+        }
+        else -> {}
+    }
+    found := false
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> {
+        if !found && sema_stmt_for_in_row_names(tree, child, key) -> found = true
     })
     found
 }
@@ -1453,6 +1486,63 @@ fn sema_stmt_for_in_tir_assigns(statements: [TStmt], key: String) -> Bool Never!
     false
 }
 
+// sema_stmt_for_in_tir_assigns of statement rows `statements` of `tree`.
+fn sema_stmt_for_in_row_assigns(tree: BodyTree, statements: [Int], key: String) -> Bool Never! {
+    loop item in statements {
+        if sema_stmt_for_in_row_stmt_assigns(tree, item, key) -> return true
+    }
+    false
+}
+
+fn sema_stmt_for_in_row_stmt_assigns(tree: BodyTree, item: Int, key: String) -> Bool Never! {
+    if tree.stmts[item - tree.stmt_base] == {
+        .Assign(place, _, _, _, _) -> {
+            if place == .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
+            false
+        }
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> sema_stmt_for_in_row_assigns(tree, body, key)
+        .RefutableBind(_, _, fallback, _) -> sema_stmt_for_in_row_assigns(tree, fallback, key)
+        .CountedLoop(_, init, _, step, _, body, _) -> {
+            if sema_stmt_for_in_row_stmt_assigns(tree, init, key) || sema_stmt_for_in_row_assigns(tree, body, key) -> return true
+            if step == .Val(nested) -> return sema_stmt_for_in_row_stmt_assigns(tree, nested, key)
+            false
+        }
+        .If(_, then_body, else_body, _, _) -> {
+            if sema_stmt_for_in_row_assigns(tree, then_body, key) -> return true
+            if else_body == .Val(else_statements) -> return sema_stmt_for_in_row_assigns(tree, else_statements, key)
+            false
+        }
+        .Match(_, arms, _, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            false
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            if else_body == .Val(else_statements) -> return sema_stmt_for_in_row_assigns(tree, else_statements, key)
+            false
+        }
+        .RangeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            sema_stmt_for_in_row_assigns(tree, else_body, key)
+        }
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            if else_body == .Val(else_statements) -> return sema_stmt_for_in_row_assigns(tree, else_statements, key)
+            false
+        }
+        .GCEdit(_, _, _, _, _, edited, _) -> sema_stmt_for_in_row_stmt_assigns(tree, edited, key)
+        else -> false
+    }
+}
+
 // True when the loop body leaves the source root `key` unchanged, so the
 // loop may walk the source in place, as Rust's
 // crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::loop_body_keeps_source
@@ -1463,20 +1553,20 @@ fn sema_stmt_for_in_tir_assigns(statements: [TStmt], key: String) -> Bool Never!
 // and no diverging arm, no branch state is dropped, so the references are
 // complete; and no read of the root can become its moving last use while the
 // walk's item borrow is live.
-fn sema_stmt_for_in_body_keeps(state: SemaOwnershipState, references_before: Int, key: String, statements: [TStmt]) -> Bool {
-    if !sema_stmt_for_in_body_mentions(state, references_before, key) && !sema_stmt_for_in_tir_mentions(statements, key) -> return true
+fn sema_stmt_for_in_body_keeps(state: SemaOwnershipState, references_before: Int, key: String, statements: [TStmt], arena: BodyTree) -> Bool {
+    if !sema_stmt_for_in_body_mentions(state, references_before, key) && !sema_stmt_for_in_tir_mentions(statements, key, arena) -> return true
     loop index in references_before..<state.references.len() {
         reference :: state.references[index]
         if reference.def_key == key && reference.kind != SemaOwnershipReferenceKind.Read -> return false
     }
-    !sema_stmt_for_in_tir_assigns(statements, key) && sema_stmt_for_in_tir_stays(statements, key)
+    !sema_stmt_for_in_tir_assigns(statements, key) && sema_stmt_for_in_tir_stays(statements, key, arena)
 }
 
 // True when every statement only falls through: no return, break, value
 // break or next at any depth (a nested loop's included), no statement of
 // type Never, and no expression that leaves or diverges
 // (sema_stmt_for_in_tir_expr_stays).
-fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool Never! {
+fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String, arena: BodyTree) -> Bool Never! {
     loop statement in statements {
         if statement == {
             .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return false
@@ -1484,56 +1574,56 @@ fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool Never! {
                 if value.ty == (Type.Named{name: "Never"}) -> return false
             }
             .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
-                if !sema_stmt_for_in_tir_stays(body, key) -> return false
+                if !sema_stmt_for_in_tir_stays(body, key, arena) -> return false
             }
             .RefutableBind(_, _, fallback, _) -> {
-                if !sema_stmt_for_in_tir_stays(fallback, key) -> return false
+                if !sema_stmt_for_in_tir_stays(fallback, key, arena) -> return false
             }
             .CountedLoop(_, init, _, step, _, body, _) -> {
-                if !sema_stmt_for_in_tir_stays([TStmt]{init}, key) || !sema_stmt_for_in_tir_stays(body, key) -> return false
+                if !sema_stmt_for_in_tir_stays([TStmt]{init}, key, arena) || !sema_stmt_for_in_tir_stays(body, key, arena) -> return false
                 if step == .Val(nested) {
-                    if !sema_stmt_for_in_tir_stays([TStmt]{nested}, key) -> return false
+                    if !sema_stmt_for_in_tir_stays([TStmt]{nested}, key, arena) -> return false
                 }
             }
             .If(_, then_body, else_body, _, _) -> {
-                if !sema_stmt_for_in_tir_stays(then_body, key) -> return false
+                if !sema_stmt_for_in_tir_stays(then_body, key, arena) -> return false
                 if else_body == .Val(else_statements) {
-                    if !sema_stmt_for_in_tir_stays(else_statements, key) -> return false
+                    if !sema_stmt_for_in_tir_stays(else_statements, key, arena) -> return false
                 }
             }
             .Match(_, arms, _, _) -> loop arm in arms {
-                if !sema_stmt_for_in_tir_stays(arm.body, key) -> return false
+                if !sema_stmt_for_in_tir_stays(arm.body, key, arena) -> return false
             }
             .EnumMatch(_, arms, else_body, _, _) -> {
                 loop arm in arms {
-                    if !sema_stmt_for_in_tir_stays(arm.body, key) -> return false
+                    if !sema_stmt_for_in_tir_stays(arm.body, key, arena) -> return false
                 }
                 if else_body == .Val(else_statements) {
-                    if !sema_stmt_for_in_tir_stays(else_statements, key) -> return false
+                    if !sema_stmt_for_in_tir_stays(else_statements, key, arena) -> return false
                 }
             }
             .RangeSwitch(_, arms, else_body, _) -> {
                 loop arm in arms {
-                    if !sema_stmt_for_in_tir_stays(arm.body, key) -> return false
+                    if !sema_stmt_for_in_tir_stays(arm.body, key, arena) -> return false
                 }
-                if !sema_stmt_for_in_tir_stays(else_body, key) -> return false
+                if !sema_stmt_for_in_tir_stays(else_body, key, arena) -> return false
             }
             .MixedSwitch(_, _, arms, else_body, _) -> {
                 loop arm in arms {
-                    if !sema_stmt_for_in_tir_stays(arm.body, key) -> return false
+                    if !sema_stmt_for_in_tir_stays(arm.body, key, arena) -> return false
                 }
                 if else_body == .Val(else_statements) {
-                    if !sema_stmt_for_in_tir_stays(else_statements, key) -> return false
+                    if !sema_stmt_for_in_tir_stays(else_statements, key, arena) -> return false
                 }
             }
             .GCEdit(_, _, _, _, _, edited, _) -> {
-                if !sema_stmt_for_in_tir_stays([TStmt]{edited}, key) -> return false
+                if !sema_stmt_for_in_tir_stays([TStmt]{edited}, key, arena) -> return false
             }
             else -> {}
         }
         stays := true
         tir_each_stmt_child(statement, (child: TExpr) -> {
-            if stays && !sema_stmt_for_in_tir_expr_stays(child, key) -> stays = false
+            if stays && !sema_stmt_for_in_tir_expr_stays(child, key, arena) -> stays = false
         })
         if !stays -> return false
     }
@@ -1543,9 +1633,10 @@ fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool Never! {
 // An expression that neither leaves the loop (`?`, a diverging `??`), nor
 // diverges (type Never), nor write-borrows or captures the root `key`; an
 // inline block's statements fall through too.
-fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String) -> Bool Never! {
+fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String, arena: BodyTree) -> Bool Never! {
     if value.ty == (Type.Named{name: "Never"}) -> return false
     if value.kind == {
+        .Flat(index) -> return sema_stmt_for_in_row_expr_stays(arena, index, key)
         .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> return false
         .OrFallback(_, fallback, _) -> {
             if fallback == {
@@ -1559,13 +1650,115 @@ fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String) -> Bool Never! {
             }
         }
         .InlineBlock(body) -> {
-            if !sema_stmt_for_in_tir_stays(body, key) -> return false
+            if !sema_stmt_for_in_tir_stays(body, key, arena) -> return false
         }
         else -> {}
     }
     stays := true
     tir_each_expr_child(value, (child: TExpr) -> {
-        if stays && !sema_stmt_for_in_tir_expr_stays(child, key) -> stays = false
+        if stays && !sema_stmt_for_in_tir_expr_stays(child, key, arena) -> stays = false
+    })
+    stays
+}
+
+// Whether node row `index` of `tree` has type Never.
+fn sema_stmt_row_is_never(tree: BodyTree, index: Int) -> Bool Never! {
+    tree.types.types[tree.expr_types[index - tree.node_base].ty] == (Type.Named{name: "Never"})
+}
+
+// sema_stmt_for_in_tir_stays of statement rows `statements` of `tree`.
+fn sema_stmt_for_in_row_stays(tree: BodyTree, statements: [Int], key: String) -> Bool Never! {
+    loop item in statements {
+        if !sema_stmt_for_in_row_stmt_stays(tree, item, key) -> return false
+    }
+    true
+}
+
+fn sema_stmt_for_in_row_stmt_stays(tree: BodyTree, item: Int, key: String) -> Bool Never! {
+    if tree.stmts[item - tree.stmt_base] == {
+        .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return false
+        .ExprStmt(value, _) -> {
+            if sema_stmt_row_is_never(tree, value) -> return false
+        }
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+            if !sema_stmt_for_in_row_stays(tree, body, key) -> return false
+        }
+        .RefutableBind(_, _, fallback, _) -> {
+            if !sema_stmt_for_in_row_stays(tree, fallback, key) -> return false
+        }
+        .CountedLoop(_, init, _, step, _, body, _) -> {
+            if !sema_stmt_for_in_row_stmt_stays(tree, init, key) || !sema_stmt_for_in_row_stays(tree, body, key) -> return false
+            if step == .Val(nested) {
+                if !sema_stmt_for_in_row_stmt_stays(tree, nested, key) -> return false
+            }
+        }
+        .If(_, then_body, else_body, _, _) -> {
+            if !sema_stmt_for_in_row_stays(tree, then_body, key) -> return false
+            if else_body == .Val(else_statements) {
+                if !sema_stmt_for_in_row_stays(tree, else_statements, key) -> return false
+            }
+        }
+        .Match(_, arms, _, _) -> loop arm in arms {
+            if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+            if else_body == .Val(else_statements) {
+                if !sema_stmt_for_in_row_stays(tree, else_statements, key) -> return false
+            }
+        }
+        .RangeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+            if !sema_stmt_for_in_row_stays(tree, else_body, key) -> return false
+        }
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+            if else_body == .Val(else_statements) {
+                if !sema_stmt_for_in_row_stays(tree, else_statements, key) -> return false
+            }
+        }
+        .GCEdit(_, _, _, _, _, edited, _) -> {
+            if !sema_stmt_for_in_row_stmt_stays(tree, edited, key) -> return false
+        }
+        else -> {}
+    }
+    stays := true
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> {
+        if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
+    })
+    stays
+}
+
+// sema_stmt_for_in_tir_expr_stays of node row `index` of `tree`.
+fn sema_stmt_for_in_row_expr_stays(tree: BodyTree, index: Int, key: String) -> Bool Never! {
+    if sema_stmt_row_is_never(tree, index) -> return false
+    if tree.nodes[index - tree.node_base].kind == {
+        .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> return false
+        .OrFallback(_, fallback, _) -> {
+            if fallback == {
+                .Value(_) -> {}
+                else -> return false
+            }
+        }
+        .Lambda(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tir_local_is(capture.local, key) -> return false
+            }
+        }
+        .InlineBlock(body) -> {
+            if !sema_stmt_for_in_row_stays(tree, body, key) -> return false
+        }
+        else -> {}
+    }
+    stays := true
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> {
+        if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
     })
     stays
 }
@@ -3901,65 +4094,67 @@ fn sema_stmt_transaction_stm_local(span: Span) -> TLocal Never! {
 }
 
 // Whether any child expression of `value` touches shared state; the
-// children are read in place (tir_each_*_child), never copied.
-fn sema_stmt_tir_children_touch_shared(value: TExpr) -> Bool Never! {
+// children are read in place (tir_each_*_child), never copied. `arena`
+// holds the rows of the body's flat nodes (sema_node).
+fn sema_stmt_tir_children_touch_shared(value: TExpr, arena: BodyTree) -> Bool Never! {
     found := false
     tir_each_expr_child(value, (child: TExpr) -> {
-        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+        if !found && sema_stmt_tir_expr_touches_shared(child, arena) -> found = true
     })
     found
 }
 
-fn sema_stmt_tir_pattern_touches_shared(pattern: TPattern) -> Bool Never! {
+fn sema_stmt_tir_pattern_touches_shared(pattern: TPattern, arena: BodyTree) -> Bool Never! {
     found := false
     tir_each_pattern_child(pattern, (child: TExpr) -> {
-        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+        if !found && sema_stmt_tir_expr_touches_shared(child, arena) -> found = true
     })
     found
 }
 
-fn sema_stmt_tir_condition_touches_shared(condition: TIfCond) -> Bool Never! {
+fn sema_stmt_tir_condition_touches_shared(condition: TIfCond, arena: BodyTree) -> Bool Never! {
     found := false
     tir_each_if_cond_child(condition, (child: TExpr) -> {
-        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+        if !found && sema_stmt_tir_expr_touches_shared(child, arena) -> found = true
     })
     found
 }
 
-fn sema_stmt_tir_statement_children_touch_shared(statement: TStmt) -> Bool Never! {
+fn sema_stmt_tir_statement_children_touch_shared(statement: TStmt, arena: BodyTree) -> Bool Never! {
     found := false
     tir_each_stmt_child(statement, (child: TExpr) -> {
-        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+        if !found && sema_stmt_tir_expr_touches_shared(child, arena) -> found = true
     })
     found
 }
 
-fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool Never! {
+fn sema_stmt_tir_expr_touches_shared(value: TExpr, arena: BodyTree) -> Bool Never! {
     if value.kind == {
+        .Flat(index) -> return sema_stmt_row_touches_shared(arena, index)
         .Lambda(_) -> return false
-        .InlineBlock(body) -> return sema_stmt_tir_statements_touch_shared(body)
+        .InlineBlock(body) -> return sema_stmt_tir_statements_touch_shared(body, arena)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            if sema_stmt_tir_condition_touches_shared(condition) -> return true
-            if sema_stmt_tir_statements_touch_shared(then_body) -> return true
-            if sema_stmt_tir_expr_touches_shared(then_value) -> return true
-            if sema_stmt_tir_statements_touch_shared(else_body) -> return true
-            return sema_stmt_tir_expr_touches_shared(else_value)
+            if sema_stmt_tir_condition_touches_shared(condition, arena) -> return true
+            if sema_stmt_tir_statements_touch_shared(then_body, arena) -> return true
+            if sema_stmt_tir_expr_touches_shared(then_value, arena) -> return true
+            if sema_stmt_tir_statements_touch_shared(else_body, arena) -> return true
+            return sema_stmt_tir_expr_touches_shared(else_value, arena)
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            if sema_stmt_tir_expr_touches_shared(subject) -> return true
-            if sema_stmt_tir_pattern_touches_shared(ok_pattern) -> return true
-            if sema_stmt_tir_statements_touch_shared(ok_body) -> return true
-            if sema_stmt_tir_expr_touches_shared(ok_value) -> return true
-            if sema_stmt_tir_pattern_touches_shared(err_pattern) -> return true
-            if sema_stmt_tir_statements_touch_shared(err_body) -> return true
-            if sema_stmt_tir_expr_touches_shared(err_value) -> return true
-            return sema_stmt_tir_expr_touches_shared(terminal)
+            if sema_stmt_tir_expr_touches_shared(subject, arena) -> return true
+            if sema_stmt_tir_pattern_touches_shared(ok_pattern, arena) -> return true
+            if sema_stmt_tir_statements_touch_shared(ok_body, arena) -> return true
+            if sema_stmt_tir_expr_touches_shared(ok_value, arena) -> return true
+            if sema_stmt_tir_pattern_touches_shared(err_pattern, arena) -> return true
+            if sema_stmt_tir_statements_touch_shared(err_body, arena) -> return true
+            if sema_stmt_tir_expr_touches_shared(err_value, arena) -> return true
+            return sema_stmt_tir_expr_touches_shared(terminal, arena)
         }
         .SharedGuardWait(guard, condition, _) -> {
-            if sema_stmt_tir_expr_touches_shared(guard) -> return true
-            return sema_stmt_tir_expr_touches_shared(condition)
+            if sema_stmt_tir_expr_touches_shared(guard, arena) -> return true
+            return sema_stmt_tir_expr_touches_shared(condition, arena)
         }
-        .CoreClosureCall(kind) -> return sema_stmt_tir_core_closure_touches_shared(kind)
+        .CoreClosureCall(kind) -> return sema_stmt_tir_core_closure_touches_shared(kind, arena)
         .FnValue(kind) -> {
             if kind == {
                 .NamedFn(_, _) -> return false
@@ -3978,152 +4173,338 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool Never! {
         }
         else -> {}
     }
-    sema_stmt_tir_children_touch_shared(value)
+    sema_stmt_tir_children_touch_shared(value, arena)
 }
 
-fn sema_stmt_tir_contract_touches_shared(contract: TContract) -> Bool Never! {
-    if sema_stmt_tir_expr_touches_shared(contract.condition) -> return true
-    sema_stmt_tir_expr_touches_shared(contract.message)
+fn sema_stmt_tir_contract_touches_shared(contract: TContract, arena: BodyTree) -> Bool Never! {
+    if sema_stmt_tir_expr_touches_shared(contract.condition, arena) -> return true
+    sema_stmt_tir_expr_touches_shared(contract.message, arena)
 }
 
-fn sema_stmt_tir_core_closure_touches_shared(kind: TCoreClosureKind) -> Bool Never! {
+fn sema_stmt_tir_core_closure_touches_shared(kind: TCoreClosureKind, arena: BodyTree) -> Bool Never! {
     if kind == {
         .Spawn(group, _, _, _) -> {
             if group != None {
                 value :: group
-                if sema_stmt_tir_expr_touches_shared(value) -> return true
+                if sema_stmt_tir_expr_touches_shared(value, arena) -> return true
             }
             false
         }
-        .Realtime(rate, frames, _) -> sema_stmt_tir_expr_touches_shared(rate) || sema_stmt_tir_expr_touches_shared(frames)
-        .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_tir_expr_touches_shared(label) || sema_stmt_tir_expr_touches_shared(shortcut) || sema_stmt_tir_expr_touches_shared(accessible_label)
-        .UITextInputOnDrop(state, ime, _) -> sema_stmt_tir_expr_touches_shared(state) || sema_stmt_tir_expr_touches_shared(ime)
+        .Realtime(rate, frames, _) -> sema_stmt_tir_expr_touches_shared(rate, arena) || sema_stmt_tir_expr_touches_shared(frames, arena)
+        .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_tir_expr_touches_shared(label, arena) || sema_stmt_tir_expr_touches_shared(shortcut, arena) || sema_stmt_tir_expr_touches_shared(accessible_label, arena)
+        .UITextInputOnDrop(state, ime, _) -> sema_stmt_tir_expr_touches_shared(state, arena) || sema_stmt_tir_expr_touches_shared(ime, arena)
         .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
     }
 }
 
-fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool Never! {
+fn sema_stmt_tir_statement_touches_shared(statement: TStmt, arena: BodyTree) -> Bool Never! {
     if statement == {
         .Transact(_, _, _, _, _) -> false
         .ContractScope(pre, body, post, _, _) -> {
             loop contract in pre {
-                if sema_stmt_tir_contract_touches_shared(contract) -> return true
+                if sema_stmt_tir_contract_touches_shared(contract, arena) -> return true
             }
-            if sema_stmt_tir_statements_touch_shared(body) -> return true
+            if sema_stmt_tir_statements_touch_shared(body, arena) -> return true
             loop contract in post {
-                if sema_stmt_tir_contract_touches_shared(contract) -> return true
+                if sema_stmt_tir_contract_touches_shared(contract, arena) -> return true
             }
             false
         }
         .RefutableBind(pattern, init, fallback, _) -> {
-            if sema_stmt_tir_pattern_touches_shared(pattern) -> return true
-            if sema_stmt_tir_expr_touches_shared(init) -> return true
-            sema_stmt_tir_statements_touch_shared(fallback)
+            if sema_stmt_tir_pattern_touches_shared(pattern, arena) -> return true
+            if sema_stmt_tir_expr_touches_shared(init, arena) -> return true
+            sema_stmt_tir_statements_touch_shared(fallback, arena)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            if sema_stmt_tir_statement_touches_shared(init) -> return true
-            if sema_stmt_tir_expr_touches_shared(condition) -> return true
+            if sema_stmt_tir_statement_touches_shared(init, arena) -> return true
+            if sema_stmt_tir_expr_touches_shared(condition, arena) -> return true
             if step != None {
                 nested :: step
-                if sema_stmt_tir_statement_touches_shared(nested) -> return true
+                if sema_stmt_tir_statement_touches_shared(nested, arena) -> return true
             }
-            sema_stmt_tir_statements_touch_shared(body)
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            if sema_stmt_tir_expr_touches_shared(start) || sema_stmt_tir_expr_touches_shared(end) -> return true
+            if sema_stmt_tir_expr_touches_shared(start, arena) || sema_stmt_tir_expr_touches_shared(end, arena) -> return true
             if step != None {
                 nested :: step
-                if sema_stmt_tir_expr_touches_shared(nested) -> return true
+                if sema_stmt_tir_expr_touches_shared(nested, arena) -> return true
             }
-            sema_stmt_tir_statements_touch_shared(body)
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
         .Range(_, _, source, start, end, step, _, _, body, _) -> {
-            if source == .Val(nested) && sema_stmt_tir_expr_touches_shared(nested) -> return true
-            if sema_stmt_tir_expr_touches_shared(start) || sema_stmt_tir_expr_touches_shared(end) -> return true
-            if step == .Val(nested) && sema_stmt_tir_expr_touches_shared(nested) -> return true
-            sema_stmt_tir_statements_touch_shared(body)
+            if source == .Val(nested) && sema_stmt_tir_expr_touches_shared(nested, arena) -> return true
+            if sema_stmt_tir_expr_touches_shared(start, arena) || sema_stmt_tir_expr_touches_shared(end, arena) -> return true
+            if step == .Val(nested) && sema_stmt_tir_expr_touches_shared(nested, arena) -> return true
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
         .If(condition, then_body, else_body, _, _) -> {
-            if sema_stmt_tir_condition_touches_shared(condition) -> return true
-            if sema_stmt_tir_statements_touch_shared(then_body) -> return true
-            if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements) else -> false
+            if sema_stmt_tir_condition_touches_shared(condition, arena) -> return true
+            if sema_stmt_tir_statements_touch_shared(then_body, arena) -> return true
+            if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements, arena) else -> false
         }
-        .Loop(_, body, _) -> sema_stmt_tir_statements_touch_shared(body)
+        .Loop(_, body, _) -> sema_stmt_tir_statements_touch_shared(body, arena)
         .While(_, condition, body, _) -> {
-            if sema_stmt_tir_expr_touches_shared(condition) -> return true
-            sema_stmt_tir_statements_touch_shared(body)
+            if sema_stmt_tir_expr_touches_shared(condition, arena) -> return true
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
         .Match(subject, arms, _, _) -> {
-            if sema_stmt_tir_expr_touches_shared(subject) -> return true
+            if sema_stmt_tir_expr_touches_shared(subject, arena) -> return true
             loop arm in arms {
-                if sema_stmt_tir_pattern_touches_shared(arm.pattern) -> return true
-                if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
+                if sema_stmt_tir_pattern_touches_shared(arm.pattern, arena) -> return true
+                if sema_stmt_tir_statements_touch_shared(arm.body, arena) -> return true
             }
             false
         }
         .EnumMatch(scrutinee, arms, else_body, _, _) -> {
-            if sema_stmt_tir_expr_touches_shared(scrutinee) -> return true
+            if sema_stmt_tir_expr_touches_shared(scrutinee, arena) -> return true
             loop arm in arms {
-                if sema_stmt_tir_pattern_touches_shared(arm.pattern) -> return true
-                if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
+                if sema_stmt_tir_pattern_touches_shared(arm.pattern, arena) -> return true
+                if sema_stmt_tir_statements_touch_shared(arm.body, arena) -> return true
             }
-            if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements) else -> false
+            if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements, arena) else -> false
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            if sema_stmt_tir_expr_touches_shared(subject) -> return true
+            if sema_stmt_tir_expr_touches_shared(subject, arena) -> return true
             loop arm in arms {
-                if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
+                if sema_stmt_tir_statements_touch_shared(arm.body, arena) -> return true
             }
-            sema_stmt_tir_statements_touch_shared(else_body)
+            sema_stmt_tir_statements_touch_shared(else_body, arena)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
-            if sema_stmt_tir_expr_touches_shared(source) || sema_stmt_tir_expr_touches_shared(collection) -> return true
+            if sema_stmt_tir_expr_touches_shared(source, arena) || sema_stmt_tir_expr_touches_shared(collection, arena) -> return true
             if step != None {
                 nested :: step
-                if sema_stmt_tir_expr_touches_shared(nested) -> return true
+                if sema_stmt_tir_expr_touches_shared(nested, arena) -> return true
             }
-            sema_stmt_tir_statements_touch_shared(body)
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_stmt_tir_statements_touch_shared(body)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_stmt_tir_statements_touch_shared(body, arena)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            if sema_stmt_tir_expr_touches_shared(subject) -> return true
+            if sema_stmt_tir_expr_touches_shared(subject, arena) -> return true
             loop arm in arms {
-                if sema_stmt_tir_expr_touches_shared(arm.condition) -> return true
-                if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
+                if sema_stmt_tir_expr_touches_shared(arm.condition, arena) -> return true
+                if sema_stmt_tir_statements_touch_shared(arm.body, arena) -> return true
             }
-            if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements) else -> false
+            if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements, arena) else -> false
         }
-        .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> sema_stmt_tir_statements_touch_shared(body)
+        .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> sema_stmt_tir_statements_touch_shared(body, arena)
         .ContextBlock(guards, body, _) -> {
             loop guard in guards {
-                if sema_stmt_tir_expr_touches_shared(guard.value) -> return true
+                if sema_stmt_tir_expr_touches_shared(guard.value, arena) -> return true
             }
-            sema_stmt_tir_statements_touch_shared(body)
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
                 .Timeout(duration) -> {
-                    if sema_stmt_tir_expr_touches_shared(duration) -> return true
+                    if sema_stmt_tir_expr_touches_shared(duration, arena) -> return true
                 }
                 else -> {}
             }
-            sema_stmt_tir_statements_touch_shared(body)
+            sema_stmt_tir_statements_touch_shared(body, arena)
         }
         .GCEdit(_, _, _, _, index_temp, nested, _) -> {
             if index_temp != None {
                 nested_index :: index_temp
-                if sema_stmt_tir_expr_touches_shared(nested_index) -> return true
+                if sema_stmt_tir_expr_touches_shared(nested_index, arena) -> return true
             }
-            sema_stmt_tir_statement_touches_shared(nested)
+            sema_stmt_tir_statement_touches_shared(nested, arena)
         }
         .Reactive(_, _) -> false
-        else -> sema_stmt_tir_statement_children_touch_shared(statement)
+        else -> sema_stmt_tir_statement_children_touch_shared(statement, arena)
     }
 }
 
-fn sema_stmt_tir_statements_touch_shared(statements: [TStmt]) -> Bool Never! {
+fn sema_stmt_tir_statements_touch_shared(statements: [TStmt], arena: BodyTree) -> Bool Never! {
     loop statement in statements {
-        if sema_stmt_tir_statement_touches_shared(statement) -> return true
+        if sema_stmt_tir_statement_touches_shared(statement, arena) -> return true
+    }
+    false
+}
+
+// sema_stmt_tir_expr_touches_shared of node row `index` of `tree`.
+fn sema_stmt_row_touches_shared(tree: BodyTree, index: Int) -> Bool Never! {
+    if tree.nodes[index - tree.node_base].kind == {
+        .Lambda(_) -> return false
+        .InlineBlock(body) -> return sema_stmt_rows_touch_shared(tree, body)
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
+            if sema_stmt_row_condition_touches_shared(tree, condition) -> return true
+            if sema_stmt_rows_touch_shared(tree, then_body) -> return true
+            if sema_stmt_row_touches_shared(tree, then_value) -> return true
+            if sema_stmt_rows_touch_shared(tree, else_body) -> return true
+            return sema_stmt_row_touches_shared(tree, else_value)
+        }
+        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
+            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            if sema_stmt_row_pattern_touches_shared(tree, ok_pattern) -> return true
+            if sema_stmt_rows_touch_shared(tree, ok_body) -> return true
+            if sema_stmt_row_touches_shared(tree, ok_value) -> return true
+            if sema_stmt_row_pattern_touches_shared(tree, err_pattern) -> return true
+            if sema_stmt_rows_touch_shared(tree, err_body) -> return true
+            if sema_stmt_row_touches_shared(tree, err_value) -> return true
+            return sema_stmt_row_touches_shared(tree, terminal)
+        }
+        .SharedGuardWait(guard, condition, _) -> {
+            if sema_stmt_row_touches_shared(tree, guard) -> return true
+            return sema_stmt_row_touches_shared(tree, condition)
+        }
+        .CoreClosureCall(kind) -> return if kind == {
+            .Spawn(group, _, _, _) -> if group == .Val(value) -> sema_stmt_row_touches_shared(tree, value) else -> false
+            .Realtime(rate, frames, _) -> sema_stmt_row_touches_shared(tree, rate) || sema_stmt_row_touches_shared(tree, frames)
+            .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_row_touches_shared(tree, label) || sema_stmt_row_touches_shared(tree, shortcut) || sema_stmt_row_touches_shared(tree, accessible_label)
+            .UITextInputOnDrop(state, ime, _) -> sema_stmt_row_touches_shared(tree, state) || sema_stmt_row_touches_shared(tree, ime)
+            .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
+        }
+        .FnValue(kind) -> {
+            if kind == {
+                .NamedFn(_, _) -> return false
+                else -> {}
+            }
+        }
+        .HostCall(call) -> {
+            if call == {
+                .Method(receiver, method, _) -> {
+                    if method == "shared.read" || method == "shared.edit" || method == "shared.read_txn" || method == "shared.edit_txn" -> return true
+                    // A capture inside a transaction snapshots through the STM.
+                    if method == "capture" && tree.types.types[tree.expr_types[receiver - tree.node_base].ty] == .Shared(_) -> return true
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    found := false
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> {
+        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_row_pattern_touches_shared(tree: BodyTree, pattern: BodyPattern) -> Bool Never! {
+    found := false
+    body_each_pattern_child(tree, pattern, (child: Int) -> {
+        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_row_condition_touches_shared(tree: BodyTree, condition: BodyIfCond) -> Bool Never! {
+    found := false
+    body_each_if_cond_child(tree, condition, (child: Int) -> {
+        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+    })
+    found
+}
+
+// sema_stmt_tir_statement_touches_shared of statement row `item` of `tree`.
+fn sema_stmt_row_statement_touches_shared(tree: BodyTree, item: Int) -> Bool Never! {
+    if tree.stmts[item - tree.stmt_base] == {
+        .Transact(_, _, _, _, _) | .Reactive(_, _) -> return false
+        .ContractScope(pre, body, post, _, _) -> {
+            loop contract in pre {
+                if sema_stmt_row_touches_shared(tree, contract.condition) || sema_stmt_row_touches_shared(tree, contract.message) -> return true
+            }
+            if sema_stmt_rows_touch_shared(tree, body) -> return true
+            loop contract in post {
+                if sema_stmt_row_touches_shared(tree, contract.condition) || sema_stmt_row_touches_shared(tree, contract.message) -> return true
+            }
+            return false
+        }
+        .RefutableBind(pattern, init, fallback, _) -> {
+            if sema_stmt_row_pattern_touches_shared(tree, pattern) -> return true
+            if sema_stmt_row_touches_shared(tree, init) -> return true
+            return sema_stmt_rows_touch_shared(tree, fallback)
+        }
+        .CountedLoop(_, init, condition, step, _, body, _) -> {
+            if sema_stmt_row_statement_touches_shared(tree, init) -> return true
+            if sema_stmt_row_touches_shared(tree, condition) -> return true
+            if step == .Val(nested) && sema_stmt_row_statement_touches_shared(tree, nested) -> return true
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .ForRange(_, _, start, end, step, _, body, _, _) -> {
+            if sema_stmt_row_touches_shared(tree, start) || sema_stmt_row_touches_shared(tree, end) -> return true
+            if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .Range(_, _, source, start, end, step, _, _, body, _) -> {
+            if source == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
+            if sema_stmt_row_touches_shared(tree, start) || sema_stmt_row_touches_shared(tree, end) -> return true
+            if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .If(condition, then_body, else_body, _, _) -> {
+            if sema_stmt_row_condition_touches_shared(tree, condition) -> return true
+            if sema_stmt_rows_touch_shared(tree, then_body) -> return true
+            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(tree, else_statements) else -> false
+        }
+        .While(_, condition, body, _) -> {
+            if sema_stmt_row_touches_shared(tree, condition) -> return true
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .Match(subject, arms, _, _) -> {
+            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            loop arm in arms {
+                if sema_stmt_row_pattern_touches_shared(tree, arm.pattern) -> return true
+                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+            }
+            return false
+        }
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
+            if sema_stmt_row_touches_shared(tree, scrutinee) -> return true
+            loop arm in arms {
+                if sema_stmt_row_pattern_touches_shared(tree, arm.pattern) -> return true
+                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+            }
+            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(tree, else_statements) else -> false
+        }
+        .RangeSwitch(subject, arms, else_body, _) -> {
+            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            loop arm in arms {
+                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+            }
+            return sema_stmt_rows_touch_shared(tree, else_body)
+        }
+        .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+            if sema_stmt_row_touches_shared(tree, source) || sema_stmt_row_touches_shared(tree, collection) -> return true
+            if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> return sema_stmt_rows_touch_shared(tree, body)
+        .MixedSwitch(subject, _, arms, else_body, _) -> {
+            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            loop arm in arms {
+                if sema_stmt_row_touches_shared(tree, arm.condition) -> return true
+                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+            }
+            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(tree, else_statements) else -> false
+        }
+        .ContextBlock(guards, body, _) -> {
+            loop guard in guards {
+                if sema_stmt_row_touches_shared(tree, guard.value) -> return true
+            }
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .ScopeMember(kind, body, _) -> {
+            if kind == .Timeout(duration) && sema_stmt_row_touches_shared(tree, duration) -> return true
+            return sema_stmt_rows_touch_shared(tree, body)
+        }
+        .GCEdit(_, _, _, _, index_temp, nested, _) -> {
+            if index_temp == .Val(nested_index) && sema_stmt_row_touches_shared(tree, nested_index) -> return true
+            return sema_stmt_row_statement_touches_shared(tree, nested)
+        }
+        else -> {}
+    }
+    found := false
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> {
+        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_rows_touch_shared(tree: BodyTree, statements: [Int]) -> Bool Never! {
+    loop item in statements {
+        if sema_stmt_row_statement_touches_shared(tree, item) -> return true
     }
     false
 }
@@ -4169,7 +4550,7 @@ fn sema_stmt_check_transaction(name: String?, name_span: Span?, body: [Stmt], im
         handle = Val(synthesized)
     }
     stm := TLocal?{None}
-    if sema_stmt_tir_statements_touch_shared(nested.value) -> stm = Val(sema_stmt_transaction_stm_local(span))
+    if sema_stmt_tir_statements_touch_shared(nested.value, context.arena.tree) -> stm = Val(sema_stmt_transaction_stm_local(span))
     Val(TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: nested.value, span: span})
 }
 fn sema_stmt_defer_close_resource(close: Expr, scopes: SemaScopeTable) -> SymbolID? {
@@ -4643,7 +5024,7 @@ fn sema_stmt_policy_compound(op: BinOp, ty: Type, read: TExpr, value: TExpr, lin
 fn sema_stmt_pure_place(place: TExpr, context: SemaCheckContext) -> Bool {
     if place.kind == {
         .Local(_) | .IntLit(_, _) -> return true
-        .Flat(index) -> return if context.arena.tree.nodes[index - context.arena.base].kind == {
+        .Flat(index) -> return if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
             .BoolLit(_) | .ConstRef(_) -> true
             else -> false
         }
@@ -5758,7 +6139,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         nested := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth -= 1
                         loop context.lending_view_parameter_keys.len() > lending_depth -> _ := &context.lending_view_parameter_keys.pop()
-                        source_stable := stable_root_key != None && sema_stmt_for_in_body_keeps(state, references_before, stable_root_key ?? "", nested.value)
+                        source_stable := stable_root_key != None && sema_stmt_for_in_body_keeps(state, references_before, stable_root_key ?? "", nested.value, context.arena.tree)
                         loop context.iter_borrowed.len() > iter_borrowed_depth -> _ := &context.iter_borrowed.pop()
                         context.arrow_loop_body = previous_arrow_loop_body
                         if !nested.complete -> valid = false
@@ -6275,7 +6656,7 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     // A prepared local reads as its value, so a local left in the checked
     // condition is known only at run time.
     runtime_local := false
-    sema_stmt_reads_runtime_local(condition, &runtime_local)
+    sema_stmt_reads_runtime_local(condition, context.arena.tree, &runtime_local)
     if runtime_local {
         &diagnostics.push(sema_error("E0989", cond_span, "this `comptime if` condition can't be known at compile time", "a `comptime if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag :: comptime {{ … }}`, then write `comptime if flag {{ … }}`"))
         return false
@@ -6343,12 +6724,25 @@ fn sema_stmt_check_comptime_block(body: [Stmt], span: Span, environment: SemaSco
     false
 }
 
-fn sema_stmt_reads_runtime_local(expression: TExpr, found: &Bool) Never! {
-    if expression.kind == .Local(_) {
+// `arena` holds the rows of the condition's flat nodes (sema_node).
+fn sema_stmt_reads_runtime_local(expression: TExpr, arena: BodyTree, found: &Bool) Never! {
+    if expression.kind == {
+        .Local(_) -> {
+            found = true
+            return
+        }
+        .Flat(index) -> return sema_stmt_row_reads_runtime_local(arena, index, &found)
+        else -> {}
+    }
+    tir_each_expr_child(expression, (child: TExpr) -> sema_stmt_reads_runtime_local(child, arena, &found))
+}
+
+fn sema_stmt_row_reads_runtime_local(tree: BodyTree, index: Int, found: &Bool) Never! {
+    if tree.nodes[index - tree.node_base].kind == .Local(_) {
         found = true
         return
     }
-    tir_each_expr_child(expression, (child: TExpr) -> sema_stmt_reads_runtime_local(child, &found))
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_stmt_row_reads_runtime_local(tree, child, &found))
 }
 
 fn sema_stmt_prep_if_not_bool(cond_span: Span) -> Diagnostic {

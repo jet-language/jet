@@ -494,7 +494,7 @@ fn sema_coverage_noelse_chain_collect(current: TExpr, span: Span, context: SemaC
     if current.kind == {
         // The chain's `NoElse` end is a flat `Never` row (sema_node).
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.base].kind == .Never(reason) -> return reason == "no else arm"
+            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .Never(reason) -> return reason == "no else arm"
             return false
         }
         .IfExpr(cond, _, _, _, next_value) -> {

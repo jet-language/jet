@@ -469,7 +469,7 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span, co
     capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
     if value.kind == {
         // A function or constant reference is a flat row (sema_node).
-        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.base].kind == {
+        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
             .ConstRef(_) -> {}
             else -> return None
         }
@@ -1118,7 +1118,8 @@ fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResul
         &dispatch.push(^dispatch_arm)
     }
     nonblocking :: else_result != None
-    wait :: sema_tir_node(result_ty, TExprKind.SelectWait{builder: ^builder, nonblocking: nonblocking}, span)
+    builder_row :: sema_arena_adopt(&context, builder)
+    wait :: sema_node(&context, result_ty, NodeKind.SelectWait{builder: builder_row, nonblocking: nonblocking}, span)
     subject :: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span)
     Val(TStmt.Inline{body: [TStmt]{
         TStmt.Let{local: result_local, let_ty: TLetTy.Inferred, init: wait, gc_promotion: None, gc_transferred: false, span: span},

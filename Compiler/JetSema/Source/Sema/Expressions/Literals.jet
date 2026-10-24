@@ -736,7 +736,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         }
     }
     if sema_call_math_builtin_name(base_ty, environment, program) == .Val(lane) && sema_call_math_is_lane(lane) {
-        read :: sema_call_math_lane_index(lane, checked_base, index, checked_index, span, environment, &diagnostics) ?? return None
+        read :: sema_call_math_lane_index(lane, checked_base, index, checked_index, span, environment, &context, &diagnostics) ?? return None
         return sema_expr_expected_owned(^read, expected, environment, program, &diagnostics)
     }
     result_ty := Type?{None}

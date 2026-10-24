@@ -17,6 +17,11 @@ struct BodyTree {
     stmts: [StmtKind]
     expr_types: [TExprType]
     types: TypeTable{TypeTable{}}
+    // A nested check's arena continues its enclosing check's rows: its first
+    // node row is index `node_base` and its first statement row `stmt_base`,
+    // and every row index into it subtracts them. Every other tree starts at 0.
+    node_base: Int{0}
+    stmt_base: Int{0}
 }
 
 // One expression: its node id, its checked form and its source span. Its type
@@ -61,7 +66,7 @@ fn body_type_id(tree: BodyTree, id: Int) -> Int Never! {
 
 // Statement `index`.
 fn body_stmt(tree: BodyTree, index: Int) -> StmtKind Never! {
-    tree.stmts[index]
+    tree.stmts[index - tree.stmt_base]
 }
 
 enum BodyStrPart {
@@ -946,7 +951,7 @@ fn body_each_map_pattern_entry_child(tree: BodyTree, value: BodyMapPatternEntry,
 fn body_each_match_arm_child(tree: BodyTree, value: BodyMatchArm, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     body_each_pattern_child(tree, value.pattern, visit)
     loop item in value.body {
-        body_each_stmt_child(tree, tree.stmts[item], visit)
+        body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
     }
 }
 
@@ -982,7 +987,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 body_each_contract_child(tree, item, visit)
             }
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             loop item in f2 {
                 body_each_contract_child(tree, item, visit)
@@ -995,7 +1000,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
             body_each_pattern_child(tree, f0, visit)
             visit(f1)
             loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .TupleDestructure(_, f1, _, _, _) -> {
@@ -1012,13 +1017,13 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
             visit(f2)
         }
         .CountedLoop(_, f1, f2, f3, _, f5, _) -> {
-            body_each_stmt_child(tree, tree.stmts[f1], visit)
+            body_each_stmt_child(tree, tree.stmts[f1 - tree.stmt_base], visit)
             visit(f2)
             if f3 == .Val(inner) {
-                body_each_stmt_child(tree, tree.stmts[inner], visit)
+                body_each_stmt_child(tree, tree.stmts[inner - tree.stmt_base], visit)
             }
             loop item in f5 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .ForRange(_, _, f2, f3, f4, _, f6, _, _) -> {
@@ -1028,7 +1033,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 visit(inner)
             }
             loop item in f6 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Range(_, _, f2, f3, f4, f5, _, _, f8, _) -> {
@@ -1041,7 +1046,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 visit(inner)
             }
             loop item in f8 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .ExprStmt(f0, _) -> {
@@ -1057,7 +1062,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 visit(inner)
             }
             loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .DeferClose(f0, _, _) -> {
@@ -1066,23 +1071,23 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
         .If(f0, f1, f2, _, _) -> {
             body_each_if_cond_child(tree, f0, visit)
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             if f2 == .Val(inner) {
                 loop item in inner {
-                    body_each_stmt_child(tree, tree.stmts[item], visit)
+                    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
                 }
             }
         }
         .Loop(_, f1, _) -> {
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .While(_, f1, f2, _) -> {
             visit(f1)
             loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .BreakValue(_, f1, _) -> {
@@ -1101,7 +1106,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
             }
             if f2 == .Val(inner) {
                 loop item in inner {
-                    body_each_stmt_child(tree, tree.stmts[item], visit)
+                    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
                 }
             }
         }
@@ -1111,7 +1116,7 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 body_each_range_arm_child(tree, item, visit)
             }
             loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .ForIn(_, _, _, f3, f4, f5, _, _, _, _, f10, _) -> {
@@ -1121,17 +1126,17 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 visit(inner)
             }
             loop item in f10 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Inline(f0, _) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .DebugOnly(f0, _) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .MixedSwitch(f0, _, f2, f3, _) -> {
@@ -1141,28 +1146,28 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
             }
             if f3 == .Val(inner) {
                 loop item in inner {
-                    body_each_stmt_child(tree, tree.stmts[item], visit)
+                    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
                 }
             }
         }
         .Unsafe(_, f1) -> {
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .UnsafeBlock(_, f1, _) -> {
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .SentryPolicy(_, f1, _) -> {
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Impure(f0, _) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Reactive(f0, _) -> {
@@ -1170,12 +1175,12 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
         }
         .Region(f0, _) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Layout(_, _, f2, _) -> {
             loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .ContextBlock(f0, f1, _) -> {
@@ -1183,35 +1188,35 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
                 body_each_context_guard_child(tree, item, visit)
             }
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Live(f0, _) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Shield(f0, _) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .ScopeMember(f0, f1, _) -> {
             body_each_scope_member_kind_child(tree, f0, visit)
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Transact(_, _, _, f3, _) -> {
             loop item in f3 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .GCEdit(_, _, _, _, f4, f5, _) -> {
             if f4 == .Val(inner) {
                 visit(inner)
             }
-            body_each_stmt_child(tree, tree.stmts[f5], visit)
+            body_each_stmt_child(tree, tree.stmts[f5 - tree.stmt_base], visit)
         }
         else -> {}
     }
@@ -1219,14 +1224,14 @@ fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Al
 
 fn body_each_range_arm_child(tree: BodyTree, value: BodyRangeArm, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop item in value.body {
-        body_each_stmt_child(tree, tree.stmts[item], visit)
+        body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
     }
 }
 
 fn body_each_mixed_arm_child(tree: BodyTree, value: BodyMixedArm, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.condition)
     loop item in value.body {
-        body_each_stmt_child(tree, tree.stmts[item], visit)
+        body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
     }
 }
 
@@ -1243,7 +1248,7 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
         }
         .InlineBlock(f0) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         .Call(_, _, f2) -> {
@@ -1487,11 +1492,11 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
         .IfExpr(f0, f1, f2, f3, f4) -> {
             body_each_if_cond_child(tree, f0, visit)
             loop item in f1 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             visit(f2)
             loop item in f3 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             visit(f4)
         }
@@ -1499,12 +1504,12 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
             visit(f0)
             body_each_pattern_child(tree, f1, visit)
             loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             visit(f3)
             body_each_pattern_child(tree, f4, visit)
             loop item in f5 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             visit(f6)
             visit(f7)
@@ -1798,7 +1803,7 @@ fn body_each_lambda_body_child(tree: BodyTree, value: BodyLambdaBody, visit: fn(
         }
         .Block(f0) -> {
             loop item in f0 {
-                body_each_stmt_child(tree, tree.stmts[item], visit)
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
         else -> {}

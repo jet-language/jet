@@ -9,6 +9,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Measure,
+    NodeKind,
     Span,
     Type,
     expr_span,
@@ -170,7 +171,7 @@ fn sema_call_try_math_static(owner: String, method: String, args: [CallArg], spa
 
 // Rust `infer_index` lane arm: `v[i]` on a compiler-provided SIMD lane reads
 // one lane scalar. The index is an Int; a written literal must name a lane.
-fn sema_call_math_lane_index(name: String, base: TExpr, index: Expr, checked_index: TExpr, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_math_lane_index(name: String, base: TExpr, index: Expr, checked_index: TExpr, span: Span, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     integer :: if checked_index.ty == {
         .Int | .InlineRange(_, _, _) -> true
         else -> false
@@ -187,5 +188,7 @@ fn sema_call_math_lane_index(name: String, base: TExpr, index: Expr, checked_ind
         }
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
-    Val(sema_tir_node(sema_call_math_scalar_type(name), TExprKind.MathLaneIndex{lane_type: name, base: base, index: checked_index, line: line}, span))
+    base_row :: sema_arena_adopt(&context, base)
+    index_row :: sema_arena_adopt(&context, checked_index)
+    Val(sema_node(&context, sema_call_math_scalar_type(name), NodeKind.MathLaneIndex{lane_type: name, base: base_row, index: index_row, line: line}, span))
 }

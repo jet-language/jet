@@ -2111,7 +2111,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         line :: sema_source_line_at(updated.source_segments, unsafe_span) ?? source_line_value
         unsafe_gate = Val(TUnsafeGate{file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, unsafe_span), line: line, reason: reason, enabled: true, fenced: false})
     }
-    sema_place_borrow_function(&body, params, place_borrow_receiver)
+    sema_place_borrow_function(&body, params, place_borrow_receiver, context.arena.tree)
     target :: sema_function_target_applicability(func)
     tir := TFunc{
         name: func.name,

@@ -10,6 +10,7 @@ use jet_foundation.[
     Expr,
     FunctionDefaultRef,
     InternalTag,
+    NodeKind,
     ParamZone,
     Span,
     SymbolID,
@@ -482,7 +483,8 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         mapped_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
         mapped_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{mapped_type}}}
-        value := sema_tir_node(mapped_guard, TExprKind.SharedGuardMap{guard: receiver_value, path: projection, editable: guard.editable}, span)
+        guard_row :: sema_arena_adopt(&context, receiver_value)
+        value := sema_node(&context, mapped_guard, NodeKind.SharedGuardMap{guard: guard_row, path: projection, editable: guard.editable}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     second_callback :: values[1] ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -494,7 +496,8 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
     first_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{first_type}}}
     second_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{second_type}}}
     result_type := Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}}}
-    value := sema_tir_node(result_type, TExprKind.SharedGuardSplit{guard: receiver_value, first: first_path, second: second_path, editable: guard.editable}, span)
+    guard_row :: sema_arena_adopt(&context, receiver_value)
+    value := sema_node(&context, result_type, NodeKind.SharedGuardSplit{guard: guard_row, first: first_path, second: second_path, editable: guard.editable}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -506,7 +509,8 @@ fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method: St
     // `Condition.notify_one()` and `.notify_all()` wake one or every waiter; the value is Unit.
     if receiver_value.ty == .Named(name) {
         if name == "Condition" && args.is_empty() && (method == "notify_one" || method == "notify_all") {
-            value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.ConditionNotify{condition: receiver_value, all: method == "notify_all"}, span)
+            condition_row :: sema_arena_adopt(&context, receiver_value)
+            value := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.ConditionNotify{condition: condition_row, all: method == "notify_all"}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
         }
     }

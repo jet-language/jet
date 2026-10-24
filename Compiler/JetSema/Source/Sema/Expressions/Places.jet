@@ -10,6 +10,7 @@ use jet_foundation.[
     Expr,
     IndexKind,
     InternalTag,
+    NodeKind,
     PlaceAccess,
     Span,
     Symbol,
@@ -495,7 +496,7 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     sema_ownership_note_close_owner(&state, base, checked_base.ty, environment, program, scopes)
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, &context, &diagnostics) -> return None
     if checked_base.ty == .Named(math_name) {
-        swizzle :: sema_expression_math_swizzle(checked_base, math_name, member, span, &diagnostics)
+        swizzle :: sema_expression_math_swizzle(checked_base, math_name, member, span, &context, &diagnostics)
         if swizzle.handled -> return if swizzle.value == .Val(read) -> sema_expr_expected(read, expected, environment, program, &diagnostics) else -> None
     }
     value :: sema_expression_field_checked(checked_base, member, span, expected, environment, program, &scopes, &context, &diagnostics) ?? return None
@@ -612,7 +613,7 @@ fn sema_expression_math_swizzle_parse(type_name_value: String, member: String, s
     SemaMathSwizzleParse.Lanes{packed: packed, count: count, overlaps: overlaps}
 }
 
-fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     lanes :: if sema_expression_math_swizzle_parse(type_name_value, member, span, &diagnostics) == {
         .NotSwizzle -> { return SemaDirectSpecialCheck{handled: false, value: None} }
         .InvalidLane -> { return SemaDirectSpecialCheck{handled: true, value: None} }
@@ -624,7 +625,8 @@ fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member
         lanes.len() == arity && !type_name_value.starts_with("Vec") -> Type.Named{name: type_name_value}
         else -> Type.Named{name: "Vec{lanes.len()}"}
     }
-    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(result_ty, TExprKind.MathSwizzleRead{type_name: type_name_value, receiver: receiver, lanes: lanes}, span))}
+    receiver_row :: sema_arena_adopt(&context, receiver)
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_node(&context, result_ty, NodeKind.MathSwizzleRead{type_name: type_name_value, receiver: receiver_row, lanes: lanes}, span))}
 }
 
 // Rust `numeric_type_from_name` + `numeric_const_type`: the type of

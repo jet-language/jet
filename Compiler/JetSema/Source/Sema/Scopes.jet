@@ -1102,7 +1102,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         // A snapshot's check continues the arena of the check it starts
         // from: its rows follow that arena's rows, and its caller appends
         // them there after the check (sema_arena_take_back).
-        arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true, base: source.arena.base + source.arena.tree.nodes.len(), stmt_base: source.arena.stmt_base + source.arena.tree.stmts.len()},
+        arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
         next_expr_id: source.next_expr_id,
     }
     sema_comptime_body_sources_index(&snapshot)

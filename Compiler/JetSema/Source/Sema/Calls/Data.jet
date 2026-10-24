@@ -8,6 +8,7 @@ use jet_foundation.[
     EffectRowEntry,
     FunctionDefaultRef,
     CopyFact,
+    NodeKind,
     ParamZone,
     PlaceAccess,
     Span,
@@ -240,7 +241,9 @@ fn sema_data_check_field_error_under(args: [CallArg], span: Span, expected: Type
     if !framed {
         &diagnostics.push(sema_error("E0905", expr_span(args[1].expr), "`FieldError.under` expects a result with `[FieldError]` errors", "the framing helper preserves the child result and prefixes every accumulated decode failure", "pass a typed decode/accessor result, such as `tree.field(\"name\")?.decode<T>()`"))
     }
-    value := sema_tir_node(inner.ty, TExprKind.DecodeUnder{segment: segment_value, inner: inner}, span)
+    segment_row :: sema_arena_adopt(&context, segment_value)
+    inner_row :: sema_arena_adopt(&context, inner)
+    value := sema_node(&context, inner.ty, NodeKind.DecodeUnder{segment: segment_row, inner: inner_row}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -895,8 +898,11 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED} else -> argument.expr
         if !clone_arg && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
-    result_ty := if ty == (Type.Named{name: "DBValue"}) -> sema_data_value_type() else -> sema_dyn_type()
-    value := sema_tir_expr(result_ty, if ty == (Type.Named{name: "DBValue"}) -> TExprKind.DBValueLit{variant: variant, arg: payload, clone_arg: clone_arg} else -> TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
+    db_value :: ty == (Type.Named{name: "DBValue"})
+    result_ty := if db_value -> sema_data_value_type() else -> sema_dyn_type()
+    arg_row := Int?{None}
+    if db_value && payload == .Val(argument) -> arg_row = Val(sema_arena_adopt(&context, argument))
+    value := if db_value -> sema_node(&context, result_ty, NodeKind.DBValueLit{variant: variant, arg: arg_row, clone_arg: clone_arg}, span) else -> sema_tir_expr(result_ty, TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 

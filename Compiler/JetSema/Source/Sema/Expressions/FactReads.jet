@@ -573,7 +573,7 @@ fn sema_fact_constant_path(value: TExpr, context: SemaCheckContext) -> Bool Neve
     if value.kind == {
         .CtLit(_) -> true
         // A constant reference is a flat row (sema_node).
-        .Flat(index) -> context.arena.tree.nodes[index - context.arena.base].kind == .ConstRef(_)
+        .Flat(index) -> context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(_)
         .Field(receiver, _) -> sema_fact_constant_path(receiver, context)
         .Index(base, index, _, _, _, _) -> index.kind == .IntLit(_, _) && sema_fact_constant_path(base, context)
         else -> false
@@ -797,7 +797,7 @@ fn sema_fact_constant_path_value(value: TExpr, context: SemaCheckContext) -> TCo
     if value.kind == {
         .IntLit(number, _) -> return Val(TComptimeValue.Int{value: number})
         .Flat(row) -> {
-            if context.arena.tree.nodes[row - context.arena.base].kind == .BoolLit(flag) -> return Val(TComptimeValue.Bool{value: flag})
+            if context.arena.tree.nodes[row - context.arena.tree.node_base].kind == .BoolLit(flag) -> return Val(TComptimeValue.Bool{value: flag})
             return None
         }
         // copy: `known` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one

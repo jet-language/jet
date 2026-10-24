@@ -673,7 +673,7 @@ fn sema_marker_rules_constant_value(checked: TExpr, marker: Marker, source_index
     if direct != None {
         return direct
     }
-    if checked.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.base].kind == .ConstRef(symbol) {
+    if checked.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(symbol) {
         loop reference in context.name_references {
             if reference.symbol.id.key == symbol.key && reference.symbol.kind == SymbolKind.Constant {
                 return sema_marker_rules_constant_for_reference(reference.symbol, context.name_references, reference_start, environment, program, values)

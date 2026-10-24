@@ -89,7 +89,7 @@ fn sema_services_valid_name(value: String) -> Bool Never! {
     true
 }
 fn sema_services_const_symbol(value: TExpr, context: SemaCheckContext) -> SymbolID? {
-    if value.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.base].kind == .ConstRef(symbol) {
+    if value.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(symbol) {
         // copy: `symbol` is a payload of the context's arena row, which keeps the original; the Val carrier owns this one
         return Val(symbol.copy())
     }

@@ -736,7 +736,7 @@ fn sema_pattern_map_key_written(key: Expr) -> Bool Never! {
 }
 
 fn sema_pattern_map_resolve_key(key: TExpr, env: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> TExpr {
-    if key.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.base].kind == .ConstRef(symbol) && program.registration_graph == .Val(graph) {
+    if key.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(symbol) && program.registration_graph == .Val(graph) {
         loop module_row_index in 0..<graph.modules.len() {
             loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
                 if graph.modules[module_row_index].constants[constant_index].symbol.id.key != symbol.key -> next

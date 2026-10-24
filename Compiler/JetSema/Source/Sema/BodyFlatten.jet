@@ -60,13 +60,11 @@ use jet_foundation.[
 // arena (`into_arena`, sema_arena_adopt) `tree` is the arena itself, a child
 // is named by its row index, and a Flat node is its own row. A nested check's
 // arena continues its enclosing check's (sema_check_context_snapshot): its
-// first node row is index `base` and its first statement row `stmt_base`.
+// tree starts at row `node_base` and statement `stmt_base`.
 struct BodyFlat {
     tree: BodyTree
     arena: BodyTree
     into_arena: Bool
-    base: Int{0}
-    stmt_base: Int{0}
 }
 
 // The FnBody of checked function `value`, whose Flat nodes are rows of `arena`.
@@ -146,7 +144,7 @@ fn body_flat_expr(value: TExpr, flat: &BodyFlat) -> Int Never! {
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
     ty :: type_table_intern(&flat.tree.types, value.ty)
     &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
-    if flat.into_arena -> return flat.base + flat.tree.nodes.len() - 1
+    if flat.into_arena -> return flat.tree.node_base + flat.tree.nodes.len() - 1
     id
 }
 
@@ -156,14 +154,14 @@ fn body_flat_arena_node(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never!
     if flat.into_arena {
         // A nested check never files a node of the check that encloses it,
         // whose rows this arena does not hold.
-        row_index :: index - flat.base
+        row_index :: index - flat.tree.node_base
         if row_index < 0 -> panic("body_flat_arena_node: arena row {index} precedes this check's rows")
         if flat.tree.nodes[row_index].id == value.id && flat.tree.types.types[flat.tree.expr_types[row_index].ty] == value.ty -> return index
         row :: flat.tree.nodes[row_index]
         &flat.tree.nodes.push(BodyNode{id: value.id, kind: row.kind, span: value.span})
         ty :: type_table_intern(&flat.tree.types, value.ty)
         &flat.tree.expr_types.push(TExprType{id: value.id, ty: ty})
-        return flat.base + flat.tree.nodes.len() - 1
+        return flat.tree.node_base + flat.tree.nodes.len() - 1
     }
     row :: flat.arena.nodes[index]
     kind :: body_copy_expr_kind(row.kind, &flat)
@@ -177,7 +175,7 @@ fn body_flat_arena_node(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never!
 fn body_flat_stmt(value: TStmt, flat: &BodyFlat) -> Int Never! {
     kind :: body_flat_stmt_kind(value, &flat)
     &flat.tree.stmts.push(kind)
-    flat.stmt_base + flat.tree.stmts.len() - 1
+    flat.tree.stmt_base + flat.tree.stmts.len() - 1
 }
 
 // Arena row `index` copied into the output tree, children first; returns its
@@ -412,7 +410,6 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .IndirectCall(f_callee, f_type_args, f_args, f_signature) -> NodeKind.IndirectCall{callee: body_flat_expr(f_callee, &flat), type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat), signature: f_signature}
         .MethodCall(f_receiver, f_method, f_type_args, f_args) -> NodeKind.MethodCall{receiver: body_flat_expr(f_receiver, &flat), method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat)}
         .DistinctCtor(f_argument) -> NodeKind.DistinctCtor{argument: body_flat_expr(f_argument, &flat)}
-        .DistinctConvert(f_owner, f_argument, f_operation, f_range, f_fallible) -> NodeKind.DistinctConvert{owner: f_owner, argument: body_flat_expr(f_argument, &flat), operation: f_operation, range: f_range, fallible: f_fallible}
         .TraitBox(f_value, f_target) -> NodeKind.TraitBox{value: body_flat_expr(f_value, &flat), target: f_target}
         .UnitConvert(f_argument, f_scale, f_offset, f_rounding, f_fallible, f_relative_uncertainty, f_file, f_line) -> NodeKind.UnitConvert{argument: body_flat_expr(f_argument, &flat), scale: f_scale, offset: f_offset, rounding: body_flat_opt_unit_rounding(f_rounding, &flat), fallible: f_fallible, relative_uncertainty: f_relative_uncertainty, file: f_file, line: f_line}
         .MathBuiltin(f_type_name, f_function, f_args) -> NodeKind.MathBuiltin{type_name: f_type_name, function: f_function, args: body_flat_list_expr(f_args, &flat)}
@@ -434,7 +431,6 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .Tuple(f_values) -> NodeKind.Tuple{values: body_flat_list_expr(f_values, &flat)}
         .List(f_values, f_trait_coercion) -> NodeKind.List{values: body_flat_list_expr(f_values, &flat), trait_coercion: f_trait_coercion}
         .Map(f_entries) -> NodeKind.Map{entries: body_flat_list_map_entry(f_entries, &flat)}
-        .EnumCtor(f_owner, f_variant, f_payload) -> NodeKind.EnumCtor{owner: f_owner, variant: f_variant, payload: body_flat_enum_payload(f_payload, &flat)}
         .Try(f_value, f_conversion, f_failure) -> NodeKind.Try{value: body_flat_expr(f_value, &flat), conversion: f_conversion, failure: f_failure}
         .TryWithContext(f_inner, f_note, f_convert, f_file, f_line, f_function) -> NodeKind.TryWithContext{inner: body_flat_expr(f_inner, &flat), note: body_flat_opt_expr(f_note, &flat), convert: f_convert, file: f_file, line: f_line, function: f_function}
         .Lambda(f_value) -> NodeKind.Lambda{value: body_flat_lambda(f_value, &flat)}
@@ -445,27 +441,20 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .LayoutLiteral(f_value) -> NodeKind.LayoutLiteral{value: body_flat_expr(f_value, &flat)}
         .LayoutCompare(f_op, f_lhs, f_rhs) -> NodeKind.LayoutCompare{op: f_op, lhs: body_flat_expr(f_lhs, &flat), rhs: body_flat_expr(f_rhs, &flat)}
         .SharedGuardValue(f_guard) -> NodeKind.SharedGuardValue{guard: body_flat_expr(f_guard, &flat)}
-        .SharedGuardMap(f_guard, f_path, f_editable) -> NodeKind.SharedGuardMap{guard: body_flat_expr(f_guard, &flat), path: f_path, editable: f_editable}
-        .SharedGuardSplit(f_guard, f_first, f_second, f_editable) -> NodeKind.SharedGuardSplit{guard: body_flat_expr(f_guard, &flat), first: f_first, second: f_second, editable: f_editable}
         .SharedGuardWait(f_guard, f_condition, f_predicate) -> NodeKind.SharedGuardWait{guard: body_flat_expr(f_guard, &flat), condition: body_flat_expr(f_condition, &flat), predicate: body_flat_lambda(f_predicate, &flat)}
-        .ConditionNotify(f_condition, f_all) -> NodeKind.ConditionNotify{condition: body_flat_expr(f_condition, &flat), all: f_all}
         .CoreCall(f_record, f_args, f_source_span, f_type_args, f_widen_to_vec, f_fallibility) -> NodeKind.CoreCall{record: f_record, args: body_flat_list_expr(f_args, &flat), source_span: f_source_span, type_args: f_type_args, widen_to_vec: f_widen_to_vec, fallibility: f_fallibility}
         .HostCall(f_call) -> NodeKind.HostCall{call: body_flat_host_call(f_call, &flat)}
         .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_flat_list_call_arg(f_args, &flat)}
         .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_flat_enum_payload(f_payload, &flat)}
         .JSONLit(f_variant, f_arg, f_clone_arg) -> NodeKind.JSONLit{variant: f_variant, arg: body_flat_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
-        .DBValueLit(f_variant, f_arg, f_clone_arg) -> NodeKind.DBValueLit{variant: f_variant, arg: body_flat_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
         .ListLit(f_values) -> NodeKind.ListLit{values: body_flat_list_expr(f_values, &flat)}
         .ListSpread(f_parts) -> NodeKind.ListSpread{parts: body_flat_list_list_spread_part(f_parts, &flat)}
         .MapLit(f_entries) -> NodeKind.MapLit{entries: body_flat_list_map_entry(f_entries, &flat)}
         .PoolSlot(f_pool, f_id, f_mutable, f_field, f_line, f_source_line) -> NodeKind.PoolSlot{pool: body_flat_expr(f_pool, &flat), id: body_flat_expr(f_id, &flat), mutable: f_mutable, field: f_field, line: f_line, source_line: f_source_line}
-        .MathLaneIndex(f_lane_type, f_base, f_index, f_line) -> NodeKind.MathLaneIndex{lane_type: f_lane_type, base: body_flat_expr(f_base, &flat), index: body_flat_expr(f_index, &flat), line: f_line}
-        .MathSwizzleRead(f_type_name, f_receiver, f_lanes) -> NodeKind.MathSwizzleRead{type_name: f_type_name, receiver: body_flat_expr(f_receiver, &flat), lanes: f_lanes}
         .Clone(f_value, f_fact) -> NodeKind.Clone{value: body_flat_expr(f_value, &flat), fact: f_fact}
         .ExplicitCopy(f_value) -> NodeKind.ExplicitCopy{value: body_flat_expr(f_value, &flat)}
         .MaterializeView(f_value) -> NodeKind.MaterializeView{value: body_flat_expr(f_value, &flat)}
         .StaticCall(f_owner, f_owner_type, f_method, f_type_args, f_args) -> NodeKind.StaticCall{owner: f_owner, owner_type: f_owner_type, method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat)}
-        .DecodeUnder(f_segment, f_inner) -> NodeKind.DecodeUnder{segment: body_flat_expr(f_segment, &flat), inner: body_flat_expr(f_inner, &flat)}
         .BuiltinMethod(f_receiver, f_operation, f_args) -> NodeKind.BuiltinMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation, args: body_flat_list_expr(f_args, &flat)}
         .IfExpr(f_cond, f_then_body, f_then_value, f_else_body, f_else_value) -> NodeKind.IfExpr{cond: body_flat_if_cond(f_cond, &flat), then_body: body_flat_list_stmt(f_then_body, &flat), then_value: body_flat_expr(f_then_value, &flat), else_body: body_flat_list_stmt(f_else_body, &flat), else_value: body_flat_expr(f_else_value, &flat)}
         .ResultHandler(f_subject, f_ok_pattern, f_ok_body, f_ok_value, f_err_pattern, f_err_body, f_err_value, f_terminal) -> NodeKind.ResultHandler{subject: body_flat_expr(f_subject, &flat), ok_pattern: body_flat_pattern(f_ok_pattern, &flat), ok_body: body_flat_list_stmt(f_ok_body, &flat), ok_value: body_flat_expr(f_ok_value, &flat), err_pattern: body_flat_pattern(f_err_pattern, &flat), err_body: body_flat_list_stmt(f_err_body, &flat), err_value: body_flat_expr(f_err_value, &flat), terminal: body_flat_expr(f_terminal, &flat)}
@@ -478,9 +467,7 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .OptField(f_base, f_member, f_flatten) -> NodeKind.OptField{base: body_flat_expr(f_base, &flat), member: f_member, flatten: f_flatten}
         .OptMethodCall(f_base, f_binding, f_call, f_flatten) -> NodeKind.OptMethodCall{base: body_flat_expr(f_base, &flat), binding: f_binding, call: body_flat_expr(f_call, &flat), flatten: f_flatten}
         .PatternMatches(f_subject, f_pattern) -> NodeKind.PatternMatches{subject: body_flat_expr(f_subject, &flat), pattern: body_flat_pattern(f_pattern, &flat)}
-        .OptionLift2(f_function, f_left, f_right) -> NodeKind.OptionLift2{function: body_flat_expr(f_function, &flat), left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat)}
         .ClosureMethod(f_receiver, f_operation, f_args) -> NodeKind.ClosureMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation, args: body_flat_list_expr(f_args, &flat)}
-        .HostBorrowCallback(f_callable, f_params) -> NodeKind.HostBorrowCallback{callable: body_flat_expr(f_callable, &flat), params: f_params}
         .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation}
         .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation, argument: body_flat_expr(f_argument, &flat)}
         .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_flat_expr(f_lhs, &flat), rhs: body_flat_expr(f_rhs, &flat)}
@@ -491,7 +478,6 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .TaskGroupAny(f_tasks) -> NodeKind.TaskGroupAny{tasks: body_flat_expr(f_tasks, &flat)}
         .SelectRecv(f_builder, f_channel) -> NodeKind.SelectRecv{builder: body_flat_expr(f_builder, &flat), channel: body_flat_expr(f_channel, &flat)}
         .SelectAfter(f_builder, f_duration, f_value) -> NodeKind.SelectAfter{builder: body_flat_expr(f_builder, &flat), duration: body_flat_expr(f_duration, &flat), value: body_flat_opt_expr(f_value, &flat)}
-        .SelectWait(f_builder, f_nonblocking) -> NodeKind.SelectWait{builder: body_flat_expr(f_builder, &flat), nonblocking: f_nonblocking}
         .FnValue(f_kind) -> NodeKind.FnValue{kind: body_flat_fn_value_kind(f_kind, &flat)}
         // body_flat_expr files a Flat node before it asks for its kind.
         .Flat(_) -> panic("body_flat_expr_kind: a Flat node is an arena row, not a checker kind")
