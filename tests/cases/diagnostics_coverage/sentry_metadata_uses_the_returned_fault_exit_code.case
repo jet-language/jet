@@ -1,0 +1,15 @@
+# tests/diagnostics_coverage.rs::sentry_metadata_uses_the_returned_fault_exit_code at tests/diagnostics_coverage.rs:449; hand-port
+# Claim: R0801/R0802/R0803 sentry reports (plain and with context) have exit_code 70 and source runtime (tests/diagnostics_coverage.rs:464-466)
+# Claim: Rendered sentry text has exactly one exit: line equal to the exit code (tests/diagnostics_coverage.rs:467-470)
+# Not ported: Synthetic jet_render_runtime_sentry / _with_context calls with probe args: Rust-only API; the CLI-observable equivalent is the release-mode R0801 run asserted below
+fixture: sentry_metadata_uses_the_returned_fault_exit_code.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --release main.jet
+cwd: app
+env: NO_COLOR=1
+exit: 70 # tests/diagnostics_coverage.rs:466-470 sentry report exit code 70 with exactly one exit: line
+stderr: ~ "R0801" # tests/diagnostics_coverage.rs:466-470 sentry report exit code 70 with exactly one exit: line
+stderr: ~ "intentionally invalid address" # tests/diagnostics_coverage.rs:466-470 sentry report exit code 70 with exactly one exit: line
+stderr: ~ "exit: 70" # tests/diagnostics_coverage.rs:466-470 sentry report exit code 70 with exactly one exit: line

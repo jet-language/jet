@@ -1,0 +1,30 @@
+# Claim: manifestless script: spawn refused with E1803 naming Exec and --allow=Exec, no process, args readable
+# Fixture migrated: the scripts sit in per-script dirs (one fn run per package namespace); package none; marker is fixture-relative spawned.txt
+# Fixture migrated: core.process items imported as use core.process.[args, cmd] (seed rejects process.args() in this position, E1004); calls changed to args()/cmd()
+# Not ported: Rust test writes marker in scratch dir; spec uses fixture-relative marker. Rust stdout-empty check on refused spawn is asserted via stdout "" on the refuse steps.
+fixture: manifestless_script_cannot_spawn_but_reads_its_arguments.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run spawn/spawn.jet spawned.txt
+exit: 1 # default: spawn refused E1803
+stdout: = "" # default: spawn refused E1803
+stderr: ~ "E1803" # default: spawn refused E1803
+stderr: ~ "undecided for `Exec" # default: spawn refused E1803
+stderr: ~ "--allow=Exec" # default: spawn refused E1803
+step: sh {work}/step-2.sh
+exit: 0 # no process started (default)
+step: jet run --release spawn/spawn.jet spawned.txt
+exit: 1 # release: spawn refused E1803
+stdout: = "" # release: spawn refused E1803
+stderr: ~ "E1803" # release: spawn refused E1803
+stderr: ~ "undecided for `Exec" # release: spawn refused E1803
+stderr: ~ "--allow=Exec" # release: spawn refused E1803
+step: sh {work}/step-4.sh
+exit: 0 # no process started (release)
+step: jet run argv/argv.jet a b
+exit: 0 # default: args read
+stdout: = "args=2\n" # default: args read
+step: jet run --release argv/argv.jet a b
+exit: 0 # release: args read
+stdout: = "args=2\n" # release: args read

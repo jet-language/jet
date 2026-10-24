@@ -1,0 +1,17 @@
+# Claim: overlarge (1025-arg) call to a zero-param plugin export is rejected with E0104, no stdout
+# Fixture migrated: WAT artifact kept as text; api snapshot api_version 1 -> 3; artifact named zero_param.wat for api alias
+# Not ported: Rust loop tier "interpreter": run_plugin_tier panics on unknown tier; only default and release are observable
+fixture: plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 1 # default tier nonzero, no stdout, E0104
+stdout: = "" # default tier nonzero, no stdout, E0104
+stdout: !~ "guest-executed" # default tier nonzero, no stdout, E0104
+stderr: ~ "E0104" # default tier nonzero, no stdout, E0104
+step: jet run --release main.jet
+exit: 1 # release tier nonzero, no stdout, E0104
+stdout: = "" # release tier nonzero, no stdout, E0104
+stdout: !~ "guest-executed" # release tier nonzero, no stdout, E0104
+stderr: ~ "E0104" # release tier nonzero, no stdout, E0104

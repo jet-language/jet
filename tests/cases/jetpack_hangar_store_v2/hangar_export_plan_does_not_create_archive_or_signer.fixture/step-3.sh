@@ -1,0 +1,1 @@
+test ! -e planned.hangar

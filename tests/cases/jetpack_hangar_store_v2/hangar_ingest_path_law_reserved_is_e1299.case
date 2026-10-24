@@ -1,0 +1,11 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_ingest_path_law_reserved_is_e1299 at tests/jetpack_hangar_store_v2.rs:19; hand-port
+# Claim: ingest of a directory containing a file named CON exits 2 with diagnostic Error [E1299]: (rs:19-43)
+# Fixture migrated: cwd/JETPACK_ROOT supplied by try.mjs instead of Scratch dirs
+# Not ported: assert_jetos_stderr_snapshot(hangar_path_law_reserved) comparison not reproduced; only exit code and code prefix asserted
+fixture: hangar_ingest_path_law_reserved_is_e1299.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest src --name bad --no-color
+exit: 2 # rs:19-43 exit 2; stderr Error [E1299]:
+stderr: ~ "Error [E1299]:" # rs:19-43 exit 2; stderr Error [E1299]:

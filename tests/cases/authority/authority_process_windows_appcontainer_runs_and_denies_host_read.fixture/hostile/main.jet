@@ -1,0 +1,9 @@
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    if process.cmd(["cmd.exe", "/C", "type C:\\Windows\\win.ini"]).cwd("/tmp").under(policy).run_checked() == {
+        .Ok(_) -> print("escaped")
+        .Err(_) -> print("blocked")
+    }
+}

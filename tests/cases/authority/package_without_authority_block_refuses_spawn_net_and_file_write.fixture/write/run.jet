@@ -1,0 +1,11 @@
+// #3718: a package.jet with no authority block does not grant `FS`, so a
+// file write is refused before the program runs.
+use core.files
+
+fn run() {
+    files.write("written.txt", "never") ?? {
+        print("write failed")
+        return
+    }
+    print("wrote")
+}

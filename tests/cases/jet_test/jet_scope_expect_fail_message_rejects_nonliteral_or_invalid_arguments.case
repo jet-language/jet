@@ -1,0 +1,26 @@
+# tests/jet_test.rs::jet_scope_expect_fail_message_rejects_nonliteral_or_invalid_arguments at tests/jet_test.rs:430; hand-port
+fixture: jet_scope_expect_fail_message_rejects_nonliteral_or_invalid_arguments.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet test d0/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args message: ""
+stderr: ~ "E0617" # tests/jet_test.rs:430 args message: ""
+step: jet test d1/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args message: "{reason}"
+stderr: ~ "E0617" # tests/jet_test.rs:430 args message: "{reason}"
+step: jet test d2/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args message: reason
+stderr: ~ "E0617" # tests/jet_test.rs:430 args message: reason
+step: jet test d3/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args message: "a", message: "b"
+stderr: ~ "E0617" # tests/jet_test.rs:430 args message: "a", message: "b"
+step: jet test d4/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args reason: "a"
+stderr: ~ "E0617" # tests/jet_test.rs:430 args reason: "a"
+step: jet test d5/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args E3999
+stderr: ~ "E0617" # tests/jet_test.rs:430 args E3999
+step: jet test d6/bad_message.jet
+exit: 1 # tests/jet_test.rs:430 args message: "a", E3001
+stderr: ~ "E0617" # tests/jet_test.rs:430 args message: "a", E3001

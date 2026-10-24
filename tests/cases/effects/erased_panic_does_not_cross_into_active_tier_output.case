@@ -1,0 +1,13 @@
+# Claim: a panic inside #Off is erased: every tier prints only the active output and exits 0
+fixture: erased_panic_does_not_cross_into_active_tier_output.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # default: the erased panic never runs
+stdout: = "active\n" # default: only the active output
+stderr: !~ "erased" # default: no erased panic text
+step: jet run --release main.jet
+exit: 0 # release: the erased panic never runs
+stdout: = "active\n" # release: only the active output
+stderr: !~ "erased" # release: no erased panic text

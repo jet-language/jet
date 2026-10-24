@@ -1,0 +1,15 @@
+# tests/cffi.rs::cffi_write_capability_round_trips_through_the_native_c_boundary at tests/cffi.rs:282; hand-port
+# Claim: C & lowers to a mutable pointer and the write is observed (print 42); C ^ consumes the C-layout struct and returns 42 (tests/cffi.rs:296-367)
+# Fixture migrated: fixture: rewritten to the Examples/features/lowlevel/native_c shape (deps c@"c", c/ dir, use c.[cap as c], #Import module c.cap); C source moved to c/cap.c; cc/ar steps dropped (jet build compiles c/)
+# Not ported: generated Rust asserts: *mut std::os::raw::c_longlong, &mut c0, pub fn __jet_consume (text of generated Rust)
+# Not ported: rustc build of main.rs and -lcap link (replaced by jet build + built)
+# Not ported: output.ffi.is_none() (internal API)
+fixture: cffi_write_capability_round_trips_through_the_native_c_boundary.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # C & lowers to a mutable pointer and the write is observed (print 42); C ^ consumes the C-layout struct and returns 42 (tests/cffi.rs:296-367)
+step: built
+exit: 0 # C & lowers to a mutable pointer and the write is observed (print 42); C ^ consumes the C-layout struct and returns 42 (tests/cffi.rs:296-367)
+stdout: = "42\\n42\\n" # C & lowers to a mutable pointer and the write is observed (print 42); C ^ consumes the C-layout struct and returns 42 (tests/cffi.rs:296-367)

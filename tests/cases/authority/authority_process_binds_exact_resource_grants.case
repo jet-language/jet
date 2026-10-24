@@ -1,0 +1,11 @@
+# Claim: exact FS.Read/FS.Write/Exec grants make plan Ok
+# Fixture migrated: host_executable("cargo") replaced by /usr/bin/true (host-independent path)
+# Not ported: Rust asserts output.rust contains jet_authority_from_rights / jet_std_process_spec_under (compiler internals, not observable via CLI)
+# Not ported: Expected planned\n is the linux Strong-sandbox branch
+fixture: authority_process_binds_exact_resource_grants.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # linux Strong branch
+stdout: = "planned\n" # linux Strong branch

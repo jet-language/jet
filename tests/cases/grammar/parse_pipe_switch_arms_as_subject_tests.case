@@ -1,0 +1,15 @@
+# tests/grammar.rs::parse_pipe_switch_arms_as_subject_tests at tests/grammar.rs:677; hand-port
+# Claim: lexing and parsing succeed (tests/grammar.rs:693-695)
+# Claim: switch subject is ident fruit, 3 arms, else present (tests/grammar.rs:708-710)
+# Claim: orange | mango is an Or of Eq comparisons (tests/grammar.rs:711-718)
+# Claim: runtime: fruit==orange selects Orange Juice then prints done (census recipe expected stdout)
+# Fixture migrated: bare value arms `apple`/`orange`/... -> string literal arms (bare identifiers are name references; jet check E0107 Nothing named `apple`)
+# Not ported: AST subject/arm/BinOp shape assertions (tests/grammar.rs:699-718): AST internal; observable through the printed arm
+fixture: parse_pipe_switch_arms_as_subject_tests.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/grammar.rs:693-718 parse + switch shape; runtime arm selection
+stdout: = parse_pipe_switch_arms_as_subject_tests.out # tests/grammar.rs:693-718 parse + switch shape; runtime arm selection
+stderr: !~ "E0" # tests/grammar.rs:693-718 parse + switch shape; runtime arm selection

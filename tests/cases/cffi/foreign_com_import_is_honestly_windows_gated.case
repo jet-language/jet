@@ -1,0 +1,11 @@
+# tests/cffi.rs::foreign_com_import_is_honestly_windows_gated at tests/cffi.rs:885; hand-port
+# Claim: use com.excel as excel yields E3260 '`com.*` needs a Windows host.' (tests/cffi.rs:885)
+# Not ported: Rust test harness setup
+fixture: foreign_com_import_is_honestly_windows_gated.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # use com.excel as excel yields E3260 '`com.*` needs a Windows host.' (tests/cffi.rs:885)
+stderr: ~ "E3260" # use com.excel as excel yields E3260 '`com.*` needs a Windows host.' (tests/cffi.rs:885)
+stderr: ~ "needs a Windows host" # use com.excel as excel yields E3260 '`com.*` needs a Windows host.' (tests/cffi.rs:885)

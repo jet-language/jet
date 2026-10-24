@@ -1,0 +1,8 @@
+# Claim: narrowing an Authority with a right it does not hold (`with("FS.Write")` outside the held set) is E0712
+fixture: authority_with_outside_held_rights_is_e0712.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 1 # the run is refused
+stderr: ~ "E0712" # the narrowing outside the held rights reports E0712

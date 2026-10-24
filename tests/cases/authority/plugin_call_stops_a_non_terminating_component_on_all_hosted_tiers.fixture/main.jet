@@ -1,0 +1,22 @@
+
+use core.plugin as plugin
+
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:."])
+    hostile :: plugin.load("non_terminating.wat", policy)
+    _result :: hostile.spin() ?? {
+        print("execution-bound-failure")
+        if err == {
+            .Budget(_, fault) -> {
+                assert(fault.export == "spin")
+                assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
+                print("Budget")
+            }
+            else -> assert(false)
+        }
+        print(err)
+        return
+    }
+    print("guest-returned")
+    print(_result)
+}

@@ -1,0 +1,9 @@
+# Claim: the interpreter rejects a Transact/FFI program with E0956
+# Fixture migrated: Rust std::cmp::max binding written as extern rust "std" #Undo(undo_mutate) fn mutate(...) = "std::cmp::max" in a fn run()
+fixture: transact_ffi_interpreter_reports_unsupported_diagnostic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet eval main.jet
+exit: 1 # unsupported FFI in the interpreter reports E0956
+stderr: ~ "E0956" # unsupported FFI in the interpreter reports E0956

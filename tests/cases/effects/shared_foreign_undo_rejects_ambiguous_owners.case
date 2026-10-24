@@ -1,0 +1,9 @@
+# Claim: a re-homed C binding (c.shared used from left and right) cannot choose between same-named undo inverses in two importing modules: E0105 names the ambiguity
+fixture: shared_foreign_undo_rejects_ambiguous_owners.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # sema rejects the ambiguity before codegen
+stderr: ~ "Error [E0105]" # the ambiguity is E0105
+stderr: ~ "ambiguous" # the message names the ambiguity

@@ -1,0 +1,18 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_verify_reports_corrupt_store_instead_of_empty_success at tests/jetpack_hangar_store_v2.rs:1508; hand-port
+# Claim: verify --json on a corrupt store exits 2 with empty stderr, schema jet.report/v1, code E1340, what could not read the Hangar (rs:1557-1573)
+# Claim: stdout does not contain no hangar object (rs:1574)
+# Fixture migrated: verify uses the jet binary as in rs:1544
+# Not ported: closure-db journal corruption before verify and restore after (rs:1531-1556): needs in-place mutation of store files, not expressible as a step; without it the exit-2 step cannot hold
+# Not ported: payload unchanged check (rs:1575-1577) reduced
+fixture: hangar_verify_reports_corrupt_store_instead_of_empty_success.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name verify-corrupt --ref verify-corrupt@fixture --no-color
+exit: 0 # rs:1515-1529 exit 0
+step: jet hangar verify verify-corrupt@fixture --json --no-color
+exit: 2 # rs:1544-1574
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1544-1574
+stdout: ~ "\"code\":\"E1340\"" # rs:1544-1574
+stdout: ~ "\"what\":\"could not read the Hangar\"" # rs:1544-1574
+stderr: !~ "no hangar object" # rs:1544-1574

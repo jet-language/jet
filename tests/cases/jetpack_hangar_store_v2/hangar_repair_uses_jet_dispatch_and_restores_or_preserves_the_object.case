@@ -1,0 +1,18 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object at tests/jetpack_hangar_store_v2.rs:1087; hand-port
+# Claim: export to an unsigned archive exits 0 (rs:1121-1134)
+# Claim: repair from the unsigned archive exits 2 with unsigned Hangar archives and leaves the payload untouched (rs:1149-1169)
+# Fixture migrated: source payload assumed to be trusted bytes (the repaired value asserted at rs:1193); [INFERENCE] from the assertion text, source file not read
+# Not ported: payload tamper before repair (rs:1163-1169 precondition): needs in-place mutation
+# Not ported: signed-archive repair and idempotent repeat (rs:1187-1205): not ported
+# Not ported: crash-stage/quarantine fabrication under hangar/quarantine (rs:1207-1256): internal layout
+fixture: hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name repairable --ref repairable@fixture --no-color
+exit: 0 # rs:1094-1108 exit 0
+step: jet hangar export repairable@fixture --to unsigned.hangar --yes --no-color
+exit: 0 # rs:1121-1134 exit 0
+step: jet hangar repair repairable@fixture --from unsigned.hangar --yes --no-color
+exit: 2 # rs:1149-1168
+stderr: ~ "unsigned Hangar archives" # rs:1149-1168

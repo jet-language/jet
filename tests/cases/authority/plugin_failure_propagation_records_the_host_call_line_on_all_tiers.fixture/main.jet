@@ -1,0 +1,11 @@
+use core.plugin as plugin
+
+fn fail() -> Int plugin.PluginError! {
+    policy :: Authority.from_rights(["FS.Read:."])
+    guest :: plugin.load("failure_guest.wat", policy)
+    guest.trap()
+}
+
+fn run() {
+    print(fail())
+}

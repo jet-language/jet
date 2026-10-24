@@ -1,0 +1,11 @@
+# Claim: `-[via missing]>` naming no parameter of the function is exactly E0748 (the effectful `show` callback is accepted)
+# Fixture migrated: the Rust source as in tests/ui/effect_via_unknown_param.jet, whose blessed stderr also carries E0112
+fixture: effect_via_unknown_param_is_e0748.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # the pass-through annotation is rejected
+stderr: ~ "Error [E0748]" # via missing is E0748
+stderr: ~ "names no such parameter" # the message names the problem
+stderr: !~ "E0112" # E0748 is the only diagnostic

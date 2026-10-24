@@ -1,0 +1,29 @@
+# tests/jetpack_hangar_store_v2.rs::manual_external_root_cli_is_atomic_and_reports_stale_etag at tests/jetpack_hangar_store_v2.rs:1350; hand-port
+# Claim: list-external-roots shows backup-sdk and etag 1.1 (rs:1407-1410)
+# Claim: stale --if-etag register exits 2 with Error [E1320] and No requested root mutation was applied. (rs:1428-1431)
+# Claim: unregister with etag 1.1 exits 0 and prints Removed external root (rs:1453-1458)
+# Fixture migrated: source payload not read (rs:1350-1356); fixture uses a plain payload file [INFERENCE]
+# Not ported: assert_jetos_stderr_snapshot_trimmed(external_root_stale_etag) comparison (rs:1436) not reproduced
+fixture: manual_external_root_cli_is_atomic_and_reports_stale_etag.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name manual --ref manual@fixture --no-color
+exit: 0 # rs:1357-1371 exit 0
+step: jetpack hangar register-external-root backup-sdk manual@fixture --expires-in 1w --yes --no-color
+env: JETPACK_PRINCIPAL=manual-root-cli
+exit: 0 # rs:1378-1398 exit 0
+step: jetpack hangar list-external-roots --no-color
+env: JETPACK_PRINCIPAL=manual-root-cli
+exit: 0 # rs:1400-1410
+stderr: ~ "backup-sdk" # rs:1400-1410
+stderr: ~ "etag 1.1" # rs:1400-1410
+step: jetpack hangar register-external-root backup-sdk manual@fixture --if-etag 1.0 --yes --no-color
+env: JETPACK_PRINCIPAL=manual-root-cli
+exit: 2 # rs:1412-1431
+stderr: ~ "Error [E1320]" # rs:1412-1431
+stderr: ~ "No requested root mutation was applied." # rs:1412-1431
+step: jetpack hangar unregister-external-root backup-sdk --etag 1.1 --yes --no-color
+env: JETPACK_PRINCIPAL=manual-root-cli
+exit: 0 # rs:1438-1458
+stderr: ~ "Removed external root" # rs:1438-1458

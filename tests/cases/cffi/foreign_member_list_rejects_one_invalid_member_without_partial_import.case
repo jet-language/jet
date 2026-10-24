@@ -1,0 +1,11 @@
+# tests/cffi.rs::foreign_member_list_rejects_one_invalid_member_without_partial_import at tests/cffi.rs:788; hand-port
+# Claim: use c.[raylib.missing, sqlite3] yields E0611 mentioning foreign library namespace (tests/cffi.rs:788)
+# Not ported: Rust test harness setup
+fixture: foreign_member_list_rejects_one_invalid_member_without_partial_import.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # use c.[raylib.missing, sqlite3] yields E0611 mentioning foreign library namespace (tests/cffi.rs:788)
+stderr: ~ "E0611" # use c.[raylib.missing, sqlite3] yields E0611 mentioning foreign library namespace (tests/cffi.rs:788)
+stderr: ~ "foreign library namespace" # use c.[raylib.missing, sqlite3] yields E0611 mentioning foreign library namespace (tests/cffi.rs:788)

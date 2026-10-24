@@ -1,0 +1,13 @@
+# tests/pkg.rs::content_hash_recorded_at_install at tests/pkg.rs:3047; hand-port
+# Claim: install records content hash (tests/pkg.rs:3047)
+# Not ported: Rust Store install return value not exposed by the CLI; checked via the lock record
+fixture: content_hash_recorded_at_install.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fetch
+env: JET_PACKAGE_STORE_DIR=store
+exit: 0 # tests/pkg.rs:3047 install
+step: sh {work}/step-2.sh
+exit: 0 # tests/pkg.rs:3047 recorded hash present
+stdout: ~ "content-hash = \"sha256-" # tests/pkg.rs:3047 recorded hash present

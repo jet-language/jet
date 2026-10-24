@@ -1,0 +1,14 @@
+# tests/cffi.rs::cffi_close_capability_round_trips_through_the_native_c_boundary at tests/cffi.rs:372; hand-port
+# Claim: #Close(release) wrapper is accepted and runs; released value read back through C is 41 (tests/cffi.rs:386-438)
+# Fixture migrated: fixture: rewritten to the Examples/features/lowlevel/native_c shape (deps c@"c", c/ dir, use c.[close as c], #Import module c.close); C source moved to c/close.c; cc/ar steps dropped (jet build compiles c/)
+# Not ported: generated Rust asserts: impl __jet_Close for, __jet_release(self), absence of jet_ffi_release(self) (text of generated Rust)
+# Not ported: rustc build and -lclose link (replaced by jet build + built)
+fixture: cffi_close_capability_round_trips_through_the_native_c_boundary.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # #Close(release) wrapper is accepted and runs; released value read back through C is 41 (tests/cffi.rs:386-438)
+step: built
+exit: 0 # #Close(release) wrapper is accepted and runs; released value read back through C is 41 (tests/cffi.rs:386-438)
+stdout: = "41\\n" # #Close(release) wrapper is accepted and runs; released value read back through C is 41 (tests/cffi.rs:386-438)

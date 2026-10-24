@@ -1,0 +1,17 @@
+# tests/jetpack_hangar_store_v2.rs::distinct_hangar_roots_share_one_cas_object_and_file_bytes at tests/jetpack_hangar_store_v2.rs:259; hand-port
+# Claim: two JETPACK_ROOTs sharing JETPACK_SHARED_CAS both ingest the same tree with exit 0 (rs:294-296)
+# Fixture migrated: JETPACK_ROOT and JETPACK_SHARED_CAS made fixture-relative (left-root, right-root, shared-cas)
+# Not ported: shared CAS object count == 2 (rs:345) and st_blocks/inode physical accounting (rs:263-286,347-355): on-disk layout, not observable through the CLI
+# Not ported: Store::find_by_reference output_hash equality (rs:332-337): Rust API
+fixture: distinct_hangar_roots_share_one_cas_object_and_file_bytes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name shared-tool --version 1.0.0 --ref shared-tool@fixture#1.0.0 --no-color
+env: JETPACK_ROOT=left-root
+env: JETPACK_SHARED_CAS=shared-cas
+exit: 0 # rs:294 exit 0
+step: jetpack hangar ingest source --name shared-tool --version 1.0.0 --ref shared-tool@fixture#1.0.0 --no-color
+env: JETPACK_ROOT=right-root
+env: JETPACK_SHARED_CAS=shared-cas
+exit: 0 # rs:296 exit 0

@@ -1,0 +1,18 @@
+# Claim: plugin export spin hits its resource bound: stdout starts with execution-bound-failure, contains Budget, never guest-returned
+# Fixture migrated: WAT artifact kept as text (seed accepts component text); api snapshot api_version 1 -> 3; artifact named non_terminating.wat for api alias
+# Not ported: Rust isolated child-process capture bound (PLUGIN_CHILD_CAPTURE_LIMIT) and the 4096-byte stdout bound are harness-only; not asserted
+# Not ported: Rust per-tier loop: this spec uses the default tier (jet run) and release tier; both tiers in assert_plugin_failure_on_all_hosted_tiers
+fixture: plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # default tier stdout has failure marker and Budget
+stdout: ~ "execution-bound-failure" # default tier stdout has failure marker and Budget
+stdout: ~ "Budget" # default tier stdout has failure marker and Budget
+stdout: !~ "guest-returned" # default tier stdout has failure marker and Budget
+step: jet run --release main.jet
+exit: 0 # release tier stdout has failure marker and Budget
+stdout: ~ "execution-bound-failure" # release tier stdout has failure marker and Budget
+stdout: ~ "Budget" # release tier stdout has failure marker and Budget
+stdout: !~ "guest-returned" # release tier stdout has failure marker and Budget

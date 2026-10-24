@@ -1,0 +1,24 @@
+# Claim: confirmation prompt through a pty: Enter spawns once; n stops with exit 1 and no spawn
+# Fixture migrated: core.process items imported as use core.process.[args, cmd] (E1004 fix, see 62)
+# Fixture migrated: util-linux script used with -qec; stdin key drives the answer
+# Not ported: Rust waits 500ms before sending the answer; the stdin key has no delay
+fixture: script_confirmation_prompt_accepts_enter_and_refuses_n.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: script -qec "jet run spawn/spawn.jet yes.txt" /dev/null
+stdin: script_confirmation_prompt_accepts_enter_and_refuses_n.stdin-1.txt
+exit: 0 # Enter: prompt shown, spawn runs
+stdout: ~ "spawn.jet will:" # Enter: prompt shown, spawn runs
+stdout: ~ "starts other programs" # Enter: prompt shown, spawn runs
+stdout: ~ "Run it? [Y/n/always]" # Enter: prompt shown, spawn runs
+step: sh {work}/step-2.sh
+exit: 0 # yes.txt created on Enter
+step: script -qec "jet run spawn/spawn.jet no.txt" /dev/null
+stdin: script_confirmation_prompt_accepts_enter_and_refuses_n.stdin-3.txt
+exit: 1 # n: exit 1 with prompt shown
+stdout: ~ "spawn.jet will:" # n: exit 1 with prompt shown
+stdout: ~ "starts other programs" # n: exit 1 with prompt shown
+stdout: ~ "Run it? [Y/n/always]" # n: exit 1 with prompt shown
+step: sh {work}/step-4.sh
+exit: 0 # no.txt absent on n

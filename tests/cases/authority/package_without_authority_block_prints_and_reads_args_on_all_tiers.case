@@ -1,0 +1,18 @@
+# Claim: a package.jet with no authority block may print and read its own arguments on every tier, no grant needed (#3718)
+# Fixture migrated: hello.jet and argv.jet sit in two packages (each declares `run`, E0624 in one package); argv imports use core.process.[args] (E1004 fix)
+fixture: package_without_authority_block_prints_and_reads_args_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run hello/hello.jet
+exit: 0 # default: printing needs no grant
+stdout: = "hello\n" # default: printing needs no grant
+step: jet run argv/argv.jet a b
+exit: 0 # default: reading arguments needs no grant
+stdout: = "args=2\n" # default: reading arguments needs no grant
+step: jet run --release hello/hello.jet
+exit: 0 # release: printing needs no grant
+stdout: = "hello\n" # release: printing needs no grant
+step: jet run --release argv/argv.jet a b
+exit: 0 # release: reading arguments needs no grant
+stdout: = "args=2\n" # release: reading arguments needs no grant

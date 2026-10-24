@@ -1,0 +1,14 @@
+# Claim: spec.plan returns Ok without spawning; marker file absent
+# Fixture migrated: marker path fixed to /tmp/jet-authority-plan-marker-h10 (Rust used temp_dir + pid)
+# Not ported: Rust expected spawned only on linux/macos with Strong native sandbox, else refused; spec uses Strong-branch value spawned\n; host sandbox level not detected by spec
+fixture: authority_plan_refuses_before_spawn_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # clear marker
+step: jet run main.jet
+exit: 0 # plan Ok on linux Strong
+stdout: = "spawned\n" # plan Ok on linux Strong
+step: sh {work}/step-3.sh
+exit: 0 # plan did not spawn
