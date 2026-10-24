@@ -11,14 +11,9 @@ The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
 identity rows; runnable provider examples live under
 [`Examples/features/`](../../Examples/features/).
 
-The Rust-hosted compiler under `Source/` and `crates/` remains the production
-and reference compiler. The default CLI continues to use that reference path.
-The staged Jet-authored compiler under `Compiler/` may implement the same
-contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission and rustc/LLVM are transitional bootstrap seams that
-leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
-D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
-permanently owned by a particular compiler implementation.
+The compiler under `Compiler/` is written in Jet and is the compiler the CLI
+runs. No Core contract is defined as permanently owned by a particular compiler
+implementation.
 
 Loaded declaration graphs close over source-owned Core nominal field and
 payload types, including optional/container members, aliases, and distinct

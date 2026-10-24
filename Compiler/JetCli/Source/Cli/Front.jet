@@ -267,7 +267,7 @@ fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Boo
     JetCLIPlan.Refused{report: diagnostic_from_registry(code, None, what, why, fix), color: color, exit_code: exit_code, notice: ""}
 }
 
-// A real `jet` command whose Jet port has not landed: refused, never guessed.
+// A real `jet` command that is not built yet: refused, never guessed.
 fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
     JetCLIPlan.Done{output: jet_cli_not_ported_output(command, color)}
 }
@@ -276,7 +276,7 @@ fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
 fn jet_cli_not_ported_output(command: String, color: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{
         stdout: "",
-        stderr: jet_cli_report("E2104", "`jet {command}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it", color),
+        stderr: jet_cli_report("E2104", "`jet {command}` is not built yet", "This `jet` has no implementation of this command form yet, and no other `jet` can run it.", "Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.", color),
         exit_code: JET_DRIVER_EXIT_USAGE,
     }
 }

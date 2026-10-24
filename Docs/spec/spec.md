@@ -1208,8 +1208,8 @@ copy :: values[0..1].copy()
 The windows above are disjoint. A bare read window remains a view in a non-owning
 place and materializes when it enters an owning slot. Constant disjoint indexes
 and ranges lower through a safe structural split; known fields are disjoint;
-dynamic projections conservatively overlap. Jet's sema, not rustc, validates
-these facts. A call or temporary is not a place: bind it first (E0213). The
+dynamic projections conservatively overlap. Jet's sema validates these facts.
+A call or temporary is not a place: bind it first (E0213). The
 retired `values.view(0..1)` spelling is E0214 and points to `values[0..1]`.
 Method calls do not extend a place, so `&values[0..1].sort()` writes the maximal
 range and then calls the method on that window (D-SHAPE-PLACE1=A).
@@ -3320,9 +3320,9 @@ For example, the browser conformance surface uses
 `web.on("#new-task", "input", handler)` and
 `web.storage.local.set("draft", web.value("#new-task"))`. The generated web
 runtime uses `addEventListener`, DOM selection, `localStorage`, and
-`sessionStorage`; native codegen provides inert checked routes rather than
-asking rustc to type-check browser APIs. The round-trip is exercised by
-[`tests/web_build.rs`](../../tests/web_build.rs).
+`sessionStorage`; native codegen provides inert checked routes for the browser
+APIs. The round-trip is exercised by
+[`tests/cases/web_build`](../../tests/cases/web_build).
 
 ### Web queries
 
@@ -3466,7 +3466,7 @@ reports files that would change and exits nonzero without writing them; add
 `--diff` to the check for unified diffs. `jet fmt -` reads source from stdin
 and writes formatted source to stdout; `--stdin-path=<label>` supplies the
 reported source name. These commands run the lexer, parser, and printer, not
-sema or rustc. (S44)
+sema. (S44)
 
 The formatter also accepts `--lang`, `--simplify`, `--changed`, and
 `--explicit-copies`. `--simplify` opts into the ratified simplest spellings;
@@ -3857,8 +3857,8 @@ and continues with session-only history (D-FE-REPL-HISTORY1=A).
 ## `jet inspect expand`
 
 `jet inspect expand` is the single transparency command for compiler-inferred
-facts. It reads the ordinary checked bundle; it does not run a second analysis
-or ask rustc.
+facts. It reads the ordinary checked bundle; it does not run a second
+analysis.
 
 ```text
 jet inspect expand --facts <lens> <file.jet>
@@ -4578,7 +4578,7 @@ signature declaration and effective grant are checked before execution.
 `.jet/generated/<package>/<name>.jet`. Action outputs ending in `.jet` follow
 the same path. Built-in derives, user derives, and build entries share one
 checked expansion pass. Build-only entries and imported build entries are
-removed before runtime code generation, so build handles never reach rustc.
+removed before runtime code generation, so build handles never reach the built program.
 The `write_generated` build option (stock `off`) says whether `jet build`
 writes each generated module to that path under the package root for
 inspection: `on` writes them, `off` writes none. It is the profile field
@@ -4823,9 +4823,8 @@ These are intentional boundaries, not implied promises:
   tier boundary requires the binder or an explicit importer contract.
 - Retired spellings and routes are not compatibility aliases. The command
   registry and its canonical grouped routes are the only CLI contract.
-- Jet is not described here as self-hosted. The Rust-hosted compiler remains
-  the reference execution path while the staged `Compiler/` work proceeds under
-  its separate bootstrap gates.
+- The compiler is written in Jet and builds programs through its own back end;
+  no Rust-hosted compiler or Rust emission path is part of the toolchain.
 
 For teaching diagnostics, staged parser errors should point toward the current
 operator spelling—for example, `and` should teach `&&`—rather than accepting a

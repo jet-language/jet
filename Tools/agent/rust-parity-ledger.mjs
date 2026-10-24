@@ -616,7 +616,7 @@ function scanRust(file, text) {
 
 const REF_RE = /((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_-]+\.rs)(?![A-Za-z0-9_])(:\d+(?:[-,]\d+)?)?((?:::[A-Za-z_]\w*)*)/g;
 const CALL_RE = /\b[A-Za-z_]\w*_not_ported(?:_output)?\s*\(/g;
-const E2104_TEXT = 'is not part of the Jet-hosted CLI';
+const E2104_TEXT = 'is not built yet';
 
 function lineSpec(group) {
   if (!group) return [];
@@ -831,7 +831,7 @@ function scanJet(file, text, idx, primary) {
       let surface = surfaceFor();
       const raw = rawLines[ln];
       if (surface === null && raw.includes('E2104') && raw.includes(E2104_TEXT)) {
-        const m = /"((?:[^"\\]|\\.)*is not part of the Jet-hosted CLI(?:[^"\\]|\\.)*)"/.exec(raw);
+        const m = /"((?:[^"\\]|\\.)*is not built yet(?:[^"\\]|\\.)*)"/.exec(raw);
         surface = m ? m[1] : '<dynamic>';
       }
       if (surface !== null && surface !== '?') {

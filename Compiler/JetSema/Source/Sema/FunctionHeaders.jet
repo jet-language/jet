@@ -306,7 +306,7 @@ fn sema_function_header_check_variadic_bound_shape(function: Func, environment: 
     loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, &loops, &uses)
     if loops > 1 -> &uses.push(last.name_span)
     loop span in uses {
-        &diagnostics.push(sema_error("E1314", span, "`{last.name}` can only be used in a direct `loop x in {last.name} {{ … }}` loop here", "`{last.name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can have different concrete types, so there's no single Rust type to give `{last.name}` outside a loop that visits each argument once", "iterate it with `loop x in {last.name} {{ … }}` — that's the only supported use"))
+        &diagnostics.push(sema_error("E1314", span, "`{last.name}` can only be used in a direct `loop x in {last.name} {{ … }}` loop here", "`{last.name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can have different concrete types, so there's no single type to give `{last.name}` outside a loop that visits each argument once", "iterate it with `loop x in {last.name} {{ … }}` — that's the only supported use"))
     }
     uses.len() == 0
 }

@@ -1491,8 +1491,7 @@ the host must obey that declaration rather than infer ownership from a header.
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),
 `Bool`, `Text` (JetText), `I8`–`I64`, `U8`–`U64`, or `F32`; a unit result is
-`void`. The Jet compiler implements this law; the frozen Rust compiler still
-admits only one homogeneous `Int`, `Float`, `Bool`, or `Text` shape.
+`void`. The Jet compiler implements this law.
 Function-valued exports and a Library-wide `init`/`shutdown` protocol are not
 part of this surface. The loader owns mapping and unmapping. The host owns
 process signals, thread creation, and isolation for a failing call.

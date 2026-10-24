@@ -147,9 +147,8 @@ exist.
 
 The post-Rust safety argument requires two independent checks before code is
 generated. Sema owns every user-facing check (I3) and reports each violation as
-a registered diagnostic. On the Rust path rustc's borrow checker and `Send`
-checks provide the second check (I2). The native backend has no rustc, so it
-needs an independent checker over JetIR, alongside its runtime instrumentation
+a registered diagnostic. The back end needs an independent second checker
+over JetIR, alongside its runtime instrumentation
 receipts, that backs:
 
 - use-after-move (E0121);

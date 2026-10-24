@@ -8,9 +8,8 @@ integration. The executable declarations live in [`Core/`](../../../Core/);
 the Prelude registry lists exports and module paths in
 [`Core.jet`](../../../Compiler/Prelude/Core.jet), and the
 [`Examples/`](../../../Examples/) and [`tests/`](../../../tests/) directories
-exercise the contracts. The Rust-hosted compiler remains the reference
-execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
-self-hosted.
+exercise the contracts. The Jet compiler in [`Compiler/`](../../../Compiler/)
+checks and builds them.
 
 Application and `#Test` helper functions retain their canonical entry-module
 call identity in both single-file and multi-file packages; the absence of
@@ -4639,12 +4638,8 @@ storage, and mutating a sketch uses its `&self` receiver with an explicit `&` ca
 
 ### Writing Core in Jet
 
-The Rust-hosted compiler remains Jet's production and reference compiler. Jet
-source packages under [`Core/`](../../../Core/) are compiled by that normal
-frontend; they are not evidence that the compiler is self-hosted. The staged
-Jet-authored compiler in [`Compiler/`](../../../Compiler/) is a separate
-bootstrap project, while Rust emission and rustc/LLVM remain part of the host
-implementation.
+Jet source packages under [`Core/`](../../../Core/) are compiled by the Jet
+compiler's normal frontend, like any other package.
 
 `Core.jet` is the declaration registry, `Core/**/*.jet` is the source for the
 Jet-owned package surface, and provider code supplies operations that require

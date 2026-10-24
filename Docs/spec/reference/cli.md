@@ -593,8 +593,8 @@ time, each phase's start and end (with its duration, item count, and resident
 and peak memory), the item being processed (a module or, with
 `JET_TRACE_DETAIL=functions`, a function), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
-trace-event lines, flushed per event, in the format of the Rust host's
-`JET_TRACE_FILE` trace (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
+trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
+(`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
 follows a running compile; Perfetto loads the file); timestamps have
 millisecond resolution. `JET_TRACE_FILE=FILE` is the environment form for
 the same five commands (`-` or `stderr` selects the readable stream), and
@@ -652,10 +652,10 @@ Directory and package targets, doctests, a `fn test` override, a bare
 `--shuffle`, and the other test flags are refused with E2104 until they are
 ported. The test-result cache, the evidence report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
-harness exit (the Rust host's outcome for a package without a claims floor).
+harness exit (the outcome for a package without a claims floor).
 
-`jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes the
-same project the Rust host writes (CmdCompile.rs `run_new`): `package.jet`
+`jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes a
+project: `package.jet`
 with the template's `authority: { allow: [...] }` row, `.jet/lock` with the running toolchain
 pin and the build stamp (the git revision when the folder is inside a
 repository), the template's `run.jet`, the four comment-only `@*.jet` command
@@ -664,9 +664,8 @@ homes for `overrides`, and `.gitignore`, then the status lines on stderr
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.
 
-`jet fmt [paths…] [-]` formats `.jet` sources with the Jet port of the
-formatter ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter),
-one module per Rust `Formatter` module) the way CmdCompile.rs `run_fmt` does:
+`jet fmt [paths…] [-]` formats `.jet` sources with the Jet formatter
+([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter)):
 no paths walk the project root (the nearest `package.jet` directory, else the
 working directory), a directory is walked sorted with the ignored directories
 and snapshot trees skipped, every file is formatted before any is written, and
@@ -819,7 +818,7 @@ function in an otherwise parseable file does not prevent a policy essay.
 `jet self devtools new-example <topic>/<name>` writes the feature example and
 its expected output using the golden harness's existing directory layout.
 Existing example source is an error; existing expected output is replaced.
-The two writes are sequential, as in the maintainer command's Rust host.
+The two writes are sequential.
 Its write confirmations are emitted even under `--json` or `--quiet`.
 
 Load-only gate queries use the same authorized source loader as schema and

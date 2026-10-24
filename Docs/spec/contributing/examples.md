@@ -155,8 +155,8 @@ The default is 4 GiB; `JET_CENSUS_MEMORY=8G` selects 8 GiB when the coordinator
 permits it. Launch is refused below 12 GiB `MemAvailable`. `--runtime DIR`
 selects a matching Jet-native runtime directory for native registry transports;
 otherwise the compiler's adjacent `jet-runtime` is used. Missing prerequisites
-are recorded as blocked/skipped, never as passes. Native-only transports and
-host-specific fixtures therefore remain visible when a Rust host is selected.
+are recorded as blocked/skipped, never as passes, so native-only transports and
+host-specific fixtures stay visible in the census.
 
 The codec/file runner's `--test CodecCSV|CodecEnv|DynCodec|CompilerFileLeaves`
 mode assembles the selected Jet test with the canonical runtime sources,
