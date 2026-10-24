@@ -466,6 +466,9 @@ records the shipped surface without adding aliases:
 
 `partition` is stable, and the list sort family preserves source order for equal
 keys. `min_by` and `max_by` retain the last source item for equal keys.
+`sort`, `sort_desc`, `min` and `max` on named tuples compare members in label
+order, not written order (S73, D-TUPLE-ORDER1=A). So `(key, index)` sorts by
+`index`, then `key`; use `sort_by` to put another member first.
 `binary_search` returns a matching index, not an insertion position or a
 promise to return the first equal item. `counts()` returns a map of element
 counts; `top_n(n)` orders by descending count and ascending key for ties.

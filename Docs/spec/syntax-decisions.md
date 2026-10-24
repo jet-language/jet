@@ -1141,7 +1141,10 @@ position `(min: Int, max: Int)`. No positional tuples, no `.0`.
 Named tuple identity uses fields sorted by name at construction, irrespective of
 source spelling order. Synthesized Core signatures obey the same invariant,
 including tuples nested in containers, callbacks, and failure domains; assignment
-does not repair or suppress a mismatched identity.
+does not repair or suppress a mismatched identity. **D-TUPLE-ORDER1=A**: a named
+tuple's order (`<`, `<=>`, `sort`, `sort_desc`, `min`, `max`, Map keys) compares
+members in that same label order, so `(key, index)` orders by `index`, then `key`.
+To order by another member first, use `sort_by` (example: collections/tuple_order).
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
 refinement of `[T]`, lowered to a **real stack array**. `::` + literal
