@@ -511,6 +511,12 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             &diagnostics.push(sema_error("E0302", source.name_span, "`{type_name(result_ty)}` has no field `{source.name}`", "struct fields must be declared by the type", "use one of the declared field names"))
             return None
         }
+        // Rust `check_struct_lit`: a computed field is recomputed on every
+        // read, so a struct literal can never give it a value.
+        if struct_def.fields[found].computed != None {
+            &diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this literal"))
+            return None
+        }
         if supplied[found] {
             &diagnostics.push(sema_error("E0105", source.name_span, "field `{source.name}` is supplied more than once", "each struct field receives one value", "remove the duplicate field"))
             return None
@@ -538,7 +544,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         &values.push(value)
     }
     loop (index, field) in struct_def.fields {
-        if supplied[index] -> next
+        if supplied[index] || field.computed != None -> next
         default_value :: field.default ?? {
             &diagnostics.push(sema_error("E0108", span, "field `{field.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{field.name}: ...` or declare a field default"))
             return None
