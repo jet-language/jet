@@ -803,7 +803,10 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         }
         if argument.convention == AccessConvention.Move -> clone_arg = false
         taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED} else -> argument.expr
-        if !clone_arg && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        // A fresh payload (a literal or call) had its moves recorded by the
+        // check above; only a named place is consumed here.
+        fresh :: argument.convention != AccessConvention.Move && sema_ownership_places_from_expr_in_state(argument.expr, scopes, &state).len() == 0
+        if !clone_arg && !fresh && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     value := sema_tir_expr(sema_dyn_type(), TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
