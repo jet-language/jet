@@ -57,12 +57,12 @@ fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
 // builders (count 1) are written in place. Only these two helpers know the
 // prefix.
 fn rt_text_header_alloc() -> I64 {
-    block :: alloc_required_valid(I64{32}, I64{8})
+    block :: jet_rt_alloc(I64{32}, I64{8})
     rc_init(block)
     block + I64{8}
 }
 
-fn rt_text_header_free(header: I64) { alloc_release_valid(header - I64{8}, I64{32}, I64{8}) }
+fn rt_text_header_free(header: I64) { jet_rt_free(header - I64{8}, I64{32}, I64{8}) }
 
 // rt_static_text headers (Lower/StaticText.jet) are process-lifetime rodata
 // objects without a count word: cap 0 over a real buffer. Heap headers with
@@ -701,7 +701,7 @@ fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I6
 // phase, done flag. Empty separators yield leading/trailing empty strings and
 // one piece per Unicode scalar, exactly like Rust str::split.
 fn text_iter_state(text: I64, separator: I64) -> I64 {
-    state :: alloc_required_valid(I64{40}, I64{8})
+    state :: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(state, jet_rt_string_clone(text))
     rt_text_store(state + I64{8}, jet_rt_string_clone(separator))
     rt_text_store(state + I64{16}, I64{0})
@@ -744,7 +744,7 @@ fn text_iter_pull(state: I64) -> I64 {
             }
         }
     }
-    slot :: alloc_required_valid(I64{8}, I64{8})
+    slot :: jet_rt_alloc(I64{8}, I64{8})
     rt_text_store(slot, rt_text_slice(text, start, end))
     slot
 }
@@ -752,7 +752,7 @@ fn text_iter_pull(state: I64) -> I64 {
 fn text_iter_drop(state: I64) {
     jet_rt_string_drop(rt_text_word(state))
     jet_rt_string_drop(rt_text_word(state + I64{8}))
-    alloc_release_valid(state, I64{40}, I64{8})
+    jet_rt_free(state, I64{40}, I64{8})
 }
 
 #Export(c) fn jet_rt_native_iter_string_split(text: I64, separator: I64, meta: I64) -> I64 {
@@ -767,7 +767,7 @@ fn text_iter_drop(state: I64) {
     // Rust rsplit's matches are rightmost nonoverlapping matches, not the
     // forward split's matches (they differ for overlapping separators).
     list :: coll_list_new()
-    slot :: alloc_required_valid(I64{8}, I64{8})
+    slot :: jet_rt_alloc(I64{8}, I64{8})
     end := rt_text_len(text)
     loop {
         found :: rt_text_find_bytes(rt_text_data(text), end, rt_text_data(separator), n, I64{0}, true)
@@ -777,7 +777,7 @@ fn text_iter_drop(state: I64) {
         if (found < I64{0}) { break }
         end = found
     }
-    alloc_release_valid(slot, I64{8}, I64{8})
+    jet_rt_free(slot, I64{8}, I64{8})
     data :: rt_text_word(list + I64{16})
     left := I64{0}
     right := rt_text_word(list) - I64{1}
@@ -791,7 +791,7 @@ fn text_iter_drop(state: I64) {
         right -= I64{1}
     }
     iter :: jet_rt_native_iter_from_list(list, meta, I64{1})
-    alloc_release_valid(list, I64{24}, I64{8})
+    jet_rt_free(list, I64{24}, I64{8})
     iter
 }
 

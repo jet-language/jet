@@ -11,7 +11,7 @@ sentry_root := I64{0}
 // runtime-init: 4
 #Export(c) fn jet_rt_sentry_init() {
     if (sentry_root != I64{0}) -> return
-    sentry_root = alloc_required_valid(I64{112}, I64{8})
+    sentry_root = jet_rt_alloc(I64{112}, I64{8})
     thread_zero(sentry_root, I64{112})
     sync_store(sentry_root + I64{24}, I64{1})
 }
@@ -48,7 +48,7 @@ fn sentry_sequence() -> I64 {
 fn sentry_stack() -> I64 {
     stack := sync_load(thread_base() + I64{184})
     if (stack == I64{0}) {
-        stack = alloc_required_valid(I64{24}, I64{8})
+        stack = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(stack, I64{24})
         sync_store(thread_base() + I64{184}, stack)
     }
@@ -56,7 +56,7 @@ fn sentry_stack() -> I64 {
 }
 #Export(c) fn jet_rt_sentry_frame_enter() -> I64 {
     if !sentry_available() -> return I64{0}
-    frame :: alloc_required_valid(I64{32}, I64{8})
+    frame :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(frame, I64{32})
     sync_mutex_lock(sentry_root)
     sync_store(frame, sync_load(sentry_root + I64{24}))
@@ -134,7 +134,7 @@ fn sentry_expire(start: I64, length: I64, sequence: I64) {
     sync_mutex_unlock(sentry_root)
     capacity :: sync_load(header + I64{8})
     if (capacity != I64{0}) -> jet_rt_free(rows, capacity * I64{8}, I64{8})
-    alloc_release_valid(frame, I64{32}, I64{8})
+    jet_rt_free(frame, I64{32}, I64{8})
 }
 fn sentry_thread_detach() {
     stack :: sync_load(thread_base() + I64{184})

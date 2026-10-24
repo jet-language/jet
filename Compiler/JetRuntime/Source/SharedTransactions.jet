@@ -306,7 +306,7 @@ fn stm_merge(parent: I64, first: I64) {
 TRANSACTION_HOOK_DEADLINE_MS :: I64{5000}
 
 #Export(c) fn jet_rt_transaction_hook_enter() -> I64 {
-    frame :: alloc_required_valid(I64{56}, I64{8})
+    frame :: jet_rt_alloc(I64{56}, I64{8})
     control :: scheduler_control_new()
     // No SCHEDULER_SCOPE_INHERITED_STOP: a panic in the hook while a stop
     // unwinds the frame is the hook's own failure, not a double panic.
@@ -324,7 +324,7 @@ TRANSACTION_HOOK_DEADLINE_MS :: I64{5000}
     record :: scheduler_control_take_stop(control)
     scheduler_control_leave(frame)
     scheduler_control_drop(control)
-    alloc_release_valid(frame, I64{56}, I64{8})
+    jet_rt_free(frame, I64{56}, I64{8})
     if (record != I64{0}) -> transaction_hook_failed(record)
 }
 

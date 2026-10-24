@@ -853,77 +853,61 @@ fn alloc_try(size: I64, align: I64) -> I64 {
 
 #Export(c) fn jet_rt_alloc_try(size: I64, align: I64) -> I64 { alloc_try(size, align) }
 
-// The class cache row (0..7, class 32 << row) of a request alloc_class
-// would serve under `limit`, or -1 when it takes another path (a direct
-// mapping, or every request in checked mode, whose limit is 0).
-fn alloc_cached_row(size: I64, align: I64, limit: I64) -> I64 Never! {
-    effective :: if (size == I64{0}) -> I64{1} else -> size
-    if (effective > limit || align > I64{4096}) -> return I64{-1}
-    needed :: wrapping(effective + alloc_header(align) + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
-    class := I64{32}
-    row := I64{0}
-    loop needed > class {
-        if (row == I64{7}) -> return I64{-1}
-        class = wrapping(class + class)
-        row = wrapping(row + I64{1})
-    }
-    row
-}
-
-// The allocation fast path (#5476): about 66,000 allocations and 54,000
-// frees run in a cold `jet run hello`. A request alloc_try_reserved would
-// serve from the calling thread's cache row, with the policy counting
-// nothing (mode word 0), is served here with no call: the same block,
-// header and count word. Zero sends the caller to the full path (no class,
-// no TCB, an empty row, a counting policy).
-fn alloc_cached(size: I64, align: I64) -> I64 {
-    index :: alloc_cached_row(size, align, alloc_class_limit)
-    if (index < I64{0}) -> return I64{0}
-    base :: thread_base()
-    if (base == I64{0}) -> return I64{0}
-    row :: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
-    #Unsafe("the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row)") {
-        if (os_load_i64(wrapping(alloc_root + I64{144})) != I64{0}) -> return I64{0}
-        block :: os_load_i64(row)
-        if (block == I64{0}) -> return I64{0}
-        pointer :: alloc_cache_pop(row, block, align)
-        alloc_count_init(pointer, align)
-        return pointer
-    }
-}
-
-// The free fast path: a class payload goes on the calling thread's cache
-// row, as alloc_free_validated pushes it, when no counted payload is tracked
-// (so alloc_untrack has nothing to find) and the row holds under 64 blocks.
-// False sends the caller to the full path.
-fn alloc_cached_give(pointer: I64, size: I64, align: I64) -> Bool {
-    index :: alloc_cached_row(size, align, alloc_class_limit)
-    if (index < I64{0}) -> return false
-    base :: thread_base()
-    if (base == I64{0}) -> return false
-    row :: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
-    #Unsafe("the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
-        if (os_load_i64(wrapping(alloc_root + I64{200})) != I64{0}) -> return false
-        count :: os_load_i64(wrapping(row + I64{8}))
-        if (count >= I64{64}) -> return false
-        slab :: os_load_i64(wrapping(pointer - I64{16}))
-        block :: os_load_i64(wrapping(pointer - I64{8}))
-        os_store_i64(block, os_load_i64(row))
-        os_store_i64(wrapping(block + I64{8}), slab)
-        os_store_i64(row, block)
-        os_store_i64(wrapping(row + I64{8}), wrapping(count + I64{1}))
-    }
-    true
-}
-
+// The allocation fast path (#5476): jet_rt_alloc and jet_rt_free serve a
+// small request of a plainly valid layout (size below alloc_class_limit,
+// align 1, 2, 4 or 8) on the calling thread's cache row, calling nothing
+// but an empty row's refill (the runtime is not inlined, and a call costs
+// more than the work): the block, header and count word alloc_try_validated
+// writes, and the push alloc_free_validated makes. The class row (0..7,
+// class 32 << row) is alloc_class's comparisons spelled out. The checks
+// that stay on it:
+// - the layout: a size and power-of-two align in the range, so the full
+//   path's alloc_layout_valid accepts it and its trap is never skipped;
+// - checked mode: alloc_class_limit 0 admits no size, so every request takes
+//   the full path, which hands it to the checked heap;
+// - a TCB: a thread without one (GS names a zero word) has no row;
+// - the counting policy: the mode word is 0 on allocation, and no counted
+//   payload is tracked on free (so alloc_untrack has nothing to find), so
+//   the ProgramAllocator facts stay exact;
+// - an ending process frees nothing (#5478, Main.jet).
+// Anything else (a direct mapping, over-alignment, an empty row whose refill
+// finds no slab, a row holding 64 blocks) takes the full path, unchanged.
 #Export(c) fn jet_rt_alloc(size: I64, align: I64) -> I64 {
+    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+        header :: if (align == I64{8}) -> I64{24} else -> I64{16}
+        needed :: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
+        index := I64{-1}
+        if (needed <= I64{256}) {
+            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
+        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
+        if (index >= I64{0}) {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
+                base :: os_tls_base_i64()
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                    row :: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    block := os_load_i64(row)
+                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    if (block != I64{0}) {
+                        pointer :: wrapping(block + header)
+                        os_store_i64(row, os_load_i64(block))
+                        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
+                        os_store_i64(wrapping(pointer - I64{8}), block)
+                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
+                        return pointer
+                    }
+                }
+            }
+        }
+    }
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return I64{0}
     }
-    cached :: alloc_cached(size, align)
-    if (cached != I64{0}) -> return cached
-    alloc_required_valid(size, align)
+    // Allocation failure is terminal SIGABRT.
+    pointer :: alloc_try_reserved(size, align)
+    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
+    pointer
 }
 
 #Export(c) fn jet_rt_free(pointer: I64, size: I64, align: I64) {
@@ -931,27 +915,39 @@ fn alloc_cached_give(pointer: I64, size: I64, align: I64) -> Bool {
     if (pointer == I64{0}) {
         return
     }
+    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+        // An ending process leaves its heap to the kernel (#5478, Main.jet).
+        if (main_process_ending != I64{0}) -> return
+        needed :: wrapping((if (size == I64{0}) -> I64{1} else -> size) + (if (align == I64{8}) -> I64{24} else -> wrapping(I64{15} + align)))
+        index := I64{-1}
+        if (needed <= I64{256}) {
+            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
+        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
+        if (index >= I64{0}) {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
+                base :: os_tls_base_i64()
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                    row :: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    count :: os_load_i64(wrapping(row + I64{8}))
+                    if (count < I64{64}) {
+                        block :: os_load_i64(wrapping(pointer - I64{8}))
+                        slab :: os_load_i64(wrapping(pointer - I64{16}))
+                        os_store_i64(block, os_load_i64(row))
+                        os_store_i64(wrapping(block + I64{8}), slab)
+                        os_store_i64(row, block)
+                        os_store_i64(wrapping(row + I64{8}), wrapping(count + I64{1}))
+                        return
+                    }
+                }
+            }
+        }
+    }
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return
     }
     // An ending process leaves its heap to the kernel (#5478, Main.jet).
     if (main_process_ending != I64{0}) -> return
-    if alloc_cached_give(pointer, size, align) -> return
-    alloc_release(alloc_untrack(pointer))
-    alloc_free_validated(pointer, size, align)
-}
-
-// Private callers prove the layout from literal sizes and exact live-owner
-// layouts. This is the same heap/policy/tracker; only redundant Layout
-// validation is absent. Allocation failure remains terminal SIGABRT.
-fn alloc_required_valid(size: I64, align: I64) -> I64 {
-    pointer :: alloc_try_reserved(size, align)
-    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
-    pointer
-}
-fn alloc_release_valid(pointer: I64, size: I64, align: I64) {
-    if (pointer == I64{0}) -> return
     alloc_release(alloc_untrack(pointer))
     alloc_free_validated(pointer, size, align)
 }

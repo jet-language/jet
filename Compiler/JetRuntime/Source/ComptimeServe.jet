@@ -64,10 +64,10 @@ fn comptime_serve_reply(frame: I64, kind: I64, a: I64, b: I64, c: I64, d: I64) {
 // value `kind` names (5: a String, 6: an Int from its decimal).
 fn comptime_serve_value(kind: I64, length: I64) -> I64 {
     size :: if (length < I64{8}) -> I64{8} else -> length
-    scratch :: alloc_required_valid(size, I64{8})
+    scratch :: jet_rt_alloc(size, I64{8})
     comptime_serve_receive(scratch, length)
     value :: if (kind == I64{5}) -> jet_rt_string_from_static(scratch, length) else -> jet_rt_int_from_static(scratch, length)
-    alloc_release_valid(scratch, size, I64{8})
+    jet_rt_free(scratch, size, I64{8})
     value
 }
 
@@ -76,9 +76,9 @@ fn comptime_serve_value(kind: I64, length: I64) -> I64 {
 // `length` bytes: a refused system call traps to the handler instead of
 // reaching the host.
 fn comptime_serve_filter(frame: I64, handler: I64, length: I64) {
-    program :: alloc_required_valid(if (length < I64{8}) -> I64{8} else -> length, I64{8})
+    program :: jet_rt_alloc(if (length < I64{8}) -> I64{8} else -> length, I64{8})
     comptime_serve_receive(program, length)
-    action :: alloc_required_valid(I64{32}, I64{8})
+    action :: jet_rt_alloc(I64{32}, I64{8})
     // SA_SIGINFO | SA_RESTORER; the handler never returns, so its restorer never runs.
     trap_store(action, handler)
     trap_store(action + I64{8}, I64{67108868})
@@ -86,14 +86,14 @@ fn comptime_serve_filter(frame: I64, handler: I64, length: I64) {
     trap_store(action + I64{24}, I64{0})
     installed :: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})
     private :: trap_syscall(I64{157}, I64{38}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
-    fprog :: alloc_required_valid(I64{16}, I64{8})
+    fprog :: jet_rt_alloc(I64{16}, I64{8})
     trap_store(fprog, length /% I64{8})
     trap_store(fprog + I64{8}, program)
     // SECCOMP_FILTER_FLAG_TSYNC: the runtime's own threads are refused too.
     filtered :: trap_syscall(I64{317}, I64{1}, I64{1}, fprog, I64{0}, I64{0}, I64{0})
-    alloc_release_valid(fprog, I64{16}, I64{8})
-    alloc_release_valid(action, I64{32}, I64{8})
-    alloc_release_valid(program, if (length < I64{8}) -> I64{8} else -> length, I64{8})
+    jet_rt_free(fprog, I64{16}, I64{8})
+    jet_rt_free(action, I64{32}, I64{8})
+    jet_rt_free(program, if (length < I64{8}) -> I64{8} else -> length, I64{8})
     comptime_serve_reply(frame, I64{1}, installed, private, filtered, I64{0})
 }
 
@@ -157,7 +157,7 @@ fn comptime_serve_loop(frame: I64) -> I64 {
 // The object's entry: `table` holds `count` words, the image's entries in
 // the compiler's order (ComptimeWire.jet). Serves until the compiler's EXIT.
 #Export(c) fn jet_rt_comptime_serve(table: I64, count: I64) {
-    frame :: alloc_required_valid(I64{64}, I64{8})
+    frame :: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_root = frame
     comptime_serve_reply(frame, I64{0}, count, I64{0}, I64{0}, I64{0})
     comptime_serve_send(table, count * I64{8})
@@ -173,10 +173,10 @@ fn comptime_serve_request(kind: I64, operands: I64, count: I64, result: I64) -> 
         jet_rt_unreachable(I64{0}, I64{0})
         return I64{0}
     }
-    frame :: alloc_required_valid(I64{64}, I64{8})
+    frame :: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_reply(frame, I64{2}, kind, operands, count, result)
     word :: comptime_serve_loop(frame)
-    alloc_release_valid(frame, I64{64}, I64{8})
+    jet_rt_free(frame, I64{64}, I64{8})
     word
 }
 
@@ -196,7 +196,7 @@ fn comptime_serve_request(kind: I64, operands: I64, count: I64, result: I64) -> 
 fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     if !comptime_serving() -> return
     jet_rt_stdout_flush()
-    frame :: alloc_required_valid(I64{64}, I64{8})
+    frame :: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_fill(frame, I64{3}, kind, a, b, c)
     trap_store(frame + I64{40}, d)
     comptime_serve_send(frame, I64{64})

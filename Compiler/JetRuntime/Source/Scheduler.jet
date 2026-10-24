@@ -49,11 +49,11 @@ fn scheduler_words_push(header: I64, word: I64) {
 fn scheduler_words_drop(header: I64) {
     capacity :: sync_load(header + I64{8})
     if (capacity != I64{0}) -> jet_rt_free(sync_load(header + I64{16}), capacity * I64{8}, I64{8})
-    alloc_release_valid(header, I64{24}, I64{8})
+    jet_rt_free(header, I64{24}, I64{8})
 }
 
 fn scheduler_control_new() -> I64 {
-    control :: alloc_required_valid(I64{128}, I64{8})
+    control :: jet_rt_alloc(I64{128}, I64{8})
     thread_zero(control, I64{128})
     sync_store(control, I64{1})
     sync_store(control + I64{64}, sync_park_new())
@@ -67,7 +67,7 @@ fn scheduler_control_retain(control: I64) {
 fn scheduler_stop_drop(record: I64) {
     if (record == I64{0}) -> return
     jet_rt_string_drop(sync_load(record + I64{40}))
-    alloc_release_valid(record, I64{56}, I64{8})
+    jet_rt_free(record, I64{56}, I64{8})
 }
 
 fn scheduler_stop_take_message(record: I64) -> I64 {
@@ -82,7 +82,7 @@ fn scheduler_control_drop(control: I64) {
     sync_park_drop(sync_load(control + I64{64}))
     // Scoped waiter/callback guards retain the control and unregister first.
     if (sync_load(control + I64{80}) != I64{0} || sync_load(control + I64{88}) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    alloc_release_valid(control, I64{128}, I64{8})
+    jet_rt_free(control, I64{128}, I64{8})
 }
 
 fn scheduler_control_current() -> I64 { sync_load(thread_base() + I64{16}) }
@@ -310,7 +310,7 @@ fn scheduler_control_take_stop(control: I64) -> I64 {
 fn scheduler_control_discard_stop(control: I64) { scheduler_stop_drop(scheduler_control_take_stop(control)) }
 
 fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
-    record :: alloc_required_valid(I64{56}, I64{8})
+    record :: jet_rt_alloc(I64{56}, I64{8})
     sync_store(record, kind)
     sync_store(record + I64{8}, I64{-1})
     sync_store(record + I64{16}, I64{-1})
@@ -490,7 +490,7 @@ fn scheduler_deliver_cancel() {
 // Nodes32B: next0, slot/code8, env16, id24. Guards retain the control.
 fn scheduler_cancel_waiter_register(control: I64, slot: I64) -> I64 {
     if (control == I64{0}) -> return I64{0}
-    node :: alloc_required_valid(I64{32}, I64{8})
+    node :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(node, I64{32})
     sync_store(node + I64{8}, slot)
     scheduler_control_retain(control)
@@ -519,12 +519,12 @@ fn scheduler_cancel_waiter_remove(control: I64, node: I64) {
     sync_mutex_lock(control + I64{72})
     scheduler_node_unlink(control + I64{80}, node)
     sync_mutex_unlock(control + I64{72})
-    alloc_release_valid(node, I64{32}, I64{8})
+    jet_rt_free(node, I64{32}, I64{8})
     scheduler_control_drop(control)
 }
 
 fn scheduler_cancel_callback_register(control: I64, code: I64, env: I64) -> I64 {
-    node :: alloc_required_valid(I64{40}, I64{8})
+    node :: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(node, I64{40})
     sync_store(node + I64{8}, code)
     sync_store(node + I64{16}, env)
@@ -553,7 +553,7 @@ fn scheduler_cancel_callback_remove(control: I64, node: I64) {
     loop {
         sync_mutex_lock(control + I64{72})
         if (sync_load(node + I64{32}) != I64{1}) {
-            alloc_release_valid(node, I64{40}, I64{8})
+            jet_rt_free(node, I64{40}, I64{8})
             sync_mutex_unlock(control + I64{72})
             break
         }
@@ -722,7 +722,7 @@ scheduler_root := I64{0}
 // runtime-init: 3
 #Export(c) fn jet_rt_scheduler_init() {
     if (scheduler_root != I64{0}) -> return
-    scheduler_root = alloc_required_valid(I64{168}, I64{8})
+    scheduler_root = jet_rt_alloc(I64{168}, I64{8})
     thread_zero(scheduler_root, I64{168})
 }
 
@@ -794,7 +794,7 @@ fn scheduler_available_parallelism(fallback: I64) -> I64 {
 fn scheduler_thread_list(root: I64, offset: I64) -> I64 {
     list := sync_load(root + offset)
     if (list == I64{0}) {
-        list = alloc_required_valid(I64{24}, I64{8})
+        list = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(list, I64{24})
         sync_store(root + offset, list)
     }
@@ -826,7 +826,7 @@ fn scheduler_thread_list_join(list: I64) -> I64 {
     loop at < length {
         record :: sync_load(data + at * I64{8})
         _ := thread_join(sync_load(record + I64{8}), I64{0})
-        alloc_release_valid(record, I64{16}, I64{8})
+        jet_rt_free(record, I64{16}, I64{8})
         at += I64{1}
     }
     scheduler_words_drop(list)
@@ -845,14 +845,14 @@ fn scheduler_reap_finished(root: I64) {
 // see a complete record.
 fn scheduler_start_worker(root: I64, flags: I64) {
     scheduler_reap_finished(root)
-    record :: alloc_required_valid(I64{16}, I64{8})
+    record :: jet_rt_alloc(I64{16}, I64{8})
     sync_store(record, root.bit_or(flags))
     sync_store(record + I64{8}, I64{0})
     sync_mutex_lock(root)
     handle :: thread_spawn(rt_scheduler_worker_address(), record)
     if (handle < I64{0}) {
         sync_mutex_unlock(root)
-        alloc_release_valid(record, I64{16}, I64{8})
+        jet_rt_free(record, I64{16}, I64{8})
         scheduler_start_failed()
         return
     }
@@ -887,7 +887,7 @@ fn scheduler_get() -> I64 {
 // Rust does, failing at pthread_create.
 fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     root :: scheduler_get()
-    job :: alloc_required_valid(I64{32}, I64{8})
+    job :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(job, I64{0})
     sync_store(job + I64{8}, code)
     sync_store(job + I64{16}, argument)
@@ -968,7 +968,7 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
         jet_rt_observe_pool(I64{-1}, I64{-1})
         code :: sync_load(job + I64{8})
         arg :: sync_load(job + I64{16})
-        alloc_release_valid(job, I64{32}, I64{8})
+        jet_rt_free(job, I64{32}, I64{8})
         if (code == I64{0}) -> task_run(arg) else -> _ := coll_call1(code, arg)
         sync_mutex_lock(root)
         sync_store(root + I64{40}, sync_load(root + I64{40}) - I64{1})
@@ -981,7 +981,7 @@ fn scheduler_blocking_wait_enter() {
     active :: scheduler_control_current() != I64{0}
     stack := sync_load(thread_base() + I64{88})
     if (stack == I64{0}) {
-        stack = alloc_required_valid(I64{24}, I64{8})
+        stack = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(stack, I64{24})
         sync_store(thread_base() + I64{88}, stack)
     }
@@ -1094,11 +1094,11 @@ fn scheduler_timer_root() -> I64 {
     root :: scheduler_root_required()
     value := sync_load(root + I64{104})
     if (value != I64{0}) -> return value
-    candidate :: alloc_required_valid(I64{48}, I64{8})
+    candidate :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(candidate, I64{48})
     previous :: sync_cas(root + I64{104}, I64{0}, candidate)
     if (previous != I64{0}) {
-        alloc_release_valid(candidate, I64{48}, I64{8})
+        jet_rt_free(candidate, I64{48}, I64{8})
         return previous
     }
     handle :: thread_spawn(rt_scheduler_timer_address(), candidate)
@@ -1109,12 +1109,12 @@ fn scheduler_timer_root() -> I64 {
 }
 
 fn scheduler_timer_node_drop(node: I64) {
-    if (sync_add(node + I64{32}, I64{-1}) == I64{1}) -> alloc_release_valid(node, I64{40}, I64{8})
+    if (sync_add(node + I64{32}, I64{-1}) == I64{1}) -> jet_rt_free(node, I64{40}, I64{8})
 }
 
 fn scheduler_timer_schedule(deadline_ns: I64, slot: I64) -> I64 {
     wheel :: scheduler_timer_root()
-    node :: alloc_required_valid(I64{40}, I64{8})
+    node :: jet_rt_alloc(I64{40}, I64{8})
     sync_store(node + I64{8}, deadline_ns)
     sync_store(node + I64{16}, slot)
     sync_store(node + I64{24}, I64{1})
@@ -1192,7 +1192,7 @@ fn scheduler_timer_shutdown(root: I64) -> I64 {
     }
     _ := thread_join(sync_load(wheel + I64{40}), I64{0})
     sync_store(root + I64{104}, I64{0})
-    alloc_release_valid(wheel, I64{48}, I64{8})
+    jet_rt_free(wheel, I64{48}, I64{8})
     I64{1}
 }
 
@@ -1313,7 +1313,7 @@ fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
 fn scheduler_owner_deadline_queue() -> I64 {
     queue := sync_load(thread_base() + I64{96})
     if (queue == I64{0}) {
-        queue = alloc_required_valid(I64{24}, I64{8})
+        queue = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(queue, I64{24})
         sync_store(queue + I64{8}, I64{1})
         sync_store(thread_base() + I64{96}, queue)
@@ -1324,7 +1324,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
     queue :: scheduler_owner_deadline_queue()
     id :: sync_load(queue + I64{8})
     sync_store(queue + I64{8}, wrapping(id + I64{1}))
-    node :: alloc_required_valid(I64{24}, I64{8})
+    node :: jet_rt_alloc(I64{24}, I64{8})
     sync_store(node, I64{0})
     sync_store(node + I64{8}, deadline_ns)
     sync_store(node + I64{16}, id)
@@ -1340,7 +1340,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
         node :: sync_load(link)
         if sync_load(node + I64{16}) == id {
             sync_store(link, sync_load(node))
-            alloc_release_valid(node, I64{24}, I64{8})
+            jet_rt_free(node, I64{24}, I64{8})
             return
         }
         link = node
@@ -1359,7 +1359,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
     node :: sync_load(earliest)
     id :: sync_load(node + I64{16})
     sync_store(earliest, sync_load(node))
-    alloc_release_valid(node, I64{24}, I64{8})
+    jet_rt_free(node, I64{24}, I64{8})
     id
 }
 
@@ -1441,10 +1441,10 @@ fn scheduler_thread_detach() {
         node := sync_load(queue)
         loop node != (I64{0}) {
             next_node :: sync_load(node)
-            alloc_release_valid(node, I64{24}, I64{8})
+            jet_rt_free(node, I64{24}, I64{8})
             node = next_node
         }
-        alloc_release_valid(queue, I64{24}, I64{8})
+        jet_rt_free(queue, I64{24}, I64{8})
         sync_store(base + I64{96}, I64{0})
     }
 }
