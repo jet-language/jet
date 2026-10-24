@@ -935,7 +935,7 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
     headers :: sema_incremental_module_headers(graph.modules)
     imports :: sema_incremental_import_headers(graph.imports)
     header_text :: "{headers:Debug}"
-    input :: "package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callable_rows:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
+    input :: "package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callables:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
     permit := cache.state.guard_edit()
     if permit.value.frozen == input -> return
     permit.value.generation += 1
@@ -2313,10 +2313,10 @@ fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_ident
 }
 
 // The staged source of the callable registered under `function_key`, through
-// `callable_rows` (Rust `ct_funcs` keyed table); `module_index` >= 0 keeps
+// its SymbolId (Rust `ct_funcs` keyed table); `module_index` >= 0 keeps
 // only a row that module declares.
 fn sema_comptime_indexed_function_source(graph: SemaRegistrationGraph, module_index: Int, function_key: String) -> SemaComptimeFunctionSource? {
-    row :: graph.callable_rows.get(function_key) ?? return None
+    row :: sema_registration_callable_row(graph, function_key) ?? return None
     if row == {
         .Function(declaring, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
@@ -6366,7 +6366,7 @@ fn sema_comptime_call_facts_pure(graph: SemaRegistrationGraph, call_facts: [Sema
             next
         }
         callee :: fact.callee ?? return false
-        callable :: graph.callable_rows.get(callee.key) ?? return false
+        callable :: sema_registration_callable_row(graph, callee.key) ?? return false
         if callable == .Foreign(_, _) -> return false
     }
     true
@@ -8099,7 +8099,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop graph_module in final_graph.modules -> &denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, threads)
+    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, final_graph.decls, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false

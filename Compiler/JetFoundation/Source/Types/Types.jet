@@ -1,6 +1,8 @@
 // Canonical semantic type and declaration identities shared by every compiler
 // phase. Keep this separate from target layout and backend representations.
 
+use core.collections.[Rows, Row]
+
 enum Type {
     Int
     Float
@@ -425,6 +427,64 @@ struct Symbol {
 
 fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
     SymbolID{key: "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"}
+}
+
+// A registered declaration in the run-wide table the registration freeze
+// fills (Cutover B L2b, s3 §1 SymbolId; spelled DeclID beside the SymbolID
+// text key): its row of `DeclTable.rows`. Facts name a registered
+// declaration by its DeclID; locals and parameters keep their SymbolID text
+// keys until L5 gives each one a FnFacts row.
+struct DeclID {
+    row: Row<DeclRow>
+}
+
+// One registered declaration: its canonical key text (diagnostics, IR
+// names) and kind.
+struct DeclRow {
+    key: String
+    kind: SymbolKind
+}
+
+// Rows in registration order (module order, then each module's callables in
+// row order). `by_key` holds each key's first row once `decl_table_index`
+// ran; a later row of a key (a redeclaration) is kept but never found.
+struct DeclTable {
+    rows: Rows<DeclRow>{Rows<DeclRow>{}}
+    by_key: [String:DeclID]{[String:DeclID]{}}
+    // Rows added since the last `decl_table_index`.
+    pending: [DeclTableEntry]{[DeclTableEntry]{}}
+}
+
+struct DeclTableEntry {
+    key: String
+    id: DeclID
+}
+
+// Appends `symbol`'s row; `decl_table_index` keys it.
+fn decl_table_add(table: &DeclTable, symbol: Symbol) -> DeclID Never! {
+    id :: DeclID{row: &table.rows.add(DeclRow{key: symbol.id.key.copy(), kind: symbol.kind})}
+    &table.pending.push(DeclTableEntry{key: symbol.id.key.copy(), id: id})
+    id
+}
+
+// Keys the pending rows. A Map is a sorted entry list, so the rows are
+// merge-sorted once by (key, row) and every insert of a new key appends.
+fn decl_table_index(table: &DeclTable) Never! {
+    if table.pending.len() == 0 -> return
+    order := compiler_take_rows<DeclTableEntry>(&table.pending)
+    &order.sort_by((left: DeclTableEntry, right: DeclTableEntry) -> (left.key <=> right.key).then(left.id.row.index() <=> right.id.row.index()))
+    // The first row of each key wins; the entries' keys move into the map.
+    loop entry in ^order {
+        if table.by_key.get(entry.key) == None -> table.by_key[entry.key] = entry.id
+    }
+}
+
+fn decl_table_find(table: DeclTable, key: String) -> DeclID? Never! {
+    table.by_key.get(key)
+}
+
+fn decl_id_index(id: DeclID) -> Int Never! {
+    id.row.index()
 }
 
 fn symbol_kind_name(kind: SymbolKind) -> String Never! {

@@ -4,7 +4,7 @@
 // rows, declared once per run), compiled and loaded once into the session's
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
-use jet_foundation.[FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTargetApplicability, TTypeDef, TVisibility]
+use jet_foundation.[DeclTable, FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTargetApplicability, TTypeDef, TVisibility]
 use jet_sema.[SemaComptimeItemRequest, SemaComptimeItemValue, SemaGraphModuleResult]
 use jet_ir.[IRProgram, IR_STARTUP_FUNCTION_PREFIX, ir_comptime_item_function, ir_program_declared]
 use jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
@@ -25,11 +25,12 @@ fn jet_driver_comptime_declared(modules: [SemaGraphModuleResult]) -> IRProgram N
 
 // The IR of `batch`'s evaluated entries from `start` on: the batch's checked
 // closure and each entry's item function, a zero-parameter function that
-// returns the entry's expression. A batch that reaches no declaration
-// (JetDriverComptimeBatch.bare) builds with none; any other builds over the
-// run's declared program, whose constant rows the values landed since its
-// last build take over first (a key's first landed value stands).
-fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue]) -> JetEvalIRComptime {
+// returns the entry's expression, whose direct calls name `decls` rows. A
+// batch that reaches no declaration (JetDriverComptimeBatch.bare) builds
+// with none; any other builds over the run's declared program, whose
+// constant rows the values landed since its last build take over first (a
+// key's first landed value stands).
+fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     loop index in start..<batch.entries.len() {
@@ -44,7 +45,7 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
         &keys.push(item.key.copy())
         &functions.push(^item)
     }
-    if batch.bare -> return jet_eval_ir_comptime_build(^functions, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, true)
+    if batch.bare -> return jet_eval_ir_comptime_build(^functions, decls, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, true)
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
         value :: values[index]
@@ -55,7 +56,7 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
         if value.destination_key != value.key -> &landed.push(jet_driver_comptime_value_row(value, value.destination_key))
     }
     staging.landed = values.len()
-    jet_eval_ir_comptime_build_over(staging.program.copy(), ^functions, keys, ^landed, &staging.taken)
+    jet_eval_ir_comptime_build_over(staging.program.copy(), ^functions, decls, keys, ^landed, &staging.taken)
 }
 
 // The constant row of landed value `value` under `key`.
@@ -79,7 +80,7 @@ fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeV
     if checked.entry_key == .Val(key) -> &keys.push(key.copy())
     if keys.len() == 0 -> return JetDriverInvocationRun{result: None, problem: Val("the checked invocation lost its entry function")}
     declarations := jet_driver_checked_declarations(&checked)
-    built := jet_eval_ir_comptime_build(^checked.functions, keys, ^declarations.type_defs, ^declarations.impls, ^declarations.constants, false)
+    built := jet_eval_ir_comptime_build(^checked.functions, checked.decls, keys, ^declarations.type_defs, ^declarations.impls, ^declarations.constants, false)
     if built.build_failures.len() > 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder refused the invocation's code: {built.build_failures.join("; ")}")}
     if built.items[0] < 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder did not build the invocation's entry function")}
     program := jet_eval_native_load(^built, config)

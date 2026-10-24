@@ -4,7 +4,7 @@
 // its declaration's name, an enum case by its variant name, Some/Ok as
 // Present, None as a clean failure and Err as a told one, a fixed-width
 // integer as an Int.
-use jet_foundation.[TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, tir_comptime_integer_key, type_name, FnBody]
+use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, tir_comptime_integer_key, type_name, FnBody]
 use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, ir_build_roots_in, ir_declared_field_type, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // What one IR evaluation produced: its value (when it completed with data),
@@ -35,13 +35,14 @@ struct JetEvalIRComptime {
 
 // Builds `functions` from the roots `item_keys`; `type_defs`, `impls` and
 // `constants` are the checked modules' declarations the builder lays values
-// out by. A comptime value reads no source location and links no C closure,
-// so the build has no source files and no foreign functions.
+// out by, `decls` the run's declaration table their direct calls name. A
+// comptime value reads no source location and links no C closure, so the
+// build has no source files and no foreign functions.
 // `comptime_values` when the roots compute compile-time values (not a build
 // invocation): ambient reads with no system call are refused while building
 // (IRProgram.comptime_values).
-fn jet_eval_ir_comptime_build(functions: ^[FnBody], item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], comptime_values: Bool) -> JetEvalIRComptime {
-    program := ir_program_new(^functions, ^type_defs, ^impls, [String:String]{}, ^constants)
+fn jet_eval_ir_comptime_build(functions: ^[FnBody], decls: DeclTable, item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], comptime_values: Bool) -> JetEvalIRComptime {
+    program := ir_program_new(^functions, decls, ^type_defs, ^impls, [String:String]{}, ^constants)
     program.comptime_values = comptime_values
     jet_eval_ir_comptime_roots(shared [IRProgram]{}, ^program, item_keys)
 }
@@ -51,11 +52,11 @@ fn jet_eval_ir_comptime_build(functions: ^[FnBody], item_keys: [String], type_de
 // after, bound to them: one program serves a run's every batch. `landed`
 // (rows of compile-time values landed since its last build) take over its
 // constant rows first, each key once (`taken`: the keys taken over).
-fn jet_eval_ir_comptime_build_over(declared: Shared<[IRProgram]>, functions: ^[FnBody], item_keys: [String], landed: ^[TConstantDef], taken: &[String:Bool]) -> JetEvalIRComptime {
+fn jet_eval_ir_comptime_build_over(declared: Shared<[IRProgram]>, functions: ^[FnBody], decls: DeclTable, item_keys: [String], landed: ^[TConstantDef], taken: &[String:Bool]) -> JetEvalIRComptime {
     program := jet_eval_ir_program_take(declared)
     program.comptime_values = true
     loop definition in ^landed -> ir_program_put_constant(&program, ^definition, &taken)
-    ir_program_bind(&program, ^functions)
+    ir_program_bind(&program, ^functions, decls)
     jet_eval_ir_comptime_roots(declared, ^program, item_keys)
 }
 

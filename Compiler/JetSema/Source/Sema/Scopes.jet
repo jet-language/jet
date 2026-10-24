@@ -11,6 +11,7 @@ use jet_foundation.[
     StmtKind,
     TExprType,
     CoreMarkerApplication,
+    DeclID,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -772,6 +773,24 @@ struct SemaProgramTables {
     // copy facts, walked once per tables. Landing comptime values never
     // changes a nominal's members, so these stay true.
     copy_facts: SemaCopyFactsTable
+}
+
+// The DeclID a direct call to the registered callable `symbol` names (Cutover
+// B L2b). Every direct call target is a registered callable, so a target with
+// no row is a compiler bug, reported rather than lowered to a guessed callee.
+fn sema_call_callee_decl(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_callable_id(graph, symbol.key) == .Val(id) -> return Val(id)
+    }
+    &diagnostics.push(sema_error("E0003", span, "the call target `{symbol.key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
+    None
+}
+
+// The key text of the registered declaration `id` (diagnostics, call facts,
+// effect node keys). A DeclID is only minted from a graph's table.
+fn sema_program_decl_key(program: SemaProgramTables, id: DeclID) -> String Never! {
+    if program.registration_graph == .Val(graph) -> return graph.decls.rows[id.row].key.copy()
+    panic("a DeclID outlived its registration graph")
 }
 
 fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
@@ -2036,7 +2055,7 @@ fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaP
         // (earlier modules first, functions before nominals in one module).
         function_module := -1
         function_row := -1
-        if graph.callable_rows.get(id.key) == .Val(callable) {
+        if sema_registration_callable_row(graph, id.key) == .Val(callable) {
             if callable == .Function(module_index, row) {
                 function_module = module_index
                 function_row = row

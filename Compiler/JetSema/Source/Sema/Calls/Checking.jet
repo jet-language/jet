@@ -512,7 +512,7 @@ fn sema_call_default_owner_scope(source: SemaCallArgSource, parameter: SemaCallP
 // The module that declares the callable a default belongs to.
 fn sema_call_default_ref_module(program: SemaProgramTables, reference: FunctionDefaultRef) -> String? {
     if program.registration_graph == .Val(graph) {
-        row :: graph.callable_rows.get(reference.owner_key) ?? return None
+        row :: sema_registration_callable_row(graph, reference.owner_key) ?? return None
         module_index :: if row == {
             .Function(index, _) | .Foreign(index, _) -> index
             .NominalMethod(index, _, _) | .ImplMethod(index, _, _) -> index

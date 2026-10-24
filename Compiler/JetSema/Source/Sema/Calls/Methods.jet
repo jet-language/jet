@@ -657,7 +657,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     // registered identity's visibility here, never while filtering candidates.
     if program.registration_graph == .Val(graph) {
         visible := Bool?{None}
-        if graph.callable_rows.get(candidate.method.symbol.key) == .Val(row) {
+        if sema_registration_callable_row(graph, candidate.method.symbol.key) == .Val(row) {
             visible = Val(if row == {
                 .Function(owner, index) -> sema_registration_visible(graph.modules[owner].functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
                 .Foreign(owner, index) -> sema_registration_visible(graph.modules[owner].foreign_functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)

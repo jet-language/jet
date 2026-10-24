@@ -158,7 +158,7 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
 
 // The policy calls of a registered callable, read from its row in place.
 fn sema_policy_registered_calls(graph: SemaRegistrationGraph, target: SymbolID) -> [Call]? Never! {
-    row :: graph.callable_rows.get(target.key) ?? return None
+    row :: sema_registration_callable_row(graph, target.key) ?? return None
     if row == {
         .Function(module_index, index) -> Val(sema_policy_calls(graph.modules[module_index].functions[index].declaration))
         .Foreign(_, _) -> None

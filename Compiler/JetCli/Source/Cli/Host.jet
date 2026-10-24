@@ -79,6 +79,7 @@ use jet_foundation.[
     JET_COMPILER_TARGET_USIZE_MAX,
     PolicyKey,
     FnBody,
+    DeclTable,
     ast_comptime_value_json,
     ast_comptime_value_show,
     diagnostic_from_registry,
@@ -262,13 +263,13 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     entry_key :: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
     declarations := jet_driver_checked_declarations(&checked)
     // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
-    layouts := ir_program_new([FnBody]{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    layouts := ir_program_new([FnBody]{}, DeclTable{}, declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     // A failure the evaluator reports points at `run`.
     span := Span{start: 0, end: 0}
     loop function in checked.functions {
         if function.key == entry_key -> span = function.source_span
     }
-    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads)
+    built := ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads)
     if built.failures.len() > 0 {
         rows :: loop failure in built.failures -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
         jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet evaluator can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), "correct the reported backend problems, then retry `jet eval {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
@@ -693,7 +694,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
         }
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan, checks) else -> ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", checks, result.compiler_threads)
+    built := if harness == .Val(plan) -> ir_build_tests(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, plan, checks) else -> ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", checks, result.compiler_threads)
     function_count :: built.program.functions.len()
     if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
     rows := [String]{}

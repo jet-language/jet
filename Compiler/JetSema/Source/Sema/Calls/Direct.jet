@@ -1162,7 +1162,12 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     policy_diagnostic_count :: diagnostics.len()
     policy_value :: sema_policy_direct_value(candidate, call.name_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if sema_has_error_since(diagnostics, policy_diagnostic_count) -> return None
-    call_value :: if policy_value == .Val(callee) -> sema_tir_node(result_type, TExprKind.IndirectCall{callee: callee, type_args: candidate.type_args, args: lowered, signature: candidate.signature}, call.name_span) else -> sema_tir_node(result_type, TExprKind.Call{callee: candidate.symbol.id, type_args: candidate.type_args, args: lowered}, call.name_span)
+    call_value :: if policy_value == .Val(callee) -> {
+        sema_tir_node(result_type, TExprKind.IndirectCall{callee: callee, type_args: candidate.type_args, args: lowered, signature: candidate.signature}, call.name_span)
+    } else -> {
+        callee :: sema_call_callee_decl(program, candidate.symbol.id, call.name_span, &diagnostics) ?? return None
+        sema_tir_node(result_type, TExprKind.Call{callee: callee, type_args: candidate.type_args, args: lowered}, call.name_span)
+    }
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings

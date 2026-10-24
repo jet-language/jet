@@ -13,6 +13,12 @@ use jet_foundation.[
     CallablePolicyChain,
     CompilerThreads,
     ConstDef,
+    DeclID,
+    DeclTable,
+    decl_id_index,
+    decl_table_add,
+    decl_table_find,
+    decl_table_index,
     Diagnostic,
     Dimension,
     DimensionAxis,
@@ -655,9 +661,12 @@ struct SemaRegistrationGraph {
     internal_problem: String?
     diagnostics: [Diagnostic]
     complete: Bool
-    // Canonical callable SymbolId key -> first registered row, in the order
-    // `sema_registration_callable_abi` searched before it was indexed.
-    callable_rows: [String:SemaRegistrationCallableRow]
+    // The run-wide declaration table (Cutover B L2b): one DeclID row per
+    // registered callable (functions, foreign functions, nominal methods,
+    // impl methods; module order, a key's first row found), and each row's
+    // place, indexed by its DeclID.
+    decls: DeclTable{DeclTable{}}
+    callables: [SemaRegistrationCallableRow]{[SemaRegistrationCallableRow]{}}
     // Base type name -> nominal rows (by `sema_expr_type_base_name`) and impl
     // rows (by `target_type_name`), in module/row order, so operator and
     // method dispatch read only the rows of their receiver type. A name maps
@@ -1176,10 +1185,21 @@ fn sema_registration_foreign_function(function: ExternFn, module_identity: Strin
     }
 }
 
-// The sole ABI lookup surface is keyed by the canonical SymbolId. Missing
-// rows mean the target is unknown; callers must not manufacture a false ABI.
+// The callable registered under `key` (Rust `funcs.get` / `registry.method`):
+// one keyed lookup of its DeclID. None means the target is unknown; callers
+// must not manufacture a false ABI.
+fn sema_registration_callable_row(graph: SemaRegistrationGraph, key: String) -> SemaRegistrationCallableRow? Never! {
+    id :: decl_table_find(graph.decls, key) ?? return None
+    Val(graph.callables[decl_id_index(id)])
+}
+
+// The DeclID of the callable registered under `key`.
+fn sema_registration_callable_id(graph: SemaRegistrationGraph, key: String) -> DeclID? Never! {
+    decl_table_find(graph.decls, key)
+}
+
 fn sema_registration_callable_abi(graph: SemaRegistrationGraph, target: SymbolID) -> SemaRegistrationCallableABI? {
-    row :: graph.callable_rows.get(target.key) ?? return None
+    row :: sema_registration_callable_row(graph, target.key) ?? return None
     if row == {
         .Function(module_index, index) -> Val(graph.modules[module_index].functions[index].abi)
         .Foreign(module_index, index) -> Val(graph.modules[module_index].foreign_functions[index].abi)
@@ -1188,11 +1208,10 @@ fn sema_registration_callable_abi(graph: SemaRegistrationGraph, target: SymbolID
     }
 }
 
-// The Jet declaration of the callable registered under `target`, through
-// `callable_rows` (Rust `funcs.get` / `registry.method`): one keyed lookup
-// instead of a scan of every module's callables. Foreign rows have none.
+// The Jet declaration of the callable registered under `target`: one keyed
+// lookup instead of a scan of every module's callables. Foreign rows have none.
 fn sema_registration_callable_declaration(graph: SemaRegistrationGraph, target: SymbolID) -> Func? {
-    row :: graph.callable_rows.get(target.key) ?? return None
+    row :: sema_registration_callable_row(graph, target.key) ?? return None
     if row == {
         .Function(module_index, index) -> Val(graph.modules[module_index].functions[index].declaration)
         .Foreign(_, _) -> None
@@ -1247,12 +1266,6 @@ struct SemaRegistrationKeyedRow {
     // Registration order: module, then row.
     order: Int
     reference: SemaRegistrationRowRef
-}
-
-struct SemaRegistrationKeyedCallable {
-    key: String
-    order: Int
-    row: SemaRegistrationCallableRow
 }
 
 fn sema_registration_keyed_row_push(rows: &[SemaRegistrationKeyedRow], key: String, module_index: Int, row: Int) Never! {
@@ -1318,28 +1331,39 @@ fn sema_registration_index_all_nominal_names(graph: &SemaRegistrationGraph) Neve
 }
 
 // Registration adds no callable or impl after the graph is prepared; later
-// edits replace rows in place, so the first-match positions stay exact. The
+// edits replace rows in place, so the first-match positions stay exact. This
+// is the registration freeze of the callables' SymbolIds (Cutover B L2b). The
 // base-name buckets are rebuilt here, each in module/row order; nominal rows
 // pushed afterwards (minted failure unions) append through
 // `sema_registration_index_nominal_rows`.
 fn sema_registration_index_callables(graph: &SemaRegistrationGraph) Never! {
-    callables := [SemaRegistrationKeyedCallable]{}
+    decls := DeclTable{}
+    callables := [SemaRegistrationCallableRow]{}
     loop (module_index, module_row) in graph.modules {
-        loop (index, function) in module_row.functions -> sema_registration_keyed_callable_push(&callables, function.symbol.id.key, SemaRegistrationCallableRow.Function{module_index: module_index, row: index})
-        loop (index, function) in module_row.foreign_functions -> sema_registration_keyed_callable_push(&callables, function.symbol.id.key, SemaRegistrationCallableRow.Foreign{module_index: module_index, row: index})
+        loop (index, function) in module_row.functions {
+            _ :: decl_table_add(&decls, function.symbol)
+            &callables.push(SemaRegistrationCallableRow.Function{module_index: module_index, row: index})
+        }
+        loop (index, function) in module_row.foreign_functions {
+            _ :: decl_table_add(&decls, function.symbol)
+            &callables.push(SemaRegistrationCallableRow.Foreign{module_index: module_index, row: index})
+        }
         loop (owner, nominal) in module_row.nominals {
-            loop (index, method) in nominal.methods -> sema_registration_keyed_callable_push(&callables, method.symbol.id.key, SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
+            loop (index, method) in nominal.methods {
+                _ :: decl_table_add(&decls, method.symbol)
+                &callables.push(SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
+            }
         }
         loop (owner, implementation) in module_row.impls {
-            loop (index, method) in implementation.methods -> sema_registration_keyed_callable_push(&callables, method.symbol.id.key, SemaRegistrationCallableRow.ImplMethod{module_index: module_index, owner: owner, row: index})
+            loop (index, method) in implementation.methods {
+                _ :: decl_table_add(&decls, method.symbol)
+                &callables.push(SemaRegistrationCallableRow.ImplMethod{module_index: module_index, owner: owner, row: index})
+            }
         }
     }
-    &callables.sort_by((left: SemaRegistrationKeyedCallable, right: SemaRegistrationKeyedCallable) -> (left.key <=> right.key).then(left.order <=> right.order))
-    rows := [String:SemaRegistrationCallableRow]{}
-    loop at in 0..<callables.len() {
-        if at == 0 || callables[at - 1].key != callables[at].key -> rows[callables[at].key] = callables[at].row
-    }
-    graph.callable_rows = rows
+    decl_table_index(&decls)
+    graph.decls = ^decls
+    graph.callables = ^callables
     sema_registration_index_all_nominal_names(&graph)
     impl_rows := [SemaRegistrationKeyedRow]{}
     loop module_index in 0..<graph.modules.len() {
@@ -1349,12 +1373,6 @@ fn sema_registration_index_callables(graph: &SemaRegistrationGraph) Never! {
     targets := sema_registration_bucket_sorted_rows(impl_rows)
     graph.impl_row_slots = ^targets.slots
     graph.impl_row_buckets = ^targets.buckets
-}
-
-fn sema_registration_keyed_callable_push(rows: &[SemaRegistrationKeyedCallable], key: String, row: SemaRegistrationCallableRow) Never! {
-    order :: rows.len()
-    // copy: the index rows are sorted on their own; the graph keeps its callables.
-    &rows.push(SemaRegistrationKeyedCallable{key: key.copy(), order: order, row: row})
 }
 
 // Buckets every impl under the trait it implements (Rust's keyed trait
@@ -3676,7 +3694,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     if package_identity == "" || entry_module_identity == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}, derive_demand: shared SemaDeriveDemand{keys: [String:Bool]{}}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}, derive_demand: shared SemaDeriveDemand{keys: [String:Bool]{}}}
     sema_registration_index_all_nominal_rows(&graph)
     sema_registration_index_source_impls(&graph)
     sema_serde_index_codec_methods(&graph)
@@ -4051,12 +4069,12 @@ fn sema_registration_lookup_qualified(graph: SemaRegistrationGraph, module_ident
     None
 }
 
-// The default expression `reference` names. Its owner is one keyed
-// `callable_rows` lookup (Rust `CallBinder` default slot of the resolved
-// signature); trait method declarations, which are not callable rows, are
-// searched only when the owner is not one.
+// The default expression `reference` names. Its owner is one keyed callable
+// lookup (Rust `CallBinder` default slot of the resolved signature); trait
+// method declarations, which are not callable rows, are searched only when
+// the owner is not one.
 fn sema_registration_resolve_default(graph: SemaRegistrationGraph, reference: FunctionDefaultRef) -> Expr? {
-    if graph.callable_rows.get(reference.owner_key) == .Val(row) {
+    if sema_registration_callable_row(graph, reference.owner_key) == .Val(row) {
         if row == {
             .Function(module_index, index) -> {
                 if reference.source_file != "" {

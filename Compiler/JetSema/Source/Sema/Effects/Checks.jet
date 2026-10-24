@@ -24,6 +24,9 @@ use jet_foundation.[
     BodyRequireKind,
     BodyTree,
     CompilerThreads,
+    DeclID,
+    DeclTable,
+    decl_table_find,
     Diagnostic,
     EffectRowEntry,
     FnBody,
@@ -566,10 +569,10 @@ fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program
     Val(true)
 }
 
-fn sema_effect_call_api(value: TExpr) -> String Never! {
+fn sema_effect_call_api(program: SemaProgramTables, value: TExpr) -> String Never! {
     if value.kind == {
         .CoreCall(record, _, _, _, _, _) -> "{record.module_name}.{record.member}"
-        .Call(callee, _, _) -> callee.key
+        .Call(callee, _, _) -> sema_program_decl_key(program, callee)
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
         .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) -> "intrinsic method"
@@ -580,11 +583,12 @@ fn sema_effect_call_api(value: TExpr) -> String Never! {
     }
 }
 
-// sema_effect_call_api of a node of a checked flat body.
-fn sema_effect_node_call_api(kind: NodeKind) -> String Never! {
+// sema_effect_call_api of a node of a checked flat body; `decls` names a
+// direct callee.
+fn sema_effect_node_call_api(decls: DeclTable, kind: NodeKind) -> String Never! {
     if kind == {
         .CoreCall(record, _, _, _, _, _) -> "{record.module_name}.{record.member}"
-        .Call(callee, _, _) -> callee.key
+        .Call(callee, _, _) -> decls.rows[callee.row].key.copy()
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
         .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) -> "intrinsic method"
@@ -1018,6 +1022,26 @@ struct SemaEffectCallIndex {
     // The name of the node each `#Unsafe` function's key names
     // (`node_by_key`), so an unsafe-call check reads no node.
     unsafe_names: [String:String]{[String:String]{}}
+    // The node of each registered declaration with a body, by DeclID row
+    // (-1: none), so a direct call finds its callee's node without its key.
+    node_by_decl: [Int]{[Int]{}}
+}
+
+// The effect node of the declaration `callee`, -1 when it has no body here.
+fn sema_effect_decl_node(facts: SemaEffectCallIndex, callee: DeclID) -> Int Never! {
+    index :: callee.row.index()
+    if index >= facts.node_by_decl.len() -> return -1
+    facts.node_by_decl[index]
+}
+
+// node_by_decl over `decls`: every node key a declaration registered.
+fn sema_effect_nodes_by_decl(node_by_key: [String:Int], decls: DeclTable) -> [Int] Never! {
+    rows := (loop _ in 0..<decls.rows.len() -> -1)
+    loop (key, node_index) in node_by_key {
+        id :: decl_table_find(decls, key) ?? next
+        rows[id.row.index()] = node_index
+    }
+    rows
 }
 
 // The caller a walk reads its call facts under: its module's row in the call
@@ -1170,16 +1194,26 @@ fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: B
     }
 }
 
-fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, expression: BodyNode) Never! {
+fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, expression: BodyNode) Never! {
+    // A direct call names its callee's node through the callee's DeclID.
+    if expression.kind == .Call(callee, _, _) {
+        target :: sema_effect_decl_node(facts, callee)
+        if target >= 0 {
+            edge_key :: nodes[target].key.copy()
+            sema_effect_node_add_edge(&nodes, node_index, edge_key)
+        } else {
+            sema_effect_record_memory_open(&nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
+        }
+        return
+    }
     callee_key :: if expression.kind == {
-        .Call(callee, _, _) -> callee.key
         .GlobalShared(initializer, _) -> initializer.key
         .MethodCall(_, method, _, _) -> method.symbol.key
         .StaticCall(_, _, method, _, _) -> method.symbol.key
         else -> ""
     }
     if {
-        callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
+        callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
         // A named callee with no body in this program has no effects.
         callee_key != "" -> sema_effect_record_memory_open(&nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
         else -> {
@@ -1335,7 +1369,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTr
                     if node.kind == .CoreCall(record, _, _, _, _, _) {
                         sema_effect_record_core_row(&nodes, node_index, record, node.span)
                     } else if !sema_effect_is_compiler_intrinsic(node.kind) {
-                        sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, node)
+                        sema_effect_record_unresolved_call(&nodes, facts, node_index, node)
                     }
                 }
             }
@@ -2197,8 +2231,9 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
 // collected at once on up to `threads` compiler threads
 // (sema_effect_collect_threads); the result is the same for any thread count.
 // `package_denials` is the root package's `authority.deny` row; `denial_modules`
-// marks, by graph module index, the modules that row binds.
-fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], threads: CompilerThreads) -> SemaEffectGraphResult {
+// marks, by graph module index, the modules that row binds. `decls` is the
+// run's declaration table, which direct callees name.
+fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], decls: DeclTable, threads: CompilerThreads) -> SemaEffectGraphResult {
     owned_prepared := ^prepared
     diagnostics := ^owned_prepared.diagnostics
     nodes := ^owned_prepared.nodes
@@ -2252,7 +2287,8 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     loop (key, node_index) in node_by_key {
         if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
     }
-    calls := SemaEffectCallIndex{modules: ^owned_prepared.calls, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods, unsafe_names: ^unsafe_names}
+    node_by_decl := sema_effect_nodes_by_decl(node_by_key, decls)
+    calls := SemaEffectCallIndex{modules: ^owned_prepared.calls, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods, unsafe_names: ^unsafe_names, node_by_decl: ^node_by_decl}
     any_unsafe :: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false

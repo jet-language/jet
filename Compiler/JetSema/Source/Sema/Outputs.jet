@@ -186,7 +186,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                 }
                 registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, path.members[0].name))
             }
-            callable :: if registered == .Val(found) -> graph.callable_rows.get(sema_resolved_key(graph, found)) else -> None
+            callable :: if registered == .Val(found) -> sema_registration_callable_row(graph, sema_resolved_key(graph, found)) else -> None
             if callable == .Val(row) {
                 if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: ^references})
             }
@@ -254,7 +254,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
         return None
     }
     symbol :: resolved ?? return None
-    callable :: graph.callable_rows.get(sema_resolved_key(graph, symbol)) ?? {
+    callable :: sema_registration_callable_row(graph, sema_resolved_key(graph, symbol)) ?? {
         &diagnostics.push(sema_output_error(expr_span(entry), "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
         return None
     }

@@ -4,14 +4,20 @@
 // an `#FFI(asm)` function is a leaf whose code is its assembled template.
 
 use jet_backend.[x64_assemble_template]
-use jet_foundation.[AccessConvention, Span, BodyCallArg]
+use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, decl_table_find]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // Indexes the checked foreign functions by the function key their calls
-// name (the first row of a key).
-fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction]) Never! {
+// name (the first row of a key), and by DeclID row over `decls`.
+fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction], decls: DeclTable) Never! {
+    p.decl_foreign = (loop _ in 0..<decls.rows.len() -> -1)
     loop row in ^foreign {
-        if p.foreign.get(row.symbol_id.key) == None -> p.foreign[row.symbol_id.key.copy()] = row
+        if p.foreign.get(row.symbol_id.key) != None -> next
+        if decl_table_find(decls, row.symbol_id.key) == .Val(id) {
+            p.decl_foreign[id.row.index()] = p.foreign_rows.len()
+            &p.foreign_rows.push(row.copy())
+        }
+        p.foreign[row.symbol_id.key.copy()] = row
     }
 }
 

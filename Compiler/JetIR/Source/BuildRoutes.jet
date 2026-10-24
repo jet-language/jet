@@ -789,6 +789,8 @@ fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFn
         }
         .Policy(fn_type, policy_args, _, wrapper_name, captures, callee) -> {
             wrapper :: wrapper_name ?? return ir_fail_slot(&b, span, "callable policy function value without a wrapper")
+            wrapper_row :: p.rows.get(wrapper) ?? return ir_fail_slot(&b, span, "callable policy wrapper {wrapper} is outside the checked program")
+            wrapper_decl :: p.function_decls[wrapper_row] ?? return ir_fail_slot(&b, span, "callable policy wrapper {wrapper} is not a registered declaration")
             params := [Type]{}
             returned := Type?{None}
             if ir_untag(ir_subst(m, fn_type)) == .Fn(fn_params, fn_ret, _, _, _, _) {
@@ -807,7 +809,7 @@ fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFn
                 &names.push(name)
             }
             result :: returned ?? Type.Named{name: "Unit"}
-            body :: ir_node(&b, result, NodeKind.Call{callee: SymbolID{key: wrapper}, type_args: [Type]{}, args: args}, span)
+            body :: ir_node(&b, result, NodeKind.Call{callee: wrapper_decl, type_args: [Type]{}, args: args}, span)
             lambda :: BodyLambda{
                 executable: BodyLambdaBody.Expr{value: body},
                 source_span: span,

@@ -370,9 +370,9 @@ struct SemaFailureProjection {
 }
 
 // The top-level function row `function_key` registers in `module_index`,
-// through `callable_rows`; -1 when that module declares none.
+// through its SymbolId; -1 when that module declares none.
 fn sema_failure_function_row(graph: SemaRegistrationGraph, module_index: Int, function_key: String) -> Int Never! {
-    row :: graph.callable_rows.get(function_key) ?? return -1
+    row :: sema_registration_callable_row(graph, function_key) ?? return -1
     if row == .Function(declaring, index) {
         if declaring == module_index -> return index
     }
@@ -570,7 +570,7 @@ fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphMo
 fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], trail: &SemaGraphTrail) -> [String] {
     projections := [SemaFailureProjection]{}
     loop key in solved {
-        row :: graph.callable_rows.get(key) ?? next
+        row :: sema_registration_callable_row(graph, key) ?? next
         if row == .Function(module_index, index) {
             contract :: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[index].declaration), err: Type.Named{name: "Never"}}
             &projections.push(SemaFailureProjection{key: key, module_index: module_index, row: index, return_type: contract})

@@ -28,7 +28,7 @@ fn jet_cli_opt_options(level: Int, build: BuildOptions) -> IROptOptions {
 fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads) -> JetCLIDecisions {
     checked := ^inputs
     declarations := jet_driver_checked_declarations(&checked)
-    built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", ir_checks_stock(), threads)
+    built := ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", ir_checks_stock(), threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(jet_cli_native_level(build), build), threads)

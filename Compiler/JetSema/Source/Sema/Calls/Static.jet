@@ -16,6 +16,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     Symbol,
+    DeclID,
     SymbolID,
     SymbolKind,
     TBuiltinOp,
@@ -274,10 +275,10 @@ fn sema_call_static_local_defaults(target: SemaStaticMethodTarget, binding: Sema
     Val(defaults)
 }
 
-fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget) -> Bool Never! {
+fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget, method_id: DeclID) -> Bool Never! {
     if value.kind == {
         .Call(symbol, type_args, args) -> {
-            if symbol.key != target.method.symbol.key -> return false
+            if symbol.row.index() != method_id.row.index() -> return false
             // The method's inferred type arguments bind any owner parameter
             // its own same-named parameter shadows.
             owner_type := target.owner_type
@@ -290,7 +291,7 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
         }
         .TraitBox(inner, target_type) -> {
             updated_inner := inner
-            if !sema_call_static_rewrite_value(&updated_inner, target) -> return false
+            if !sema_call_static_rewrite_value(&updated_inner, target, method_id) -> return false
             value.kind = TExprKind.TraitBox{value: updated_inner, target: target_type}
             return true
         }
@@ -300,7 +301,7 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
             if statements[last] == {
                 .ExprStmt(call, statement_span) -> {
                     updated_call := call
-                    if !sema_call_static_rewrite_value(&updated_call, target) -> return false
+                    if !sema_call_static_rewrite_value(&updated_call, target, method_id) -> return false
                     updated_statements := statements.copy()
                     updated_statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
                     value.kind = TExprKind.InlineBlock{body: updated_statements}
@@ -313,15 +314,15 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
     }
     false
 }
-fn sema_call_static_call_value(value: TExpr, symbol: SymbolID) -> TExpr? {
+fn sema_call_static_call_value(value: TExpr, method_id: DeclID) -> TExpr? {
     if value.kind == {
-        .Call(callee, _, _) -> if callee.key == symbol.key -> return Val(value) else -> return None
-        .TraitBox(inner, _) -> return sema_call_static_call_value(inner, symbol)
+        .Call(callee, _, _) -> if callee.row.index() == method_id.row.index() -> return Val(value) else -> return None
+        .TraitBox(inner, _) -> return sema_call_static_call_value(inner, method_id)
         .InlineBlock(statements) -> {
             if statements.len() == 0 -> return None
             last :: statements.len() - 1
             if statements[last] == {
-                .ExprStmt(call, _) -> return sema_call_static_call_value(call, symbol)
+                .ExprStmt(call, _) -> return sema_call_static_call_value(call, method_id)
                 else -> return None
             }
         }
@@ -874,7 +875,8 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     defaults :: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return SemaMethodSpecialCheck{handled: true, value: None} else -> sema_call_static_local_defaults(target, binding, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{name: "{type_name}.{method}", name_span: span, type_args: type_args, args: args}
     checked :: sema_call_check_direct_target_owned(&state, selected, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    call_value :: sema_call_static_call_value(checked.value, target.method.symbol) ?? {
+    method_id :: sema_call_callee_decl(program, target.method.symbol, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    call_value :: sema_call_static_call_value(checked.value, method_id) ?? {
         &diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -883,7 +885,7 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     &context.call_return_views.push(SemaCallReturnView{span: span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, call_checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := checked.value
-    if !sema_call_static_rewrite_value(&value, target) {
+    if !sema_call_static_rewrite_value(&value, target, method_id) {
         &diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

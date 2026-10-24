@@ -279,7 +279,7 @@ fn ir_spawn_label(p: IRProgram, b: IRBuilder, executable: BodyLambda) -> String 
         loop {
             if ir_body_node(p, b, id).kind == {
                 .Call(callee, _, _) -> {
-                    row :: p.rows.get(callee.key) ?? -1
+                    row :: ir_decl_row(p, callee)
                     if row >= 0 -> return p.functions[row].name.copy()
                     return ""
                 }

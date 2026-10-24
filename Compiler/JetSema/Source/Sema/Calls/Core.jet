@@ -651,7 +651,8 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
         if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
             argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-            value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+            callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+            value :: sema_tir_node(result_type, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
@@ -678,7 +679,8 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
             return None
         }
         source_args :: sema_call_core_source_arguments(record, args, params, span, environment, program)
-        value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
+        callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+        value :: sema_tir_node(result_type, TExprKind.Call{callee: callee, type_args: type_args, args: source_args}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     value := sema_tir_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, fallibility: fallibility}, span)

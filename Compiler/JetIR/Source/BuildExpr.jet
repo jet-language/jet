@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, tir_generated_local, tir_user_local, type_carrier_identity, StmtKind]
+use jet_foundation.[AccessConvention, DeclID, Span, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, tir_generated_local, tir_user_local, type_carrier_identity, StmtKind]
 
 fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
     b.line = function.line
@@ -1141,7 +1141,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return slot
         }
         .Call(callee, type_args, args) -> {
-            return ir_call(&m, p, &b, callee.key, type_args, -1, [IRWriteBack]{}, args, span)
+            return ir_call_decl(&m, p, &b, callee, type_args, args, span)
         }
         .MethodCall(receiver, method, type_args, args) -> {
             if ir_trait_receiver(m, p, ir_ty(p, b, receiver), method) -> return ir_trait_call(&m, p, &b, receiver, method, type_args, args, expression_ty, span)
@@ -2141,6 +2141,24 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
     if p.intrinsics.get(key) == .Val(intrinsic) -> return ir_intrinsic_call(&m, p, &b, intrinsic, args, span)
     if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(&m, p, &b, foreign, args, span)
     row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "call of a function outside the checked program: {key}")
+    ir_call_row(&m, p, &b, row, type_args, receiver, receiver_backs, args, span)
+}
+
+// A direct call of the declaration `callee` (NodeKind.Call): its intrinsic,
+// foreign row or function row, read by its DeclID row, no key looked up.
+fn ir_call_decl(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: DeclID, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
+    row :: ir_decl_row(p, callee)
+    if row >= 0 && p.intrinsics.len() > 0 {
+        if p.intrinsics.get(p.functions[row].key) == .Val(intrinsic) -> return ir_intrinsic_call(&m, p, &b, intrinsic, args, span)
+    }
+    foreign :: ir_decl_foreign(p, callee)
+    if foreign >= 0 -> return ir_foreign_call(&m, p, &b, p.foreign_rows[foreign], args, span)
+    if row < 0 -> return ir_fail_slot(&b, span, "call of a function outside the checked program (declaration row {callee.row.index()})")
+    ir_call_row(&m, p, &b, row, type_args, -1, [IRWriteBack]{}, args, span)
+}
+
+// The call of function row `row` (ir_call).
+fn ir_call_row(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [BodyCallArg], span: Span) -> Int Never! {
     params :: p.functions[row].params
     // The callee's parameter and return types in concrete terms.
     names :: if type_args.len() > 0 -> ir_generic_names(p, p.functions[row]) else -> [String]{}
@@ -2193,7 +2211,7 @@ fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [T
             return value
         }
     }
-    callee :: ir_function_id(&m, p, key, type_args) ?? return ir_fail_slot(&b, span, "call of {key}")
+    callee :: ir_function_row_id(&m, p, row, type_args) ?? return ir_fail_slot(&b, span, "call of {p.functions[row].key}")
     dst := -1
     written_return :: ir_executable_return(p.functions[row]) ?? Type.Named{name: "Unit"}
     returned :: if names.len() > 0 -> ir_subst_in(names, concrete, written_return) else -> written_return
@@ -2267,25 +2285,25 @@ fn ir_tag_order_test(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, lh
     if variant == "" -> return None
     left_expr := -1
     right_expr := -1
-    key := ""
+    row := -1
     if ir_body_node(p, b, lhs).kind == {
         .MethodCall(receiver, method, type_args, args) -> {
             if args.len() != 1 || type_args.len() > 0 -> return None
             receiver_ty :: ir_ty(p, b, receiver)
             if ir_trait_receiver(m, p, receiver_ty, method) -> return None
-            key = ir_method_key(m, p, receiver_ty, method)
+            row = p.rows.get(ir_method_key(m, p, receiver_ty, method)) ?? return None
             left_expr = receiver
             right_expr = args[0].value
         }
         .Call(callee, type_args, args) -> {
             if args.len() != 2 || type_args.len() > 0 -> return None
-            key = callee.key
+            row = ir_decl_row(p, callee)
             left_expr = args[0].value
             right_expr = args[1].value
         }
         else -> return None
     }
-    row :: p.rows.get(key) ?? return None
+    if row < 0 -> return None
     left_row :: ir_value_type(&m, p, ir_ty(p, b, left_expr)) ?? return None
     right_row :: ir_value_type(&m, p, ir_ty(p, b, right_expr)) ?? return None
     if ir_tag_method(m, p, row, left_row, right_row) != "compare" -> return None

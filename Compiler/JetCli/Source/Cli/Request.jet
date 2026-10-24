@@ -134,7 +134,7 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     lifecycle_text :: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
     rows :: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
     declarations := jet_driver_checked_declarations(&checked)
-    library := ir_build_library(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
+    library := ir_build_library(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
     issues := compiler_take_rows<String>(&library.errors)
     loop failure in library.failures -> &issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     if issues.len() == 0 {

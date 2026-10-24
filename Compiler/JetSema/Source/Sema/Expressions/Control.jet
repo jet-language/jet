@@ -702,7 +702,7 @@ fn sema_failure_defer_obligation(callee: SemaFailureCallee?, diagnostics: &[Diag
 fn sema_failure_callee_inferred_never(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
     found :: callee ?? return false
     if program.registration_graph == .Val(graph) {
-        row :: graph.callable_rows.get(found.key) ?? return false
+        row :: sema_registration_callable_row(graph, found.key) ?? return false
         if row == .Function(module_index, index) {
             declaration :: graph.modules[module_index].functions[index].declaration
             if failure_contract_of_function(declaration.return_type, declaration.return_type_span) == .InferredNever(_) -> return true

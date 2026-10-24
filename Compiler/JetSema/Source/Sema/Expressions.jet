@@ -2242,10 +2242,9 @@ fn sema_expr_check_format_selector(checked: TExpr, format: StrFormat, environmen
     false
 }
 
-fn sema_expr_call_callee(value: TExpr) -> SymbolID? {
+fn sema_expr_call_callee(program: SemaProgramTables, value: TExpr) -> SymbolID? {
     if value.kind == {
-        // copy: `symbol` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
-        .Call(symbol, _, _) -> return Val(symbol.copy())
+        .Call(callee, _, _) -> return Val(SymbolID{key: sema_program_decl_key(program, callee)})
         .MethodCall(_, method, _, _) -> return Val(method.symbol)
         // A call behind its generated argument pins keeps its callee.
         .InlineBlock(body) -> {
@@ -2255,7 +2254,7 @@ fn sema_expr_call_callee(value: TExpr) -> SymbolID? {
                 if body[index] == .Contract(_) -> next
                 return None
             }
-            if body[body.len() - 1] == .ExprStmt(tail, _) -> return sema_expr_call_callee(tail)
+            if body[body.len() - 1] == .ExprStmt(tail, _) -> return sema_expr_call_callee(program, tail)
             return None
         }
         else -> None
@@ -2291,9 +2290,9 @@ fn sema_expr_comptime_local_method_target(environment: SemaScopeEnvironment, pro
 
 fn sema_expr_comptime_target(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, symbol: SymbolID) -> SemaExprComptimeTarget? {
     if program.registration_graph == .Val(graph) {
-        // One keyed `callable_rows` lookup (Rust `funcs.get`): top-level
-        // functions and nominal methods are compile-time targets.
-        row :: graph.callable_rows.get(symbol.key) ?? return None
+        // One keyed callable lookup (Rust `funcs.get`): top-level functions
+        // and nominal methods are compile-time targets.
+        row :: sema_registration_callable_row(graph, symbol.key) ?? return None
         if row == {
             .Function(module_index, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].functions[index].declaration, path: graph.modules[module_index].functions[index].symbol.name, kind: "function"})
             .NominalMethod(module_index, owner, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].nominals[owner].methods[index].declaration, path: "{graph.modules[module_index].nominals[owner].symbol.name}.{graph.modules[module_index].nominals[owner].methods[index].symbol.name}", kind: "method"})
@@ -2321,7 +2320,7 @@ fn sema_expr_comptime_target(environment: SemaScopeEnvironment, program: SemaPro
 // `comptime`, read in place from the graph rows.
 fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
     if program.registration_graph == .Val(graph) {
-        row :: graph.callable_rows.get(symbol.key) ?? return false
+        row :: sema_registration_callable_row(graph, symbol.key) ?? return false
         return if row == {
             .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
             .NominalMethod(module_index, owner, index) -> graph.modules[module_index].nominals[owner].methods[index].declaration.is_comptime
@@ -2400,10 +2399,10 @@ fn sema_expr_comptime_call_args(value: TExpr, context: SemaCheckContext) -> [TCo
 }
 
 fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, span: Span, checked: SemaCallChecked, diagnostics: &[Diagnostic]) -> Bool {
-    wall := sema_effect_check_transaction_wall(environment, program, scopes, checked.facts.effect_bound, sema_effect_call_api(checked.value), span, &diagnostics)
+    wall := sema_effect_check_transaction_wall(environment, program, scopes, checked.facts.effect_bound, sema_effect_call_api(program, checked.value), span, &diagnostics)
     allowed :: wall ?? return false
     if !allowed -> return false
-    callee := sema_expr_call_callee(checked.value)
+    callee := sema_expr_call_callee(program, checked.value)
     foreign_effect_root :: sema_expr_call_foreign_effect_root(program, callee)
     &context.call_facts.push(SemaCallSiteFact{
         span: span,

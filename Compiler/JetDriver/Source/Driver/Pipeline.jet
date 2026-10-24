@@ -85,6 +85,9 @@ use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
     DIAGNOSTIC_ERROR,
+    DeclID,
+    DeclTable,
+    decl_table_find,
     Diagnostic,
     Item,
     name_ledger_from_facts,
@@ -736,7 +739,7 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 fn jet_driver_comptime_precise_refs(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
     // Function values the body stores, and Core source functions Sema
     // rewrote a Core call to, are lowered with it, like its callees.
-    named :: ir_named_function_keys(tree, roots, body)
+    named :: ir_named_function_keys(tree, roots, body, graph.decls)
     if named.len() > 0 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
         loop key in named {
@@ -1431,7 +1434,7 @@ fn jet_driver_comptime_flush(
         }
     }
     if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.build", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
-    built := jet_driver_comptime_ir_build(batch, start, &staging, values)
+    built := jet_driver_comptime_ir_build(batch, start, &staging, values, graph.decls)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.build", batch.functions.len() + built.items.len())
     counters.programs_built += 1
     counters.functions_built += batch.functions.len() + built.items.len()
@@ -3199,27 +3202,32 @@ fn jet_driver_keep_going_tir_trap_row(kg: &JetDriverKeepGoingLog, function: FnBo
 // Under JET_KEEP_GOING a function whose check failed and whose own trap did
 // not check either (sema_keep_going_push_stub) is such a callee: each of its
 // callers lowers as a trap instead, and each is a census row.
-fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult]) {
-    targets := [String:Bool]{}
-    loop function in functions -> targets[function.key] = true
+fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult], decls: DeclTable) {
+    // Whether each declaration (by DeclID row) has a checked function or
+    // foreign row.
+    targets := (loop _ in 0..<decls.rows.len() -> false)
+    loop function in functions {
+        if decl_table_find(decls, function.key) == .Val(id) -> targets[id.row.index()] = true
+    }
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
-            targets[row.key] = true
-            targets[row.symbol_id.key] = true
+            if decl_table_find(decls, row.key) == .Val(id) -> targets[id.row.index()] = true
+            if decl_table_find(decls, row.symbol_id.key) == .Val(id) -> targets[id.row.index()] = true
         }
     }
     loop position in 0..<functions.len() {
-        missing :: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
+        missing_id :: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
+        missing :: decls.rows[missing_id.row].key
         trap :: jet_driver_keep_going_tir_trap_row(&kg, functions[position], "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "keep-going trap: this function calls `{missing}`, which did not check")
         functions[position] = trap
     }
 }
 
-// The first direct-call callee key in `function` (its parameter defaults,
-// then its body, each expression before the ones below it) that `targets`
-// does not hold.
-fn jet_driver_unresolved_direct_call(function: FnBody, targets: [String:Bool]) -> String? Never! {
-    missing := String?{None}
+// The first direct-call callee in `function` (its parameter defaults, then
+// its body, each expression before the ones below it) that `targets` does
+// not mark.
+fn jet_driver_unresolved_direct_call(function: FnBody, targets: [Bool]) -> DeclID? Never! {
+    missing := DeclID?{None}
     loop parameter in function.params {
         if parameter.default == Val(value) -> jet_driver_unresolved_call_in(function.tree, value, targets, &missing)
     }
@@ -3233,18 +3241,18 @@ fn jet_driver_unresolved_direct_call(function: FnBody, targets: [String:Bool]) -
 // One statement's subtrees. Its own function so the visitor closure lends the
 // `missing` write parameter: the stage-0 Rust tier then lends `targets` to the
 // closure instead of copying it per statement.
-fn jet_driver_unresolved_call_statement(tree: BodyTree, statement: Int, targets: [String:Bool], missing: &String?) Never! {
+fn jet_driver_unresolved_call_statement(tree: BodyTree, statement: Int, targets: [Bool], missing: &DeclID?) Never! {
     body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> jet_driver_unresolved_call_in(tree, child, targets, &missing))
 }
 
-// Records in `missing` (once) the first direct-call callee key in
-// `expression` or below it that `targets` does not hold, read in place.
-fn jet_driver_unresolved_call_in(tree: BodyTree, expression: Int, targets: [String:Bool], missing: &String?) Never! {
+// Records in `missing` (once) the first direct-call callee in `expression` or
+// below it that `targets` does not mark, read in place.
+fn jet_driver_unresolved_call_in(tree: BodyTree, expression: Int, targets: [Bool], missing: &DeclID?) Never! {
     if missing != None -> return
     node :: body_node(tree, expression)
     if node.kind == .Call(callee, _, _) {
-        if targets.get(callee.key) == None {
-            missing = Val(callee.key)
+        if !targets[callee.row.index()] {
+            missing = Val(callee)
             return
         }
     }
@@ -3271,7 +3279,8 @@ struct JetDriverCheckedProjectionCapture {
 
 // What the slot IR builder reads, where MIR lowering would start (Pipeline
 // `jet_driver_lower_releasing`): the checked functions, after Core pruning
-// and keep-going traps; the checked modules (declarations, names) beside
+// and keep-going traps; the declaration table their direct calls name; the
+// checked modules (declarations, names) beside
 // them; the checked source files' text by path (the first file of a path);
 // the entry module; the key of the executable entry
 // (jet_driver_resolve_entry_key), None for a program without one; the entry
@@ -3281,6 +3290,8 @@ struct JetDriverCheckedProjectionCapture {
 struct JetDriverLoweringInputs {
     functions: [FnBody]
     modules: [SemaGraphModuleResult]
+    // The run's declaration table: every direct call's callee is a row.
+    decls: DeclTable
     sources: [String:String]
     entry_module_identity: String
     entry_key: String?
@@ -4028,7 +4039,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if request.mode == JetDriverCompileMode.Eval {
         selected_name :: request.selected_entry ?? "run"
         key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
-        loop diagnostic in check_pure_program_root(key, checked_graph.modules) -> &load.diagnostics.push(diagnostic)
+        loop diagnostic in check_pure_program_root(key, checked_graph.modules, registration_graph.decls) -> &load.diagnostics.push(diagnostic)
     }
 
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.owners")
@@ -4120,9 +4131,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
 
     // From here on the registration graph is read only for the entry
-    // module's C export rows and the Rust foreign facts.
+    // module's C export rows and the Rust foreign facts; its declaration
+    // table moves on with the checked functions, whose direct calls name it.
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.registration")
     c_export_rows :: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
+    decls := ^registration_graph.decls
+    registration_graph.decls = DeclTable{}
     late_registration := SemaRegistrationGraph?{None}
     if jet_driver_rust_foreign_present(registration_graph) -> late_registration = Val(^registration_graph)
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.registration", c_export_rows.len())
@@ -4130,7 +4144,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // #3980: lower only the Core source bodies the program reaches (Rust
     // TIR `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := ir_reachable_core_rows(&checked_functions, ^lowering_candidates, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules), request.compiler_threads)
+    lowering_rows := ir_reachable_core_rows(&checked_functions, decls, ^lowering_candidates, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules), request.compiler_threads)
     sema_functions := [FnBody]{}
     unlowered_functions := [FnBody]{}
     jet_driver_partition_checked_functions(&checked_functions, lowering_rows, &sema_functions, &unlowered_functions)
@@ -4138,7 +4152,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         jet_driver_keep_going_diagnostics(&kg, "sema", load.diagnostics)
         if kg.skip.len() > 0 -> jet_driver_keep_going_trap_lowering(&kg, &sema_functions)
         // Only a failed check can leave a callee without a checked function.
-        if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(&kg, &sema_functions, runtime_semantic_modules)
+        if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(&kg, &sema_functions, runtime_semantic_modules, decls)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
     // The native executable route reads the checked functions; its entry
@@ -4182,7 +4196,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks, c_exports: c_export_rows.copy()})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, decls: ^decls, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks, c_exports: c_export_rows.copy()})
     }
     result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
     result.entry_effects = ^entry_effects

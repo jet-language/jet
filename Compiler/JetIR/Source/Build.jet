@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern]
+use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -228,6 +228,14 @@ struct IRProgram {
     // A runtime library's intrinsics by function key (BuildLibrary.jet):
     // a call of one is its machine operation, never a call.
     intrinsics: [String:IRRuntimeIntrinsic]
+    // Cutover B L2b: by DeclID row, each declaration's first function row
+    // (-1: none) and its checked foreign row in `foreign_rows` (-1: none),
+    // and by function row its DeclID (None: not a registered declaration).
+    // A direct call (NodeKind.Call) finds its callee here, by no key.
+    decl_rows: [Int]{[Int]{}}
+    decl_foreign: [Int]{[Int]{}}
+    foreign_rows: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
+    function_decls: [DeclID?]{[DeclID?]{}}
     // Whether the modules built from it check for a runtime stop after each
     // call that can deliver one (IRModule.stop_points); false only for the
     // runtime library (ir_build_library).
@@ -345,14 +353,14 @@ struct IRLambdaJob {
 // body writes) instead of its value.
 struct IRCaptureSlot { name: String, offset: Int, row: Int, by_ref: Bool }
 
-fn ir_program_new(functions: ^[FnBody], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
+fn ir_program_new(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], sources: ^[String:String], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
     owned_sources :: ^sources
     programs := [IRProgram]{}
     // The sources are indexed on their own thread while the declarations bind.
     task.group ir_program_sources {
         indexing :: task ir_source_index(owned_sources)
         p := ir_program_declared(^type_defs, ^impl_defs, ^constant_defs, functions)
-        ir_program_bind(&p, ^functions)
+        ir_program_bind(&p, ^functions, decls)
         index := indexing.join() ?? panic(compiler_threads_failure_text(err))
         p.source_bytes = ^index.bytes
         p.source_lines = ^index.lines
@@ -446,8 +454,9 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
 // Binds `functions` to `p` in place of the functions it had: their rows,
 // the union types their signatures name that `p` lacks, and the
 // implementation methods and trait method tables that name function rows.
+// `decls` is the run's declaration table their direct calls name.
 // The declarations stay, so one declared program serves many builds.
-fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
+fn ir_program_bind(p: &IRProgram, functions: ^[FnBody], decls: DeclTable) Never! {
     owned := ^functions
     ir_declared_owners(&owned, p.types)
     ir_add_signature_union_types(&p.types, &p.type_rows, owned)
@@ -495,8 +504,42 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody]) Never! {
     p.spawn_sites = ir_spawn_sites(owned)
     p.functions = ^owned
     p.rows = rows
+    ir_program_bind_decls(&p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
+}
+
+// The bound functions' DeclID rows over `decls` (IRProgram.decl_rows,
+// function_decls): a key's first function row, as `rows` holds it.
+fn ir_program_bind_decls(p: &IRProgram, decls: DeclTable) Never! {
+    decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
+    function_decls := [DeclID?]{}
+    loop (row, function) in p.functions {
+        found :: decl_table_find(decls, function.key)
+        if found == .Val(id) {
+            if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = row
+        }
+        &function_decls.push(found)
+    }
+    p.decl_rows = ^decl_rows
+    p.function_decls = ^function_decls
+    p.decl_foreign = [Int]{}
+    p.foreign_rows = [SemaCheckedForeignFunction]{}
+}
+
+// The function row of declaration `id` (-1: no bound function).
+fn ir_decl_row(p: IRProgram, id: DeclID) -> Int Never! {
+    index :: id.row.index()
+    if index >= p.decl_rows.len() -> return -1
+    p.decl_rows[index]
+}
+
+// The `foreign_rows` row of declaration `id` (-1: not a checked foreign
+// function).
+fn ir_decl_foreign(p: IRProgram, id: DeclID) -> Int Never! {
+    index :: id.row.index()
+    if index >= p.decl_foreign.len() -> return -1
+    p.decl_foreign[index]
 }
 
 // A method's owner arrives spelled as its module names it (`Parser`), while
@@ -681,6 +724,11 @@ fn ir_type_def(p: IRProgram, name: String) -> Int? Never! {
 // in the current instance's terms), queueing it on first use.
 fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -> Int? Never! {
     row :: p.rows.get(key) ?? return None
+    ir_function_row_id(&m, p, row, type_args)
+}
+
+// ir_function_id of the checked function at row `row`.
+fn ir_function_row_id(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -> Int? Never! {
     function :: p.functions[row]
     if type_args.len() == 0 || (function.generic_params.len() == 0 && ir_owner_binders(p, function).len() == 0) {
         if m.ids[row] >= 0 -> return Val(m.ids[row])
@@ -909,10 +957,10 @@ fn ir_symbol_name(function: FnBody) -> String Never! {
 // keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
 // non-generic function of checks.modules is a root too, so the image carries
 // the package's unreached functions.
-fn ir_build_program(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
-    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
+fn ir_build_program(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
+    p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
-    ir_foreign_index(&p, ^foreign)
+    ir_foreign_index(&p, ^foreign, decls)
     row :: p.rows.get(entry_key) ?? {
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
         return IRBuildResult{program: ir_module_for(p), failures: failures}
@@ -1046,9 +1094,9 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
 // Builds every checked non-generic function (a library or a coverage
 // census) on up to `threads` threads; generic functions are built per
 // instance their callers reach.
-fn ir_build_all(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
-    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
-    ir_foreign_index(&p, ^foreign)
+fn ir_build_all(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
+    p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
+    ir_foreign_index(&p, ^foreign, decls)
     roots := [IRWaveJob]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 || ir_owner_binders(p, p.functions[row]).len() > 0 -> next

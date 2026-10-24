@@ -8,7 +8,7 @@
 // validated by signature here; ir_call builds each call of one as its
 // machine operation (ir_intrinsic_call).
 
-use jet_foundation.[AccessConvention, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote]
+use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One `#Export(c)` row of the entry module: its checked function's key and
@@ -95,9 +95,9 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
 // ir_build_program's. A row whose function does not satisfy the C export
 // law is not an export. `lifecycle_rows` are the lines of the lifecycle
 // list (ir_lifecycle_rows).
-fn ir_build_library(functions: ^[FnBody], type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
-    p := ir_program_new(^functions, ^type_defs, ^impls, ^sources, ^constants)
-    ir_foreign_index(&p, ^foreign)
+fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
+    p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
+    ir_foreign_index(&p, ^foreign, decls)
     p.stop_points = false
     m := ir_module_for(p)
     exports := [IRLibraryExportRow]{}

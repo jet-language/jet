@@ -750,7 +750,7 @@ fn sema_contract_callee_facts(func: Func) -> SemaContractCalleeFacts Never! {
 }
 
 fn sema_contract_registered_facts(graph: SemaRegistrationGraph, target: SymbolID) -> SemaContractCalleeFacts? {
-    row :: graph.callable_rows.get(target.key) ?? return None
+    row :: sema_registration_callable_row(graph, target.key) ?? return None
     if row == {
         .Function(module_index, index) -> Val(sema_contract_callee_facts(graph.modules[module_index].functions[index].declaration))
         .Foreign(_, _) -> None

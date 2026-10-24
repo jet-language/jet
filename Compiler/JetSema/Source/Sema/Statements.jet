@@ -5350,11 +5350,11 @@ fn sema_stmt_discarded_call(checked: TExpr) -> SemaStmtDiscardedCall? Never! {
 // reports it when the callee's row is empty (pure means an
 // empty row and nothing passed with `&`). A call whose carrier can still fail
 // waits for the failure solve.
-fn sema_stmt_mark_discarded_result(checked: TExpr, fact_start: Int, context: &SemaCheckContext) Never! {
+fn sema_stmt_mark_discarded_result(program: SemaProgramTables, checked: TExpr, fact_start: Int, context: &SemaCheckContext) Never! {
     discarded :: sema_stmt_discarded_call(checked) ?? return
     call :: discarded.call
     callee_key :: if call.kind == {
-        .Call(callee, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> callee.key
+        .Call(callee, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> sema_program_decl_key(program, callee)
         .StaticCall(_, _, method, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> method.symbol.key
         .MethodCall(receiver, method, _, args) -> {
             written :: if receiver.kind == {
@@ -6198,7 +6198,7 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
                                         complete = false
                                     }
                                     else -> {
-                                        sema_stmt_mark_discarded_result(checked, discard_fact_start, &context)
+                                        sema_stmt_mark_discarded_result(program, checked, discard_fact_start, &context)
                                         &output.push(TStmt.ExprStmt{value: checked, span: expr_span(expr)})
                                     }
                                 }
