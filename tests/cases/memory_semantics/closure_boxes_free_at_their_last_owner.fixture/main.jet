@@ -2,7 +2,8 @@
 // last owner ends. Each scenario runs `warm` rounds, reads the peak resident
 // set (VmHWM), runs 8 * `warm` more rounds and reads it again: a box (or a
 // capture) that outlives its last owner grows the peak with the round count.
-// The checksums catch a box freed while an owner still calls it.
+// The checksums catch a box freed while an owner still calls it. #5918: a
+// transaction hook whose body can fail drops the Result it returns.
 package {
     name: "closure_boxes_free_at_their_last_owner"
     authority: { allow: [Env, FS.Read, IO, Mem.Alloc, Time.Wait] }
@@ -242,6 +243,29 @@ fn settle(value: Int) Never! {
     if value > 3 -> panic("hook saw {value}")
 }
 
+fn fallible_hooks(from: Int, to: Int) -> Int {
+    data :: [Int]{1, 2, 3}
+    total := 0
+    loop i in from..<to {
+        total += fallible_hooked(data, i) ?? 0
+    }
+    total
+}
+
+fn fallible_hooked(data: [Int], i: Int) -> Int Reject! {
+    #Transact(tx) {
+        tx.on_commit(() -> note(data[i % 3]))
+        tx.on_rollback(() -> note(data[(i + 1) % 3]))
+        if i % 2 == 1 -> return Err(Reject.Odd)
+    }
+    Ok(i)
+}
+
+// These hooks' body: it can fail, so each hook returns a Result box.
+fn note(value: Int) {
+    if value > 3 -> print("hook saw {value}")
+}
+
 fn listened(from: Int, to: Int) -> Int {
     data :: [Int]{1, 2, 3}
     total := 0
@@ -277,5 +301,6 @@ fn run() {
     measure("sent to a task", tasks, 20000)
     measure("scope guard", guarded, 400000)
     measure("transaction hook", hooks, 200000)
+    measure("fallible transaction hook", fallible_hooks, 200000)
     measure("event listener", listened, 50000)
 }

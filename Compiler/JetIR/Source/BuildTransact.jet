@@ -1,16 +1,17 @@
 // The IR builder's `#Transact(name) { .. }` blocks (codegen Statements.jet
 // jet_codegen_lower_transaction, Lower Transaction.jet). The handle is a
 // 24-byte box [committed, commit hooks, rollback hooks], each hook list a
-// chain of 16-byte nodes [closure box, next] with the newest first; its drop
-// (the generated jet_ir_transaction_drop) runs the commit hooks LIFO when
-// committed, else the rollback hooks LIFO, and releases the other list
-// un-run. A block touching Shared values also owns a runtime Stm, committed
-// at the clean end and rolled back by its drop. The values the block mutates
-// are snapshotted on entry. Every exit that is not the clean end rolls back
-// the same way (#5477): a `return`, a propagated error or a `break`/`next`
-// leaving the block (ir_tx_unwind) and a stop (a panic, a cancellation,
-// process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
-// latest first, then drop the Stm and the handle before the exit's own drops.
+// chain of 24-byte nodes [closure box, next, result runner] with the newest
+// first; its drop (the generated jet_ir_transaction_drop) runs the commit
+// hooks LIFO when committed, else the rollback hooks LIFO, and releases the
+// other list un-run. A block touching Shared values also owns a runtime Stm,
+// committed at the clean end and rolled back by its drop. The values the
+// block mutates are snapshotted on entry. Every exit that is not the clean
+// end rolls back the same way (#5477): a `return`, a propagated error or a
+// `break`/`next` leaving the block (ir_tx_unwind) and a stop (a panic, a
+// cancellation, process.exit, os.stop: Build.jet ir_stop_return) restore the
+// snapshots, latest first, then drop the Stm and the handle before the
+// exit's own drops.
 
 use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
 
@@ -94,20 +95,55 @@ fn ir_transaction_walk(m: &IRModule, a: &IRBuilder, head: Int, run: Bool, guarde
         frame :: ir_runtime(&m, &a, "jet_rt_transaction_hook_enter", [Int]{}, word_row)
         stopping :: a.stopping
         a.stopping = true
-        _ :: ir_call_closure(&m, &a, boxed, [Int]{}, -1)
+        ir_transaction_hook_call(&m, &a, node, boxed)
         a.stopping = stopping
         _ :: ir_runtime(&m, &a, "jet_rt_transaction_hook_leave", [Int]{frame}, -1)
     } else if run {
-        _ :: ir_call_closure(&m, &a, boxed, [Int]{}, -1)
+        ir_transaction_hook_call(&m, &a, node, boxed)
     }
     following :: ir_load_word(&m, &a, node, 8)
     ir_closure_unref(&m, &a, boxed)
-    size :: ir_word_const(&m, &a, 16)
+    size :: ir_word_const(&m, &a, 24)
     ir_free(&m, &a, node, size)
     ir_emit(&a.f, IROp.Copy, node, following, -1, -1, a.line)
     ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
     ir_end(&a.f, a.line)
     ir_end(&a.f, a.line)
+}
+
+// Runs the callback `boxed` of hook `node`: through the node's result runner
+// when it has one, else directly with no result.
+fn ir_transaction_hook_call(m: &IRModule, a: &IRBuilder, node: Int, boxed: Int) Never! {
+    runner :: ir_load_word(&m, &a, node, 16)
+    zero :: ir_word_const(&m, &a, 0)
+    has_runner :: ir_bool_op(&m, &a, IROp.Ne, runner, zero)
+    ir_open_if(&a.f, has_runner, a.line)
+    start :: ir_args(&a.f, [Int]{boxed})
+    ir_emit(&a.f, IROp.CallIndirect, -1, runner, start, 1, a.line)
+    ir_stop_check(&m, &a)
+    ir_else(&a.f, a.line)
+    _ :: ir_call_closure(&m, &a, boxed, [Int]{}, -1)
+    ir_end(&a.f, a.line)
+}
+
+// The result runner of hook callbacks returning row `row` (a fallible
+// callback's Result): it calls the callback box it is given and drops the
+// result the hook discards. A stopped call wrote no result, so its stop
+// edge leaves before the drop. One per result row.
+fn ir_transaction_hook_runner(m: &IRModule, row: Int) -> Int Never! {
+    key :: "#transaction.hook.run<{ir_row_key(m, row)}>"
+    known :: m.function_rows.get(key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_function_new("transaction.hook.run", key, "jet_ir_transaction_hook_run_{ir_key_hash(key)}", "", 0))
+    m.function_rows[key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    boxed :: ir_new_slot(&a, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "boxed"))
+    result :: ir_call_closure(&m, &a, boxed, [Int]{}, row)
+    ir_emit(&a.f, IROp.Drop, -1, result, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
 }
 
 // `#Transact(handle) { body }`: the handle and the Stm open, the snapshots
@@ -349,18 +385,32 @@ fn ir_tx_unwind_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span:
 }
 
 // `name.on_commit(f)` / `name.on_rollback(f)` (Lower lower_transaction_hook):
-// the callback's closure box goes on the front of its list.
+// the callback's closure box goes on the front of its list, with the result
+// runner (ir_transaction_hook_runner) of a callback whose result has a drop,
+// else none.
 fn ir_transaction_hook(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_name: String, executable: BodyLambda, commit: Bool, span: Span) -> Int Never! {
     binding :: ir_lookup_binding(b, handle_name) ?? return ir_fail_slot(&b, span, "transaction hook without the handle {handle_name}")
     closure_ty :: ir_lambda_function_type(executable)
     env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return -1
-    offset :: if commit -> 8 else -> 16
     pointer_row :: ir_pointer_row(&m)
-    node :: ir_box_alloc(&m, &b, 16, pointer_row)
+    runner := ir_word_const(&m, &b, 0)
+    if executable.ret == .Val(ret) {
+        if !ir_unit_type(ret) && !ir_never_type(ret) {
+            result_row :: ir_value_type(&m, p, ret) ?? return ir_type_fail(&b, span, ret)
+            if m.types[result_row].drop != "" {
+                id :: ir_transaction_hook_runner(&m, result_row)
+                runner = ir_temp(&m, &b, pointer_row)
+                ir_emit(&b.f, IROp.FunctionAddress, runner, id, -1, -1, b.line)
+            }
+        }
+    }
+    offset :: if commit -> 8 else -> 16
+    node :: ir_box_alloc(&m, &b, 24, pointer_row)
     ir_emit(&b.f, IROp.Store, -1, node, 0, env, b.line)
     head :: ir_load_word(&m, &b, binding.slot, offset)
     ir_emit(&b.f, IROp.Store, -1, node, 8, head, b.line)
+    ir_emit(&b.f, IROp.Store, -1, node, 16, runner, b.line)
     ir_emit(&b.f, IROp.Store, -1, binding.slot, offset, node, b.line)
     b.fresh[env] = false
     b.fresh[node] = false
