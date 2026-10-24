@@ -1720,7 +1720,49 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
         ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, -1, site)
         return dst
     }
+    if op == .Add || op == .Sub {
+        if ir_word_record(m, p, b.f.slot_type[left]) == .Val(left_record) {
+            if ir_word_record(m, p, b.f.slot_type[right]) == .Val(right_record) -> return ir_time_binary(&m, p, &b, op, site, left, left_record, right, right_record, span)
+        }
+    }
     ir_fail_slot(&b, span, "operator {op} on {ir_type_name(left_ty)}")
+}
+
+// `+` and `-` over the time records sema_expr_check_time_binary admits
+// (Duration ± Duration, Instant ± Duration, Duration + Instant, Instant -
+// Instant). Each operand is a word record over its exact-Int nanoseconds, so
+// the result is the exact Int sum or difference of the two fields, stored in
+// the result's record: a Duration, unless one operand is a Duration and the
+// other is not, when it is the other operand's record. The record constructor
+// stops with the range stop on a value beyond i64, so `+` and `-` stop on
+// overflow as `*` and `/` do (jet_duration_scale, jet_duration_divide).
+fn ir_time_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, site: Int, left: Int, left_record: IRWordRecord, right: Int, right_record: IRWordRecord, span: Span) -> Int Never! {
+    duration_ty :: Type.Named{name: "Duration"}
+    duration_row :: ir_value_type(&m, p, duration_ty) ?? return ir_type_fail(&b, span, duration_ty)
+    duration_record :: ir_word_record(m, p, duration_row) ?? return ir_fail_slot(&b, span, "Duration without its word record")
+    left_duration :: left_record.constructor == duration_record.constructor
+    right_duration :: right_record.constructor == duration_record.constructor
+    result_row := duration_row
+    result_record := duration_record.copy()
+    if left_duration && !right_duration {
+        if op == .Sub -> return ir_fail_slot(&b, span, "operator {op} with a Duration on the left")
+        result_row = b.f.slot_type[right]
+        result_record = right_record.copy()
+    } else if !left_duration && right_duration {
+        result_row = b.f.slot_type[left]
+        result_record = left_record.copy()
+    } else if !left_duration && op != .Sub {
+        return ir_fail_slot(&b, span, "operator {op} on two time points")
+    }
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    x :: ir_runtime(&m, &b, left_record.getter, [Int]{left}, int_row)
+    y :: ir_runtime(&m, &b, right_record.getter, [Int]{right}, int_row)
+    exact :: ir_fresh_like(&m, &b, x)
+    at :: ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, exact, x, y, IR_OVERFLOW_TRAP, site)
+    ir_stop_trap(&m, &b, at)
+    ir_release(&m, &b, x)
+    ir_release(&m, &b, y)
+    ir_word_record_new(&m, &b, result_record, exact, result_row)
 }
 
 // `left <=> right` (Lower lower_three_way): the Less/Equal/Greater variant
