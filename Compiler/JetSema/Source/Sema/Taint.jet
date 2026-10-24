@@ -4,6 +4,7 @@
 // the registration graph's declaration identities; it is never reconstructed
 // from generated TIR and it does not maintain a second name registry.
 use jet_foundation.[
+    authority_grantable_roots,
     BindPattern,
     CompilerThreads,
     Diagnostic,
@@ -401,7 +402,7 @@ fn sema_taint_push_invalid_path(diagnostics: &[Diagnostic], name: String, span: 
     candidates := [String]{}
     if {
         destination -> {
-            candidates = sema_effect_grantable_roots()
+            candidates = authority_grantable_roots()
             &candidates.push("Html")
         }
         else -> {

@@ -7,11 +7,6 @@
 // their owners live in the PackageModel area (Authority/SandboxAuthority.jet,
 // Policy/EffectProjection.jet); this file stays compiler-free.
 
-// jet_foundation::Effects::EFFECT_ROOTS: the thirteen grantable roots.
-AUTHORITY_EFFECT_ROOTS :: comptime { [String]{
-    "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"
-} }
-
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF :: "Exec.Args"
@@ -34,6 +29,16 @@ AUTHORITY_TIME_WAIT_LEAF :: "Time.Wait"
 fn authority_is_deny_only(right: String) -> Bool Never! {
     root :: authority_root(right)
     root == AUTHORITY_PANIC_ROOT || root == "Mem" || right == AUTHORITY_TIME_WAIT_LEAF
+}
+
+// The roots an application may grant: every root Prelude/Effects.jet declares
+// but the deny-only ones, in vocabulary order.
+fn authority_grantable_roots() -> [String] Never! {
+    roots := [String]{}
+    loop root in EFFECT_VOCABULARY_ROOTS {
+        if !authority_is_deny_only(root) -> &roots.push(root)
+    }
+    roots
 }
 
 // The one verdict every checkpoint answers.
@@ -79,16 +84,12 @@ fn authority_ascii_lower(value: String) -> String Never! {
     String.from_bytes(out) ?? value
 }
 
-// Resolve one root using the canonical table. Dotted input is accepted only
-// for its root; leaf declaration remains sema's job.
+// Resolve one root, without regard to ASCII case, against the roots
+// Prelude/Effects.jet declares. Dotted input is accepted only for its root;
+// leaf declaration remains sema's job.
 fn authority_parse_root(right: String) -> String? Never! {
     folded :: authority_ascii_lower(authority_root(right))
-    if folded == {
-        "panic" -> return Val(AUTHORITY_PANIC_ROOT)
-        "mem" -> return Val("Mem")
-        else -> {}
-    }
-    loop known in AUTHORITY_EFFECT_ROOTS {
+    loop known in EFFECT_VOCABULARY_ROOTS {
         if authority_ascii_lower(known) == folded -> return Val(known)
     }
     None

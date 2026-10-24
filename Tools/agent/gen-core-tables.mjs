@@ -38,7 +38,9 @@ const OPERATIONS_END = "<!-- END GENERATED COLLECTION OPERATIONS -->";
 const BUILD_EFFECT_NAMES = [
   "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU",
 ];
-const INTERNAL_EFFECT_NAMES = ["Panic", "Mem"];
+// The deny-only roots: declared with the rest of the vocabulary, refused by a
+// policy but never granted.
+const DENY_ONLY_ROOT_NAMES = ["Mem", "Panic"];
 
 function file(rel) {
   return path.join(ROOT, rel);
@@ -88,9 +90,9 @@ function parseEffects(source) {
     .filter((declaration) => !declaration.name.includes("."))
     .map((declaration) => declaration.name);
   const rootSet = new Set(roots);
-  for (const internal of INTERNAL_EFFECT_NAMES) {
-    if (rootSet.has(internal)) {
-      fail(`${EFFECT_SOURCE_PATH}: ${internal} is compiler-internal and cannot be declared`);
+  for (const denyOnly of DENY_ONLY_ROOT_NAMES) {
+    if (!rootSet.has(denyOnly)) {
+      fail(`${EFFECT_SOURCE_PATH}: deny-only root ${denyOnly} is not declared`);
     }
   }
   for (const build of BUILD_EFFECT_NAMES) {

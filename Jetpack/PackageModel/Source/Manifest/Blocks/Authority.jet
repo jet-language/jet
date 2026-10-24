@@ -10,7 +10,7 @@ use jetpack_foundation.[
     AUTHORITY_TRUST_REQUIRE_LOGGED, AUTHORITY_TRUST_REQUIRE_NONE, PROVIDER_FIELD_ALLOW,
     PROVIDER_FIELD_DENY, PROVIDER_FIELD_REGISTRY, syntax_is_ui_capability,
 ]
-use jet_foundation.[authority_parse_root, authority_root]
+use jet_foundation.[EFFECT_VOCABULARY_ROOTS, authority_root]
 
 enum TrustDecision {
     Allow
@@ -78,14 +78,10 @@ struct AuthorityBlock {
     }
 }
 
-// `Sema::Effect::parse(root).is_some()`: `root` is one canonical closed
-// effect root.
+// `Sema::Effect::parse(root).is_some()`: `root` is one root of
+// Prelude/Effects.jet, spelled canonically.
 fn pkg_effect_root_known(root: String) -> Bool Never! {
-    if (authority_parse_root(root) ?? "") != root -> return false
-    if root == {
-        "Net" | "FS" | "IO" | "DB" | "Time" | "Rand" | "Env" | "Exec" | "Log" | "GPU" | "Panic" | "FFI" | "Browser" | "Secret" | "Mem" -> true
-        else -> false
-    }
+    EFFECT_VOCABULARY_ROOTS.contains(root)
 }
 
 // `Sema::memory_allocation_bound(name).is_some()`: `Mem.Alloc` or

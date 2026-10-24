@@ -195,7 +195,8 @@ export function goldenFailureExit(stem, stderr) {
   // #1474: this source disables logging before log.fatal exits 1.
   if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
   // Source-proved entry returns, matching kit_golden_failure_exit in Tools/testkit/Golden.jet;
-  // fatal_exit explicitly calls process.exit(1). An arbitrary Error prefix is not an exit oracle.
+  // fatal_exit explicitly calls process.exit(1), and an E1803 authority refusal
+  // exits 1 before anything runs. An arbitrary Error prefix is not an exit oracle.
   switch (stem) {
     case "errors/propagation_journey":
     case "errors/propagation_journey_direct":
@@ -207,6 +208,10 @@ export function goldenFailureExit(stem, stderr) {
     case "errors/fatal_exit":
     case "serde/decode_error_exit":
     case "crypto/crypto_error_run":
+    case "effects/authority_core_method":
+    case "effects/authority_denied":
+    case "effects/authority_partial":
+    case "effects/authority_undeclared":
       return 1;
     default:
       return null;

@@ -2,6 +2,7 @@
 // This never runs a second checker; callers pass the registered graph and its
 // finalized checked result so imported modules and solved effects stay intact.
 use jet_foundation.[
+    authority_grantable_roots,
     ArithmeticMode,
     ArithmeticOperation,
     ArithmeticPolicyFact,
@@ -507,7 +508,7 @@ fn sema_compiler_index_fact_kind_order(kind: String) -> Int Never! {
 
 fn sema_compiler_index_fact_registry(registration: SemaRegistrationGraph) -> TComptimeValue Never! {
     rows := [SemaCompilerFactRegistryRow]{}
-    loop root in sema_compiler_index_sorted_strings(sema_effect_grantable_roots()) {
+    loop root in sema_compiler_index_sorted_strings(authority_grantable_roots()) {
         members := [String]{}
         loop registration_module_index in 0..<registration.modules.len() {
             loop item_index in 0..<registration.modules[registration_module_index].program.items.len() {

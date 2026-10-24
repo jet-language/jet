@@ -3172,6 +3172,29 @@ remains an inferred reachability fact and can be prohibited with
 grant. `Time` and its other leaves retain their ordinary positive bounds.
 This applies to Rust bootstrap and native Jet effect-bound checks alike.
 
+**D-AUTH-AMBIENT3=A — A written allow list adds to the beginner floor**
+*(ratified 2026-10-24, card c09xsceu)*: the floor (`IO`, `Mem.Alloc`,
+`Exec.Args`) holds for every program, with or without a package block. A
+written `authority.allow` list adds rights to it and never replaces it; a
+written `authority.deny` list alone removes nothing else. A floor right leaves
+only through `deny`, and `deny` still wins over every allow. `jet fix` and the
+E1803 Fix name only the rights beyond the floor. Rationale: the floor carries
+no power a shell has not already given the process, so repeating it in every
+list is noise, and losing printing by writing an unrelated denial is a trap
+(138 of 187 single-line allow rows restated `IO` and `Mem.Alloc`; `deny: [Exec]`
+alone refused `print` with E1803).
+
+**D-AUTHORITY-DENYROW1=A — A package deny is a compile-time prohibition for
+every effect** *(ratified 2026-10-24, card c0pp8jfr)*: each entry of the entry
+package's `authority.deny` list becomes a whole-program prohibition, exactly
+like writing `-[!E]>` on every function of that package. `jet check`,
+`jet build` and `jet run` report a reachable use with E0749 and the call
+chain, before anything runs. E1803 keeps undecided rights and the
+invocation's `--deny` denials. Rationale: a deny list is a promise about the
+code, not about one run; checking it while compiling gives it one meaning and
+the exact call chain, where a checker that says ok to a program the run
+refuses gives two.
+
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
 D-EFF4/5 names are tree roots; a signature/`#Abilities`/`-[!…]>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
@@ -5996,6 +6019,16 @@ sha256:)`, `.exec(tool:, args:)`, `.install(src:, dest:)`, and
 `BuildStep` action graph. Unknown fields, missing fields, unlocked fetches,
 invalid paths, cycles, and partial outputs remain errors; the recipe does not
 add ambient authority or a second build mechanism.
+
+**D-EFFECTS-BLOCK1=B — Allow and deny sit directly in `authority`**
+*(ratified 2026-10-24, card c0l7k5ji)*: a package states the effects it may
+use as `authority: { allow: [Net, FS.Read], deny: [Exec] }`, one level deep,
+beside `grants`, `needs`, `trust` and `providers`; the `authority.holds`
+wrapper is retired. Every permission setting stays in one block, as
+D-AUTHORITY-MANIFEST1 wanted. `allow` and `deny` are always lists of rights
+and `grants` is always a map keyed by package name, so the two do not read
+alike. A leading `package { … }` block of a manifest-less file uses the same
+two fields.
 
 **U1 — manifest history**: superseded — see D-ECO-FILEROOT1 above (`package.jet`).
 

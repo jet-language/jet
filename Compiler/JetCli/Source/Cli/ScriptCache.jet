@@ -199,7 +199,7 @@ fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String,
     program :: jet_cli_script_record_program(rows) ?? return None
     if rows[2] != keep.sources || rows[JET_CLI_SCRIPT_RECORD_HEAD..<rows.len()].join("\n") != keep.toolchain -> return None
     executable :: x64_executable_kept("{directory}/{program}") ?? return None
-    authority := JetCLIAuthority{required: jet_cli_script_rights(rows[3]), granted: jet_cli_script_rights(rows[4]), denied: jet_cli_script_rights(rows[5]), authority: rows[6]}
+    authority := JetCLIAuthority{required: jet_cli_script_rights(rows[3]), granted: jet_cli_script_rights(rows[4]), denied: jet_cli_script_rights(rows[5]), authority: rows[6], invocation_denied: [String]{}}
     jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, invocation))
     refused :: jet_cli_authority_report(file, source, color, "run", authority)
     if refused != None -> return refused

@@ -11,6 +11,9 @@
 // for denial/reachability facts but are deny-only and never become positive
 // grants.
 use jet_foundation.[
+    EFFECT_VOCABULARY_ROOTS,
+    authority_grantable_roots,
+    authority_is_deny_only,
     BodyCallArg,
     BodyContract,
     BodyCoreClosureKind,
@@ -347,17 +350,8 @@ fn sema_effect_source_from_function_key(func: Func, module_identity: String, key
 // ────────────────────────────────────────────────────────────────────────────
 // Canonical effect vocabulary and set operations
 
-fn sema_effect_grantable_roots() -> [String] Never! {
-    [String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"}
-}
-
-fn sema_effect_known_root(root: String) -> Bool Never! {
-    if root == "Panic" || root == "Mem" -> return true
-    loop candidate in sema_effect_grantable_roots() {
-        if candidate == root -> return true
-    }
-    false
-}
+// The vocabulary is Prelude/Effects.jet, read through Foundation's
+// EFFECT_VOCABULARY_ROOTS and `authority_grantable_roots`.
 
 // The name up to its first `(` or `.`: the family of a member (`FS.Read`)
 // or of a bounded effect (`Mem.Alloc(above: 1)`), read from the bytes once
@@ -375,26 +369,13 @@ fn sema_effect_root(name: String) -> String Never! {
     String.from_bytes(bytes.slice(0, end)) ?? name.copy()
 }
 
+// A root's place in Prelude/Effects.jet: the canonical order of a row.
 fn sema_effect_rank(name: String) -> Int Never! {
     root :: sema_effect_root(name)
-    if root == {
-        "Net" -> 0
-        "FS" -> 1
-        "IO" -> 2
-        "DB" -> 3
-        "Time" -> 4
-        "Rand" -> 5
-        "Env" -> 6
-        "Exec" -> 7
-        "Log" -> 8
-        "GPU" -> 9
-        "FFI" -> 10
-        "Browser" -> 11
-        "Secret" -> 12
-        "Panic" -> 13
-        "Mem" -> 14
-        else -> 100
+    loop (index, known) in EFFECT_VOCABULARY_ROOTS {
+        if known == root -> return index
     }
+    100
 }
 
 fn sema_effect_set_contains(set: [String], value: String) -> Bool Never! {
@@ -445,7 +426,7 @@ fn sema_effect_parse_name(name: String) -> String? {
         if amount <= 0 -> return None
     }
     root :: sema_effect_root(base)
-    if !sema_effect_known_root(root) -> return None
+    if !EFFECT_VOCABULARY_ROOTS.contains(root) -> return None
     loop segment in base.split(".") {
         if segment == "" -> return None
     }
@@ -455,8 +436,7 @@ fn sema_effect_parse_name(name: String) -> String? {
 fn sema_effect_without_deny_only(values: [String]) -> [String] Never! {
     result := [String]{}
     loop value in values {
-        root :: sema_effect_root(value)
-        if root != "Panic" && root != "Mem" && value != "Time.Wait" -> sema_effect_set_add(&result, value)
+        if !authority_is_deny_only(value) -> sema_effect_set_add(&result, value)
     }
     result
 }
@@ -1708,10 +1688,6 @@ fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [String]
 // ────────────────────────────────────────────────────────────────────────────
 // Call-graph fixed point and public graph hook
 
-fn sema_effect_all_grantable() -> [String] Never! {
-    sema_effect_grantable_roots()
-}
-
 struct SemaEffectPending {
     node: Int
     name: String
@@ -1739,7 +1715,7 @@ fn sema_effect_solve(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] Ne
     pending := [SemaEffectPending]{}
     loop (index, node) in nodes {
         row := node.direct
-        if node.maximal -> sema_effect_set_union(&row, sema_effect_all_grantable())
+        if node.maximal -> sema_effect_set_union(&row, authority_grantable_roots())
         loop edge in node.call_edges {
             if edge == "__jet_panic__" {
                 sema_effect_set_add(&row, "Panic")
@@ -2212,7 +2188,7 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
     }
     walked := &nodes.pop() ?? panic("the #FX region node left the graph")
     inferred := ^walked.direct
-    if walked.maximal -> sema_effect_set_union(&inferred, sema_effect_all_grantable())
+    if walked.maximal -> sema_effect_set_union(&inferred, authority_grantable_roots())
     loop edge in walked.call_edges {
         if edge == "__jet_panic__" {
             sema_effect_set_add(&inferred, "Panic")

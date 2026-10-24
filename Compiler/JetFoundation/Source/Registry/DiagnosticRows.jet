@@ -7419,9 +7419,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         why: "Execution stops before host state changes. Every program already allows printing, reading input, allocating memory, and reading the program's own arguments; a written `allow` row adds any other effect, and only `deny` takes a right away. `--json` carries the raw `required_effects`, `granted_effects`, `denied_effects`, and `authority` facts.",
         fix: "Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS]`; the row adds to what every program already holds. A program with no `package.jet` declares that row in a leading `package {{ … }}` block of its entry file; `jet fix --all` inserts that block. For one run, `--allow=<RIGHTS>` grants the named effects and `-A` (`--allow-all`) grants every effect; a file whose first line is `#!/usr/bin/env jet` is a script and always runs that way. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal.",
         detail: true,
-        structured_fix: None,
-        fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS]`; the row adds to what every program already holds. A program with no `package.jet` declares that row in a leading `package {{ … }}` block of its entry file; `jet fix --all` inserts that block. For one run, `--allow=<RIGHTS>` grants the named effects and `-A` (`--allow-all`) grants every effect; a file whose first line is `#!/usr/bin/env jet` is a script and always runs that way. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal."}),
+        structured_fix: Val(DiagnosticRegistryFix.SuggestedSourceEdit),
+        fix_safety: Val(DiagnosticFixSafety.NeedsReview),
+        no_fix_reason: None,
     },
     {
         code: "E0801",

@@ -443,6 +443,7 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
 
 // The directory part of `path`, as Rust `Path::parent` reads it.
 fn jet_cli_parent(path: String) -> String? Never! {
+    if path == "/" -> return None
     parts :: path.split("/").to_list()
     if parts.len() <= 1 -> return None
     parent :: jet_cli_prefix(parts, parts.len() - 1).join("/")
