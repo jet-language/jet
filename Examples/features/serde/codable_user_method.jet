@@ -1,0 +1,31 @@
+// A type's own ordinary `encode`/`decode` methods are just methods: the
+// package default does not generate a codec that would collide with them.
+// Its plain neighbour still gets the generated codec and JSON round-trips.
+use core.encoding.json as json
+
+struct Record {
+    key: String
+
+    fn encode(self) -> String { "record:{self.key}" }
+    fn decode(raw: String) -> Record { Record{key: raw} }
+}
+
+struct Ticket {
+    id: Int
+}
+
+impl Ticket {
+    fn encode(self) -> String { "ticket-{self.id}" }
+}
+
+struct Plain {
+    n: Int
+}
+
+fn run() {
+    print(Record.decode("k").encode())
+    print(Ticket{id: 4}.encode())
+    print(json.to_string(Plain{n: 7}) ?? panic("JSON encode"))
+    back :: json.decode<Plain>("{{\"n\":9}}") ?? panic("JSON decode")
+    print(back.n)
+}

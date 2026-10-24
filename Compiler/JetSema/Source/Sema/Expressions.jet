@@ -2534,6 +2534,31 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program:
     false
 }
 
+// The receiver type's own inherent method `method` (declared in its body or
+// in an inherent `impl`; trait impls do not count). A type's ordinary
+// `encode` method keeps its own call instead of the Encode contract route.
+fn sema_expr_declares_inherent_method(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+    base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
+    if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation in graph.modules[owner_index].impls {
+                if implementation.target_type_name != base_name || implementation.trait_name != None -> next
+                loop function in implementation.methods {
+                    if function.symbol.name == method && function.parameters.len() > 0 -> return true
+                }
+            }
+        }
+    }
+    caller :: sema_type_module_row(graph, environment.module_identity)
+    owner :: sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) ?? return false
+    loop function in graph.modules[owner.module_index].nominals[owner.row].methods {
+        if function.symbol.name == method && function.parameters.len() > 0 -> return true
+    }
+    }
+    false
+}
+
 // Rust `funcs.get(name)`: some declared function (local or imported) has
 // this name in any frame, even when a nearer binding shadows it.
 fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bool Never! {

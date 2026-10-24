@@ -620,7 +620,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
         if query.handled -> return query
     }
     if method == "query" && resolved_ty == .List(row) -> return sema_data_check_list_query(receiver, receiver_value, row, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if method == "encode" -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if method == "encode" && !sema_expr_declares_inherent_method(environment, program, receiver_value.ty, "encode") -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if resolved_ty == {
         .Named(name) -> {
             if sema_data_is_json_name(name) {

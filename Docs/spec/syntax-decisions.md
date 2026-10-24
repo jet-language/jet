@@ -2256,6 +2256,9 @@ marker opts in and `!` refuses compiler generation: `#!Printable` or
 A missing trait follows the package default. Positive markers generate only
 when fields qualify. Negative markers affect only compiler generation. A
 hand-written implementation wins over the package default and either sign.
+An ordinary method named `encode` or `decode` on the type also keeps the
+package default from generating that codec, whose method would be a second
+member of that name; a positive marker still generates it and reports E0105.
 Traits that are not structurally derivable remain explicit-only.
 For structural equality, a generic argument is constrained by `Equatable`
 when it occurs in a stored field. A phantom parameter does not introduce

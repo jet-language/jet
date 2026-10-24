@@ -1782,26 +1782,32 @@ fn sema_derive_has_name(derives: [NamedSpan], name: String) -> Bool {
 // readiness, selection, and the codec expansion ask keyed questions instead of
 // rescanning items. `trait_impls` maps an impl key to its sources
 // (sema_derive_impl_flags); `nominals` maps a name to its first struct, enum,
-// or distinct position.
+// or distinct position. `codec_methods` holds the (type, Encode/Decode) impl
+// keys whose type declares that codec's method name (`encode`, `decode`) as an
+// ordinary method: the generated codec would be a second member of that name,
+// so the package default never selects it (an explicit marker still asks).
 struct SemaDeriveItemIndex {
     trait_impls: [String:Int]
     nominals: [String:Int]
     distincts: [String:Bool]
+    codec_methods: [String:Bool]
 }
 
 fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
-    index := SemaDeriveItemIndex{trait_impls: [String:Int]{}, nominals: [String:Int]{}, distincts: [String:Bool]{}}
+    index := SemaDeriveItemIndex{trait_impls: [String:Int]{}, nominals: [String:Int]{}, distincts: [String:Bool]{}, codec_methods: [String:Bool]{}}
     loop (position, item) in items {
         if item == {
             .Impl(definition) -> {
                 key :: sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")
                 index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), definition.is_generated_serde)
+                if definition.trait_name == None -> sema_derive_index_codec_methods(&index, definition.type_name, definition.methods)
             }
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
                     key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
                     index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
                 }
+                sema_derive_index_codec_methods(&index, definition.name, definition.methods)
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
             .Enum(definition) -> {
@@ -1809,6 +1815,7 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
                     key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
                     index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
                 }
+                sema_derive_index_codec_methods(&index, definition.name, definition.methods)
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
             .Distinct(definition) -> {
@@ -1819,6 +1826,13 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
         }
     }
     index
+}
+
+fn sema_derive_index_codec_methods(index: &SemaDeriveItemIndex, type_name: String, methods: [Func]) {
+    loop method in methods {
+        if method.name == "encode" -> index.codec_methods[sema_type_metadata_impl_key(type_name, "Encode")] = true
+        if method.name == "decode" -> index.codec_methods[sema_type_metadata_impl_key(type_name, "Decode")] = true
+    }
 }
 
 // The sources of one (type, trait) impl key: bit 1 a written impl item or
@@ -2004,7 +2018,7 @@ fn sema_derive_auto_selected(items: [Item], index: SemaDeriveItemIndex, trait_na
             }
             else -> next
         }
-        if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(index, name, trait_name) -> next
+        if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(index, name, trait_name) || index.codec_methods.get(sema_type_metadata_impl_key(name, trait_name)) != None -> next
         readiness.candidates[name] = names.len()
         &names.push(name)
         &nodes.push(item)
