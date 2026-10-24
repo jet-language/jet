@@ -1781,27 +1781,55 @@ fn jet_cli_trace_micros(start_ms: Int) -> Int Never! {
 }
 
 // Milliseconds since boot from `/proc/uptime` (`12345.67 …`, CLOCK_BOOTTIME),
-// the trace's monotonic clock; 0 when it cannot be read.
+// the trace's monotonic clock; 0 when it cannot be read. Every span's begin
+// and end reads it, so it is scanned in place, never split.
 fn jet_cli_trace_uptime_ms() -> Int Never! {
     text :: cli_files.read("/proc/uptime") ?? return 0
-    loop field in text.split(" ") {
-        parts :: field.split(".").to_list()
-        if parts.len() != 2 -> return 0
-        fraction := parts[1]
-        loop fraction.len() < 3 -> fraction = "{fraction}0"
-        seconds :: Int.parse(parts[0]) ?? return 0
-        millis :: Int.parse(fraction.slice(0..<3)) ?? return 0
-        return seconds * 1000 + millis
+    bytes :: text.bytes()
+    point := 0
+    loop point < bytes.len() && bytes[point] != (U8{46}) {
+        if bytes[point] == (U8{32}) -> return 0
+        point += 1
     }
-    0
+    seconds :: jet_cli_trace_number(bytes, 0, point)
+    if seconds < 0 || point >= bytes.len() -> return 0
+    end := point + 1
+    loop end < bytes.len() && bytes[end] != (U8{32}) && bytes[end] != (U8{10}) {
+        if bytes[end] == (U8{46}) -> return 0
+        end += 1
+    }
+    if end > point + 1 && jet_cli_trace_number(bytes, point + 1, end) < 0 -> return 0
+    // The first three fraction digits, zero-padded: `.67` is 670 ms.
+    millis := 0
+    loop index in 0..<3 {
+        digit :: if point + 1 + index < end -> Int.from_u8(bytes[point + 1 + index]) - 48 else -> 0
+        millis = millis * 10 + digit
+    }
+    seconds * 1000 + millis
+}
+
+// The decimal number `bytes[from..<to]`, or -1 when it is empty or holds a
+// non-digit.
+fn jet_cli_trace_number(bytes: [U8], from: Int, to: Int) -> Int Never! {
+    if from >= to -> return -1
+    value := 0
+    loop index in from..<to {
+        code :: Int.from_u8(bytes[index])
+        if code < 48 || code > 57 -> return -1
+        value = value * 10 + code - 48
+    }
+    value
 }
 
 // The calling thread's kernel id, from `/proc/thread-self` (`<pid>/task/<tid>`).
 fn jet_cli_trace_thread() -> Int Never! {
     link :: cli_files.read_link("/proc/thread-self") ?? return 0
-    parts :: link.split("/").to_list()
-    if parts.len() == 0 -> return 0
-    Int.parse(parts[parts.len() - 1]) ?? 0
+    bytes :: link.bytes()
+    start := bytes.len()
+    loop start > 0 && bytes[start - 1] != (U8{47}) -> start -= 1
+    number :: jet_cli_trace_number(bytes, start, bytes.len())
+    if number < 0 -> return 0
+    number
 }
 
 fn jet_cli_trace_memory() -> JetCLITraceMemory? Never! {
@@ -1835,12 +1863,10 @@ JET_CLI_TRACE_NS_PER_TICK :: 10000000
 // `<run ns> <wait ns> <timeslices>`, whose first field is the thread's.
 fn jet_cli_trace_thread_cpu_ns() -> Int Never! {
     schedstat :: cli_files.read("/proc/thread-self/schedstat") ?? return -1
-    cpu_ns := -1
-    loop field in schedstat.trim().split(" ") {
-        cpu_ns = Int.parse(field) ?? -1
-        break
-    }
-    cpu_ns
+    bytes :: schedstat.bytes()
+    end := 0
+    loop end < bytes.len() && bytes[end] != (U8{32}) && bytes[end] != (U8{10}) -> end += 1
+    jet_cli_trace_number(bytes, 0, end)
 }
 
 // The process's CPU clock and major fault count (`cpu_ns` -1).
