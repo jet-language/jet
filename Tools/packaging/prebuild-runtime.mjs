@@ -61,7 +61,13 @@ const recipeSha256 = nativePackRecipe(source.sha256, backend.sha256, lifecycle.s
 function publishPlatform() {
   const directory = join(out, 'foreign/platform');
   mkdirSync(directory, { recursive: true });
-  for (const path of platform) copyFileSync(path, join(directory, basename(path)));
+  // Platform archives may come from a read-only store (mode 0444): replace the
+  // published copy instead of writing through it, so a second publish succeeds.
+  for (const path of platform) {
+    const target = join(directory, basename(path));
+    rmSync(target, { force: true });
+    copyFileSync(path, target);
+  }
 }
 if (existsSync(join(out, 'native.key'))) {
   try {
