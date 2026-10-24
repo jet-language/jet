@@ -237,7 +237,7 @@ fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironment,
     path :: sema_hardware_expr_path(expression) ?? return None
     if path.len() < 1 -> return None
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+        module_index :: sema_scope_caller_index(environment, graph) ?? return None
         alias := path[0]
         visible_index :: sema_scope_resolve_index(scopes, alias) ?? return None
         visible := scopes.bindings[visible_index].symbol

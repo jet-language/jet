@@ -285,7 +285,7 @@ fn sema_prelude_error_conversion(source: Type, diagnostics: &[Diagnostic]) -> Fu
 
 fn sema_module_no_prelude(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+        module_index :: sema_scope_caller_index(environment, graph) ?? return false
         return graph.modules[module_index].program.no_prelude
     }
     false
@@ -491,7 +491,7 @@ fn sema_failure_alias_target_is_error(target_name: String, module_identity: Stri
 // The declaring module wins; other graph modules supply imported nominals.
 fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
-        if sema_registration_module_index(graph, environment.module_identity) == .Val(module_index) {
+        if sema_scope_caller_index(environment, graph) == .Val(module_index) {
             local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
             if local != None -> return local
         }
@@ -563,7 +563,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
             if unresolved && !generic_names.contains(name) {
                 declared := false
                 if environment.registration_graph == .Val(graph) {
-                    declared = sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None
+                    declared = sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None
                 }
                 if !declared -> &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first"))
             }
@@ -611,7 +611,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
 // declarations name the wrapper over their formal `T`.
 fn sema_check_expiring_secret_declared_type(ty: Type, span: Span, generic_names: [String], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     resolved := ty
-    if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
     if resolved == .Apply(name, args) {
         if !sema_is_expiring_secret_name(name) -> return
         if args.len() == 1 {

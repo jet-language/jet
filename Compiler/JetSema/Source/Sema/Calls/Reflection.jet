@@ -65,10 +65,10 @@ fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
 
 fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        if sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) == (Val(true)) -> return true
+        if sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) == (Val(true)) -> return true
         // Imported nominal capabilities belong to their declaring registry. A
         // caller need not import the trait name as well as the displayed type.
-        owner :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
+        owner :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
         nominal :: graph.modules[owner.module_index].nominals[owner.row]
         sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, nominal.symbol.module_name, environment.generic_params) ?? false
     } else {

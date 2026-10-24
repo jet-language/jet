@@ -2608,7 +2608,7 @@ fn sema_ownership_clear_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
 fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     own_close := false
     if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
+        if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == .Val(row) {
             nominal :: graph.modules[row.module_index].nominals[row.row]
             own_close = sema_copy_nominal_has_impl(program.registration_graph, nominal, "Close").value
         }

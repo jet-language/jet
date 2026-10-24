@@ -83,10 +83,10 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, program: Sem
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
     }
     if program.registration_graph == .Val(graph) {
-        bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
+        bound := sema_type_bound_satisfied_at(graph, ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
         if bound -> return true
         name :: sema_type_graph_base_name(ty) ?? return false
-        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+        resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
         if resolved.symbol.kind != SymbolKind.Type -> return false
         if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
             if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) -> return true

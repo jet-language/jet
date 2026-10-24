@@ -78,7 +78,7 @@ enum SemaCoreCallRoute {
 
 fn sema_call_core_import_target(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
     if program.registration_graph == .Val(graph) {
-    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+    module_index :: sema_scope_caller_index(environment, graph) ?? return None
     imports :: sema_core_registration_imports(graph.modules[module_index])
     imported :: sema_core_import_find(imports, alias) ?? return None
     module_name := imported.module_name
@@ -99,7 +99,7 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, program: Sema
 // module or a member import.
 fn sema_call_source_import_target(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
     if program.registration_graph == .Val(graph) {
-    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+    module_index :: sema_scope_caller_index(environment, graph) ?? return None
     loop import_index in 0..<graph.modules[module_index].imports.len() {
         loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
             if graph.modules[module_index].imports[import_index].bindings[binding_index].local != alias || graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind != SymbolKind.Import || graph.modules[module_index].imports[import_index].bindings[binding_index].declaration != None -> next
@@ -134,7 +134,7 @@ fn sema_call_core_import_member(target: SemaCallImportTarget, requested_member: 
 // visible lexical binding for the local alias.
 fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+    module_index :: sema_scope_caller_index(environment, graph) ?? return false
     visible_index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
     visible_symbol := scopes.bindings[visible_index].symbol
     module_row :: graph.modules[module_index]
@@ -190,7 +190,7 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, program: Sema
     // that checked row then executes the source `request` declaration.
     if !registered_source_target && source_name == "core.http.client" && member == "request" -> return None
     if source_name == "core.encoding.json" && member == "decode" && type_args.len() != 0 -> return None
-    caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+    caller_index :: sema_scope_caller_index(environment, graph) ?? return None
     // Same-owner native providers keep their host row. A source-only function
     // has no such row and still resolves to its declaration from this module.
     if !registered_source_target && graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity {
@@ -770,7 +770,7 @@ fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, 
         .Numeric -> {
             if sema_expr_is_numeric(ty) || ty == (Type.Named{name: "Complex"}) -> return true
             if program.registration_graph == .Val(graph) {
-                return sema_type_bound_satisfied_with_generics(graph, ty, "Numeric", environment.module_identity, environment.generic_params) ?? false
+                return sema_type_bound_satisfied_at(graph, ty, "Numeric", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
             } else {
                 return false
             }
@@ -788,7 +788,7 @@ fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, 
                 else -> {}
             }
             if program.registration_graph == .Val(graph) {
-                return sema_type_bound_satisfied_with_generics(graph, ty, "Debuggable", environment.module_identity, environment.generic_params) ?? false
+                return sema_type_bound_satisfied_at(graph, ty, "Debuggable", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
             } else {
                 return false
             }

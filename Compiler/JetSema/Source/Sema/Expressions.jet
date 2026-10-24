@@ -898,7 +898,7 @@ fn sema_expr_byte_text(value: U8) -> String Never! {
 }
 
 fn sema_expr_expected_type(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
-    if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_with_generics(graph, value, environment.module_identity, environment.generic_params)
+    if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_recursive(graph, value, sema_scope_caller_row(environment, graph), environment.generic_params)
     // copy: the expected type is a new owned Type. When nothing resolves it equals `value`, the
     // caller's expectation (a read parameter), which the caller keeps.
     value.copy()
@@ -906,7 +906,7 @@ fn sema_expr_expected_type(value: Type, environment: SemaScopeEnvironment, progr
 
 fn sema_expr_expected_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph_value) {
-        return sema_type_assignable_in_graph_with_generics(graph_value, required, offered, environment.module_identity, environment.generic_params)
+        return sema_type_assignable_in_graph_at(graph_value, required, offered, sema_scope_caller_row(environment, graph_value), environment.generic_params)
     }
     Val(sema_type_assignable(required, offered))
 }
@@ -2475,7 +2475,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
 fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type) -> String Never! {
     base_name :: sema_expr_type_base_name(receiver_type) ?? return type_name(receiver_type)
     if program.registration_graph == .Val(graph) {
-    if sema_type_resolve_nominal_row(graph, receiver_type, environment.module_identity) == .Val(row) {
+    if sema_type_resolve_nominal_row_at(graph, receiver_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
         nominal :: graph.modules[row.module_index].nominals[row.row]
         return "{nominal.symbol.module_name}::{nominal.symbol.name}"
     }
@@ -2512,7 +2512,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program:
         }
     }
     receiver_name :: sema_expr_operator_row_name(base_name)
-    caller :: sema_type_module_row(graph, environment.module_identity)
+    caller :: sema_scope_caller_row(environment, graph)
     source_declaration := sema_type_source_owns_nominal(graph, base_name, caller)
     if sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) == .Val(owner) {
         module_row :: graph.modules[owner.module_index]
@@ -3174,7 +3174,7 @@ fn sema_expr_function_field(receiver: Type, name: String, method_name: String, e
     if !callable -> return false
     if sema_expr_declares_nominal_method(environment, program, sema_expr_unwrap_tag(receiver), method_name, false) -> return false
     if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, receiver, environment.module_identity) == .Val(row) {
+        if sema_type_resolve_nominal_row_at(graph, receiver, sema_scope_caller_row(environment, graph)) == .Val(row) {
             nominal :: graph.modules[row.module_index].nominals[row.row]
             loop implementation_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
                 implementation :: graph.modules[implementation_row.module_index].impls[implementation_row.row]
@@ -3919,7 +3919,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         if (sema_expr_precise_name(lhs.ty) == None) == (sema_expr_precise_name(rhs.ty) == None) {
             left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
             right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
-            caller :: sema_type_module_row(graph, environment.module_identity)
+            caller :: sema_scope_caller_row(environment, graph)
             source_operator = sema_type_source_owns_nominal(graph, left_name, caller) || sema_type_source_owns_nominal(graph, right_name, caller)
         }
     }
@@ -4097,7 +4097,7 @@ fn sema_expr_require_unsafe(operation: String, span: Span, context: &SemaCheckCo
 
 fn sema_expr_core_import_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
     if program.registration_graph == .Val(graph) {
-    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+    module_index :: sema_scope_caller_index(environment, graph) ?? return None
     imports :: sema_core_registration_imports(graph.modules[module_index])
     imported :: sema_core_import_find(imports, alias) ?? return None
     target := sema_registration_module_index(graph, imported.module_name)

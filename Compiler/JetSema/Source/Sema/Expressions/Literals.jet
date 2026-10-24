@@ -886,7 +886,7 @@ fn sema_expression_view_subrange_type(ty: Type) -> Type? Never! {
 fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if program.registration_graph == .Val(graph) {
     name :: sema_type_graph_base_name(ty) ?? return false
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+    resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
     if resolved.symbol.kind != SymbolKind.Type -> return false
     if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
         if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") -> return true

@@ -40,7 +40,7 @@ struct SemaCallTypedArguments {
 
 fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
     if program.registration_graph == .Val(graph) {
-        sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+        sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
     } else {
         // copy: the resolved type is a new owned Type. When nothing resolves it equals `ty`, the
         // caller's signature type (a read parameter), which stays in the signature.
@@ -50,7 +50,7 @@ fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment, program:
 
 fn sema_call_type_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == {
-        .Val(graph) -> sema_type_assignable_in_graph_with_generics(graph, required, offered, environment.module_identity, environment.generic_params)
+        .Val(graph) -> sema_type_assignable_in_graph_at(graph, required, offered, sema_scope_caller_row(environment, graph), environment.generic_params)
         else -> Val(sema_type_assignable(required, offered))
     }
 }

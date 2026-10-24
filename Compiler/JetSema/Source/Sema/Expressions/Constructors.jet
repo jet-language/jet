@@ -67,7 +67,7 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEn
         if scopes.bindings[found].symbol.kind == SymbolKind.Type -> return Val(sema_scope_binding_symbol(environment, scopes, found))
     }
     if program.registration_graph == .Val(graph) {
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
+    resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
     return if resolved.symbol.kind == SymbolKind.Type -> Val(resolved.symbol) else -> None
     }
     None
@@ -226,7 +226,7 @@ fn sema_expression_enum_declares_variant(enum_name: String, variant: String, env
 fn sema_expression_same_nominal_head(left: String, right: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if left == right -> return true
     if program.registration_graph == .Val(graph) {
-        caller :: sema_type_module_row(graph, environment.module_identity)
+        caller :: sema_scope_caller_row(environment, graph)
         return sema_type_graph_resolve_apply_name(graph, left, caller) == sema_type_graph_resolve_apply_name(graph, right, caller)
     }
     false
@@ -963,7 +963,7 @@ struct SemaExpressionTypedTextParts {
 }
 
 fn sema_expression_typed_literal_printable_bound(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) -> return sema_type_bound_satisfied_with_generics(graph, ty, "Printable", environment.module_identity, environment.generic_params) ?? false
+    if program.registration_graph == .Val(graph) -> return sema_type_bound_satisfied_at(graph, ty, "Printable", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
     false
 }
 

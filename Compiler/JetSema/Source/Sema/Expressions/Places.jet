@@ -613,7 +613,7 @@ fn sema_expression_numeric_bound_type(base: Expr, member: String) -> Type? {
 fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) -> return true
     if program.registration_graph == .Val(graph) {
-    caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return true
+    caller_index :: sema_scope_caller_index(environment, graph) ?? return true
     caller_name :: graph.modules[caller_index].module_name
     if caller_name == "core" || caller_name.starts_with("core.") -> return true
     shown :: type_name(ty)

@@ -100,7 +100,7 @@ fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: Sem
     }
     if actual_name != name -> return false
     if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
+        if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None -> return false
         owner :: sema_registration_core_builtin_owner(graph, name) ?? return false
         return owner.ownership == TDeclarationOwnership.Owned
     }
@@ -109,7 +109,7 @@ fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: Sem
 
 fn sema_ownership_crossing_intrinsic_apply(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, allow_without_nominal: Bool) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        nominal_row := sema_type_resolve_nominal_row(graph, ty, environment.module_identity)
+        nominal_row := sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph))
         if nominal_row == .Val(row) {
             value :: graph.modules[row.module_index].nominals[row.row]
             return value.symbol.name == name && (value.compiler_owned || value.symbol.module_name.starts_with("core."))
@@ -212,7 +212,7 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
 fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     if sema_type_name_is_generic(context.generic_params, name) -> return None
     if program.registration_graph == .Val(graph) {
-        caller :: sema_type_module_row(graph, environment.module_identity)
+        caller :: sema_scope_caller_row(environment, graph)
         nominal_row := sema_type_resolve_nominal_row_at(graph, ty, caller)
         if nominal_row == .Val(row) -> return sema_ownership_crossing_named(ty, graph.modules[row.module_index].nominals[row.row], crossing, strict_callable, cell_only, environment, program, context, &walk)
         resolved := sema_type_graph_resolve_named(graph, name, caller)
@@ -276,7 +276,7 @@ fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, clos
             if shared_guard && cell_only -> return None
             if shared_guard -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
             if program.registration_graph == .Val(graph) {
-                nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? {
+                nominal_row :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? {
                     return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
                 }
                 return sema_ownership_crossing_named(ty, graph.modules[nominal_row.module_index].nominals[nominal_row.row], crossing, strict_callable, cell_only, environment, program, context, &walk)

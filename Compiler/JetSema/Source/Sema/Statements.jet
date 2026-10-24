@@ -3032,7 +3032,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                 }
                 nominal_row :: actual ?? return None
                 nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                plain_fields = !(sema_type_bound_satisfied_with_generics(graph, ty, "Close", environment.module_identity, context.generic_params) ?? true)
+                plain_fields = !(sema_type_bound_satisfied_at(graph, ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params) ?? true)
                 named :: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
                 named_matches :: if named == {
                     .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
@@ -3445,7 +3445,7 @@ fn sema_stmt_uninit_plain_data(ty: Type) -> Bool Never! {
 
 fn sema_stmt_module_uses_core_mem(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+        module_index :: sema_scope_caller_index(environment, graph) ?? return false
         return sema_function_header_inline_has_core_mem(graph.modules[module_index])
     }
     false
@@ -3664,7 +3664,7 @@ fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: 
         return false
     }
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+        module_index :: sema_scope_caller_index(environment, graph) ?? return false
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
             if graph.modules[module_index].constants[constant_index].symbol.id.key == id.key -> return graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime
         }
@@ -3832,7 +3832,7 @@ fn sema_stmt_transaction_rollback_methods(ty: Type, environment: SemaScopeEnviro
         else -> return None
     }
     if program.registration_graph == .Val(graph) {
-        nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+        nominal_row :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return None
         nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
         loop graph_module_index in 0..<graph.modules.len() {
             loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
@@ -4197,7 +4197,7 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
             value :: resource_value ?? return None
             resource_id :: sema_stmt_defer_close_resource(close, scopes) ?? return None
             if program.registration_graph == .Val(graph) {
-                satisfies_close := sema_type_bound_satisfied_with_generics(graph, value.ty, "Close", environment.module_identity, context.generic_params)
+                satisfies_close := sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params)
                 if satisfies_close == None -> return None
                 close_valid := satisfies_close == (Val(true))
                 if !close_valid {

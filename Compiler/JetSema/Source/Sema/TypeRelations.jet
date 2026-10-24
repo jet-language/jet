@@ -1303,7 +1303,13 @@ fn sema_type_same_named(required: Type, offered: Type) -> Bool Never! {
 
 fn sema_type_assignable_in_graph_with_generics(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     if sema_type_same_named(required, offered) -> return Val(true)
-    caller :: sema_type_module_row(graph, caller_module_identity)
+    sema_type_assignable_in_graph_at(graph, required, offered, sema_type_module_row(graph, caller_module_identity), generic_params)
+}
+
+// sema_type_assignable_in_graph_with_generics for a caller already resolved
+// to its registration row (-1: none).
+fn sema_type_assignable_in_graph_at(graph: SemaRegistrationGraph, required: Type, offered: Type, caller: Int, generic_params: [TGenericParam]) -> Bool? {
+    if sema_type_same_named(required, offered) -> return Val(true)
     required_resolved :: sema_type_resolve_declared_recursive(graph, required, caller, generic_params)
     offered_resolved :: sema_type_resolve_declared_recursive(graph, offered, caller, generic_params)
     if sema_type_assignable(required_resolved, offered_resolved) -> return Val(true)

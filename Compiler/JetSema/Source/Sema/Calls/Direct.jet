@@ -328,7 +328,7 @@ fn sema_call_check_ambient_close(call: Call, environment: SemaScopeEnvironment, 
         return None
     }
     if program.registration_graph == .Val(graph) {
-        satisfies_close :: sema_type_bound_satisfied_with_generics(graph, value.ty, "Close", environment.module_identity, context.generic_params) ?? return None
+        satisfies_close :: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params) ?? return None
         if !satisfies_close {
             shown :: type_name(value.ty)
             &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}: Close {{ … }}` with every required method"))

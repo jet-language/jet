@@ -431,6 +431,9 @@ enum SemaComptimeBodyWorkOperation {
 struct SemaScopeEnvironment {
     registration_graph: SemaRegistrationGraph?{None}
     module_identity: String
+    // The registration row of `module_identity` when module entry set it
+    // (sema_scope_caller_row checks it still is), -1 otherwise.
+    module_row: Int{-1}
     package_identity: String
     module_name: String
     source_file: String
@@ -833,6 +836,7 @@ fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program:
 fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
     if program.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
+        environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
         environment.source_file = graph.modules[module_index].source_file
@@ -856,6 +860,7 @@ fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment,
     if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
+        environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
         environment.source_file = graph.modules[module_index].source_file
@@ -870,6 +875,21 @@ fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment,
         return true
     }
     false
+}
+
+// The registration row of the environment's module: the row module entry
+// recorded when `graph` still registers `module_identity` there (one shared
+// buffer compare), else the identity lookup. Callers pass it as the `caller`
+// row of named-type resolution instead of looking the identity up each time.
+fn sema_scope_caller_row(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int Never! {
+    sema_scope_caller_index(environment, graph) ?? -1
+}
+
+// sema_scope_caller_row as an option: None when no row registers the module.
+fn sema_scope_caller_index(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int? Never! {
+    row :: environment.module_row
+    if row >= 0 && row < graph.modules.len() && graph.modules[row].module_identity == environment.module_identity -> return Val(row)
+    sema_registration_module_index(graph, environment.module_identity)
 }
 
 fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
