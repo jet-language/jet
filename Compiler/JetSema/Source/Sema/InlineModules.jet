@@ -289,7 +289,8 @@ fn sema_inline_mapped_names(rewrite: SemaInlineRewrite, names: [NamedSpan]) -> [
 }
 
 // A program a `module` lowering leaves complete: nothing but nested modules
-// that are themselves lowered.
+// that are themselves lowered, and marker declarations, which stay in the
+// body as their home (MarkerModules resolves `#alias.module.Marker` there).
 fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
     body :: definition.body ?? return false
     loop item in body {
@@ -297,6 +298,7 @@ fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
             if !sema_inline_module_lowered(child) -> return false
             next
         }
+        if item == .MarkerDecl(_) -> next
         return false
     }
     true
