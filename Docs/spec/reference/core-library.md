@@ -4054,9 +4054,9 @@ not a copied local handle.
 
 ### `core.net.tls` — TLS stream wrapper
 
-`core.net.tls` upgrades a connected TCP stream to a verified TLS stream. Its
-configuration carriers are validated before network use, and configured ALPN
-protocols are passed through the native TLS provider. See [`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
+`core.net.tls` upgrades a connected TCP stream to a verified TLS 1.2/1.3
+stream. It is Jet source over the vendored Mbed TLS 3.6 engine; configuration
+carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4076,23 +4076,25 @@ protocols are passed through the native TLS provider. See [`Core/Net/Tls.jet`](.
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
 
-TLS handshake, read, write, and close-notify use the consumed socket's shared
-readiness path. Handshake failures use `NetError`; stream failures use the
-`IOError` tree, including cancellation, timeout, closed, and protocol errors.
+TLS handshake, read, write, and close-notify drive the engine over the consumed
+socket's nonblocking descriptor and wait through `TCPStream.ready`. Handshake
+failures use `NetError`; stream failures use the `IOError` tree, including
+cancellation, timeout, closed, and protocol errors. A peer that closes the
+socket without close_notify is a protocol (truncation) error, not end of stream.
 
-`TLSCertificate` and `TLSPeerIdentity` also retain the provider carrier: peer
-identity returns verified native certificate values, not independent Jet
-records. Keeping one nominal carrier avoids missing declarations and mismatched
-certificate-chain layouts without changing the public API.
+`TLSCertificate` and `TLSPeerIdentity` are plain Jet records parsed from the
+verified chain: DER bytes, SHA-256 of the certificate and its SubjectPublicKeyInfo,
+DNS subjectAltNames, validity in Unix milliseconds, and RFC 4514-style subject
+and issuer names.
 
 The consumed-stream overload is distinct from `client(host, port)`: using
-`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable native
-configuration and returns `NetError`, with the explicit budget combined with
-the ambient earliest deadline. `RootCertificates.from_pem` and
-`ClientIdentity.from_pem` validate through the same provider used by the
-handshake before any TCP stream is consumed. A custom-only trust policy never
-loads system roots. The `net/tls_peer_identity` example exercises that path
-against the checked-in local CA and checks the verified peer chain.
+`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable
+configuration and returns `NetError`. System trust reads `SSL_CERT_FILE` /
+`SSL_CERT_DIR` when set and otherwise the first distribution bundle that loads.
+`RootCertificates.from_pem` and `ClientIdentity.from_pem` validate through the
+same engine used by the handshake before any TCP stream is consumed. A
+custom-only trust policy never loads system roots. The `core_net_tls` testkit
+cases exercise that path over loopback against the checked-in local CA.
 
 ### `core.db` — checked database boundaries
 

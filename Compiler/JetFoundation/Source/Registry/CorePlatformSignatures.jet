@@ -253,9 +253,6 @@ core.process __stdout_line_bytes ProcessStdoutStream Result<[u8],IOError>
 core.process __stderr_line_bytes ProcessStderrStream Result<[u8],IOError>
 core.net __unix_connect_host String Result<UnixStream,NetError>
 core.net __unix_connect_deadline_host String,Duration Result<UnixStream,NetError>
-core.net.tls __client_stream ^TCPStream,String Result<TLSStream,IOError>
-core.net.tls __client_deadline ^TCPStream,String,Duration Result<TLSStream,NetError>
-core.net.tls __client_config_deadline ^TCPStream,String,TLSClientConfig,Duration Result<TLSStream,NetError>
 core.http.server __serve String,HTTPMux,HTTPServerTLS?,Duration? Result<Unit,HTTPError>
 core.http.server __bind String,HTTPMux,HTTPServerTLS?,Duration? Result<HTTPServer,HTTPError>
 core.http.server __static_files HTTPMux,String,String,Bool?,Bool?,Bool? Unit
@@ -263,9 +260,6 @@ core.http.server __middleware HTTPMux,^fn(HTTPHandler;HTTPHandler) Unit
 core.http __router - HTTPRouter
 core.http __parse String HTTPRequest
 core.http __dispatch HTTPRouter,HTTPRequest Result<HTTPResponse,HTTPError>
-core.net.tls __read &TLSStream,Int Result<[u8],IOError>
-core.net.tls __write &TLSStream,[u8] Result<Int,IOError>
-core.net.tls __write_all &TLSStream,[u8] Result<Unit,IOError>
 core.net.ws __connect String Result<WsConn,WsError>
 core.net.ws __upgrade HTTPRequest Result<WsConn,WsError>
 core.http.client __get String Result<HTTPResponse,HTTPError>
@@ -477,6 +471,7 @@ core.net socket_host|socket_to_string SocketAddr String
 core.net socket_port SocketAddr Int
 core.net tcp_listen_addr|__tcp_listen_addr SocketAddr Result<TCPListener,NetError>
 core.net tcp_accept|__tcp_accept TCPListener Result<TCPStream,NetError>
+core.net __tcp_fd TCPStream Int
 core.net tcp_connect|__tcp_connect String Result<TCPStream,NetError>
 core.net tcp_connect_addr|__tcp_connect_addr SocketAddr Result<TCPStream,NetError>
 core.net tcp_connect_timeout|__tcp_connect_timeout SocketAddr,Int Result<TCPStream,NetError>

@@ -1,0 +1,25 @@
+# #5484: core.net.tls over the vendored Mbed TLS engine. A loopback handshake
+# against OpenSSL `s_server -rev` with the checked-in test CA chain: verified
+# identity, application bytes, close_notify, repeated close, TLS 1.2 bounds, and
+# the NotValidForName / UnknownIssuer certificate failures. SSL_CERT_FILE pins
+# the default (system) trust to an unrelated self-signed certificate.
+requires: tool:openssl
+fixture: tls_loopback_handshake_verifies_custom_roots_and_names.fixture
+copy: {root}/tests/fixtures/tls/smtp.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/smtp.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/smtp.server.key.pem server.key.pem
+copy: {root}/tests/fixtures/tls/localhost.cert.pem unrelated.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: SSL_CERT_FILE={work}/unrelated.pem
+session tls raw: openssl s_server -quiet -rev -accept {free-port:tls} -cert server.cert.pem -key server.key.pem -alpn http/1.1
+sleep: 250ms
+write: main.jet main.template
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "localhost\nCN=localhost\nCN=Jet-Test-CA\nlocalhost\n1783974691000\n2099334691000\n1\ntrue\ntrue\nTLSv1.3\ntrue\ngnip\ntrue\ntrue\nTLSv1.2\ntrue\ngnip\nTLS handshake with `127.0.0.1` failed: invalid peer certificate: NotValidForName\nTLS handshake with `localhost` failed: invalid peer certificate: UnknownIssuer\n"
+signal tls: KILL
+close tls
+exit: any # s_server is killed by the case; its exit status is not part of the contract

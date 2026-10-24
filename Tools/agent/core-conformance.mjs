@@ -259,8 +259,8 @@ fn run() {
   ["core.net.tls.unwrap", `// core-conformance: core.net.tls.unwrap
 use core.net.tls as tls
 
-fn run() {
-    print(tls.unwrap(tls.TLSStream{fd: 0, host: "example.test", port: 443}).peer_port())
+fn run() -[Net]> {
+    print(tls.unwrap(TLSStream{}) == .Err(_))
 }
 `],
 ]);

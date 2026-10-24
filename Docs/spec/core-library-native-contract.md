@@ -838,40 +838,21 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
-TLS root-certificate and trust data use native carriers independently of the
-TLS transport engine. `TLSCarriers.jet` transfers consumed list/root headers
-without copying their buffers; cloning creates independent byte storage using
-the canonical host U8 stride. The root PEM field is a borrowed list header,
-whereas a trust-variant projection returns an owned root clone. System trust
-has no active root buffer. These ownership operations do not perform certificate
-validation or a TLS handshake. `TLSRootsWitness.c` pins their ownership and
-wrong-variant contracts against the composed Jet object.
-Certificate and peer snapshots also use independent native data storage: cloning
-recurses through byte lists, DNS text lists, and the certificate chain without
-duplicating an inline record's header. The chain stores inline certificates;
-growth moves their owned children, and a sequence projection borrows its slot.
-Certificate subject/issuer and peer name/cipher projections lend caller-owned
-E4 descriptors, which must not be freed, grown, or consumed. Signed validity
-timestamps remain raw i64 facts. `TLSCertificateWitness.c` exercises deep clones,
-parent lifetimes, list growth, and these borrowed projections.
-
-Native client identity owns its inline PEM byte-list header and a native
-Secret handle. Cloning copies only initialized U8 elements into independent
-buffers; dropping delegates private-key erasure and release to the canonical
-Secret provider, including its entire capacity and host U8 stride. Client
-configuration owns inline trust, optional identity, raw protocol-version tags,
-and an ALPN text list. Its trust projection borrows the parent's inline field.
-`TLSClientWitness.c` checks independence, optional identity, all trust variants,
-ALPN ownership, null drops, and private-key capacity erasure before deallocation.
-This data-provider contract does not claim TLS engine or certificate validation.
+`core.net.tls` has no native carriers or handles. `Core/Net/Tls.jet` is plain
+Core source over the vendored Mbed TLS 3.6 closure (`c.[mbedtls]`,
+`Core/Vendor/Mbedtls`, version and sha256 in its `VERSION` file). The
+`jet_tls.c` shim only binds an Mbed TLS context to the borrowed nonblocking
+descriptor from `core.net.__tcp_fd` and returns raw Mbed TLS status codes;
+trust selection, hostname checks, version bounds, ALPN, readiness waits,
+deadlines, close_notify, the verified peer identity and every error message are
+Jet. The `TCPStream` stays the descriptor's owner for the stream's lifetime.
 
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
 `DATA_SEQUENCE_DATA`, plus `data_sequence_new`, `data_sequence_slot`, and
-`data_sequence_reserve`. Dyn and TLS certificate sequences use those
-unchanged helpers. TLS byte-list children use `data_u8_list_copy_into` and
-`data_u8_list_drop_fields` from the same provider; their old private TLS
-definitions are removed. The shared sequence index and capacity failure
+`data_sequence_reserve`. Dyn sequences use those unchanged helpers. Byte-list
+children use `data_u8_list_copy_into` and `data_u8_list_drop_fields` from the
+same provider. The shared sequence index and capacity failure
 providers still require composition before native caller admission.
 
 Native mail attachment data uses `MailAttachment.jet`'s 40-byte carrier:
@@ -903,18 +884,6 @@ low-byte normalization, independent clones and exact-sized shell deallocation.
 connection, scope, pool and lease carriers are Jet structs over the vendored
 SQLite C closure (`c.[sqlite3]`), `RowPolicy` and `SQL` are source values, and
 typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
-
-The held native TLS stream handle is 112 bytes: ID, owned canonical FD72,
-optional timeout facts, seven borrowed callback pointers and one nullable
-owned peer snapshot. The seventh callback is the seed's `peer_snapshot`,
-distinct from its optional `peer_identity` owner. Drop releases the descriptor
-through `HostFiles.jet`'s canonical `jet_fd_drop_raw` (dependency `047fb460b`),
-then the peer snapshot in field declaration order, then the stream shell.
-It never invokes a TLS-close or other borrowed callback, matching the absence
-of a custom seed destructor. Show is exactly `TLSStream(<signed ID>)`.
-`TLSStreamHandleWitness.c` checks real descriptor closure before snapshot
-release, optional ownership and untouched callbacks. This does not claim a
-native TLS handshake engine or transport callback admission.
 
 The native delivery handle owns three independent text children in a 40-byte
 carrier, plus normalized duplicate Bool and raw signed generation facts.

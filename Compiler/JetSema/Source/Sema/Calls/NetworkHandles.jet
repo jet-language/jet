@@ -1,4 +1,4 @@
-// Source producers for typed network handles and the TLS static sentinels.
+// Source producers for typed network handles.
 // These operations are intrinsic TIR handles; their canonical backend routes
 // carry the Net effect and fixed ABI. Plain module calls stay in CoreCall.
 use jet_foundation.[
@@ -47,12 +47,6 @@ fn sema_network_handle_argument_move(name: String, ty: Type) -> SemaCallParam Ne
     parameter
 }
 
-fn sema_network_handle_parameter_move(name: String, label: String, ty: Type, zone: ParamZone) -> SemaCallParam Never! {
-    parameter := sema_network_handle_parameter(name, label, ty, zone)
-    parameter.convention = AccessConvention.Move
-    parameter
-}
-
 fn sema_network_handle_deadline() -> SemaCallParam Never! {
     sema_network_handle_parameter("deadline", "deadline", Type.Named{name: "Duration"}, ParamZone.LabelOnly)
 }
@@ -66,10 +60,6 @@ fn sema_network_handle_spec(operation: THandleOp, result_type: Type, params: [Se
         callback_non_escaping: false,
         effect_name: Val("Net"),
     }
-}
-
-fn sema_network_handle_io_error() -> Type Never! {
-    Type.Named{name: "IOError"}
 }
 
 fn sema_network_handle_result(ok: Type, err: Type) -> Type Never! {
@@ -95,7 +85,6 @@ fn sema_network_handle_ready_params() -> [SemaCallParam] Never! {
 }
 
 fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
-    io_error := sema_network_handle_io_error()
     unit := Type.Named{name: "Unit"}
     string := Type.String
     bytes := sema_network_handle_u8_list()
@@ -140,25 +129,6 @@ fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> Sem
         if method == "close" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamClose, sema_network_handle_net_result(unit), [SemaCallParam]{}, AccessConvention.Read))
         if method == "set_timeout" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamSetTimeout, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("timeout", duration)}, AccessConvention.Read))
     }
-    if owner == "TLSStream" {
-        if method == "read" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TLSStreamReadDeadline, sema_network_handle_result(bytes, io_error), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        if method == "write_all" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TLSStreamWriteAllDeadline, sema_network_handle_result(unit, io_error), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
-        if method == "ready" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TLSStreamReady, sema_network_handle_result(Type.Named{name: "NetReady"}, io_error), sema_network_handle_ready_params(), AccessConvention.Read))
-        if method == "close" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TLSStreamClose, sema_network_handle_result(unit, io_error), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "close_write" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TLSStreamCloseWrite, sema_network_handle_result(unit, io_error), [SemaCallParam]{sema_network_handle_deadline()}, AccessConvention.Read))
-        if method == "peer_identity" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TLSStreamPeerIdentity, Type.Named{name: "TLSPeerIdentity"}, [SemaCallParam]{}, AccessConvention.Read))
-    }
-    if owner == "TLSClientConfig" {
-        receiver_convention := AccessConvention.Move
-        if method == "with_alpn" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TLSClientConfigWithALPN, sema_network_handle_result(Type.Named{name: "TLSClientConfig"}, io_error), [SemaCallParam]{sema_network_handle_argument("protocols", Type.List{element: string})}, receiver_convention))
-        if method == "with_trust" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TLSClientConfigWithTrust, sema_network_handle_result(Type.Named{name: "TLSClientConfig"}, io_error), [SemaCallParam]{sema_network_handle_argument_move("trust", Type.Named{name: "TLSClientTrust"})}, receiver_convention))
-        if method == "with_client_identity" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TLSClientConfigWithIdentity, sema_network_handle_result(Type.Named{name: "TLSClientConfig"}, io_error), [SemaCallParam]{sema_network_handle_argument("identity", Type.Named{name: "TLSClientIdentity"})}, receiver_convention))
-        if method == "with_version_bounds" && argc == 2 {
-            minimum := sema_network_handle_parameter_move("min", "min", Type.Named{name: "TLSVersion"}, ParamZone.LabelOnly)
-            maximum := sema_network_handle_parameter_move("max", "max", Type.Named{name: "TLSVersion"}, ParamZone.LabelOnly)
-            return Val(sema_network_handle_spec(THandleOp.TLSClientConfigWithVersionBounds, sema_network_handle_result(Type.Named{name: "TLSClientConfig"}, io_error), [SemaCallParam]{minimum, maximum}, receiver_convention))
-        }
-    }
     if owner == "WsConn" {
         ws_error := Type.Named{name: "WsError"}
         if method == "send_text" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsConn", method: method}, sema_network_handle_result(unit, ws_error), [SemaCallParam]{sema_network_handle_argument("text", string)}, AccessConvention.Read))
@@ -192,8 +162,6 @@ fn sema_network_handle_known_method(owner: String, method: String) -> Bool Never
     if owner == "UDPSocket" -> return method == "ready" || method == "close" || method == "receive" || method == "send_to"
     if owner == "UnixListener" -> return method == "accept"
     if owner == "UnixStream" -> return method == "read" || method == "write_all" || method == "ready" || method == "close" || method == "set_timeout"
-    if owner == "TLSStream" -> return method == "read" || method == "write_all" || method == "ready" || method == "close" || method == "close_write" || method == "peer_identity"
-    if owner == "TLSClientConfig" -> return method == "with_alpn" || method == "with_trust" || method == "with_client_identity" || method == "with_version_bounds"
     if owner == "WsConn" -> return method == "send_text" || method == "send_bytes" || method == "recv" || method == "close"
     if owner == "WsMessage" -> return method == "is_text" || method == "is_binary" || method == "is_close" || method == "text" || method == "bytes"
     false
@@ -201,7 +169,6 @@ fn sema_network_handle_known_method(owner: String, method: String) -> Bool Never
 
 fn sema_network_handle_owner_module(owner: String) -> String Never! {
     if owner == "TCPListener" || owner == "TCPStream" || owner == "UDPSocket" || owner == "UnixListener" || owner == "UnixStream" -> return "core.net"
-    if owner == "TLSStream" || owner == "TLSClientConfig" -> return "core.net.tls"
     if owner == "WsConn" || owner == "WsMessage" -> return "core.net.ws"
     ""
 }
@@ -269,15 +236,6 @@ fn sema_network_handle_expected_arity(owner: String, method: String) -> String N
         if method == "read" || method == "write_all" || method == "ready" -> return "2"
         if method == "set_timeout" -> return "1"
         return "0"
-    }
-    if owner == "TLSStream" {
-        if method == "read" || method == "write_all" || method == "ready" -> return "2"
-        if method == "close_write" -> return "1"
-        return "0"
-    }
-    if owner == "TLSClientConfig" {
-        if method == "with_version_bounds" -> return "2"
-        return "1"
     }
     if owner == "WsConn" {
         if method == "send_text" || method == "send_bytes" -> return "1"
@@ -395,54 +353,4 @@ fn sema_network_handle_text_params(params: [SemaCallParam]) -> [SemaCallParam] N
     result := params.copy()
     if result.len() > 0 -> result[0].ty = Val(Type.String)
     result
-}
-
-fn sema_network_tls_static_target(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
-    if receiver == {
-        .Field(base, leaf, _, _) -> {
-            is_tls_module := if base == {
-                .Ident(alias, _, _) -> sema_expr_core_import_module(environment, program, alias) == (Val("core.net.tls"))
-                else -> false
-            }
-            if is_tls_module {
-                if leaf == "ClientConfig" && method == "default" -> return Val("ClientConfig")
-                if leaf == "RootCertificates" && method == "from_pem" -> return Val("RootCertificates")
-                if leaf == "ClientIdentity" && method == "from_pem" -> return Val("ClientIdentity")
-            }
-        }
-        else -> {}
-    }
-    None
-}
-
-fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    target :: sema_network_tls_static_target(receiver, method, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    result_type := Type.Named{name: "TLSClientConfig"}
-    operation := THandleOp.TLSClientConfigDefault
-    params := [SemaCallParam]{}
-    effect_name := Val("Net")
-    if target == "RootCertificates" {
-        result_type = sema_network_handle_result(Type.Named{name: "TLSRootCertificates"}, sema_network_handle_io_error())
-        operation = THandleOp.TLSRootCertificatesFromPEM
-        &params.push(sema_network_handle_argument("pem", sema_network_handle_u8_list()))
-    }
-    if target == "ClientIdentity" {
-        result_type = sema_network_handle_result(Type.Named{name: "TLSClientIdentity"}, sema_network_handle_io_error())
-        operation = THandleOp.TLSClientIdentityFromPEM
-        &params.push(sema_network_handle_parameter("cert_chain", "cert_chain", sema_network_handle_u8_list(), ParamZone.LabelOnly))
-        &params.push(sema_network_handle_parameter("private_key", "private_key", sema_network_handle_u8_list(), ParamZone.LabelOnly))
-    }
-    if (target == "ClientConfig" && args.len() != 0) || (target == "RootCertificates" && args.len() != 1) || (target == "ClientIdentity" && args.len() != 2) {
-        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        expected_count := if {
-            target == "ClientConfig" -> 0
-            target == "RootCertificates" -> 1
-            else -> 2
-        }
-        &diagnostics.push(sema_call_arity_diagnostic("{target}.{method}", expected_count, args.len(), false, span))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    typed_args :: sema_network_handle_checked_args("{target}.{method}", params, args, None, AccessConvention.Read, false, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    unit_receiver := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
-    sema_network_handle_finish(unit_receiver, operation, typed_args, result_type, effect_name, "core.net.tls.{target}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }

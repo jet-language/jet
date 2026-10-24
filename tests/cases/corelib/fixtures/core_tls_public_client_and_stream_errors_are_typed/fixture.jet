@@ -1,7 +1,12 @@
+package {
+    name: "fixture"
+    authority: { allow: [IO, Net, Time.Wait] }
+}
 
 use core.net.tls as tls
 
-fn run() -[Net]> {
+fn run() -[IO, Net]> {
     print(tls.client("localhost", 0) == .Err(_))
-    print(tls.read(TLSStream{}, 0) == .Err(_))
+    stream := TLSStream{}
+    print(tls.read(&stream, 0) == .Err(_))
 }

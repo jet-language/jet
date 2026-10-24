@@ -167,8 +167,6 @@ IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "FieldInfo", fields: [String]{"name", "ty", "index", "fields", "markers", "dimensions", "facts", "is_pub", "span"}},
     {name: "TypeParamInfo", fields: [String]{"name", "bounds", "span"}},
     {name: "SourceSpan", fields: [String]{"start", "end"}},
-    {name: "TLSPeerIdentity", fields: [String]{"verified_server_name", "leaf", "certificate_chain", "cipher_suite", "tls_version"}},
-    {name: "TLSCertificate", fields: [String]{"der", "sha256", "spki_sha256", "dns_names", "valid_from_unix_ms", "valid_until_unix_ms", "subject", "issuer"}},
     {name: "ModGrant", fields: [String]{"read"}},
 } }
 
@@ -359,8 +357,6 @@ IR_COMPILER_OWNED_ENUMS :: comptime { [IRCompilerOwnedEnum]{
     {name: "RecipientPolicy", variants: [String]{"RequireAll", "DeliverAccepted"}},
     {name: "SMTPAuth", variants: [String]{"None", "Password"}},
     {name: "TLSTrust", variants: [String]{"System", "SystemPlusCa"}},
-    {name: "TLSVersion", variants: [String]{"TLS12", "TLS13"}},
-    {name: "TLSClientTrust", variants: [String]{"System", "SystemPlus", "CustomOnly"}},
     {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
     {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
     {name: "NetShutdown", variants: [String]{"Read", "Write", "Both"}},
@@ -442,10 +438,6 @@ fn ir_compiler_owned_enum_payload(name: String, variant: String) -> IRCompilerOw
     }
     if name == "SMTPAuth" && variant == "Password" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "username", ty: Type.String}, TypeTupleField{name: "password", ty: Type.Named{name: "Secret"}}})
     if name == "TLSTrust" && variant == "SystemPlusCa" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "pem", ty: bytes}})
-    if name == "TLSClientTrust" {
-        if variant == "SystemPlus" || variant == "CustomOnly" -> return ir_compiler_owned_single(Type.Named{name: "TLSRootCertificates"})
-        return IRCompilerOwnedPayload.Unit
-    }
     // The canonical twelve DataEvent payloads are the
     // generated Core payload rows (Rust core_types.rs data_event_payload).
     if name == "DataEvent" {

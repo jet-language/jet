@@ -167,6 +167,11 @@ fn jet_cli_native_c_build_map(directory: String) -> String Never! {
     "-ffile-prefix-map={directory}=."
 }
 
+// Core's vendored C closures (Core/Vendor/*): a Core module's `c.<lib>`
+// import links the copy published beside the runtime at
+// `{runtime_dir}/foreign/<lib>`, never the machine's library.
+fn jet_cli_vendored_c_library(lib: String) -> Bool Never! { lib == "sqlite3" || lib == "mbedtls" }
+
 // SQLite is the sanctioned bundled dependency, not the machine's sqlite.
 // These are libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
 fn jet_cli_sqlite_c_flags() -> [String] Never! {
@@ -465,7 +470,7 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
         loop declaration in declarations {
             if declaration.library != lib -> next
             target :: declaration.target
-            if lib == "sqlite3" && (target == "system" || target.starts_with("nixpkgs:")) -> next
+            if jet_cli_vendored_c_library(lib) && (target == "system" || target.starts_with("nixpkgs:")) -> next
             if target == "system" {
                 declared_system = true
                 next
@@ -479,7 +484,7 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
             if !directories.contains(directory) -> &directories.push(directory)
         }
         if directories.len() > 1 -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` has conflicting declarations"))
-        if lib == "sqlite3" && directories.len() == 0 -> &directories.push("{runtime_dir}/foreign/sqlite3")
+        if jet_cli_vendored_c_library(lib) && directories.len() == 0 -> &directories.push("{runtime_dir}/foreign/{lib}")
         if directories.len() > 0 {
             path :: jet_cli_foreign_static_archive(lib, directories, cache, true) ?? return Err(err)
             jet_cli_foreign_add(&inputs, path) ?? return Err(err)

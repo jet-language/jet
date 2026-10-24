@@ -234,6 +234,19 @@ fn coll_list_drop(header: I64, meta: I64, start: I64) {
     if (len != I64{0}) { jet_rt_free(ptr, len, I64{1}) }
 }
 
+// The `core.mem.__bytes_pack` route: native_lists passes the borrowed [U8]
+// as its element data and length, not a list header.
+#Export(c) fn jet_rt_bytes_pack_route(data: I64, length: I64) -> I64 {
+    if (length == I64{0}) { return I64{1} }
+    packed :: jet_rt_alloc(length, I64{1})
+    at := I64{0}
+    loop at < length {
+        trap_put(packed + at, host_u8_get(data, at))
+        at += I64{1}
+    }
+    packed
+}
+
 #Export(c) fn jet_rt_bytes_unpack(ptr: I64, len: I64) -> I64 {
     header :: coll_list_new()
     if (len == I64{0}) { return header }

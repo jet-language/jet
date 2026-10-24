@@ -58,19 +58,36 @@ const recipeSha256 = nativePackRecipe(source.sha256, backend.sha256, lifecycle.s
   platformInputs.map(row => row.sha256), compilerSha256);
 // User foreign closures link the Jet-only runtime object with these exact
 // platform archives once (Compiler/JetCli ForeignLink.jet); ship them beside it.
-// core.db's `c.sqlite3` import has no package declaration of its own: the link
-// closure compiles the vendored amalgamation from `foreign/sqlite3`.
-const sqliteSources = ['sqlite3.c', 'sqlite3.h', 'sqlite3ext.h', 'LICENSE'].map(name => join(repo, 'Core/Vendor/Sqlite3', name));
+// Core's `c.sqlite3` and `c.mbedtls` imports have no package declaration of
+// their own: the link closure compiles the vendored sources published under
+// `foreign/<lib>`, keeping each tree's relative layout (mbedTLS's mbedtls/ and
+// psa/ header directories).
+const vendored = [['sqlite3', 'Core/Vendor/Sqlite3'], ['mbedtls', 'Core/Vendor/Mbedtls']];
+function vendorFiles(root, relative = '') {
+  const rows = [];
+  for (const entry of readdirSync(join(root, relative), { withFileTypes: true })) {
+    const path = join(relative, entry.name);
+    if (entry.isDirectory()) rows.push(...vendorFiles(root, path));
+    else if (/\.[ch]$/u.test(entry.name) || entry.name === 'LICENSE' || entry.name === 'VERSION') rows.push(path);
+  }
+  return rows.sort();
+}
 function publishPlatform() {
-  for (const [name, paths] of [['platform', platform], ['sqlite3', sqliteSources]]) {
+  // Platform archives may come from a read-only store (mode 0444): replace the
+  // published copy instead of writing through it, so a second publish succeeds.
+  const platformDirectory = join(out, 'foreign', 'platform');
+  mkdirSync(platformDirectory, { recursive: true });
+  for (const path of platform) {
+    const target = join(platformDirectory, basename(path));
+    rmSync(target, { force: true });
+    copyFileSync(path, target);
+  }
+  for (const [name, source] of vendored) {
     const directory = join(out, 'foreign', name);
-    mkdirSync(directory, { recursive: true });
-    // Platform archives may come from a read-only store (mode 0444): replace the
-    // published copy instead of writing through it, so a second publish succeeds.
-    for (const path of paths) {
-      const target = join(directory, basename(path));
-      rmSync(target, { force: true });
-      copyFileSync(path, target);
+    rmSync(directory, { recursive: true, force: true });
+    for (const path of vendorFiles(join(repo, source))) {
+      mkdirSync(dirname(join(directory, path)), { recursive: true });
+      copyFileSync(join(repo, source, path), join(directory, path));
     }
   }
 }

@@ -1515,7 +1515,7 @@ function coreCallEffectLeafFor(moduleName, member) {
     "__dns_txt_lookup", "__dns_txt_at_lookup", "__dns_ptr_lookup", "__dns_srv_lookup", "__dns_srv_at_lookup",
   ])) return "Time.Wait";
   // TLS waits.
-  if (moduleName === "core.net.tls" && coreCallOneOf(member, ["client", "read", "read_text", "write", "write_all", "write_text", "close", "__read", "__write", "__write_all", "__client_stream", "__client_deadline", "__client_config_deadline"])) return "Time.Wait";
+  if (moduleName === "core.net.tls" && coreCallOneOf(member, ["client", "read", "read_text", "write", "write_all", "write_text", "close"])) return "Time.Wait";
   // HTTP waits.
   if ((moduleName === "core.http.client" && coreCallOneOf(member, ["get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"])) || (moduleName === "core.http" && member === "get") || (moduleName === "core.http.server" && coreCallOneOf(member, ["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"]))) return "Time.Wait";
   // Encoding readers and writers.

@@ -3045,8 +3045,6 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
         if memory.handled -> return memory
         http := sema_call_try_http_static(receiver, method, owner_type_args, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if http.handled -> return http
-        tls := sema_call_try_network_tls_static(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if tls.handled -> return tls
     }
 
     owner :: if receiver == {.Ident(name, _, _) -> name else -> ""}

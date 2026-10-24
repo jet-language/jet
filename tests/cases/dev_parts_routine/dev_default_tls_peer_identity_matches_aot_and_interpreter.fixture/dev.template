@@ -16,13 +16,14 @@ fn run() {
     if !peer.cipher_suite.starts_with("TLS13_") { panic("cipher") }
     if peer.tls_version != .TLS13 { panic("version") }
     crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
-    secure.write_text("GET / HTTP/1.0{crlf}Host: localhost{crlf}{crlf}") ?? panic("request")
+    secure.write_all("GET / HTTP/1.0{crlf}Host: localhost{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request")
     // At most 8 * 512 bytes; preserve the marker across TLS read boundaries.
     response := ""
     response_reads := 0
     loop response_reads < 8 && !response.contains("<HTML>") {
-        chunk :: secure.read_text(512) ?? panic("response")
-        if chunk == "" -> break
+        bytes :: secure.read(512, deadline: budget) ?? panic("response")
+        if bytes.len() == 0 -> break
+        chunk :: String.from_bytes(bytes) ?? panic("response text")
         response = "{response}{chunk}"
         response_reads = response_reads + 1
     }

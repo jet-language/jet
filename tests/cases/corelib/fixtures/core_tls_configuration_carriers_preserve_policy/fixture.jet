@@ -1,7 +1,11 @@
+package {
+    name: "fixture"
+    authority: { allow: [IO, Net, Time.Wait] }
+}
 
 use core.net.tls as tls
 
-fn run() -[Net]> {
+fn run() -[IO, Net]> {
     cfg :: tls.with_alpn(tls.config("example.test"), "h2")
     print(tls.has_alpn(cfg, "h2"))
     print(tls.flags(cfg).len() == 1)

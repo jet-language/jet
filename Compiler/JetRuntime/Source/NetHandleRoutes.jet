@@ -308,6 +308,17 @@ fn net_tcp_address_text(holder: I64, listener: Bool, peer: Bool, output: I64, er
 }
 #Export(c) fn jet_net_tcp_local_addr(stream: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(stream, false, false, output, error) }
 #Export(c) fn jet_net_tcp_peer_addr(stream: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(stream, false, true, output, error) }
+// core.net.__tcp_fd: the borrowed stream's nonblocking OS socket descriptor
+// (FD72 word 8), or -1 once the stream is closed, for Core's TLS provider
+// (Core/Net/Tls.jet), which drives that same socket and waits through
+// TCPStream.ready. The TCPStream keeps owning the descriptor.
+#Export(c) fn jet_net_tcp_fd(stream: I64) -> I64 {
+    state :: jet_socket_stream_fd_raw(stream)
+    fd_lock(state)
+    fd :: if (fd_word(state, I64{16}) == I64{0}) -> fd_word(state, I64{8}) else -> I64{-1}
+    fd_unlock(state)
+    jet_int_owned_from_i64(fd)
+}
 #Export(c) fn jet_net_listener_local_addr(listener: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(listener, true, false, output, error) }
 fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
     scratch :: jet_rt_alloc(I64{16}, I64{8})
