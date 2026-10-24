@@ -117,18 +117,17 @@ fn ir_opt_report_add(total: &IROptReport, part: IROptReport) Never! {
 }
 
 // Optimizing threads (compiler_threads_admit): a thread is admitted for at
-// least this many IR instructions of a wave (a few milliseconds of passes,
-// well above a thread's start), so only a small wave runs on the calling
-// thread.
+// least this many IR instructions of the module (a few milliseconds of
+// passes, well above a thread's start), so only a small module runs on the
+// calling thread.
 IR_OPT_MIN_INSTRUCTIONS_PER_THREAD :: 2000
 
 // Optimizes `m` in place at `options.level` (0, 1 or 2), on as many threads
-// as `threads` admits. The functions run in waves of the bottom-up call graph
-// (ir_opt_waves): a function's passes read only its own body and the final
-// bodies of its non-recursive callees, which all sit in earlier waves, so
-// the functions of one wave are independent and every body is the one the
-// single-threaded Tarjan walk produces, for any thread count. The report's
-// instruction counts stay 0; ir_optimize_module_measured fills them.
+// as `threads` admits. A function's passes read only its own body and the
+// final bodies of its non-recursive callees, so a function runs once those
+// callees are done (ir_opt_scheduled) and every body is the one the
+// single-threaded bottom-up walk produces, for any thread count. The
+// report's instruction counts stay 0; ir_optimize_module_measured fills them.
 fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     level :: options.level
     report := ir_opt_report(level)
@@ -144,53 +143,22 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     loop f in functions -> &weights.push(1 + f.op.len())
     glue :: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
     report.direct_calls += ir_opt_prepare(&functions, weights, ^glue, threads)
-    order := ir_opt_bottom_up(functions)
-    waves :: ir_opt_waves(functions, order)
-    // Each body moves into a one-row list, so a pass takes its function out
-    // and puts it back while the others stay readable; the passes read only
-    // the type rows of the module, which move beside the bodies, and the
-    // ids of the runtime routes they know (ir_opt_routes).
-    bodies := [[IRFunction]]{}
-    loop functions.len() > 0 {
-        row := &functions.pop() ?? { break }
-        &bodies.push([IRFunction]{^row})
-    }
-    &bodies.reverse()
-    view := ir_module_new()
-    compiler_transfer_rows<IRType>(&view.types, &m.types)
-    loop route in ir_opt_routes() {
-        id :: m.name_rows.get(route) ?? -1
-        if id >= 0 -> view.name_rows[route] = id
-    }
-    sites :: ir_opt_call_sites(bodies)
+    order :: ir_opt_bottom_up(functions)
+    sites :: ir_opt_call_sites(functions)
     keys := [String]{}
-    loop row in bodies -> &keys.push(row[0].key.copy())
-    inputs :: shared IROptInputs{views: [IRModule]{^view}, bodies: ^bodies, keys: ^keys, recursive: ^order.recursive, sites: ^sites, options: options.copy()}
-    loop wave in waves {
-        total := 0
-        wave_weights := [Int]{}
-        loop id in wave {
-            total += weights[id]
-            &wave_weights.push(weights[id])
-        }
-        workers :: compiler_threads_admit(threads, wave.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
-        if workers <= 1 {
-            ir_opt_wave_inline(inputs, wave, &report)
-            next
-        }
-        claims :: shared IROptClaims{cells: ir_opt_wave_take(inputs, wave), order: compiler_threads_heaviest_first(wave_weights), next: 0}
-        parts := ir_opt_claimers(inputs, claims, workers) ?? panic("the IR optimizing threads failed")
-        ir_opt_wave_put(inputs, wave, &parts, &report)
+    loop f in functions -> &keys.push(f.key.copy())
+    total := 0
+    loop weight in weights -> total += weight
+    workers :: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers > 1 {
+        ir_opt_scheduled(&m, &functions, ^keys, order, ^sites, weights, options, workers, &report)
+    } else {
+        view := ir_opt_view(&m)
+        bodies := ir_opt_rows(&functions)
+        ir_opt_serial(view, &bodies, keys, order.recursive, sites, options, order.order, &report)
+        compiler_transfer_rows<IRType>(&m.types, &view.types)
+        ir_opt_unrows(&functions, &bodies)
     }
-    back := ir_opt_take_inputs(inputs)
-    view_back := &back.views.pop() ?? panic("the IR optimizer lost the module's type rows")
-    compiler_transfer_rows<IRType>(&m.types, &view_back.types)
-    loop back.bodies.len() > 0 {
-        row := &back.bodies.pop() ?? { break }
-        body := &row.pop() ?? panic("the IR optimizer lost a function body")
-        &functions.push(^body)
-    }
-    &functions.reverse()
     compiler_transfer_rows<IRFunction>(&m.functions, &functions)
     if options.dump != "" {
         loop f in m.functions {
@@ -198,6 +166,49 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
         }
     }
     report
+}
+
+// The passes read the module's type rows, moved out of `m` into a module of
+// their own, and the ids of the runtime routes they know (ir_opt_routes).
+fn ir_opt_view(m: &IRModule) -> IRModule Never! {
+    view := ir_module_new()
+    compiler_transfer_rows<IRType>(&view.types, &m.types)
+    loop route in ir_opt_routes() {
+        id :: m.name_rows.get(route) ?? -1
+        if id >= 0 -> view.name_rows[route] = id
+    }
+    view
+}
+
+// Each body moves into a one-row list, so a pass takes its function out and
+// puts it back while the others stay readable.
+fn ir_opt_rows(functions: &[IRFunction]) -> [[IRFunction]] Never! {
+    bodies := [[IRFunction]]{}
+    loop functions.len() > 0 {
+        row := &functions.pop() ?? { break }
+        &bodies.push([IRFunction]{^row})
+    }
+    &bodies.reverse()
+    bodies
+}
+
+fn ir_opt_unrows(functions: &[IRFunction], bodies: &[[IRFunction]]) Never! {
+    loop bodies.len() > 0 {
+        row := &bodies.pop() ?? { break }
+        body := &row.pop() ?? panic("the IR optimizer lost a function body")
+        &functions.push(^body)
+    }
+    &functions.reverse()
+}
+
+// Functions `ids`, in that order, on the calling thread: each body out of its
+// row, through its passes, and back.
+fn ir_opt_serial(view: IRModule, bodies: &[[IRFunction]], keys: [String], recursive: [Bool], sites: [Int], options: IROptOptions, ids: [Int], report: &IROptReport) Never! {
+    loop id in ids {
+        body := &bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
+        optimized := ir_opt_function(view, bodies, keys, ^body, recursive, sites, options, &report)
+        &bodies[id].push(^optimized)
+    }
 }
 
 // ir_optimize_module with the report's instruction counts before and after
@@ -369,126 +380,165 @@ fn ir_opt_ssa(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROpt
     if facts > 0 -> ir_opt_simplify(m, &f, &report)
 }
 
-// The waves of the bottom-up order: a function's wave is one past the
-// latest wave of the non-recursive callees it calls directly (0 for none),
-// and each wave lists its functions in the bottom-up order.
-fn ir_opt_waves(functions: [IRFunction], order: OptOrder) -> [[Int]] Never! {
-    wave := [Int]{}
-    loop _ in functions -> &wave.push(-1)
-    waves := [[Int]]{}
-    loop id in order.order {
-        at := 0
-        loop k in 0..<functions[id].op.len() {
-            if functions[id].op[k] != .Call -> next
-            callee :: functions[id].a[k]
-            if callee < 0 || callee >= functions.len() || callee == id || order.recursive[callee] -> next
-            if wave[callee] + 1 > at -> at = wave[callee] + 1
-        }
-        wave[id] = at
-        loop waves.len() <= at -> &waves.push([Int]{})
-        &waves[at].push(id)
-    }
-    waves
-}
-
-// What every optimizing thread reads and nothing writes while a wave runs:
-// the module's type rows (in a module of their own), every function's body
-// (a one-row list; the wave's own rows are empty while it runs) and key
-// (always there, so a pass that matches a callee by key sees the same
-// callees for any thread count), which functions are recursive, how many
-// direct call sites each has, and the level.
-struct IROptInputs {
-    views: [IRModule]
-    bodies: [[IRFunction]]
-    keys: [String]
-    recursive: [Bool]
-    sites: [Int]
-    options: IROptOptions
-}
-
 // Per function, the direct Calls of it in the whole module.
-fn ir_opt_call_sites(bodies: [[IRFunction]]) -> [Int] Never! {
+fn ir_opt_call_sites(functions: [IRFunction]) -> [Int] Never! {
     sites := [Int]{}
-    loop _ in bodies -> &sites.push(0)
-    loop row in bodies {
-        loop f in row {
-            loop at in 0..<f.op.len() {
-                callee :: f.a[at]
-                if f.op[at] == .Call && callee >= 0 && callee < sites.len() -> sites[callee] = sites[callee] + 1
-            }
+    loop _ in functions -> &sites.push(0)
+    loop f in functions {
+        loop at in 0..<f.op.len() {
+            callee :: f.a[at]
+            if f.op[at] == .Call && callee >= 0 && callee < sites.len() -> sites[callee] = sites[callee] + 1
         }
     }
     sites
 }
 
-// A threaded wave's claim state, read-only while its threads run: per
-// position of the wave its body, in a cell of its own (the one thread that
-// claims a position takes the body without contending with the others),
-// the positions in claim order (compiler_threads_heaviest_first: a heavy
-// body starts while light ones remain to fill the threads' tails), and the
-// next rank, which a thread takes with one atomic add.
-struct IROptClaims {
+// A function waits for each distinct non-recursive function other than
+// itself that it calls directly: its passes read those final bodies (the
+// inliner; recursive callees are never inlined). The rows are
+// `callees[callee_start[f]..<callee_start[f + 1]]`.
+fn ir_opt_callee_edges(functions: [IRFunction], recursive: [Bool], callee_start: &[Int], callees: &[Int]) Never! {
+    seen := [Int]{}
+    loop _ in functions -> &seen.push(-1)
+    loop id in 0..<functions.len() {
+        &callee_start.push(callees.len())
+        loop k in 0..<functions[id].op.len() {
+            if functions[id].op[k] != .Call -> next
+            callee :: functions[id].a[k]
+            if callee < 0 || callee >= functions.len() || callee == id || recursive[callee] || seen[callee] == id -> next
+            seen[callee] = id
+            &callees.push(callee)
+        }
+    }
+    &callee_start.push(callees.len())
+}
+
+// The same edges the other way: the functions waiting for each function,
+// `callers[caller_start[g]..<caller_start[g + 1]]`.
+fn ir_opt_caller_edges(count: Int, callee_start: [Int], callees: [Int], caller_start: &[Int], callers: &[Int]) Never! {
+    next_at := [Int]{}
+    loop _ in 0..<count + 1 -> &next_at.push(0)
+    loop callee in callees -> next_at[callee + 1] = next_at[callee + 1] + 1
+    loop at in 0..<count -> next_at[at + 1] = next_at[at + 1] + next_at[at]
+    loop at in next_at -> &caller_start.push(at)
+    loop _ in callees -> &callers.push(-1)
+    loop id in 0..<count {
+        loop k in callee_start[id]..<callee_start[id + 1] {
+            callee :: callees[k]
+            callers[next_at[callee]] = id
+            next_at[callee] = next_at[callee] + 1
+        }
+    }
+}
+
+// The dependency-count schedule every optimizing thread reads: the module's
+// type rows (in a module of their own), every function's key (a pass that
+// matches a callee by key sees every callee), which functions are
+// recursive, how many direct call sites each has, and the options; per
+// function its body in a cell of its own (taken out while its passes run,
+// final once it is done), its final ir_opt_size (-1 until it is done) and
+// how many of the callees it waits for are not done; the edges both ways;
+// and `ring`, the functions in the order they became ready (-1 at a
+// position not yet published), with `head` the next position a thread
+// claims and `tail` the next one a finished function publishes into. A
+// thread changes only the atomics and the cells of the functions it claims.
+struct IROptGraph {
+    views: [IRModule]
+    keys: [String]
+    recursive: [Bool]
+    sites: [Int]
+    options: IROptOptions
     cells: [Shared<IROptCell>]
-    order: [Int]
-    next: Atomic<Int>
+    sizes: [IROptCount]
+    pending: [IROptCount]
+    callee_start: [Int]
+    callees: [Int]
+    caller_start: [Int]
+    callers: [Int]
+    ring: [IROptCount]
+    head: Atomic<Int>
+    tail: Atomic<Int>
 }
 
 struct IROptCell {
     body: [IRFunction]
 }
 
-// A thread's optimized bodies, each with its wave position, and its report.
-struct IROptClaimed {
-    done: [IROptDone]
-    report: IROptReport
+struct IROptCount {
+    value: Atomic<Int>
 }
 
-struct IROptDone {
-    at: Int
-    body: IRFunction
-}
+// Checks of a waiting thread (ir_opt_ready) with no function published in
+// between, after which it stops waiting: about a second, far longer than a
+// function's passes, so only a run whose thread stopped (a panic) gets here.
+IR_OPT_STALL_CHECKS :: 1073741824
 
-// A wave on the calling thread: each body out of its row, through its passes, back.
-fn ir_opt_wave_inline(inputs: Shared<IROptInputs>, wave: [Int], report: &IROptReport) {
-    permit := inputs.guard_edit()
-    loop id in wave {
-        body := &permit.value.bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
-        optimized := ir_opt_function(permit.value.views[0], permit.value.bodies, permit.value.keys, ^body, permit.value.recursive, permit.value.sites, permit.value.options, &report)
-        &permit.value.bodies[id].push(^optimized)
-    }
-}
-
-// The wave's bodies move out of their rows into cells, in wave order.
-fn ir_opt_wave_take(inputs: Shared<IROptInputs>, wave: [Int]) -> [Shared<IROptCell>] {
-    permit := inputs.guard_edit()
-    cells := [Shared<IROptCell>]{}
-    loop id in wave {
-        body := &permit.value.bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
-        &cells.push(shared IROptCell{body: [IRFunction]{^body}})
-    }
-    cells
-}
-
-// The optimized bodies move back into their rows, each by its wave
-// position; the threads' reports add into `report`.
-fn ir_opt_wave_put(inputs: Shared<IROptInputs>, wave: [Int], parts: &[IROptClaimed], report: &IROptReport) {
-    permit := inputs.guard_edit()
-    loop part in 0..<parts.len() {
-        ir_opt_report_add(&report, parts[part].report)
-        loop parts[part].done.len() > 0 {
-            done := &parts[part].done.pop() ?? { break }
-            &permit.value.bodies[wave[done.at]].push(^done.body)
+// The module's functions on `workers` threads in dependency order: a
+// function becomes ready once every callee it waits for
+// (ir_opt_callee_edges) is done, and the threads claim the ready functions
+// in the order they became ready (the first ones heaviest first), so a
+// function runs while unrelated ones still do and no thread waits for a
+// whole call depth to finish. A function's passes read only its own body
+// and copies of the final bodies of the callees it may inline, so every body
+// is the one the single-threaded bottom-up walk produces, for any thread
+// count. What a stalled run left runs on the calling thread afterward, in
+// bottom-up order.
+fn ir_opt_scheduled(m: &IRModule, functions: &[IRFunction], keys: ^[String], order: OptOrder, sites: ^[Int], weights: [Int], options: IROptOptions, workers: Int, report: &IROptReport) {
+    callee_start := [Int]{}
+    callees := [Int]{}
+    ir_opt_callee_edges(functions, order.recursive, &callee_start, &callees)
+    caller_start := [Int]{}
+    callers := [Int]{}
+    ir_opt_caller_edges(functions.len(), callee_start, callees, &caller_start, &callers)
+    ready := [Int]{}
+    ready_weights := [Int]{}
+    pending := [IROptCount]{}
+    sizes := [IROptCount]{}
+    loop id in 0..<functions.len() {
+        waits :: callee_start[id + 1] - callee_start[id]
+        &pending.push(IROptCount{value: waits})
+        &sizes.push(IROptCount{value: -1})
+        if waits == 0 {
+            &ready.push(id)
+            &ready_weights.push(weights[id])
         }
     }
+    ring := [IROptCount]{}
+    loop at in compiler_threads_heaviest_first(ready_weights) -> &ring.push(IROptCount{value: ready[at]})
+    published :: ring.len()
+    loop ring.len() < functions.len() -> &ring.push(IROptCount{value: -1})
+    cells := [Shared<IROptCell>]{}
+    loop functions.len() > 0 {
+        body := &functions.pop() ?? { break }
+        &cells.push(shared IROptCell{body: [IRFunction]{^body}})
+    }
+    &cells.reverse()
+    view := ir_opt_view(&m)
+    graph :: shared IROptGraph{views: [IRModule]{^view}, keys: ^keys, recursive: order.recursive.copy(), sites: ^sites, options: options.copy(), cells: ^cells, sizes: ^sizes, pending: ^pending, callee_start: ^callee_start, callees: ^callees, caller_start: ^caller_start, callers: ^callers, ring: ^ring, head: 0, tail: published}
+    parts := ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
+    loop part in parts -> ir_opt_report_add(&report, part)
+    held := graph.guard_edit()
+    bodies := [[IRFunction]]{}
+    loop cell in held.value.cells {
+        own := cell.guard_edit()
+        &bodies.push(compiler_take_rows<IRFunction>(&own.value.body))
+    }
+    left := [Int]{}
+    loop id in order.order {
+        if held.value.sizes[id].value.load() < 0 -> &left.push(id)
+    }
+    if left.len() > 0 -> ir_opt_serial(held.value.views[0], &bodies, held.value.keys, held.value.recursive, held.value.sites, held.value.options, left, &report)
+    compiler_transfer_rows<IRType>(&m.types, &held.value.views[0].types)
+    ir_opt_unrows(&functions, &bodies)
 }
 
-// Runs `tasks` optimizing threads, one task each; returns what each optimized.
-fn ir_opt_claimers(inputs: Shared<IROptInputs>, claims: Shared<IROptClaims>, tasks: Int) -> [IROptClaimed] {
-    if tasks <= 0 -> return [IROptClaimed]{}
-    parts := [IROptClaimed]{}
+// Runs `tasks` optimizing threads, one task each; returns each one's report.
+fn ir_opt_schedulers(graph: Shared<IROptGraph>, tasks: Int) -> [IROptReport] {
+    if tasks <= 0 -> return [IROptReport]{}
+    parts := [IROptReport]{}
     task.group ir_opt_threads {
-        head :: task ir_opt_claimed(inputs, claims)
-        parts = ir_opt_claimers(inputs, claims, tasks - 1)
+        head :: task ir_opt_scheduled_thread(graph)
+        parts = ir_opt_schedulers(graph, tasks - 1)
         part := head.join() ?? ir_opt_stopped(err)
         &parts.push(^part)
     }
@@ -496,36 +546,82 @@ fn ir_opt_claimers(inputs: Shared<IROptInputs>, claims: Shared<IROptClaims>, tas
 }
 
 // A stopped optimizing thread: its panic text, re-raised unchanged.
-fn ir_opt_stopped(failure: TaskFailure) -> IROptClaimed Never! {
+fn ir_opt_stopped(failure: TaskFailure) -> IROptReport Never! {
     panic(compiler_threads_failure_text(failure))
 }
 
-// One thread: claims the wave's next position and optimizes its body until
-// none is left, keeping each result with its position until the join.
-fn ir_opt_claimed(inputs: Shared<IROptInputs>, claims: Shared<IROptClaims>) -> IROptClaimed {
-    reads :: inputs.guard_read()
-    ranks :: claims.guard_read()
-    claimed := IROptClaimed{done: [IROptDone]{}, report: ir_opt_report(0)}
+// One thread: claims the next ring position until none is left, waits for
+// its function, optimizes it against copies of the final bodies of the
+// callees it may inline (`callees[g]`, one row while it runs, else empty),
+// publishes its size and body, and publishes each function it was the last
+// pending callee of.
+fn ir_opt_scheduled_thread(graph: Shared<IROptGraph>) -> IROptReport {
+    reads :: graph.guard_read()
+    report := ir_opt_report(0)
+    count :: reads.value.cells.len()
+    once :: reads.value.options.level >= 2 && ir_opt_enabled(reads.value.options, "once")
+    callees := [[IRFunction]]{}
+    loop _ in 0..<count -> &callees.push([IRFunction]{})
     loop {
-        rank :: ranks.value.next.add(1)
-        if rank >= ranks.value.order.len() -> break
-        at :: ranks.value.order[rank]
-        body := ir_opt_cell_take(ranks.value.cells[at])
-        optimized := ir_opt_function(reads.value.views[0], reads.value.bodies, reads.value.keys, ^body, reads.value.recursive, reads.value.sites, reads.value.options, &claimed.report)
-        &claimed.done.push(IROptDone{at: at, body: ^optimized})
+        rank :: reads.value.head.add(1)
+        if rank >= count -> break
+        id :: ir_opt_ready(reads.value, rank)
+        if id < 0 -> break
+        first :: reads.value.callee_start[id]
+        last :: reads.value.callee_start[id + 1]
+        loop k in first..<last {
+            callee :: reads.value.callees[k]
+            if reads.value.sizes[callee].value.load() <= ir_opt_inline_reach(reads.value.sites, callee, once, reads.value.options.level) -> &callees[callee].push(ir_opt_cell_copy(reads.value.cells[callee]))
+        }
+        body := ir_opt_cell_take(reads.value.cells[id])
+        optimized := ir_opt_function(reads.value.views[0], callees, reads.value.keys, ^body, reads.value.recursive, reads.value.sites, reads.value.options, &report)
+        size :: ir_opt_size(optimized)
+        ir_opt_cell_put(reads.value.cells[id], ^optimized)
+        loop k in first..<last -> callees[reads.value.callees[k]] = [IRFunction]{}
+        reads.value.sizes[id].value.store(size)
+        loop k in reads.value.caller_start[id]..<reads.value.caller_start[id + 1] {
+            caller :: reads.value.callers[k]
+            if reads.value.pending[caller].value.add(-1) == 1 -> reads.value.ring[reads.value.tail.add(1)].value.store(caller)
+        }
     }
-    claimed
+    report
+}
+
+// The function published at ring position `rank`, once one is; -1 when
+// none was published anywhere for IR_OPT_STALL_CHECKS checks in a row.
+fn ir_opt_ready(graph: IROptGraph, rank: Int) -> Int {
+    seen := graph.tail.load()
+    idle := 0
+    loop {
+        id :: graph.ring[rank].value.load()
+        if id >= 0 -> return id
+        now :: graph.tail.load()
+        if now != seen {
+            seen = now
+            idle = 0
+        } else {
+            idle += 1
+            if idle >= IR_OPT_STALL_CHECKS -> return -1
+        }
+    }
 }
 
 fn ir_opt_cell_take(cell: Shared<IROptCell>) -> IRFunction {
     held := cell.guard_edit()
-    body := &held.value.body.pop() ?? panic("the IR optimizer claimed a wave position twice")
+    body := &held.value.body.pop() ?? panic("the IR optimizer claimed a function twice")
     ^body
 }
 
-fn ir_opt_take_inputs(inputs: Shared<IROptInputs>) -> IROptInputs {
-    permit := inputs.guard_edit()
-    IROptInputs{views: compiler_take_rows<IRModule>(&permit.value.views), bodies: compiler_take_rows<[IRFunction]>(&permit.value.bodies), keys: [String]{}, recursive: [Bool]{}, sites: [Int]{}, options: permit.value.options.copy()}
+fn ir_opt_cell_put(cell: Shared<IROptCell>, body: ^IRFunction) {
+    held := cell.guard_edit()
+    &held.value.body.push(^body)
+}
+
+// A done callee's final body.
+fn ir_opt_cell_copy(cell: Shared<IROptCell>) -> IRFunction {
+    held :: cell.guard_read()
+    if held.value.body.len() == 0 -> panic("the IR optimizer read a callee before it was done")
+    held.value.body[0].copy()
 }
 
 // Instructions that do something (Nop and End excluded): the size inlining

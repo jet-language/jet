@@ -26,7 +26,8 @@ IR_OPT_INLINE_ONCE_O2 :: 1500
 IR_OPT_INLINE_ONCE_CALLER_O2 :: 3000
 
 // `caller`'s body with its selected call sites inlined, None when it selects
-// none. `bodies[g]` holds function g's final body (one row); the caller's
+// none. `bodies[g]` holds function g's final body (one row), or no row when
+// g's size is past ir_opt_inline_reach (it is never inlined); the caller's
 // own row and the rows of recursive functions are never read. `sites[g]`
 // counts the direct calls of g in the module; `once_called` takes the
 // once-called ones (O2).
@@ -73,7 +74,7 @@ fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
 // else -1. An asm leaf's code is its template, never IR to inline.
 fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id :: caller.a[at]
-    if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] -> return -1
+    if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 -> return -1
     callee :: bodies[callee_id][0]
     if callee.asm != None -> return -1
     if caller.c[at] != callee.param_count -> return -1
@@ -90,6 +91,14 @@ fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, a
         if callee.source_file != caller.source_file && ir_opt_located(m, callee, k) -> return -1
     }
     size
+}
+
+// The largest ir_opt_size of `callee` that ir_opt_inline_build may inline at
+// one of its call sites: the once-called limit for a callee called once
+// (`once_called`, O2), else the level's callee limit.
+fn ir_opt_inline_reach(sites: [Int], callee: Int, once_called: Bool, level: Int) -> Int Never! {
+    if once_called && callee >= 0 && callee < sites.len() && sites[callee] == 1 -> return IR_OPT_INLINE_ONCE_O2
+    if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
 }
 
 // Whether selection reports a stop of instruction `at` at the function's
