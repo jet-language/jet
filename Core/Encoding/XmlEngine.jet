@@ -340,6 +340,18 @@ fn xml_schema_order(entries: View<(key: String, value: Dyn)>) -> [String]? Never
     }
     if has_exact_xml_keys(entries, order) -> Val(^order) else -> None
 }
+// Whether `value` is an array of byte-sized integers.
+fn xml_byte_array(value: Dyn?) -> Bool Never! {
+    values :: array_value(value) ?? return false
+    loop item in values {
+        if item == .Int(byte) {
+            if byte < 0 || byte > 255 -> return false
+        } else {
+            return false
+        }
+    }
+    true
+}
 // Rust: crates/jet-foundation/src/XmlPull.rs:451
 fn xml_schema_types_are_valid(entries: View<(key: String, value: Dyn)>) -> Bool Never! {
     text :: (key: String) -> field_kind(xml_entry(entries, key)) == "text"
@@ -349,13 +361,7 @@ fn xml_schema_types_are_valid(entries: View<(key: String, value: Dyn)>) -> Bool 
     object_or_null :: (key: String) -> object(key) || field_kind(xml_entry(entries, key)) == "null"
     bool_or_null :: (key: String) -> field_kind(xml_entry(entries, key)) == "bool" || field_kind(xml_entry(entries, key)) == "null"
     has :: (key: String) -> !(xml_entry(entries, key) == .None)
-    bytes :: (key: String) -> {
-        if array_value(xml_entry(entries, key)) == .Val(values) {
-            loop value in values { if value == .Int(byte) { if byte < 0 || byte > 255 -> return false } else { return false } }
-            return true
-        }
-        false
-    }
+    bytes :: (key: String) -> xml_byte_array(xml_entry(entries, key))
     kind_field :: (key: String) -> text_value(xml_entry(entries, key))
     if kind_field("$xml") == .Val(kind) {
         return if kind == {
@@ -2906,7 +2912,7 @@ impl Scanner {
                     return Err(self.fail("reserved namespace prefix binding"))
                 }
                 parsed :: &self.parse_parts(value, value_source_base) ?? return Err(err)
-                namespace_uri :: parsed.normalized ?? return Err(self.fail("namespace URI contains unresolved entity reference"))
+                namespace_uri :: ^parsed.normalized ?? return Err(self.fail("namespace URI contains unresolved entity reference"))
                 &declarations.push(DeclaredNamespace{prefix: ^prefix, uri: ^namespace_uri, quote: attribute.quote.copy(), raw: raw.copy()})
             }
         }
