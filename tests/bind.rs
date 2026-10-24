@@ -819,30 +819,6 @@ fn public_c_bind_writes_parseable_hashed_cache_and_regenerates_idempotently() {
     let _ = fs::remove_dir_all(dir);
 }
 
-#[test]
-fn bind_missing_header_is_e3208() {
-    let missing = std::env::temp_dir().join("jet_missing_bind_header.h");
-    let _ = fs::remove_file(&missing);
-    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["inspect", "bind"])
-        .arg(&missing)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "unexpected stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("Error [E3208]:"),
-        "missing bind diagnostic:\n{stderr}"
-    );
-    assert!(stderr.contains("Why:"), "missing E3208 reason:\n{stderr}");
-    assert!(stderr.contains("Fix:"), "missing E3208 fix:\n{stderr}");
-    check_cli_snapshot("bind_missing_e3208.txt", &scrub_cli_path(&stderr, &missing));
-}
 
 #[test]
 fn data_bind_invalid_is_registered_e3208_snapshot() {

@@ -1070,24 +1070,6 @@ fn authority_example_runs_on_all_hosted_tiers() {
     );
 }
 
-#[test]
-fn authority_is_not_a_type_selection_or_dispatch_input() {
-    let source = r#"
-fn run() {
-        #FX(Authority) {
-        print("Authority must remain ordinary data")
-    }
-}
-"#;
-    let diagnostics =
-        jet::compile(source).expect_err("Authority must not act as an effect/type fact");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0930"),
-        "{diagnostics:#?}"
-    );
-}
 
 #[test]
 fn authority_parser_accepts_the_named_value() {

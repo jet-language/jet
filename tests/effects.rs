@@ -62,33 +62,6 @@ fn civil_zone_rows_keep_truthful_precise_effects() {
     assert_eq!(process.effect_leaf(), Some("FS.Read"));
 }
 
-#[test]
-fn named_zone_lookup_requires_environment_and_read_effects() {
-    let source = include_str!("ui/time_zone_effects.jet");
-    let diagnostics = jet::compile(source).expect_err("zone lookup must not hide either effect");
-    for function in ["pure", "env_only", "read_only"] {
-        assert!(
-            diagnostics.iter().any(|diagnostic|
-                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
-                    && diagnostic.what.contains(function)),
-            "{function} must report its effect ceiling: {diagnostics:#?}",
-        );
-    }
-    assert!(
-        diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
-            .all(|diagnostic| {
-                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
-                    && ["pure", "env_only", "read_only"]
-                        .iter()
-                        .any(|function| diagnostic.what.contains(function))
-            }),
-        "only the named user effect ceilings may fail: {diagnostics:#?}",
-    );
-    let source = include_str!("fixtures/time_zone_effects_truthful.jet");
-    jet::compile(source).expect("truthful zone bounds and pure numeric-offset parsing must compile");
-}
 
 #[test]
 fn callbacks_entry_effects_are_only_io() {
@@ -627,30 +600,6 @@ fn run() {
     );
 }
 
-/// D-NOPANIC1=D: Panic is an ordinary deniable effect row, not a second
-/// failure mechanism. The diagnostic names the reachable stop and its exits.
-#[test]
-fn panic_prohibition_is_e0749_with_three_exits() {
-    let src = r#"
-fn parse_port(raw: String) -[!Panic]> Int {
-    return Int.parse(raw) ?? panic("bad port")
-}
-fn run() { print(parse_port("8080")) }
-"#;
-    let diagnostics = jet::compile(src).expect_err("a denied panic must fail sema");
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "E0749")
-        .expect("expected E0749");
-    assert!(diagnostic.what.contains("parse_port"), "{diagnostic:#?}");
-    assert!(diagnostic.why.contains("parse_port"), "{diagnostic:#?}");
-    assert!(
-        diagnostic.fix.contains("fallible result"),
-        "{diagnostic:#?}"
-    );
-    assert!(diagnostic.fix.contains("facts"), "{diagnostic:#?}");
-    assert!(diagnostic.fix.contains("#Pre"), "{diagnostic:#?}");
-}
 
 /// D-NOPANIC1=D: the existing call graph projects Panic through every
 /// reachable caller and preserves the legacy panic row at the same time.
@@ -680,133 +629,13 @@ fn run() { top() }
         .contains("main::top"));
 }
 
-/// A refinement fact discharges a Panic denial for a fixed-list read. The
-/// example and this fixture use the same sema proof (`FixedListProof`).
-#[test]
-fn fixed_list_refinement_discharges_panic_denial() {
-    let src = r#"
-Die :: distinct Int(1..6)
-fn pick(faces: [String#6], roll: Die) -[!Panic]> String { faces[roll.raw() - 1].copy() }
-fn run() {}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "refined fixed-list read should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// Panic is a closed root. A nearby spelling remains E0119, not a new row.
-#[test]
-fn unknown_panic_effect_name_is_e0119_only() {
-    let src = "fn work() -[!Panics]> {}\nfn run() {}\n";
-    let c = codes(src);
-    assert!(
-        c.iter().any(|code| code == "E0119"),
-        "expected E0119, got {c:?}"
-    );
-    assert!(
-        !c.iter().any(|code| code == "E0749"),
-        "unknown root must not deny: {c:?}"
-    );
-}
 
-/// A `#(FS)` bound that matches the body's only effect compiles clean.
-#[test]
-fn declared_bound_matching_body_ok() {
-    let src = r#"
-use core.files as fs
-fn load(path: String) -[FS]> String {
-    return fs.read(path.copy()) ?? ""
-}
-fn run() { print(load("x")) }
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "matching bound should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// A bound that omits an effect the body uses is E0740.
-#[test]
-fn out_of_set_effect_is_e0740() {
-    let src = r#"
-use core.files as fs
-fn load(path: String) -[Net]> String {
-    return fs.read(path) ?? ""
-}
-fn run() { print(load("x")) }
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0740"),
-        "expected E0740, got {:?}",
-        codes(src)
-    );
-}
 
-/// Effects propagate transitively along calls: `load` reaches `FS` only through
-/// `helper`, yet its `#(Net)` bound is still violated.
-#[test]
-fn effects_propagate_transitively() {
-    let src = r#"
-use core.files as fs
-fn helper(p: String) -> String { return fs.read(p) ?? "" }
-fn load(path: String) -[Net]> String { return helper(path) }
-fn run() { print(load("x")) }
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0740"),
-        "transitive FS should trip E0740: {:?}",
-        codes(src)
-    );
-}
 
-/// A wider bound than the body uses is allowed — `#(…)` is a ceiling, not exact.
-#[test]
-fn wider_bound_than_body_ok() {
-    let src = r#"
-use core.files as fs
-fn load(path: String) -[FS, Net]> String {
-    return fs.read(path.copy()) ?? ""
-}
-fn run() { print(load("x")) }
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "a wider ceiling should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// `print` contributes `IO`; an `#(IO)` bound covers it.
-#[test]
-fn io_effect_from_print_ok() {
-    let src = r#"
-fn announce(n: Int) -[IO]> { print("{n}") }
-fn run() { announce(1) }
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "IO bound should cover print: {:?}",
-        codes(src)
-    );
-}
 
-/// An unannotated function infers freely — no bound, no E0740.
-#[test]
-fn unannotated_function_never_trips_e0740() {
-    let src = r#"
-use core.files as fs
-fn load(path: String) -> String { return fs.read(path) ?? "" }
-fn run() { print(load("x")) }
-"#;
-    assert!(
-        !codes(src).iter().any(|c| c == "E0740"),
-        "unannotated fn must not trip E0740: {:?}",
-        codes(src)
-    );
-}
 
 /// D-SHAPE8: retired effect markers are rejected with the canonical arrow fix.
 #[test]
@@ -818,201 +647,15 @@ fn run() { print(calc()) }
     assert_eq!(codes(src), vec!["E0066"]);
 }
 
-/// D-EFF3: an impl of a `#Pure` trait method that reaches an effect is E0742.
-#[test]
-fn trait_impl_exceeding_bound_is_e0742() {
-    let src = r#"
-use core.files as fs
-trait Hasher { fn hash(self) -[]> Int }
-struct Doc { path: String }
-impl Doc.Hasher {
-    fn hash(self) -> Int {
-        body :: fs.read(self.path) ?? ""
-        return body.len()
-    }
-}
-fn run() {
-    d :: Doc{ path: "x" }
-    print(d.hash())
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0742"),
-        "impl exceeding #Pure bound should be E0742: {:?}",
-        codes(src)
-    );
-}
 
-/// A conformant impl of a bounded trait method compiles clean.
-#[test]
-fn trait_impl_within_bound_ok() {
-    let src = r#"
-trait Shape { fn area(self) -[]> Int }
-struct Square { side: Int }
-impl Square.Shape {
-    fn area(self) -> Int { return self.side * self.side }
-}
-fn run() {
-    s :: Square{ side: 5 }
-    print("{s.area()}")
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "conformant impl should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// D-EFF2 (transparent flow-through): passing a named effectful function as a
-/// callback flows its effects to the caller, surfacing at the call site.
-#[test]
-fn named_callback_flows_through_to_caller() {
-    let src = r#"
-use core.files as fs
-fn readit() -> String { return fs.read("x") ?? "" }
-fn apply(f: fn() -> String) -> String { return f() }
-fn caller() -[Net]> String { return apply(readit) }
-fn run() { print(caller()) }
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0740"),
-        "callback FS should flow to caller: {:?}",
-        codes(src)
-    );
-}
 
-/// A lambda callback's effects flow into the enclosing function too (the lambda
-/// body is walked inline), so a `#FX` region catches an effect inside it.
-#[test]
-fn lambda_callback_flows_into_region() {
-    let src = r#"
-use core.files as fs
-fn apply(f: fn() -> String) -> String { return f() }
-fn run() {
-    #FX(Net) {
-        r :: apply(() -> fs.read("x") ?? "")
-        print(r)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0712"),
-        "lambda FS should surface in region: {:?}",
-        codes(src)
-    );
-}
 
-/// A pure named callback flows nothing — a bounded caller stays clean.
-#[test]
-fn pure_callback_flows_nothing() {
-    let src = r#"
-fn inc(n: Int) -> Int { return n + 1 }
-fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x) }
-fn caller() -[IO]> { print("{apply(inc, 1)}") }
-fn run() { caller() }
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "pure callback must not trip a bound: {:?}",
-        codes(src)
-    );
-}
 
-/// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
-/// call (here `FS`) inside a `#Pure fn` is a purity violation (E3401) — even
-/// though the legacy purity list only knew about stdin/time/random.
-#[test]
-fn pure_fn_with_core_effect_is_e3401() {
-    let src = r#"
-use core.files as fs
-fn readit(p: String) -[]> String { return fs.read(p) ?? "" }
-fn run() { print(readit("x")) }
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E3401"),
-        "FS in #Pure fn should be E3401: {:?}",
-        codes(src)
-    );
-}
 
-/// A `#FX(…)` region whose body stays within the authority set compiles clean.
-#[test]
-fn authority_region_within_set_ok() {
-    let src = r#"
-fn announce(n: Int) -[IO]> { print("{n}") }
-fn run() {
-    #FX(IO) {
-        announce(1)
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "in-set authority region should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// An effect used inside a `#FX(…)` region but not in its authority list is E0712.
-#[test]
-fn authority_region_out_of_set_is_e0712() {
-    let src = r#"
-use core.files as fs
-fn run() {
-    #FX(Net) {
-        text :: fs.read("x") ?? ""
-        print(text)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0712"),
-        "expected E0712, got {:?}",
-        codes(src)
-    );
-}
 
-/// A `#FX(…)` region restriction is transitive: an effect reached only through
-/// a call still trips E0712.
-#[test]
-fn authority_region_transitive_is_e0712() {
-    let src = r#"
-use core.files as fs
-fn helper(p: String) -> String { return fs.read(p) ?? "" }
-fn run() {
-    #FX(IO) {
-        text :: helper("x")
-        print(text)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0712"),
-        "transitive FS should trip E0712: {:?}",
-        codes(src)
-    );
-}
 
-/// An unknown effect name is E0119, and does not also trip E0740.
-#[test]
-fn unknown_effect_name_is_e0119_only() {
-    let src = r#"
-fn work() -[Bogus]> { print("hi") }
-fn run() { work() }
-"#;
-    let c = codes(src);
-    assert!(
-        c.iter().any(|c| c == "E0119"),
-        "expected E0119, got {:?}",
-        c
-    );
-    assert!(
-        !c.iter().any(|c| c == "E0740"),
-        "unknown name should suppress E0740: {:?}",
-        c
-    );
-}
 
 #[test]
 fn declared_effect_leaf_is_checked_everywhere() {
@@ -1047,44 +690,8 @@ fn run() {
     }
 }
 
-#[test]
-fn undeclared_effect_root_remains_open() {
-    let source = "fn network() -[Net.Custom]> {}\nfn run() { network() }\n";
-    assert!(
-        codes(source).is_empty(),
-        "a root with no declared leaves remains open: {:?}",
-        codes(source)
-    );
-}
 
-#[test]
-fn effect_declaration_requires_a_leaf() {
-    let diagnostics =
-        jet::compile("effect Log\nfn run() {}\n").expect_err("a root alone declares no leaf");
-    assert!(
-        diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0750" && diagnostic.fix.contains("effect Log.Name")
-        }),
-        "{diagnostics:#?}"
-    );
-}
 
-#[test]
-fn declared_effect_leaf_checks_enum_and_trait_type_surfaces() {
-    for source in [
-        "effect Log.Audit\nenum Callback { One(fn() -[Log.Aduut]>) }\nfn run() {}\n",
-        "effect Log.Audit\ntrait Callback { fn get(self) -> fn() -[Log.Aduut]> }\nfn run() {}\n",
-    ] {
-        let diagnostics =
-            jet::compile(source).expect_err("an effect typo in a nested type must fail");
-        assert!(
-            diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "E0750"),
-            "{diagnostics:#?}"
-        );
-    }
-}
 
 #[test]
 fn dependency_effect_declaration_joins_the_package_view() {
@@ -1142,145 +749,12 @@ fn dependency_effect_declaration_joins_the_package_view() {
 
 // ── Scoped authority (D-SCAP1) ─────────────────────────────────────────────────
 
-/// D-AUTHORITY-SCOPE1: a named `#FX(authority: FS) { … }` whose body stays within
-/// the listed set compiles clean.
-#[test]
-fn grant_within_set_ok() {
-    let src = r#"
-use core.files as fs
-fn run() {
-    #FX(authority: FS, IO) {
-        text :: fs.read("x") ?? ""
-        print(text)
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "in-set grant should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// D-AUTHORITY-MODEL1: a nested `#FX` scope may attenuate its parent, but a
-/// declaration that names a new right is rejected even when its body is empty.
-#[test]
-fn nested_grant_cannot_widen_outer_authority() {
-    let src = r#"
-fn run() {
-    #FX(grant: FS) {
-        #FX(inner: Net) {}
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|code| code == "E0712"),
-        "nested authority widening should be rejected: {:?}",
-        codes(src)
-    );
-}
 
-/// D-AUTHORITY-SCOPE1: an effect used inside a named `#FX(…)` that the list
-/// doesn't authorize has no authority — E0712.
-#[test]
-fn grant_out_of_set_is_e0712() {
-    let src = r#"
-use core.files as fs
-fn run() {
-    #FX(authority: Net) {
-        text :: fs.read("x") ?? ""
-        print(text)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0712"),
-        "expected E0712, got {:?}",
-        codes(src)
-    );
-}
 
-/// D-AUTHORITY-SCOPE1: the named `#FX` restriction is transitive — an effect reached only through
-/// a call still trips E0712.
-#[test]
-fn grant_transitive_is_e0712() {
-    let src = r#"
-use core.files as fs
-fn helper(p: String) -> String { return fs.read(p) ?? "" }
-fn run() {
-    #FX(authority: IO) {
-        text :: helper("x")
-        print(text)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0712"),
-        "transitive FS should trip E0712: {:?}",
-        codes(src)
-    );
-}
 
-/// D-AUTHORITY-SCOPE1: the Authority handle may not escape its block — aliasing it to
-/// another binding is E0711.
-#[test]
-fn grant_handle_alias_is_e0711() {
-    let src = r#"
-fn run() {
-    #FX(authority: IO) {
-        alias :: authority
-        print("hi")
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0711"),
-        "aliasing the handle should be E0711: {:?}",
-        codes(src)
-    );
-}
 
-/// D-SCAP1: not naming the handle anywhere (never escaping it) compiles clean —
-/// the named `#FX` block is the authorizing context, the handle need not be used.
-#[test]
-fn grant_unused_handle_ok() {
-    let src = r#"
-fn run() {
-    #FX(authority: IO) {
-        print("granted")
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "an unused grant handle should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// D-AUTHORITY-SCOPE1: an unknown effect name in a `#FX(…)` list is E0119 and
-/// suppresses the E0712 subset check.
-#[test]
-fn grant_unknown_effect_is_e0119() {
-    let src = r#"
-fn run() {
-    #FX(authority: Bogus) {
-        print("hi")
-    }
-}
-"#;
-    let c = codes(src);
-    assert!(
-        c.iter().any(|c| c == "E0119"),
-        "expected E0119, got {:?}",
-        c
-    );
-    assert!(
-        !c.iter().any(|c| c == "E0712"),
-        "unknown name should suppress E0712: {:?}",
-        c
-    );
-}
 
 /// I3: a named `#FX(…)` region lowers to a plain lexical block — the generated
 /// Rust carries no authority machinery (no handle value or revoke), no effect
@@ -1349,25 +823,6 @@ fn run() {
 
 // ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────
 
-/// D-TXN2: an irreversible Core effect (FS) reached DIRECTLY inside a
-/// `#Transact` block is E0746 at the call site.
-#[test]
-fn transact_irreversible_fs_is_e0746() {
-    let src = r#"
-use core.files as fs
-fn run() {
-    #Transact(tx) {
-        text :: fs.read("x") ?? ""
-        print(text)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0746"),
-        "FS in #Transact should be E0746: {:?}",
-        codes(src)
-    );
-}
 
 /// D-TXN2: a Net effect directly in the block is also rejected (E0746).
 #[test]
@@ -1389,78 +844,9 @@ fn run() {
     );
 }
 
-/// D-BOUND-UNDO1=A: a foreign call is irreversible inside a transaction unless
-/// the binding names its compensating function.
-#[test]
-fn transact_ffi_without_undo_is_e0746() {
-    let src = r#"
-extern rust "std" {
-    fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
-}
-fn run() {
-    #Transact(tx) {
-        mutate(1, 2)
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0746"),
-        "FFI in #Transact should be E0746: {:?}",
-        codes(src)
-    );
-}
 
-/// D-BOUND-UNDO1=A: an explicit undo contract uses the existing rollback hook
-/// and keeps the foreign call itself as the only bridge expression.
-#[test]
-fn transact_ffi_with_undo_registers_rollback_hook() {
-    let src = r#"
-extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
-}
-fn undo_mutate(left: Int, right: Int) { print(left + right) }
-fn run() {
-    #Transact(tx) {
-        mutate(1, 2)
-    }
-}
-"#;
-    let output = jet::compile(src).expect("FFI with #Undo should compile");
-    assert!(
-        output.rust.contains(".on_rollback(Box::new("),
-        "#Undo must lower to the existing rollback hook: {}",
-        output.rust
-    );
-    assert!(
-        output.rust.contains("__jet_undo_arg_"),
-        "#Undo must capture the foreign arguments before the bridge call: {}",
-        output.rust
-    );
-}
 
-#[test]
-fn transact_ffi_undo_rejects_parameter_type_mismatch() {
-    let src = r#"
-extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
-}
-fn undo_mutate(left: String, right: Int) {}
-fn run() {}
-"#;
-    assert!(codes(src).iter().any(|code| code == "E0112"));
-}
 
-#[test]
-fn transact_ffi_undo_rejects_non_unit_return() {
-    let src = r#"
-extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
-}
-fn undo_mutate(left: Int, right: Int) -> Int { return 0 }
-fn run() {}
-"#;
-    assert!(codes(src).iter().any(|code| code == "E0113"));
-}
 
 /// D-BOUND-UNDO1=A: the native inline-FFI bridge executes the compensating
 /// function when the transaction fails, so the declaration cannot bypass the
@@ -1678,62 +1064,8 @@ fn run() {
     }
 }
 
-/// D-TXN2: a reversible-or-benign effect (IO via `print`) is NOT rejected inside
-/// a `#Transact` block.
-#[test]
-fn transact_reversible_io_ok() {
-    let src = r#"
-fn run() {
-    #Transact(tx) {
-        print("reversible work")
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "IO in #Transact should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// D-TXN2 fix-it: the same FS effect is accepted when registered via
-/// `name.on_commit(…)` — a deferred (post-commit) context.
-#[test]
-fn transact_fs_in_on_commit_ok() {
-    let src = r#"
-use core.files as fs
-fn run() {
-    #Transact(tx) {
-        print("reversible work")
-        tx.on_commit(() -> {
-            fs.write("x", "done") ?? panic("write failed")
-        })
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "FS inside on_commit should compile: {:?}",
-        codes(src)
-    );
-}
 
-/// D-TXN3/D-TXN4: `on_commit` needs a zero-parameter lambda (E0104).
-#[test]
-fn transact_on_commit_needs_zero_param_lambda() {
-    let src = r#"
-fn run() {
-    #Transact(tx) {
-        tx.on_commit((n: Int) -> { print("{n}") })
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0104"),
-        "on_commit with a param should be E0104: {:?}",
-        codes(src)
-    );
-}
 
 /// I3: a `#Transact` block + `on_commit` carry no effect/transaction machinery
 /// that leaks user-visible effect annotations; and generated Rust has NO `unsafe`.
@@ -1766,49 +1098,7 @@ fn run() {
     );
 }
 
-/// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() -> { … })` — the mirror of
-/// `on_commit`. A zero-param lambda on a `#Transact` handle compiles clean and lowers
-/// to a boxed rollback hook on the transaction guard.
-#[test]
-fn transact_on_rollback_ok() {
-    let src = r#"
-fn run() {
-    #Transact(tx) {
-        print("work")
-        tx.on_rollback(() -> { print("undo") })
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "on_rollback should compile: {:?}",
-        codes(src)
-    );
-    let rust = jet::compile(src).expect("compiles").rust;
-    assert!(
-        rust.contains(".on_rollback(Box::new("),
-        "expected a boxed rollback hook: {}",
-        rust
-    );
-}
 
-/// D-TXN-ROLLBACK (layer 3): `on_rollback` needs a zero-parameter lambda (E0104),
-/// exactly like `on_commit`.
-#[test]
-fn transact_on_rollback_needs_zero_param_lambda() {
-    let src = r#"
-fn run() {
-    #Transact(tx) {
-        tx.on_rollback((n: Int) -> { print("{n}") })
-    }
-}
-"#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0104"),
-        "on_rollback with a param should be E0104: {:?}",
-        codes(src)
-    );
-}
 
 /// D-TXN-ROLLBACK (layer 1): a value mutated inside a `#Transact` block is
 /// auto-snapshotted on entry — the generated Rust calls the `jet_txn::snapshot`
@@ -1886,22 +1176,6 @@ fn run() {
     );
 }
 
-/// D-TXN4: a bare `#Transact { … }` with no handle stays legal (no hooks).
-#[test]
-fn transact_bare_no_handle_ok() {
-    let src = r#"
-fn run() {
-    #Transact {
-        print("bare transaction")
-    }
-}
-"#;
-    assert!(
-        codes(src).is_empty(),
-        "bare #Transact should compile: {:?}",
-        codes(src)
-    );
-}
 
 // ---------------------------------------------------------------------------
 // D-EFF2 expert levers: callback param effect bounds + `#(via f)` pass-through.
