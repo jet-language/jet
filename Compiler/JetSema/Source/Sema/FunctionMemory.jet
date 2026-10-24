@@ -444,8 +444,11 @@ fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaratio
     loop declaration in declarations {
         // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet),
         // and so does `explicit_units` (E0127, Scopes.jet sema_scope_module_policy
-        // and sema_scope_push_unit_policy).
-        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.ExplicitUnits -> next
+        // and sema_scope_push_unit_policy). `sentries` only turns the runtime
+        // witness of a sentry build on or off; the lexical #Unsafe gate and its
+        // obligations are checked either way, and a normal build lowers a
+        // sentry scope as a plain scope (JetIR BuildExpr ir_stmt).
+        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries -> next
         // An audited-gate key (`unsafe: .Forbid`, `check_removal: .Forbid`, …)
         // is no memory policy: the gate ledger and pkg_check_project_gate
         // enforce it.
