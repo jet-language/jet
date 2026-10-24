@@ -1818,7 +1818,10 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
         }
         if parser_current_kind(&state) != TOKEN_LBRACE {
             statement :: parser_parse_statement(&state)
-            return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: Span{start: hash.span.start, end: parser_previous_end(state)}}
+            switched_span :: Span{start: hash.span.start, end: parser_previous_end(state)}
+            // copy: the application row and the Switched statement each keep the marker.
+            &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(switched_span), site: Val(RuleSite.Statement)})
+            return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: switched_span}
         }
     }
     saved_tail_depth :: state.callable_tail_depth
@@ -1827,6 +1830,11 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     body :: parser_parse_body_block(&state, value_tail)
     state.callable_tail_depth = saved_tail_depth
     span :: parser_cover(hash.span, body.span)
+    // Rust `bind_rule_fact(…, RuleSite::Block)`: every marked block is a
+    // Block-site application, so the vocabulary, site, repeatability and
+    // argument checks see it like any other applied rule.
+    // copy: the application row and the statement built below each keep the marker.
+    &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(span), site: Val(RuleSite.Block)})
     if marker.name == {
         "Unsafe" -> {
             reason := String?{None}
@@ -1873,8 +1881,51 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
             }
             Stmt.Transact{name: transaction_name, name_span: transaction_span, body: body.statements, implicit: false, span: span}
         }
-        else -> Stmt.ScopeMember{name: marker.name, name_span: marker.name_span, args: [Expr]{}, args_span: None, body: body.statements, dsl: true, dot_span: hash.span, span: span}
+        // Rust `at_context_stmt`, `at_live_stmt`, `at_nondeterministic_stmt`.
+        "Context" -> Stmt.ContextBlock{fields: parser_context_fields(&state, marker, args), body: body.statements, span: span}
+        "Live" -> Stmt.Live{body: body.statements, span: span}
+        "Nondeterministic" -> {
+            if args.len() != 1 -> parser_marker_shape_error(&state, marker)
+            reason_expr :: if args.len() > 0 -> args[0].expr else -> Expr.Unit{span: marker_span, id: parser_node_id(&state)}
+            reason :: parser_expr_literal_string(reason_expr) ?? ""
+            Stmt.AssumeDet{reason: reason, reason_expr: reason_expr, body: body.statements, span: span}
+        }
+        // Rust: `#Arithmetic(mode) { … }` is the generic marker block (a
+        // non-text scope member the checker reads as a lexical policy); any
+        // other name is a declared checked text block. Both keep their
+        // arguments.
+        else -> {
+            block_args :: loop arg in args -> arg.expr
+            args_span :: if args.len() > 0 -> Val(marker_span) else -> None
+            text_block :: marker.name != "Arithmetic"
+            Stmt.ScopeMember{name: marker.name, name_span: marker.name_span, args: block_args, args_span: args_span, body: body.statements, dsl: text_block, dot_span: if text_block -> hash.span else -> marker_span, span: span}
+        }
     }
+}
+
+// Rust `at_context_stmt`: each argument sets one context field. A labeled
+// argument names its field; an unlabeled one binds the next parameter of
+// `Context(allocator, logger, deadline)` (PreludeMarkers.jet), and one past
+// them is the marker's E0930 shape refusal.
+fn parser_context_fields(state: &JetParserState, marker: Marker, args: [CallArg]) -> [ContextField] {
+    params :: [String]{"allocator", "logger", "deadline"}
+    fields := [ContextField]{}
+    loop (index, arg) in args {
+        value_span :: expr_span(arg.expr)
+        if arg.label == {
+            // copy: `args` is a read parameter the marker keeps; each field owns its name and value.
+            .Val(label) -> &fields.push(ContextField{name: label.name.copy(), value: arg.expr.copy(), span: Span{start: label.span.start, end: value_span.end}})
+            .None -> {
+                if index >= params.len() {
+                    parser_marker_shape_error(&state, marker)
+                    next
+                }
+                // copy: `args` is a read parameter the marker keeps; the field owns its value.
+                &fields.push(ContextField{name: params[index].copy(), value: arg.expr.copy(), span: value_span})
+            }
+        }
+    }
+    fields
 }
 
 fn parser_expr_literal_string(expr: Expr) -> String? {

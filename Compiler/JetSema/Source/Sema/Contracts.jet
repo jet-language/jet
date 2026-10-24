@@ -118,8 +118,10 @@ fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, 
     loop index in name_start..<source.name_references.len() -> &destination.name_references.push(source.name_references[index])
     loop index in comptime_start..<source.comptime_requests.len() -> &destination.comptime_requests.push(source.comptime_requests[index])
     loop index in copy_start..<source.copy_events.len() -> &destination.copy_events.push(source.copy_events[index])
-    // A snapshot starts with no goal rows, so every row it holds is this condition's.
+    // A snapshot starts with no goal rows and no incomplete reasons, so every
+    // row it holds is this condition's; a condition left incomplete keeps why.
     loop index in 0..<source.typed_goals.len() -> &destination.typed_goals.push(source.typed_goals[index])
+    loop reason in source.incomplete_reasons -> &destination.incomplete_reasons.push(reason)
     sema_check_context_merge_expr_ids(source, &destination)
     if source.exact_int_reachable -> destination.exact_int_reachable = true
 }

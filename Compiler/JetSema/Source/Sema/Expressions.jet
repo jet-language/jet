@@ -2103,9 +2103,14 @@ fn sema_expr_int_literal_tir(value: Int, ty: Type, width: TIntegerWidth?, span: 
 }
 
 fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    if expected != None {
+    // D-INTLIT-WIDTH1: a bare numeral in a Float/F32 slot widens there,
+    // checked exactly at compile time (E1003 past 2^53 / 2^24).
+    if width == None && expected != None {
         contextual_expected :: expected
-        if contextual_expected == Type.Float || contextual_expected == Type.Float32 -> return None
+        if contextual_expected == Type.Float || contextual_expected == Type.Float32 {
+            literal :: sema_expr_int_literal_tir(value, Type.Int, None, span, environment, program) ?? return None
+            return sema_expr_numeric_literal_conversion(literal, contextual_expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, &diagnostics)
+        }
     }
     ty := Type.Int
     tir_width := TIntegerWidth?{None}
@@ -2139,9 +2144,13 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
 
 // `literal_span` is the written numeral's own span, where a range error points.
 fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?, span: Span, literal_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    if expected != None {
+    // D-INTLIT-WIDTH1: as sema_expr_integer_literal, `-7` in a Float slot.
+    if width == None && expected != None {
         contextual_expected :: expected
-        if contextual_expected == Type.Float || contextual_expected == Type.Float32 -> return None
+        if contextual_expected == Type.Float || contextual_expected == Type.Float32 {
+            literal :: sema_expr_int_literal_tir(-value, Type.Int, None, span, environment, program) ?? return None
+            return sema_expr_numeric_literal_conversion(literal, contextual_expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, &diagnostics)
+        }
     }
     ty := Type.Int
     tir_width := TIntegerWidth?{None}

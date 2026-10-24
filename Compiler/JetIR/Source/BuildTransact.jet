@@ -12,12 +12,15 @@
 // process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
 // latest first, then drop the Stm and the handle before the exit's own drops.
 
-use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, tir_generated_local, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
 // `shield` set and nothing else: an early exit leaves the session Shield.
-struct IRTxFrame { handle: Int, stm: Int, snapshots: [IRTxSnapshot], loops: Int, shield: Bool }
+// A `#Context(deadline: …)` block is a frame with only `deadline`, the
+// two-word save area of the deadline it replaced (-1: none): an early exit
+// restores that deadline.
+struct IRTxFrame { handle: Int, stm: Int, snapshots: [IRTxSnapshot], loops: Int, shield: Bool, deadline: Int }
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
 // exit, through `restore` of its Rollback implementation `rollback` when it
@@ -141,7 +144,7 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
         &saved.push(taken)
     }
     if saved.len() > 0 -> b.program = Val(p.copy())
-    &b.transactions.push(IRTxFrame{handle: handle_slot, stm: stm_slot, snapshots: saved, loops: b.loops.len(), shield: false})
+    &b.transactions.push(IRTxFrame{handle: handle_slot, stm: stm_slot, snapshots: saved, loops: b.loops.len(), shield: false, deadline: -1})
     ir_stmts(&m, p, &b, body)
     _ :: &b.transactions.pop()
     if ir_failed(b) -> return
@@ -163,13 +166,47 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
 // are masked and leaving it delivers what arrived meanwhile.
 fn ir_shield(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _ :: ir_runtime(&m, &b, "jet_rt_session_shield_enter", [Int]{}, -1)
-    &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true})
+    &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true, deadline: -1})
     ir_scope_open(&b)
     ir_stmts(&m, p, &b, body)
     if ir_failed(b) -> return
     ir_scope_close(&m, &b)
     _ :: &b.transactions.pop()
     _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+}
+
+// `#Context(field: value, …) { .. }` (Rust tir_to_mir_stmt ContextBlock,
+// MIRRust MirScopeKind::Context): the guard values run in order; a
+// `deadline` (absolute wall milliseconds, Deadline.jet) is installed for the
+// body by jet_ctx_push_deadline, which saves the enclosing one in a stack
+// save area, and jet_ctx_pop_deadline restores it after the body's bindings
+// drop or on an early exit (ir_tx_unwind, ir_stop_return). The other guards
+// have no native carrier: their values run and are released.
+fn ir_context_block(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyContextGuard], body: [Int]) Never! {
+    save := -1
+    loop guard in guards {
+        value :: ir_expr(&m, p, &b, guard.value)
+        if ir_failed(b) || value < 0 -> return
+        if guard.field != "deadline" || save >= 0 {
+            ir_release(&m, &b, value)
+            next
+        }
+        word_row :: ir_word_row(&m)
+        deadline :: if m.types[b.f.slot_type[value]].kind == .Int -> ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row) else -> value
+        if deadline != value -> ir_release(&m, &b, value)
+        pointer_row :: ir_pointer_row(&m)
+        save = ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, save, 16, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, "jet_ctx_push_deadline", [Int]{deadline, save}, -1)
+    }
+    if save >= 0 -> &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save})
+    ir_scope_open(&b)
+    ir_stmts(&m, p, &b, body)
+    if ir_failed(b) -> return
+    ir_scope_close(&m, &b)
+    if save < 0 -> return
+    _ :: &b.transactions.pop()
+    _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{save}, -1)
 }
 
 // Saves the entry value of `snapshot.local` in a generated variable: its
@@ -269,6 +306,9 @@ fn ir_tx_unwind(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Spa
             }
             if frame.shield {
                 _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+            }
+            if frame.deadline >= 0 {
+                _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
             }
         }
         index -= 1

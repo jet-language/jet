@@ -554,6 +554,9 @@ fn decimal_integral(value: I64, mode: I64) -> I64 {
 
 #Export(c) fn jet_decimal_to_string(value: I64) -> I64 { decimal_render(value) }
 
+// The coefficient is an owned exact Int; the scale is a plain word.
+#Export(c) fn jet_rt_handle_clone_jet_decimal(value: I64) -> I64 { precise_pair(jet_rt_int_clone(precise_top(value)), precise_bottom(value)) }
+
 #Export(c) fn jet_rt_handle_drop_jet_decimal(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_int_drop(precise_top(value))

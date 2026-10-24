@@ -1018,7 +1018,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .PathWalk -> return Val(ir_handle_h("path.walk", "jet_path_walk", [Bool]{true}, Val(Effect.FS)))
         .ReaderOver(owned) -> {
             symbol := if owned -> "jet_reader_over_owned" else -> "jet_reader_over"
-            mask := if owned -> [Bool]{false} else -> [Bool]{true}
+            mask := if owned -> [Bool]{false, false} else -> [Bool]{true, false}
             return Val(ir_handle_h("reader.over", symbol, mask, None))
         }
         .ReaderReadU8 -> return Val(ir_handle_h("reader.read_u8", "jet_reader_read_u8", [Bool]{true}, None))
@@ -1042,7 +1042,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .ReaderPeek -> return Val(ir_handle_h("reader.peek", "jet_reader_peek", [Bool]{true}, None))
         .ReaderSeek -> return Val(ir_handle_h("reader.seek", "jet_reader_seek", [Bool]{true, false}, None))
         .ReaderSkip -> return Val(ir_handle_h("reader.skip", "jet_reader_skip", [Bool]{true, false}, None))
-        .ReaderTake -> return Val(ir_handle_h("reader.take", "jet_reader_take", [Bool]{true, false}, None))
+        .ReaderTake -> return Val(ir_handle_h("reader.take", "jet_reader_take", [Bool]{true, false, false}, None))
         .ReaderRemaining -> return Val(ir_handle_h("reader.remaining", "jet_reader_remaining", [Bool]{true}, None))
         .ReaderAtEnd -> return Val(ir_handle_h("reader.at_end", "jet_reader_at_end", [Bool]{true}, None))
         .CursorOver -> return Val(ir_handle_h("cursor.over", "jet_cursor_over", [Bool]{true}, None))

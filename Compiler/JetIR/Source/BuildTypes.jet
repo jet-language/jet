@@ -1693,9 +1693,9 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
         return ir_runtime(&m, &b, "jet_int_{member}", args, result_ty)
     }
     if kind == .Word {
-        trapping :: op == .Rem || op == .FloorDiv || op == .Mod || op == .Pow
+        trapping :: op == .Rem || op == .FloorDiv || op == .Mod
         bitwise :: op == .BitAnd || op == .BitOr || op == .BitXor
-        if op == .Pow -> return ir_fail_slot(&b, span, "fixed-width power")
+        if op == .Pow -> return ir_fixed_power(&m, p, &b, left, right, site, span)
         ir_op :: ir_binary_op(op) ?? return ir_fail_slot(&b, span, "fixed-width operator {op}")
         // The old trap routes (jet_<w>_trap_<op>) are native checked operators.
         policy :: if (overflow || trapping) && !bitwise -> IR_OVERFLOW_TRAP else -> IR_OVERFLOW_WRAP
@@ -1726,6 +1726,32 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
         }
     }
     ir_fail_slot(&b, span, "operator {op} on {ir_type_name(left_ty)}")
+}
+
+// Fixed-width `a.pow(n)` (Rust Prelude Power.rs jet_pow, the trapping
+// mode): both operands widen to exact Ints, jet_int_pow raises (a negative
+// exponent stops), and jet_int_checked_fixed narrows the power back to the
+// base's width, stopping when it leaves the range as a multiplication does.
+fn ir_fixed_power(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, site: Int, span: Span) -> Int Never! {
+    target :: b.f.slot_type[left]
+    row :: m.types[target]
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    base :: ir_numeric_cast(&m, p, &b, left, int_row, span)
+    exponent :: ir_numeric_cast(&m, p, &b, right, int_row, span)
+    if ir_failed(b) -> return -1
+    args := [Int]{base, exponent}
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    power :: ir_runtime(&m, &b, "jet_int_pow", args, int_row)
+    ir_release(&m, &b, base)
+    ir_release(&m, &b, exponent)
+    // jet_int_checked_fixed's kinds: I8, I16, I32, I64, then U8 … U64.
+    width :: if row.bits <= 8 -> 0 else if row.bits <= 16 -> 1 else if row.bits <= 32 -> 2 else -> 3
+    kind_word :: ir_int_constant(&m, &b, int_row, if row.signed -> width else -> width + 4)
+    narrowed := [Int]{power, kind_word}
+    loop arg in ir_location(&m, &b, site) -> &narrowed.push(arg)
+    result :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_fixed"), narrowed, target)
+    ir_release(&m, &b, power)
+    result
 }
 
 // `+` and `-` over the time records sema_expr_check_time_binary admits
@@ -3442,6 +3468,13 @@ fn ir_numeric_cast(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target
         return ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, target)
     }
     if source.kind == .Int && destination.kind == .Float -> return ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{value}, target)
+    // Float32 widens to Float exactly and Float narrows to Float32 by
+    // rounding (`Float.from_f32`; IR Convert between the float rows).
+    if (source.kind == .Float || source.kind == .Float32) && (destination.kind == .Float || destination.kind == .Float32) {
+        result :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, result, value, -1, -1, b.line)
+        return result
+    }
     ir_fail_slot(&b, span, "numeric conversion from {ir_type_name(source.ty)} to {ir_type_name(destination.ty)}")
 }
 

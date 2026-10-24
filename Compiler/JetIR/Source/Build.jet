@@ -1642,6 +1642,7 @@ fn ir_route_can_stop(symbol: String) -> Bool Never! {
         "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_journey_reset" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
+        "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" -> false
         // A rollback hook's failure is taken by _leave (BuildTransact.jet ir_transaction_walk).
         "jet_rt_transaction_hook_enter" | "jet_rt_transaction_hook_leave" -> false
         else -> true
@@ -1753,6 +1754,9 @@ fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
             }
             if frame.shield {
                 _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+            }
+            if frame.deadline >= 0 {
+                _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
             }
         }
         b.transactions = open

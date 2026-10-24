@@ -25,6 +25,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
 ]
+use jet_parser.[jfmt_expr_start]
 
 struct SemaCallTypedArguments {
     values: [TExpr]
@@ -339,7 +340,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             .Val(_) -> true
             .None -> false
         }
-        binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, &scopes, &state, expr_span(args[index].expr)) else -> [String]{}
+        binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, &scopes, &state, args[index].expr) else -> [String]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
         self_typed :: sema_stmt_numeric_slot_self_typed(args[index].expr, required)
@@ -473,8 +474,11 @@ fn sema_call_binder_ref_symbol(environment: SemaScopeEnvironment, program: SemaP
 // Opens the default's own frame with each earlier parameter bound to its slot
 // temporary; the caller leaves it after checking the default. A placeholder
 // enters ownership only when the default reads it, so an unread one is no
-// unused binding. `span` is the default expression, so every read follows it.
-fn sema_call_enter_binder_refs(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, span: Span) -> [String] Never! {
+// unused binding. Each placeholder is declared at the default's first source
+// byte, so every read in it follows the declaration: a method chain or index
+// (`values.len()`, `values[0]`) is spanned after its base (jfmt_expr_start).
+fn sema_call_enter_binder_refs(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, default_expr: Expr) -> [String] Never! {
+    span :: Span{start: jfmt_expr_start(default_expr), end: expr_span(default_expr).end}
     owner :: sema_scope_function_owner_key(scopes)
     _ := sema_scope_enter(&scopes, &state, owner)
     keys := [String]{}
@@ -524,7 +528,7 @@ fn sema_call_default_ref_module(program: SemaProgramTables, reference: FunctionD
 // at the call.
 fn sema_call_check_owner_default(owner_scope: ^SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, call_span: Span, binder_keys: &[String], diagnostics: &[Diagnostic]) -> TExpr? {
     scope := ^owner_scope ?? return None
-    if argument.flags.binder_refs.len() > 0 -> binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, environment, program, &scope.scopes, &scope.state, expr_span(argument.expr))
+    if argument.flags.binder_refs.len() > 0 -> binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, environment, program, &scope.scopes, &scope.state, argument.expr)
     default_diagnostics := [Diagnostic]{}
     checked :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(argument.expr, expected, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &default_diagnostics) else -> sema_check_expression(argument.expr, expected, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, &default_diagnostics)
     loop diagnostic in default_diagnostics -> &diagnostics.push(sema_default_use_site_diagnostic(diagnostic, call_span))

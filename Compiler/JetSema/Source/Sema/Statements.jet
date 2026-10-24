@@ -4271,6 +4271,24 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
         if !dsl_args_valid || !nested.complete -> return None
         return Val(TStmt.Region{body: nested.value, span: span})
     }
+    // Rust `#Arithmetic(mode) { … }` (D-WRAP-SCOPE1=A): one lexical
+    // fixed-width arithmetic mode over the block, read by the operator checks
+    // as `context.arithmetic_policy`. An argument that names no mode is the
+    // marker's E0930 shape refusal; the block is still checked.
+    if name == "Arithmetic" {
+        mode := ArithmeticMode?{None}
+        if args.len() == 1 -> mode = sema_function_arithmetic_mode(args[0])
+        if mode == None {
+            expected :: "Arithmetic(mode: ArithmeticMode)"
+            &diagnostics.push(sema_error("E0930", span, "`#Arithmetic` arguments do not match `{expected}`", "marker arguments use the registered parameter kinds, labels, defaults, and variadic slot", "match the registered signature `{expected}`"))
+        }
+        outer_policy :: context.arithmetic_policy
+        if mode == .Val(value) -> context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: value, scope_span: span, operation_span: span, operation: None})
+        nested := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "arithmetic@{span.start}", loop_depth)
+        context.arithmetic_policy = outer_policy
+        if mode == None || !nested.complete -> return None
+        return Val(TStmt.Region{body: nested.value, span: span})
+    }
     kind := TScopeMemberKind?{None}
     if name == {
         "setup" -> {
@@ -5986,7 +6004,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     else -> complete = false
                 }
             }
-            .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Region(_, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Switched(_, _, _) | .Transact(_, _, _, _, _) | .Policy(_, _, _) | .AuthorityScope(_, _, _, _, _) | .TaskGroup(_, _, _, _, _) -> {
+            .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Region(_, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Switched(_, _, _) | .Transact(_, _, _, _, _) | .Policy(_, _, _) | .AuthorityScope(_, _, _, _, _) | .TaskGroup(_, _, _, _, _) -> {
                 if !sema_stmt_check_scoped_statement(statements[index], return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
             .ComptimeIf(cond, cond_span, then_body, else_body, span, _) -> {
@@ -6003,18 +6021,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     complete = false
                 }
             }
-            .Live(_, span) -> {
-                complete = false
-                if sema_scope_environment_no_os(environment) {
-                    &diagnostics.push(sema_error("E3301", span, "`#Live {{ … }}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider."))
-                } else {
-                    sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
-                }
-            }
             .ContextBlock(fields, body, span) -> {
                 if !sema_stmt_check_context_block(fields, body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
-            .Layout(_, _, _, span) | .AssumeDet(_, _, _, span) -> {
+            .Layout(_, _, _, span) -> {
                 complete = false
                 sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
             }
@@ -6029,7 +6039,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .Switch(_, _, _, _) | .While(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {
                 if sema_stmt_refutable_statement_exits(statements[index]) -> reachable = false
             }
-            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {
+            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {
                 if sema_stmt_refutable_block_exits(body) -> reachable = false
             }
             .ScopeMember(name, _, _, _, body, _, _, _) -> {
@@ -6218,11 +6228,11 @@ fn sema_stmt_check_context_block(fields: [ContextField], body: [Stmt], span: Spa
             next
         }
         if field.name == "deadline" && !sema_stmt_context_deadline_type(checked.ty) {
-            &diagnostics.push(sema_error("E0762", field.span, "`deadline` needs an Int epoch-millis instant, got {type_name(checked.ty)}", "the `deadline` field carries an absolute time budget in milliseconds", "pass an Int, e.g. `time.now() + 200`"))
+            &diagnostics.push(sema_error("E0762", field.span, "`deadline` needs an Int epoch-millis instant, got {sema_type_show(checked.ty)}", "the `deadline` field carries an absolute time budget in milliseconds", "pass an Int, e.g. `time.now() + 200`"))
             complete = false
         }
         if field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
-            &diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {type_name(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value", "pass an allocator, e.g. `mem.Arena.new()`"))
+            &diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value", "pass an allocator, e.g. `mem.Arena.new()`"))
             complete = false
         }
         &guards.push(TContextGuard{field: field.name, value: checked})
@@ -6596,6 +6606,27 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
                 }
             }
         }
+        // Rust `Stmt::Live`: a lexical block; a no-OS target has no terminal.
+        .Live(body, span) -> {
+            if sema_scope_environment_no_os(environment) {
+                complete = false
+                &diagnostics.push(sema_error("E3301", span, "`#Live {{ … }}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider."))
+            }
+            nested :: sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "live@{span.start}", loop_depth)
+            if {
+                !nested.complete -> complete = false
+                else -> &output.push(TStmt.Live{body: nested.value, span: span})
+            }
+        }
+        // Rust `Stmt::AssumeDet`: the audited `#Nondeterministic("reason")`
+        // body is a lexical block (the gate ledger records the audit).
+        .AssumeDet(_, _, body, span) -> {
+            nested :: sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "nondeterministic@{span.start}", loop_depth)
+            if {
+                !nested.complete -> complete = false
+                else -> &output.push(TStmt.Region{body: nested.value, span: span})
+            }
+        }
         .Region(_, _, body, span) -> {
             nested :: sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "region@{span.start}", loop_depth)
             if {
@@ -6609,18 +6640,10 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
         }
         .ScopeMember(name, _, args, args_span, body, dsl, _, span) -> {
             checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
-            // A declared text block whose rule has a body was validated by
-            // that rule at registration (UserTemplates.jet);
-            // a rule without a body (`#SQL`, `#HTML`) is checked-text
-            // validation this checker does not run yet.
-            if dsl {
-                declared := false
-                if environment.registration_graph == .Val(graph) -> declared = sema_registration_declared_text_rule(graph, name)
-                if !declared {
-                    complete = false
-                    sema_check_unsupported(&context, "the checked text block `#{name}` is not validated by the self-hosted checker yet")
-                }
-            }
+            // D-DSLBLOCK1 (Rust `check_dsl_body`): a checked text block's
+            // name, site and header were validated by the scope-member pass
+            // (ScopeMembers.jet, E0927/E0355/E0617); its body is ordinary
+            // checked Jet statements.
             if checked == {
                 .Val(value) -> &output.push(value)
                 .None -> complete = false
