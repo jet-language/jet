@@ -21,7 +21,7 @@
 // itself compares no keys, and the merged module's key maps are filled in
 // ascending key order.
 
-use jet_foundation.[compiler_take_rows, compiler_threads_failure_text]
+use jet_foundation.[compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows]
 
 // A function the walk starts from: function `local` of part `part`.
 struct IRMergeRoot { part: Int, local: Int }
@@ -133,29 +133,82 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
             out.trait_keys[identity.copy()] = key
         }
     }
-    loop (group, id) in g.type_ids {
-        if id >= 0 -> out.type_rows[g.type_keys[group].copy()] = id
-    }
-    loop (group, id) in g.name_ids {
-        if id >= 0 -> out.name_rows[g.name_keys[group].copy()] = id
-    }
-    loop (group, id) in g.function_ids {
-        if id >= 0 -> out.function_rows[g.function_keys[group].copy()] = id
-    }
-    // A hashed symbol ends with its key's 64-bit stable id (IR.jet
-    // ir_hashed_function). Two keys can hash alike, which would name two
-    // functions with one symbol: that stops the build. Keys are compared
-    // only when two hashes meet.
-    hashed := [U64:Int]{}
-    loop (id, f) in out.functions {
-        if (f.symbol_hash == U64{0}) -> next
-        if hashed.get(f.symbol_hash) == .Val(other) {
-            if out.functions[other].key != f.key -> panic("internal error: the symbol hash of {out.functions[other].key} and {f.key} is the same")
-            next
+    // The parts are read no more: they drop on threads of their own while
+    // this one fills the merged key maps. A task's arguments stay shared with
+    // the thread that spawns it, which drops them after the join, so each
+    // part reaches its thread through `released`: the thread pops it off.
+    released :: shared [IRModule]{}
+    ir_merge_release_fill(released, ^parts)
+    task.group ir_merge_release_group {
+        dropped :: task ir_merge_release(released, -1)
+        loop (group, id) in g.type_ids {
+            if id >= 0 -> out.type_rows[g.type_keys[group].copy()] = id
         }
-        hashed[f.symbol_hash] = id
+        loop (group, id) in g.name_ids {
+            if id >= 0 -> out.name_rows[g.name_keys[group].copy()] = id
+        }
+        loop (group, id) in g.function_ids {
+            if id >= 0 -> out.function_rows[g.function_keys[group].copy()] = id
+        }
+        // A hashed symbol ends with its key's 64-bit stable id (IR.jet
+        // ir_hashed_function). Two keys can hash alike, which would name two
+        // functions with one symbol: that stops the build. Keys are compared
+        // only when two hashes meet.
+        hashed := [U64:Int]{}
+        loop (id, f) in out.functions {
+            if (f.symbol_hash == U64{0}) -> next
+            if hashed.get(f.symbol_hash) == .Val(other) {
+                if out.functions[other].key != f.key -> panic("internal error: the symbol hash of {out.functions[other].key} and {f.key} is the same")
+                next
+            }
+            hashed[f.symbol_hash] = id
+        }
+        _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     out
+}
+
+// Moves `parts` into `released`.
+fn ir_merge_release_fill(released: Shared<[IRModule]>, parts: ^[IRModule]) Never! {
+    rows := ^parts
+    permit :: released.guard_edit()
+    compiler_transfer_rows<IRModule>(&permit.value, &rows)
+}
+
+// Drops `count` parts of `released` (-1: all of them), each on a thread of
+// its own; returns how many it dropped.
+fn ir_merge_release(released: Shared<[IRModule]>, count: Int) -> Int Never! {
+    if count < 0 -> return ir_merge_release(released, ir_merge_release_count(released))
+    if count == 0 -> return 0
+    dropped := 0
+    task.group ir_merge_release_parts {
+        head :: task ir_merge_release_part(released)
+        dropped = ir_merge_release(released, count - 1)
+        dropped += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    dropped
+}
+
+// Pops a part off `released` and drops it here, outside the lock; returns
+// how many it dropped (one, or none when none was left).
+fn ir_merge_release_part(released: Shared<[IRModule]>) -> Int Never! {
+    part :: ir_merge_release_pop(released)
+    part.len()
+}
+
+fn ir_merge_release_pop(released: Shared<[IRModule]>) -> [IRModule] Never! {
+    permit :: released.guard_edit()
+    part := [IRModule]{}
+    if permit.value.len() > 0 {
+        row := &permit.value.pop() ?? panic("a nonempty released part list failed to pop")
+        &part.push(^row)
+    }
+    part
+}
+
+fn ir_merge_release_count(released: Shared<[IRModule]>) -> Int Never! {
+    permit :: released.guard_read()
+    permit.value.len()
 }
 
 // Each part's rows as runs in ascending key order (`(key, local)`: the key

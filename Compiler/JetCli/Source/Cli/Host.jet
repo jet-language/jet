@@ -105,6 +105,7 @@ use jet_ir.[
     ir_build_program,
     ir_checks_of,
     ir_checks_stock,
+    ir_module_new,
     ir_program_new,
     ir_build_tests,
     ir_optimize_module,
@@ -749,7 +750,13 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     }
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-    compiled := ir_x64_compile_module(^built.program, threads)
+    // A field move shares the module's rows with `built`, which would keep
+    // them until this returns and free them all there, after the object is
+    // written; a fresh module in its place leaves the compile their one owner
+    // (ir_x64_object frees them beside the object write).
+    program := ^built.program
+    built.program = ir_module_new()
+    compiled := ir_x64_compile_module(^program, threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
     loop error in compiled.errors {
         if keep_going -> &census.push(jet_cli_keep_going_row("ir.x64", "-", error)) else -> &rows.push(error)

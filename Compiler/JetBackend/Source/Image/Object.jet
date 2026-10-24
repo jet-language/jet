@@ -17,7 +17,7 @@
 // `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
 // function's frame, source lines and variables.
 
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
 
 ELF64_SECTION_HEADER_SIZE :: 64
 ELF64_SYMBOL_SIZE :: 24
@@ -266,7 +266,7 @@ fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never
 // threads `threads` admits (Dwarf.jet dwarf_info); the bytes are the same
 // for any thread count. With `debug_info` false the DWARF sections are empty
 // (the static link then carries none); `.eh_frame` is always written.
-fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
+fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
     // Per function id + 1 its first function row (-1: none); the entry stub
     // `main` is id -1.
     max_id := -1
@@ -410,6 +410,69 @@ fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64Compile
     dwarf :: x64_dwarf_sections(program, functions, debug, offsets, text.len(), X64DwarfSymbols{
         text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
     }, threads, debug_info)
+    // The functions, their debug rows and the module are read no more: they
+    // drop on a thread of their own while the file is assembled.
+    x64_object_text_release(inputs)
+    released :: shared X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}
+    x64_object_release_fill(released, ^program, ^functions, ^debug)
+    files := [[U8]]{}
+    task.group x64_object_release_group {
+        dropped :: task x64_object_release(released)
+        &files.push(x64_object_file(dwarf, text, rodata, rodata_align, ^rela_text, symtab, strtab, first_global, data_relas, exports))
+        _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    X64ExecutableResult{bytes: &files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
+}
+
+// What x64_object_functions_threads releases. A task's arguments stay shared
+// with the thread that spawns it, which drops them after the join, so what
+// x64_object_release drops reaches it here: it takes it off.
+struct X64ObjectReleased {
+    functions: [X64CompiledFunction]
+    debug: [X64FunctionDebug]
+    programs: [X64ObjectModule]
+}
+
+// Drops the `.text` threads' share of the functions (they all joined).
+fn x64_object_text_release(inputs: Shared<X64ObjectTextShared>) {
+    permit :: inputs.guard_edit()
+    permit.value.functions = [X64CompiledFunction]{}
+}
+
+fn x64_object_release_fill(released: Shared<X64ObjectReleased>, program: ^X64ObjectModule, functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug]) {
+    permit :: released.guard_edit()
+    permit.value.functions = ^functions
+    permit.value.debug = ^debug
+    &permit.value.programs.push(^program)
+}
+
+// Takes the rows off `released` and drops them here, outside the lock;
+// returns how many rows there were.
+fn x64_object_release(released: Shared<X64ObjectReleased>) -> Int Never! {
+    functions :: x64_object_release_functions(released)
+    debug :: x64_object_release_debug(released)
+    programs :: x64_object_release_programs(released)
+    functions.len() + debug.len() + programs.len()
+}
+
+fn x64_object_release_functions(released: Shared<X64ObjectReleased>) -> [X64CompiledFunction] Never! {
+    permit :: released.guard_edit()
+    compiler_take_rows<X64CompiledFunction>(&permit.value.functions)
+}
+
+fn x64_object_release_debug(released: Shared<X64ObjectReleased>) -> [X64FunctionDebug] Never! {
+    permit :: released.guard_edit()
+    compiler_take_rows<X64FunctionDebug>(&permit.value.debug)
+}
+
+fn x64_object_release_programs(released: Shared<X64ObjectReleased>) -> [X64ObjectModule] Never! {
+    permit :: released.guard_edit()
+    compiler_take_rows<X64ObjectModule>(&permit.value.programs)
+}
+
+// The object file of the sections x64_object_functions_threads built: the
+// ELF header, the section contents and the section header table.
+fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_align: Int, rela_text: ^[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
@@ -496,5 +559,5 @@ fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64Compile
     loop (index, section) in sections {
         elf64_section_header(&bytes, name_offsets[index], section.kind, section.flags, section_offsets[index], section_sizes[index], section.link, section.info, section.align, section.entry_size)
     }
-    X64ExecutableResult{bytes: bytes, errors: [String]{}}
+    bytes
 }

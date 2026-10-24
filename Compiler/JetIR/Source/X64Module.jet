@@ -339,7 +339,99 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
-    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, owned.threads, debug_info)
+    threads :: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
+    // What is left of the compile (its IR module above all) is read no more:
+    // it drops on tasks of their own while the object is written.
+    released :: shared IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}
+    ir_x64_release_fill(released, ^owned, threads)
+    objects := [X64ExecutableResult]{}
+    task.group ir_x64_object_release {
+        rest :: task ir_x64_release_rest(released)
+        dropped :: task ir_x64_release_runs(released, -1)
+        &objects.push(x64_object_functions_threads(^program, ^functions, ^debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info))
+        _ :: rest.join() ?? panic(compiler_threads_failure_text(err))
+        _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    &objects.pop() ?? panic("the object writer lost its object")
+}
+
+// What ir_x64_object releases: the compile's IR functions in runs, each
+// dropped on a thread of its own, and the `rest` of the compile. A task's
+// arguments stay shared with the thread that spawns it, which drops them
+// after the join, so what a task drops reaches it here: it pops it off.
+struct IRX64Released {
+    runs: [[IRFunction]]
+    rest: [IRX64Result]
+}
+
+// The most runs the IR functions of an object's compile drop in
+// (ir_x64_release_fill): on one thread their drop outlasts the object write.
+IR_X64_RELEASE_WAYS :: 4
+
+// Moves `compiled` into `released`: its IR functions in up to
+// IR_X64_RELEASE_WAYS runs (no more than `threads` allows), then the rest.
+fn ir_x64_release_fill(released: Shared<IRX64Released>, compiled: ^IRX64Result, threads: CompilerThreads) Never! {
+    owned := ^compiled
+    wanted :: threads.cap ?? threads.cores
+    ways :: if {
+        wanted < 1 -> 1
+        wanted > IR_X64_RELEASE_WAYS -> IR_X64_RELEASE_WAYS
+        else -> wanted
+    }
+    share :: owned.program.functions.len() /% ways + 1
+    permit :: released.guard_edit()
+    loop owned.program.functions.len() > 0 {
+        run := [IRFunction]{}
+        loop run.len() < share && owned.program.functions.len() > 0 {
+            row := &owned.program.functions.pop() ?? panic("a nonempty IR function list failed to pop")
+            &run.push(^row)
+        }
+        &permit.value.runs.push(^run)
+    }
+    &permit.value.rest.push(^owned)
+}
+
+// Drops `runs` runs of `released` (-1: all of them), each on a thread of its
+// own; returns how many IR functions they held.
+fn ir_x64_release_runs(released: Shared<IRX64Released>, runs: Int) -> Int Never! {
+    if runs < 0 -> return ir_x64_release_runs(released, ir_x64_release_count(released))
+    if runs == 0 -> return 0
+    count := 0
+    task.group ir_x64_release_threads {
+        head :: task ir_x64_release_run(released)
+        count = ir_x64_release_runs(released, runs - 1)
+        count += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    count
+}
+
+// Pops a run off `released` and drops it here, outside the lock; returns how
+// many IR functions it held.
+fn ir_x64_release_run(released: Shared<IRX64Released>) -> Int Never! {
+    run :: ir_x64_release_pop_run(released)
+    run.len()
+}
+
+fn ir_x64_release_pop_run(released: Shared<IRX64Released>) -> [IRFunction] Never! {
+    permit :: released.guard_edit()
+    &permit.value.runs.pop() ?? [IRFunction]{}
+}
+
+fn ir_x64_release_count(released: Shared<IRX64Released>) -> Int Never! {
+    permit :: released.guard_read()
+    permit.value.runs.len()
+}
+
+// Pops the rest of the compile off `released` and drops it here, outside the
+// lock; returns how many rows of it there were (one).
+fn ir_x64_release_rest(released: Shared<IRX64Released>) -> Int Never! {
+    rest :: ir_x64_release_pop_rest(released)
+    rest.len()
+}
+
+fn ir_x64_release_pop_rest(released: Shared<IRX64Released>) -> [IRX64Result] Never! {
+    permit :: released.guard_edit()
+    compiler_take_rows<IRX64Result>(&permit.value.rest)
 }
 
 // Order the functions of `compiled` (and their debug rows) for the object's
@@ -396,11 +488,11 @@ fn ir_x64_hot_order(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
-    program :: ir_x64_object_module(&owned)
-    debug :: compiler_take_rows<X64FunctionDebug>(&owned.debug)
-    functions :: compiler_take_rows<X64CompiledFunction>(&owned.functions)
+    program := ir_x64_object_module(&owned)
+    debug := compiler_take_rows<X64FunctionDebug>(&owned.debug)
+    functions := compiler_take_rows<X64CompiledFunction>(&owned.functions)
     globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
-    x64_object_functions_threads(program, functions, debug, globals, owned.threads, debug_info)
+    x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info)
 }
 
 // The object writer's module of `owned`: its data, debug files and types
