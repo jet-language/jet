@@ -1512,8 +1512,11 @@ declined under D-CORESURF-SMALL1.
 
 `core.watcher` creates explicit watch handles for files, process IDs, and TCP
 ports (D-WATCH-SCOPE1). Polling is explicit: a handle or set does not own a
-background thread or shell process, and the public module has no callback
-registration method.
+background thread or shell process. Each handle owns one synchronous
+`Event<WatchEvent>`: `handle.on(scope, handler)` and `handle.once(scope,
+handler)` register on it, and every `poll` emits each event it returns to it.
+Handles and sets are shared: copies observe the same watch state, and
+`set.add(handle)` keeps the handle in every copy of the set.
 
 Watch constructors retain provider-owned resource state, not string-backed
 handle records. `files(path)` passes the path to the provider unchanged; its
@@ -1532,6 +1535,23 @@ filesystem error is not replaced by a source-only empty-path error.
 | `len(set)` | `Int` | Count handles in a set. |
 | `remove(set, target)` / `contains(set, target)` | `!IOError` / `Bool !IOError` | Return the explicit unsupported-operation error for non-empty set operations; an empty `contains` target returns false. |
 | `debounce(handle, ms)` | `WatchHandle !IOError` | Reject a negative duration and otherwise return the provider's unsupported-operation error. |
+
+| Method | Result | Description |
+| --- | --- | --- |
+| `handle.poll()` / `handle.events()` | `[WatchEvent]` | Diff the target since the last poll and emit each event to the handle's event. A cancelled handle returns none. |
+| `handle.on(scope, handler)` / `handle.once(scope, handler)` | `Subscription` | Register a `fn(WatchEvent)` handler for the scope's lifetime. |
+| `handle.cancel()` / `handle.is_active()` | unit/bool | Stop the handle, or ask whether it still polls. |
+| `handle.summary()` | `String` | `watch file <root>`, `watch process <pid>`, or `watch port <host>:<port>`. |
+| `set.add(handle)` | unit | Add a handle to the shared set. |
+| `set.poll()` / `set.events()` | `[WatchEvent]` | Poll every handle in insertion order. |
+| `set.summary()` | `String` | `watchset handles=<n>`. |
+
+A file poll reports `Created` and `Modified` paths in path order, then
+`Removed` paths in path order, with detail `dir` or `file`; a failed snapshot
+is one `Error` event for the root. A process poll reports `Ready` when the
+process is first seen alive and `Exited` when it stops or was never alive. A
+port poll reports `Ready` (detail `host:port`) once a connection succeeds
+after the port was not ready.
 
 `WatchDomain` is `File`, `Process`, or `Port`. `WatchEventKind` is `Created`,
 `Modified`, `Removed`, `Error`, `Exited`, or `Ready`. `WatchEvent` carries

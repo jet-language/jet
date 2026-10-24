@@ -163,6 +163,87 @@ impl WatchEvent.Equatable {
     }
 }
 
+fn watch_domain_of(target: Int) -> WatchDomain Never! {
+    if {
+        target == 1 -> WatchDomain.Process
+        target == 2 -> WatchDomain.Port
+        else -> WatchDomain.File
+    }
+}
+
+fn watch_kind_named(name: String) -> WatchKind Never! {
+    if {
+        name == "Created" -> WatchKind.Created
+        name == "Modified" -> WatchKind.Modified
+        name == "Removed" -> WatchKind.Removed
+        name == "Error" -> WatchKind.Error
+        name == "Exited" -> WatchKind.Exited
+        else -> WatchKind.Ready
+    }
+}
+
+// ReactiveEventWatch.rs WatchHandle: a shared watch whose poll diffs its
+// target and hands each event to the handle's own Event<WatchEvent>. The
+// runtime answers three texts per event (kind, path, detail); the domain,
+// pid and port come from the handle's target.
+impl WatchHandle {
+    fn poll(self) -[IO]> [WatchEvent] Never! {
+        texts :: core.watcher.__poll(self)
+        target :: core.watcher.__target(self)
+        number :: core.watcher.__number(self)
+        pid :: if target == 1 -> number else -> 0
+        port :: if target == 2 -> number else -> 0
+        bus :: core.watcher.__event(self)
+        out := [WatchEvent]{}
+        at := 0
+        loop at + 2 < texts.len() {
+            ev :: WatchEvent{domain: watch_domain_of(target), kind: watch_kind_named(texts[at]), path: texts[at + 1], detail: texts[at + 2], pid: pid, port: port}
+            &out.push(ev.copy())
+            _ := bus.emit(^ev)
+            at = at + 3
+        }
+        out
+    }
+
+    fn events(self) -[IO]> [WatchEvent] Never! { self.poll() }
+
+    fn on(self, scope: EventScope, handler: fn(WatchEvent)) -> Subscription Never! {
+        core.watcher.__event(self).on(scope, handler)
+    }
+
+    fn once(self, scope: EventScope, handler: fn(WatchEvent)) -> Subscription Never! {
+        core.watcher.__event(self).once(scope, handler)
+    }
+
+    fn cancel(self) Never! -[IO]> { core.watcher.__cancel(self) }
+
+    fn is_active(self) -> Bool Never! { core.watcher.__is_active(self) }
+
+    fn summary(self) -> String Never! {
+        target :: core.watcher.__target(self)
+        if target == 1 -> return "watch process {core.watcher.__number(self)}"
+        if target == 2 -> return "watch port {core.watcher.__text(self)}:{core.watcher.__number(self)}"
+        "watch file {core.watcher.__text(self)}"
+    }
+}
+
+// ReactiveEventWatch.rs WatchSet: a shared list of handles polled in order.
+impl WatchSet {
+    fn add(self, handle: WatchHandle) Never! -[IO]> { core.watcher.__set_add(self, handle) }
+
+    fn poll(self) -[IO]> [WatchEvent] Never! {
+        out := [WatchEvent]{}
+        loop index in 0..<core.watcher.__set_len(self) {
+            loop ev in core.watcher.__set_get(self, index).poll() -> &out.push(ev)
+        }
+        out
+    }
+
+    fn events(self) -[IO]> [WatchEvent] Never! { self.poll() }
+
+    fn summary(self) -> String Never! { "watchset handles={core.watcher.__set_len(self)}" }
+}
+
 #Test("WatchEvent source layout keeps all fields and independent copies") {
     event :: WatchEvent{domain: .Process, kind: .Exited, path: "p", detail: "gone", pid: -1, port: 65535}
     cloned_event := event.copy()
