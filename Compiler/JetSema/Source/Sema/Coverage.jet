@@ -11,6 +11,8 @@ use jet_foundation.[
     Stmt,
     TextEdit,
     Type,
+    core_enum_payload_variants,
+    core_enum_variants,
     diagnostic_with_edit,
     expr_span,
     measure_literal_value,
@@ -249,10 +251,17 @@ fn sema_coverage_is_open_scalar(ty: Type) -> Bool Never! {
 }
 
 // Rust `builtin_type_registry`: the compiler-owned runtime enums (`Ordering`,
-// `RemoveBy`) are closed sets without a registered nominal.
+// `RemoveBy`) and the Core registry enums with no source declaration (`Dyn`)
+// are closed sets without a registered nominal.
 fn sema_coverage_compiler_enum(ty: Type) -> [String]? {
-    if ty == .Named(name) -> return sema_compiler_enum_variants(name)
-    None
+    name := ""
+    if ty == {
+        .Named(value) -> name = value
+        else -> return None
+    }
+    if sema_compiler_enum_variants(name) == .Val(variants) -> return Val(variants)
+    if core_enum_payload_variants(name) == .Val(variants) -> return Val(variants)
+    core_enum_variants(name)
 }
 
 fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {

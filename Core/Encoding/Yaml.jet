@@ -437,6 +437,8 @@ fn yaml_leaf(value: Dyn) -> String Never! {
             // each number's exact lexeme (#4602); that text is a YAML number.
             .Number(text) -> text.copy()
             .Text(s) -> yaml_scalar(s)
+            // A YAML timestamp is its plain RFC 3339 scalar, as the parser reads one.
+            .DateTime(_) -> value.to_text() ?? panic("DateTime always has an RFC 3339 representation")
             .Bytes(bytes) -> {
                 out := "["
                 loop i in 0..<bytes.len() {

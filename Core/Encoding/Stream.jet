@@ -1585,6 +1585,18 @@ fn write_tree(writer: &JSONPush, value: Dyn) EncodingError! -[IO]> {
         .Bool(v) -> &writer.write(DataEvent.Bool(v))
         .Int(v) -> &writer.write(DataEvent.Int(v))
         .Float(v) -> &writer.write(DataEvent.Float(v))
+        .Number(text) -> {
+            #Unsafe("retain a validated number lexeme in the private event carrier") {
+                &writer.write(DataEvent.Number(text))
+            }
+        }
+        .Bytes(bytes) -> {
+            #Unsafe("project the native compiler-private Bytes carrier into its event") {
+                &writer.write(DataEvent.Bytes(bytes))
+            }
+        }
+        // As in JSON event projection: a temporal value is its RFC 3339 text.
+        .DateTime(_) -> &writer.write(DataEvent.Text(value.to_text() ?? ""))
         .Text(v) -> &writer.write(DataEvent.Text(v))
         .Array(values) -> {
             &writer.write(DataEvent.ArrayStart)

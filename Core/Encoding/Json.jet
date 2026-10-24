@@ -742,16 +742,22 @@ fn typed_parse_error(error: EncodingError) -> [FieldError] Never! {
 
 
 fn append_events(value: Dyn) -> [DataEvent] Never! {
-    #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
-        if value == .Number(text) -> return [DataEvent]{DataEvent.Number(text)}
-        if value == .Bytes(bytes) -> return [DataEvent]{DataEvent.Bytes(bytes)}
-    }
     out := [DataEvent]{}
     if value == {
         .Null -> &out.push(DataEvent.Null)
         .Bool(v) -> &out.push(DataEvent.Bool(v))
         .Int(n) -> &out.push(DataEvent.Int(n))
         .Float(n) -> &out.push(DataEvent.Float(n))
+        .Number(text) -> {
+            #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
+                &out.push(DataEvent.Number(text))
+            }
+        }
+        .Bytes(bytes) -> {
+            #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
+                &out.push(DataEvent.Bytes(bytes))
+            }
+        }
         .Text(s) -> &out.push(DataEvent.Text(s))
         // JSON events carry temporal values as their RFC 3339 text, not a
         // format-specific event variant absent from the shared DataEvent rail.
@@ -835,11 +841,9 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
     if depth > safe_limits().max_depth {
         return Err(value_error(EncodingErrorKind.Limit, pointer_text(path, path.len()), "max_depth {safe_limits().max_depth} exceeded"))
     }
-    #Unsafe("Core rejects native byte carriers before inspecting public JSON values") {
-        if value == .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
-    }
     if value == {
         .Null -> write_ascii(&out, "null")
+        .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")
@@ -914,23 +918,17 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
 
 
 fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! {
-    #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
-        if value == .Number(text) {
-            write_ascii(&out, text)
-            return Ok(())
-        }
-        if value == .Bytes(bytes) {
+    if value == {
+        .Null -> write_ascii(&out, "null")
+        .Number(text) -> write_ascii(&out, text)
+        .Bytes(bytes) -> {
             &out.push(U8{91})
             loop index in 0..<bytes.len() {
                 if index > 0 -> &out.push(U8{44})
                 write_ascii(&out, "{bytes[index]}")
             }
             &out.push(U8{93})
-            return Ok(())
         }
-    }
-    if value == {
-        .Null -> write_ascii(&out, "null")
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")
@@ -1348,12 +1346,6 @@ fn patch_edit(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn) 
 // RFC 6902 `test` equality: numbers by value, arrays in order, objects by
 // member set regardless of order.
 fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
-    #Unsafe("Core compares compiler-private byte carriers without exposing their payloads") {
-        if left == .Bytes(a) {
-            if right == .Bytes(b) -> return a == b
-            return false
-        }
-    }
     if left == {
         .Null -> {
             if right == {
@@ -1398,6 +1390,12 @@ fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
             }
         }
         .DateTime(_) -> return left == right
+        .Bytes(a) -> {
+            if right == {
+                .Bytes(b) -> return a == b
+                else -> return false
+            }
+        }
         .Array(a) -> {
             if right == {
                 .Array(b) -> {

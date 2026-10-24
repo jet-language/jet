@@ -213,6 +213,9 @@ fn jet_error_json_encode_value(value: Dyn) -> String Never! {
         .Int(number) -> "{number}"
         .Float(number) -> foundation_float_display(number)
         .Text(text) -> foundation_json_quote(text)
+        .Number(lexeme) -> lexeme.copy()
+        // Bytes encode as their base64 text, a DateTime as its RFC 3339 text.
+        .Bytes(_) -> foundation_json_quote(value.to_text() ?? "")
         .DateTime(_) -> foundation_json_quote(value.to_text() ?? "")
         .Array(values) -> {
             encoded := [String]{}
