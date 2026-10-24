@@ -398,7 +398,7 @@ fn sema_genmod_arg_span(arg: ModuleArg) -> Span {
 // declaration (a primitive, an unknown name) implements no declared trait.
 fn sema_genmod_implements(graph: SemaRegistrationGraph, module_identity: String, ty: Type, bound: String) -> Bool {
     resolved_bound :: sema_registration_lookup_name(graph, module_identity, bound) ?? return true
-    if resolved_bound.symbol.kind != SymbolKind.Trait -> return true
+    if sema_resolved_kind(graph, resolved_bound) != SymbolKind.Trait -> return true
     if sema_type_resolve_nominal_row(graph, ty, module_identity) == None -> return false
     sema_type_bound_satisfied(graph, ty, bound, module_identity) ?? true
 }

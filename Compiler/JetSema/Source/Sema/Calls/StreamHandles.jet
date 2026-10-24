@@ -91,7 +91,7 @@ fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaSco
             owner_module := sema_stream_handle_owner_module(owner)
             // A declared or imported type named like a module-less built-in
             // (`Path`) shadows it; the two never share an identity.
-            return row.symbol.kind == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, row.symbol.module_name) ?? "") == owner_module
+            return sema_resolved_kind(graph, row) == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, sema_resolved_module_name(graph, row)) ?? "") == owner_module
         }
         return true
     } else {
@@ -512,7 +512,7 @@ fn sema_call_try_stream_handle_static(owner: String, method: String, args: [Call
 fn sema_stream_handle_registered_owner(owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Symbol? {
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner)
-        if resolved == .Val(row) && row.symbol.kind == SymbolKind.Type -> return Val(row.symbol)
+        if resolved == .Val(row) && sema_resolved_kind(graph, row) == SymbolKind.Type -> return Val(sema_resolved_symbol(graph, row))
         return None
     } else {
         return None

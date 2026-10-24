@@ -28,7 +28,7 @@ fn sema_serde_type_definition(environment: SemaScopeEnvironment, program: SemaPr
         // A resolved type carries its canonical identity (`module::Name`),
         // which the graph lookup resolves in its declaring module.
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
-        row :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) ?? return None
+        row :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
         return Val(program.checked_types[row])
     }
     leaf := sema_serde_named_leaf(name)

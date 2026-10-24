@@ -157,7 +157,7 @@ fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment, prog
     if program.registration_graph == .Val(graph) {
         name :: sema_type_graph_base_name(ty) ?? return false
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
-        if resolved.symbol.kind != SymbolKind.Type -> return false
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
         module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
         row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
         // Matched in place: a pattern on the indexed path copies the whole item.

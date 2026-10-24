@@ -69,7 +69,7 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEn
     }
     if program.registration_graph == .Val(graph) {
     resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
-    return if resolved.symbol.kind == SymbolKind.Type -> Val(resolved.symbol) else -> None
+    return if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
     }
     None
 }

@@ -458,14 +458,14 @@ fn sema_type_graph_nominal_row(graph: SemaRegistrationGraph, key: String) -> Sem
 // carry none). Both name the key's first registered row.
 fn sema_type_graph_resolved_nominal_row(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SemaRegistrationRowRef? {
     if resolved.nominal_row == .Val(row) -> return Val(row)
-    graph.nominal_symbol_rows.get(resolved.symbol.id.key)
+    graph.nominal_symbol_rows.get(sema_resolved_key(graph, resolved))
 }
 
 fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
-    row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return resolved.symbol.name
-    nominal :: graph.modules[row.module_index].nominals[row.row]
+    row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return sema_resolved_name(graph, resolved)
+    // The nominal is read in place: binding it copied the row and its Item.
     // Compiler-owned nominals keep the bare shared spelling (`Ordering`).
-    if nominal.compiler_owned -> nominal.symbol.name else -> "{nominal.symbol.module_name}::{nominal.symbol.name}"
+    if graph.modules[row.module_index].nominals[row.row].compiler_owned -> graph.modules[row.module_index].nominals[row.row].symbol.name else -> "{graph.modules[row.module_index].nominals[row.row].symbol.module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}"
 }
 
 fn sema_type_name_is_generic(generic_params: [TGenericParam], name: String) -> Bool Never! {
@@ -482,23 +482,23 @@ fn sema_type_name_is_generic(generic_params: [TGenericParam], name: String) -> B
 fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, caller: Int) -> Type Never! {
     if name == "" || name == "Unit" || name == "Err" || name == "Never" -> return Type.Named{name: name}
     resolved :: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return Type.Named{name: name}
-    if resolved.symbol.kind == {
+    if sema_resolved_kind(graph, resolved) == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
         .Type -> {
             if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) {
-                nominal :: graph.modules[row.module_index].nominals[row.row]
-                // Single-level matches read the alias in place; a nested
+                // Read in place: binding the nominal copied the row and its
+                // Item. Single-level matches read the alias in place; a nested
                 // `.SourceAST(.TypeAlias(definition))` pattern clones the Item.
-                if nominal.source == .SourceAST(item) {
+                if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                     if item == .TypeAlias(definition) {
                         if definition.type_params.len() == 0 && definition.target == .Named(_) {
-                            return sema_type_graph_resolve_named(graph, type_name(definition.target), sema_type_module_row(graph, nominal.symbol.module_name))
+                            return sema_type_graph_resolve_named(graph, type_name(definition.target), sema_type_module_row(graph, graph.modules[row.module_index].nominals[row.row].symbol.module_name))
                         }
                     }
                 }
             }
             if sema_type_graph_resolved_nominal_row(graph, resolved) != None -> return Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)}
-            if resolved.source_module_identity.starts_with("<corelib>/") -> return resolved.symbol.ty ?? Type.Named{name: name}
+            if resolved.source_module_identity.starts_with("<corelib>/") -> return sema_resolved_ty(graph, resolved) ?? Type.Named{name: name}
             Type.Named{name: name}
         }
         else -> Type.Named{name: name}
@@ -508,20 +508,20 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
 fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return name
     if sema_type_source_owns_nominal(graph, name, caller) -> return sema_type_graph_canonical_symbol_name(graph, resolved)
-    if resolved.symbol.kind == SymbolKind.Type && resolved.source_module_identity.starts_with("<corelib>/") && sema_type_graph_resolved_nominal_row(graph, resolved) == None {
-        if resolved.symbol.ty == .Val(builtin) {
+    if sema_resolved_kind(graph, resolved) == SymbolKind.Type && resolved.source_module_identity.starts_with("<corelib>/") && sema_type_graph_resolved_nominal_row(graph, resolved) == None {
+        if sema_resolved_ty(graph, resolved) == .Val(builtin) {
             if builtin == .Named(leaf) -> return leaf
         }
     }
     if {
-        resolved.symbol.kind == SymbolKind.Type && sema_type_graph_resolved_nominal_row(graph, resolved) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
+        sema_resolved_kind(graph, resolved) == SymbolKind.Type && sema_type_graph_resolved_nominal_row(graph, resolved) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
         else -> name
     }
 }
 
 fn sema_type_graph_resolve_trait_bound(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return name
-    if resolved.symbol.kind == SymbolKind.Trait -> sema_type_graph_canonical_symbol_name(graph, resolved) else -> name
+    if sema_resolved_kind(graph, resolved) == SymbolKind.Trait -> sema_type_graph_canonical_symbol_name(graph, resolved) else -> name
 }
 
 struct SemaTypeAliasCycleRow {
@@ -614,7 +614,7 @@ fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
                 }
                 if bound -> next
                 resolved :: sema_type_graph_lookup_symbol(graph, nominal.symbol.module_name, name) ?? next
-                target :: positions.get(resolved.symbol.id.key) ?? next
+                target :: positions.get(sema_resolved_key(graph, resolved)) ?? next
                 &rows[at].edges.push(target)
             }
         }
@@ -821,7 +821,7 @@ fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaR
         || nominal.kind != SemaRegistrationNominalKind.TypeAlias
         || nominal.generic_params.len() != 0
         || nominal.symbol.visibility < 2 -> return None
-    Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility, nominal_row: Val(row)})
+    Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility, nominal_row: Val(row)})
 }
 
 // Rust `struct_owner_module`'s tail: a bare type name the caller neither
@@ -847,7 +847,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index:
             if carrier_row.module_name != carrier || !carrier_row.module_identity.starts_with("<corelib>/") -> next
             symbol :: carrier_row.nominals[row.row].symbol
             if symbol.name != name -> next
-            return Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: carrier_row.module_identity, target_module_identity: carrier_row.module_identity, visibility: symbol.visibility, nominal_row: Val(row)})
+            return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: carrier_row.module_identity, target_module_identity: carrier_row.module_identity, visibility: symbol.visibility, nominal_row: Val(row)})
         }
         return None
     }
@@ -891,8 +891,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index:
     }
     chosen :: found ?? return None
     owner_row :: graph.modules[chosen.module_index]
-    symbol :: owner_row.nominals[chosen.row].symbol
-    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: symbol.visibility, nominal_row: Val(chosen)})
+    Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: chosen.module_index, row: chosen.row}, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: owner_row.nominals[chosen.row].symbol.visibility, nominal_row: Val(chosen)})
 }
 
 // Rust `split_type_name`'s leaf: after the last `::`, else after the last `.`.
@@ -927,7 +926,7 @@ fn sema_type_resolve_nominal_row_at(graph: SemaRegistrationGraph, actual: Type, 
 // source nominal of that name (sema_type_unscoped_nominal_row).
 fn sema_type_lookup_nominal_row(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol?, name: String, caller: Int) -> SemaRegistrationRowRef? {
     if resolved == .Val(found) {
-        if found.symbol.kind != SymbolKind.Type -> return None
+        if sema_resolved_kind(graph, found) != SymbolKind.Type -> return None
         return sema_type_graph_resolved_nominal_row(graph, found)
     }
     if caller >= 0 && graph.modules[caller].module_identity.starts_with("<corelib>/") -> return None
@@ -963,8 +962,8 @@ fn sema_type_graph_trait_symbol(graph: SemaRegistrationGraph, module_identity: S
 
 fn sema_type_graph_trait_symbol_at(graph: SemaRegistrationGraph, caller: Int, bound_name: String) -> Symbol? {
     resolved :: sema_type_graph_lookup_symbol_at(graph, caller, bound_name) ?? return None
-    if resolved.symbol.kind != SymbolKind.Trait -> return None
-    Val(resolved.symbol)
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Trait -> return None
+    Val(sema_resolved_symbol(graph, resolved))
 }
 
 // Rust Generics::BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
@@ -984,7 +983,7 @@ fn sema_type_graph_bound_symbol(graph: SemaRegistrationGraph, module_identity: S
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name)
     if resolved != None -> return resolved
     symbol :: sema_type_builtin_trait_symbol(name) ?? return None
-    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: "", target_module_identity: "", visibility: symbol.visibility})
+    Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: symbol}, source_module_identity: "", target_module_identity: "", visibility: 2})
 }
 
 fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Bool Never! {

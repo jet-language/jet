@@ -3830,7 +3830,7 @@ fn sema_stmt_transaction_collect_roots(statements: [Stmt], roots: &[String]) Nev
 fn sema_stmt_transaction_rollback_trait_symbol(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Symbol? {
     if implementation.trait_symbol != None -> return implementation.trait_symbol
     resolved :: sema_registration_lookup_name(graph, implementation.source_module_identity, "Rollback") ?? return None
-    if resolved.symbol.kind == SymbolKind.Trait -> return Val(resolved.symbol)
+    if sema_resolved_kind(graph, resolved) == SymbolKind.Trait -> return Val(sema_resolved_symbol(graph, resolved))
     None
 }
 

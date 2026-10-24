@@ -764,10 +764,12 @@ enum SemaRegistrationCallableRow {
     ImplMethod(module_index: Int, owner: Int, row: Int)
 }
 
-// A name resolved to its symbol. The declaration stays in the graph: a type
-// symbol's row is `sema_type_graph_nominal_row`, so a lookup copies no item.
+// A name resolved to its symbol (Cutover B L2a). The symbol row stays in the
+// graph: a lookup returns its place, and readers take the fields they need
+// (sema_resolved_kind/_name/_key/_ty), so no lookup copies a Symbol. A type
+// symbol's nominal row is `sema_type_graph_resolved_nominal_row`.
 struct SemaRegistrationResolvedSymbol {
-    symbol: Symbol
+    place: SemaRegistrationSymbolPlace
     source_module_identity: String
     target_module_identity: String
     visibility: Int
@@ -775,6 +777,75 @@ struct SemaRegistrationResolvedSymbol {
     // the symbol (`symbol_nominal_rows`, a builtin row, a nominal row);
     // None leaves `sema_type_graph_resolved_nominal_row` to the key map.
     nominal_row: SemaRegistrationRowRef?{None}
+}
+
+// Where a resolved symbol's row lives. `Detached` holds a symbol no graph row
+// keeps: a builtin trait bound and an export row resolved through a chain.
+enum SemaRegistrationSymbolPlace {
+    Declared(module_index: Int, row: Int)
+    Imported(module_index: Int, import_index: Int, binding: Int)
+    Nominal(module_index: Int, row: Int)
+    Detached(symbol: Symbol)
+}
+
+fn sema_resolved_kind(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SymbolKind Never! {
+    if resolved.place == {
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].kind
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.kind
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.kind
+        .Detached(symbol) -> symbol.kind
+    }
+}
+
+fn sema_resolved_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
+    if resolved.place == {
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].name
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.name
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.name
+        .Detached(symbol) -> symbol.name
+    }
+}
+
+// The symbol's SymbolId key.
+fn sema_resolved_key(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
+    if resolved.place == {
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].id.key
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.id.key
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.id.key
+        .Detached(symbol) -> symbol.id.key
+    }
+}
+
+fn sema_resolved_ty(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> Type? Never! {
+    if resolved.place == {
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].ty
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.ty
+        .Detached(symbol) -> symbol.ty
+    }
+}
+
+fn sema_resolved_id(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SymbolID Never! {
+    SymbolID{key: sema_resolved_key(graph, resolved)}
+}
+
+fn sema_resolved_module_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
+    if resolved.place == {
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].module_name
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_name
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.module_name
+        .Detached(symbol) -> symbol.module_name
+    }
+}
+
+// A copy of the resolved Symbol, for a caller that keeps it.
+fn sema_resolved_symbol(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> Symbol Never! {
+    if resolved.place == {
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row]
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol
+        .Detached(symbol) -> symbol
+    }
 }
 
 fn sema_registration_visibility(is_pub: Bool, is_package_pub: Bool) -> Int Never! {
@@ -3940,11 +4011,11 @@ fn sema_registration_lookup_name_at(graph: SemaRegistrationGraph, module_index: 
     local :: sema_registration_lookup_module_probe(graph.modules[module_index], module_index, module_identity, name, hash)
     if local != None -> return local
     if sema_registration_namespace_owner_at(graph, module_index, name, hash) == .Val(owner) {
-        return Val(SemaRegistrationResolvedSymbol{symbol: graph.modules[owner.module_index].symbols[owner.row], source_module_identity: graph.modules[owner.module_index].module_identity, target_module_identity: graph.modules[owner.module_index].module_identity, visibility: graph.modules[owner.module_index].symbols[owner.row].visibility, nominal_row: sema_registration_symbol_nominal_row(graph.modules[owner.module_index], owner.module_index, owner.row)})
+        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Declared{module_index: owner.module_index, row: owner.row}, source_module_identity: graph.modules[owner.module_index].module_identity, target_module_identity: graph.modules[owner.module_index].module_identity, visibility: graph.modules[owner.module_index].symbols[owner.row].visibility, nominal_row: sema_registration_symbol_nominal_row(graph.modules[owner.module_index], owner.module_index, owner.row)})
     }
     builtin :: sema_registration_compiler_builtin_row(graph, name) ?? return None
-    nominal_symbol :: graph.modules[builtin.module_index].nominals[builtin.row].symbol
-    Val(SemaRegistrationResolvedSymbol{symbol: nominal_symbol, source_module_identity: nominal_symbol.module_name, target_module_identity: nominal_symbol.module_name, visibility: nominal_symbol.visibility, nominal_row: Val(builtin)})
+    // The nominal's symbol is read in place: binding it copied the Symbol.
+    Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: builtin.module_index, row: builtin.row}, source_module_identity: graph.modules[builtin.module_index].nominals[builtin.row].symbol.module_name, target_module_identity: graph.modules[builtin.module_index].nominals[builtin.row].symbol.module_name, visibility: graph.modules[builtin.module_index].nominals[builtin.row].symbol.visibility, nominal_row: Val(builtin)})
 }
 
 // The nominal row `symbols[position]` of module row `module_index`
@@ -3958,16 +4029,14 @@ fn sema_registration_symbol_nominal_row(module_row: SemaRegistrationModule, modu
 // A name declared or imported by one module, hashed once (A1).
 fn sema_registration_lookup_module_probe(module_row: SemaRegistrationModule, module_index: Int, module_identity: String, name: String, hash: Int) -> SemaRegistrationResolvedSymbol? {
     if sema_registration_symbol_position(module_row, name, hash) == .Val(symbol_position) {
-        return Val(SemaRegistrationResolvedSymbol{symbol: module_row.symbols[symbol_position], source_module_identity: module_identity, target_module_identity: module_identity, visibility: module_row.symbols[symbol_position].visibility, nominal_row: sema_registration_symbol_nominal_row(module_row, module_index, symbol_position)})
+        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Declared{module_index: module_index, row: symbol_position}, source_module_identity: module_identity, target_module_identity: module_identity, visibility: module_row.symbols[symbol_position].visibility, nominal_row: sema_registration_symbol_nominal_row(module_row, module_index, symbol_position)})
     }
     if sema_registration_import_binding_at(module_row, name, hash) == .Val(binding_ref) {
-        return sema_registration_resolved_import_binding(module_row.imports[binding_ref.import_index].bindings[binding_ref.binding])
+        binding :: binding_ref.binding
+        import_index :: binding_ref.import_index
+        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Imported{module_index: module_index, import_index: import_index, binding: binding}, source_module_identity: module_row.imports[import_index].bindings[binding].target_module_identity, target_module_identity: module_row.imports[import_index].bindings[binding].target_module_identity, visibility: module_row.imports[import_index].bindings[binding].visibility})
     }
     None
-}
-
-fn sema_registration_resolved_import_binding(binding: SemaRegistrationImportBinding) -> SemaRegistrationResolvedSymbol? Never! {
-    Val(SemaRegistrationResolvedSymbol{symbol: binding.symbol, source_module_identity: binding.target_module_identity, target_module_identity: binding.target_module_identity, visibility: binding.visibility})
 }
 
 fn sema_registration_lookup_qualified(graph: SemaRegistrationGraph, module_identity: String, alias: String, name: String) -> SemaRegistrationResolvedSymbol? {
@@ -3977,7 +4046,7 @@ fn sema_registration_lookup_qualified(graph: SemaRegistrationGraph, module_ident
         if import.declaration.alias != alias -> next
         target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? return None
         resolved :: sema_registration_resolve_export(graph, target_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
-        return Val(SemaRegistrationResolvedSymbol{symbol: resolved.symbol, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})
+        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: resolved.symbol}, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})
     }
     None
 }

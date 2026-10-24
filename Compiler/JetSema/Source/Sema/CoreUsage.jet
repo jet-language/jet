@@ -212,7 +212,7 @@ fn sema_core_generated_register_unqualified(graph: SemaRegistrationGraph, regist
     resolved := sema_registration_lookup_name(graph, registration_module.module_identity, type_name)
     if resolved != None {
         row :: resolved ?? return
-        if row.symbol.kind != SymbolKind.Type && row.symbol.kind != SymbolKind.Trait {
+        if sema_resolved_kind(graph, row) != SymbolKind.Type && sema_resolved_kind(graph, row) != SymbolKind.Trait {
             sema_core_generated_register_core_name(&markers, type_name, module_name, type_name)
             return
         }

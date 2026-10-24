@@ -65,8 +65,8 @@ fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool Never! {
 fn sema_comparability_definition(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> TTypeDef? {
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
-        if resolved.symbol.kind != SymbolKind.Type -> return None
-        index :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) ?? return None
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
+        index :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
         return Val(program.checked_types[index])
     }
     sema_serde_type_definition(environment, program, name)
@@ -87,8 +87,8 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, program: Sem
         if bound -> return true
         name :: sema_type_graph_base_name(ty) ?? return false
         resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
-        if resolved.symbol.kind != SymbolKind.Type -> return false
-        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
             if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) -> return true
         }
         if trait_name != "Equatable" -> return false

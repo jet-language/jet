@@ -397,8 +397,8 @@ fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value
         registered_function := false
         if program.registration_graph == .Val(graph) {
             resolved := sema_registration_lookup_name(graph, environment.module_identity, handler_name)
-            if resolved == .Val(function) && function.symbol.kind == SymbolKind.Function {
-                if handler_symbol == .Val(symbol) && symbol.key == function.symbol.id.key -> registered_function = true
+            if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
+                if handler_symbol == .Val(symbol) && symbol.key == sema_resolved_key(graph, function) -> registered_function = true
             }
         }
         if !registered_function {
@@ -699,10 +699,11 @@ fn sema_job_queue_function(expression: Expr, environment: SemaScopeEnvironment, 
     }
     if program.registration_graph == .Val(graph) {
     resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
-    if resolved.symbol.kind != SymbolKind.Function -> return None
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Function -> return None
     module_index :: sema_registration_module_index(graph, resolved.source_module_identity) ?? return None
+    key :: sema_resolved_key(graph, resolved)
     loop index in 0..<graph.modules[module_index].functions.len() {
-        if graph.modules[module_index].functions[index].symbol.id.key != resolved.symbol.id.key -> next
+        if graph.modules[module_index].functions[index].symbol.id.key != key -> next
         if !graph.modules[module_index].functions[index].declaration.is_job || graph.modules[module_index].functions[index].declaration.params.len() != 1 -> return None
         return Val(SemaRegistrationRowRef{module_index: module_index, row: index})
     }

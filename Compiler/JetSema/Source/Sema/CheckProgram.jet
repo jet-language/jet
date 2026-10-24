@@ -1587,13 +1587,13 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
                 bound_index += 1
                 next
             }
-            if resolved.symbol.kind != SymbolKind.Trait {
+            if sema_resolved_kind(graph, resolved) != SymbolKind.Trait {
                 &diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
                 complete = false
                 bound_index += 1
                 next
             }
-            &bounds.push(resolved.symbol.id)
+            &bounds.push(sema_resolved_id(graph, resolved))
             bound_index += 1
         }
         &params.push(TGenericParam{name: parameter.name, bounds: bounds})
@@ -1671,12 +1671,12 @@ fn sema_function_owner_generic_params(graph: SemaRegistrationGraph, owner_type: 
                 complete = false
                 next
             }
-            if symbol.symbol.kind != SymbolKind.Trait {
+            if sema_resolved_kind(graph, symbol) != SymbolKind.Trait {
                 &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
                 complete = false
                 next
             }
-            &bounds.push(symbol.symbol.id)
+            &bounds.push(sema_resolved_id(graph, symbol))
         }
         &params.push(TGenericParam{name: parameter.name, bounds: bounds})
         index += 1

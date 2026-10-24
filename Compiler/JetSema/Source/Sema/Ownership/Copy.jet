@@ -479,7 +479,7 @@ fn sema_copy_named_facts(
         // every caller; any other name is the caller's scope's reading.
         if resolved == None || !name.contains("::") -> walk.tainted = true
         if resolved == .Val(found) {
-            if found.symbol.kind == SymbolKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
+            if sema_resolved_kind(registered, found) == SymbolKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
         }
         if sema_type_lookup_nominal_row(registered, resolved, name, caller) == .Val(row) {
             if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)

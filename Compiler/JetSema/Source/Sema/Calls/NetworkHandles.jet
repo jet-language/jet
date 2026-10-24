@@ -238,7 +238,7 @@ fn sema_network_handle_is_canonical(receiver_type: Type, owner: String, environm
     if expected_module == "" -> return false
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-        if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
+        if resolved == .Val(symbol) -> return sema_resolved_kind(graph, symbol) == SymbolKind.Type && (sema_registration_module_name(graph, sema_resolved_module_name(graph, symbol)) ?? "") == expected_module
     }
     true
 }

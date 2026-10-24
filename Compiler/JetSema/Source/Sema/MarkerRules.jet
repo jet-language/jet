@@ -1597,8 +1597,8 @@ fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDecl
             return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{sema_unknown_name(argument.name, argument.span)}, complete: true}
         }
         resolved_value :: resolved ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
-        symbol := resolved_value.symbol
-        if symbol.kind != SymbolKind.Type && symbol.kind != SymbolKind.Trait {
+        kind :: sema_resolved_kind(graph, resolved_value)
+        if kind != SymbolKind.Type && kind != SymbolKind.Trait {
             diagnostic := sema_error("E0107", argument.span, "`{argument.name}` doesn't name a type", "a checked type argument must resolve to a declared type or trait", "use a type name here")
             return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{diagnostic}, complete: true}
         }

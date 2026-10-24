@@ -929,8 +929,8 @@ fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnviron
     if program.registration_graph == .Val(graph) {
     name :: sema_type_graph_base_name(ty) ?? return false
     resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
-    if resolved.symbol.kind != SymbolKind.Type -> return false
-    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
         if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") -> return true
     }
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false

@@ -544,13 +544,14 @@ fn sema_expression_module_constant(alias: String, member: String, span: Span, ex
     if scopes.bindings[index].symbol.kind != SymbolKind.Import -> return SemaMethodSpecialCheck{handled: false, value: None}
     if program.registration_graph == .Val(graph) {
         resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-        if resolved.symbol.kind != SymbolKind.Constant -> return SemaMethodSpecialCheck{handled: false, value: None}
-        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: resolved.symbol, kind: "const"})
-        ty :: resolved.symbol.ty ?? {
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Constant -> return SemaMethodSpecialCheck{handled: false, value: None}
+        symbol :: sema_resolved_symbol(graph, resolved)
+        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
+        ty :: symbol.ty ?? {
             sema_check_unsupported(&context, "constant `{alias}.{member}` (read at offset {span.start}) has no staged compile-time value")
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: resolved.symbol.id}, span)
+        value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: symbol.id}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: false, value: None}

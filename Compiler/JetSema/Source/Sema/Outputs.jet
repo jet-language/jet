@@ -142,7 +142,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                 exported :: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity, [String]{})
                 // copy: the resolved symbol owns its texts, while `found` is a payload view of the
                 // export row in the read-only graph, which keeps them.
-                if exported == .Val(found) -> resolved = Val(SemaRegistrationResolvedSymbol{symbol: found.symbol.copy(), source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
+                if exported == .Val(found) -> resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
             }
         }
         if resolved == None {
@@ -173,7 +173,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                         exported :: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity, [String]{}) ?? break
                         // copy: the registered symbol owns its texts, while `exported` is a view of
                         // an export row in the read-only graph, which keeps them.
-                        registered = Val(SemaRegistrationResolvedSymbol{symbol: exported.symbol.copy(), source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
+                        registered = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol.copy()}, source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
                         break
                     }
                 } else {
@@ -186,7 +186,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                 }
                 registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, path.members[0].name))
             }
-            callable :: if registered == .Val(found) -> graph.callable_rows.get(found.symbol.id.key) else -> None
+            callable :: if registered == .Val(found) -> graph.callable_rows.get(sema_resolved_key(graph, found)) else -> None
             if callable == .Val(row) {
                 if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: ^references})
             }
@@ -246,7 +246,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             } else {
                 // copy: the resolved symbol owns its texts, while `exported` is a view of an export
                 // row in the read-only graph, which keeps them.
-                resolved = Val(SemaRegistrationResolvedSymbol{symbol: exported.symbol.copy(), source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
+                resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol.copy()}, source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
             }
         }
     } else {
@@ -254,12 +254,12 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
         return None
     }
     symbol :: resolved ?? return None
-    callable :: graph.callable_rows.get(symbol.symbol.id.key) ?? {
+    callable :: graph.callable_rows.get(sema_resolved_key(graph, symbol)) ?? {
         &diagnostics.push(sema_output_error(expr_span(entry), "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
         return None
     }
     if callable == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: source_name ?? graph.modules[module_index].functions[function_index].declaration.name.copy(), references: ^references})
-    &diagnostics.push(sema_output_error(expr_span(entry), "Output entry `{symbol.symbol.name}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function"))
+    &diagnostics.push(sema_output_error(expr_span(entry), "Output entry `{sema_resolved_name(graph, symbol)}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function"))
     None
 }
 
