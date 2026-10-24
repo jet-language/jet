@@ -747,6 +747,25 @@ struct SemaRegistrationGraph {
     derive_demand: Shared<SemaDeriveDemand>
     derive_wave_rows: [String:Bool]{[String:Bool]{}}
     derive_checked: [String:Bool]{[String:Bool]{}}
+    // The canonical spellings of the nominals registered by the end of
+    // sema_registration_prepare_graph (sema_registration_index_canonical_nominals);
+    // None for a graph built another way, whose lookups cut each spelling.
+    canonical_nominals: SemaCanonicalNominals?{None}
+}
+
+// `{module_name}::{name}` of every nominal row registered by the end of graph
+// construction. Rows never move and their symbols never rename, so a row the
+// table holds keeps its spelling; a row pushed later is spelled where it is read.
+struct SemaCanonicalNominals {
+    // names[module_index][row]: the nominal row's canonical spelling.
+    names: [[String]]
+    // Canonical spelling -> row of `owners`/`leaves`: the module `module_rows`
+    // gives its `module_name` and its leaf name, exactly the module and name a
+    // cut at its last `::` finds (sema_type_graph_lookup_symbol_at). Spellings
+    // whose leaf holds `::`, or whose module is not registered, are left out.
+    rows: NameRows
+    owners: [Int]
+    leaves: [String]
 }
 
 struct SemaRegistrationRowRef {
@@ -1322,6 +1341,37 @@ fn sema_registration_index_all_nominal_rows(graph: &SemaRegistrationGraph) Never
         if at == 0 || symbol_rows[at - 1].key != symbol_rows[at].key -> graph.nominal_symbol_rows[symbol_rows[at].key] = symbol_rows[at].reference
     }
     sema_registration_index_all_nominal_names(&graph)
+}
+
+// Graph construction's last step: the canonical spelling of every nominal row
+// registered by then (SemaCanonicalNominals). A spelling's first row wins; any
+// row of one spelling names the same module and leaf.
+fn sema_registration_index_canonical_nominals(graph: &SemaRegistrationGraph) Never! {
+    table := SemaCanonicalNominals{names: [[String]]{}, rows: name_rows(), owners: [Int]{}, leaves: [String]{}}
+    loop module_index in 0..<graph.modules.len() {
+        names := [String]{}
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            spelling :: "{graph.modules[module_index].nominals[row].symbol.module_name}::{graph.modules[module_index].nominals[row].symbol.name}"
+            &names.push(spelling)
+            if graph.modules[module_index].nominals[row].symbol.name.contains("::") -> next
+            owner :: name_rows_get_text(graph.module_rows, graph.modules[module_index].nominals[row].symbol.module_name) ?? next
+            if name_rows_get_text(table.rows, spelling) != None -> next
+            name_rows_set(&table.rows, spelling, table.owners.len())
+            &table.owners.push(owner)
+            &table.leaves.push(graph.modules[module_index].nominals[row].symbol.name)
+        }
+        &table.names.push(^names)
+    }
+    graph.canonical_nominals = Val(^table)
+}
+
+// `{module_name}::{name}` of nominal row `row`: the spelling built with the
+// graph, or spelled here for a row registered after it.
+fn sema_registration_nominal_spelling(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> String Never! {
+    if graph.canonical_nominals == .Val(table) {
+        if row.module_index < table.names.len() && row.row < table.names[row.module_index].len() -> return table.names[row.module_index][row.row]
+    }
+    "{graph.modules[row.module_index].nominals[row.row].symbol.module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}"
 }
 
 fn sema_registration_index_all_nominal_names(graph: &SemaRegistrationGraph) Never! {
@@ -3879,6 +3929,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         sema_registration_push_graph_diagnostic(&graph, finding.module_index, finding.diagnostic)
         graph.complete = false
     }
+    sema_registration_index_canonical_nominals(&graph)
     graph
 }
 

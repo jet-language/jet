@@ -1770,17 +1770,18 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, p
         .Named(name) | .Apply(name, _) -> name
         else -> ""
     }
-    parts :: path.split(".").to_list()
-    if parts.len() != 2 -> return None
-    head_value :: SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}
-    owner :: sema_expression_type_symbol(&scopes, environment, program, parts[0])
+    // Exactly two dotted parts, cut in place: no part list per literal.
+    parts :: path.split_once(".") ?? return None
+    if parts.after.contains(".") -> return None
+    head_value :: SemaExpressionVariantHead{enum_name: parts.before, variant: parts.after}
+    owner :: sema_expression_type_symbol(&scopes, environment, program, parts.before)
     if owner == .Val(symbol) {
-        if sema_scope_declaration_enum_declares(environment, program, symbol.id, parts[1]) -> return Val(head_value)
+        if sema_scope_declaration_enum_declares(environment, program, symbol.id, parts.after) -> return Val(head_value)
         if sema_expression_core_export_variants(environment, program, symbol) == None -> return None
     }
     // A compiler-owned Core enum (`EmailError`) has no declaration; its
     // named-payload case comes from the generated Core enum payload rows.
-    if core_enum_variant_labels(parts[0], parts[1]) != None -> Val(head_value) else -> None
+    if core_enum_variant_labels(parts.before, parts.after) != None -> Val(head_value) else -> None
 }
 
 // A record field written as the bare shorthand `{name}`: the parser gives its

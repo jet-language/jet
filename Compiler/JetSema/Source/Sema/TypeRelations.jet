@@ -40,6 +40,7 @@ use jet_foundation.[
     type_with_effective_fn_returns,
     core_source_owns_type,
     type_name,
+    name_rows_get_text,
     core_identity_in_module,
     is_compute_tensor_family,
 ]
@@ -476,10 +477,19 @@ fn sema_type_graph_resolved_nominal_row(graph: SemaRegistrationGraph, resolved: 
 }
 
 fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
-    row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return sema_resolved_name(graph, resolved)
-    // The nominal is read in place: binding it copied the row and its Item.
-    // Compiler-owned nominals keep the bare shared spelling (`Ordering`).
-    if graph.modules[row.module_index].nominals[row.row].compiler_owned -> graph.modules[row.module_index].nominals[row.row].symbol.name else -> "{graph.modules[row.module_index].nominals[row.row].symbol.module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}"
+    sema_type_graph_canonical_name_at(graph, resolved, sema_type_graph_resolved_nominal_row(graph, resolved))
+}
+
+// sema_type_graph_canonical_symbol_name for a caller that already holds the
+// symbol's sema_type_graph_resolved_nominal_row.
+fn sema_type_graph_canonical_name_at(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, nominal: SemaRegistrationRowRef?) -> String Never! {
+    if nominal == .Val(row) {
+        // The nominal is read in place: binding it copied the row and its Item.
+        // Compiler-owned nominals keep the bare shared spelling (`Ordering`).
+        if graph.modules[row.module_index].nominals[row.row].compiler_owned -> return graph.modules[row.module_index].nominals[row.row].symbol.name
+        return sema_registration_nominal_spelling(graph, row)
+    }
+    sema_resolved_name(graph, resolved)
 }
 
 fn sema_type_name_is_generic(generic_params: [TGenericParam], name: String) -> Bool Never! {
@@ -499,7 +509,9 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
     if sema_resolved_kind(graph, resolved) == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
         .Type -> {
-            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) {
+            // One row lookup serves the alias test and the spelling.
+            nominal :: sema_type_graph_resolved_nominal_row(graph, resolved)
+            if nominal == .Val(row) {
                 // Read in place: binding the nominal copied the row and its
                 // Item. Single-level matches read the alias in place; a nested
                 // `.SourceAST(.TypeAlias(definition))` pattern clones the Item.
@@ -510,8 +522,8 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
                         }
                     }
                 }
+                return Type.Named{name: sema_type_graph_canonical_name_at(graph, resolved, nominal)}
             }
-            if sema_type_graph_resolved_nominal_row(graph, resolved) != None -> return Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)}
             if resolved.source_module_identity.starts_with("<corelib>/") -> return sema_resolved_ty(graph, resolved) ?? Type.Named{name: name}
             Type.Named{name: name}
         }
@@ -802,6 +814,11 @@ fn sema_type_graph_lookup_symbol_at(graph: SemaRegistrationGraph, caller: Int, n
         // The identity is passed as a place: binding it copied the String.
         local :: sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, name)
         if local != None -> return local
+    }
+    // A canonical nominal spelling's owner and leaf were cut with the graph
+    // (SemaCanonicalNominals): the module and name the cut below finds.
+    if graph.canonical_nominals == .Val(canonical_table) {
+        if name_rows_get_text(canonical_table.rows, name) == .Val(row) -> return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
     }
     // The name is cut in place; no part list is built per lookup.
     if name.cut_last("::") == .Val(canonical) {
