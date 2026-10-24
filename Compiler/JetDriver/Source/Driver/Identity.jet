@@ -543,12 +543,16 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
-    // Canonical parser/load facts, available without checking callable bodies.
+    // Canonical parser/load facts, available without checking callable bodies;
+    // only a source query fills it (SourceQueries `jet_driver_load_with_names`).
     names: NameLedger?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
     build_program: TComptimeValue?{None}
     build_nodes: [BuildGraphNode]?{None}
+    // The entry package's member files that declare a top-level `fn run`
+    // (Loader.jet `jet_driver_run_member_paths`).
+    run_member_paths: [String]{[String]{}}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -612,6 +616,9 @@ struct JetDriverCompileResult {
     // (JetCli Request.jet `jet_cli_compile_prepared`) so the native backend
     // route after it compiles on the same threads.
     compiler_threads: CompilerThreads{compiler_threads_single()}
+    // The entry package's member files that declare a top-level `fn run`,
+    // from the load's parse (JetDriverLoadResult.run_member_paths).
+    run_member_paths: [String]{[String]{}}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

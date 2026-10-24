@@ -16,6 +16,7 @@
 use core.files as cli_files
 use jet_driver.[
 JetDriverAuthorizedSourceFile,
+JetDriverCompileResult,
 JET_DRIVER_EXIT_USAGE,
 JET_DRIVER_EXIT_USER_ERROR,
 jet_driver_inline_package,
@@ -737,6 +738,15 @@ fn jet_cli_package_run_member(root: String) -[FS]> String? Never! {
 // main.rs `find_project_entry_with_callable`: the stock entry of the
 // project rooted at `root`.
 fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
+    jet_cli_find_project_entry_at(root_path, command, color, &notices, true)
+}
+
+// The stock entry; without `run_member` a package without `run.jet` or
+// `<name>.jet` stands on its first source file instead of parsing every
+// member for `fn run`. Either way the entry is a real file, so a caller that
+// only asks whether the project has an entry (the workspace member scan) needs
+// no parse; it resolves the member entry of the one it selects.
+fn jet_cli_find_project_entry_at(root_path: String, command: String, color: Bool, notices: &[String], run_member: Bool) -[FS, Env]> JetCLIEntryFound Never! {
     root :: cli_files.realpath(root_path) ?? root_path
     package := JetCLIManifest?{None}
     if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) != None {
@@ -775,7 +785,7 @@ fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, n
         // package's one `fn run` is the entry; a library package has none,
         // and its first source file stands for the package.
         if !cli_files.is_file(jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)) {
-            if jet_cli_package_run_member(root) == .Val(member) {
+            if run_member && jet_cli_package_run_member(root) == .Val(member) {
                 return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: member, callable: None}}
             }
             files := [JetDriverAuthorizedSourceFile]{}
@@ -1090,6 +1100,18 @@ fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootF
     }
 }
 
+// The entry of the selected workspace member: its scanned stock entry
+// resolved in full (the `fn run` member parse included), or its override.
+// The scan already wrote the member's notices.
+fn jet_cli_workspace_member_entry(member_root: String, scanned: JetCLIEntry, from_stock: Bool, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
+    if !from_stock -> return JetCLIEntryFound.Entry{entry: scanned}
+    written := [String]{}
+    if jet_cli_find_project_entry_at(member_root, command, color, &written, true) == .Entry(entry) {
+        if cli_files.is_file(entry.path) -> return JetCLIEntryFound.Entry{entry: entry}
+    }
+    JetCLIEntryFound.Entry{entry: scanned}
+}
+
 // main.rs `resolve_bare_entry` the entry a bare command, or
 // one aimed at the directory `cwd`, compiles. A workspace with more than one
 // runnable member is ambiguous unless `-p <member>` picks one; otherwise the
@@ -1115,10 +1137,14 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
         }
         runnable := [JetCLIWorkspaceMember]{}
         entries := [JetCLIEntry]{}
+        // The stock entry of a member is resolved without the `fn run`
+        // member parse: whether it can run needs only that it has an entry
+        // file; the selected member's entry is resolved in full below.
+        stocks := [Bool]{}
         loop member in members_plan {
             member_root :: jet_cli_entry_join(root, member.path)
             stock := JetCLIEntry?{None}
-            if jet_cli_find_project_entry(member_root, command, color, &notices) == {
+            if jet_cli_find_project_entry_at(member_root, command, color, &notices, false) == {
                 .Entry(entry) -> {
                     if cli_files.is_file(entry.path) -> stock = Val(entry)
                 }
@@ -1126,9 +1152,13 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
                 .Absent -> {}
             }
             entry := stock
+            from_stock := true
             if use_override {
                 if jet_cli_command_override(member_root, command, color) == {
-                    .Entry(found) -> { entry = Val(found) }
+                    .Entry(found) -> {
+                        entry = Val(found)
+                        from_stock = false
+                    }
                     .Refused(plan_refused) -> return JetCLIEntryFound.Refused{plan: plan_refused}
                     .Absent -> {}
                 }
@@ -1136,17 +1166,18 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
             if entry == .Val(selected) {
                 &runnable.push(member)
                 &entries.push(selected)
+                &stocks.push(from_stock)
             }
         }
         if member_flag == .Val(want) {
             loop (index, member) in runnable {
-                if member.name == want -> return JetCLIEntryFound.Entry{entry: entries[index]}
+                if member.name == want -> return jet_cli_workspace_member_entry(jet_cli_entry_join(root, member.path), entries[index], stocks[index], command, color)
             }
             names := [String]{}
             loop member in members_plan -> &names.push(member.name)
             return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2104", "no workspace member named `{want}`", jet_cli_why("E2104"), "pick one of: {names.join(", ")}", color, JET_DRIVER_EXIT_USAGE)}
         }
-        if runnable.len() == 1 -> return JetCLIEntryFound.Entry{entry: entries[0]}
+        if runnable.len() == 1 -> return jet_cli_workspace_member_entry(jet_cli_entry_join(root, runnable[0].path), entries[0], stocks[0], command, color)
         if runnable.len() >= 2 {
             names := [String]{}
             loop member in runnable -> &names.push(member.name)
@@ -1223,8 +1254,10 @@ fn jet_cli_with_notices(notices: [String], plan: ^JetCLIPlan) -> JetCLIPlan Neve
 // CmdInspect.rs `package_is_library_only`: a project check of a library
 // package runs in Check mode and never demands `fn run`. A package is a
 // library when every declared output is a Library, or when it declares none
-// and no member file defines a top-level `fn run`.
-fn jet_cli_package_is_library_only(entry: String) -[FS, Env]> Bool Never! {
+// and no member file defines a top-level `fn run`. A clean compile already
+// parsed every member, so its load facts answer that; a compile with errors
+// may have stopped before some member, so the members are parsed here.
+fn jet_cli_package_is_library_only(entry: String, compiled: JetDriverCompileResult) -[FS, Env]> Bool Never! {
     folder :: jet_cli_parent(entry) ?? "."
     root := ""
     if jet_cli_find_package_root(folder, false) == {
@@ -1238,6 +1271,7 @@ fn jet_cli_package_is_library_only(entry: String) -[FS, Env]> Bool Never! {
         }
         return true
     }
+    if jet_cli_errors(compiled.diagnostics).len() == 0 -> return compiled.run_member_paths.len() == 0
     jet_cli_package_run_member(root) == .None
 }
 

@@ -278,11 +278,9 @@ fn lexer_lex_chunk_part(inputs: Shared<LexerChunkShared>, part: Shared<LexerChun
     }
     if !lexer_chunk_delimiters_nest(facts, if seed -> 1 else -> 0, !last) -> clean = false
     tables := token_tables()
-    raw := lex_payload_from_facts(source, facts, reads.value.config_surface, reads.value.allow_reserved_identifiers, 0, gap_start, to, &tables)
-    diagnostics := ^raw.diagnostics
-    raw.diagnostics = [Diagnostic]{}
     events :: terminator_events(source, facts)
-    lexed := lexed_with_terminators(facts, ^raw, events)
+    terminator_diagnostics := [Diagnostic]{}
+    lexed := lex_payload_from_facts(source, facts, events, reads.value.config_surface, reads.value.allow_reserved_identifiers, 0, gap_start, to, &tables, &terminator_diagnostics)
     if seed {
         // The seed `}` is the last token of the chunk before; it leaves the
         // front in place (reverse, pop, reverse: no token is copied).
@@ -291,7 +289,7 @@ fn lexer_lex_chunk_part(inputs: Shared<LexerChunkShared>, part: Shared<LexerChun
         _ := &lexed.tokens.pop()
         &lexed.tokens.reverse()
     }
-    &permit.value.outputs.push(LexerChunkOutput{tokens: ^lexed.tokens, tables: ^tables, diagnostics: ^diagnostics, terminator_diagnostics: ^lexed.diagnostics, line_starts: lexer_line_starts(source, from, to, from == 0), clean: clean, map: [Int]{}, literal_base: 0})
+    &permit.value.outputs.push(LexerChunkOutput{tokens: ^lexed.tokens, tables: ^tables, diagnostics: ^lexed.diagnostics, terminator_diagnostics: ^terminator_diagnostics, line_starts: lexer_line_starts(source, from, to, from == 0), clean: clean, map: [Int]{}, literal_base: 0})
     1
 }
 

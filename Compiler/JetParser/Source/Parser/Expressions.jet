@@ -224,7 +224,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
     }
 
     left := parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
-    left = parser_parse_postfix(&state, left, depth + 1, allow_struct_lit)
+    left = parser_parse_postfix(&state, ^left, depth + 1, allow_struct_lit)
     loop {
         operator := parser_current_kind(&state)
         precedence := parser_expression_precedence(operator)
@@ -252,7 +252,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             fallback_span :: parser_fallback_span(fallback)
             span := parser_cover(left.span, fallback_span)
             left = ParsedExpr{
-                expr: Expr.OrFallback{value: left.expr, fallback: fallback, is_option: false, span: span, id: parser_node_id(&state)},
+                expr: Expr.OrFallback{value: ^left.expr, fallback: fallback, is_option: false, span: span, id: parser_node_id(&state)},
                 span: span,
             }
             next
@@ -261,16 +261,16 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         if operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(&state) {
             pattern :: parser_parse_pattern(&state, depth + 1, allow_struct_lit)
             span := parser_cover(left.span, pattern.span)
-            left = ParsedExpr{expr: Expr.PatternTest{subject: left.expr, pattern: pattern.pattern, span: span, id: parser_node_id(&state)}, span: span}
+            left = ParsedExpr{expr: Expr.PatternTest{subject: ^left.expr, pattern: pattern.pattern, span: span, id: parser_node_id(&state)}, span: span}
             next
         }
 
-        right :: parser_parse_expression_restricted(&state, precedence + 1, depth + 1, allow_struct_lit, stop_before_comparison)
+        right := parser_parse_expression_restricted(&state, precedence + 1, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(left.span, right.span)
 
         if operator == TOKEN_DOT_DOT || operator == TOKEN_DOT_DOT_LT {
             left = ParsedExpr{
-                expr: Expr.Range{start: left.expr, end: right.expr, exclusive: operator == TOKEN_DOT_DOT_LT, span: span, id: parser_node_id(&state)},
+                expr: Expr.Range{start: ^left.expr, end: ^right.expr, exclusive: operator == TOKEN_DOT_DOT_LT, span: span, id: parser_node_id(&state)},
                 span: span,
             }
             // Rust `expr_range`: one range, never chained (`1..2..3`); the
@@ -324,7 +324,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         // `==`, `!=` and `<=>` never chain: any comparison after one is E0003.
         if (operator == TOKEN_EQ_EQ || operator == TOKEN_NOT_EQ || operator == TOKEN_COMPARE) && parser_expression_comparison_token(parser_current_kind(&state)) -> parser_report_chained_comparison(&state)
         left = ParsedExpr{
-            expr: Expr.Binary{op: parser_binary_operator(operator), left: left.expr, right: right.expr, span: span, id: parser_node_id(&state)},
+            expr: Expr.Binary{op: parser_binary_operator(operator), left: ^left.expr, right: ^right.expr, span: span, id: parser_node_id(&state)},
             span: span,
         }
         if operator_token.span.end > left.span.end -> left.span.end = operator_token.span.end
@@ -500,10 +500,10 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
         fields := parser_parse_expression_fields(&state, depth + 1)
         span := parser_cover(start, fields.span)
         if head == None {
-            return ParsedExpr{expr: Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields.fields, inferred: true, span: span, id: parser_node_id(&state)}, span: span}
+            return ParsedExpr{expr: Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: ^fields.fields, inferred: true, span: span, id: parser_node_id(&state)}, span: span}
         }
-        body := if fields.fields.len() == 0 -> TypedLitBody.Empty else -> TypedLitBody.Fields{fields: fields.fields}
-        return ParsedExpr{expr: Expr.TypedLit{head: Val(head), body: body, span: span, id: parser_node_id(&state)}, span: span}
+        body := if fields.fields.len() == 0 -> TypedLitBody.Empty else -> TypedLitBody.Fields{fields: ^fields.fields}
+        return ParsedExpr{expr: Expr.TypedLit{head: Val(head), body: ^body, span: span, id: parser_node_id(&state)}, span: span}
     }
     open := parser_expect(&state, TOKEN_LBRACE, "`{{` to open a typed literal")
     if parser_current_kind(&state) == TOKEN_RBRACE {
@@ -545,33 +545,35 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     }
     first := parser_parse_expression(&state, 1, depth + 1)
     parser_literal_close_terminators(&state)
-    body := TypedLitBody.Value{value: first.expr}
     // #3739: a map head's lone expression with no `:` stays a one-expression
-    // body; sema reads it as the whole value.
-    if {
+    // body; sema reads it as the whole value. Every part moves into the body:
+    // a copied element list costs a clone and a drop of every element tree.
+    body := if {
         (map_head && parser_current_kind(&state) != TOKEN_RBRACE) || (head == None && parser_current_kind(&state) == TOKEN_COLON) -> {
             parser_expect(&state, TOKEN_COLON, "`:` between a map key and its value")
-            first_value :: parser_parse_expression(&state, 1, depth + 1)
-            entries := [ExprPair]{ExprPair{key: first.expr, value: first_value.expr}}
+            first_value := parser_parse_expression(&state, 1, depth + 1)
+            entries := [ExprPair]{ExprPair{key: ^first.expr, value: ^first_value.expr}}
             loop parser_current_kind(&state) == TOKEN_COMMA {
                 parser_bump(&state)
                 if parser_current_kind(&state) == TOKEN_RBRACE -> break
-                key :: parser_parse_expression(&state, 1, depth + 1)
+                key := parser_parse_expression(&state, 1, depth + 1)
                 parser_expect(&state, TOKEN_COLON, "`:` between a map key and its value")
-                value :: parser_parse_expression(&state, 1, depth + 1)
-                &entries.push(ExprPair{key: key.expr, value: value.expr})
+                value := parser_parse_expression(&state, 1, depth + 1)
+                &entries.push(ExprPair{key: ^key.expr, value: ^value.expr})
             }
-            body = TypedLitBody.Entries{entries: entries}
+            TypedLitBody.Entries{entries: ^entries}
         }
         list_head || (head == None && parser_current_kind(&state) == TOKEN_COMMA) -> {
-            elements := [Expr]{first.expr}
+            elements := [Expr]{^first.expr}
             loop parser_current_kind(&state) == TOKEN_COMMA {
                 parser_bump(&state)
                 if parser_current_kind(&state) == TOKEN_RBRACE -> break
-                &elements.push(parser_parse_expression(&state, 1, depth + 1).expr)
+                element := parser_parse_expression(&state, 1, depth + 1)
+                &elements.push(^element.expr)
             }
-            body = TypedLitBody.Elements{elements: elements}
+            TypedLitBody.Elements{elements: ^elements}
         }
+        else -> TypedLitBody.Value{value: ^first.expr}
     }
     parser_literal_close_terminators(&state)
     close := parser_expect(&state, TOKEN_RBRACE, "`}}` to close a typed literal")
@@ -1528,8 +1530,8 @@ fn parser_is_adjacent_call_result(expr: Expr) -> Bool Never! {
     }
 }
 
-fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
-    expression := initial
+fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
+    expression := ^initial
     // Rust `expr_primary`: a capitalized name's own `<…>` (`Pool<T>.new()`)
     // and call-site arguments (`decode<Order>(raw)`).
     owner_type_args := [Type]{}
@@ -1681,12 +1683,12 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     end :: parser_parse_expression(&state, 1, depth + 1)
                     slice_close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after a slice range")
                     slice_span :: parser_cover(open.span, slice_close.span)
-                    expression = ParsedExpr{expr: Expr.Slice{base: expression.expr, start: selector, end: end.expr, range: None, span: slice_span, id: parser_node_id(&state)}, span: slice_span}
+                    expression = ParsedExpr{expr: Expr.Slice{base: ^expression.expr, start: selector, end: end.expr, range: None, span: slice_span, id: parser_node_id(&state)}, span: slice_span}
                     next
                 }
                 selector_close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after an index")
                 selector_span :: parser_cover(open.span, selector_close.span)
-                expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: ^selector, span: selector_span, kind: IndexKind.Unknown, id: parser_node_id(&state)}, span: selector_span}
+                expression = ParsedExpr{expr: Expr.Index{base: ^expression.expr, index: ^selector, span: selector_span, kind: IndexKind.Unknown, id: parser_node_id(&state)}, span: selector_span}
                 next
             }
             index :: parser_parse_expression(&state, 1, depth + 1)
@@ -1699,11 +1701,11 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 .Range(start, end, exclusive, _, _) -> {
                     range_expr := index.expr
                     expression = ParsedExpr{
-                        expr: Expr.Slice{base: expression.expr, start: start, end: end, range: Val(range_expr), span: bracket_span, id: parser_node_id(&state)},
+                        expr: Expr.Slice{base: ^expression.expr, start: start, end: end, range: Val(range_expr), span: bracket_span, id: parser_node_id(&state)},
                         span: span,
                     }
                 }
-                else -> expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: index.expr, span: bracket_span, kind: IndexKind.Unknown, id: parser_node_id(&state)}, span: span}
+                else -> expression = ParsedExpr{expr: Expr.Index{base: ^expression.expr, index: index.expr, span: bracket_span, kind: IndexKind.Unknown, id: parser_node_id(&state)}, span: span}
             }
             next
         }
@@ -1717,7 +1719,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             if operator.kind == TOKEN_DOT && parser_current_kind(&state) == TOKEN_STAR {
                 star :: parser_bump(&state)
                 deref_span :: parser_cover(expression.span, star.span)
-                expression = ParsedExpr{expr: Expr.Deref{value: expression.expr, span: deref_span, id: parser_node_id(&state)}, span: deref_span}
+                expression = ParsedExpr{expr: Expr.Deref{value: ^expression.expr, span: deref_span, id: parser_node_id(&state)}, span: deref_span}
                 next
             }
             // `Type.{ … }` / `alias.Type.{ … }` is retired; the
@@ -1742,7 +1744,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 number :: parser_bump(&state)
                 parser_add_error_code(&state, "E0049", number.span, "Jet doesn't use numeric field access like `.0` (S73)", "`.0` looks like the start of a decimal number, so tuple members must have names", "name the members when you build the tuple: `(x: 1, y: 2)`, then read `p.x`")
                 span := parser_cover(expression.span, number.span)
-                expression = ParsedExpr{expr: Expr.Field{base: expression.expr, member: "0", span: span, id: parser_node_id(&state)}, span: span}
+                expression = ParsedExpr{expr: Expr.Field{base: ^expression.expr, member: "0", span: span, id: parser_node_id(&state)}, span: span}
                 next
             }
             member :: if parser_current_kind(&state) == TOKEN_KW_COPY || parser_current_kind(&state) == TOKEN_KW_MOVE -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
@@ -1750,7 +1752,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             span := parser_cover(expression.span, member.span)
             // A field access is spanned at its member name, as in the
             // reference; `span` covers the base too.
-            expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: expression.expr, member: member_name, member_span: member.span, flatten: false, span: span, id: parser_node_id(&state)}, span: span} else -> ParsedExpr{expr: Expr.Field{base: expression.expr, member: member_name, span: member.span, id: parser_node_id(&state)}, span: span}
+            expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: ^expression.expr, member: member_name, member_span: member.span, flatten: false, span: span, id: parser_node_id(&state)}, span: span} else -> ParsedExpr{expr: Expr.Field{base: ^expression.expr, member: member_name, span: member.span, id: parser_node_id(&state)}, span: span}
             next
         }
         if kind == TOKEN_QUESTION {
@@ -1972,10 +1974,10 @@ fn parser_parse_expression_fields(state: &JetParserState, depth: Int) -> ParsedE
             value := Expr.Ident{name: parser_value(state, name_token), span: name_token.span, id: parser_node_id(&state)}
             if parser_current_kind(&state) == TOKEN_COLON {
                 parser_bump(&state)
-                parsed_value :: parser_parse_expression(&state, 1, depth + 1)
-                value = parsed_value.expr
+                parsed_value := parser_parse_expression(&state, 1, depth + 1)
+                value = ^parsed_value.expr
             }
-            &fields.push(ExprField{name: parser_value(state, name_token), name_span: name_token.span, value: value})
+            &fields.push(ExprField{name: parser_value(state, name_token), name_span: name_token.span, value: ^value})
             if parser_current_kind(&state) == TOKEN_RBRACE -> break
             separator_kind := parser_current_kind(&state)
             if {
@@ -1992,7 +1994,7 @@ fn parser_parse_expression_fields(state: &JetParserState, depth: Int) -> ParsedE
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after record fields")
-    ParsedExprFields{fields: fields, span: parser_cover(open.span, close.span)}
+    ParsedExprFields{fields: ^fields, span: parser_cover(open.span, close.span)}
 }
 
 // A record payload `.Case{…}` is read only where a struct literal may stand,

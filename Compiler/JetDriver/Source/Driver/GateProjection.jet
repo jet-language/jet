@@ -46,7 +46,7 @@ struct JetDriverGateQueryResult {
 // Inspect uses exactly the authorized source-query loader. No registration,
 // body checking, comptime execution, MIR lowering, or emission happens here.
 fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQueryResult {
-    load :: jet_driver_load(request)
+    load :: jet_driver_load_with_names(request)
     source :: jet_driver_source_query_loaded(load, request)
     if !source.complete -> return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
     modules := [SemaGateModule]{}

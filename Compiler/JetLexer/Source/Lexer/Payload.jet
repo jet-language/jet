@@ -10,8 +10,10 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_registry_row,
     name_empty,
+    name_index,
     name_intern,
     name_intern_bytes,
+    name_start,
 ]
 use core.text as unicode
 
@@ -30,6 +32,24 @@ fn intern_source(tables: &TokenTables, source: [U8], start: Int, end: Int) -> Na
     bounded_end :: if end > source.len() -> source.len() else -> end
     if start >= bounded_end -> return name_empty()
     name_intern_bytes(&tables.names, source, start, bounded_end)
+}
+
+// A keyword or punctuation kind: the scanner gives every token of the kind
+// the same bytes (literals, names, comments, fences and EOF excluded).
+fn fixed_spelling_kind(kind: Int) -> Bool Never! {
+    (kind >= K_TRUE && kind <= K_SHR) || (kind >= K_DOT && kind <= K_LBRACKET) || kind == K_BANG || kind == K_UNIFIED_ARROW || kind == K_EQ || (kind >= K_FN && kind <= K_MODULE) || (kind >= K_COLON && kind <= K_DOLLAR)
+}
+
+// `intern_source` of a token of `kind`: a fixed-spelling kind reuses the id
+// its first token interned (the same id the probe returns), checked against
+// the spelling's length.
+fn intern_token_source(tables: &TokenTables, kind: Int, source: [U8], start: Int, end: Int) -> Name Never! {
+    if !fixed_spelling_kind(kind) -> return intern_source(&tables, source, start, end)
+    cached :: tables.spellings[kind]
+    if cached > 0 && tables.names.ends[cached] - name_start(tables.names, cached) == end - start && end <= source.len() -> return Name{id: U32{cached}}
+    text :: intern_source(&tables, source, start, end)
+    tables.spellings[kind] = name_index(text)
+    text
 }
 
 fn literal_row(tables: &TokenTables, literal: TokenLiteral) -> Int Never! {
@@ -389,31 +409,38 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
 
 // The tokens of `facts`, which cover `source[from..<to]`: the gaps between
 // facts are checked from `from` to `to` (the whole source for a one-range
-// lex; a range of a chunked lex ends between tokens).
-fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables) -> LexedTokens {
+// lex; a range of a chunked lex ends between tokens). The terminator
+// `events` of the same facts apply in the same walk: each event's `;`
+// lands before its fact's token, and its diagnostics go to
+// `terminator_diagnostics`.
+fn lex_payload_from_facts(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables, terminator_diagnostics: &[Diagnostic]) -> LexedTokens {
     tokens := [Token]{}
     diagnostics := [Diagnostic]{}
     cursor := from
     index := 0
+    event_index := 0
     fact_count :: facts.len() /% 4
     loop index < fact_count {
+        event_index = terminator_events_apply(facts, events, event_index, index, &tokens, &terminator_diagnostics)
         kind :: kind_at(facts, index)
         start :: facts[index * 4 + 1]
         end :: facts[index * 4 + 2]
         gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-        text :: intern_source(&tables, source, start, end)
+        text :: intern_token_source(&tables, kind, source, start, end)
         built :: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
         if built.keep -> &tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
         cursor = end
         index += 1
     }
     gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-    LexedTokens{tokens: tokens, diagnostics: diagnostics}
+    LexedTokens{tokens: ^tokens, diagnostics: ^diagnostics}
 }
 
+// An interpolation's nested source: payload only, no terminator pass.
 fn lex_payload_at_depth(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables) -> LexedTokens {
     facts :: raw_token_facts(source, config_surface)
-    lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth, 0, source.len(), &tables)
+    unused := [Diagnostic]{}
+    lex_payload_from_facts(source, facts, [Int]{}, config_surface, allow_reserved_identifiers, depth, 0, source.len(), &tables, &unused)
 }
 
 fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, tables: &TokenTables, diagnostics: &[Diagnostic]) -> [Token] {

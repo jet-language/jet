@@ -164,14 +164,14 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
             return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{missing}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
     }
-    requires_run :: project && !jet_cli_package_is_library_only(file) && jet_cli_entry_lacks_run(source)
+    lacks_run :: project && jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
+            if lacks_run && !jet_cli_package_is_library_only(file, result) -> &diagnostics.push(jet_cli_no_run_diagnostic())
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
                 if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
             }

@@ -2957,12 +2957,12 @@ fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
 
 // jet_driver_inline_package with the top-level item scan of a large source
 // on the compiler threads (jet_driver_inline_top_level_package_threads).
+// `bytes` are `source.bytes()`, which the caller lexes after the scan.
 // A thread spawn can fail, so this entry is fallible like the threaded
 // parse entries that call it.
-fn jet_driver_inline_package_threads(source: String, threads: CompilerThreads) -> JetDriverInlinePackage {
+fn jet_driver_inline_package_threads(source: String, bytes: [U8], threads: CompilerThreads) -> JetDriverInlinePackage {
     none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
     if !source.contains("package") -> return none
-    bytes :: source.bytes()
     first :: jet_driver_inline_trivia_end(bytes, 0)
     open :: jet_driver_inline_package_open(bytes, first)
     if open >= 0 {
@@ -3064,12 +3064,18 @@ fn jet_driver_inline_scan_part(inputs: Shared<JetDriverInlineShared>, part: Shar
 // an offset into the original text (Rust `InlinePackageBlock::mask_source`).
 fn jet_driver_blank_source_range(source: String, start: Int, end: Int) -> String {
     bytes := source.bytes()
-    loop offset in start..<end {
-        if bytes[offset] != (U8{10}) && bytes[offset] != (U8{13}) -> bytes[offset] = U8{32}
-    }
+    jet_driver_blank_bytes(&bytes, start, end)
     // copy: the blanked source is a new owned String. On a UTF-8 failure it falls back to `source`,
     // the caller's file text (a read parameter), which stays with the caller.
     String.from_bytes(bytes) ?? source.copy()
+}
+
+// jet_driver_blank_source_range in place on the source bytes. A carrier
+// range starts and ends at ASCII bytes, so the blanked bytes stay UTF-8.
+fn jet_driver_blank_bytes(bytes: &[U8], start: Int, end: Int) Never! {
+    loop offset in start..<end {
+        if bytes[offset] != (U8{10}) && bytes[offset] != (U8{13}) -> bytes[offset] = U8{32}
+    }
 }
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
@@ -3357,11 +3363,14 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
 // parse splits at item boundaries (parse_lexed_with_source_threads).
 // Fallible like every thread-spawning step of the parse wave.
 fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
-    carrier :: jet_driver_inline_package_threads(text, threads)
+    // The one copy of the file's bytes: the carrier scan reads it, the mask
+    // blanks it in place, the lexer and parser read it.
+    source := text.bytes()
+    carrier :: jet_driver_inline_package_threads(text, source, threads)
     if carrier.error == .Val(diagnostic) {
         return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{diagnostic}}, demand: jet_driver_empty_core_identifier_demand()}
     }
-    source :: if carrier.found -> jet_driver_mask_inline_package(text, carrier).bytes() else -> text.bytes()
+    if carrier.found -> jet_driver_blank_bytes(&source, carrier.start, carrier.end)
     lexed := lex_threads(source, threads)
     tokens :: lexed.lexed.tokens.len()
     lines :: lexed.line_starts.len() - 1
@@ -3447,7 +3456,9 @@ fn jet_driver_parse_one(job: JetDriverParseJob, threads: CompilerThreads) -> Jet
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output.
 fn jet_driver_parse_core_source(text: String, module_name: String, owned_members: [String], runtime: Bool, runtime_entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
-    source :: jet_driver_mask_inline_package(text, jet_driver_inline_package_threads(text, threads)).bytes()
+    source := text.bytes()
+    carrier :: jet_driver_inline_package_threads(text, source, threads)
+    if carrier.found -> jet_driver_blank_bytes(&source, carrier.start, carrier.end)
     lexed := lex_generated_threads(source, threads)
     tokens :: lexed.lexed.tokens.len()
     lines :: lexed.line_starts.len() - 1
@@ -4423,7 +4434,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     }
     complete :: failed_stage == None && !jet_driver_has_errors(diagnostics)
-    names :: jet_driver_loaded_names(&modules, source_units, resolved_imports)
+    run_member_paths :: jet_driver_run_member_paths(modules, source_units, catalog.entry_package_identity)
     JetDriverLoadResult{
         package_identity: catalog.entry_package_identity,
         packages: catalog.packages,
@@ -4437,8 +4448,30 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         diagnostics: diagnostics,
         failed_stage: failed_stage,
         complete: complete,
-        names: Val(names),
+        run_member_paths: run_member_paths,
     }
+}
+
+// The member files of the entry package (a `package.jet` namespace) that
+// declare a top-level `fn run`, in load order: the host's library test
+// (JetCli `jet_cli_package_is_library_only`) reads them from the load
+// instead of parsing every member again.
+fn jet_driver_run_member_paths(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], package_identity: String) -> [String] Never! {
+    paths := [String]{}
+    loop loaded in modules {
+        if loaded.package_identity != package_identity || loaded.source_unit_index < 0 || loaded.source_unit_index >= source_units.len() -> next
+        unit :: source_units[loaded.source_unit_index]
+        if !unit.in_namespace || unit.path.starts_with("<build-generated>/") -> next
+        loop item in loaded.program.items {
+            if item == .Func(function) {
+                if function.name == "run" {
+                    &paths.push(unit.path)
+                    break
+                }
+            }
+        }
+    }
+    paths
 }
 
 // A module path segment names its file in PascalCase: `unicode_assets` is

@@ -23,7 +23,15 @@ struct JetDriverSourceQueryResult {
 }
 
 fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
-    jet_driver_source_query_loaded(jet_driver_load(request), request)
+    jet_driver_source_query_loaded(jet_driver_load_with_names(request), request)
+}
+
+// A source query's load with its name ledger. Only the source queries read
+// the ledger, so a compile's `jet_driver_load` leaves `names` None.
+fn jet_driver_load_with_names(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+    load := jet_driver_load(request)
+    load.names = Val(jet_driver_loaded_names(&load.modules, load.source_units, load.imports))
+    load
 }
 
 fn jet_driver_source_query_loaded(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {

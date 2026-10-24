@@ -1957,7 +1957,7 @@ Jet counterparts the name matcher missed; every row cites its Jet location in `c
 | `fn-decl` | 4 | 0 | 116 | Compiler/JetParser/Source/Parser/Items.jet:969 (parser_parse_function) |
 | `hangar-external-roots` | 4 | 0 | 241 | Jetpack/CLI/Source/Hangar/ExternalRootCommands.jet:72 (cli_hangar_list_external_roots) |
 | `if-condition-lowering` | 4 | 0 | 801 | Compiler/JetCodegen/Source/Codegen/Statements.jet:173 (lower_condition) |
-| `lexer-terminators-covered` | 4 | 0 | 195 | Compiler/JetLexer/Source/Lexer/Terminators.jet:482 (lexed_with_terminators) |
+| `lexer-terminators-covered` | 4 | 0 | 195 | Compiler/JetLexer/Source/Lexer/Terminators.jet:483 (terminator_events_apply) |
 | `origin-join` | 4 | 0 | 22 | Compiler/JetSema/Source/Sema/CheckedProjections.jet:27 (sema_fact_local_origin) |
 | `profile-generation-build` | 4 | 0 | 197 | Jetpack/CLI/Source/Profile/ProfileGenerationBuild.jet:128 (cli_build_package_generation) |
 | `reflect-dimension-range` | 4 | 0 | 37 | Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:390 (sema_comptime_reflection_dimension) |
@@ -2074,7 +2074,7 @@ Jet counterparts the name matcher missed; every row cites its Jet location in `c
 | `jsonl` | 2 | 0 | 25 | Core/Encoding/Jsonl.jet:37 (parse) |
 | `lambda-sendability` | 2 | 0 | 68 | Compiler/JetSema/Source/Sema/Ownership/Crossings.jet:309 (sema_ownership_crossing_problem) |
 | `legacy-build-import` | 2 | 0 | 406 | Jetpack/CLI/Source/Migration/Importers.jet:208 (cli_import_cargo) |
-| `lexer-split-header-covered` | 2 | 0 | 19 | covered: Jet emits the same text `' must stay on the same line as the closing ')'` at Compiler/JetLexer/Source/Lexer/Terminators.jet:511 |
+| `lexer-split-header-covered` | 2 | 0 | 19 | covered: Jet emits the same text `' must stay on the same line as the closing ')'` at Compiler/JetLexer/Source/Lexer/Terminators.jet:501 |
 | `library-export-diagnostics` | 2 | 0 | 14 | Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:10323 (E1257) |
 | `library-outputs-covered` | 0 | 2 | 343 | tests/cases/library_outputs/component_build_load_and_foreign_call_are_one_surface.case:5 (component_build_load_and_foreign_call_are_one_surface) |
 | `lint-policy-covered` | 0 | 2 | 28 | Jetpack/PackageModel/Tests/LintPolicy.jet:17 (lint policy turns a denied lint into E1293) |

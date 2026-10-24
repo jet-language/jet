@@ -477,72 +477,47 @@ fn split_spelling(kind: Int) -> String Never! {
     }
 }
 
-fn lexed_with_terminators(facts: [Int], input: ^LexedTokens, events: [Int]) -> LexedTokens {
-    // A local owner: its fields move out and are refilled in place.
-    lexed := ^input
-    tokens := [Token]{}
-    diagnostics := ^lexed.diagnostics
-    lexed.diagnostics = [Diagnostic]{}
-    // The payload tokens, last first: each one is moved over (popped), never
-    // copied, in the same order the index walk visited them.
-    remaining := ^lexed.tokens
-    lexed.tokens = [Token]{}
-    &remaining.reverse()
-    event_index := 0
-    raw_index := 0
-    fact_count :: facts.len() /% 4
+// Applies the events of `events[event_index..]` at fact `raw_index` before
+// that fact's token lands: a `;` token, or the E0986 diagnostic of a split
+// header. Returns the index of the first later event.
+fn terminator_events_apply(facts: [Int], events: [Int], event_index: Int, raw_index: Int, tokens: &[Token], diagnostics: &[Diagnostic]) -> Int {
+    at_event := event_index
     event_count :: events.len() /% 3
-    loop raw_index < fact_count {
-        loop event_index < event_count && events[event_index * 3 + 1] == raw_index {
-            event :: events[event_index * 3]
-            at :: events[event_index * 3 + 2]
-            if {
-                event == 1 -> {
-                    &tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at}))
-                }
-                else -> {
-                    kind :: kind_at(facts, raw_index)
-                    start :: facts[raw_index * 4 + 1]
-                    end :: facts[raw_index * 4 + 2]
-                    spelling :: split_spelling(kind)
-                    &diagnostics.push(diagnostic_from_registry(
-                        "E0986",
-                        Val(Span{start: start, end: end}),
-                        "`{spelling}` must stay on the same line as the closing `)`",
-                        "an arrow, effect row, or opening block continues the header on its line",
-                        "move `{spelling}` up to the `)` line",
-                    ))
-                }
+    loop at_event < event_count && events[at_event * 3 + 1] == raw_index {
+        event :: events[at_event * 3]
+        at :: events[at_event * 3 + 2]
+        if {
+            event == 1 -> {
+                &tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at}))
             }
-            event_index += 1
-        }
-        kind :: kind_at(facts, raw_index)
-        start :: facts[raw_index * 4 + 1]
-        end :: facts[raw_index * 4 + 2]
-        if remaining.len() > 0 {
-            last :: remaining.len() - 1
-            if {
-                remaining[last].kind == kind && remaining[last].span.start == start && remaining[last].span.end == end -> {
-                    moved :: &remaining.pop() ?? panic("a payload token was checked present")
-                    &tokens.push(moved)
-                }
-                else -> {
-                    if remaining[last].span.start <= start -> _ := &remaining.pop()
-                }
+            else -> {
+                kind :: kind_at(facts, raw_index)
+                start :: facts[raw_index * 4 + 1]
+                end :: facts[raw_index * 4 + 2]
+                spelling :: split_spelling(kind)
+                &diagnostics.push(diagnostic_from_registry(
+                    "E0986",
+                    Val(Span{start: start, end: end}),
+                    "`{spelling}` must stay on the same line as the closing `)`",
+                    "an arrow, effect row, or opening block continues the header on its line",
+                    "move `{spelling}` up to the `)` line",
+                ))
             }
         }
-        raw_index += 1
+        at_event += 1
     }
-    LexedTokens{tokens: tokens, diagnostics: diagnostics}
+    at_event
 }
 
 fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
     tables := token_tables()
     facts :: raw_token_facts(source, config_surface)
-    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0, 0, source.len(), &tables)
     events :: terminator_events(source, facts)
-    lexed :: lexed_with_terminators(facts, ^raw, events)
-    Lexed{tokens: lexed.tokens, tables: tables, diagnostics: lexed.diagnostics}
+    terminator_diagnostics := [Diagnostic]{}
+    lexed := lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), &tables, &terminator_diagnostics)
+    diagnostics := ^lexed.diagnostics
+    &diagnostics.extend(terminator_diagnostics)
+    Lexed{tokens: ^lexed.tokens, tables: ^tables, diagnostics: ^diagnostics}
 }
 
 fn lex(source: [U8]) -> Lexed {
