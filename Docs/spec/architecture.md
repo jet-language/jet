@@ -1439,7 +1439,14 @@ SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
 `Core/Vendor/Sqlite3`, with its license and the seed's bundled feature flags,
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
-Packaging ships those sources beside the runtime. User foreign
+Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
+once when the toolchain is packaged: `prebuild-runtime.mjs` builds each library
+under the native C policy and installs `jet-runtime/<key>/foreign/<lib>/lib<lib>.a`
+(with its LICENSE and VERSION) beside the pack. The archive digests are part of
+the runtime key and the vendored sources, flags and C compiler identity part of
+the pack recipe. A Core `c.<lib>` import links that archive, so neither jet's
+self-compile nor a `core.db` or `core.net.tls` program needs a C compiler; only
+C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
