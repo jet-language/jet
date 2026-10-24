@@ -644,9 +644,12 @@ fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
     """
 }
 
-// Fixture-only until libc leaves the pack: raw clone does not construct musl's
-// FS TLS or set __libc.threaded. Child stack is [entry,arg] and has a guard page;
-// parent/child TID words live until the kernel's CHILD_CLEARTID and join finish.
+// Raw clone runs the child at entry(arg) on the supplied stack [entry,arg]
+// and exits 0 if entry returns. It does not construct musl's FS TLS or set
+// __libc.threaded, so a thread made this way stays fixture-only until libc
+// leaves the pack; the spawn child (HostSpawn.jet spawn_vfork) only runs raw
+// syscalls before execve. A thread's stack has a guard page; parent/child TID
+// words live until the kernel's CHILD_CLEARTID and join finish.
 #[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
 fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
     """

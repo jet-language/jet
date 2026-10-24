@@ -209,9 +209,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1172,
+  "total": 1175,
   "counts": {
-    "Compiler": 527,
+    "Compiler": 530,
     "Core": 204,
     "Examples": 39,
     "Jetpack": 10,
@@ -2630,42 +2630,63 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 291,
+      "line": 293,
       "column": 13,
       "reason": "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 709,
+      "line": 382,
+      "column": 13,
+      "reason": "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
+      "line": 392,
+      "column": 5,
+      "reason": "rt_sigprocmask reads the parent's saved mask word in this spawn's block"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
+      "line": 433,
+      "column": 5,
+      "reason": "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
+      "line": 786,
       "column": 9,
       "reason": "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 723,
+      "line": 800,
       "column": 5,
       "reason": "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 734,
+      "line": 811,
       "column": 5,
       "reason": "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 739,
+      "line": 816,
       "column": 9,
       "reason": "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 750,
+      "line": 827,
       "column": 5,
       "reason": "successful realpath NUL-terminates its result within the PATH_MAX byte buffer"
     },
@@ -8431,13 +8452,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 527 |
+| Compiler | 530 |
 | Core | 204 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
 | tests | 384 |
-| **total** | **1172** |
+| **total** | **1175** |
 
 ### Regions
 
@@ -8787,12 +8808,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 236:5 | "path lends its immutable E4 bytes for std-compatible sockaddr_un validation" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 258:13 | "scratch owns the sockaddr_un pathname and its final zero byte" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 224:17 | "Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 291:13 | "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 709:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 723:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 734:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 739:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 750:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 293:13 | "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 382:13 | "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 392:5 | "rt_sigprocmask reads the parent's saved mask word in this spawn's block" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 433:5 | "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 786:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 800:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 811:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 816:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 827:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 22:5 | "bytes borrows one live NUL-terminated startup string" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 45:5 | "startup lends the immutable, null-terminated envp pointer array" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 58:5 | "rows exclusively owns raw_count index records; startup lends every pointed-to NUL string" |
