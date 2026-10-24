@@ -5823,6 +5823,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/collections_and_methods/sentry_typed_int_store_keeps_exact_carrier.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the typed pointer refers to the live local cell for these stores"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/comptime_cli_parity/fixtures/tier_parity_examples_run_through_aot_jit_and_interpreter/tooling_checked_text_type/checked_text_type.jet",
       "line": 20,
       "column": 5,
@@ -5851,10 +5858,66 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet",
+      "line": 20,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/core_crypto_argon2id/argon2id_parallel_lanes_match_rfc_vector_across_tiers/input/run.jet",
       "line": 7,
       "column": 5,
       "reason": "fixed Argon2id parallel-lane known-answer vector"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "value is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_alignment.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the tuple storage is live but this raw Int is misaligned"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_recursive_stack.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the recursive address outlives its owning Jet frame"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_stack.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the returned address outlives its owning Jet frame"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_provenance.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "external address must be a live allocation"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_quarantine.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "pointer is used only after arena reset to prove quarantine"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/custom/fixtures/sentry_source_policy_off_is_tier_parity/fixture.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "the local cell is live for this raw read"
     },
     {
       "package": "tests",
@@ -6012,6 +6075,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/place_window_lifetimes/borrowed_window_stays_caller_owned.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the borrowed value is live in the caller"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/place_window_lifetimes/heap_element_window_stays_allocator_owned.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the list element remains heap-owned"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/place_window_lifetimes/stack_window_uses_expiring_sentry_address.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "cell is live on this stack frame"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/policy_scope/unsafe_obligations_are_checked_before_codegen.fixture/run.jet",
       "line": 5,
       "column": 5,
@@ -6054,182 +6138,98 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_collections_and_methods/sentry_typed_int_store_keeps_exact_carrier.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the typed pointer refers to the live local cell for these stores"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet",
-      "line": 20,
-      "column": 5,
-      "reason": "the exit callback has no captured state"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "value is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_alignment.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the tuple storage is live but this raw Int is misaligned"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_recursive_stack.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "the recursive address outlives its owning Jet frame"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_stack.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the returned address outlives its owning Jet frame"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_provenance.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "external address must be a live allocation"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_quarantine.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "pointer is used only after arena reset to prove quarantine"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_custom/fixtures/sentry_source_policy_off_is_tier_parity/fixture.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "the local cell is live for this raw read"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_place_window_lifetimes/borrowed_window_stays_caller_owned.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the borrowed value is live in the caller"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_place_window_lifetimes/heap_element_window_stays_allocator_owned.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the list element remains heap-owned"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_place_window_lifetimes/stack_window_uses_expiring_sentry_address.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "cell is live on this stack frame"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
+      "file": "tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
       "line": 1,
       "column": 1,
       "reason": "the cell is live on this frame"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
+      "file": "tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
       "line": 9,
       "column": 5,
       "reason": "call the gated reader"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
+      "file": "tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
       "line": 15,
       "column": 5,
       "reason": "test region calls the gated reader"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/ffi_capability_edge_uses_shared_sentry_prelude/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/ffi_capability_edge_uses_shared_sentry_prelude/main.jet",
       "line": 7,
       "column": 5,
       "reason": "the foreign call may write through the borrowed value"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet",
       "line": 2,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be a live, valid Int"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet",
       "line": 10,
       "column": 5,
       "reason": "addr is the address of `cell`, a live Int on this stack frame"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet",
       "line": 2,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be a live, valid Int"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet",
       "line": 10,
       "column": 5,
       "reason": "addr is the address of `cell`, a live Int on this stack frame"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/sentry_kernel_is_shared_by_aot_and_runtime_adapters/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/sentry_kernel_is_shared_by_aot_and_runtime_adapters/main.jet",
       "line": 7,
       "column": 5,
       "reason": "the local cell is live for this raw read"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet",
       "line": 2,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be a live, valid Int"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet",
       "line": 10,
       "column": 5,
       "reason": "addr is the address of `cell`, a live Int on this stack frame"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet",
       "line": 2,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be valid"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet",
       "line": 10,
       "column": 5,
       "reason": "safe: cell is live"
     },
     {
       "package": "tests",
-      "file": "tests/cases/tir_unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet",
+      "file": "tests/cases/unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet",
       "line": 2,
       "column": 1,
       "reason": "UART TX register is mapped by the target machine"
@@ -8084,7 +8084,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
-      "file": "tests/run/tir_patterns_and_fields/fixed_size_list_widens_at_core_call.jet",
+      "file": "tests/run/patterns_and_fields/fixed_size_list_widens_at_core_call.jet",
       "line": 5,
       "column": 5,
       "reason": "fixed signature vector"
@@ -8392,7 +8392,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
-      "file": "tests/ui/tir_unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet",
+      "file": "tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet",
       "line": 2,
       "column": 1,
       "reason": "UART TX register is mapped by the target machine"
@@ -9245,11 +9245,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/cli_parts_inspect/fixtures/team/unsafe/main.jet | 2:5 | "audit" |
 | tests | tests/cases/cli_parts_inspect/fixtures/test_hardened/hardened/main.jet | 4:5 | "test deliberately reads after arena reset" |
 | tests | tests/cases/cli_parts_inspect/fixtures/test_hardened/release/main.jet | 4:5 | "test deliberately reads after arena reset" |
+| tests | tests/cases/collections_and_methods/sentry_typed_int_store_keeps_exact_carrier.fixture/main.jet | 6:5 | "the typed pointer refers to the live local cell for these stores" |
 | tests | tests/cases/comptime_cli_parity/fixtures/tier_parity_examples_run_through_aot_jit_and_interpreter/tooling_checked_text_type/checked_text_type.jet | 20:5 | "checked text example output" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers.fixture/main.jet | 8:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o1/run.jet | 11:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o2/run.jet | 11:5 | "fixed RFC interop vectors" |
+| tests | tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet | 20:5 | "the exit callback has no captured state" |
 | tests | tests/cases/core_crypto_argon2id/argon2id_parallel_lanes_match_rfc_vector_across_tiers/input/run.jet | 7:5 | "fixed Argon2id parallel-lane known-answer vector" |
+| tests | tests/cases/custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
+| tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_alignment.jet | 4:5 | "the tuple storage is live but this raw Int is misaligned" |
+| tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_recursive_stack.jet | 11:5 | "the recursive address outlives its owning Jet frame" |
+| tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_stack.jet | 8:5 | "the returned address outlives its owning Jet frame" |
+| tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
+| tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_quarantine.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
+| tests | tests/cases/custom/fixtures/sentry_source_policy_off_is_tier_parity/fixture.jet | 7:5 | "the local cell is live for this raw read" |
 | tests | tests/cases/dev_parts_routine/jit_1216_adversarial_regressions.fixture/raw_alias/run.jet | 5:5 | "the pointer stays inside this stack frame" |
 | tests | tests/cases/dev_parts_routine/unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries.fixture/fault.jet | 3:5 | "mapped address is valid and aligned" |
 | tests | tests/cases/fixtures_crypto_bridge_entropy/argon2id_rfc_and_expert_known_answers_kill_argon2i_mutation.fixture/run.jet | 37:5 | "original public expert Argon2id KAT" |
@@ -9272,38 +9281,29 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/observe/panic_context_uses_only_lexically_live_locals.fixture/unsafe/panic_lexical_unsafe.jet | 3:5 | "the region only binds and prints a local; it reads and writes no raw memory" |
 | tests | tests/cases/output_callable/runnable_contracts_and_selection_fail_in_sema.fixture/probe3/main.jet | 2:1 | "raw boundary" |
 | tests | tests/cases/pin/fixtures/library_wires_self_ref_under_unsafe_and_exposes_safe_pin_api/fixture.jet | 10:5 | "node storage is fixed for the returned pin; self_addr names this place" |
+| tests | tests/cases/place_window_lifetimes/borrowed_window_stays_caller_owned.fixture/main.jet | 5:5 | "the borrowed value is live in the caller" |
+| tests | tests/cases/place_window_lifetimes/heap_element_window_stays_allocator_owned.fixture/main.jet | 6:5 | "the list element remains heap-owned" |
+| tests | tests/cases/place_window_lifetimes/stack_window_uses_expiring_sentry_address.fixture/main.jet | 6:5 | "cell is live on this stack frame" |
 | tests | tests/cases/policy_scope/unsafe_obligations_are_checked_before_codegen.fixture/run.jet | 5:5 | "local pointer" |
 | tests | tests/cases/single_use/drop_erases_no_unsafe_in_codegen.fixture/source-1.jet | 14:5 | "gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_block_satisfies_single_use.fixture/source-1.jet | 15:5 | "the resource is already gone; nothing to release" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 13:1 | "voids a freshly-acquired lock whose resource is already gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 19:5 | "calling the audited voider" |
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
-| tests | tests/cases/tir_collections_and_methods/sentry_typed_int_store_keeps_exact_carrier.fixture/main.jet | 6:5 | "the typed pointer refers to the live local cell for these stores" |
-| tests | tests/cases/tir_control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet | 20:5 | "the exit callback has no captured state" |
-| tests | tests/cases/tir_custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
-| tests | tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_alignment.jet | 4:5 | "the tuple storage is live but this raw Int is misaligned" |
-| tests | tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_recursive_stack.jet | 11:5 | "the recursive address outlives its owning Jet frame" |
-| tests | tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_stack.jet | 8:5 | "the returned address outlives its owning Jet frame" |
-| tests | tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
-| tests | tests/cases/tir_custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_quarantine.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
-| tests | tests/cases/tir_custom/fixtures/sentry_source_policy_off_is_tier_parity/fixture.jet | 7:5 | "the local cell is live for this raw read" |
-| tests | tests/cases/tir_place_window_lifetimes/borrowed_window_stays_caller_owned.fixture/main.jet | 5:5 | "the borrowed value is live in the caller" |
-| tests | tests/cases/tir_place_window_lifetimes/heap_element_window_stays_allocator_owned.fixture/main.jet | 6:5 | "the list element remains heap-owned" |
-| tests | tests/cases/tir_place_window_lifetimes/stack_window_uses_expiring_sentry_address.fixture/main.jet | 6:5 | "cell is live on this stack frame" |
-| tests | tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
-| tests | tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 9:5 | "call the gated reader" |
-| tests | tests/cases/tir_unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 15:5 | "test region calls the gated reader" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/ffi_capability_edge_uses_shared_sentry_prelude/main.jet | 7:5 | "the foreign call may write through the borrowed value" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet | 2:1 | "reads through a raw pointer; addr must be a live, valid Int" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet | 10:5 | "addr is the address of `cell`, a live Int on this stack frame" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet | 2:1 | "reads through a raw pointer; addr must be a live, valid Int" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet | 10:5 | "addr is the address of `cell`, a live Int on this stack frame" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/sentry_kernel_is_shared_by_aot_and_runtime_adapters/main.jet | 7:5 | "the local cell is live for this raw read" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet | 2:1 | "reads through a raw pointer; addr must be a live, valid Int" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet | 10:5 | "addr is the address of `cell`, a live Int on this stack frame" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet | 2:1 | "reads through a raw pointer; addr must be valid" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet | 10:5 | "safe: cell is live" |
-| tests | tests/cases/tir_unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet | 2:1 | "UART TX register is mapped by the target machine" |
+| tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
+| tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 9:5 | "call the gated reader" |
+| tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 15:5 | "test region calls the gated reader" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/ffi_capability_edge_uses_shared_sentry_prelude/main.jet | 7:5 | "the foreign call may write through the borrowed value" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet | 2:1 | "reads through a raw pointer; addr must be a live, valid Int" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/paren/main.jet | 10:5 | "addr is the address of `cell`, a live Int on this stack frame" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet | 2:1 | "reads through a raw pointer; addr must be a live, valid Int" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/mem_address_of_never_folds_plain_or_parenthesized/plain/main.jet | 10:5 | "addr is the address of `cell`, a live Int on this stack frame" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/sentry_kernel_is_shared_by_aot_and_runtime_adapters/main.jet | 7:5 | "the local cell is live for this raw read" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet | 2:1 | "reads through a raw pointer; addr must be a live, valid Int" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/unsafe_fn_block_and_ptr_ops/main.jet | 10:5 | "addr is the address of `cell`, a live Int on this stack frame" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet | 2:1 | "reads through a raw pointer; addr must be valid" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet | 10:5 | "safe: cell is live" |
+| tests | tests/cases/unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/cases/web_build/module_local_dev_is_validated_as_web_runtime.fixture/main.jet | 4:9 | "exercise the web TIR gate" |
 | tests | tests/conformance/corpus/core/crypto/aes/nist_gcm.jet | 11:5 | "published KAT or frozen seed AES-GCM fixture" |
 | tests | tests/conformance/corpus/core/crypto/aes/seed_differential.jet | 11:5 | "published KAT or frozen seed AES-GCM fixture" |
@@ -9568,7 +9568,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | tests | tests/run/core_crypto_foundations/crypto_aead_tampering_is_rejected_across_tiers.jet | 16:5 | "fixed AEAD tamper vector" |
-| tests | tests/run/tir_patterns_and_fields/fixed_size_list_widens_at_core_call.jet | 5:5 | "fixed signature vector" |
+| tests | tests/run/patterns_and_fields/fixed_size_list_widens_at_core_call.jet | 5:5 | "fixed signature vector" |
 | tests | tests/ui/audited_gate_ladder_forbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
 | tests | tests/ui/cffi_out_pointer_requires_unsafe.jet | 12:1 | "the local slot remains live for the complete C call" |
 | tests | tests/ui/checked_text_raw_requires_unsafe.jet | 22:5 | "audited literal" |
@@ -9612,7 +9612,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/ui/lowlevel_volatile_write_wrong_value.jet | 6:5 | "slot is live and pointer never escapes" |
 | tests | tests/ui/marker_group_forbidden.jet | 2:21 | "audit" |
 | tests | tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 11:9 | "attempt to discard a loan" |
-| tests | tests/ui/tir_unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
+| tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/ui/unsafe_forbidden/run.jet | 2:5 | "not allowed" |
 | tests | tests/ui/unsafe_obligation_missing.jet | 5:5 | "local pointer" |
 | tests | tests/ui/unsafe_obligation_no_bleed.jet | 6:5 | "two independent pointer operations" |
