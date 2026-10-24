@@ -1,0 +1,8 @@
+Error [E0118]: `name` in this pattern would make a new `name`, but `name` already holds a value
+  --> pattern_test_reuse_map_value.jet:19:30
+    |
+ 19 |     same :: user == ["name": name, ..]
+    |                              ^^^^
+ Why: A pattern test introduces the names in its pattern; it does not compare with an existing value
+ Fix: Pick a new name to bind (`_` if unused); to compare, test the pattern in an `if` condition and compare the bound name there: `if subject == .Case(found) && found == name`
+More: jet-lang.dev/e/E0118

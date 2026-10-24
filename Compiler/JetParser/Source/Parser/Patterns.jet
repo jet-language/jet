@@ -375,12 +375,14 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
     ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(&state)}, span: token.span}
 }
 // S31 only equality against `Val(name)` introduces a binding.
-// Other payload expressions construct a value. This restriction belongs to
-// comparison RHS parsing, not dispatch-arm or nested leading-dot patterns.
+// Other payload expressions construct a value, and so does an ALL_CAPS
+// constant name: `x == Val(LIMIT)` compares with the constant.
+// This restriction belongs to comparison RHS parsing, not dispatch-arm or
+// nested leading-dot patterns.
 fn parser_comparison_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == TOKEN_IDENT && parser_value(state, token) == "Val" {
-        return parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN
+        return parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN && !parser_constant_name(parser_value_at(&state, 2))
     }
     parser_pattern_rhs_ahead(&state)
 }

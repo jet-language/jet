@@ -1,0 +1,8 @@
+Error [E0118]: `y` in this pattern would make a new `y`, but `y` already holds a value
+  --> pattern_test_reuse_record.jet:19:34
+    |
+ 19 |     same :: point == Point{x: 0, y}
+    |                                  ^
+ Why: A pattern test introduces the names in its pattern; it does not compare with an existing value
+ Fix: Pick a new name to bind (`_` if unused); to compare, test the pattern in an `if` condition and compare the bound name there: `if subject == .Case(found) && found == y`
+More: jet-lang.dev/e/E0118

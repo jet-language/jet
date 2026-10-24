@@ -4,6 +4,7 @@
 // expression checker owns subject inference; this file owns only pattern
 // shape/type validation, recovery bindings, and TPattern construction.
 use jet_foundation.[
+    BindName,
     BinEndian,
     BinMatchPart,
     Diagnostic,
@@ -814,32 +815,82 @@ fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagno
     }
 }
 
-// S31 with (#4713): `subject == Val(name)`
-// binds `name` in every expression position. In a value position a name that
-// already holds a value is this E0118; `Val((name))` is the comparison with
-// the held value (a parenthesized payload constructs it). Conditions report a
-// held name when they declare their bindings
-// (sema_expression_declare_condition_bindings), which keeps the
-// refinement `x == .Val(x)` that every `x != None` test is rewritten into.
+// S31 with (#4713): a pattern test binds the names in its pattern in every
+// expression position. In a value position a name that already holds a
+// value is this E0118, whatever slot it sits in (variant and payload slots,
+// nested patterns, record fields, list items and rest, map values); it never
+// compares with the held value. `Val((name))` is the comparison with the held
+// value (a parenthesized payload constructs it). Text and byte holes report
+// their own E0118 while the pattern is checked. Conditions report a held name
+// when they declare their bindings (sema_expression_declare_condition_bindings),
+// which keeps the refinement `x == .Val(x)` that every `x != None` test is
+// rewritten into.
 fn sema_pattern_test_reused_payload_name(pattern: Pattern, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    name := ""
-    name_span := Span{start: 0, end: 0}
-    if pattern == {
-        .Present(binding, binding_span, inner, _) -> if inner == None {
-            name = binding
-            name_span = binding_span
+    names := [BindName]{}
+    sema_pattern_test_binding_names(pattern, &names)
+    optional_payload :: if pattern == {
+        .Present(_, _, inner, _) -> inner == None
+        .Variant(variant, slots, _, _) -> variant == "Val" && slots.len() == 1 && (if slots[0] == {.Bind(_, _) -> true else -> false})
+        else -> false
+    }
+    reused := false
+    loop bound in names {
+        if bound.name == "" || sema_pattern_hole_name_available(bound.name, scopes) -> next
+        reused = true
+        name :: bound.name
+        if optional_payload {
+            &diagnostics.push(sema_error("E0118", bound.span, "`Val({name})` would make a new `{name}`, but `{name}` already holds a value", "a payload name after `==` introduces a new name; it does not compare with an existing value", "write `Val(({name}))` to compare with the existing value, or pick a new name to bind"))
+        } else {
+            &diagnostics.push(sema_error("E0118", bound.span, "`{name}` in this pattern would make a new `{name}`, but `{name}` already holds a value", "a pattern test introduces the names in its pattern; it does not compare with an existing value", "pick a new name to bind (`_` if unused); to compare, test the pattern in an `if` condition and compare the bound name there: `if subject == .Case(found) && found == {name}`"))
         }
-        .Variant(variant, slots, _, _) -> if variant == "Val" && slots.len() == 1 {
-            if slots[0] == .Bind(bound, bound_span) {
-                name = bound
-                name_span = bound_span
+    }
+    reused
+}
+
+// The names a value-position pattern test binds, in source order. Only the
+// first alternative of an or-pattern is read: every alternative binds the
+// same names.
+fn sema_pattern_test_binding_names(pattern: Pattern, names: &[BindName]) Never! {
+    if pattern == {
+        .Variant(_, bindings, _, _) -> loop slot in bindings -> sema_pattern_test_slot_names(slot, &names)
+        .Present(binding, binding_span, inner, _) -> sema_pattern_test_payload_names(binding, binding_span, inner, &names)
+        .Ok(binding, binding_span, inner, _) -> sema_pattern_test_payload_names(binding, binding_span, inner, &names)
+        .Err(binding, binding_span, inner, _) -> sema_pattern_test_payload_names(binding, binding_span, inner, &names)
+        .Or(alternatives, _) -> {
+            if alternatives.len() > 0 -> sema_pattern_test_binding_names(alternatives[0], &names)
+        }
+        .Struct(fields, _, _, _) -> {
+            loop field in fields {
+                if field == .Bind(_, _, local, local_span) -> &names.push(BindName{name: local, span: local_span, rename: None})
+                if field == .Nested(_, _, nested) -> sema_pattern_test_binding_names(nested, &names)
             }
         }
+        .List(items, rest, _) -> {
+            loop item in items -> sema_pattern_test_slot_names(item, &names)
+            if rest == .Val(tail) && tail.name == .Val(bound) {
+                if bound.rename == .Val(local) -> &names.push(BindName{name: local.name, span: local.span, rename: None}) else -> &names.push(bound)
+            }
+        }
+        .Map(entries, _, _) -> loop entry in entries -> sema_pattern_test_slot_names(entry.slot, &names)
         else -> {}
     }
-    if name == "" || sema_pattern_hole_name_available(name, scopes) -> return false
-    &diagnostics.push(sema_error("E0118", name_span, "`Val({name})` would make a new `{name}`, but `{name}` already holds a value", "a payload name after `==` introduces a new name; it does not compare with an existing value", "write `Val(({name}))` to compare with the existing value, or pick a new name to bind"))
-    true
+}
+
+fn sema_pattern_test_payload_names(binding: String, binding_span: Span, inner: Pattern?, names: &[BindName]) Never! {
+    if inner == .Val(nested) {
+        sema_pattern_test_binding_names(nested, &names)
+        return
+    }
+    &names.push(BindName{name: binding, span: binding_span, rename: None})
+}
+
+fn sema_pattern_test_slot_names(slot: PatSlot, names: &[BindName]) Never! {
+    if slot == {
+        .Bind(name, span) -> &names.push(BindName{name: name, span: span, rename: None})
+        .Nested(pattern) -> sema_pattern_test_binding_names(pattern, &names)
+        .Named(_, _, inner) -> sema_pattern_test_slot_names(inner, &names)
+        else -> {}
+    }
 }
 
 // S20: Jet text has only the `\n`, `\t`, `\"`, `\\` escapes plus doubled
