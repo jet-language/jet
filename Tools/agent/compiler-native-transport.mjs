@@ -11,13 +11,13 @@ export const nativeTransportPackage = 'name: "compiler_registry_transport"\nvers
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 export function nativeCommandProblem(run) {
-    if (run.error || run.signal || run.status !== 0) return { verdict: 'no-mir', detail: `native Jet exit ${run.status ?? run.signal}: ${run.error?.message ?? run.stderr ?? ''}` };
+    if (run.error || run.signal || run.status !== 0) return { verdict: 'no-artifact', detail: `native Jet exit ${run.status ?? run.signal}: ${run.error?.message ?? run.stderr ?? ''}` };
     return null;
 }
 
 export function nativeTransportEnvironment(env = process.env) {
     const clean = { ...env };
-    for (const name of Object.keys(clean)) if (/^JET_(?:BOOTSTRAP_|FRONT_)/.test(name) || name === 'JET_DUMP_MIR') delete clean[name];
+    for (const name of Object.keys(clean)) if (/^JET_(?:BOOTSTRAP_|FRONT_)/.test(name)) delete clean[name];
     return clean;
 }
 
@@ -37,9 +37,9 @@ export function runNativeLibrary({ jet, file, prefix, lifecycle = prefix + '.lif
     if (exportsFile) hookEnv.JET_FRONT_LIBRARY_EXPORTS = resolve(exportsFile);
     const run = command(jet, ['check', resolve(file)], { prefix, cwd, env: hookEnv, execute, timeout });
     let problem = nativeCommandProblem(run);
-    if (existsSync(prefix + '.issues')) problem = { verdict: 'no-mir', detail: readFileSync(prefix + '.issues', 'utf8') };
+    if (existsSync(prefix + '.issues')) problem = { verdict: 'no-artifact', detail: readFileSync(prefix + '.issues', 'utf8') };
     if (!problem) for (const suffix of ['.o', '.exports', '.abi.json']) if (!existsSync(prefix + suffix)) {
-        problem = { verdict: 'no-mir', detail: `native library hook omitted ${suffix}` };
+        problem = { verdict: 'no-artifact', detail: `native library hook omitted ${suffix}` };
         break;
     }
     return { run, problem };
@@ -60,20 +60,11 @@ export function runNativeProgram({ jet, file, root = dirname(file), prefix, env 
     if (!existsSync(join(root, 'package.jet'))) writeFileSync(join(root, 'package.jet'), nativeTransportPackage);
     const built = join(root, '.jet/build', basename(file, '.jet'));
     rmSync(built, { force: true });
-    for (const suffix of ['.exe', '.issues', '.pack-issues', '.lir']) rmSync(prefix + suffix, { force: true });
+    for (const suffix of ['.exe', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
     const run = command(jet, ['build', resolve(file)], { prefix, cwd: root, env: nativeTransportEnvironment(env), execute, timeout });
     const problem = nativeCommandProblem(run);
     if (problem) return { run, problem };
-    if (!existsSync(built)) return { run, problem: { verdict: 'no-mir', detail: 'native build did not emit a fresh executable' } };
+    if (!existsSync(built)) return { run, problem: { verdict: 'no-artifact', detail: 'native build did not emit a fresh executable' } };
     copyFileSync(built, prefix + '.exe'); chmodSync(prefix + '.exe', 0o755);
     return { run, problem: null, binary: prefix + '.exe' };
-}
-
-export function runNativeCheckedMir({ driver, file, mir, prefix, cwd = dirname(file), env = process.env, execute, timeout }) {
-    rmSync(mir, { force: true });
-    const run = command(driver, [resolve(file), resolve(mir)], { prefix, cwd, env: nativeTransportEnvironment(env), execute, timeout });
-    let problem = nativeCommandProblem(run);
-    if (!problem && (run.stdout !== 'checked registry MIR: pass\n' || run.stderr !== '')) problem = { verdict: 'no-mir', detail: 'checked MIR driver verdict differs' };
-    if (!problem && !existsSync(mir)) problem = { verdict: 'no-mir', detail: 'native checked-MIR transport omitted MIR' };
-    return { run, problem };
 }

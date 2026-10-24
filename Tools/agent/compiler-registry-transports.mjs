@@ -148,7 +148,7 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
     // the explicitly supplied pack, never use a previous installed runtime.
     const nativeJet = stageNativeToolchain({ jet, runtimePack, runtimeDir, out: join(logDir, 'toolchain') });
     const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1', JET: nativeJet, JET_RUN: nativeJet, JET_RUNTIME_PACK: runtimePack, JET_RUNTIME_JET_OBJECT: runtimeObject, JET_RUNTIME_OBJECT: runtimeObject, JET_RUNTIME_C_LIB: runtimeObject, NO_COLOR: '1', TERM: 'dumb' };
-    for (const name of Object.keys(env)) if (/^JET_(?:BOOTSTRAP_|FRONT_)/.test(name) || name === 'JET_DUMP_MIR') delete env[name];
+    for (const name of Object.keys(env)) if (/^JET_(?:BOOTSTRAP_|FRONT_)/.test(name)) delete env[name];
     for (const name of ['JET_TEST_FILTER', 'JET_NATIVE_TEST_ID', 'FX_ONLY', 'FX_HEAD', 'FX_EXCLUDE', 'SELFHOST_SKIP', 'SELFHOST_ROOTS']) delete env[name];
     function execute(command, args = [], options = {}) {
         const result = spawnSync(command, args, { cwd: out, env, encoding: 'utf8', maxBuffer: 128 << 20, timeout: 600000, ...options });

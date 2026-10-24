@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { nativeCommandProblem, nativeTransportEnvironment, runNativeCheckedMir, runNativeLibrary, runNativeProgram } from './compiler-native-transport.mjs';
+import { nativeCommandProblem, nativeTransportEnvironment, runNativeLibrary, runNativeProgram } from './compiler-native-transport.mjs';
 
 const temporary = (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'jet-native-transport-'));
@@ -15,11 +15,11 @@ const completionOnly = (_command, _args, options) => spawnSync(process.execPath,
 
 test('native command outcomes never accept interruption or unsuccessful exits', () => {
     assert.equal(nativeCommandProblem({ status: 0 }), null);
-    for (const run of [{ status: 1 }, { status: null, signal: 'SIGKILL' }, { status: null, error: Error('spawn refused') }]) assert.equal(nativeCommandProblem(run).verdict, 'no-mir');
+    for (const run of [{ status: 1 }, { status: null, signal: 'SIGKILL' }, { status: null, error: Error('spawn refused') }]) assert.equal(nativeCommandProblem(run).verdict, 'no-artifact');
 });
 
 test('native transport clears inherited bootstrap and observation hooks', () => {
-    assert.deepEqual(nativeTransportEnvironment({ JET_TOOLCHAIN_ROOT: '/pinned', JET_RUNTIME_PACK: '/pack', JET_BOOTSTRAP_MODE: 'factory', JET_FRONT_MIR_OUTPUT: '/stale', JET_FRONT_LIBRARY_OBJECT_OUTPUT: '/stale', JET_DUMP_MIR: '/stale' }), { JET_TOOLCHAIN_ROOT: '/pinned', JET_RUNTIME_PACK: '/pack' });
+    assert.deepEqual(nativeTransportEnvironment({ JET_TOOLCHAIN_ROOT: '/pinned', JET_RUNTIME_PACK: '/pack', JET_BOOTSTRAP_MODE: 'factory', JET_FRONT_LIBRARY_OBJECT_OUTPUT: '/stale' }), { JET_TOOLCHAIN_ROOT: '/pinned', JET_RUNTIME_PACK: '/pack' });
 });
 
 test('library uses check FILE and rejects completion without fresh artifacts', (t) => {
@@ -51,14 +51,4 @@ test('program build completion without an executable is not a native feed', (t) 
     } });
     assert.match(result.problem.detail, /a fresh executable/);
     assert.equal(existsSync(prefix + '.exe'), false);
-});
-
-test('checked MIR requires the real driver verdict and a fresh stream', (t) => {
-    const root = temporary(t), file = join(root, 'unit.jet'), mir = join(root, 'checked.mird');
-    writeFileSync(file, 'fn run() {}\n'); writeFileSync(mir, 'stale stream');
-    const result = runNativeCheckedMir({ driver: '/pinned/mir-driver', file, mir, prefix: join(root, 'mir'), execute(command, args, options) {
-        assert.deepEqual(args, [file, mir]); return completionOnly(command, args, options);
-    } });
-    assert.equal(result.problem.detail, 'checked MIR driver verdict differs');
-    assert.equal(existsSync(mir), false);
 });

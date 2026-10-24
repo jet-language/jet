@@ -119,15 +119,6 @@ A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
 codes, and probes for another scope do not mutate the pending stop. Sentry
 records its raw fault detail before dropping it, never its rendered report.
-The native checked-MIR transport calls the CLI's authorized compiler request
-and serializes the resulting MIR through the canonical Jet MIR writer. The
-transport records the real driver outcome and requires a fresh output stream.
-`check-expect-mir-identity.mjs` compares a fixed non-test corpus
-through before/after checked-MIR drivers built from their respective pinned
-compiler sources. Both drivers use the same native transport and stop-point
-mode; compiling the same current frontend twice does not establish a historical
-frontend comparison. These execution and byte-identity checks belong to the
-composed compiler-unit proof, not the light source-parser lane.
 
 ## Purpose and scope
 

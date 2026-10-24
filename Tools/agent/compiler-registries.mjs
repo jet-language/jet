@@ -149,7 +149,7 @@ function environment() {
     const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_TEST_JSON: '1', NO_COLOR: '1', TERM: 'dumb' };
     delete env.JET_RUNTIME_PACK;
     for (const name of Object.keys(env)) {
-        if (name.startsWith('JET_FRONT_') || name.startsWith('JET_BOOTSTRAP_') || /^(JET_TEST_FILTER|JET_TEST_SHUFFLE_SEED|JET_TEST_SERIAL|JET_TEST_TRACE_TIERS|JET_NATIVE_TEST_ID|JET_NATIVE_TEST_REPORT_PATH|JET_NATIVE_TEST_RECORDS_PATH|JET_UPDATE_SNAPSHOTS|JET_SCHEMA_CACHE_DIR|JET_DUMP_MIR|FX_.*)$/.test(name)) delete env[name];
+        if (name.startsWith('JET_FRONT_') || name.startsWith('JET_BOOTSTRAP_') || /^(JET_TEST_FILTER|JET_TEST_SHUFFLE_SEED|JET_TEST_SERIAL|JET_TEST_TRACE_TIERS|JET_NATIVE_TEST_ID|JET_NATIVE_TEST_REPORT_PATH|JET_NATIVE_TEST_RECORDS_PATH|JET_UPDATE_SNAPSHOTS|JET_SCHEMA_CACHE_DIR|FX_.*)$/.test(name)) delete env[name];
     }
     return env;
 }
