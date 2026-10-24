@@ -190,7 +190,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 | [`Core/`](Core/) | The core library's Jet sources |
 | [`Jetpack/`](Jetpack/) | Jetpack, the package manager, written in Jet |
 | [`Examples/`](Examples/) | Executable examples and their golden output |
-| [`tests/`](tests/) | Behavior, diagnostic-snapshot, regression, and compiler-proof tests |
+| [`tests/`](tests/) | Behavior, diagnostic-snapshot, and regression tests |
 | [`Docs/`](Docs/README.md) | Specifications, guides, dated evidence, and the project website |
 | [`Tools/`](Tools/) | Contributor tooling: the agent environment, CI and performance scripts, the performance gauntlet, editor integrations, and Tower, the project board |
 

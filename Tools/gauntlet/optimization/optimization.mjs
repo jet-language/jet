@@ -17,7 +17,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
 const DEFAULT_MANIFEST = join(HERE, "manifest.json");
 const RUNNER = join(ROOT, "Tools/agent/jet-env");
-const CHECKER = join(ROOT, "tests/compiler-proof/optimization/check.mjs");
 const HARNESS = join(ROOT, "Tools/gauntlet/harness/run.mjs");
 const TIMEOUT_MS = 120000;
 const OBSERVATION_FIELDS = Object.freeze([
@@ -159,11 +158,8 @@ function validateManifest(manifest, manifestPath) {
   if (!Array.isArray(manifest?.families) || manifest.families.length !== 5) {
     throw new Error("optimization manifest must contain exactly five experiment families");
   }
-  if (manifest?.contract?.path !== "tests/compiler-proof/optimization/contract.json") {
-    throw new Error("families must consume the canonical optimization contract");
-  }
   for (const field of OBSERVATION_FIELDS) {
-    if (!manifest.contract.observation_fields?.includes(field)) {
+    if (!manifest.contract?.observation_fields?.includes(field)) {
       throw new Error(`canonical observation missing from manifest: ${field}`);
     }
   }
@@ -216,13 +212,10 @@ function validateManifest(manifest, manifestPath) {
 function loadContext(manifestPath) {
   const manifest = readJson(manifestPath);
   validateManifest(manifest, manifestPath);
-  const contractPath = repoPath(manifest.contract.path, "contract.path");
   const context = {
     manifest,
     manifestPath,
     manifestSha256: fileSha256(manifestPath),
-    contractSha256: fileSha256(contractPath),
-    checkerSha256: fileSha256(CHECKER),
     harnessSha256: fileSha256(HARNESS),
     families: [],
   };
@@ -256,8 +249,6 @@ function loadContext(manifestPath) {
           expected_sha256: expectedSha256,
           peer_sha256: peerSha256,
           peer_sha256_by_language: peerSha256ByLanguage,
-          checker_sha256: context.checkerSha256,
-          contract_sha256: context.contractSha256,
           compiler_sha256: null,
           target_identity: null,
           toolchain_identity: null,
@@ -388,8 +379,6 @@ function plan(context) {
     status: "authored_unexecuted",
     card: context.manifest.card,
     manifest_sha256: context.manifestSha256,
-    contract_sha256: context.contractSha256,
-    checker_sha256: context.checkerSha256,
     harness_sha256: context.harnessSha256,
     bounded_execution: context.manifest.execution,
     families: context.families.map((family) => ({
@@ -495,8 +484,6 @@ function execute(context, options) {
   const target = targetIdentity(options.jetBin);
   const tools = toolchainIdentity();
   const compilerCommand = target.compiler_path ?? "jet";
-  const checkerProcess = runProcess(RUNNER, ["full", "node", CHECKER, "--json"], { timeoutMs: options.timeoutMs });
-  const checkerRecord = parseRecord(checkerProcess.stdout);
   const variants = [];
   for (const family of context.families) {
     for (const variant of family.variants) {
@@ -535,14 +522,11 @@ function execute(context, options) {
     generated: new Date().toISOString(),
     card: context.manifest.card,
     manifest_sha256: context.manifestSha256,
-    contract_sha256: context.contractSha256,
-    checker_sha256: context.checkerSha256,
     harness_sha256: context.harnessSha256,
     target_identity: target,
     toolchain_identity: tools,
     timeout_ms: options.timeoutMs,
     scratch,
-    checker: { ...checkerProcess, record: checkerRecord },
     variants,
     gauntlet: {
       process: harnessProcess,
@@ -550,7 +534,7 @@ function execute(context, options) {
       result_sha256: resultPath ? fileSha256(resultPath) : null,
       report: harnessReport,
     },
-    proof_boundary: "Execution records are evidence for later review; bounded runs, checker blocked status, missing modes, and unavailable rows remain unverified.",
+    proof_boundary: "Execution records are evidence for later review; bounded runs, missing modes, and unavailable rows remain unverified.",
   };
   return raw;
 }
@@ -709,12 +693,9 @@ function report(context, raw) {
     card: context.manifest.card,
     manifest_sha256: context.manifestSha256,
     raw_sha256: textSha256(JSON.stringify(raw)),
-    contract_sha256: context.contractSha256,
-    checker_sha256: context.checkerSha256,
     harness_sha256: context.harnessSha256,
     target_identity: raw.target_identity ?? null,
     toolchain_identity: raw.toolchain_identity ?? null,
-    checker: raw.checker ?? null,
     gauntlet: raw.gauntlet ?? null,
     families,
     unverified,

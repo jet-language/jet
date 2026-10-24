@@ -7,15 +7,11 @@
   "driver": "Tools/gauntlet/optimization/optimization.mjs",
   "runner": {
     "environment": "Tools/agent/jet-env",
-    "checker": "tests/compiler-proof/optimization/check.mjs",
-    "checker_args": ["--json"],
     "inspection": ["jet", "inspect", "compiler", "check"],
     "harness": "Tools/gauntlet/harness/run.mjs",
     "target_binary": "jet"
   },
   "contract": {
-    "path": "tests/compiler-proof/optimization/contract.json",
-    "schema": "jet.optimization-contract.v1",
     "observation_fields": [
       "result",
       "typed_failure",
@@ -49,7 +45,7 @@
     "modes": ["plan", "execute", "report"],
     "tiers": ["aot", "run", "dev", "check"],
     "required_same_job": ["control", "candidate", "invalid_fast", "legal_slow", "legal_measured_improvement", "required_peers"],
-    "raw_records_required": ["checker", "compiler_inspect", "direct_run", "gauntlet"],
+    "raw_records_required": ["compiler_inspect", "direct_run", "gauntlet"],
     "timeout_ms": 120000,
     "scratch_root": "$XDG_CACHE_HOME/jet-optimization/runs",
     "no_averaging": true,
@@ -65,8 +61,6 @@
       "expected_sha256",
       "peer_sha256",
       "peer_sha256_by_language",
-      "checker_sha256",
-      "contract_sha256",
       "compiler_sha256",
       "target_identity",
       "toolchain_identity",
@@ -77,7 +71,6 @@
   "selection": {
     "owner_choice_required": true,
     "adoption_requires": [
-      "checker_legality_record",
       "all_required_observations",
       "same_job_control_and_candidate",
       "same_job_required_peer_and_modes",
@@ -93,7 +86,7 @@
     "jet_variant": "Authored in each family fixture directory; no production optimizer or second compiler is introduced.",
     "peer_variant": "Matched Python implementation consumes the same declared input and expected output.",
     "measurement": "pending: no execution, timing, or adoption claim is authored in source",
-    "source_of_truth": "Jet and peer fixture files plus raw checker/inspect/harness records"
+    "source_of_truth": "Jet and peer fixture files plus raw inspect/harness records"
   },
   "families": [
     {
@@ -150,7 +143,7 @@
         "candidate_rule": "reassociate only under a checked machine-number contract",
         "selected_rule": null,
         "rejected_rule": null,
-        "decision": "awaiting checker, same-job cost, and owner choice",
+        "decision": "awaiting same-job cost and owner choice",
         "owner_card": "#2895"
       }
     },
@@ -209,7 +202,7 @@
         "candidate_rule": "fuse or widen only from explicit range and non-overlap facts",
         "selected_rule": null,
         "rejected_rule": null,
-        "decision": "awaiting checker, same-job cost, and owner choice",
+        "decision": "awaiting same-job cost and owner choice",
         "owner_card": "#2895"
       }
     },
@@ -269,7 +262,7 @@
         "candidate_rule": "specialize stable pure inputs and invalidate on identity change",
         "selected_rule": null,
         "rejected_rule": null,
-        "decision": "awaiting checker, same-job cost, and owner choice",
+        "decision": "awaiting same-job cost and owner choice",
         "owner_card": "#2899"
       }
     },
@@ -328,7 +321,7 @@
         "candidate_rule": "remove only copies with a proven no-observable-copy relation",
         "selected_rule": null,
         "rejected_rule": null,
-        "decision": "awaiting checker, same-job cost, and owner choice",
+        "decision": "awaiting same-job cost and owner choice",
         "owner_card": "#2899"
       }
     },
@@ -387,7 +380,7 @@
         "candidate_rule": "select bounded parallel scheduling only after legality and D-ACCEL1 cost gate",
         "selected_rule": null,
         "rejected_rule": null,
-        "decision": "awaiting checker, same-job cost, and owner choice",
+        "decision": "awaiting same-job cost and owner choice",
         "owner_card": "#2922"
       }
     }

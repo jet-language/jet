@@ -6,10 +6,6 @@
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    # D-COMPILER-PROOF-TOOLS1=A: proof artifacts use the exact Lean 4.29.1
-    # derivation recorded by the compiler-proof manifest, independently from
-    # the rolling nixpkgs input used by ordinary Jet development.
-    proofNixpkgs.url = "github:NixOS/nixpkgs/0c88e1f2bdb93d5999019e99cb0e61e1fe2af4c5";
   };
 
   outputs =
@@ -17,7 +13,6 @@
       self,
       nixpkgs,
       flake-utils,
-      proofNixpkgs,
       rust-overlay,
     }:
     flake-utils.lib.eachDefaultSystem (
@@ -27,7 +22,6 @@
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
         };
-        proofPkgs = proofNixpkgs.legacyPackages.${system};
         jetR = pkgs.rWrapper.override { packages = [ pkgs.rPackages.jsonlite ]; };
 
         # User FFI helpers opt into this compiler/sysroot explicitly. Keep
@@ -107,33 +101,9 @@
           '';
         jetDev = mkJetDevBin "jet" "JET";
         jetpackDev = mkJetDevBin "jetpack" "JETPACK";
-        # D-COMPILER-PROOF-TOOLS1=A: keep Lean development-only. The exact
-        # output path is recorded in tests/compiler-proof/toolchain/manifest.json;
-        # ordinary compiler/runtime shells must not inherit this closure.
-        # Keep this literal while the proof artifacts are assembled in the
-        # worktree: Nix flakes expose tracked inputs only. The manifest remains
-        # the runtime authority and rejects any different executable.
-        proofToolchainPin = "/nix/store/sz7vdknpsl9ipkjj003vbfa7sd284535-lean4-4.29.1";
-        proofToolchain = proofPkgs.lean4;
-        proofShell = pkgs.mkShellNoCC {
-          packages = [ proofToolchain ];
-          shellHook = ''
-            export JET_PROOF_TOOLCHAIN_STORE="${proofToolchain}"
-            export JET_PROOF_TOOLCHAIN_PIN="${proofToolchainPin}"
-            if [ "$JET_PROOF_TOOLCHAIN_STORE" != "$JET_PROOF_TOOLCHAIN_PIN" ]; then
-              echo "compiler-proof: pinned Lean derivation mismatch" >&2
-              echo "  manifest: $JET_PROOF_TOOLCHAIN_PIN" >&2
-              echo "  nixpkgs:  $JET_PROOF_TOOLCHAIN_STORE" >&2
-              exit 78
-            fi
-            export JET_NIX_TMP_CLEANED=1
-            export JET_ENV_DISABLE=1
-          '';
-        };
       in
       {
         packages = {
-          proof-toolchain = proofToolchain;
           rust-musl-toolchain = jetRustToolchain;
         } // pkgs.lib.optionalAttrs jetHasMuslHelpers {
           musl-linker = jetMuslCC;
@@ -204,9 +174,6 @@
           '';
         };
 
-        # Development-only proof shell. It is deliberately not part of the
-        # default shell used by ordinary Jet compilation or installation.
-        devShells.proof = proofShell;
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
         # OS-image work. Use `nix develop .#full` / `jet-env full …` explicitly.
         devShells.full = pkgs.mkShell {

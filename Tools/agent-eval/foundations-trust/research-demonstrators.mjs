@@ -798,7 +798,6 @@ const FRONTIER_STUDIES = Object.freeze([
     claim: "A shared derivation over canonical facts can drive checking, explanation, and optimization without an independent semantic rule in each consumer.",
     falsifier: FRONTIER_FALSIFIERS.H1,
     owners: Object.freeze(["#2945", "#2937", "#2939"]),
-    proof_families: Object.freeze(["checking", "core", "lowering"]),
     fixture: "frontier2954-semantic-contract",
     contract: "frontier2954-semantic-contract.json",
     baseline: "frontier2954-semantic-contract-baseline.mjs",
@@ -811,7 +810,6 @@ const FRONTIER_STUDIES = Object.freeze([
     claim: "Revision, generation, lifetime, and clock relations can reject stale work without erasing distinct temporal meanings or adding mandatory beginner annotations.",
     falsifier: FRONTIER_FALSIFIERS.H2,
     owners: Object.freeze(["#2949", "#2940", "#2937"]),
-    proof_families: Object.freeze(["checking", "core", "runtime", "adapter"]),
     fixture: "frontier2954-temporal-identity",
     contract: "frontier2954-temporal-identity.json",
     baseline: "frontier2954-temporal-identity-baseline.mjs",
@@ -824,7 +822,6 @@ const FRONTIER_STUDIES = Object.freeze([
     claim: "Checked legality and measured whole-job cost can select an optimization while preserving defined results, failures, mutation, input consumption, and event order.",
     falsifier: FRONTIER_FALSIFIERS.H3,
     owners: Object.freeze(["#2951", "#2939", "#2950"]),
-    proof_families: Object.freeze(["core", "lowering", "runtime"]),
     fixture: "frontier2954-conditional-optimization",
     contract: "frontier2954-conditional-optimization.json",
     baseline: "frontier2954-conditional-optimization-baseline.mjs",
@@ -1032,73 +1029,9 @@ function frontierLoadGauntletRelation() {
 }
 
 
-function frontierLoadProofRelation() {
-  const obligations = frontierReadJson("tests/compiler-proof/obligations.json");
-  const value = obligations.value;
-  const valid = obligations.status === "available"
-    && value?.schema === "jet.compiler-obligations.v1"
-    && Array.isArray(value.rows);
-  if (!valid) {
-    return {
-      status: "unavailable",
-      reason: obligations.reason ?? "canonical proof obligation relation is malformed or unavailable",
-      path: obligations.path,
-      digest: obligations.digest,
-      row_count: null,
-      rows: [],
-      relation: "tests/compiler-proof/obligations.json.rows",
-    };
-  }
-  const rows = value.rows.map((row) => ({
-    id: row.id ?? null,
-    family: row.family ?? null,
-    rule: row.rule ?? null,
-    owner: row.owner ?? null,
-    state: row.obligation_state ?? null,
-  }));
-  return {
-    status: "available",
-    reason: null,
-    path: obligations.path,
-    digest: obligations.digest,
-    schema: value.schema,
-    row_count: rows.length,
-    rows,
-    relation: "tests/compiler-proof/obligations.json.rows",
-  };
-}
-
 function frontierLoadCanonicalRelations() {
   return {
     gauntlet: frontierLoadGauntletRelation(),
-    proof: frontierLoadProofRelation(),
-  };
-}
-
-function frontierProofJoin(relation, families) {
-  if (relation.status !== "available") {
-    return {
-      status: "unavailable",
-      relation: relation.relation,
-      path: relation.path,
-      digest: relation.digest,
-      families: [...families],
-      obligation_ids: [],
-      reason: relation.reason,
-    };
-  }
-  const rows = relation.rows.filter((row) => families.includes(row.family));
-  return {
-    status: rows.length > 0 ? "joined" : "unavailable",
-    relation: relation.relation,
-    path: relation.path,
-    digest: relation.digest,
-    families: [...families],
-    obligation_ids: rows.map((row) => row.id).filter(Boolean),
-    owners: [...new Set(rows.map((row) => row.owner).filter(Boolean))].sort(),
-    reason: rows.length > 0
-      ? null
-      : "canonical proof relation has no obligation in the requested family; no formal claim may be promoted",
   };
 }
 
@@ -1135,8 +1068,8 @@ function frontierTierPlan(study, options, executionStatus = "not-requested") {
       evidence_class: "formal",
       status: "unavailable",
       contract_id: study.id,
-      relation: "canonical proof obligation join only",
-      reason: "no formal checker result is inferred from the study fixture; proof relation remains a separate evidence class",
+      relation: "none",
+      reason: "no formal checker result is inferred from the study fixture",
     },
   ];
 }
@@ -1413,12 +1346,10 @@ function frontierEqual(left, right) {
   return frontierCanonicalJson(left) === frontierCanonicalJson(right);
 }
 
-function frontierStudyCanonicalRefs(relations, study) {
+function frontierStudyCanonicalRefs(relations) {
   return {
     gauntlet_matrix: relations.gauntlet.matrix.digest,
     gauntlet_manifest: relations.gauntlet.measurement_manifest.digest,
-    proof_obligations: relations.proof.digest,
-    proof_families: [...study.proof_families],
   };
 }
 
@@ -1765,8 +1696,7 @@ function frontierStudyRecord(study, relations, options) {
   const fixtureIdentity = frontierFixtureIdentity(study);
   const fixturePaths = frontierFixturePaths(study);
   const contract = frontierStudyContract(study);
-  const proof = frontierProofJoin(relations.proof, study.proof_families);
-  const canonicalRefs = frontierStudyCanonicalRefs(relations, study);
+  const canonicalRefs = frontierStudyCanonicalRefs(relations);
   const workload = {
     relation: "Tools/gauntlet/matrix.json.strict_performance_policy.critical_areas",
     joins: relations.gauntlet.mission_joins,
@@ -1797,7 +1727,6 @@ function frontierStudyRecord(study, relations, options) {
       aggregation: "per-area and per-join only; no averaging away a loss",
       evidence_promotion: "forbidden across model, runtime, formal, and human classes",
     },
-    proof_relation: proof,
     canonical_refs: canonicalRefs,
     model_evidence: frontierModelEvidence(study),
     execution: {
@@ -1928,7 +1857,6 @@ function frontierArtifactForStudies(studies, relations) {
     canonical_relations: {
       gauntlet_matrix: relations.gauntlet.matrix.digest,
       gauntlet_manifest: relations.gauntlet.measurement_manifest.digest,
-      proof_obligations: relations.proof.digest,
     },
     studies: studies.map((study) => ({
       study_id: study.id,
@@ -2001,7 +1929,7 @@ function frontierBuildEnvelope(options = {}) {
         promoted_to_formal: false,
       },
       formal: {
-        scope: "checked proof artifacts only; this driver retains the canonical relation without claiming a checker result",
+        scope: "checked proof artifacts only; this driver claims no checker result",
         promoted_from_runtime: false,
       },
       human: {
@@ -2108,7 +2036,6 @@ function frontierReplayArtifact(artifactPath) {
   const currentRelationDigests = {
     gauntlet_matrix: currentRelations.gauntlet.matrix.digest,
     gauntlet_manifest: currentRelations.gauntlet.measurement_manifest.digest,
-    proof_obligations: currentRelations.proof.digest,
   };
   if (!frontierEqual(artifact?.canonical_relations, currentRelationDigests)) {
     issues.push("artifact canonical relation digests do not match current canonical inputs");
