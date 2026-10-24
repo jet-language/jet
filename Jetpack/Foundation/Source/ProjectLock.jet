@@ -100,21 +100,21 @@ fn env_acquire_lock(root: String, scope: String) -[FS, Env, Time]> RuntimeLock I
 // probe followed by deletion lets a contender take the same inode in the gap.
 fn env_try_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock? IOError! {
     authority :: foundation_open_directory_authority(root, true)
-    opened :: env_lock_open_scope(authority, scope)
+    opened :: env_lock_open_scope(^authority, scope)
     owner :: env_lock_try_owner(opened) ?? return Ok(None)
-    Ok(Val(env_lock_hold(opened, owner)))
+    Ok(Val(env_lock_hold(^opened, ^owner)))
 }
 
 // Rust `acquire_lock_with_timing`: a bounded wait reports IOError.TimedOut.
 fn env_acquire_lock_waiting(root: String, scope: String, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
     authority :: foundation_open_directory_authority(root, true)
-    env_lock_acquire_opened(env_lock_open_scope(authority, scope), wait)
+    env_lock_acquire_opened(env_lock_open_scope(^authority, scope), wait)
 }
 
-fn env_lock_acquire_opened(opened: RuntimeLockScope, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
+fn env_lock_acquire_opened(opened: ^RuntimeLockScope, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
     deadline :: time.instant() + wait
     loop {
-        if env_lock_try_owner(opened) == .Val(owner) -> return Ok(env_lock_hold(opened, owner))
+        if env_lock_try_owner(opened) == .Val(owner) -> return Ok(env_lock_hold(^opened, ^owner))
         remaining :: deadline - time.instant()
         if remaining.ns <= 0 -> return Err(IOError.TimedOut(IOContext{operation: .Write, resource: Val(opened.path), os_code: None, cause: Val("timed out waiting for jetpack lock `{opened.path}`")}))
         poll :: time.duration_ms(RUNTIME_LOCK_POLL_MS)
@@ -129,7 +129,7 @@ fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env, Time]> Runtime
 }
 
 // A scope marker is created/opened only below the original retained root.
-fn env_lock_open_scope(authority: FoundationDirectoryAuthority, scope: String) -[FS]> RuntimeLockScope IOError! {
+fn env_lock_open_scope(authority: ^FoundationDirectoryAuthority, scope: String) -[FS]> RuntimeLockScope IOError! {
     marker_parent :: authority.child(RUNTIME_LOCK_DIR, true)
     name :: "{env_lock_sanitize_scope(scope)}.lock"
     if marker_parent.create_exclusive(name, RUNTIME_LOCK_MARKER_MODE) == {
@@ -146,7 +146,7 @@ fn env_lock_open_scope(authority: FoundationDirectoryAuthority, scope: String) -
     env_lock_check_marker_kind(marker_parent, name, path)
     marker :: marker_parent.open_file(name)
     env_lock_validate_marker(marker_parent, marker, name, path)
-    Ok(RuntimeLockScope{authority: authority, marker_parent: marker_parent, marker: marker, name: name, path: path})
+    Ok(RuntimeLockScope{authority: ^authority, marker_parent: marker_parent, marker: marker, name: name, path: path})
 }
 
 // FILELOCK1 on `<canonical managed root>/.jetpack.lock`: created owner-only,
@@ -162,8 +162,10 @@ fn env_lock_try_owner(opened: RuntimeLockScope) -[FS, Env]> FileLock? IOError! {
 fn env_lock_owner_path(authority: FoundationDirectoryAuthority) -> String Never! {
     files.join(authority.path(), RUNTIME_LOCK_OWNER_FILE)
 }
-fn env_lock_hold(opened: RuntimeLockScope, owner: FileLock) -> RuntimeLock Never! {
-    RuntimeLock{path: opened.path, owner_path: env_lock_owner_path(opened.authority), owner: owner, marker: opened.marker, authority: opened.authority, marker_parent: opened.marker_parent, marker_name: opened.name}
+// The lock takes the scope's retained handles; nothing else keeps them.
+fn env_lock_hold(opened: ^RuntimeLockScope, owner: ^FileLock) -> RuntimeLock Never! {
+    owner_path :: env_lock_owner_path(opened.authority)
+    RuntimeLock{path: opened.path, owner_path: owner_path, owner: ^owner, marker: ^opened.marker, authority: ^opened.authority, marker_parent: ^opened.marker_parent, marker_name: opened.name}
 }
 fn env_lock_check_marker_kind(parent: FoundationDirectoryAuthority, name: String, path: String) IOError! -[FS]> {
     info :: parent.entry_stat(name)
@@ -242,7 +244,7 @@ struct RuntimeLockSession {
         identity :: authority.identity()
         key :: authority.path()
         if self.held_roots.contains(identity) -> return Ok(RuntimeLockGuard{root: key, identity: identity, lock: None})
-        lock :: env_lock_acquire_opened(env_lock_open_scope(authority, scope), time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS))
+        lock :: env_lock_acquire_opened(env_lock_open_scope(^authority, scope), time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS))
         &self.held_roots.push(identity)
         Ok(RuntimeLockGuard{root: key, identity: identity, lock: Val(lock)})
     }

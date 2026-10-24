@@ -1,0 +1,60 @@
+Error [E0121]: `a.id` was consumed by the struct literal, so it can't be used here
+  --> close_value_stored_then_used.jet:22:13
+    |
+ 22 |     print(a.id)
+    |             ^^
+  --> close_value_stored_then_used.jet:21:23
+    |
+ 21 |     h :: Holder{item: a}
+    |                       ^ `a.id` moved to the struct literal here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `a.id` after the move, or give the struct literal a copy with `a.id.copy()` where it moved.
+More: jet-lang.dev/e/E0121
+
+Error [E0121]: `a` was consumed by the struct literal, so it can't be used here
+  --> close_value_stored_then_used.jet:29:11
+    |
+ 29 |     print(a.len())
+    |           ^
+  --> close_value_stored_then_used.jet:28:23
+    |
+ 28 |     g :: Group{items: a}
+    |                       ^ `a` moved to the struct literal here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `a` after the move, or give the struct literal a copy with `a.copy()` where it moved.
+More: jet-lang.dev/e/E0121
+
+Error [E0121]: `a.id` was consumed by the variant payload, so it can't be used here
+  --> close_value_stored_then_used.jet:36:13
+    |
+ 36 |     print(a.id)
+    |             ^^
+  --> close_value_stored_then_used.jet:35:20
+    |
+ 35 |     s :: Slot.Full(a)
+    |                    ^ `a.id` moved to the variant payload here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `a.id` after the move, or give the variant payload a copy with `a.id.copy()` where it moved.
+More: jet-lang.dev/e/E0121
+
+Error [E0121]: `a.id` was consumed by `.push()`, so it can't be used here
+  --> close_value_stored_then_used.jet:44:13
+    |
+ 44 |     print(a.id)
+    |             ^^
+  --> close_value_stored_then_used.jet:43:15
+    |
+ 43 |     &out.push(a)
+    |               ^ `a.id` moved to `.push()` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `a.id` after the move, or give `.push()` a copy with `a.id.copy()` where it moved.
+More: jet-lang.dev/e/E0121
+
+Error [E0201]: `r` cannot be moved from borrowed storage
+  --> close_value_stored_then_used.jet:49:18
+    |
+ 49 |     Holder{item: r}
+    |                  ^
+ Why: `r` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the struct literal
+ Fix: Declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201

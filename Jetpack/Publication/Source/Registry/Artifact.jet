@@ -40,7 +40,7 @@ fn publication_snapshot_verified_artifact(repo: String, entry: PublicationIndexE
     if entry.content_hash != "" && before != entry.content_hash -> return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} failed its content hash"))
     publication_verify_oci_referrers(repo, entry)
     // Keep the private snapshot on the checkout's disk rather than /tmp.
-    snapshot :: pkg_source_snapshot_into(source, held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
+    snapshot :: pkg_source_snapshot_into(source, ^held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
     if entry.content_hash != "" && snapshot.content_hash != entry.content_hash {
         close(^snapshot)
         return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} changed while being snapshotted"))
@@ -81,8 +81,8 @@ fn publication_publish_artifact(repo: String, source: String, name: String, vers
     destination :: publication_artifact_path(repo, name, version)
     publication_ensure_real_directory(repo, "registry checkout")
     held :: foundation_open_directory_authority(repo)
-    snapshot :: pkg_source_snapshot_into(foundation_open_directory_authority(source), held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
-    result :: publication_publish_snapshot(repo, held, source, snapshot.directory, snapshot.content_hash, name, version, expected_hash, destination)
+    snapshot :: pkg_source_snapshot_into(foundation_open_directory_authority(source), ^held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
+    result :: publication_publish_snapshot(repo, snapshot.parent, source, snapshot.directory, snapshot.content_hash, name, version, expected_hash, destination)
     close(^snapshot)
     result
 }

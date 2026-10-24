@@ -974,7 +974,7 @@ fn jet_driver_comptime_dependency_cycle(rows: [JetDriverComptimeWaitRow]) -> Jet
 
 // The run's evaluator configuration for one evaluation. An IR evaluation
 // reads constants from the build's constant rows, never from globals.
-fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: JetEvalComptimeInputAdapter?) -> JetEvalConfig {
+fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: ^JetEvalComptimeInputAdapter?) -> JetEvalConfig {
     build_host_adapter :: if original.build_host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
@@ -986,7 +986,7 @@ fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: JetEvalCompt
         globals: [String:TComptimeValue]{},
         runtime_execution: false,
         build_host_adapter: build_host_adapter,
-        comptime_input_adapter: inputs,
+        comptime_input_adapter: ^inputs,
         host_hooks: original.host_hooks,
         native: original.native,
     }

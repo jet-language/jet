@@ -164,8 +164,8 @@ struct JetEvalIRState {
     host_values: [TComptimeValue]{[TComptimeValue]{}}
 }
 
-fn jet_eval_native_session(file: String, reader: JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
-    image :: shared JetEvalNativeImage{file: file, reader: reader, read: false, bytes: None}
+fn jet_eval_native_session(file: String, reader: ^JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
+    image :: shared JetEvalNativeImage{file: file, reader: ^reader, read: false, bytes: None}
     shared JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}
 }
 
