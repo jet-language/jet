@@ -4,7 +4,7 @@
 // build and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
 use jet_foundation.[BuildOptions, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
-use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_optimize_module_measured, ir_opt_options_from, ir_opt_report_text]
+use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
 struct JetCLIDecisions {
@@ -14,12 +14,13 @@ struct JetCLIDecisions {
     unbuilt: [String]
 }
 
-// The optimizer's options at `level` (`small`: the build option, inlining
-// kept to the O1 limits), with the environment's pass knobs: JET_OPT_DISABLE
-// (pass names to skip), JET_OPT_SSA_VERIFY, JET_OPT_SSA_STRESS and
-// JET_OPT_DUMP (Opt.jet IROptOptions).
-fn jet_cli_opt_options(level: Int, small: Bool) -> IROptOptions {
-    ir_opt_options_from(level, small, decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
+// The optimizer's options at `level` with `build`'s (the build options)
+// `small` (inlining kept to the O1 limits) and `inline` (which callees
+// inlining takes), plus the environment's pass knobs: JET_OPT_DISABLE (pass
+// names to skip), JET_OPT_SSA_VERIFY, JET_OPT_SSA_STRESS and JET_OPT_DUMP
+// (Opt.jet IROptOptions).
+fn jet_cli_opt_options(level: Int, build: BuildOptions) -> IROptOptions {
+    ir_opt_options_from(level, build_options_value(build, "small") == "true", ir_opt_inline_of(build_options_value(build, "inline")), decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
 }
 
 // Builds `inputs` into one IR module from its entry and optimizes it as
@@ -30,7 +31,7 @@ fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, build: BuildOptions, thre
     built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", ir_checks_stock(), threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
-    report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(jet_cli_native_level(build), build_options_value(build, "small") == "true"), threads)
+    report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(jet_cli_native_level(build), build), threads)
     JetCLIDecisions{report: report, unbuilt: ^unbuilt}
 }
 

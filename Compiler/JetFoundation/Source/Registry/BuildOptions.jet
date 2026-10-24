@@ -44,6 +44,10 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // true keeps the optimizer's inlining to the O1 limits at any level, so
     // inlining grows the code no more than `optimize: basic` does.
     {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
+    // Which callees the optimizer inlines (O1 and O2; O0 inlines none): auto
+    // picks them by size, always_marked takes only the `#Inline(Always)` ones,
+    // past the size limits, and off inlines nothing.
+    {name: "inline", kind: BuildOptionKind.Choice, values: [String]{"auto", "always_marked", "off"}, stock_build: "auto", stock_run: "auto", removes_check: [String]{}, help: "Which calls the optimizer inlines: auto, always_marked or off"},
 } }
 
 // The Jai build options Jet refuses, each with the law that leaves nothing for

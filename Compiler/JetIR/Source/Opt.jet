@@ -25,30 +25,50 @@
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_transfer_rows]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
-// limits at any level (`small`, the build option), the passes `disabled`
-// names (to bisect a difference to one pass: "unique", "once", "scalar",
-// "promote", "range", "ssa", "stops", "glue"), whether every SSA form is
-// verified (`verify`), whether every SSA value leaves SSA in a fresh slot
-// (`stress`, which exercises the moves out of SSA), and the name of the
-// functions whose IR before and after the passes the report carries (`dump`,
-// "" for none).
+// limits at any level (`small`, the build option), which callees inlining
+// takes (`inline`, the build option), the passes `disabled` names (to bisect
+// a difference to one pass: "unique", "once", "scalar", "promote", "range",
+// "ssa", "stops", "glue"), whether every SSA form is verified (`verify`),
+// whether every SSA value leaves SSA in a fresh slot (`stress`, which
+// exercises the moves out of SSA), and the name of the functions whose IR
+// before and after the passes the report carries (`dump`, "" for none).
 struct IROptOptions {
     level: Int
     small: Bool
+    inline: IROptInline
     disabled: [String]
     verify: Bool
     stress: Bool
     dump: String
 }
 
+// Which callees inlining takes (the `inline` build option; level 0 inlines
+// nothing): Auto the level's choice by size (OptInline.jet), Marked only the
+// callees marked `#Inline(Always)`, at every call the inliner can splice and
+// past the size limits, Off none.
+enum IROptInline {
+    Auto
+    Marked
+    Off
+}
+
+// The `inline` build option's value as an IROptInline.
+fn ir_opt_inline_of(value: String) -> IROptInline Never! {
+    if value == {
+        "always_marked" -> IROptInline.Marked
+        "off" -> IROptInline.Off
+        else -> IROptInline.Auto
+    }
+}
+
 fn ir_opt_options(level: Int) -> IROptOptions Never! {
-    IROptOptions{level: level, small: false, disabled: [String]{}, verify: false, stress: false, dump: ""}
+    IROptOptions{level: level, small: false, inline: IROptInline.Auto, disabled: [String]{}, verify: false, stress: false, dump: ""}
 }
 
 // Options from the environment's values: JET_OPT_DISABLE (pass names,
 // comma-separated), JET_OPT_SSA_VERIFY and JET_OPT_SSA_STRESS ("1": on),
 // JET_OPT_DUMP (a function name).
-fn ir_opt_options_from(level: Int, small: Bool, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
+fn ir_opt_options_from(level: Int, small: Bool, inline: IROptInline, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
     disabled := [String]{}
     if disable == .Val(text) {
         loop name in text.split(",") {
@@ -56,7 +76,7 @@ fn ir_opt_options_from(level: Int, small: Bool, disable: String?, verify: String
             if trimmed != "" -> &disabled.push(trimmed)
         }
     }
-    IROptOptions{level: level, small: small, disabled: ^disabled, verify: (verify ?? "") == "1", stress: (stress ?? "") == "1", dump: dump ?? ""}
+    IROptOptions{level: level, small: small, inline: inline, disabled: ^disabled, verify: (verify ?? "") == "1", stress: (stress ?? "") == "1", dump: dump ?? ""}
 }
 
 fn ir_opt_enabled(options: IROptOptions, pass: String) -> Bool Never! {
@@ -340,7 +360,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     // `small` keeps inlining to O1's: its callee limit and budget, and no
     // once-called callees (each copy adds up to its callee's size).
     inline_level :: if options.small -> 1 else -> level
-    out := ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, &report) ?? ^body
+    out := if options.inline == .Off -> ^body else -> ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, options.inline, &report) ?? ^body
     if ir_opt_enabled(options, "glue") -> ir_opt_glue_drops(&out, m, keys)
     ir_opt_simplify(m, &out, &report)
     if level >= 2 {
@@ -448,11 +468,13 @@ fn ir_opt_caller_edges(count: Int, callee_start: [Int], callees: [Int], caller_s
 // position not yet published), with `head` the next position a thread
 // claims and `tail` the next one a finished function publishes into. A
 // thread changes only the atomics and the cells of the functions it claims.
+// `marked[g]` is function g's IRFunction.inline_always.
 struct IROptGraph {
     views: [IRModule]
     keys: [String]
     recursive: [Bool]
     sites: [Int]
+    marked: [Bool]
     options: IROptOptions
     cells: [Shared<IROptCell>]
     sizes: [IROptCount]
@@ -513,6 +535,8 @@ fn ir_opt_scheduled(m: &IRModule, functions: &[IRFunction], keys: ^[String], ord
     loop at in compiler_threads_heaviest_first(ready_weights) -> &ring.push(IROptCount{value: ready[at]})
     published :: ring.len()
     loop ring.len() < functions.len() -> &ring.push(IROptCount{value: -1})
+    marked := [Bool]{}
+    loop f in functions -> &marked.push(f.inline_always)
     cells := [Shared<IROptCell>]{}
     loop functions.len() > 0 {
         body := &functions.pop() ?? { break }
@@ -520,7 +544,7 @@ fn ir_opt_scheduled(m: &IRModule, functions: &[IRFunction], keys: ^[String], ord
     }
     &cells.reverse()
     view := ir_opt_view(&m)
-    graph :: shared IROptGraph{views: [IRModule]{^view}, keys: ^keys, recursive: order.recursive.copy(), sites: ^sites, options: options.copy(), cells: ^cells, sizes: ^sizes, pending: ^pending, callee_start: ^callee_start, callees: ^callees, caller_start: ^caller_start, callers: ^callers, ring: ^ring, head: 0, tail: published}
+    graph :: shared IROptGraph{views: [IRModule]{^view}, keys: ^keys, recursive: order.recursive.copy(), sites: ^sites, marked: ^marked, options: options.copy(), cells: ^cells, sizes: ^sizes, pending: ^pending, callee_start: ^callee_start, callees: ^callees, caller_start: ^caller_start, callers: ^callers, ring: ^ring, head: 0, tail: published}
     parts := ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
     loop part in parts -> ir_opt_report_add(&report, part)
     held := graph.guard_edit()
@@ -577,7 +601,7 @@ fn ir_opt_scheduled_thread(graph: Shared<IROptGraph>) -> IROptReport {
         last :: reads.value.callee_start[id + 1]
         loop k in first..<last {
             callee :: reads.value.callees[k]
-            if reads.value.sizes[callee].value.load() <= ir_opt_inline_reach(reads.value.sites, callee, once, reads.value.options.level) -> &callees[callee].push(ir_opt_cell_copy(reads.value.cells[callee]))
+            if reads.value.sizes[callee].value.load() <= ir_opt_inline_reach(reads.value.sites, callee, once, reads.value.options.level, reads.value.options.inline, reads.value.marked[callee]) -> &callees[callee].push(ir_opt_cell_copy(reads.value.cells[callee]))
         }
         body := ir_opt_cell_take(reads.value.cells[id])
         optimized := ir_opt_function(reads.value.views[0], callees, reads.value.keys, ^body, reads.value.recursive, reads.value.sites, reads.value.options, &report)

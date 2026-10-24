@@ -1,0 +1,20 @@
+// Which calls the optimizer inlines (`jet build` optimizes; `jet run` does not):
+//   jet build run.jet                         inline: auto, callees picked by size
+//   jet build --inline=always_marked run.jet   only `#Inline(Always)` callees, any size
+//   jet build --profile=plain run.jet         inline: off, from the profile
+// The program prints the same under every value.
+#Inline(Always)
+fn scale(x: Int, factor: Int) -> Int {
+    (x * factor + 7) % 1000
+}
+
+fn shift(x: Int) -> Int {
+    (x + 3) % 1000
+}
+
+fn run() {
+    values :: [Int]{4, 8, 15, 16, 23, 42}
+    total := 0
+    loop value in values -> total = shift(scale(total + value, 3))
+    print("total: {total}")
+}

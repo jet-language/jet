@@ -3651,6 +3651,17 @@ command-line help describes the flag as “Favor a smaller binary”; it does no
 promise a particular byte-size ratio (S15). Example:
 [`Examples/features/tooling/build_debug_info`](../../Examples/features/tooling/build_debug_info/run.jet).
 
+`inline` says which callees the optimizer inlines at `optimize: basic` and
+`full` (`none` inlines none). `auto` (the stock) picks them by size, within the
+level's limits. `always_marked` takes only the functions marked
+`#Inline(Always)`, at every direct call the inliner can splice, whatever their
+size and with no per-caller budget (`small` does not limit them). The inliner
+cannot splice a recursive callee, a callee that writes a parameter, an
+`#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop.
+`off` inlines nothing. `fn build` writes `b.inline(.AlwaysMarked)`, and the
+flag writes `--inline=always_marked`. Example:
+[`Examples/features/tooling/build_inline`](../../Examples/features/tooling/build_inline/run.jet).
+
 ### Language server
 
 `jet self lsp` speaks JSON-RPC over standard input and output. It uses the same

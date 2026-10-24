@@ -16,6 +16,10 @@
 // result slot (an aggregate result: fresh frame storage and a copy of its
 // bytes, as the call's result storage) and a Br out of that Block. Lines of
 // a callee from another file become the call's line.
+//
+// Under `inline: always_marked` (IROptInline.Marked) only a callee marked
+// `#Inline(Always)` (IRFunction.inline_always) is taken, at every call site
+// that passes the checks above but the size limits and the budget.
 
 IR_OPT_INLINE_CALLEE_O1 :: 40
 IR_OPT_INLINE_BUDGET_O1 :: 200
@@ -24,37 +28,43 @@ IR_OPT_INLINE_BUDGET_O2 :: 400
 // A once-called callee (O2), and the caller size past which none is taken.
 IR_OPT_INLINE_ONCE_O2 :: 1500
 IR_OPT_INLINE_ONCE_CALLER_O2 :: 3000
+// The size limit of a marked callee under IROptInline.Marked: none.
+IR_OPT_INLINE_MARKED :: 1000000000
 
 // `caller`'s body with its selected call sites inlined, None when it selects
 // none. `bodies[g]` holds function g's final body (one row), or no row when
 // g's size is past ir_opt_inline_reach (it is never inlined); the caller's
 // own row and the rows of recursive functions are never read. `sites[g]`
 // counts the direct calls of g in the module; `once_called` takes the
-// once-called ones (O2).
-fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, report: &IROptReport) -> IRFunction? Never! {
+// once-called ones (O2); `inline` which callees are taken (Auto by size,
+// Marked only the `#Inline(Always)` ones).
+fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: &IROptReport) -> IRFunction? Never! {
     limit :: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
     budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
     grown := ir_opt_size(caller)
     selected_sites := [Bool]{}
     any := false
     loop at in 0..<caller.op.len() {
-        once :: once_called && caller.op[at] == .Call && caller.a[at] >= 0 && caller.a[at] < sites.len() && sites[caller.a[at]] == 1
-        size :: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
         selected := false
-        if size >= 0 && once && size > limit {
-            selected = grown + size <= IR_OPT_INLINE_ONCE_CALLER_O2
-        } else if size >= 0 {
-            selected = size <= budget
-            if selected -> budget -= size
+        if inline == .Marked {
+            selected = caller.op[at] == .Call && ir_opt_inline_marked(bodies, caller.a[at]) && ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_MARKED) >= 0
+        } else {
+            once :: once_called && caller.op[at] == .Call && caller.a[at] >= 0 && caller.a[at] < sites.len() && sites[caller.a[at]] == 1
+            size :: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
+            if size >= 0 && once && size > limit {
+                selected = grown + size <= IR_OPT_INLINE_ONCE_CALLER_O2
+            } else if size >= 0 {
+                selected = size <= budget
+                if selected -> budget -= size
+            }
+            if selected -> grown += size
         }
-        if selected {
-            grown += size
-            any = true
-        }
+        if selected -> any = true
         &selected_sites.push(selected)
     }
     if !any -> return None
     out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
+    out.inline_always = caller.inline_always
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
     loop value in caller.args -> &out.args.push(value)
@@ -95,10 +105,22 @@ fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, a
 
 // The largest ir_opt_size of `callee` that ir_opt_inline_build may inline at
 // one of its call sites: the once-called limit for a callee called once
-// (`once_called`, O2), else the level's callee limit.
-fn ir_opt_inline_reach(sites: [Int], callee: Int, once_called: Bool, level: Int) -> Int Never! {
+// (`once_called`, O2), else the level's callee limit. Under `inline` Marked
+// a `marked` callee has no limit and no other callee is inlined; under Off
+// none is (-1).
+fn ir_opt_inline_reach(sites: [Int], callee: Int, once_called: Bool, level: Int, inline: IROptInline, marked: Bool) -> Int Never! {
+    if inline == {
+        .Off -> return -1
+        .Marked -> return if marked -> IR_OPT_INLINE_MARKED else -> -1
+        .Auto -> {}
+    }
     if once_called && callee >= 0 && callee < sites.len() && sites[callee] == 1 -> return IR_OPT_INLINE_ONCE_O2
     if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
+}
+
+// Whether function `callee` has a body here and is marked `#Inline(Always)`.
+fn ir_opt_inline_marked(bodies: [[IRFunction]], callee: Int) -> Bool Never! {
+    callee >= 0 && callee < bodies.len() && bodies[callee].len() > 0 && bodies[callee][0].inline_always
 }
 
 // Whether selection reports a stop of instruction `at` at the function's

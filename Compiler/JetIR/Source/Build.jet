@@ -667,7 +667,9 @@ fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) ->
     if type_args.len() == 0 || (function.generic_params.len() == 0 && ir_owner_binders(p, function).len() == 0) {
         if m.ids[row] >= 0 -> return Val(m.ids[row])
         id :: m.functions.len()
-        &m.functions.push(ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line))
+        made := ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line)
+        made.inline_always = function.is_inline_always
+        &m.functions.push(^made)
         m.function_rows[function.key] = id
         m.ids[row] = id
         &m.queue.push(IRQueued{row: row, id: id, args: [Type]{}})
@@ -684,7 +686,9 @@ fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) ->
     instance :: "{function.key}<{spelled.join(", ")}>"
     if m.instances.get(instance) == .Val(known) -> return Val(known)
     id :: m.functions.len()
-    &m.functions.push(ir_function_new(function.name, instance, "{ir_symbol_name(function)}__{ir_key_hash(instance)}", function.source_file, function.line))
+    made := ir_function_new(function.name, instance, "{ir_symbol_name(function)}__{ir_key_hash(instance)}", function.source_file, function.line)
+    made.inline_always = function.is_inline_always
+    &m.functions.push(^made)
     m.function_rows[instance] = id
     m.instances[instance] = id
     &m.queue.push(IRQueued{row: row, id: id, args: concrete})

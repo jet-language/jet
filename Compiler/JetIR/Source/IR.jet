@@ -168,6 +168,8 @@ enum IRSlotKind { Param Local Temp }
 // an `#FFI(asm)` leaf's assembled template (BuildForeign.jet ir_asm_call):
 // such a function has Word parameters, no instructions, and its machine
 // code is the template's (X64Select.jet ir_x64_asm_function).
+// `inline_always` marks a function its source marks `#Inline(Always)`, the
+// callees the `inline: always_marked` build option inlines (OptInline.jet).
 struct IRFunction {
     name: String
     key: String
@@ -190,6 +192,7 @@ struct IRFunction {
     // Open structured-control instructions while building (indexes into `op`).
     open: [Int]
     asm: IRAsmLeaf?
+    inline_always: Bool
 }
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is
@@ -368,7 +371,7 @@ fn ir_function_new(name: String, key: String, symbol: String, source_file: Strin
         param_count: 0, result: -1,
         slot_type: [Int]{}, slot_kind: [IRSlotKind]{}, slot_name: [Int]{}, slot_line: [Int]{},
         op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, code_line: [Int]{}, args: [Int]{},
-        open: [Int]{}, asm: None,
+        open: [Int]{}, asm: None, inline_always: false,
     }
 }
 

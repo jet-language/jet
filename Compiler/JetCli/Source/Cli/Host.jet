@@ -741,7 +741,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if level > 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(&built.program, jet_cli_opt_options(level, build_options_value(options, "small") == "true"), threads)
+        _ := ir_optimize_module(&built.program, jet_cli_opt_options(level, options), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
     }
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source)

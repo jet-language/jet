@@ -1,0 +1,44 @@
+# #5005: the Choice row `inline` (auto, always_marked, off; stock auto) says
+# which callees the optimizer inlines. `mix` is marked `#Inline(Always)` and
+# past the O1 callee limit, `bump` is small and unmarked: auto inlines `bump`,
+# always_marked every call of `mix` (the largest image), off neither (the
+# smallest). The program prints the same under every value.
+fixture: fixtures/build_inline
+env: NO_COLOR=1
+step: jet build main.jet
+cwd: open
+exit: 0
+rename: open/.jet/build/main open/.jet/build/main_auto
+capture: auto_size = size file open/.jet/build/main_auto
+step: jet build --inline=off main.jet
+cwd: open
+exit: 0
+file: open/.jet/build/main size < {cap:auto_size}
+rename: open/.jet/build/main open/.jet/build/main_off
+capture: off_size = size file open/.jet/build/main_off
+step: {work}/open/.jet/build/main_off
+exit: 0
+stdout: = "mixed: 400255\n"
+step: jet build --profile=marked main.jet
+cwd: open
+exit: 0
+capture: marked_size = size file open/.jet/build/main
+file: open/.jet/build/main_auto size < {cap:marked_size}
+step: {work}/open/.jet/build/main
+exit: 0
+stdout: = "mixed: 400255\n"
+step: jet build --inline=always_marked --optimize=full --small main.jet
+cwd: open
+exit: 0
+step: jet build --inline=sometimes main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]: `--inline=sometimes` isn't a value of `inline`" # auto, always_marked or off
+step: jet build
+cwd: code
+exit: 0
+stderr: !~ "note:" # no flag replaces a written value
+step: jet build --inline=always_marked
+cwd: code
+exit: 0
+stderr: ~ "note: --inline=always_marked replaces b.inline(.Off) at @build.jet:2 for this run" # the replace note spells the Choice call
