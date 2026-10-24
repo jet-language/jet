@@ -5,9 +5,3 @@
 struct X64ImageDataReloc { at: Int, target: Int }
 
 X64_FUNCTION_ALIGN :: 16
-fn x64_link_place(text: &[U8], function: X64CompiledFunction) -> Int Never! {
-    loop text.len() % X64_FUNCTION_ALIGN != 0 -> x64_int3(&text)
-    at :: text.len()
-    &text.extend(function.code)
-    at
-}
