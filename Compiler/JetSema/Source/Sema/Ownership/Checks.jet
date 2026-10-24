@@ -4623,7 +4623,11 @@ fn sema_ownership_check_nested_call_value(state: &SemaOwnershipState, value: Exp
 
 fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if expr == {
-        .Ident(name, span, _) -> sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) && sema_ownership_check_use(&state, expr, scopes, &diagnostics)
+        // As the expression check notes it (sema_expression_ident): only a
+        // local or a parameter is owned state. A type, module or constant
+        // root (`Float.NAN`, `Dyn.Null` inside a consumed payload) has no
+        // reference to note.
+        .Ident(name, span, _) -> sema_ownership_check_ident_reference(&state, name, span, scopes) && sema_ownership_check_use(&state, expr, scopes, &diagnostics)
         .Paren(value, _, _) -> sema_ownership_check_expression(&state, value, scopes, &diagnostics)
         .Copy(value, _, _) -> sema_ownership_check_expression(&state, value, scopes, &diagnostics)
         .Deref(value, _, _) -> sema_ownership_check_expression(&state, value, scopes, &diagnostics)
@@ -4864,6 +4868,13 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
         }
         else -> true
     }
+}
+
+fn sema_ownership_check_ident_reference(state: &SemaOwnershipState, name: String, span: Span, scopes: SemaScopeTable) -> Bool Never! {
+    index :: sema_scope_resolve_index(scopes, name) ?? return true
+    kind :: scopes.bindings[index].symbol.kind
+    if kind != SymbolKind.Local && kind != SymbolKind.Parameter -> return true
+    sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
