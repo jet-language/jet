@@ -1881,6 +1881,16 @@ fn parser_mark_maximal_place(state: &JetParserState, expr: Expr, access: PlaceAc
         .Slice(base, start, end, range, span, node) -> {
             if parser_contains_method_call(base) -> return Expr.Slice{base: parser_mark_maximal_place(&state, base, access, mark), start: start, end: end, range: range, span: span, id: node}
         }
+        // `&src.read() ? ok -> … ! err -> …`: the postfix result handler is
+        // part of the operand the mark parsed, so the mark belongs to the
+        // handled value that both branch tests share.
+        .If(cond, then_body, then_value, else_body, else_value, span, node) -> {
+            if parser_is_result_handler_expr(expr) && cond == .PatternTest(subject, ok_pattern, ok_span, ok_node) && else_value == .If(err_cond, err_body, err_value, err_else_body, err_else_value, err_if_span, err_if_node) && err_cond == .PatternTest(_, err_pattern, err_span, err_node) {
+                marked :: parser_mark_maximal_place(&state, subject, access, mark)
+                err_if :: Expr.If{cond: Expr.PatternTest{subject: marked.copy(), pattern: err_pattern, span: err_span, id: err_node}, then_body: err_body, then_value: err_value, else_body: err_else_body, else_value: err_else_value, span: err_if_span, id: err_if_node}
+                return Expr.If{cond: Expr.PatternTest{subject: ^marked, pattern: ok_pattern, span: ok_span, id: ok_node}, then_body: then_body, then_value: then_value, else_body: else_body, else_value: ^err_if, span: span, id: node}
+            }
+        }
         else -> {}
     }
     span :: parser_cover(mark, expr_span(expr))
