@@ -102,7 +102,7 @@ fn parse_with(text: String, options: XMLParseOptions) -> Dyn XMLError! {
     kernel.parse_document_with(text, kernel.parse_options(options)) ?? return Err(kernel.public_error(err))
 }
 
-fn parse_bytes(bytes: [U8], options: XMLParseOptions{.safe()}) -> Dyn XMLError! {
+fn parse_bytes(bytes: [U8], options: XMLParseOptions{XMLParseOptions.safe()}) -> Dyn XMLError! {
     kernel.parse_document_bytes_with(bytes, kernel.parse_options(options)) ?? return Err(kernel.public_error(err))
 }
 
@@ -110,7 +110,7 @@ fn to_string(tree: Dyn) -> String XMLError! {
     kernel.render_document(tree) ?? return Err(kernel.public_error(err))
 }
 
-fn to_bytes(tree: Dyn, options: XMLRenderOptions{.safe()}) -> [U8] XMLError! {
+fn to_bytes(tree: Dyn, options: XMLRenderOptions{XMLRenderOptions.safe()}) -> [U8] XMLError! {
     kernel.render_document_bytes(tree, kernel.render_encoding(options.encoding), kernel.lexical_policy(options.lexical)) ?? return Err(kernel.public_error(err))
 }
 
@@ -140,16 +140,16 @@ fn content(element: Dyn) -> [Dyn] XMLError! {
     kernel.element_content(element) ?? return Err(kernel.public_error(err))
 }
 
-fn decode<T: Decode>(text: String, options: XMLParseOptions{.safe()}) -> T [FieldError]! {
+fn decode<T: Decode>(text: String, options: XMLParseOptions{XMLParseOptions.safe()}) -> T [FieldError]! {
     document :: parse_with(text, options) ?? return Err(kernel.field_error(err))
     projected :: kernel.project_document_for_decode(document) ?? return Err(kernel.field_error(kernel.public_error(err)))
-    projected.decode<T>()
+    projected.decode<T>() ?? return Err(err)
 }
 
-fn decode_bytes<T: Decode>(bytes: [U8], options: XMLParseOptions{.safe()}) -> T [FieldError]! {
+fn decode_bytes<T: Decode>(bytes: [U8], options: XMLParseOptions{XMLParseOptions.safe()}) -> T [FieldError]! {
     document :: parse_bytes(bytes, options) ?? return Err(kernel.field_error(err))
     projected :: kernel.project_document_for_decode(document) ?? return Err(kernel.field_error(kernel.public_error(err)))
-    projected.decode<T>()
+    projected.decode<T>() ?? return Err(err)
 }
 
 /// Bounded XML events retain lexical bytes and latch the first stream error.
@@ -227,7 +227,7 @@ struct XMLReader {
     }
 }
 
-fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{.safe()}) -> XMLReader EncodingError! {
+fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML
