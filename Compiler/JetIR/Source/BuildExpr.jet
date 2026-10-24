@@ -864,7 +864,9 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
 }
 
 // `storage (op)= value` for module storage `key`: the value, then the
-// read-modify-write through the storage cell.
+// read-modify-write through the storage cell. An Int cell owns its value:
+// the new one is owned first (it may be a read of the cell itself), then
+// the old one drops.
 fn ir_storage_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op: TBinaryOp?, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
     at :: p.constants.get(key) ?? return ir_fail(&b, span, "module storage {key} without a declaration")
@@ -883,7 +885,13 @@ fn ir_storage_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op:
         ir_release(&m, &b, right)
         if ir_failed(b) -> return
     }
-    ir_store_at(&m, p, &b, address, 0, result)
+    owned :: ir_own(&m, p, &b, result)
+    if ir_has_drop(m, b, owned) {
+        row :: ir_value_type(&m, p, definition.ty) ?? return ir_fail(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
+        old :: ir_load_at(&m, &b, address, 0, row)
+        ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+    }
+    ir_store_at(&m, p, &b, address, 0, owned)
 }
 
 fn ir_loop_frame(b: IRBuilder, label: String?) -> IRLoopFrame? Never! {

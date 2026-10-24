@@ -160,17 +160,21 @@ fn ir_static_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: Stri
 // 8-byte data row per declaration in the object's writable data, holding the
 // initial value's word, that every read loads and every assignment stores.
 // Storage holds one plain word (a Bool, fixed-width or Char word, or a
-// Float); -1 on failure.
+// Float) or an exact Int, which the cell owns: its initial value is an
+// inline word, and each assignment drops the value it replaces
+// (ir_storage_assign). -1 on failure.
 fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
     kind :: m.types[row].kind
-    if kind != .Bool && kind != .Word && kind != .Char && kind != .Float && kind != .Float32 -> return ir_fail_slot(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
+    if kind != .Bool && kind != .Word && kind != .Char && kind != .Float && kind != .Float32 && kind != .Int -> return ir_fail_slot(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
     memo :: "storage:{definition.key}"
     object := m.constant_rows.get(memo) ?? -1
     if object < 0 {
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         cell :: ir_static_new(&s, 8)
         if !ir_static_into(&m, p, &s, cell, 0, definition.ty, row, definition.value) -> return ir_fail_slot(&b, span, "module storage {definition.name}: initial value does not freeze")
+        // A static Int node could never be dropped by the cell's next write.
+        if s.bytes.len() != 1 -> return ir_fail_slot(&b, span, "module storage {definition.name}: initial Int outside the inline range")
         object = m.data.len()
         &m.data.push(s.bytes[cell].copy())
         // No address words; the entry marks a word-aligned static object.
