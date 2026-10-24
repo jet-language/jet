@@ -30,13 +30,14 @@ fn jet_cli_gate_external(kind: GateKind, scope: String, source: String, subject:
     GateEntry{kind: kind, domain: "security", scope: scope, source: source, span: None, subject: subject, reason: None, status: Val("recorded"), detail: detail, provenance: provenance, operations: []}
 }
 
-// The `check_removal` gate of a build option value that removes a runtime
-// check (BuildOptionRow.removes_check), as the command line, a `package.jet`
-// profile or `fn build` wrote it.
-fn jet_cli_check_removal_gate(choice: BuildOptionChoice) -> GateEntry Never! {
+// The gate of a build option value: `check_removal` for one that removes a
+// runtime check (BuildOptionRow.removes_check), `link_override` for
+// `link_args`, as the command line, a `package.jet` profile or `fn build`
+// wrote it.
+fn jet_cli_build_option_gate(kind: GateKind, choice: BuildOptionChoice, detail: String) -> GateEntry Never! {
     source :: if choice.layer == BuildOptionLayer.Flag -> "command line" else -> "build options"
     subject :: if choice.site == "" -> choice.written.copy() else -> "{choice.written} {choice.site}"
-    jet_cli_gate_external(GateKind.CheckRemoval, "build", source, subject, "build option that removes a runtime check", [source])
+    jet_cli_gate_external(kind, "build", source, subject, detail, [source])
 }
 
 // Host reads the actual canonical TrustStore once; only typed projection lives
@@ -74,7 +75,8 @@ fn jet_cli_gate_append_invocation(ledger: &GateLedger, args: [String]) Never! {
     }
     if build_option_flags(args) == .Resolved(flags, _) {
         loop choice in flags.written {
-            if build_option_removes_check(choice) -> gate_ledger_push(&ledger, jet_cli_check_removal_gate(choice))
+            if build_option_removes_check(choice) -> gate_ledger_push(&ledger, jet_cli_build_option_gate(GateKind.CheckRemoval, choice, "build option that removes a runtime check"))
+            if choice.name == "link_args" -> gate_ledger_push(&ledger, jet_cli_build_option_gate(GateKind.LinkOverride, choice, "build option that adds native link inputs"))
         }
     }
 }
@@ -212,7 +214,7 @@ fn jet_cli_gates_host(request: JetDriverCompileRequest, args: [String], file: St
     if !result.source.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
     kind := GateKind?{None}
     if jet_cli_option_value(args, "--kind") == .Val(value) {
-        parsed :: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
+        parsed :: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, link_override, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
         kind = Val(parsed)
     }
     if !result.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)

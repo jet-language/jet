@@ -22,6 +22,7 @@ fn policy_key_name(key: PolicyKey) -> String Never! {
         .Structure -> "structure"
         .LintAllow -> "lint_allow"
         .CheckRemoval -> "check_removal"
+        .LinkOverride -> "link_override"
         .ScopedGC -> "gc"
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
@@ -47,6 +48,7 @@ fn policy_key_parse(name: String) -> PolicyKey? Never! {
         "structure" -> Val(PolicyKey.Structure)
         "lint_allow" -> Val(PolicyKey.LintAllow)
         "check_removal" -> Val(PolicyKey.CheckRemoval)
+        "link_override" -> Val(PolicyKey.LinkOverride)
         "gc" -> Val(PolicyKey.ScopedGC)
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
@@ -133,6 +135,7 @@ POLICY_RULES :: comptime { [PolicyRule]{
     {key: PolicyKey.Structure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.LintAllow, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.CheckRemoval, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    {key: PolicyKey.LinkOverride, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.ScopedGC, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Override},
     {key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
@@ -201,6 +204,7 @@ fn policy_key_debug_text(key: PolicyKey) -> String Never! {
         .Structure -> "Structure"
         .LintAllow -> "LintAllow"
         .CheckRemoval -> "CheckRemoval"
+        .LinkOverride -> "LinkOverride"
         .ScopedGC -> "ScopedGc"
         .ExplicitUnits -> "ExplicitUnits"
         .Copies -> "Copies"

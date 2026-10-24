@@ -18,6 +18,9 @@ enum GateKind {
     // A build option value that removes a runtime memory-safety check
     // (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
     CheckRemoval
+    // The `link_args` build option (D-TARGET-LINKER1): native link inputs
+    // the program's own declarations don't name.
+    LinkOverride
 }
 
 fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
@@ -37,6 +40,7 @@ fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
         .Structure -> PolicyKey.Structure
         .LintAllow -> PolicyKey.LintAllow
         .CheckRemoval -> PolicyKey.CheckRemoval
+        .LinkOverride -> PolicyKey.LinkOverride
     }
 }
 
@@ -61,13 +65,14 @@ fn gate_kind_parse(value: String) -> GateKind? Never! {
         "structure" -> Val(GateKind.Structure)
         "lint_allow" -> Val(GateKind.LintAllow)
         "check_removal" -> Val(GateKind.CheckRemoval)
+        "link_override" -> Val(GateKind.LinkOverride)
         else -> None
     }
 }
 
 fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
     if kind == {
-        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic | .CheckRemoval -> true
+        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic | .CheckRemoval | .LinkOverride -> true
         else -> false
     }
 }
@@ -89,6 +94,7 @@ fn gate_kind_order(kind: GateKind) -> Int Never! {
         .PrecisionDemotion -> 12
         .Structure -> 13
         .LintAllow -> 14
+        .LinkOverride -> 15
     }
 }
 

@@ -1,6 +1,6 @@
 // Exact compiler-value contract from Collections.rs::build_context_method_*.
 // This table is arity-polymorphic; Core owns the session semantics, not sema.
-use jet_foundation.[AccessConvention, BuildOptionKind, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_argument, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
+use jet_foundation.[AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_accepts, build_option_argument, build_option_list_value, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
 use jet_parser.[jfmt_format_program_with_tokens]
 use jet_lexer.[Token]
 
@@ -211,22 +211,23 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
     }
     row :: build_option_row(name) ?? return failed
     argument :: args[wanted - 1]
-    value := ""
-    if row.kind == BuildOptionKind.Bool {
-        if argument.expr == .Bool(written, _, _) -> value = "{written}"
-    } else if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
-        if leading_dot && enum_args.len() == 0 -> value = build_option_value_of_variant(row, variant) ?? ""
+    shape_fix :: "write `{sema_build_option_call_shape(method, name, pinned)}`"
+    value :: sema_build_option_value(row, argument.expr) ?? {
+        &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes {build_option_variants_text(row)}", shape_fix))
+        return failed
     }
-    if value.len() == 0 {
-        &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes one of {build_option_variants_text(row)}", "write `{sema_build_option_call_shape(method, name, pinned)}`"))
+    if !build_option_accepts(row, value) {
+        &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes {build_option_variants_text(row)}, each one line and none empty", shape_fix))
         return failed
     }
     // Only the value is an ordinary argument: a pin's option name is a row
-    // name, not an expression of the body.
-    params :: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
-    ordinary := [CallArg]{argument.copy()}
-    ownership :: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return failed
+    // name, not an expression of the body; a List row's literal reads nothing.
+    if row.kind != BuildOptionKind.List {
+        params :: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+        ordinary := [CallArg]{argument.copy()}
+        ownership :: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+        if !ownership.accepted || !ownership.complete -> return failed
+    }
     values :: [TExpr]{
         sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, args[0].span),
         sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, argument.span),
@@ -235,11 +236,60 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
 }
 
-// `b.debug_info(false)`, `b.pin(.optimize, .Full)`: a call of `method` that
-// sets row `name` to its last value, as the fix of a malformed call.
+// The row value `expr` writes: `false` for a Bool row, `.Full` for a Choice
+// row, and, since the value reaches the build session as text, a string
+// literal for a Text row and a list literal of them for a List row.
+fn sema_build_option_value(row: BuildOptionRow, expr: Expr) -> String? {
+    if row.kind == {
+        .Bool -> {
+            if expr == .Bool(written, _, _) -> return Val("{written}")
+        }
+        .Choice -> {
+            if expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
+                if leading_dot && enum_args.len() == 0 -> return build_option_value_of_variant(row, variant)
+            }
+        }
+        .Text -> return sema_build_option_literal(expr)
+        .List -> {
+            if expr == .ListLit(elements, _, _) {
+                items := [String]{}
+                loop element in elements {
+                    item :: sema_build_option_literal(element) ?? return None
+                    &items.push(item)
+                }
+                return Val(build_option_list_value(items))
+            }
+        }
+    }
+    None
+}
+
+// The text of a string literal without interpolation.
+fn sema_build_option_literal(expr: Expr) -> String? {
+    if expr == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(piece) {
+                text = "{text}{piece}"
+            } else {
+                return None
+            }
+        }
+        return Val(text)
+    }
+    None
+}
+
+// `b.debug_info(false)`, `b.pin(.optimize, .Full)`, `b.output_dir("dist")`,
+// `b.libs(["z"])`: a call of `method` that sets row `name` to an example
+// value, as the fix of a malformed call.
 fn sema_build_option_call_shape(method: String, name: String, pinned: Bool) -> String Never! {
     row :: build_option_row(name) ?? return "b.pin(.optimize, .Full)"
-    example :: build_option_argument(row, row.values[row.values.len() - 1])
+    example :: if row.kind == {
+        .Text -> "\"dist\""
+        .List -> "[\"z\"]"
+        else -> build_option_argument(row, row.values[row.values.len() - 1])
+    }
     if pinned -> return "b.pin(.{name}, {example})"
     "b.{method}({example})"
 }

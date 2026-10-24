@@ -1,0 +1,16 @@
+// The link and target rows:
+//   jet build                              writes dist/run (`b.output_dir("dist")`)
+//   jet build --output-dir=out             writes out/run: the flag replaces fn build's value
+//   jet run --profile=vendored run.jet     searches vendor/ first for `libs` and `-l`
+//                                          libraries (a `link_override` gate)
+//   jet build --os=web                     refused (E2104): the native backend
+//                                          writes Linux x86-64 ELF images
+fn greeting(names: [String]) -> String {
+    out := "linked"
+    loop name in names -> out = "{out} {name}"
+    out
+}
+
+fn run() {
+    print(greeting(["against", "vendor/"]))
+}

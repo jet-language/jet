@@ -29,6 +29,7 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Program,
     Span,
+    build_option_list_value,
     diagnostic_from_registry,
 ]
 use jet_lexer.[
@@ -118,6 +119,9 @@ struct JetCLIBuildProfile {
 struct JetCLIProfileField {
     name: String
     value: String
+    // `libs: ["z", "bz2"]`: a list of strings, its value the items joined by
+    // newlines (a List build option's value, build_option_list_value).
+    list: Bool
 }
 
 struct JetCLIMemberRef {
@@ -293,9 +297,10 @@ fn jet_cli_outputs(tokens: [Token], tables: TokenTables, open: Int, close: Int) 
 }
 
 // `build: { release: Build{ optimize: full, debug_info: true }, fast: Build{...} }`:
-// the profiles and their plain fields (`name: word`). A policy field
-// (`build: { allow: Exec }`) or a nested value (`settings: { ... }`) is skipped;
-// PackageModel reads and checks the whole block when the compile loads it.
+// the profiles and their plain fields (`name: word`, `name: "text"`,
+// `name: ["a", "b"]`). A policy field (`build: { allow: Exec }`) or another
+// nested value (`settings: { ... }`) is skipped; PackageModel reads and checks
+// the whole block when the compile loads it.
 fn jet_cli_build_profiles(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIBuildProfile] Never! {
     profiles := [JetCLIBuildProfile]{}
     index := open + 1
@@ -316,6 +321,24 @@ fn jet_cli_build_profiles(tokens: [Token], tables: TokenTables, open: Int, close
         fields := [JetCLIProfileField]{}
         field := body + 1
         loop field < body_close {
+            if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && tokens[field + 2].kind == TOKEN_LBRACKET {
+                list_close :: jet_cli_matching_close(tokens, field + 2)
+                if list_close < 0 || list_close > body_close -> break
+                items := [String]{}
+                strings := true
+                at := field + 3
+                loop at < list_close {
+                    if jet_cli_is_manifest_string(tokens[at].kind) {
+                        &items.push(token_decoded(tables, tokens[at]))
+                    } else if tokens[at].kind != TOKEN_COMMA {
+                        strings = false
+                    }
+                    at += 1
+                }
+                if strings -> &fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: build_option_list_value(items), list: true})
+                field = list_close + 1
+                next
+            }
             if tokens[field].kind == TOKEN_LBRACE || tokens[field].kind == TOKEN_LBRACKET || tokens[field].kind == TOKEN_LPAREN {
                 skipped :: jet_cli_matching_close(tokens, field)
                 if skipped < 0 -> break
@@ -329,7 +352,7 @@ fn jet_cli_build_profiles(tokens: [Token], tables: TokenTables, open: Int, close
                     kind == TOKEN_FALSE -> "false"
                     else -> token_decoded(tables, tokens[field + 2])
                 }
-                &fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: value})
+                &fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: value, list: false})
                 field += 3
                 next
             }

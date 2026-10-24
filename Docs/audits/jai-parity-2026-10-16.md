@@ -227,11 +227,11 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 | # | Jai | Jet today | State | Closes it |
 |---|---|---|---|---|
 | E01 | `output_type` (5 kinds) | package output kinds; no object or check-only output | ballot | D-JAI-BUILDOPT1 (`kind`) |
-| E02 | output, intermediate path | `--output` (unported in JetCli) | ballot | D-JAI-BUILDOPT1 (`output_dir`, `work_dir`) |
+| E02 | output, intermediate path | `output_dir` build option for `jet build` (#5828); no intermediate-path row | shipped / ballot | D-JAI-BUILDOPT1 (`work_dir`) |
 | E03 | `entry_point_name` | `output.entry`; freestanding target profile facts (D-TARGET-SURFACE1) | ratified | — |
-| E04 | `os_target` | `--target=web`, wasm targets | ballot | D-JAI-BUILDOPT1 (`os`) |
+| E04 | `os_target` | `os` build option (#5828): `linux` builds; `macos`, `windows`, `web` and `freestanding` are refused (E2104) until a backend writes them | shipped (linux) | D-JAI-BUILDOPT1 (`os`) |
 | E05 | `cpu_target`, machine options | none | ballot | D-JAI-BUILDOPT1 (`cpu`, `cpu_features`) |
-| E06 | `minimum_os_version` | none | ballot | D-JAI-BUILDOPT1 (`min_os`) |
+| E06 | `minimum_os_version` | `min_os` build option (#5828), refused (E2104): a Linux ELF image has no versioned ABI floor | shipped (refusal) | D-JAI-BUILDOPT1 (`min_os`) |
 | E07 | `backend` | implied by profile (`Compiler/JetCli/Source/Cli/Front.jet:342-346`) | ballot | D-JAI-BUILDOPT1 (`backend`) |
 | E08 | `Optimization_Type` (6 presets) | `optimize: none\|basic\|full`, `small` | groundwork / ballot | D-JAI-BUILDOPT1 (`.Size`, `.MinSize`) |
 | E09 | bytecode inliner | `#Inline` per function; `inline` build option (auto, always_marked, off; #5829) | shipped | D-JAI-BUILDOPT1 (`inline`) |
@@ -246,7 +246,7 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 | E22 | `llvm_options` | none | ballot | D-JAI-BUILDOPT1 (typed fields + `backend_args`) |
 | E23 | `x64_options` | none | ballot | D-JAI-BUILDOPT1 (`backend_args`) |
 | E24 | `temporary_storage_size` | none | ballot | D-JAI-BUILDOPT1 (`scratch_size`), D-JAI-CONTEXT1 |
-| E25 | linker arguments | `-l`/`-L` for `jet cc` only | ballot | D-JAI-BUILDOPT1 (`link_args`, `libs`) |
+| E25 | linker arguments | `libs` and `link_args` build options (#5828): `-L<dir>`, `-l<name>`, `.a` archives; a `link_override` gate | shipped | D-JAI-BUILDOPT1 (`link_args`, `libs`) |
 | E26 | `use_custom_link_command` | none | ballot | D-JAI-EVENTS1 (`build.link`) |
 | E27 | `import_path` | package identity resolution | by design | — |
 | E28 | diagnostics format options | `--color`, `--quiet` | ballot | D-JAI-BUILDOPT1 (`diagnostics`, `short_paths`, `timings`) |

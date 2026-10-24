@@ -4,7 +4,7 @@
 // Source owns session mutation, validation and projection on every tier.
 use core.crypto as build_crypto
 use core.build.[BuildGraph, BuildGraphTarget, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphNode, BuildGraphInputDigest]
-use jet_foundation.[Span, build_option_row, type_name]
+use jet_foundation.[Span, build_option_accepts, build_option_row, type_name]
 
 struct BuildSessionPolicy {
     legacy_denied: String?
@@ -408,7 +408,7 @@ fn build_session_set_option(state: &BuildSessionState, args: [BuildSessionValue]
     name :: build_session_text(args, 0) ?? return build_session_fail(state, "build option name must be a string")
     value :: build_session_text(args, 1) ?? return build_session_fail(state, "build option value must be a string")
     row :: build_option_row(name) ?? return build_session_fail(state, "`{name}` isn't a build option")
-    if !row.values.contains(value) -> return build_session_fail(state, "`{value}` isn't a value of build option `{name}`")
+    if !build_option_accepts(row, value) -> return build_session_fail(state, "`{value}` isn't a value of build option `{name}`")
     loop index in 0..<state.options.len() {
         if state.options[index].name != name -> next
         if state.options[index].pinned && state.options[index].value != value -> return build_session_fail(state, "build option `{name}` is pinned to `{state.options[index].value}`; `fn build` can't change it")

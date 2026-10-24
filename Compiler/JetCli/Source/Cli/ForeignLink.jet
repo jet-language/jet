@@ -6,7 +6,7 @@ use core.files as cli_files
 use core.process as cli_process
 use core.sys as cli_sys
 use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
-use jet_foundation.[Type, sha256_bytes, sha256_hex_bytes]
+use jet_foundation.[BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
 
 #Error
 struct JetCLIForeignLinkError { message: String }
@@ -403,22 +403,33 @@ fn jet_cli_foreign_static_archive(lib: String, directories: [String], cache: Str
 struct JetCLIForeignSources {
     root: String
     declarations: [JetDriverCDependency]
+    // The `libs` and `link_args` build options (BuildOptions.jet).
+    libs: [String]
+    link_args: [String]
 }
 
 // Capture only C declarations before a factory transfers its request into
 // the compiler. Keeping the complete source snapshot would copy source text.
-fn jet_cli_native_c_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIForeignSources JetCLIForeignLinkError! {
+fn jet_cli_native_c_sources(snapshot: JetDriverAuthorizedSourceSnapshot, options: BuildOptions) -> JetCLIForeignSources JetCLIForeignLinkError! {
     root := ""
     loop candidate in snapshot.roots {
         if candidate.identity == snapshot.entry_root_identity -> root = candidate.canonical_path
     }
     if root == "" -> return Err(jet_cli_foreign_link_error("C link resolution has no authorized entry source root"))
-    Ok(JetCLIForeignSources{root: root, declarations: jet_driver_c_dependencies(snapshot)})
+    Ok(JetCLIForeignSources{root: root, declarations: jet_driver_c_dependencies(snapshot), libs: build_options_list(options, "libs"), link_args: build_options_list(options, "link_args")})
+}
+
+// A `link_args` path or `-L` directory, under the source root unless absolute.
+fn jet_cli_foreign_option_path(root: String, written: String) -> String Never! {
+    if written.starts_with("/") -> return written.copy()
+    "{root}/{written}"
 }
 
 // The checked foreign link facts `facts` realized as link inputs: the C
-// provider archives, the realized Rust helper archive `rust_helper` (its
-// exact StaticLibrary) and the inline C archive, in that order.
+// provider archives (with the libraries the `libs` and `link_args` build
+// options add), the `link_args` archives, the realized Rust helper archive
+// `rust_helper` (its exact StaticLibrary) and the inline C archive, in that
+// order.
 fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
     root :: sources.root
@@ -432,6 +443,19 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
         loop lib in facts.libraries -> &libraries.push(lib)
     }
     loop lib in facts.transitive_links -> &libraries.push(lib)
+    // The `libs` and `link_args` build options: more libraries, each found
+    // in the `-L` directories first, and archives linked as they are.
+    requested := sources.libs.copy()
+    link_dirs := [String]{}
+    archives := [String]{}
+    loop word in sources.link_args {
+        if {
+            word.starts_with("-L") -> &link_dirs.push(jet_cli_foreign_option_path(root, word.removeprefix("-L")))
+            word.starts_with("-l") -> &requested.push(word.removeprefix("-l"))
+            else -> &archives.push(jet_cli_foreign_option_path(root, word))
+        }
+    }
+    loop lib in requested -> &libraries.push(lib)
     libraries = jet_cli_sorted_set(libraries)
     loop lib in libraries {
         // These names select the program's one implicit musl platform below.
@@ -461,8 +485,18 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
             jet_cli_foreign_add(&inputs, path) ?? return Err(err)
             next
         }
+        // A `-L` directory of the `link_args` build option is searched first.
+        found := ""
+        loop directory in link_dirs {
+            if found == "" && cli_files.is_file("{directory}/lib{lib}.a") -> found = "{directory}/lib{lib}.a"
+        }
+        if found != "" {
+            jet_cli_foreign_add(&inputs, found) ?? return Err(err)
+            next
+        }
         // Undeclared imports require pkg-config; an explicit c@system falls
-        // back to the same nixpkgs provisioning as the seed resolver.
+        // back to the same nixpkgs provisioning as the seed resolver, and a
+        // library the build options name to the C compiler's search path.
         output := ""
         configured := false
         if cli_process.cmd([String]{"pkg-config", "--static", "--libs", lib}).run() == .Ok(receipt) {
@@ -470,6 +504,11 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
                 output = receipt.output
                 configured = true
             }
+        }
+        if !configured && requested.contains(lib) && !declared_system {
+            path :: jet_cli_foreign_static_archive(lib, [String]{}, cache, false) ?? return Err(err)
+            jet_cli_foreign_add(&inputs, path) ?? return Err(err)
+            next
         }
         if !configured {
             if !declared_system -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` was not declared and pkg-config did not find it"))
@@ -490,6 +529,10 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
             path :: jet_cli_foreign_static_archive(name, directories, cache, false) ?? return Err(err)
             jet_cli_foreign_add(&inputs, path) ?? return Err(err)
         }
+    }
+    loop archive in archives {
+        if !cli_files.is_file(archive) -> return Err(jet_cli_foreign_link_error("the `link_args` archive `{archive}` doesn't exist"))
+        jet_cli_foreign_add(&inputs, archive) ?? return Err(err)
     }
     if rust_helper == .Val(path) -> jet_cli_foreign_add(&inputs, path) ?? return Err(err)
     // FFI.rs's inline C bridge: every selected `#FFI(c)` body, one archive.

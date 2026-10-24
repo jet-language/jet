@@ -1869,7 +1869,7 @@ Every deliberate gate uses the same organization → package → module →
 function → block tightening ladder. The policy keys are `unsafe`, `impure`,
 `nondeterministic`, `dependency_grant`, `build_flag`, `session_flag`,
 `trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`, `state_transition`,
-`precision_demotion`, `structure`, `lint_allow`, and `check_removal`. The first three retain
+`precision_demotion`, `structure`, `lint_allow`, `check_removal`, and `link_override`. The first three retain
 their existing modes; every added key accepts `.GateOnly` (the default) or
 `.Forbid`. An organization's `.Forbid` cannot be widened by a package
 `.GateOnly` or a command-line allowance. Refusal reports the gate kind, its
@@ -3681,6 +3681,40 @@ non-generic function of the package's own modules, so the image carries them
 `fn build` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
+
+### Output places, link inputs and targets
+
+The `output_dir`, `libs`, `link_args`, `os` and `min_os` rows place the
+executable, add native link inputs and name the target. `output_dir` and
+`min_os` hold a string (`output_dir: "dist"`, `b.output_dir("dist")`,
+`--output-dir=dist`); `libs` and `link_args` hold a list of strings
+(`libs: ["z"]`, `b.libs(["z"])`), and each flag adds one item
+(`--libs=z --libs=bz2`). `fn build` writes a string or list literal.
+
+`output_dir` (stock `""`, which is `.jet/build`) is the directory `jet build`
+writes its executables to, under the package root unless it is absolute. It
+places a product without changing its bytes, so no cache key names it.
+`jet run`, `jet dev` and `jet test` write no executable for it to place, and
+a value written for them is refused with E2104.
+
+`libs` names more C libraries the native link resolves foreign symbols
+against. Each is a static archive, found like an undeclared `#Link` library:
+in a `link_args` `-L` directory, then through `pkg-config`, then on the C
+compiler's search path. `link_args` adds `-L<dir>` (a directory searched
+first), `-l<name>` (a library, as in `libs`) and `.a` archive paths, under the
+package root unless absolute. The native linker takes no flags and reads `ar`
+archives only, so any other word is refused with E2104. Link inputs the
+program's own declarations don't name are a `link_override` gate (see One
+audited-gate law): `jet inspect gates FILE --link-args=-lz` lists it, and a
+package or organization `policy: { link_override: .Forbid }` refuses it with
+E3415 before the program is linked.
+
+`os` (stock `linux`; also `macos`, `windows`, `web` and `freestanding`) is the
+operating system the image runs on. The native backend writes Linux x86-64 ELF
+images, so every other value is refused with E2104. `min_os` (stock `""`) is
+the oldest OS version the image runs on; a Linux ELF image has no versioned
+ABI floor, so any value is refused with E2104. Example:
+[`Examples/features/tooling/build_link_inputs`](../../Examples/features/tooling/build_link_inputs/run.jet).
 
 ### Language server
 

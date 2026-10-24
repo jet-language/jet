@@ -19,16 +19,19 @@ use jet_driver.[
 ]
 use jet_foundation.[
     BuildOptionChoice,
+    BuildOptionKind,
     BuildOptionLayer,
     BuildOptions,
+    build_option_accepts,
+    build_option_argument,
     build_option_check_removal_note,
     build_option_flag_refusal,
     build_options_check_removals,
     build_option_flag_row,
     build_option_flags,
+    build_option_profile_hint,
     build_option_refusal,
     build_option_row,
-    build_option_values_text,
     build_options_resolve,
     build_options_stock,
     JET_CLI_COMMANDS,
@@ -762,10 +765,11 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
             loop field in found.fields {
                 if build_option_refusal(field.name) == .Val(refusal) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {field.value}` {site} isn't a build option", refusal.law, "remove the `{field.name}` field", color, JET_DRIVER_EXIT_USAGE)}
                 row :: build_option_row(field.name) ?? next
-                if !row.values.contains(field.value) {
-                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {field.value}` {site} isn't a value of `{field.name}`", jet_cli_why("E2104"), "write `{field.name}:` with one of {build_option_values_text(row)}", color, JET_DRIVER_EXIT_USAGE)}
+                shown :: if field.list -> build_option_argument(row, field.value) else -> field.value.copy()
+                if field.list != (row.kind == BuildOptionKind.List) || !build_option_accepts(row, field.value) {
+                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {shown}` {site} isn't a value of `{field.name}`", jet_cli_why("E2104"), "write `{field.name}:` with {build_option_profile_hint(row)}", color, JET_DRIVER_EXIT_USAGE)}
                 }
-                &written.push(BuildOptionChoice{name: field.name.copy(), value: field.value.copy(), layer: BuildOptionLayer.Profile, written: "{field.name}: {field.value}", site: site.copy(), pinned: false})
+                &written.push(BuildOptionChoice{name: field.name.copy(), value: field.value.copy(), layer: BuildOptionLayer.Profile, written: "{field.name}: {shown}", site: site.copy(), pinned: false})
             }
         } else {
             if {

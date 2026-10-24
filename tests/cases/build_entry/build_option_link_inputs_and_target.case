@@ -1,0 +1,108 @@
+# #5828: the link and target rows. `output_dir` places `jet build`'s
+# executables and is refused for a command that writes none; `libs` and
+# `link_args` add native link inputs (`link_args` takes only `-L<dir>`,
+# `-l<name>` and `.a` archives) and are a `link_override` gate that
+# `policy: { link_override: .Forbid }` refuses (E3415); `os` other than linux
+# and any `min_os` are refused, since the native backend writes Linux x86-64
+# ELF images only.
+fixture: fixtures/build_link
+artifact: app
+env: NO_COLOR=1
+step: jet run --link-args=-Lvendor app.jet
+cwd: open
+exit: 0
+stdout: = "linked\n"
+step: jet run --libs=m --libs=pthread app.jet
+cwd: open
+exit: 0
+stdout: = "linked\n" # a repeated List flag adds each item
+step: jet inspect gates --json app.jet --link-args=-Lvendor
+cwd: open
+exit: 0
+json: stdout doc $.gates.entries[?kind="link_override"][0].subject = "--link-args=-Lvendor"
+json: stdout doc $.gates.entries[?kind="link_override"][0].source = "command line"
+step: jet run --link-args=vendor/libmissing.a app.jet
+cwd: open
+exit: 1
+stderr: ~ "vendor/libmissing.a` doesn't exist" # an archive is linked as written, so a missing one is an error
+step: jet run --link-args=-Wl,--as-needed app.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]" # the native linker takes no flags
+stderr: ~ "-Wl,--as-needed" # the refused word is named
+step: jet run --link-args=greet.o app.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]" # it reads `ar` archives only
+step: jet run --libs= app.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]" # an empty item
+step: jet build app.jet
+cwd: open
+exit: 0
+file: open/.jet/build/app exists # the stock place
+file: open/out/app absent
+step: jet build --profile=dist app.jet
+cwd: open
+exit: 0
+file: open/out/app exists # the profile's output_dir
+step: {work}/open/out/app
+exit: 0
+stdout: = "linked\n"
+step: jet run --output-dir=out app.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]" # a run writes no executable to place
+stderr: ~ "`--output-dir=out` places the executables `jet build` writes, and `jet run` writes none" # the refused flag is named
+step: jet build --os=web app.jet
+cwd: open
+exit: 2
+stderr: ~ "asks for a web image, and the native backend writes Linux x86-64 ELF images only" # the flag's os is refused
+step: jet build --profile=web app.jet
+cwd: open
+exit: 2
+stderr: ~ "`os: web` in profile `web` of package.jet asks for a web image" # the profile field is the site
+step: jet build --min-os=10.15 app.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]" # a Linux ELF image has no versioned ABI floor
+stderr: ~ "`--min-os=10.15` sets a minimum OS version" # the refused flag is named
+step: jet build --output-dir=.jet/build
+cwd: code
+exit: 0
+file: code/.jet/build/app exists # the flag replaces fn build's value
+file: code/built/app absent
+step: jet build
+cwd: code
+exit: 0
+file: code/built/app exists # fn build's b.output_dir("built")
+step: {work}/code/built/app
+exit: 0
+stdout: = "built\n"
+step: jet build --output-dir=other
+cwd: code
+exit: 0
+file: code/other/app exists # any directory under the package root
+step: jet run --link-args=-Lvendor main.jet
+cwd: forbid
+exit: 1
+stderr: ~ "Error [E3415]: The `link_override` gate at `command line (--link-args=-Lvendor)` is forbidden by" # the package policy forbids the gate
+step: jet build --profile=vendored main.jet
+cwd: forbid
+exit: 1
+stderr: ~ "Error [E3415]: The `link_override` gate at `link_args: [\"-Lvendor\"] in profile vendored of package.jet` is forbidden by" # the profile field is the gate's site
+step: jet run main.jet
+cwd: forbid
+exit: 0
+stdout: = "checked\n"
+step: jet run --profile=flat main.jet
+cwd: refused_profile
+exit: 2
+stderr: ~ "Error [E2104]" # a List row takes a list literal
+stderr: ~ "a list of strings" # the expected kind is named
+step: jet build
+cwd: refused_code
+exit: 1
+stderr: ~ "Error [E3502]" # so does its fn build call
+stderr: ~ "b.libs" # the refused call is named
