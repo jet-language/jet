@@ -226,9 +226,10 @@ fn sema_policy_has_unsupported_applications(program: Program) -> Bool Never! {
         if application.marker.name != "allow" -> return true
     }
     loop application in program.rule_facts {
-        // A file `#Target` is lowered by the parser into the Program's target
-        // fields, which are checked on their own.
-        if application.site == .Val(site) && site == RuleSite.File && application.marker.name == "Target" -> next
+        // A file `#Target` or `#NoPrelude` is lowered by the parser into the
+        // Program's target fields or its no_prelude flag, which are checked on
+        // their own.
+        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude") -> next
         if sema_policy_statement_form(application) -> next
         if application.marker.name != "allow" -> return true
     }
