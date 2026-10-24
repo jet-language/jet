@@ -184,6 +184,22 @@ fn name_rows_set_hashed(map: &NameRows, text: String, hash: Int, row: Int) Never
         map.rows[key] = row
         return
     }
+    name_rows_append(&map, text, hash, row)
+}
+
+// Binds `text` to `row` (>= 0) unless it is bound: a key's first row stands.
+// One hash serves the probe and the insert.
+fn name_rows_set_first(map: &NameRows, text: String, row: Int) Never! {
+    hash :: name_rows_hash(text)
+    if name_rows_key(map, text, hash) == .Val(key) {
+        if map.rows[key] < 0 -> map.rows[key] = row
+        return
+    }
+    name_rows_append(&map, text, hash, row)
+}
+
+// Adds `text`, which the map never held, bound to `row`.
+fn name_rows_append(map: &NameRows, text: String, hash: Int, row: Int) Never! {
     key :: map.texts.len()
     // copy: the map keeps its own key; `text` stays with the caller.
     &map.texts.push(text.copy())

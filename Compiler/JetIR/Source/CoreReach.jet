@@ -23,7 +23,7 @@ use jet_foundation.[
     TStrFormat,
     core_identity_in_module,
 ]
-use jet_foundation.[DeclTable, Span, Type, decl_table_find]
+use jet_foundation.[DeclTable, NameRows, Span, Type, decl_table_find, name_rows, name_rows_get_text, name_rows_set_first]
 
 fn ir_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     if kind == {
@@ -404,7 +404,8 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [String:Bool]{}
     loop identity in core_module_identities -> core_modules[identity] = true
-    keyed := [(key: String, at: Int, row: Int)]{}
+    // Each candidate key's first row (a hashed map: only looked up).
+    by_key := name_rows()
     reachable := [Bool]{}
     roots := [Int]{}
     weights := [Int]{}
@@ -418,7 +419,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
             &reachable.push(false)
             next
         }
-        &keyed.push((key: function.key.copy(), at: index, row: index))
+        name_rows_set_first(&by_key, function.key, index)
         if decl_table_find(decls, function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
         }
@@ -431,8 +432,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
             &weights.push(function.source_span.end - function.source_span.start)
         }
     }
-    by_key := ir_first_rows(^keyed)
-    slot :: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(&functions)}, by_key: [[String:Int]]{^by_key}, source_keys: [[String:String]]{^source_keys}, decl_rows: ^decl_rows, roots: ^roots}
+    slot :: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(&functions)}, by_key: [NameRows]{^by_key}, source_keys: [[String:String]]{^source_keys}, decl_rows: ^decl_rows, roots: ^roots}
     pending := [Int]{}
     loop target in ir_core_reach_root_targets(slot, weights, threads) {
         if !reachable[target] {
@@ -463,7 +463,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
 // the function rows by DeclID row, and the rooted rows.
 struct IRReachShared {
     functions: [[FnBody]]
-    by_key: [[String:Int]]
+    by_key: [NameRows]
     source_keys: [[String:String]]
     decl_rows: [Int]
     roots: [Int]
@@ -542,10 +542,11 @@ fn ir_core_reach_part_targets(slot: Shared<IRReachShared>, first: Int, last: Int
 // The rows checked function row `row` names (a direct call's by its
 // DeclID row; others by key, or by their generic declaration's key),
 // appended to `targets`.
-fn ir_core_reach_row_targets(functions: [FnBody], by_key: [String:Int], source_keys: [String:String], decl_rows: [Int], row: Int, targets: &[Int]) Never! {
+fn ir_core_reach_row_targets(functions: [FnBody], by_key: NameRows, source_keys: [String:String], decl_rows: [Int], row: Int, targets: &[Int]) Never! {
     loop key in ir_core_reach_function_keys(functions[row], functions, source_keys, decl_rows, &targets) {
-        target :: by_key.get(key) ?? by_key.get(ir_core_reach_template_key(key)) ?? next
-        &targets.push(target)
+        target := name_rows_get_text(by_key, key)
+        if target == None -> target = name_rows_get_text(by_key, ir_core_reach_template_key(key))
+        if target == .Val(found) -> &targets.push(found)
     }
 }
 

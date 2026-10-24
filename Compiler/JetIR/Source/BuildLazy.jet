@@ -1045,7 +1045,7 @@ fn ir_line_next_body(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type,
     payload :: ir_new_slot(&a, handle_row, IRSlotKind.Param, ir_intern_name(&m, "payload"))
     output :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "output"))
     key :: ir_line_reader_key(p.functions, handle_ty)
-    row :: p.rows.get(key) ?? return ir_fail(&a, span, "line reader of {ir_type_name(handle_ty)}")
+    row :: ir_function_row(p, key) ?? return ir_fail(&a, span, "line reader of {ir_type_name(handle_ty)}")
     access :: ir_receiver_access(p.functions[row].kind)
     result := -1
     if access == "static" {

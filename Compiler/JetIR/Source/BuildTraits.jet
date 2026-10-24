@@ -43,7 +43,7 @@ fn ir_trait_receiver(m: IRModule, p: IRProgram, receiver: Type, method: TMethodR
 // implementation of the concrete receiver (a bounded generic's receiver is
 // concrete per instance).
 fn ir_method_key(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef) -> String Never! {
-    if p.rows.get(method.symbol.key) != None -> return method.symbol.key.copy()
+    if ir_function_row(p, method.symbol.key) != None -> return method.symbol.key.copy()
     owner :: method.trait_owner ?? return method.symbol.key.copy()
     concrete :: ir_trait_identity(p, ir_subst(m, receiver))
     candidates :: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
@@ -126,7 +126,7 @@ fn ir_trait_call(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, metho
     candidates :: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
     loop index in candidates {
         if p.functions[index].generic_params.len() > 0 -> next
-        if p.rows.get(p.functions[index].key) != (Val(index)) -> next
+        if ir_function_row(p, p.functions[index].key) != (Val(index)) -> next
         implementer :: ir_trait_implementer(p, index, owner) ?? next
         // One implementation per concrete type: its payload key selects it.
         identity :: ir_trait_identity(p, implementer)

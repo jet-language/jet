@@ -349,7 +349,7 @@ fn ir_codec_decode_helper(p: IRProgram, target: Type) -> (name: String, type_arg
 // does not hold it (CoreReach.jet ir_codec_decode_source).
 fn ir_codec_decode_key(p: IRProgram, name: String) -> String? Never! {
     loop (index, function) in p.functions {
-        if function.name == name && ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) && p.rows.get(function.key) == (Val(index)) -> return Val(function.key.copy())
+        if function.name == name && ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) -> return Val(function.key.copy())
     }
     None
 }
@@ -463,7 +463,7 @@ fn ir_codec_impl(p: IRProgram, concrete: Type, codec: String, method: String) ->
     declaration :: ir_render_type_key(p.type_rows, p.types, concrete)
     candidates :: p.trait_methods.get("{codec}|{method}") ?? [Int]{}
     loop row in candidates {
-        if p.rows.get(p.functions[row].key) != (Val(row)) -> next
+        if ir_function_row(p, p.functions[row].key) != (Val(row)) -> next
         owner := Type?{None}
         if p.functions[row].kind == {
             .Method(_, owner_type) -> owner = Val(owner_type.copy())

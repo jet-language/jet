@@ -105,8 +105,7 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     unchecked := 0
     outside := 0
     loop row in rows {
-        index :: p.rows.get(row.key) ?? -1
-        if index < 0 {
+        index :: ir_function_row(p, row.key) ?? {
             unchecked += 1
             next
         }

@@ -2,7 +2,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern]
+use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set_first]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -189,7 +189,8 @@ fn ir_bounds_mode(p: IRProgram, row: Int) -> IRBoundsMode Never! {
 // built once per distinct list of concrete type arguments (monomorphized).
 struct IRProgram {
     functions: [FnBody]
-    rows: [String:Int]
+    // Each function key's first row in `functions` (ir_first_function_rows).
+    rows: NameRows
     types: [TTypeDef]
     type_rows: [String:Int]
     // Checked constants (ConstRef / CtLit values): each key's row in
@@ -382,6 +383,20 @@ fn ir_first_rows(entries: ^[(key: String, at: Int, row: Int)]) -> [String:Int] N
     rows
 }
 
+// Each function key of `functions` to its first row, filled in one pass in
+// row order. A hashed map: its readers only look keys up, so no String sort
+// orders it.
+fn ir_first_function_rows(functions: [FnBody]) -> NameRows Never! {
+    rows := name_rows()
+    loop (index, function) in functions -> name_rows_set_first(&rows, function.key, index)
+    rows
+}
+
+// The first row of the checked function `key` (IRProgram.rows).
+fn ir_function_row(p: IRProgram, key: String) -> Int? Never! {
+    name_rows_get_text(p.rows, key)
+}
+
 // A program over the checked declarations with no function bound yet
 // (ir_program_bind binds them): the constants by key, the types with the
 // compiler-owned ones and the union types the declarations and `functions`'
@@ -445,7 +460,7 @@ fn ir_program_declared(type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_
         if method == "" -> next
         &impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: [String:Int]{}, types: ^types, type_rows: type_rows, constants: constants, constant_defs: ^defs, startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), types: ^types, type_rows: type_rows, constants: constants, constant_defs: ^defs, startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -457,9 +472,7 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody], decls: DeclTable) Never!
     owned := ^functions
     ir_declared_owners(&owned, p.types)
     ir_add_signature_union_types(&p.types, &p.type_rows, owned)
-    function_keys := [(key: String, at: Int, row: Int)]{}
-    loop (index, function) in owned -> &function_keys.push((key: function.key.copy(), at: index, row: index))
-    rows :: ir_first_rows(^function_keys)
+    rows :: ir_first_function_rows(owned)
     // An implementation method is checked as its owner's method of that name
     // (a TraitMethod when its trait resolves in the implementing module,
     // else a plain Method).
@@ -721,7 +734,7 @@ fn ir_type_def(p: IRProgram, name: String) -> Int? Never! {
 // The IR id of the checked function `key` applied to `type_args` (written
 // in the current instance's terms), queueing it on first use.
 fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -> Int? Never! {
-    row :: p.rows.get(key) ?? return None
+    row :: ir_function_row(p, key) ?? return None
     ir_function_row_id(&m, p, row, type_args)
 }
 
@@ -959,7 +972,7 @@ fn ir_build_program(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
     ir_foreign_index(&p, ^foreign, decls)
-    row :: p.rows.get(entry_key) ?? {
+    row :: ir_function_row(p, entry_key) ?? {
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
         return IRBuildResult{program: ir_module_for(p), failures: failures}
     }
@@ -985,7 +998,7 @@ fn ir_build_roots_in(program: ^IRProgram, root_keys: [String], threads: Compiler
     roots := [IRWaveJob]{}
     failures := [IRBuildFailure]{}
     loop key in root_keys {
-        row :: p.rows.get(key) ?? {
+        row :: ir_function_row(p, key) ?? {
             &failures.push(IRBuildFailure{key: key.copy(), name: key.copy(), message: "the root function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
             next
         }

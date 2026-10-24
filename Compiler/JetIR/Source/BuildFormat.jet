@@ -14,7 +14,7 @@ fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, forma
     member :: ir_string_format_member(concrete, format) ?? return ir_fail_slot(&b, span, "interpolation format {format}")
     row := -1
     loop (index, function) in p.functions {
-        if function.name == member && ir_string_format_source(function.module_identity, function.source_file, function.kind) && p.rows.get(function.key) == (Val(index)) {
+        if function.name == member && ir_string_format_source(function.module_identity, function.source_file, function.kind) && ir_function_row(p, function.key) == (Val(index)) {
             row = index
             break
         }

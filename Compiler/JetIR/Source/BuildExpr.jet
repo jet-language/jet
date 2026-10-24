@@ -69,8 +69,7 @@ fn ir_arm_params(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Ne
         self_slot :: b.bindings[0].slot
         own_close := false
         if function.name == "close" && b.bindings[0].indirect < 0 {
-            row :: p.rows.get(function.key) ?? -1
-            own_close = row >= 0 && ir_close_method(m, p, b.f.slot_type[self_slot]) == row
+            own_close = ir_function_row(p, function.key) == (Val(ir_close_method(m, p, b.f.slot_type[self_slot])))
         }
         if own_close {
             ir_close_arm(&m, p, &b, self_slot, true, function.source_span)
@@ -1183,8 +1182,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .MethodCall(receiver, method, type_args, args) -> {
             if ir_trait_receiver(m, p, ir_ty(p, b, receiver), method) -> return ir_trait_call(&m, p, &b, receiver, method, type_args, args, expression_ty, span)
             key :: ir_method_key(m, p, ir_ty(p, b, receiver), method)
-            if type_args.len() > 0 && p.rows.get(key) == None -> return ir_fail_slot(&b, span, "generic method call outside the checked program")
-            row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "method call outside the checked program: {method.name}")
+            if type_args.len() > 0 && ir_function_row(p, key) == None -> return ir_fail_slot(&b, span, "generic method call outside the checked program")
+            row :: ir_function_row(p, key) ?? return ir_fail_slot(&b, span, "method call outside the checked program: {method.name}")
             receiver_access :: ir_receiver_access(p.functions[row].kind)
             // A method of a generic type is built for the receiver's instance.
             receiver_ty :: ir_ty(p, b, receiver)
@@ -2062,7 +2061,7 @@ fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TS
         result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
         return ir_route(&m, p, &b, symbol, slots, borrowed, result, span)
     }
-    row :: p.rows.get(method.symbol.key) ?? return ir_fail_slot(&b, span, "static call outside the checked program: {method.name}")
+    row :: ir_function_row(p, method.symbol.key) ?? return ir_fail_slot(&b, span, "static call outside the checked program: {method.name}")
     function :: p.functions[row]
     expected :: function.generic_params.len()
     if expected > 0 && type_args.len() > 0 && type_args.len() != expected -> return ir_fail_slot(&b, span, "static call of {method.name} with {type_args.len()} of {expected} type arguments")
@@ -2233,7 +2232,7 @@ fn ir_print(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) N
 fn ir_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [BodyCallArg], span: Span) -> Int Never! {
     if p.intrinsics.get(key) == .Val(intrinsic) -> return ir_intrinsic_call(&m, p, &b, intrinsic, args, span)
     if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(&m, p, &b, foreign, args, span)
-    row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "call of a function outside the checked program: {key}")
+    row :: ir_function_row(p, key) ?? return ir_fail_slot(&b, span, "call of a function outside the checked program: {key}")
     ir_call_row(&m, p, &b, row, type_args, receiver, receiver_backs, args, span)
 }
 
@@ -2383,7 +2382,7 @@ fn ir_tag_order_test(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, lh
             if args.len() != 1 || type_args.len() > 0 -> return None
             receiver_ty :: ir_ty(p, b, receiver)
             if ir_trait_receiver(m, p, receiver_ty, method) -> return None
-            row = p.rows.get(ir_method_key(m, p, receiver_ty, method)) ?? return None
+            row = ir_function_row(p, ir_method_key(m, p, receiver_ty, method)) ?? return None
             left_expr = receiver
             right_expr = args[0].value
         }
@@ -2425,7 +2424,7 @@ fn ir_tag_order_test(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, lh
 fn ir_precise_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, args: [Int], span: Span) -> Int Never! {
     helper :: ir_precise_source_helper(type_name, function) ?? ""
     key :: "function:<corelib>/core.math::{helper}"
-    if helper == "" || p.rows.get(key) == None {
+    if helper == "" || ir_function_row(p, key) == None {
         type_key :: if type_name == {
             "Decimal" -> "decimal"
             "Fraction" -> "fraction"
@@ -4469,7 +4468,7 @@ fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args
 // read of module storage loads its cell, and a read of a constant computed
 // at startup borrows the value its cell holds (ir_startup_read).
 fn ir_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
-    if p.rows.get(key) != None -> return ir_function_value(&m, p, &b, ty, key, span)
+    if ir_function_row(p, key) != None -> return ir_function_value(&m, p, &b, ty, key, span)
     at :: p.constants.get(key) ?? return ir_fail_slot(&b, span, "constant {key} without a declaration")
     definition :: p.constant_defs[at]
     if definition.init != None -> return ir_startup_read(&m, p, &b, definition, span)
@@ -4516,7 +4515,7 @@ fn ir_startup_guard(m: &IRModule, p: IRProgram, definition: TConstantDef) -> Int
     known :: m.function_rows.get(key) ?? -1
     if known >= 0 -> return known
     init_key :: definition.init ?? return -1
-    init_row :: p.rows.get(init_key) ?? return -1
+    init_row :: ir_function_row(p, init_key) ?? return -1
     init_function :: p.functions[init_row]
     row :: ir_value_type(&m, p, definition.ty) ?? return -1
     callee_return :: ir_executable_return(init_function) ?? return -1
@@ -4578,7 +4577,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
     adapter_key :: "{key}#value<{type_carrier_identity(signature)}>"
     adapter := m.function_rows.get(adapter_key) ?? -1
     if adapter < 0 {
-        function_row :: p.rows.get(key) ?? return ir_fail_slot(&b, span, "named function {key} outside the checked program")
+        function_row :: ir_function_row(p, key) ?? return ir_fail_slot(&b, span, "named function {key} outside the checked program")
         function :: p.functions[function_row].copy()
         if function.generic_params.len() > 0 -> return ir_fail_slot(&b, span, "generic named function as a value")
         if function.params.len() != params.len() -> return ir_fail_slot(&b, span, "named function {function.name} as a value of {params.len()} parameters")

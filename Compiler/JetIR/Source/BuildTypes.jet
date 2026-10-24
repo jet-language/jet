@@ -2578,7 +2578,7 @@ fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conve
             ir_release(&m, &b, payload)
         }
         .Typed(function_name, _, target) -> {
-            row :: p.rows.get(function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
+            row :: ir_function_row(p, function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
             callee :: ir_function_id(&m, p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
             routine_return :: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(&b, span, "error conversion {function_name} without a result")
             returned_row :: ir_value_type(&m, p, routine_return) ?? return ir_type_fail(&b, span, routine_return)
