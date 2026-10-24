@@ -13,7 +13,7 @@ use jet_foundation.[
     TExprType,
     StmtKind,
     compiler_transfer_rows,
-    body_type_intern,
+    type_table_intern,
     Call,
     CallArg,
     CallContractRow,
@@ -101,7 +101,7 @@ fn sema_tir_expr(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
 // lands on the handle, BodyFlatten.jet body_flat_arena_node).
 fn sema_node(context: &SemaCheckContext, ty: Type, kind: ^NodeKind, span: Span) -> TExpr Never! {
     &context.arena.tree.nodes.push(BodyNode{id: AST_NODE_GENERATED, kind: ^kind, span: span})
-    row_type :: body_type_intern(&context.arena.tree, ty)
+    row_type :: type_table_intern(&context.arena.tree.types, ty)
     &context.arena.tree.expr_types.push(TExprType{id: AST_NODE_GENERATED, ty: row_type})
     // copy: the row keeps its type; the handle carries its own.
     TExpr{ty: ty.copy(), kind: .Flat(index: context.arena.base + context.arena.tree.nodes.len() - 1), span: span}
@@ -124,7 +124,7 @@ fn sema_arena_take_back(context: &SemaCheckContext, rows: ^BodyFlat) Never! {
     if nested.base != context.arena.base + context.arena.tree.nodes.len() || nested.stmt_base != context.arena.stmt_base + context.arena.tree.stmts.len() -> panic("sema_arena_take_back: the enclosing check built nodes while a nested check ran")
     compiler_transfer_rows<BodyNode>(&context.arena.tree.nodes, &nested.tree.nodes)
     loop row in nested.tree.expr_types {
-        ty :: body_type_intern(&context.arena.tree, nested.tree.types[row.ty])
+        ty :: type_table_intern(&context.arena.tree.types, nested.tree.types.types[row.ty])
         &context.arena.tree.expr_types.push(TExprType{id: row.id, ty: ty})
     }
     compiler_transfer_rows<StmtKind>(&context.arena.tree.stmts, &nested.tree.stmts)

@@ -445,7 +445,7 @@ fn symbol_kind_name(kind: SymbolKind) -> String Never! {
     }
 }
 
-// A hash of `ty`'s shape for interning (body_type_intern): equal types hash
+// A hash of `ty`'s shape for interning (type_table_intern): equal types hash
 // equal. It reads variants, names and child types and skips spans, contracts
 // and measures, which only the equality check that follows compares.
 fn type_shape_hash(ty: Type) -> Int Never! {
@@ -499,6 +499,51 @@ fn type_shape_hash_into(hash: U64, ty: Type) -> U64 Never! {
         .Quantity(base, _) -> type_shape_hash_into(type_hash_mix(hash, U64{23}), base)
         .Measure(_) -> type_hash_mix(hash, U64{24})
     }
+}
+
+// Each distinct Type once, named by its index (s3 TypeId): a side table whose
+// rows name types by Int. `hashes` holds each type's type_shape_hash; `slots`
+// is open addressing over them, 0 when empty, else the type's index plus one.
+struct TypeTable {
+    types: [Type]{[Type]{}}
+    hashes: [Int]{[Int]{}}
+    slots: [Int]{[Int]{}}
+}
+
+TYPE_TABLE_INITIAL_SLOTS :: 16
+
+// The index of `ty` in `table.types`, added on first sight: equal types
+// share one index, and only a new type is copied.
+fn type_table_intern(table: &TypeTable, ty: Type) -> Int Never! {
+    hash :: type_shape_hash(ty)
+    if table.slots.len() == 0 -> type_table_grow(&table, TYPE_TABLE_INITIAL_SLOTS)
+    mask :: table.slots.len() - 1
+    slot := hash.bit_and(mask)
+    loop table.slots[slot] != 0 {
+        index :: table.slots[slot] - 1
+        if table.hashes[index] == hash && table.types[index] == ty -> return index
+        slot = (slot + 1).bit_and(mask)
+    }
+    index :: table.types.len()
+    // copy: `ty` is the caller's read value; the table owns this one
+    &table.types.push(ty.copy())
+    &table.hashes.push(hash)
+    table.slots[slot] = index + 1
+    if (index + 1) * 2 > mask -> type_table_grow(&table, (mask + 1) * 2)
+    index
+}
+
+// Rebuilds the slots at `capacity` (a power of two) from the stored hashes.
+fn type_table_grow(table: &TypeTable, capacity: Int) Never! {
+    slots := [Int]{}
+    loop _ in 0..<capacity -> &slots.push(0)
+    mask :: capacity - 1
+    loop index in 0..<table.types.len() {
+        slot := table.hashes[index].bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = index + 1
+    }
+    table.slots = ^slots
 }
 
 fn type_carrier_identity(ty: Type) -> String Never! {

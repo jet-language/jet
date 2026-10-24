@@ -70,7 +70,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[Type, sha256_bytes, sha256_hex, sha256_hex_bytes]
+use jet_foundation.[Type, TypeTable, sha256_bytes, sha256_hex, sha256_hex_bytes]
 
 enum IROp {
     Nop
@@ -219,14 +219,15 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `function_rows` maps a function key to its id (row of `functions`);
 // `entry` is the program entry (`fn run`), -1 for a library. `layouts`,
 // `layout_low`, `struct_members`, `variant_members`, `enum_sizes`,
-// `handle_rows` and `nominal_rows` are the builder's layout memo
+// `handle_rows`, `value_types` and `value_rows` are the builder's layout memo
 // (BuildTypes.jet ir_struct_row, ir_struct_members, ir_variant_members,
 // ir_enum_box_size, ir_handle_row, ir_value_type_in): a
 // struct instance's row by identity (-1 when it does not lay out) and its
 // resolved members, an enum instance variant's members by "<declaration
 // row>|<identity>#<index>" and its box size by "<declaration row>|<identity>",
-// a bare nominal name's runtime handle row (-1: none), and a bare nominal
-// name's value row with no struct being laid out (-1: none). `close_free` holds
+// a bare nominal name's runtime handle row (-1: none), and the value row of
+// each type interned in `value_types`, by its index, with no struct being
+// laid out (-1: none; -2: being laid out). `close_free` holds
 // the type rows BuildOwn.jet ir_close_parts_reach proved free of a Close
 // method at any depth. `scalar_rows` holds the row of each scalar checked
 // type by its BuildTypes.jet ir_scalar_code (-1: not interned yet).
@@ -265,7 +266,8 @@ struct IRModule {
     variant_members: [String:[IRMember]]
     enum_sizes: [String:Int]
     handle_rows: [String:Int]
-    nominal_rows: [String:Int]
+    value_types: TypeTable{TypeTable{}}
+    value_rows: [Int]{[Int]{}}
     close_free: [Int:Bool]
     scalar_rows: [Int]
     ids: [Int]
@@ -282,7 +284,7 @@ struct IRModule {
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, key_rows: [String:[Int]]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, nominal_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, helper_errors: [String:String]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
+    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, key_rows: [String:[Int]]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, helper_errors: [String:String]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {
