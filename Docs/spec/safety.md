@@ -211,14 +211,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1166,
+  "total": 1172,
   "counts": {
-    "Compiler": 522,
+    "Compiler": 527,
     "Core": 204,
     "Examples": 39,
     "Jetpack": 10,
     "Tools": 8,
-    "tests": 383
+    "tests": 384
   },
   "regions": [
     {
@@ -1848,70 +1848,70 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 43,
+      "line": 55,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 54,
+      "line": 66,
       "column": 5,
       "reason": "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 72,
+      "line": 84,
       "column": 5,
       "reason": "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 225,
+      "line": 273,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 260,
+      "line": 308,
       "column": 5,
       "reason": "address is a word of the read-only image mapping, the scratch mapping, a stack frame the walk checked, or the kernel's signal frame"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 266,
+      "line": 314,
       "column": 5,
       "reason": "address is a byte of the read-only image mapping or the scratch mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 272,
+      "line": 320,
       "column": 5,
       "reason": "address is a word of the private scratch mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 683,
+      "line": 731,
       "column": 13,
       "reason": "buffer + used lies inside the scratch mapping's 8 KiB path buffer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 689,
+      "line": 737,
       "column": 5,
       "reason": "buffer + used lies inside the scratch mapping's 8 KiB path buffer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 720,
+      "line": 768,
       "column": 9,
       "reason": "buffer + used + at lies inside the scratch mapping's 8 KiB path buffer"
     },
@@ -3171,14 +3171,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Secret.jet",
-      "line": 120,
+      "line": 124,
       "column": 5,
-      "reason": "bytes is the exclusive moved native List<U8> header; secret is fresh aligned24B storage and adopts its sole buffer without copying secret material"
+      "reason": "bytes is the moved native List<U8> header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Secret.jet",
-      "line": 144,
+      "line": 143,
+      "column": 5,
+      "reason": "secret is fresh aligned24B storage this call owns exclusively"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Secret.jet",
+      "line": 162,
       "column": 5,
       "reason": "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer"
     },
@@ -3773,21 +3780,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 161,
+      "line": 140,
+      "column": 5,
+      "reason": "data is this test's fresh live allocation of bytes bytes"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
+      "line": 152,
+      "column": 5,
+      "reason": "secret is a live Secret header over its own buffer; data stays live through the retained reference"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
+      "line": 166,
+      "column": 5,
+      "reason": "data is still live: the other holder's reference was never released"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
+      "line": 177,
+      "column": 5,
+      "reason": "frozen is a live Secret header over its own buffer"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
+      "line": 217,
       "column": 5,
       "reason": "both buffers are this test's fresh live allocations of bytes bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 179,
+      "line": 235,
       "column": 5,
       "reason": "kept is a live Secret header and kept_data its live buffer; the scrub only zeroes the buffer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 201,
+      "line": 258,
       "column": 5,
       "reason": "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency"
     },
@@ -5946,6 +5981,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 1,
       "column": 14,
       "reason": "never entered: a marker group cannot carry an unsafe region, so check rejects this program"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_semantics/closure_boxes_free_at_their_last_owner.fixture/main.jet",
+      "line": 316,
+      "column": 5,
+      "reason": "the exit callback only reads its captured List"
     },
     {
       "package": "tests",
@@ -8391,13 +8433,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 522 |
+| Compiler | 527 |
 | Core | 204 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
-| tests | 383 |
-| **total** | **1166** |
+| tests | 384 |
+| **total** | **1172** |
 
 ### Regions
 
@@ -8635,16 +8677,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/EncodingErrors.jet | 6:5 | "borrows an initialized aligned word in a live encoding carrier or option input" |
 | Compiler | Compiler/JetRuntime/Source/EncodingErrors.jet | 9:5 | "owns a writable aligned word in a fresh encoding carrier or caller output" |
 | Compiler | Compiler/JetRuntime/Source/EnvRoutes.jet | 18:5 | "removed lends exactly one initialized writable C bool byte; no adjacent padding belongs to this output" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 43:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 54:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 72:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 225:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 260:5 | "address is a word of the read-only image mapping, the scratch mapping, a stack frame the walk checked, or the kernel's signal frame" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 266:5 | "address is a byte of the read-only image mapping or the scratch mapping" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 272:5 | "address is a word of the private scratch mapping" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 683:13 | "buffer + used lies inside the scratch mapping's 8 KiB path buffer" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 689:5 | "buffer + used lies inside the scratch mapping's 8 KiB path buffer" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 720:9 | "buffer + used + at lies inside the scratch mapping's 8 KiB path buffer" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 55:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 66:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 84:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 273:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 308:5 | "address is a word of the read-only image mapping, the scratch mapping, a stack frame the walk checked, or the kernel's signal frame" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 314:5 | "address is a byte of the read-only image mapping or the scratch mapping" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 320:5 | "address is a word of the private scratch mapping" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 731:13 | "buffer + used lies inside the scratch mapping's 8 KiB path buffer" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 737:5 | "buffer + used lies inside the scratch mapping's 8 KiB path buffer" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 768:9 | "buffer + used + at lies inside the scratch mapping's 8 KiB path buffer" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 34:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 24:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 5:5 | "borrows an initialized aligned word inside a live native geometry carrier" |
@@ -8824,8 +8866,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 11:5 | "address names the caller-owned live Secret buffer; effectful asm stores wipe every byte including spare capacity before release" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 90:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 107:5 | "start..start+length covers the Secret buffer's mapped pages; madvise and mlock change only their dump and residency attributes" |
-| Compiler | Compiler/JetRuntime/Source/Secret.jet | 120:5 | "bytes is the exclusive moved native List&lt;U8&gt; header; secret is fresh aligned24B storage and adopts its sole buffer without copying secret material" |
-| Compiler | Compiler/JetRuntime/Source/Secret.jet | 144:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
+| Compiler | Compiler/JetRuntime/Source/Secret.jet | 124:5 | "bytes is the moved native List&lt;U8&gt; header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material" |
+| Compiler | Compiler/JetRuntime/Source/Secret.jet | 143:5 | "secret is fresh aligned24B storage this call owns exclusively" |
+| Compiler | Compiler/JetRuntime/Source/Secret.jet | 162:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 62:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 6:5 | "borrows an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 10:5 | "publishes an aligned live synchronization word with x86 release ordering" |
@@ -8910,9 +8953,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 80:5 | "reused is newly allocated live32B storage exclusively owned by this witness, not a read of freed storage" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 112:5 | "data is this test's live List allocation; every capacity byte is dirtied before the wipe" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 120:5 | "the same live allocation remains exclusively owned while this test checks all wiped bytes" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 161:5 | "both buffers are this test's fresh live allocations of bytes bytes" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 179:5 | "kept is a live Secret header and kept_data its live buffer; the scrub only zeroes the buffer" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 201:5 | "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 140:5 | "data is this test's fresh live allocation of bytes bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 152:5 | "secret is a live Secret header over its own buffer; data stays live through the retained reference" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 166:5 | "data is still live: the other holder's reference was never released" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 177:5 | "frozen is a live Secret header over its own buffer" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 217:5 | "both buffers are this test's fresh live allocations of bytes bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 235:5 | "kept is a live Secret header and kept_data its live buffer; the scrub only zeroes the buffer" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 258:5 | "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet | 8:1 | "the raw pointer deliberately escapes its frame for the sentry witness" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet | 14:1 | "an expired inline raw read must stop before any pointee byte is loaded" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryTests.jet | 206:5 | "the checked Source callback uses the exact two-word native ABI" |
@@ -9221,6 +9268,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/fmt_round_trip_regressions/raw_c_imports_and_module_binding_mutability_are_byte_exact_and_idempotent/input/run.jet | 10:1 | "audited C boundary" |
 | tests | tests/cases/gate_ledger/fixtures/gates/gates.jet | 2:5 | "test unsafe reason" |
 | tests | tests/cases/marker_groups_modules/groups_require_two_members_no_parameters_and_no_hidden_forbidden_kinds.fixture/g3/main.jet | 1:14 | "never entered: a marker group cannot carry an unsafe region, so check rejects this program" |
+| tests | tests/cases/memory_semantics/closure_boxes_free_at_their_last_owner.fixture/main.jet | 316:5 | "the exit callback only reads its captured List" |
 | tests | tests/cases/observe/panic_context_uses_only_lexically_live_locals.fixture/unsafe/panic_lexical_unsafe.jet | 3:5 | "the region only binds and prints a local; it reads and writes no raw memory" |
 | tests | tests/cases/output_callable/runnable_contracts_and_selection_fail_in_sema.fixture/probe3/main.jet | 2:1 | "raw boundary" |
 | tests | tests/cases/pin/fixtures/library_wires_self_ref_under_unsafe_and_exposes_safe_pin_api/fixture.jet | 10:5 | "node storage is fixed for the returned pin; self_addr names this place" |
