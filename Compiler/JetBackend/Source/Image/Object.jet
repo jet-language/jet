@@ -144,8 +144,9 @@ fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never
 
 // x64_object_functions with the `.debug_info` subprograms built on the
 // threads `threads` admits (Dwarf.jet dwarf_info); the bytes are the same
-// for any thread count.
-fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads) -> X64ExecutableResult Never! {
+// for any thread count. With `debug_info` false the DWARF sections are empty
+// (the static link then carries none); `.eh_frame` is always written.
+fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
     exported := [Int:Bool]{}
     export_names := [String:Bool]{}
     function_rows := [Int:Int]{}
@@ -258,7 +259,7 @@ fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64Compile
     }
     dwarf :: x64_dwarf_sections(program, functions, debug, offsets, text.len(), X64DwarfSymbols{
         text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
-    }, threads)
+    }, threads, debug_info)
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR

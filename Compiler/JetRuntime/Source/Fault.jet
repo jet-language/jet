@@ -131,7 +131,14 @@ fn fault_overflow(s: I64, rip: I64, rbp: I64, rsp: I64) {
     } else {
         alloc_check_say(rt_static_text("??"))
     }
-    alloc_check_say(rt_static_text("`\n"))
+    alloc_check_say(rt_static_text("`"))
+    // No Jet frame named (an image without debug info, or a foreign frame):
+    // the faulting pc.
+    if !found {
+        alloc_check_say(rt_static_text(" at "))
+        alloc_check_hex(rip)
+    }
+    alloc_check_say(rt_static_text("\n"))
     if found && fault_file(s, fault_word(s + I64{120})) {
         line :: fault_word(s + I64{128})
         alloc_check_say(rt_static_text("  --> "))
@@ -188,6 +195,19 @@ fn fault_report(s: I64, signal: I64, address: I64, rip: I64, rbp: I64, rsp: I64)
     }
     alloc_check_say(rt_static_text("\nBacktrace:\n"))
     if (s == I64{0}) -> return
+    // An image without .debug_info (`debug_info: false`) names no function:
+    // the faulting pc and the return addresses of the frame walk print.
+    if (fault_word(s + I64{24}) == I64{0}) {
+        fault_address_line(rip)
+        frame := fault_first_frame(rbp, rsp)
+        steps := I64{0}
+        loop frame != (I64{0}) && steps < (I64{64}) {
+            fault_address_line(fault_word(frame + I64{8}))
+            frame = fault_next_frame(frame)
+            steps += I64{1}
+        }
+        return
+    }
     // The faulting frame always prints (?? when it is not a Jet function);
     // its callers print when they are Jet functions.
     if !fault_frame_line(s, rip, I64{0}) -> alloc_check_say(rt_static_text("  ??\n"))
@@ -199,6 +219,13 @@ fn fault_report(s: I64, signal: I64, address: I64, rip: I64, rbp: I64, rsp: I64)
         frame = fault_next_frame(frame)
         steps += I64{1}
     }
+}
+
+// One backtrace line `  0x…` of an image without debug info.
+fn fault_address_line(pc: I64) {
+    alloc_check_say(rt_static_text("  "))
+    alloc_check_hex(pc)
+    alloc_check_say(rt_static_text("\n"))
 }
 
 // One backtrace line `  name at file:line` for the Jet function holding pc

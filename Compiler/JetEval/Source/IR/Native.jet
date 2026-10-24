@@ -207,7 +207,7 @@ fn jet_eval_native_child_new() -> Shared<JetEvalNativeChild> Never! {
 fn jet_eval_native_start(c: &JetEvalNativeChild, session: JetEvalNativeSession, stdout: Bool) -> Bool {
     if c.child.pid > 0 -> return true
     if c.stub.len() == 0 {
-        compiled := ir_x64_object(ir_x64_compile_module(jet_eval_native_entry_module(), compiler_threads_single()))
+        compiled := ir_x64_object(ir_x64_compile_module(jet_eval_native_entry_module(), compiler_threads_single()), true)
         if compiled.errors.len() > 0 {
             c.failure = "the comptime entry program doesn't compile: {compiled.errors.join("; ")}"
             return false
@@ -358,7 +358,7 @@ fn jet_eval_native_load(built: ^JetEvalIRComptime, config: JetEvalConfig) -> Jet
     functions := compiler_take_rows<IRFunction>(&code.functions)
     program.types = shared code.copy()
     code.functions = ^functions
-    compiled := ir_x64_object(ir_x64_compile_module(^code, compiler_threads_single()))
+    compiled := ir_x64_object(ir_x64_compile_module(^code, compiler_threads_single()), true)
     if compiled.errors.len() > 0 {
         program.failure = "the batch doesn't compile to x86-64: {compiled.errors.join("; ")}"
         program.entries = ^entries

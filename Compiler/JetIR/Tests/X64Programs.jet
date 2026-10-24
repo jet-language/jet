@@ -875,7 +875,7 @@ fn xp_status(args: [String]) -> Int {
             code_bytes += one.function.code.len()
         }
         compiled := ir_x64_compile_module(m.copy(), compiler_threads_single())
-        object :: ir_x64_object(^compiled)
+        object :: ir_x64_object(^compiled, true)
         if object.errors.len() > 0 {
             loop error in object.errors -> print("{program.name}: {error}")
             failures += 1
@@ -962,9 +962,9 @@ fn xp_level_failed(failure: String) -> XPLevelRun {
 // the runtime pack as `exe` and run in `out`.
 fn xp_level(m: IRModule, level: Int, pack: [U8], pack_path: String, exe: String, out: String) -> XPLevelRun {
     optimized := m.copy()
-    report :: ir_optimize_module_measured(&optimized, IROptOptions{level: level, disabled: [String]{}, verify: true, stress: false, dump: ""}, compiler_threads_single())
+    report :: ir_optimize_module_measured(&optimized, IROptOptions{level: level, small: false, disabled: [String]{}, verify: true, stress: false, dump: ""}, compiler_threads_single())
     compiled := ir_x64_compile_module(^optimized, compiler_threads_single())
-    object :: ir_x64_object(^compiled)
+    object :: ir_x64_object(^compiled, true)
     if object.errors.len() > 0 -> return xp_level_failed(object.errors.join("; "))
     bufs := [[U8]]{object.bytes, pack.copy()}
     linked :: x64_link_executable([String]{"{exe}.o", pack_path}, ^bufs, LINK_BASE)
@@ -1004,8 +1004,8 @@ fn xp_threads() -> Int {
     eight := ir_x64_compile_module(^m, CompilerThreads{cap: Val(8), cores: 8, memory_available: None})
     eight_ns :: resumed.elapsed().ns
     errors :: one.errors.len() + eight.errors.len()
-    one_object :: ir_x64_object(^one)
-    eight_object :: ir_x64_object(^eight)
+    one_object :: ir_x64_object(^one, true)
+    eight_object :: ir_x64_object(^eight, true)
     same :: errors == 0 && one_object.errors.len() == 0 && one_object.bytes == eight_object.bytes
     print("threads\t161\tone {one_ns /% 1000} us\teight {eight_ns /% 1000} us\t{one_object.bytes.len()} B\t{if same -> "IDENTICAL" else -> "DIFFERENT"}")
     if same -> 0 else -> 1

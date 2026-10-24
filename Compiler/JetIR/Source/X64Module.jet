@@ -325,8 +325,9 @@ fn ir_x64_take_inputs(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // The relocatable object of `compiled` (moved in, every row moved on): its
 // functions behind a global `main` that runs the module's entry function
 // (no parameters, no result) through the runtime's jet_rt_main, as the old
-// native route's object.
-fn ir_x64_object(compiled: ^IRX64Result) -> X64ExecutableResult Never! {
+// native route's object. `debug_info` false (the build option) leaves the
+// DWARF sections empty.
+fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
     entry :: owned.program.entry
@@ -338,7 +339,7 @@ fn ir_x64_object(compiled: ^IRX64Result) -> X64ExecutableResult Never! {
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
-    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, owned.threads)
+    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, owned.threads, debug_info)
 }
 
 // Order the functions of `compiled` (and their debug rows) for the object's
@@ -391,15 +392,15 @@ fn ir_x64_hot_order(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 // The relocatable object of a library module (moved in, every row moved
 // on): its functions with no `main`, each of `exports` (ir_build_library)
 // a global symbol of its IR function and, with a priority, a constructor or
-// destructor hook.
-fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport]) -> X64ExecutableResult Never! {
+// destructor hook. `debug_info` as ir_x64_object.
+fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
     program :: ir_x64_object_module(&owned)
     debug :: compiler_take_rows<X64FunctionDebug>(&owned.debug)
     functions :: compiler_take_rows<X64CompiledFunction>(&owned.functions)
     globals :: loop row in exports -> X64RuntimeExport{function: LIRFunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
-    x64_object_functions_threads(program, functions, debug, globals, owned.threads)
+    x64_object_functions_threads(program, functions, debug, globals, owned.threads, debug_info)
 }
 
 // The object writer's module of `owned`: its data, debug files and types

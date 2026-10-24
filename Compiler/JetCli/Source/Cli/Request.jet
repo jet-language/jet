@@ -142,7 +142,7 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
         threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
         _ := ir_optimize_module(&library.program, ir_opt_options(1), threads)
         compiled := ir_x64_compile_module(^library.program, threads)
-        object := ir_x64_library_object(^compiled, library.exports)
+        object := ir_x64_library_object(^compiled, library.exports, true)
         if object.errors.len() == 0 {
             cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
             // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).

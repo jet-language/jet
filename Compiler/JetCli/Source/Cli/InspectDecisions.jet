@@ -3,7 +3,7 @@
 // O2 under a release profile), plus the functions the IR builder could not
 // build and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
-use jet_foundation.[CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, canonical_pass_boundary_gaps]
+use jet_foundation.[BuildOptions, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
 use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_optimize_module_measured, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
@@ -14,21 +14,23 @@ struct JetCLIDecisions {
     unbuilt: [String]
 }
 
-// The optimizer's options at `level`, with the environment's pass knobs:
-// JET_OPT_DISABLE (pass names to skip), JET_OPT_SSA_VERIFY,
-// JET_OPT_SSA_STRESS and JET_OPT_DUMP (Opt.jet IROptOptions).
-fn jet_cli_opt_options(level: Int) -> IROptOptions {
-    ir_opt_options_from(level, decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
+// The optimizer's options at `level` (`small`: the build option, inlining
+// kept to the O1 limits), with the environment's pass knobs: JET_OPT_DISABLE
+// (pass names to skip), JET_OPT_SSA_VERIFY, JET_OPT_SSA_STRESS and
+// JET_OPT_DUMP (Opt.jet IROptOptions).
+fn jet_cli_opt_options(level: Int, small: Bool) -> IROptOptions {
+    ir_opt_options_from(level, small, decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
 }
 
-// Builds `inputs` into one IR module from its entry and optimizes it at `level`.
-fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, level: Int, threads: CompilerThreads) -> JetCLIDecisions {
+// Builds `inputs` into one IR module from its entry and optimizes it as
+// `build` (the build options) has `jet build` do.
+fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads) -> JetCLIDecisions {
     checked := ^inputs
     declarations := jet_driver_checked_declarations(&checked)
     built := ir_build_program(^checked.functions, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", ir_checks_stock(), threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
-    report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(level), threads)
+    report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(jet_cli_native_level(build), build_options_value(build, "small") == "true"), threads)
     JetCLIDecisions{report: report, unbuilt: ^unbuilt}
 }
 
@@ -83,7 +85,7 @@ fn jet_cli_inspect_decisions_host(job: JetCLIInspectJob, source: String) -> JetD
             if inputs.entry_key == None -> jet_cli_inspect_finish(job, jet_cli_build_failed("`{job.file}` has no `fn run` to optimize", "the IR optimizer reports the program reachable from its `fn run`", "add `fn run()` to the file, or check it with `jet check {job.file}`", job.color))
             threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
             build :: if job.release_build -> jet_cli_stock_release_options() else -> build_options_stock("build")
-            decisions :: jet_cli_decisions(^inputs, jet_cli_native_level(build), threads)
+            decisions :: jet_cli_decisions(^inputs, build, threads)
             report :: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }

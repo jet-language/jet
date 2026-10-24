@@ -6,8 +6,19 @@
 // One order holds: the command's stock value, then the selected profile, then
 // `fn build`, then the flag, each later layer replacing the earlier. A pin makes
 // a flag with another value an error (E2113) that names the pin.
+
+// How a row's value is written. A Choice value is a word (`optimize: full`,
+// `--optimize=full`, `b.optimize(.Full)`); a Bool value is `true` or `false`
+// everywhere (`debug_info: false`, `--debug-info=false`,
+// `b.debug_info(false)`), and its bare flag (`--small`) is `true`.
+enum BuildOptionKind {
+    Choice
+    Bool
+}
+
 struct BuildOptionRow {
     name: String
+    kind: BuildOptionKind
     // The value spellings, as the profile field and the flag write them.
     values: [String]
     // The stock value of `jet build`, and of `jet run`, `jet dev` and `jet test`.
@@ -22,11 +33,17 @@ struct BuildOptionRow {
 
 JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
-    {name: "optimize", values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
+    {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
     // A failed list bounds check: fatal stops the program (the stock), report
     // writes the failure to stderr and goes on with the access unchecked, off
     // drops the check.
-    {name: "bounds", values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
+    {name: "bounds", kind: BuildOptionKind.Choice, values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
+    // false leaves the DWARF sections (.debug_*) out of the image; .eh_frame
+    // stays, and a crash report then names addresses, not functions and lines.
+    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true or false"},
+    // true keeps the optimizer's inlining to the O1 limits at any level, so
+    // inlining grows the code no more than `optimize: basic` does.
+    {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
 } }
 
 // The Jai build options Jet refuses, each with the law that leaves nothing for
@@ -116,15 +133,19 @@ fn build_option_flag_row(argument: String) -> BuildOptionRow? {
     None
 }
 
-// `min_size` -> `MinSize`: the value's spelling as a `fn build` argument.
-fn build_option_method_value(value: String) -> String {
-    sema_casing_pascal_words(value)
+// A value as a `fn build` argument: `min_size` -> `.MinSize` for a Choice
+// row, `false` as it is for a Bool row.
+fn build_option_argument(row: BuildOptionRow, value: String) -> String {
+    if row.kind == BuildOptionKind.Bool -> return value.copy()
+    ".{sema_casing_pascal_words(value)}"
 }
 
 // The row value a `fn build` argument `.Variant` spells, if any.
 fn build_option_value_of_variant(row: BuildOptionRow, variant: String) -> String? {
+    if row.kind == BuildOptionKind.Bool -> return None
+    spelled :: ".{variant}"
     loop value in row.values {
-        if build_option_method_value(value) == variant -> return Val(value)
+        if build_option_argument(row, value) == spelled -> return Val(value)
     }
     None
 }
@@ -137,7 +158,7 @@ fn build_option_values_text(row: BuildOptionRow) -> String Never! {
 // `.None, .Basic or .Full`: the values as `fn build` writes them.
 fn build_option_variants_text(row: BuildOptionRow) -> String Never! {
     words := [String]{}
-    loop value in row.values -> &words.push(".{build_option_method_value(value)}")
+    loop value in row.values -> &words.push(build_option_argument(row, value))
     build_option_join(words)
 }
 
@@ -205,8 +226,9 @@ fn build_option_flags(argv: [String]) -> BuildOptionsResolved Never! {
         if argument == "--" -> break
         row :: build_option_flag_row(argument) ?? next
         flag :: build_option_flag(row.name)
-        if !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with one of {build_option_values_text(row)}"}
-        value :: argument.slice(flag.len() + 1..<argument.len())
+        bare :: argument == flag && row.kind == BuildOptionKind.Bool
+        if !bare && !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with one of {build_option_values_text(row)}"}
+        value :: if bare -> "true" else -> argument.slice(flag.len() + 1..<argument.len())
         if !row.values.contains(value) -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with one of {build_option_values_text(row)}"}
         loop earlier in flags {
             if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: "pass `{flag}` once"}

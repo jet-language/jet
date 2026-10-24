@@ -3632,13 +3632,24 @@ obligation (I1), and a conversion is total or returns an Optional
 `fn build` call of either name is refused with that law. Example:
 [`Examples/features/tooling/build_bounds`](../../Examples/features/tooling/build_bounds/run.jet).
 
+The `debug_info` and `small` rows hold a Bool: a profile field writes
+`debug_info: false`, `fn build` writes `b.debug_info(false)`, and the flag
+writes `--debug-info=false`; a bare `--small` or `--debug-info` means `true`.
+`debug_info` (stock `true`) says whether the image carries DWARF debug info.
+With `false` the image has no `.debug_*` section; `.eh_frame` stays, and a
+crash report prints the faulting address and the return addresses of its
+frames instead of function names and lines.
+
 ### Size-oriented builds
 
-`jet build --small` selects the size-oriented build profile. The profile uses
-`opt-level=z`, fat LTO, `panic=abort`, and stripped symbols rather than the
-speed-oriented defaults. The command-line help describes the flag as
-“Favor a smaller binary”; it does not promise a particular byte-size ratio
-(S15).
+`small` (stock `false`) favors a smaller binary: with `true` the optimizer
+inlines only within the O1 limits (callee size and per-caller budget, and no
+once-called callees) at any `optimize` level, so inlining grows the code no
+more than `optimize: basic` does. `jet build --small` is `--small=true`. Jai's
+`min_size` has no row, since the native backend has no separate size pass. The
+command-line help describes the flag as “Favor a smaller binary”; it does not
+promise a particular byte-size ratio (S15). Example:
+[`Examples/features/tooling/build_debug_info`](../../Examples/features/tooling/build_debug_info/run.jet).
 
 ### Language server
 

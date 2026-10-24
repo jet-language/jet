@@ -24,14 +24,17 @@
 
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_transfer_rows]
 
-// What the optimizer runs: the level, the passes `disabled` names (to
-// bisect a difference to one pass: "unique", "once", "scalar", "promote", "range", "ssa", "stops", "glue"), whether every SSA
-// form is verified (`verify`), whether every SSA value leaves SSA in a
-// fresh slot (`stress`, which exercises the moves out of SSA), and the
-// name of the functions whose IR before and after the passes the report
-// carries (`dump`, "" for none).
+// What the optimizer runs: the level, whether inlining keeps to the O1
+// limits at any level (`small`, the build option), the passes `disabled`
+// names (to bisect a difference to one pass: "unique", "once", "scalar",
+// "promote", "range", "ssa", "stops", "glue"), whether every SSA form is
+// verified (`verify`), whether every SSA value leaves SSA in a fresh slot
+// (`stress`, which exercises the moves out of SSA), and the name of the
+// functions whose IR before and after the passes the report carries (`dump`,
+// "" for none).
 struct IROptOptions {
     level: Int
+    small: Bool
     disabled: [String]
     verify: Bool
     stress: Bool
@@ -39,13 +42,13 @@ struct IROptOptions {
 }
 
 fn ir_opt_options(level: Int) -> IROptOptions Never! {
-    IROptOptions{level: level, disabled: [String]{}, verify: false, stress: false, dump: ""}
+    IROptOptions{level: level, small: false, disabled: [String]{}, verify: false, stress: false, dump: ""}
 }
 
 // Options from the environment's values: JET_OPT_DISABLE (pass names,
 // comma-separated), JET_OPT_SSA_VERIFY and JET_OPT_SSA_STRESS ("1": on),
 // JET_OPT_DUMP (a function name).
-fn ir_opt_options_from(level: Int, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
+fn ir_opt_options_from(level: Int, small: Bool, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
     disabled := [String]{}
     if disable == .Val(text) {
         loop name in text.split(",") {
@@ -53,7 +56,7 @@ fn ir_opt_options_from(level: Int, disable: String?, verify: String?, stress: St
             if trimmed != "" -> &disabled.push(trimmed)
         }
     }
-    IROptOptions{level: level, disabled: ^disabled, verify: (verify ?? "") == "1", stress: (stress ?? "") == "1", dump: dump ?? ""}
+    IROptOptions{level: level, small: small, disabled: ^disabled, verify: (verify ?? "") == "1", stress: (stress ?? "") == "1", dump: dump ?? ""}
 }
 
 fn ir_opt_enabled(options: IROptOptions, pass: String) -> Bool Never! {
@@ -334,7 +337,10 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     level :: options.level
     body := ^f
     if level >= 2 && ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_hoist_unique(m, &body, keys)
-    out := ir_opt_inline_build(m, bodies, body, recursive, sites, level >= 2 && ir_opt_enabled(options, "once"), level, &report) ?? ^body
+    // `small` keeps inlining to O1's: its callee limit and budget, and no
+    // once-called callees (each copy adds up to its callee's size).
+    inline_level :: if options.small -> 1 else -> level
+    out := ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, &report) ?? ^body
     if ir_opt_enabled(options, "glue") -> ir_opt_glue_drops(&out, m, keys)
     ir_opt_simplify(m, &out, &report)
     if level >= 2 {

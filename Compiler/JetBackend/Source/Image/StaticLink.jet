@@ -1919,10 +1919,11 @@ struct LinkSectionHeader {
     entry_size: Int
 }
 
-// Give every unloaded, uncompressed `.debug_*` section of a directly linked
-// object a row (with no GOT slots) whose address is its offset in the
-// output section of its name, so relocations against it yield DWARF
-// section offsets.
+// Give every unloaded, uncompressed, non-empty `.debug_*` section of a
+// directly linked object a row (with no GOT slots) whose address is its
+// offset in the output section of its name, so relocations against it yield
+// DWARF section offsets. An empty one (every one under `debug_info: false`)
+// names no output section.
 fn link_debug_sections(c: &LinkContext) -> LinkDebug Never! {
     debug := LinkDebug{names: [String]{}, rows: [[Int]]{}, sizes: [Int]{}}
     groups := [String:Int]{}
@@ -1932,7 +1933,7 @@ fn link_debug_sections(c: &LinkContext) -> LinkDebug Never! {
         first :: c.obj_first_section[obj].copy()
         loop k in 1..<c.obj_count[obj] {
             s :: first + k
-            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s).bit_and(0x802)) != 0 -> next
+            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s).bit_and(0x802)) != 0 || link_sec_size(c, obj, s) == 0 -> next
             name_at :: link_sec_name(c, obj, s)
             if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
             name :: link_cstr(c.bufs, b, name_at)

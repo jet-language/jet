@@ -741,7 +741,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if level > 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(&built.program, jet_cli_opt_options(level), threads)
+        _ := ir_optimize_module(&built.program, jet_cli_opt_options(level, build_options_value(options, "small") == "true"), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
     }
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
@@ -754,7 +754,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     if rows.len() > 0 -> return jet_cli_native_object_failure(JetCLINativeFailure.Build{rows: rows})
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
     hot_missing :: ir_x64_hot_order(&compiled, hot)
-    object := ir_x64_object(^compiled)
+    object := ir_x64_object(^compiled, build_options_value(options, "debug_info") == "true")
     if trace_sink == .Val(sink) {
         sink.end("ir.object", function_count)
         sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)

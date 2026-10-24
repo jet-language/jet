@@ -37,6 +37,7 @@ TOKEN_COLON,
 TOKEN_COMMA,
 TOKEN_DOT,
 TOKEN_EOF,
+TOKEN_FALSE,
 TOKEN_IDENT,
 TOKEN_KW_MODULE,
 TOKEN_KW_USE,
@@ -49,6 +50,7 @@ TOKEN_RBRACE,
 TOKEN_RBRACKET,
 TOKEN_RPAREN,
 TOKEN_STRING,
+TOKEN_TRUE,
 Token,
 TokenTables,
 token_decoded,
@@ -320,8 +322,14 @@ fn jet_cli_build_profiles(tokens: [Token], tables: TokenTables, open: Int, close
                 field = skipped + 1
                 next
             }
-            if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
-                &fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: token_decoded(tables, tokens[field + 2])})
+            if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || tokens[field + 2].kind == TOKEN_TRUE || tokens[field + 2].kind == TOKEN_FALSE || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
+                kind :: tokens[field + 2].kind
+                value :: if {
+                    kind == TOKEN_TRUE -> "true"
+                    kind == TOKEN_FALSE -> "false"
+                    else -> token_decoded(tables, tokens[field + 2])
+                }
+                &fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: value})
                 field += 3
                 next
             }

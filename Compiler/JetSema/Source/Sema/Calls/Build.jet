@@ -1,6 +1,6 @@
 // Exact compiler-value contract from Collections.rs::build_context_method_*.
 // This table is arity-polymorphic; Core owns the session semantics, not sema.
-use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
+use jet_foundation.[AccessConvention, BuildOptionKind, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_argument, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
 use jet_parser.[jfmt_format_program_with_tokens]
 use jet_lexer.[Token]
 
@@ -168,15 +168,15 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-// #5005 build options (BuildOptions.jet): `b.optimize(.Full)` sets a row's
-// value in fn build; `b.pin(.optimize, .Full)` sets and pins it, so a flag
-// can't change it. The session receives the row name and the value's table
-// spelling (`optimize`, `full`).
+// #5005 build options (BuildOptions.jet): `b.optimize(.Full)` or
+// `b.debug_info(false)` sets a row's value in fn build; `b.pin(.optimize,
+// .Full)` sets and pins it, so a flag can't change it. The session receives
+// the row name and the value's table spelling (`optimize`, `full`).
 fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     pinned :: method == "pin"
     wanted :: if pinned -> 2 else -> 1
-    shape :: if pinned -> "b.pin(.optimize, .Full)" else -> "b.{method}(.Full)"
+    shape :: if pinned -> "b.pin(.optimize, .Full)" else -> sema_build_option_call_shape(method, method, false)
     takes :: if pinned -> "a build option and one of its values" else -> "one value"
     if args.len() != wanted {
         &diagnostics.push(sema_error("E3502", span, "`b.{method}` takes {takes}, got {args.len()} arguments", "a build option call names one value of the option's row", "write `{shape}`"))
@@ -184,7 +184,7 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
     }
     loop argument in args {
         if argument.label != None || argument.spread || argument.flags.template_items != None {
-            &diagnostics.push(sema_error("E3502", argument.span, "`b.{method}` takes positional leading-dot arguments", "a build option and its value are written as `.name`", "write `{shape}`"))
+            &diagnostics.push(sema_error("E3502", argument.span, "`b.{method}` takes positional arguments", "a build option is written as `.name`, and its value as its row spells it", "write `{shape}`"))
             return failed
         }
     }
@@ -210,11 +210,13 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
     row :: build_option_row(name) ?? return failed
     argument :: args[wanted - 1]
     value := ""
-    if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
+    if row.kind == BuildOptionKind.Bool {
+        if argument.expr == .Bool(written, _, _) -> value = "{written}"
+    } else if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
         if leading_dot && enum_args.len() == 0 -> value = build_option_value_of_variant(row, variant) ?? ""
     }
     if value.len() == 0 {
-        &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes one of {build_option_variants_text(row)}", "write `{shape}`"))
+        &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes one of {build_option_variants_text(row)}", "write `{sema_build_option_call_shape(method, name, pinned)}`"))
         return failed
     }
     // Only the value is an ordinary argument: a pin's option name is a row
@@ -229,4 +231,13 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
     }
     result :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
+}
+
+// `b.debug_info(false)`, `b.pin(.optimize, .Full)`: a call of `method` that
+// sets row `name` to its last value, as the fix of a malformed call.
+fn sema_build_option_call_shape(method: String, name: String, pinned: Bool) -> String Never! {
+    row :: build_option_row(name) ?? return "b.pin(.optimize, .Full)"
+    example :: build_option_argument(row, row.values[row.values.len() - 1])
+    if pinned -> return "b.pin(.{name}, {example})"
+    "b.{method}({example})"
 }

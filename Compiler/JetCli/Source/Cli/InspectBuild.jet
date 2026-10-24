@@ -8,7 +8,7 @@ use jet_driver.[
 ]
 use jet_foundation.[
     BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile,
-    build_option_check_removal_note, build_option_method_value, build_options_check_removals, build_options_with_code,
+    build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_with_code,
 ]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
 use core.files as build_files
@@ -121,8 +121,9 @@ fn jet_cli_build_code_options(file: String, set: [BuildSessionOption]) -> [Build
         loop index in 0..<end {
             if bytes[index] == (U8{10}) -> line += 1
         }
-        value :: build_option_method_value(option.value)
-        written :: if option.pinned -> "b.pin(.{option.name}, .{value})" else -> "b.{option.name}(.{value})"
+        row :: build_option_row(option.name) ?? panic("the build session set `{option.name}`, which is no build-option row")
+        value :: build_option_argument(row, option.value)
+        written :: if option.pinned -> "b.pin(.{option.name}, {value})" else -> "b.{option.name}({value})"
         &choices.push(BuildOptionChoice{name: option.name.copy(), value: option.value.copy(), layer: BuildOptionLayer.Code, written: written, site: "at {relative}:{line}", pinned: option.pinned})
     }
     choices

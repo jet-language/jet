@@ -820,13 +820,16 @@ fn dwarf_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: 
 
 // The debug and unwind sections for `functions` (placed at `offsets` in a
 // `.text` of `text_size` bytes; debug[i] belongs to functions[i]); the
-// subprograms of `.debug_info` on the threads `threads` admits.
-fn x64_dwarf_sections(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) -> X64DwarfSections Never! {
+// subprograms of `.debug_info` on the threads `threads` admits. With
+// `debug_info` false only `.eh_frame` is built; the DWARF sections stay empty.
+fn x64_dwarf_sections(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads, debug_info: Bool) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
-        eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: dwarf_abbrevs(), info: [U8]{}, info_relas: [X64ObjectRela]{},
+        eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: [U8]{}, info: [U8]{}, info_relas: [X64ObjectRela]{},
         line: [U8]{}, line_relas: [X64ObjectRela]{}, loclists: [U8]{},
     }
     dwarf_eh_frame(&sections, functions, debug, offsets, symbols)
+    if !debug_info -> return sections
+    sections.abbrev = dwarf_abbrevs()
     dwarf_info(&sections, program, functions, debug, offsets, text_size, symbols, threads)
     dwarf_line(&sections, program, functions, debug, offsets, symbols)
     sections
