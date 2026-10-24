@@ -12,18 +12,16 @@ scenario planning in
 
 ## One core, one build path
 
-Every execution consumes the same executable TIR from the same front end
+Every execution consumes the same checked program and IR from the same front end
 (R12) and preserves the same supported features and behavior (I9).
 Compile-speed work therefore targets development latency through precise
 incrementality and backend cost, while optimized builds retain the
 optimization work requested by the program's profile.
 
-The Rust host remains the production and reference implementation boundary for
-compiler work. A Jet-authored compiler path is a staged port contract: it may
-replace redundant work only after the same front-end checks, TIR meaning,
-diagnostics, and tier parity are proven. This document does not claim that
-the staged port has replaced the default compiler or that the Rust reference
-boundary has been removed.
+The compiler is the Jet-authored implementation; the fixed-point chain builds
+it with itself. Compile-speed work may replace redundant work only after the
+same front-end checks, checked-program meaning, diagnostics, and tier parity
+are proven.
 
 ## Build-speed constraints
 
@@ -75,7 +73,7 @@ If Jet code takes over a compiler stage, it follows these principles. They are
 architecture constraints, not a claim about which stage has already moved.
 
 1. **No redundant verification.** Semantic analysis remains the single
-   gatekeeper (R2). The backend consumes proven TIR; it does not rediscover
+   gatekeeper (R2). The backend consumes the proven checked program; it does not rediscover
    user errors through a hidden host compiler.
 2. **Query-based incrementality.** Function- and module-granular memoization is
    the spine. An edit rechecks the touched item and dependents rather than the
@@ -83,10 +81,10 @@ architecture constraints, not a claim about which stage has already moved.
 3. **Parallel by construction.** Per-module lex/parse/sema work fans out with
    one controlled cross-module resolve point and no global mutable context.
 4. **Monomorphization is policy.** Generic instances may be shared, cold code
-   outlined, and duplication capped during TIR lowering.
-5. **Tiered backends consume one TIR.** The JIT lens and AOT lens are consumers
-   of the same executable representation; R12 differential gates compare the
-   same program and output across tiers.
+   outlined, and duplication capped while the IR is built.
+5. **Every tier consumes one IR.** O0 (machine code in memory) and O1/O2
+   (executable files) are consumers of the same IR; R12 differential gates
+   compare the same program and output across tiers.
 6. **Optimization follows the declared budget.** AOT may spend longer on the
    ship step, while the default development path avoids work that does not
    affect the current edit.

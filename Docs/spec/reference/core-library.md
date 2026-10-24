@@ -1715,7 +1715,7 @@ dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 Compiler fact reads such as `@function.effects` are separate from runtime
 reflection. Projections of prepared fact records, including fields reached
 through an optional fact, remain compile-time values. Tests against their
-closed fact-enum variants fold before MIR lowering; ordinary user enums retain
+closed fact-enum variants fold before the IR is built; ordinary user enums retain
 their nominal owner and are not folded as compiler facts.
 
 ### `core.sys` — environment and system facts
@@ -2110,7 +2110,7 @@ results use normalized exact policies, not fieldwise record derivation.
 Decimal's named hooks, rounding, and exact rendering are also source methods,
 so loaded nominal identities and bare exact values expose the same behavior.
 
-The policies and rendering live in `Core/Math/Math.jet`. Checked precise TIR
+The policies and rendering live in `Core/Math/Math.jet`. Checked precise
 operations resolve their reserved helpers by the loaded math module identity;
 they do not resolve a user function with the same helper spelling.
 The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
@@ -2804,7 +2804,7 @@ serializer.
 security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
 Native authority preserves the complete parse/render options, entity policies,
 lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
-The native CBOR and XML options/error records retain checked MIR owner rows
+The native CBOR and XML options/error records retain checked owner rows
 even when no source module declares them. Their field shapes come from the
 same checked Core field registry used by type checking; removing a source
 codec must not remove its native options or located error payloads.

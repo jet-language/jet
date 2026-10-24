@@ -30,7 +30,7 @@ yes in design and mostly in practice. Every Rust rejection in the corpus that
 guards memory safety is also a Jet rejection (C02, C03, C05, C12, C18, C23,
 C25, C26, C29, C41–C43, C45, C51, C55, C58–C61). One program is a real gap:
 **C62** iterates a list while a local closure pushes into it. `jet check`
-accepts it, and only the backend's MIR legality verifier stops the build with
+accepts it, and only a backend legality check stops the build with
 an internal compiler error. Today that fails closed because the backend
 checks again. After Rust and its checks leave, a miss like this would become
 silent memory corruption. That is why the independent re-proof on card #4619
@@ -535,7 +535,7 @@ is rejected, D-MEMREF-EXCL1), `&` parameters are exclusive, and Z0 links are
 read-only during their life. Emitting those facts is also the most dangerous
 thing a backend can do: one wrong `noalias` is silent corruption. Today rustc
 re-checks every borrow we emit. After Rust leaves, the native backend must
-emit an aliasing fact only when MIR Lint has independently verified it
+emit an aliasing fact only when IR Lint has independently verified it
 (section 5.8).
 
 ## 5. Recommended design
@@ -675,7 +675,7 @@ in four ways. None adds syntax.
    write, and on which place. Core collection methods declare theirs once in
    the Prelude (I9).
 4. **Link class selection.** After the proof, each link gets the cheapest
-   class its facts allow, recorded in MIR for the second checker.
+   class its facts allow, recorded in the IR for the second checker.
 
 ### 5.7 Expert path
 
@@ -690,17 +690,17 @@ in four ways. None adds syntax.
 - **Entity systems:** `Pool<T>` and `ID<T>`, unchanged.
 - **Raw memory:** `*T` and `mem.Ptr<T>` inside `#Unsafe` (D-RAWPTR2).
 
-### 5.8 After Rust: MIR Lint re-proves the model
+### 5.8 After Rust: IR Lint re-proves the model
 
 Today rustc's borrow checker and `Send`/`Sync` re-check the Rust that Jet
 emits; a rejection is an internal error (I2). C62 shows that this backstop
-catches real sema misses. Card #4619 makes MIR Lint the replacement. Its
+catches real sema misses. Card #4619 makes IR Lint, a re-proof pass over the slot IR, the replacement. Its
 planned rule families are `alias.exclusive`, `view.valid`, and `send.boundary`
 (agent SafetyNet's design, not yet landed). Links need four additions:
 
-| Rule | Proves | MIR facts needed |
+| Rule | Proves | IR facts needed |
 |---|---|---|
-| `link.scoped` | A link marked Scoped is never live across a shape write to, a move of, or the end of any owner in its source set | Explicit loan-begin and loan-end operations (SafetyNet found MIR has none today); a shape-effect tag on each operation |
+| `link.scoped` | A link marked Scoped is never live across a shape write to, a move of, or the end of any owner in its source set | Explicit loan-begin and loan-end operations (the slot IR has none today); a shape-effect tag on each operation |
 | `link.fallback` | A Checked access is dominated by its check; a Kept link targets counted storage and its retains and releases balance; a Generational deref is dominated by its generation compare | Link class tag on each link operation |
 | `send.link` | A link value that crosses a task boundary has the thread-safe class, or is group-scoped with the join dominating every owner invalidation | Existing task-group scope markers |
 | `noalias.justified` | Every read-only or non-aliased attribute the native backend emits is backed by a verified Scoped or exclusive fact | The attribute set per function argument and pointer |
@@ -708,8 +708,8 @@ planned rule families are `alias.exclusive`, `view.valid`, and `send.boundary`
 Each rule is a forward dataflow over the same bit rows as `ownership.move`, so
 the lint stays linear in program size. Every failure is an internal error
 naming the pass. #4619's mutation test (delete each sema check in turn and
-show MIR Lint still rejects the program) must include C62 and one case per
-shape-write kind. MIR also needs the frozen-value fact that SafetyNet reports
+show IR Lint still rejects the program) must include C62 and one case per
+shape-write kind. The IR also needs the frozen-value fact that SafetyNet reports
 missing (Rust lowers `freeze` to a plain copy; the Jet compiler has no
 `freeze` at all), or `freeze` stops being provable after Rust leaves.
 
@@ -790,7 +790,7 @@ These are drafts for the orchestrator to place in Tower. Each names its proof.
 - **K9 — Close the C62 sema miss.** A local closure's write footprint counts as
   a write to the iterated list. Proof: C62 is E0507 in `jet check`; no ICE.
 - **K10 — View fields in the same scope and their methods** (C24b, C24c).
-- **K11 — MIR Lint link rules** (`link.scoped`, `link.fallback`, `send.link`,
+- **K11 — IR Lint link rules** (`link.scoped`, `link.fallback`, `send.link`,
   `noalias.justified`) plus explicit loan operations, shape-effect tags, link
   class tags, and the frozen-value fact, as an extension of #4619.
 - **K12 — `freeze` of a last use moves** into immutable storage instead of
@@ -864,5 +864,5 @@ Cited from the literature, not re-fetched for this note:
 
 Jet sources: `Docs/spec/spec.md` (Ownership and borrowing; Expert memory tier;
 Concurrency), `Docs/spec/architecture.md` (Concurrency boundary safety),
-`Docs/spec/mir-lint.md`, Tower decisions named inline, cards #3645, #4249,
+Tower decisions named inline, cards #3645, #4249,
 #4392, #4619, and the corpus at `/mnt/jetscratch/scratch/memcorpus/`.

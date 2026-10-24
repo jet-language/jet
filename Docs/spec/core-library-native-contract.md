@@ -25,7 +25,7 @@ payload types, including optional/container members, aliases, and distinct
 bases. An implicit bare name such as `Stat.modified: DateTime` selects the
 registered Core owner (`core.time`), unless a local declaration or generic
 binder owns that name. The owner source and its own declaration dependencies
-join the ordinary checked module queue before MIR nominal facts are frozen;
+join the ordinary checked module queue before nominal facts are frozen;
 emission must not substitute a native carrier, invent an alias declaration, or
 resolve an unrelated module merely because its type shares the leaf name.
 
@@ -55,7 +55,7 @@ that proof requires the freshly composed Jet-only runtime object.
 
 Native task-stop publication requires both a current task control and the
 compiler's scoped publication capability: only a checked operation immediately
-followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
+followed by the IR's stop poll (`IR_STOP_POLL_KEY`) may arm it. Plain calls and root bodies remain
 process-fatal. Runtime-internal traps (overflow, division by zero, and list
 bounds) in task bodies are not publishable unless compiler-armed.
 The native raw-pointer Deref sentry read uses that same immediate-Propagate
@@ -72,18 +72,8 @@ Program-side require, panic, and index-miss producers run registered cleanup
 before the call only when they cannot emit a real Propagate (plain mode,
 cleanup-masked code, transactions, or a closed block). Otherwise the Poll stop
 edge owns that cleanup exactly once, and an unconditional stop's impossible
-resume seals `Stopped`. The Jet `jet_codegen_lower_fallback_panic` path in
-`Statements.jet` runs that pre-call cleanup on the plain `TOrFallback::Panic`
-path too.
-
-The factory selects `jet_driver_compile_mir` for both native programs and
-runtime-library objects. `JetDriverCompileRequest.native_stop_points` selects
-returning-stop MIR before the shared `lower_functions` lowers functions and
-closures; runtime-library objects leave it false. It does not enable comptime
-budgets. This matches the task
-boundary's panic-to-TaskFailure catch rather than letting an ordinary native
-task panic abort its whole process. Plain/no-task MIR production uses the
-same false-mode implementation; its output is expected to remain byte-identical.
+resume seals `Stopped`. The plain fallback-panic path runs that pre-call
+cleanup too.
 
 Native cleanup frames bracket their actions with `jet_rt_cleanup_enter/leave`:
 one runtime cleanup scope (`jet_rt_session_cleanup_enter/leave`, whose owned
@@ -405,7 +395,7 @@ at its consumer; other borrow-only callbacks, iteration cursors, and reference
 bindings live in their defining lexical scope. Owned handles and shared-capture
 cells retain their existing release rules. Disjoint fields behind an exclusive
 guard project from one reborrow of its referent, not repeated guard dereferences.
-Map-store callbacks capture their owned payload, not the reusable MIR slot.
+Map-store callbacks capture their owned payload, not the reusable IR slot.
 An owned callback return does not introduce a caller-supplied capture lifetime
 when no callback-bearing input supplies one. Stored callback handles retain
 their owning lifetime; forwarding a borrowed input retains its capture lifetime.
@@ -527,7 +517,7 @@ returns an unheld guard with no lingering registration.
 
 Like Rust's `Arc<T>` releasing its final strong owner, the callback runs in the
 releasing caller's context. The provider adds neither a cleanup mask nor a
-session shield; releases inside a MIR cleanup frame inherit that frame's
+session shield; releases inside a cleanup frame inherit that frame's
 bracket. A callback that returns with pending stop still permits the provider
 to free the payload allocation and descriptor and release the strong owners'
 implicit weak reservation before the caller propagates it. Reclamation on a

@@ -911,16 +911,15 @@ The five reportable cost rows are:
 5. **Generic representation fallback:** a collection uses its generic
    representation because no shape proof selected a direct representation.
 
-The sema checker supplies view-copy `L2510` rows. Typed TIR supplies the other
-four rows and the complete explain projection. Before projection, the shared
-cost seam requires every sema-checked reachable callable to have a matching
-TIR body. Type-parameterized, foreign, and otherwise uncovered reachable
-surfaces are explicit completeness failures; they are never silently omitted.
-`jet check` and `jet lint --cost` merge these sources and deduplicate identical
-source-site diagnostics. They retain semantic remainders inside loops.
+The sema checker supplies view-copy `L2510` rows. The checked program supplies
+the other four rows and the complete explain projection. Before projection, the
+shared cost seam requires every sema-checked reachable callable to have a
+matching checked body. Type-parameterized, foreign, and otherwise uncovered
+reachable surfaces are explicit completeness failures; they are never silently
+omitted. `jet check` and `jet lint --cost` merge these sources and deduplicate
+identical source-site diagnostics. They retain semantic remainders inside loops.
 `jet explain --cost` also retains optimizer-proven removals. Backends do not
-reconstruct cost from emitted Rust; every explain row uses the honest
-`tier=shared-tir` label.
+reconstruct cost from emitted code.
 
 ```jet
 loop item in items {

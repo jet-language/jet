@@ -484,8 +484,8 @@ projection, but a struct field or method literally named `call` shadows it.
 Direct calls on plain names, fields, indexes, and lambdas remain valid. The retired
 adjacent-call spelling `)(` has no compatibility parser; it receives the registered
 diagnostic
-`E-CALL-VALUE` and does not enter sema or TIR. `.call(...)` uses the existing
-function-value binder and one TIR function-value lowering on every execution tier.
+`E-CALL-VALUE` and does not enter sema or the IR. `.call(...)` uses the existing
+function-value binder and one function-value lowering on every execution tier.
 
 **S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
 D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by
@@ -1014,7 +1014,7 @@ whose sign is dynamic remains Int and uses the shared runtime negative-power sto
 Retired infix arithmetic and compounds produce E0398 naming the method, with
 a precedence-preserving structured repair. Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.
-Generated Jet observers use these methods too: the MIR wire writer extracts
+Generated Jet observers use these methods too: a wire writer extracts
 its hexadecimal byte nibbles with `.bit_and(15)`, not retired infix arithmetic.
 
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to
@@ -1035,7 +1035,7 @@ spread**: `prefix.[a, b, c]` means `[prefix.a, prefix.b, prefix.c]`. Entries
 are bare member names only (E0961 if not — E0963 remains S76 fixed-list
 destructure). In list position the fields splice into the surrounding list;
 elsewhere the result is an ordinary list of that length. Sema desugars before
-inference; no TIR node. S76 `[T#N]` fixed-size lists are unaffected.
+inference; no checked-program node. S76 `[T#N]` fixed-size lists are unaffected.
 **D-FANOUT2** (no `s.{…}` second axis) is moot.
 
 **D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = {…}` on
@@ -1932,7 +1932,7 @@ and web throws carry the same report. `#Todo` is a real stop at exit 70, not
 exit 101. I4 and I9 apply to runtime failures.
 
 **D-FAIL-TIER1=A — contracts check on every tier and erase under proof**
-*(ratified 2026-08-06, card #1531)*: contracts have a TIR node and one
+*(ratified 2026-08-06, card #1531)*: contracts have a checked-program node and one
 Prelude check, so AOT, JIT, and the interpreter run the same check. A `#Pre`
 breach points at the call site. A `#Post` or `require` breach points at the
 body. A range proof removes a check; the unproven case keeps it. This amends
@@ -2182,7 +2182,7 @@ indirect cycles as E0855 with the complete chain; it never expands until stable.
 **D-GENMOD-IDENTITY1=A — Applicative instance identity**: one resolved template
 DefinitionId plus one normalized argument tuple identifies one module instance.
 Repeated applications of that pair project the same nominal member types,
-InstanceFingerprint, sema result, TIR/codegen specialization, cache entry, and
+InstanceFingerprint, sema result, IR specialization, cache entry, and
 LSP references. A different normalized argument tuple or resolved template
 definition is a different instance.
 
@@ -2209,7 +2209,7 @@ never replaces nominal identity, and impls mint no type identity.
 Resolution occurs before instantiation, so imports/re-exports do not mint
 identity; locked package version/source differences do. Public TypeFingerprints
 persist in semantic-index, interface, and cache artifacts with schema/full-key
-verification. Sema checks each reachable instance once; TIR/codegen emit one
+verification. Sema checks each reachable instance once; the IR builder emits one
 specialization and aliases are source-name projections. Cache keys additionally
 include compiler ABI/schema, checked body semantic hash, target/profile/effects/
 layout, and dependency interfaces. The semantic index records definitions,
@@ -2752,7 +2752,7 @@ semver diffing (E1218/E2601), not a capability-tier freeze. **Card #642
 reconciliation shipped (2026-07-16)**: concrete, generic, callback, and
 receiver parameters now share the same unmarked-read lowering; no sema or
 codegen path may upgrade them to move or insert a hidden copy. Direct `&`
-calls write back identically in dev, TIR, and native builds. **S3 shipped
+calls write back identically in every build tier. **S3 shipped
 (2026-07-04)**: `-> &T` returns and `&T` fields are gone from the grammar
 (ordinary syntax errors); `#Ref`/E0207/E0427 deleted outright. **S4 shipped
 (2026-07-04)**: `copy x` (D-CAP2) is the one copy verb — a real prefix-verb
@@ -2810,7 +2810,7 @@ retired mark: E0941 teaches it and its Safe fix writes `x.copy()`. The
 entries below keep their historical `~x` text.
 The Jet checker routes the zero-argument, non-generic value call through its
 copy classifier before receiver-method lookup. Its `ExplicitCopy`, `Clone`
-and materialized-view TIR products use the existing MIR copy lowering; there
+and materialized-view checked products use the existing copy lowering; there
 is no separate runtime `.copy()` method-dispatch path.
 Interpolation holes contain ordinary expressions, so copies inside a hole
 also use `.copy()`; literal string text remains unchanged. The compiler's
@@ -2967,9 +2967,8 @@ ordinary `Close` cleanup (#4792). A partial field move leaves cleanup only
 for the remaining initialized fields; moving the payload transfers its duty.
 Only the consuming receiver's storage in its own `Close` body is structural
 cleanup: another local of the same nominal type still closes normally.
-The Rust printer and MIREval implement this as seed/verification seams that
-die at cutover; native execution uses Jet-owned Lower cleanup glue.
-Their immutable cleanup facts are cached per program/type, and partial-move
+Native execution implements this with the IR builder's cleanup glue.
+Its immutable cleanup facts are cached per program/type, and partial-move
 parity witnesses use owned payloads rather than Copy-only records.
 
 **S53 — Concurrency** *(historical record, superseded by D-CONC-SPAWN1=D)*:
@@ -3214,7 +3213,7 @@ Prelude leaves. Once a root has one declared leaf, every dotted use under that
 root in effect rows, `#Abilities`, and package budgets must name a declared
 leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
 A root with no declared leaves stays open for gradual adoption. Declarations
-erase before TIR.
+erase before the IR is built.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function
@@ -3701,7 +3700,7 @@ ordinary operations are sequentially consistent, while `publish` and
 `observe` are the intent-named release/acquire pair. No method accepts a
 memory-order argument or exposes a relaxed operation. Unsupported targets
 reject the declaration rather than silently using a lock fallback.
-These operations borrow the cell in its checked place. A borrow-only MIR read
+These operations borrow the cell in its checked place. A borrow-only read
 and its synthetic cleanup do not materialize or destroy a second cell; an
 explicit consuming or copying operation keeps its separate ownership meaning.
 
@@ -4298,7 +4297,7 @@ new event syntax. `core.event` exposes `Event<T>` for many-subscriber typed
 occurrences, `Hook<T, R>` for ordered intervention points, `Subscription` for
 explicit unsubscribe, `EventScope` for owned lifetime cleanup, `EventPolicy`
 for sync/queued dispatch policy, and `EventTrace` for delivered/queued/dropped
-debug facts. The compiler knows these types for checking, TIR lowering, docs,
+debug facts. The compiler knows these types for checking, IR lowering, docs,
 debugger/Canvas projection, and editor highlighting; source sugar remains
 reserved until examples prove the library spelling is too noisy. Default
 dispatch is synchronous and deterministic: priority first, then subscription
@@ -5281,12 +5280,9 @@ ratified unit mechanism (D-UNITLIT1); no second style-only unit system (I8).
 Supersedes Phase 3's interim `Length` struct pair. *Shipped* (Tower c134):
 `Examples/features/ui/ui_typed_style.jet` declares `#UnitFamily(Length) { px }`
 and its `Style` record carries `width: Px`/`height: Px`; the interim `Length`
-struct/enum pair is deleted. Landing this required closing a standing typed-IR
-gap — a distinct-typed struct/enum field (`width: Px`, `Length(Px)`) was not
-admitted by the TIR subset (`field_ty_covered`/`enum_payload_ty_covered`), so
-any struct/enum carrying a unit-family field ICEd once the TIR became codegen's
-sole path; both predicates now admit distinct types, and the distinct newtype
-emits a `JetDebug` impl so a container's derived debug covers the field.
+struct/enum pair is deleted. A distinct-typed struct/enum field (`width: Px`,
+`Length(Px)`) is an ordinary checked field, and a container's derived debug
+covers it.
 Cross-family mixing (`320px + 500ms`) is E0127, unchanged from D-DIST3.
 
 **D-OBS1 / D-OBS3 — Observability**: source maps + Jet-line panic reports;
@@ -5323,7 +5319,7 @@ record. This decision reuses ordinary `{ ... }` and
 `Type{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
 production, formatter form, editor grammar, snapshot, or executable example.
 
-#560 owns all runtime enforcement and acceptance work: parser, sema, TIR,
+#560 owns all runtime enforcement and acceptance work: parser, sema, IR builder,
 formatter, hover, inspect, Canvas, templates, migration, and rejection of
 unknown role fields. D-SHAPE5a does not choose file placement; the final role
 inventory or its fields; merge, composition, or override law; provenance
@@ -5380,7 +5376,7 @@ root: <Root> :: <Root>{
 This is normative future source behavior, not an executable spelling today.
 There is no per-kind parser or evaluator. Package and role declarations are
 replaced only after #560 lands the source gate; ordinary Jet modules remain
-ordinary modules and are unchanged. #560 owns parser, sema, TIR, formatter,
+ordinary modules and are unchanged. #560 owns parser, sema, IR builder, formatter,
 hover, inspection, Canvas, templates, migration, editor support, and acceptance
 for this shape. D-ECO-DECL1 adds no keyword, sigil, `Syntax.rs` constant,
 parser production, grammar form, diagnostic, snapshot, or executable example
@@ -6825,13 +6821,13 @@ freestanding builds. Platform selection comes from the existing `#Target`
 marker or the package manifest `target:` field, never from the type name.
 Target-sensitive builder capabilities are checked in sema against that
 resolved target and report the capability, required target, and resolved
-target; all execution tiers then consume the same checked App/TIR contract.
+target; all execution tiers then consume the same checked App contract.
 
 **D-WEBAPP1=D — one sema-known application graph**: sema evaluates the
 statically evaluable App-returning `fn run` builder chain into one typed graph. Runtime
 registration outside a declared typed `.mount` is a compile diagnostic. Mounts
 keep prefix, effects, and security policy static. Browser/server partition,
-hydration mismatch, executable TIR, and generated-source re-entry laws apply;
+hydration mismatch, checked program, and generated-source re-entry laws apply;
 `jet inspect expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
 
 **D-DX-ROUTER1=A — routes bind typed inputs on the one App graph**: a route
@@ -6909,7 +6905,7 @@ marker (D-HTTP-ROUTE-EXPOSE1), which is not implemented yet.
 
 **D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,
 fusion, differentiation, placement, and expert device/buffer/stream/kernel work
-under one operation family. Graph/kernel forms are internal executable-TIR
+under one operation family. Graph/kernel forms are internal checked-program
 stages. External accelerator providers are explicit bridges and must
 differentially match Core semantics.
 
@@ -6937,7 +6933,7 @@ contracts and differential-test requirements.
 **D-COMPUTE-KERNEL-SURFACE1=B — explicit safe-kernel marker**: an ordinary
 function becomes a safe kernel only with `#Kernel(.parallel)`. Sema attaches
 one proof record covering bounds, aliasing, captures, races, barrier
-uniformity, and control flow before TIR. This epoch ships the conservative
+uniformity, and control flow before the IR is built. This epoch ships the conservative
 read-only, effect-free expression subset; indexed writes, loops, captures, and
 opaque/provider calls remain rejected until their proof facts exist. Raw
 vendor/device code stays in the typed `#Unsafe` tier.
@@ -6980,7 +6976,7 @@ provider and native hosts fail closed when no browser provider is present.
 *(ratified 2026-08-03)*: a raw-device contract is minted only by a trusted
 provider after it checks the kernel metadata and differential reference. The
 contract is opaque to safe Jet, is accepted only inside `#Unsafe`, and is
-carried through TIR into the launch receipt. A reason string, arity, or ordinary
+carried through the checked program into the launch receipt. A reason string, arity, or ordinary
 record is never a proof. With no raw-device provider in the Epoch 3 CPU
 policy, the built-in constructor fails closed; it must not fabricate a token.
 
@@ -7960,7 +7956,7 @@ existing `?`, `!`, and `->` tokens form one fixed exhaustive Result handler:
 `result ? ok -> success ! error -> failure`. Each identifier binds one
 branch-local payload, source order is success then failure, and neither branch
 may be omitted or repeated. The parser lowers the form to the existing `.Ok`
-and `.Err` pattern-test AST; sema, TIR, codegen, JIT, and interpreter add no
+and `.Err` pattern-test AST; sema, the IR builder and the back end add no
 carrier or handler API. `?` propagation, `?.`, unary `!`, ordinary `->` arms,
 and `??` retain their current meanings. This adds no keyword or sigil.
 
@@ -8082,7 +8078,7 @@ statement tail produces unit and is diagnosed when a value is required. The
 same law applies to value arm tables and fallback blocks. A final audited
 `#Unsafe("reason") { … }` region forwards the value expectation to its own
 tail without relaxing the lexical unsafe gate. Engines lower the checked value
-through the existing TIR return path.
+through the existing checked return path.
 
 **2026-08-20 — D-SIG-SHAPE1=B** *(card #2125)*: the return type sits bare after
 the parameter list, and `->` becomes the one body arrow across the whole

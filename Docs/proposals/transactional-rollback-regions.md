@@ -7,7 +7,7 @@ mined 2026-07-24. The source report is
 `Docs/audits/2026-07-24-verse-video-mining.md`. Jet's current disposition is
 **watch**: ordinary `?` propagation never implies rollback.
 
-This document is a paper design only. It does not change parser, sema, TIR,
+This document is a paper design only. It does not change parser, sema, IR builder,
 runtime, or `?` behavior.
 
 ## Glossary
@@ -340,5 +340,5 @@ inverse. The rollback proof belongs beside, not inside, the effect row.
 
 Keep this proposal parked. If the owner unfreezes it, ballot
 D-TXN-SCOPE1, D-TXN-SPELL1, and D-TXN-EFFECT1, then run the `^T` paper spike.
-Do not build parser, sema, TIR, runtime, or compensation code before those
+Do not build parser, sema, IR builder, runtime, or compensation code before those
 decisions.

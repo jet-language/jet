@@ -44,7 +44,7 @@ replace the audit gate: raw-pointer formation, dereference, address-based
 pointer construction, and volatile access also require `#Unsafe`. The sema
 obligation pass can require `assert valid_ptr, aligned, no_alias` immediately
 after a tracked operation. Those assertions are meaningful only inside the
-gate and are removed before TIR.
+gate and are removed before the IR is built.
 
 Inline `#FFI(c)`, `#FFI(cpp)`, and `#FFI(asm)` bodies require an enclosing
 `#Unsafe("reason")` gate. The same boundary covers foreign calls whose
@@ -133,7 +133,7 @@ compiler, so an older release cannot prove a newly audited wrapper.
 Current limits: the JetIR backend emits no ASan Load/Store checks, stack
 redzones/use-after-return, uninitialized-memory/UB or data-race checks.
 The gate explicitly lists these, sanitized native compiler self-build and
-mutation-control proofs for MIR `alias.exclusive`, `view.valid` and
+mutation-control proofs for the IR checker's `alias.exclusive`, `view.valid` and
 `send.boundary` as missing. The current runtime/frontend still require Rust,
 no native O1/O2
 producer has been admitted, and no current runtime pack is recorded in the
@@ -161,8 +161,7 @@ receipts, that backs:
   and Cell, view, or function values that cross one (E1102);
 - writes through a frozen value (E1113).
 
-That checker does not exist yet: the earlier MIR Lint checked the MIR program,
-which the compiler no longer builds. Until it lands, the native backend relies
+That checker does not exist yet. Until it lands, the native backend relies
 on sema alone for these rules, and its controls must be independent mutation
 controls (clean and planted programs that bypass sema), not receipts obtained by
 deleting semantic checks in a compiler build.
@@ -6239,7 +6238,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "file": "tests/cases/web_build/module_local_dev_is_validated_as_web_runtime.fixture/main.jet",
       "line": 4,
       "column": 9,
-      "reason": "exercise the web TIR gate"
+      "reason": "exercise the web gate"
     },
     {
       "package": "tests",
@@ -9304,7 +9303,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet | 2:1 | "reads through a raw pointer; addr must be valid" |
 | tests | tests/cases/unsafe_and_runtime/fixtures/unsafe_tier_emit_is_byte_exact/main.jet | 10:5 | "safe: cell is live" |
 | tests | tests/cases/unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet | 2:1 | "UART TX register is mapped by the target machine" |
-| tests | tests/cases/web_build/module_local_dev_is_validated_as_web_runtime.fixture/main.jet | 4:9 | "exercise the web TIR gate" |
+| tests | tests/cases/web_build/module_local_dev_is_validated_as_web_runtime.fixture/main.jet | 4:9 | "exercise the web gate" |
 | tests | tests/conformance/corpus/core/crypto/aes/nist_gcm.jet | 11:5 | "published KAT or frozen seed AES-GCM fixture" |
 | tests | tests/conformance/corpus/core/crypto/aes/seed_differential.jet | 11:5 | "published KAT or frozen seed AES-GCM fixture" |
 | tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 13:9 | "frozen Ed25519 sign witness" |

@@ -22,21 +22,15 @@ and `jet version --json` succeed with no output. Diagnostic essays instead
 use the `jet.status/v1` `explain` action under `--json`. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
-`jet emit --ast|--mir|--lir <file>` prints one compiler tier of a file:
-`--ast` the parsed syntax tree (parsing only), `--mir` the checked MIR of the
-entry package's functions, and `--lir` the LIR `jet build` lowers for them,
-before the LIR passes of its optimization level. `--fn NAME` keeps one
-function. Each tier is one tree. The text form
-indents each child two spaces. `--json` writes the same tree as the `emit`
-status, a `{kind, text, children}` node per line. MIR numbers each function's
-values, blocks, places, locals and scopes from zero (`v0`, `b0`, `p0`, `l0`,
-`s0`) and shows every value's type and ownership mode. LIR renumbers
-module-wide functions, signatures and data in order of first use and lists
-a called function it does not show as `declare fN name`. When `jet build`
-fails to lower a function, it writes that function's MIR and LIR as `<n>.mir`
-and `<n>.lir` beside the build output in `.jet/build/<stem>.ice/`; when it
-fails to compile a function to machine code, it writes that function's final
-LIR as `<n>.lir` there. The report names that directory.
+`jet emit --ast|--ir <file>` prints one compiler tier of a file:
+`--ast` the parsed syntax tree (parsing only), and `--ir` the slot IR `jet build`
+builds from the checked functions of the entry package (every checked function
+for a program without an entry). `--ir` checks the file in Run mode: errors stop
+it and visible lints go to stderr. `--fn NAME` keeps one function. Each tier is
+one tree. The text form indents each child two spaces. `--json` writes the same
+tree as the `emit` status, a `{kind, text, children}` node per line. A function
+the IR builder cannot build is reported as E2104 with its name, key and source
+span.
 
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.
@@ -559,19 +553,12 @@ namespace semantics; retired manifests, symlinks, and other authority errors
 are not treated as missing. Existing manifests and source files retain their
 checked handles and are revalidated before invoking the compiler.
 
-`jet build` writes `.jet/build/<stem>` in that source root. The default and
-`--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
-the functions `fn run` reaches to a relocatable object, and the in-process
+`jet build` writes `.jet/build/<stem>` in that source root. Every profile uses
+the Jet-native backend: the IR builder builds the functions `fn run` reaches,
+x86-64 selection compiles them to a relocatable object, and the in-process
 linker binds it to the runtime pack shipped beside `jet` into a static x86-64
-executable. A program that backend cannot lower yet is refused
-with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
-rustc and the release profile flags. The Rust file starts with the same
-runtime/Core prefix the Rust compiler emits (MIRRust `emit_mir_runtime_text`):
-[`Emit/RuntimePrefix.jet`](../../../Compiler/JetCodegen/Source/Emit/RuntimePrefix.jet)
-assembles it from the Prelude and Foundation `.rs` sources under
-`JET_TOOLCHAIN_ROOT` (which must therefore also hold `crates/`), with the
-artifact's runtime parts, the test-harness gate, and the release devtools
-policy (`local` inspection for `--release`, development for a test harness).
+executable. The default build is O1; `--release` (or `--profile release`) is
+O2. A program that backend cannot build yet is refused with E2104.
 Other build flags and profiles are refused with E2104 until they are ported.
 
 `jet run <file>` (and the `jet <file>` shorthand) builds the same executable
@@ -728,7 +715,7 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
-The frozen TIR fact channel classifies view materialization, collection
+The checked program's fact channel classifies view materialization, collection
 copy-on-write, exact-integer spill, retained outcome construction, and
 representation fallback. Inline-integer removal is a proof from typed
 operand intervals, not an assumption about the runtime value. The cost query
@@ -882,7 +869,7 @@ build`) shares the driver's checked plan projection. Its `files` and
 `affected_files` fields both list the static file universe; this is distinct
 from `core.build.receipt_diff`'s change-impact closure. Without an execution
 record, action cache status remains `unknown`. Build vector rows retain the
-compiler MIR's declaration order rather than acceleration inspection's
+checked program's declaration order rather than acceleration inspection's
 key-sorted function view.
 
 Compiler check/compile/link node identities come from the final checked bundle,
@@ -940,7 +927,7 @@ failure contract, solved effects, and reference/declaration spans. The driver
 selects a singular runnable Output (or an explicit address) before lowering;
 inspection does not rename a function or reinterpret a text entry. Layout rows
 come from the compiler's target-aware reflection engine, not the inspecting
-host's pointer width. Inspection stops after canonical MIR production and does
+host's pointer width. Inspection stops at the checked program and does
 not emit or execute the selected callable.
 
 `inspect.output` reports the selected binding, callable identity, effective

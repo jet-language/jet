@@ -119,7 +119,7 @@ returning `Shared<T>`; its inferred transitive effects may contain only `Mem`.
 Every use of one initializer must select the same lifetime.
 
 Sema publishes that checked identity and lifetime. Lowering creates one typed
-MIR `Global` site per initializer, not a special initializer-name table or a
+IR global site per initializer, not a special initializer-name table or a
 per-caller cache. A getter returns an owning clone; retiring a site releases
 its owner without invalidating outstanding clones. Process sites survive
 world reloads, World sites retire at an explicit quiescent world boundary,
@@ -618,7 +618,7 @@ glue dies at the post-freeze regeneration; it is not a source compatibility path
 The unused `BrowserHost::eval_core_call` plain-call dispatcher is removed,
 along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
 `locked_ct` conversions. Repository-wide binding, qualified-call, string, and
-macro searches found no callers. Unrelated compiler/MIR `eval_core_call`
+macro searches found no callers. Unrelated compiler `eval_core_call`
 functions are not that binding. The resident method adapter, handle table,
 live timeout/locked conversions, and included AOT providers are unchanged.
 

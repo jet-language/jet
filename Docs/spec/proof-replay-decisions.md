@@ -428,13 +428,13 @@ Error [E3627]: replay capture refused sensitive data
 More: jet-lang.dev/e/E3627
 ```
 
-**Rule.** Replay identity binds schema, Jet build, Core ABI, MIR/TIR schema and
+**Rule.** Replay identity binds schema, Jet build, Core ABI, IR schema and
 hashes, target triple/backend/profile, producer, entry, source hashes,
 package/workspace/lock/build inputs, and the authority/capture manifest. A
 reader requires exact semantic identity (E3621), then runs the recorded adapter
 and any ratified counterpart. `dev-tir-v1` and `aot-native-v1` are the only
 ratified counterpart pair for a matching native target, ABI, profile, Core ABI,
-and checked TIR hash.
+and checked-program hash.
 
 **Reason.** Reproducing a value is not equivalent to proving that two different
 program identities or adapters produced the same result.
@@ -509,7 +509,7 @@ in [jetpack-epoch5.md](reference/jetpack-epoch5.md).
 TARGET` never runs it. Sema remains authoritative for compilation, user
 rejections, and diagnostics; the solver consumes immutable typed obligations
 exported after sema. It cannot parse source as an authority, add syntax, relax a
-rejection, alter TIR or codegen, or ask rustc whether code works. It is a
+rejection, alter the checked program or codegen, or ask rustc whether code works. It is a
 standard-library-only path producer with no external crate, daemon, network
 call, executable, or compiler dependency. (D-WD12) (D-OOBPROOF1)
 

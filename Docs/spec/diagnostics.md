@@ -291,7 +291,7 @@ block switching within the existing read/write loan contract.
 Compiler comparisons against an already-bound optional ID or interpolated
 symbol use parenthesized value expressions, not capture patterns. Decision
 hashing passes byte ranges as `View<U8>` and projects only runtime-part variants
-present in the canonical MIR inventory.
+present in the canonical runtime inventory.
 
 Prepared host Shared transfers validate the borrowed tree before committing
 the owner alias. After that commit, adoption updates the original carrier
@@ -305,19 +305,10 @@ into a separate program owner restore their empty moved fields before the
 remaining carrier is borrowed again.
 
 Boolean values returned by `Never!` helpers consume their checked failure
-carrier before entering logical joins. MIR Phi inputs must retain matching
-drop obligations; recursive write views of trait-owning enum/list values do
-not relax that invariant. `compiler_host_owner_write_view.jet` is lowered and
-validated by the bootstrap regression, which checks plain Bool Phi inputs.
+carrier before entering logical joins.
 
-An internal checked-TIR lowering failure preserves its underlying reason and
+An internal IR build failure preserves its underlying reason and
 source-byte span in the existing ICE report and exits 101 under I2.
-
-Borrowed enum payload bindings over checked list indexes remain rooted in
-their stable collection owner. Rust emission references the selected element's
-payload instead of cloning it; the existing owner-invalidation rules still
-govern the view. The recursive noncopy-owner regression compiles and executes
-the generated Rust in addition to validating MIR.
 
 An exhaustive value-form Result dispatch checks its subject once, including
 when coverage visits an `.Err` arm before an `.Ok` arm. The ordinary condition
@@ -355,7 +346,7 @@ retired DataTree Rust type is not restored as an alias.
 
 Source-hook capability queries snapshot only the type identity, key and span
 before a write-access call on the owning emission context. The hook lookup does
-not require copying a full MIR type definition or its field/variant lists, and
+not require copying a full type definition or its field/variant lists, and
 the checked program rows remain unchanged.
 
 Manifestless script binding searches keep first-match root, entry-file and

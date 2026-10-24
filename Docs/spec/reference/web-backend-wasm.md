@@ -3,9 +3,9 @@
 The web backend partitions the checked program between JavaScript for browser/DOM work
 and WebAssembly for eligible logic. This page is for web application authors
 and compiler contributors choosing a target, reading partition diagnostics, and
-checking the source-backed examples. The executable boundary is implemented by
-[`Compiler/JetCodegen/Source/Emit/Web`](../../../Compiler/JetCodegen/Source/Emit/Web/);
-web diagnostics are registered in
+checking the source-backed examples. The Jet-hosted CLI does not build the web
+target yet: `jet build --target=web` is refused with E2104. Web diagnostics are
+registered in
 [`Compiler/Prelude/Diagnostics.jet`](../../../Compiler/Prelude/Diagnostics.jet).
 
 The ratified decisions are D-WEBBACKEND1, D-WASM1, D-JSBIND1, D-WEBKIND1, and

@@ -199,7 +199,7 @@ The target jobs are source compilation/package, artifact identity/distribution, 
 
 ### G-2. Preserve one Jet meaning
 
-A source program has one checked semantic meaning. The current boundary is checked Source/AST -> typed TIR -> canonical MIR (schema 3) -> adapters, with JPM/1 downstream as stable distribution machine. Every tier MUST preserve it; profiles may change capabilities/limits, not arithmetic/type/trap/CoreLib meaning. TIR/MIR remain private representations, not public wire law or a second authority; see [existing contracts](#existing-contracts).
+A source program has one checked semantic meaning. The current boundary is checked Source/AST -> checked program -> slot IR -> adapters, with JPM/1 downstream as stable distribution machine. Every tier MUST preserve it; profiles may change capabilities/limits, not arithmetic/type/trap/CoreLib meaning. The checked program and the IR remain private representations, not public wire law or a second authority; see [existing contracts](#existing-contracts).
 
 `C-003` **Tier identity.** Every required fixture MUST produce the same defined result or the same specified failure category across the reference interpreter, JIT, AOT/cache, browser path, and each claimed host profile. A missing tier is an uncovered comparison, not a pass.
 
@@ -252,7 +252,7 @@ Each term owns one fact. Terms from another chapter MUST NOT be reused with a se
 | **Resource** | A host or guest object subject to ownership, generation, rights, limits, and lifecycle: a file handle, socket, stream, task, volume, GPU object, secret, or memory reservation. |
 | **Receipt** | An authenticated record binding source/package/artifact digests, authority decisions, environment, engine tier, resource events, outputs, errors, and lifecycle transitions. A receipt is evidence of an observed run, not a proof merely because it is signed. |
 | **Generation** | An immutable content/configuration revision selected for activation. A rollout may expose more than one generation while old instances drain. |
-| **Compiler IR** | A private compiler representation in the checked Source/AST -> TIR -> canonical MIR path (current MIR schema 3). It can change without changing JPM/1; it is not public wire law or an authority policy. |
+| **Compiler IR** | A private compiler representation in the checked Source/AST -> checked program -> slot IR path. It can change without changing JPM/1; it is not public wire law or an authority policy. |
 | **Comparator** | A named family/configuration compared on a specific overlapping job. A family representative does not prove every product in the family. |
 | **Paired workload** | One fixed source, dataset, correctness oracle, failure schedule, policy, limits, and environment run through two or more comparable stacks. |
 | **Unknown** | A claim for which the required source or observation is absent. Unknown is not solved, mitigated, or a pass. |
@@ -274,7 +274,7 @@ The following table is the current-law ledger that this proposal must preserve u
 | Receipts | A successful action receipt joins exact inputs, planned actions, output digests, activation proof, parent generation, and rollback facts. Producer/WAL closure, reachability, explain, repair, and GC use this lineage. | Current accepted direction (#655, #420, #1019/#1020, #517); observed code and Tower evidence, not a claim that every path has runtime proof here. |
 | Authority | There is one authority carrier and one rights tree/holds relation. `ApplicationAuthority` combines semantic effects, package loader policy, and interactive replacement. `SandboxAuthority` lends a narrower scope, resolves no-follow roots, and checks imports against declared needs. | Current law; `crates/jet-foundation/src/Authority.rs` and `crates/jet-pkg-model/src/Authority.rs`. |
 | Compiler seam | `jet-pkg-model` is read-only and has no provider/network/shell dependency; `jet-env-model` is a pure plan model; `jetpack` owns provider, network, shell, realization, and JetOS. Ordinary `jet` does not link or initialize Wasmtime. | Current crate boundary; `Docs/spec/architecture.md` and `AGENTS.md`. |
-| Execution meaning | The current source boundary is checked Source/AST -> typed TIR -> canonical MIR (schema 3) -> backend/adapters. The portable machine is downstream of semantic MIR, not another source-language authority. Current adapters and Prelude/CoreLib preserve one meaning across applicable tiers. | Current law in code; some architecture prose still says TIR is the sole seam, which is stale relative to the current MIR boundary. |
+| Execution meaning | The current source boundary is checked Source/AST -> checked program -> slot IR -> backend/adapters. The portable machine is downstream of the IR, not another source-language authority. Current adapters and Prelude/CoreLib preserve one meaning across applicable tiers. | Current law in code. |
 | Numeric and concurrency law | `Int` is exact arbitrary precision; fixed-width arithmetic and `Int`/`Fraction`/floor/mod/remainder/shift operations belong to shared Prelude/CoreLib semantics. Source inspection found a TIR/MIREval `Int / Int` Fraction path and direct truncating helper branches, but did not establish reachability or an observed user-facing failure. `Atomic<T>` has a closed carrier set, no public order argument, and current operations use SeqCst; lock-free Atomic64 is an explicit target requirement and there is no silent lock fallback. | Current law plus explicit integration gates; [Sources](#sources) and [Sources](#sources). Exact scalar FP details remain incomplete and are not silently normalized by this proposal. |
 | Native code | A native `Library` is trusted in-process code with an exact C-safe scalar/text surface. It is not a second sandbox. Host owns signals, thread creation, waiting, free, unmapping, and failure isolation; a panic cannot unwind through C. | Current law; `Docs/spec/architecture.md`, `Docs/spec/spec.md`, and native-library sources. |
 | Plugin code | `core.plugin` is an untrusted Wasm Component path with deny-by-default imports, typed host facts, explicit authority, no-follow roots, fuel 10,000,000, memory 16 MiB, table 10,000, wire 16 MiB, and a two-second timeout in the inspected implementation. Compiler extensions use a separate world and remain in `jetpack`. | Current law and implementation constants; `Prelude/Plugin.rs`, compiler-extension sources, and syntax decisions. The constants are source-inspected, not an exercised guarantee. |
@@ -290,7 +290,7 @@ The observed Hangar path has a documented divergence: older architecture text na
 
 **P-EXIST-002 (one authority carrier).** Package resolution MAY calculate requested rights, but it MUST hand the canonical authority facts to the JPH/1 host boundary and the execution tier. A package signature, source path, profile name, cache location, or compiler effect MUST NOT itself grant a host right.
 
-**P-EXIST-003 (seam direction).** `jet-pkg-model`, `jet-env-model`, compiler front ends, codegen, and seam crates MUST NOT link provider, network, shell, deployment-engine, or Wasmtime implementation dependencies merely to parse or check a package. Runtime-only components may own an engine as already allowed by the plugin contract. The current semantic path is checked Source/AST -> TIR -> canonical MIR -> adapters; the compiler can lower checked semantic facts to JPM/1 and graph facts without initializing an engine or contacting a provider.
+**P-EXIST-003 (seam direction).** `jet-pkg-model`, `jet-env-model`, compiler front ends, codegen, and seam crates MUST NOT link provider, network, shell, deployment-engine, or Wasmtime implementation dependencies merely to parse or check a package. Runtime-only components may own an engine as already allowed by the plugin contract. The current semantic path is checked Source/AST -> checked program -> slot IR -> adapters; the compiler can lower checked semantic facts to JPM/1 and graph facts without initializing an engine or contacting a provider.
 
 **P-EXIST-004 (semantic identity).** Package selection, artifact verification, generation activation, and service execution MUST preserve the one Prelude/CoreLib meaning required by the current execution law. `Int` remains arbitrary precision even though JPM has an i64 primitive; exact `Int`/`Fraction` behavior, fixed-width overflow policy, division/remainder distinctions, shifts, and the closed SeqCst atomic carrier law cannot be narrowed by a target profile. The lock-free Atomic64 target requirement cannot be replaced by a hidden mutex fallback. A native cache, foreign runtime, browser adapter, or host profile cannot silently define a second arithmetic, error, authority, or cancellation meaning. JPM/1 and JPH/1 are the portable contracts; they do not authorize a semantic fork.
 
@@ -298,7 +298,7 @@ The observed Hangar path has a documented divergence: older architecture text na
 
 **P-EXIST-006 (source evidence honesty).** A source-inspected schema, registered command, or accepted Tower card MUST be described as such. No example in this chapter is an observed command output, benchmark, successful install, or security result. Proposed protocol traces are explicitly labelled `PROPOSED TRACE`.
 
-**P-EXIST-007 (semantic boundary).** A package record MUST identify source/AST provenance, TIR facts, canonical MIR schema and digest, and downstream JPM/1 output as distinct identities. Compiler-private MIR is not a public ABI merely because a package stores its digest. A graph action that cannot bind these identities MUST refuse portable admission.
+**P-EXIST-007 (semantic boundary).** A package record MUST identify source/AST provenance, checked-program facts, IR schema and function digests, and downstream JPM/1 output as distinct identities. Compiler-private IR is not a public ABI merely because a package stores its digest. A graph action that cannot bind these identities MUST refuse portable admission.
 
 **P-EXIST-008 (numeric adoption gate).** A future exact JPM floating-point baseline MAY recommend IEEE widths, nearest-even elementary arithmetic, gradual underflow, explicit FMA, no implicit reassociation/contraction, and specified NaN behavior, but that is a proposed all-tier amendment. The package lock MUST carry a numeric-semantics digest and MUST NOT claim tier parity from portable-only FP normalization. The unresolved direct-helper reachability question is an integration gate, not an observed failure and not permission to choose a new source law.
 
@@ -315,12 +315,12 @@ JPM/1 defines the verified portable code bytes, instructions, traps, and portabl
 ## Architecture
 ### A.1 Boundary and execution flow
 
-**M-ARCH-001.** JPM/1 is one stable, typed, block-local SSA machine. It is a distribution and execution contract, not compiler-private TIR/MIR, LLVM bitcode, a source-language type checker, or a host pointer ABI. A producer may lower canonical MIR schema 3 to JPM, but an engine MUST NOT infer source semantics from a JPM byte sequence.
+**M-ARCH-001.** JPM/1 is one stable, typed, block-local SSA machine. It is a distribution and execution contract, not compiler-private IR, LLVM bitcode, a source-language type checker, or a host pointer ABI. A producer may lower the slot IR to JPM, but an engine MUST NOT infer source semantics from a JPM byte sequence.
 
 A portable run has this order:
 
 1. The Jet compiler parses and checks source, selects Prelude/CoreLib implementations, and records source semantic identity.
-2. The compiler produces canonical MIR schema 3 and a complete source semantic bundle. The semantic bundle is required for a source-bound claim; a bare JPM file is machine-only.
+2. The compiler produces the slot IR and a complete source semantic bundle. The semantic bundle is required for a source-bound claim; a bare JPM file is machine-only.
 3. A writer emits canonical JPM bytes, source/debug identity in the package graph, and a verification input record. JPM has no custom executable extension section.
 4. The existing package/lock/Hangar/receipt graph binds JPM content, dependencies, JPH interface identities, requested authorities, profile, limits, semantic bundle, and generation.
 5. A bounded loader snapshots the immutable bytes, parses canonical sections, verifies types/control flow/references/segments/imports, and emits a verification receipt. No instruction or initializer runs before verification finishes.
@@ -380,7 +380,7 @@ A JPH ordinary failure (denied, stale, closed, quota, unsupported, timeout, or p
 
 ### A.4 Source semantic bundle and machine-only artifacts
 
-**M-ARCH-018.** A source-bound activation MUST carry the complete content-identified `SemanticBundle` object defined once by `P-GRAPH-001`. Its exact fields and preimage are the package graph's `SemanticBundleBody/1`: format `01`, Prelude/CoreLib implementation/content digest, numeric-semantics digest, MIR schema `3`, and sorted complete required-module and required-interface digest arrays. `SemanticBundleDigest` is the graph object identity computed from that fixed preimage. The source-bound node, lock, artifact, verification receipt, and admission receipt reference that digest; each verifier resolves and recomputes the complete object before link, cache, or activation. They MUST NOT repeat a partial semantic record. The bundle does not choose a new Jet `Int /` law.
+**M-ARCH-018.** A source-bound activation MUST carry the complete content-identified `SemanticBundle` object defined once by `P-GRAPH-001`. Its exact fields and preimage are the package graph's `SemanticBundleBody/1`: format `01`, Prelude/CoreLib implementation/content digest, numeric-semantics digest, IR schema, and sorted complete required-module and required-interface digest arrays. `SemanticBundleDigest` is the graph object identity computed from that fixed preimage. The source-bound node, lock, artifact, verification receipt, and admission receipt reference that digest; each verifier resolves and recomputes the complete object before link, cache, or activation. They MUST NOT repeat a partial semantic record. The bundle does not choose a new Jet `Int /` law.
 
 **M-ARCH-019.** A raw standalone JPM file without a source semantic bundle is explicitly **machine-only**. It may execute its own JPM scalar/control/memory contract when its imports and profile are satisfied, but it MUST NOT claim Jet source-language meaning, exact `Int`, Fraction, exception, or Prelude behavior. Source-bound activation with a missing or mismatched bundle fails at the activation phase as `semantic_bundle_missing` or `semantic_bundle_mismatch`, not as a malformed byte result.
 
@@ -1161,7 +1161,7 @@ Conformance covers canonical encoding, all instruction/FP/conversion/SIMD/trap b
 
 JPH/1 is the language-neutral, typed boundary for every verified JPM/1 instance. The reference interpreter, JIT, AOT/cache, browser adapter, embedded adapter, and native broker adapter consume the same type IDs, resource identities, error categories, ownership transitions, effect states, and cancellation rules. A transport may be local IPC, a browser message channel, an in-process broker call, or an embedded queue, but transport choice does not alter the wire meaning.
 
-JPH is downstream of checked Source/AST -> typed TIR -> canonical MIR -> adapters. It is not source ABI, public MIR, or a second authority language. Shared Prelude/CoreLib remains the owner of exact `Int`, `Fraction`, checked/floor/mod/remainder/shift operations, and current `Atomic<T>` meaning. JPM `i64` does not narrow source `Int`. No host pointer, native address, managed object identity, or borrowed guest pointer crosses this boundary.
+JPH is downstream of checked Source/AST -> checked program -> slot IR -> adapters. It is not source ABI, public IR, or a second authority language. Shared Prelude/CoreLib remains the owner of exact `Int`, `Fraction`, checked/floor/mod/remainder/shift operations, and current `Atomic<T>` meaning. JPM `i64` does not narrow source `Int`. No host pointer, native address, managed object identity, or borrowed guest pointer crosses this boundary.
 
 ### H-ABI-002 — Authenticated bootstrap, envelope, and frame kinds
 
@@ -3078,7 +3078,7 @@ SemanticBundle {
   semantic_bundle_format: u8 = 01,
   prelude_corelib_digest: Digest,
   numeric_semantics_digest: Digest,
-  mir_schema: u32 = 3,
+  ir_schema: u32,
   required_module_digests: [Digest] sorted by encoded digest bytes,
   required_interface_digests: [Digest] sorted by encoded digest bytes
 }
@@ -3089,11 +3089,11 @@ SemanticBundleBody/1 fields, in order:
   semantic_bundle_format:u8,
   prelude_corelib_digest:Digest,
   numeric_semantics_digest:Digest,
-  mir_schema:u32le,
+  ir_schema:u32le,
   required_module_digests(sorted),
   required_interface_digests(sorted)
 
-The digest preimage uses the fixed JPK-C14N/1 `Record`/`Count`/`Digest` encodings above. Counts are emitted even for an empty list; duplicate digests, a format other than `01`, a MIR schema other than `3`, or unsorted arrays reject. `semantic_bundle_digest` is derived from the body and is not included in its own preimage. A `SemanticBundle` object is stored once in the graph/Hangar object store; source-bound records reference its digest and validate the complete object before admission.
+The digest preimage uses the fixed JPK-C14N/1 `Record`/`Count`/`Digest` encodings above. Counts are emitted even for an empty list; duplicate digests, a format other than `01`, an `ir_schema` the reader does not implement, or unsorted arrays reject. `semantic_bundle_digest` is derived from the body and is not included in its own preimage. A `SemanticBundle` object is stored once in the graph/Hangar object store; source-bound records reference its digest and validate the complete object before admission.
 
 NodeRecord {
   node_id: NodeId,
@@ -3394,7 +3394,7 @@ The conversion from logical string enums to these bytes is total; unknown logica
 
 `P-GRAPH-001` is repaired as follows: a lock is reconstructible from immutable digests, exact selections, target records, authority-policy identity, toolchain records, owned-source records, and retained receipts. Moving names/channels/paths are selection inputs only. A missing required field, unbound digest, or mutable path produces an incomplete-lock refusal.
 
-`P-GRAPH-002` is repaired: every executable or host-affecting output has an `ArtifactRecord`, producer action, target/trust state, and result receipt. Native, AOT-cache, device, foreign-runtime, OCI, and JPM outputs cannot share an identity merely because their package name matches. For every source-bound node, lock, artifact, verification/admission receipt, and source-producing action, `semantic_bundle_digest` (or the lock's sorted `semantic_bundle_digests`) MUST resolve to one complete `SemanticBundle` object above; the verifier recomputes its `SemanticBundleDigest` and rejects a missing, partial, mismatched, duplicated, or stale object before cache, link, or activation admission. No record may repeat only Prelude/CoreLib, MIR, numeric, module, or interface fields as a substitute for that reference.
+`P-GRAPH-002` is repaired: every executable or host-affecting output has an `ArtifactRecord`, producer action, target/trust state, and result receipt. Native, AOT-cache, device, foreign-runtime, OCI, and JPM outputs cannot share an identity merely because their package name matches. For every source-bound node, lock, artifact, verification/admission receipt, and source-producing action, `semantic_bundle_digest` (or the lock's sorted `semantic_bundle_digests`) MUST resolve to one complete `SemanticBundle` object above; the verifier recomputes its `SemanticBundleDigest` and rejects a missing, partial, mismatched, duplicated, or stale object before cache, link, or activation admission. No record may repeat only Prelude/CoreLib, IR, numeric, module, or interface fields as a substitute for that reference.
 
 `P-GRAPH-004` is repaired: requested authority is copied from the graph to the host decision request. Only the current `ApplicationAuthority` decision, exact `application_authority_digest`, exact `host_import_decision_receipt`, and `revocation_epoch` populate `effective`. The graph never treats a manifest, signature, source ownership, or `AuthorityRequest` as a grant.
 
@@ -4475,7 +4475,7 @@ The source-to-rank function is closed and derived: `host-policy=0`, `lock=1`, `c
 
 ### P-DX-004 — Inspection, receipts, and replay
 
-`jet inspect` keeps source/AST provenance, TIR facts, MIR schema 3, JPM bytes, JPH interfaces, target native output, authority, graph, and receipts as distinct identities. A source-map value can be `available`, `optimized_out`, `not_materialized`, `redacted`, or `unavailable_on_tier`; a debugger never invents a value or treats a host pointer as a machine value. Attach requires debug authority bound to instance/generation/fields and revalidates across generation changes.
+`jet inspect` keeps source/AST provenance, checked-program facts, IR schema, JPM bytes, JPH interfaces, target native output, authority, graph, and receipts as distinct identities. A source-map value can be `available`, `optimized_out`, `not_materialized`, `redacted`, or `unavailable_on_tier`; a debugger never invents a value or treats a host pointer as a machine value. Attach requires debug authority bound to instance/generation/fields and revalidates across generation changes.
 
 A replay artifact binds JPM, graph/lock, tier, schedule decisions, host input bytes, clock/random substitutions, and external-effect records. It replays pure computation and recorded host responses only. An unrecorded network, secret, native-device, or external-database effect returns refusal rather than contacting the live host.
 
@@ -4612,7 +4612,7 @@ A logical lock projection is separate from `package.jet`; it is not presented as
 }
 ```
 
-The sample digest strings are illustrative. A real implementation computes them from the fixed preimages above and must not infer missing fields. The `semantic_bundle_digest` points to the complete graph/Hangar `SemanticBundle` object; the node, lock, and any admission receipt all validate that same object rather than copying a partial Prelude/CoreLib/MIR/numeric subset. `platforms` contains full `TargetProfileRecord` values, and `selected` contains every required selection field.
+The sample digest strings are illustrative. A real implementation computes them from the fixed preimages above and must not infer missing fields. The `semantic_bundle_digest` points to the complete graph/Hangar `SemanticBundle` object; the node, lock, and any admission receipt all validate that same object rather than copying a partial Prelude/CoreLib/IR/numeric subset. `platforms` contains full `TargetProfileRecord` values, and `selected` contains every required selection field.
 
 ### P-EX-002 — Owned-source update with concurrent edit
 
@@ -4907,7 +4907,7 @@ Each row has one material downside. “Eliminated by contract” means an exact 
 | L-01 / JPM parser | New parser is new attack surface. | Fixed JPM/1 header, ordered sections, canonical unsigned-LEB32, bounded lengths, reject overlong/overflow before allocation. | Independent implementation, fuzzing, review. | Mitigated | Malformed corpus stays bounded and tier-independent. |
 | L-02 / JPM bytes | Typed SSA plus metadata may cost bytes. | Measure code/import/debug/authority/package/receipt and full runtime bytes; make no size claim from code alone. | Tiny programs may exceed Wasm/native images. | Empirically unknown | Cold transfer/install bytes per paired fixture. |
 | L-03 / JPM validation | Independent validation costs load time and memory. | Validate sections, SSA, types, CFG, imports, references, bounds, limits, and traps before activation; hints never replace checks. | Validation may dominate tiny cold calls. | Empirically unknown | Cold first-result CPU/wall/peak and hostile limits. |
-| L-04 / JPM compiler | Public seam requires a new aligned lowering. | Source/AST -> TIR -> canonical MIR (schema 3) remains semantic authority; MIR-to-JPM preserves facts and Prelude/CoreLib meaning. | Compiler work, cache invalidation, drift risk. | Mitigated | Differential tiers; no private IR silently defines law. |
+| L-04 / JPM compiler | Public seam requires a new aligned lowering. | Source/AST -> checked program -> slot IR remains semantic authority; IR-to-JPM preserves facts and Prelude/CoreLib meaning. | Compiler work, cache invalidation, drift risk. | Mitigated | Differential tiers; no private IR silently defines law. |
 | L-05 / JPM `Int`/GC | Exact `Int` and managed guests still need runtime machinery. | Preserve arbitrary-precision `Int` above JPM `i64`; use specified guest big-number/library, no host pointer identity or compulsory tracing collector. | Big-number, GC, reflection, exception, and library costs remain. | Irreducible | Exact-Int/managed pairs show outputs, peak memory, GC/library cost; narrowing fails. |
 | L-06 / JPM tooling | New source/debug tooling may lag incumbents. | Version source/debug identities; report source, portable/native mapping, optimized-away values, and authority/resource cause. | JDWP, DevTools, CLR, and BEAM may be richer. | Empirically unknown | Debug corpus across tiers. |
 | L-07 / JPM ecosystem | Jet starts with less ecosystem. | Use named foreign adapters/projections and existing package/lock/Hangar homes; never imply compatibility without an adapter. | Libraries, providers, IDEs, and operator knowledge remain costs. | Irreducible | Missing dependency/provider is uncovered, not passed. |
@@ -5345,11 +5345,11 @@ The recommendation is a **JPM/1 core plus explicit adapters and projections**, n
 
 All items here are **PROPOSED and unratified**. No current law changes until the owner ratifies a corresponding amendment.
 
-1. **Adopt a new stable JPM/1 machine contract.** Amend the current portable-format law to recognize the fixed JPM/1 envelope, typed block-local SSA, defined arithmetic/traps, bounded memory, typed references, and no LLVM UB/poison semantics. Keep compiler-private TIR/MIR private and separately identified.
+1. **Adopt a new stable JPM/1 machine contract.** Amend the current portable-format law to recognize the fixed JPM/1 envelope, typed block-local SSA, defined arithmetic/traps, bounded memory, typed references, and no LLVM UB/poison semantics. Keep the compiler-private checked program and IR private and separately identified.
 2. **Preserve arbitrary-precision `Int`.** Amend the portable semantic law, if needed, to state explicitly that JPM `i64` is a low-level primitive and cannot narrow Jet `Int`; exact `Int`, `Fraction`, and checked/floor/mod/remainder/shift operations remain shared Prelude/CoreLib semantics. Resolve the observed-in-source reachability conflict as an integration gate, not as a new source-language decision.
 3. **Make the FP baseline an all-tier proposal.** Where JPM exact FP requires explicit NaN payload/signaling, signed-zero, gradual-underflow, nearest-even, FMA, and no implicit reassociation/contraction rules stronger than current inspected law, ratification MUST amend every tier together. A portable-only normalization is not sufficient.
 4. **Preserve current atomics law.** Core lowering MUST retain the closed carrier family, SeqCst behavior, lock-free Atomic64 requirement, and no silent lock fallback. The current API has no caller order argument; foreign low-level orderings MUST NOT silently become a new public Jet parameter.
-5. **Adopt one semantic reference path.** Amend execution-tier law so reference interpreter, baseline/JIT, AOT/cache, browser lowering, and native adapters must preserve one checked Prelude/CoreLib meaning after Source/AST -> TIR -> canonical MIR. Existing trusted native Jet and native Library contracts remain until a separate clean-cutover amendment.
+5. **Adopt one semantic reference path.** Amend execution-tier law so reference interpreter, baseline/JIT, AOT/cache, browser lowering, and native adapters must preserve one checked Prelude/CoreLib meaning after Source/AST -> checked program -> slot IR. Existing trusted native Jet and native Library contracts remain until a separate clean-cutover amendment.
 6. **Adopt JPH/1 by reference.** Amend host/plugin law to use the canonical typed host ABI, broker-local generation-bound handles, explicit ownership/async/cancel/reentrancy, and authority checks. Do not duplicate host layouts in JPM.
 7. **Extend, do not fork, the package graph.** Amend package/lock/Hangar/receipt schemas to carry JPM digests, interface/debug/authority identities, profile requirements, cache identities, source ownership, and generation state. Do not add a second resolver, trust database, deploy manifest, or sandbox authority.
 8. **Keep foreign formats as explicit projections.** Amend compatibility law to define Wasm component/browser, JVM/.NET/JS/BEAM, native-process, OCI, gVisor, Kata, and Firecracker adapters. An adapter's trust transition, copying, lifecycle, and unsupported capabilities must be receipt-bearing.

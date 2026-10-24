@@ -1302,7 +1302,7 @@ do not claim that the public `Map` shape has become an ordered source list.
 The unused `__object_into_entries` and `__tree_tag` registry rows were removed
 along with their seed functions, signatures, gates and native lowering handlers.
 A repository-wide reference search found declarations and handlers only, not
-any Jet codec, Rust TIR/MIR emitter, JS or comptime consumer.
+any Jet codec, emitter, JS or comptime consumer.
 
 The D-JSON3 `__coerce_now` and `__coerce_emit` registrations use the ambient
 interpreter route as well as the existing AOT host symbols. The resident

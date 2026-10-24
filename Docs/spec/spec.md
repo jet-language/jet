@@ -567,7 +567,7 @@ trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 `Decode.decode(tree: Dyn) -> Self ![FieldError]` are ordinary trait methods.
 `Dyn.decode<T>()` is the public typed-dispatch path for primitive,
 container, generated, and hand-written implementations. A built-in derive adds
-typed Jet items beside the marked type and sends them through the same sema, TIR,
+typed Jet items beside the marked type and sends them through the same sema, IR builder,
 and codegen path as hand-written members. JSON therefore compares the same
 encoded bytes and decoded values for generated and hand-written codecs. A
 user-defined derive expands only when its provider or target is entry-local;
@@ -1258,7 +1258,7 @@ Public API snapshots publish each relation canonically. One source is
 `source;access:...;path:...`; a union is
 `one_of(source;path:...,source;path:...);access:...`, sorted by stable source
 identity. Adding, removing, or changing a possible source changes the API digest
-and is a breaking provenance change. TIR receives only sema-approved provenance
+and is a breaking provenance change. The IR builder receives only sema-approved provenance
 and lowering flags; it does not infer owners, overlaps, lifetimes, or escapes.
 
 A kept link into a growable container follows D-LINK-ITEM1=A. A brief link
@@ -1875,8 +1875,8 @@ CI or an administrator supplies the floor through
 The path is retained as provenance, and an unreadable or malformed configured
 file fails closed. `jet inspect gates --kind unsafe FILE` reports each gate,
 operation, discharge state, and effective policy. Assertions erase in sema
-before the shared AOT
-or development TIR boundary. See
+before the shared IR
+boundary. See
 [`Examples/features/lowlevel/unsafe_obligations.jet`](../../Examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
 
 ### One audited-gate law
@@ -4231,7 +4231,7 @@ fn verify_release() {}
 
 An Executable takes zero or one supported typed CLI parameter; a Service or
 Check takes no parameters. Each returns `Unit` or `Unit ?`. Sema resolves and
-validates the reference before TIR or Rust emission and publishes its definition
+validates the reference before the IR is built and publishes its definition
 and effect row to semantic tooling.
 With no explicit selection, a legacy `fn run` wins; otherwise one compatible
 Executable is selected. Multiple candidates are E1321 with a sorted list

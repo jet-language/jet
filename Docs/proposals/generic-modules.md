@@ -31,7 +31,7 @@ D-GENMOD-VALUE1=A admits immutable Tier-0 comptime `Bool`, `Int`, `Char`,
 D-GENMOD-BODY1=A gives templates full ordinary-module item and marker parity,
 with definition-site lexical capture. D-GENMOD-IDENTITY1=A makes instances
 applicative: the same resolved template DefinitionId and normalized arguments
-mean one instance, including nominal types, sema, TIR/codegen, cache, and LSP
+mean one instance, including nominal types, sema, IR/codegen, cache, and LSP
 identity.
 
 ## Current implementation
@@ -40,7 +40,7 @@ Parser, sema, and codegen specialize full bodies, including nominal types,
 traits and impls, constants, tests/benches, and nested modules/templates. Values
 are evaluated and normalized, bounds and cycles are checked, definition-site
 scope is retained, imported templates work, and equivalent applications share
-one applicative instance. Instance identity reaches TIR/codegen, build-cache
+one applicative instance. Instance identity reaches IR/codegen, build-cache
 inputs, semindex, and LSP symbols; digest/full-key collisions stop as E0859/ICE
 before codegen. Exported nominal names remain distinct internally, while source
 reaches them through the instance path (`three_ints.Buffer`).
@@ -63,7 +63,7 @@ before claiming the entire card complete.
    - preserve definition-site capture and ordinary module visibility.
 3. Identity and codegen:
    - intern one instance by DefinitionId plus normalized arguments;
-   - share nominal types, sema/TIR, generated code, cache, and LSP references;
+   - share nominal types, sema/IR, generated code, cache, and LSP references;
    - emit only instantiated modules reachable from the entry graph;
    - keep one stable InstanceFingerprint per instance.
 4. Diagnostics and proof:

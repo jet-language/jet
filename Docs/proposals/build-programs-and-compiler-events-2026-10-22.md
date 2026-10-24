@@ -41,9 +41,10 @@ about:
   positional arguments, `b.legacy` takes 6 to 17, and each extra position is
   a different typed control (toolchain, probes, signing identity, and so on).
   Labels are rejected (E0764).
-- Codegen turns every call into one string-keyed host call,
+- The IR builder turns every call into one string-keyed host call,
   `jet_comptime_host_method` with the route `"Build.<method>"`
-  (`Compiler/JetCodegen/Source/Codegen/BuildMethods.jet`). The build session
+  (`Compiler/JetIR/Source/BuildExpr.jet`, served by
+  `Compiler/JetEval/Source/IR/Host.jet`). The build session
   dispatches on that string (`Compiler/JetBuildSession/Source/Session.jet`,
   `Compiler/JetDriver/Source/Driver/BuildAdapter.jet` and
   `Compiler/JetDriver/Source/Driver/DevQueries.jet`).
