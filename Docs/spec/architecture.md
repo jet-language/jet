@@ -1367,7 +1367,7 @@ C String parameters instead use per-call NUL-terminated copies; their String
 results are copied before those temporaries are released.
 `Core/Mem/Mem.jet` keeps private-loan and packed-byte tests in the trusted
 embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
-`Compiler/JetCli/Tests/run-c-ffi.mjs` covers declared-source scalar ABI and the
+`Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI and the
 bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
 
 `jet inspect bind cpp` is owned by
