@@ -1,107 +1,99 @@
 {
-  "source": "/mnt/jetscratch/discovery/perf/SPEED-500K.md §1 (per-phase budget, work ns per source line, single-thread-equivalent CPU)",
+  "source": "/mnt/jetscratch/discovery/perf/SPEED-500K.md §1 (per-phase budget, work ns per source line, single-thread-equivalent CPU); the -wall columns are the owner's self-compile targets (#5479, #5915) as wall ns per source line, checked with --clock wall",
   "default_lines": 448165,
   "lines_counter": "parse.user_lines",
-  "columns": ["225K", "500K", "1M"],
+  "columns": ["225K", "500K", "1M", "2.5s-wall", "20ms-wall"],
   "rows": [
     {
       "id": "P1+P2",
       "phase": "read + lex + intern + parse",
       "spans": ["sources", "load"],
-      "budget": { "225K": 1600, "500K": 720, "1M": 400 },
+      "budget": { "225K": 1600, "500K": 720, "1M": 400, "2.5s-wall": 683, "20ms-wall": 5 },
       "units": [{ "counter": "parse.tokens", "unit": "token", "budget": { "1M": 44 } }]
     },
     {
       "id": "P3",
       "phase": "collect / register / resolve",
       "spans": ["register"],
-      "budget": { "225K": 1800, "500K": 810, "1M": 450 }
+      "budget": { "225K": 1800, "500K": 810, "1M": 450, "2.5s-wall": 273, "20ms-wall": 2 }
     },
     {
       "id": "P4",
       "phase": "comptime: one check + evaluation",
       "spans": ["sema.check", "comptime", "comptime.bodies", "comptime.validate"],
-      "budget": { "225K": 1000, "500K": 450, "1M": 250 },
+      "budget": { "225K": 1000, "500K": 450, "1M": 250, "2.5s-wall": 683, "20ms-wall": 5 },
       "units": [{ "counter": "comptime.items_checked", "unit": "comptime item", "budget": { "1M": 45000 } }]
     },
     {
       "id": "P5a+P5b",
       "phase": "sema bodies + ownership (one pass; P5b is not traced apart)",
       "spans": ["sema.bodies", "sema.recheck"],
-      "budget": { "225K": 13200, "500K": 5960, "1M": 3300 },
+      "budget": { "225K": 13200, "500K": 5960, "1M": 3300, "2.5s-wall": 1640, "20ms-wall": 13 },
       "units": [{ "counter": "parse.tokens", "unit": "token", "budget": { "1M": 368 } }]
     },
     {
       "id": "P5c",
       "phase": "effect tracking",
       "spans": ["sema.effects"],
-      "budget": { "225K": 1200, "500K": 540, "1M": 300 }
+      "budget": { "225K": 1200, "500K": 540, "1M": 300, "2.5s-wall": 137, "20ms-wall": 1 }
     },
     {
       "id": "P5d",
       "phase": "failure inference",
       "spans": ["sema.failure"],
-      "budget": { "225K": 800, "500K": 360, "1M": 200 }
+      "budget": { "225K": 800, "500K": 360, "1M": 200, "2.5s-wall": 82, "20ms-wall": 1 }
     },
     {
       "id": "P6",
       "phase": "other whole-program finalize",
       "spans": ["sema.finalize"],
       "exclude": ["sema.bodies", "sema.recheck", "sema.effects", "sema.failure"],
-      "budget": { "225K": 400, "500K": 180, "1M": 100 }
+      "budget": { "225K": 400, "500K": 180, "1M": 100, "2.5s-wall": 410, "20ms-wall": 3 }
     },
     {
       "id": "P7",
-      "phase": "TIR -> MIR lowering",
+      "phase": "typed tree -> IR lowering (driver lower)",
       "spans": ["lower"],
-      "budget": { "225K": 7200, "500K": 3240, "1M": 1800 },
+      "budget": { "225K": 2600, "500K": 1170, "1M": 650, "2.5s-wall": 137, "20ms-wall": 1 },
       "units": [{ "counter": "lower.functions", "unit": "function", "budget": { "1M": 33000 } }]
     },
     {
       "id": "P8",
-      "phase": "MIR assembly + O1 passes",
-      "spans": ["assemble", "optimize"],
-      "exclude": ["optimize.legality", "optimize.lint", "mir.digest"],
-      "budget": { "225K": 5200, "500K": 2340, "1M": 1300 }
+      "phase": "IR build",
+      "spans": ["ir.build"],
+      "budget": { "225K": 9000, "500K": 4050, "1M": 2250, "2.5s-wall": 820, "20ms-wall": 7 }
     },
     {
       "id": "P9",
-      "phase": "MIR consistency check (legality + lint)",
-      "spans": ["optimize.legality", "optimize.lint"],
-      "budget": { "225K": 2000, "500K": 900, "1M": 500 }
-    },
-    {
-      "id": "D5",
-      "phase": "MIR digest (every consumer)",
-      "spans": ["mir.digest"],
-      "budget": { "225K": 0, "500K": 0, "1M": 0 }
+      "phase": "IR O1 passes",
+      "spans": ["ir.opt"],
+      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 683, "20ms-wall": 5 }
     },
     {
       "id": "P10",
-      "phase": "MIR -> LIR (native.lower)",
-      "spans": ["native.lower"],
-      "budget": { "225K": 5200, "500K": 2340, "1M": 1300 },
-      "units": [{ "counter": "native.lower.lir_insts", "unit": "LIR inst", "budget": { "1M": 43 } }]
+      "phase": "x64 selection, register allocation, encode",
+      "spans": ["ir.x64"],
+      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 328, "20ms-wall": 3 }
     },
     {
-      "id": "P11+P12+P13",
-      "phase": "per function: LIR O1, the one LIR check, isel, regalloc, encode; object, DWARF",
-      "spans": ["native.object"],
-      "budget": { "225K": 13000, "500K": 5850, "1M": 3250 }
+      "id": "P11",
+      "phase": "object write",
+      "spans": ["ir.object"],
+      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 273, "20ms-wall": 2 }
     },
     {
       "id": "P14",
       "phase": "link + foreign objects",
       "spans": ["native.link", "native.foreign", "native.rust_foreign"],
-      "budget": { "225K": 1000, "500K": 450, "1M": 250 }
+      "budget": { "225K": 1000, "500K": 450, "1M": 250, "2.5s-wall": 219, "20ms-wall": 2 }
     },
     {
       "id": "P15",
       "phase": "driver, phase boundaries (residual)",
       "residual": true,
-      "budget": { "225K": 800, "500K": 360, "1M": 200 }
+      "budget": { "225K": 800, "500K": 360, "1M": 200, "2.5s-wall": 465, "20ms-wall": 4 }
     }
   ],
-  "work_sum_stated": { "225K": 54400, "500K": 24480, "1M": 13600 },
-  "cpu_budget": { "225K": 71100, "500K": 32000, "1M": 16000 }
+  "work_sum_stated": { "225K": 54400, "500K": 24480, "1M": 13600, "2.5s-wall": 6833, "20ms-wall": 54 },
+  "cpu_budget": { "225K": 71100, "500K": 32000, "1M": 16000, "2.5s-wall": 6833, "20ms-wall": 54 }
 }

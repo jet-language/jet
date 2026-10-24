@@ -934,7 +934,6 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
         CensusItem{name: "D10b marker groups", kind: "load.marker_groups.relex", labelled: false},
         CensusItem{name: "D10b marker groups", kind: "load.marker_groups.reparse", labelled: false},
         CensusItem{name: "D12 comptime build", kind: "comptime.build", labelled: true},
-        CensusItem{name: "D5 MIR digest", kind: "mir.digest", labelled: true},
     }
     loop item in census_items {
         entries := detail(spans, item.kind, clock, &notes)
@@ -1059,35 +1058,33 @@ fn tail(cells: [String], from: Int, to: Int) -> String Never! {
     words.join("|")
 }
 
-#Test("process CPU per line, nested checks and digests subtracted from their phase") {
+#Test("process CPU per line, nested phases subtracted from their parent") {
     events := [String]{test_counter("parse.user_lines", 1000), test_counter("parse.tokens", 9000)}
     loop event in test_span("sources", 0, 1000, 1000000, "sources") -> &events.push(event)
     &events.push(test_event("load", "B", 1000, 0))
     loop event in test_span("parse", 1000, 5000, 3000000, "selfhost.jet") -> &events.push(event)
     loop event in test_span("load.marker_groups.relex", 5000, 6000, 1000000, "a.jet") -> &events.push(event)
     &events.push(test_event("load", "E", 10000, 9000000))
-    &events.push(test_event("optimize", "B", 20000, 0))
-    loop event in test_span("optimize.legality", 20000, 21000, 50000000, "optimize.legality") -> &events.push(event)
-    loop event in test_span("mir.digest", 21000, 22000, 20000000, "optimize.seal") -> &events.push(event)
-    loop event in test_span("optimize.lint", 22000, 23000, 30000000, "optimize.lint") -> &events.push(event)
-    &events.push(test_event("optimize", "E", 30000, 200000000))
-    &events.push(test_event("native.lower", "B", 30000, 0))
-    &events.push(test_event("native.lower", "E", 40000, 10000000))
-    &events.push(test_counter("native.lower.lir_insts", 2000))
-    loop event in test_span("native.object", 40000, 50000, 13000000, "native.object") -> &events.push(event)
+    &events.push(test_event("sema.finalize", "B", 20000, 0))
+    loop event in test_span("sema.bodies", 20000, 21000, 50000000, "sema.bodies") -> &events.push(event)
+    loop event in test_span("sema.effects", 22000, 23000, 30000000, "sema.effects") -> &events.push(event)
+    &events.push(test_event("sema.finalize", "E", 30000, 200000000))
+    loop event in test_span("ir.opt", 30000, 40000, 200000000, "ir.opt") -> &events.push(event)
+    loop event in test_span("ir.x64", 40000, 50000, 10000000, "ir.x64") -> &events.push(event)
+    loop event in test_span("ir.object", 50000, 60000, 13000000, "ir.object") -> &events.push(event)
     outcome :: report(test_options([String]{"t", "--column", "1M"}), test_budget(), test_trace(events))
     assert_eq(outcome.code, 1)
     text :: outcome.out.join("\n")
     assert(text.contains("clock:   proc_cpu"))
     assert(text.contains("lines:   1,000 (trace counter parse.user_lines)"))
     assert_eq(tail(test_row(outcome.out, "P1+P2"), 3, 7), "10,000|400|25.0x|OVER")
-    assert_eq(tail(test_row(outcome.out, "P8"), 3, 7), "100,000|1,300|76.9x|OVER")
-    assert_eq(tail(test_row(outcome.out, "P9"), 3, 7), "80,000|500|160.0x|OVER")
-    assert_eq(tail(test_row(outcome.out, "D5"), 3, 7), "20,000|0|inf|OVER")
-    assert_eq(tail(test_row(outcome.out, "P10"), 3, 7), "10,000|1,300|7.7x|OVER")
-    assert_eq(tail(test_row(outcome.out, "P11+P12+P13"), 3, 7), "13,000|3,250|4.0x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P6"), 3, 7), "120,000|100|1200.0x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P5a+P5b"), 3, 7), "50,000|3,300|15.2x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P5c"), 3, 7), "30,000|300|100.0x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P9"), 3, 7), "200,000|1,750|114.3x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P10"), 3, 7), "10,000|1,750|5.7x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P11"), 3, 7), "13,000|1,750|7.4x|OVER")
     assert_eq(test_row(outcome.out, "P3")[6], "absent")
-    assert(!text.contains("native.lir_lint"))
     assert(text.contains("FAIL: over the 1M budget"))
 }
 

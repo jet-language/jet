@@ -292,7 +292,6 @@ function main() {
   addCensus("D10b marker groups", "load.marker_groups.relex", false);
   addCensus("D10b marker groups", "load.marker_groups.reparse", false);
   addCensus("D12 comptime build", "comptime.build", true);
-  addCensus("D5 MIR digest", "mir.digest", true);
   console.log("");
   console.log(table(["census", "span", "spans", "seconds", "ns/line", "items"], census));
 

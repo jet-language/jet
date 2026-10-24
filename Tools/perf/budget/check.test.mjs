@@ -33,7 +33,7 @@ function row(out, id) {
   return line.trim().split(/\s{2,}/);
 }
 
-test("process CPU per line, nested checks and digests subtracted from their phase", () => {
+test("process CPU per line, nested phases subtracted from their parent", () => {
   const file = writeTrace([
     counter("parse.user_lines", 1000),
     counter("parse.tokens", 9000),
@@ -42,15 +42,13 @@ test("process CPU per line, nested checks and digests subtracted from their phas
     ...span("parse", 1000, 5000, 3_000_000, "selfhost.jet"),
     ...span("load.marker_groups.relex", 5000, 6000, 1_000_000, "a.jet"),
     { name: "load", cat: "load", ph: "E", ts: 10000, args: { proc_cpu_ns: 9_000_000 } },
-    { name: "optimize", cat: "optimize", ph: "B", ts: 20000 },
-    ...span("optimize.legality", 20000, 21000, 50_000_000),
-    ...span("mir.digest", 21000, 22000, 20_000_000, "optimize.seal"),
-    ...span("optimize.lint", 22000, 23000, 30_000_000),
-    { name: "optimize", cat: "optimize", ph: "E", ts: 30000, args: { proc_cpu_ns: 200_000_000 } },
-    { name: "native.lower", cat: "native.lower", ph: "B", ts: 30000 },
-    { name: "native.lower", cat: "native.lower", ph: "E", ts: 40000, args: { proc_cpu_ns: 10_000_000 } },
-    counter("native.lower.lir_insts", 2000),
-    ...span("native.object", 40000, 50000, 13_000_000),
+    { name: "sema.finalize", cat: "sema.finalize", ph: "B", ts: 20000 },
+    ...span("sema.bodies", 20000, 21000, 50_000_000),
+    ...span("sema.effects", 22000, 23000, 30_000_000),
+    { name: "sema.finalize", cat: "sema.finalize", ph: "E", ts: 30000, args: { proc_cpu_ns: 200_000_000 } },
+    ...span("ir.opt", 30000, 40000, 200_000_000),
+    ...span("ir.x64", 40000, 50000, 10_000_000),
+    ...span("ir.object", 50000, 60000, 13_000_000),
   ]);
   const { status, out } = run(file, "--column", "1M");
   assert.equal(status, 1, out);
@@ -58,14 +56,14 @@ test("process CPU per line, nested checks and digests subtracted from their phas
   assert.match(out, /lines:\s+1,000 \(trace counter parse\.user_lines\)/);
   // load (9 ms) + sources (1 ms) = 10 ms over 1,000 lines.
   assert.deepEqual(row(out, "P1+P2").slice(3, 7), ["10,000", "400", "25.0x", "OVER"]);
-  // optimize 200 ms less legality 50, lint 30 and digest 20.
-  assert.deepEqual(row(out, "P8").slice(3, 7), ["100,000", "1,300", "76.9x", "OVER"]);
-  assert.deepEqual(row(out, "P9").slice(3, 7), ["80,000", "500", "160.0x", "OVER"]);
-  assert.deepEqual(row(out, "D5").slice(3, 7), ["20,000", "0", "inf", "OVER"]);
-  assert.deepEqual(row(out, "P10").slice(3, 7), ["10,000", "1,300", "7.7x", "OVER"]);
-  assert.deepEqual(row(out, "P11+P12+P13").slice(3, 7), ["13,000", "3,250", "4.0x", "OVER"]);
+  // sema.finalize 200 ms less its nested bodies (50) and effects (30).
+  assert.deepEqual(row(out, "P6").slice(3, 7), ["120,000", "100", "1200.0x", "OVER"]);
+  assert.deepEqual(row(out, "P5a+P5b").slice(3, 7), ["50,000", "3,300", "15.2x", "OVER"]);
+  assert.deepEqual(row(out, "P5c").slice(3, 7), ["30,000", "300", "100.0x", "OVER"]);
+  assert.deepEqual(row(out, "P9").slice(3, 7), ["200,000", "1,750", "114.3x", "OVER"]);
+  assert.deepEqual(row(out, "P10").slice(3, 7), ["10,000", "1,750", "5.7x", "OVER"]);
+  assert.deepEqual(row(out, "P11").slice(3, 7), ["13,000", "1,750", "7.4x", "OVER"]);
   assert.equal(row(out, "P3")[6], "absent");
-  assert.doesNotMatch(out, /native\.lir_lint/);
   assert.match(out, /load\.marker_groups\.relex\s+1\s+0\.001/);
   assert.match(out, /FAIL: over the 1M budget/);
 });
