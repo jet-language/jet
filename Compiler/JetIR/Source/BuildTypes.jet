@@ -3201,8 +3201,42 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             return result
         }
         .Predicate(method) -> return ir_float_predicate(&m, &b, value, method, receiver_ty, span)
+        .BitCount(method, width) -> return ir_bit_count(&m, &b, value, method, width, target, span)
         else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
+}
+
+// `x.count_ones()` and the other population counts (Rust
+// lower_numeric_method): an exact Int crosses borrowed to
+// jet_numeric_int_bit_count and a fixed word as its extended 64-bit word to
+// jet_numeric_bit_count, each with the operation code and the receiver's
+// width; the count is an Int.
+fn ir_bit_count(m: &IRModule, b: &IRBuilder, value: Int, method: String, width: Int, target: Int, span: Span) -> Int Never! {
+    operation :: if method == {
+        "count_ones" -> 0
+        "count_zeros" -> 1
+        "leading_zeros" -> 2
+        "trailing_zeros" -> 3
+        "bit_count" -> 4
+        "bit_length" -> 5
+        else -> { return ir_fail_slot(&b, span, "numeric method {method}") }
+    }
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    code :: ir_int_constant(&m, &b, int_row, operation)
+    bits :: ir_int_constant(&m, &b, int_row, width)
+    kind :: ir_kind_of(m, b, value)
+    if kind == .Int {
+        result :: ir_runtime(&m, &b, "jet_numeric_int_bit_count", [Int]{value, code, bits}, target)
+        ir_release(&m, &b, value)
+        return result
+    }
+    if kind != .Word {
+        shown :: ir_type_name(m.types[b.f.slot_type[value]].ty)
+        return ir_fail_slot(&b, span, "numeric method {method} of {shown}")
+    }
+    word_row :: ir_word_row(&m)
+    word :: ir_copy_word(&m, &b, value, word_row)
+    ir_runtime(&m, &b, "jet_numeric_bit_count", [Int]{word, code, bits}, target)
 }
 
 // `x.is_nan()`, `x.is_infinite()`, `x.is_finite()` on Float and F32: NaN is

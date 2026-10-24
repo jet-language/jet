@@ -104,3 +104,22 @@ fn numeric_bit_set(word: I64, at: I64) -> Bool { ((word >> at).bit_and(I64{1})) 
     loop trailing < bits && !numeric_bit_set(value, trailing) -> trailing += I64{1}
     trailing
 }
+
+// MIREval.rs jet_numeric_int_bit_count over JetBigInt::bit_count: the
+// jet_numeric_bit_count operations on a borrowed exact Int. Operations 0-3
+// read its two's complement within `width` bits; 4 and 5 read its
+// magnitude, past 64 bits by halving a copy.
+#Export(c) fn jet_numeric_int_bit_count(value: I64, operation: I64, width: I64) -> I64 {
+    if int_inline(value) -> return jet_numeric_bit_count(value, operation, width)
+    bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if ((operation != I64{4} && operation != I64{5}) || int_fits(value, bound)) -> return jet_numeric_bit_count(int_word(value), operation, width)
+    node :: int_copy(value, I64{0})
+    ones := I64{0}
+    length := I64{0}
+    loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+        ones += int_div_small(node, I64{2})
+        length += I64{1}
+    }
+    int_free_node(node)
+    if (operation == I64{4}) -> ones else -> length
+}
