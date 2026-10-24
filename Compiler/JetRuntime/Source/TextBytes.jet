@@ -106,7 +106,8 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
 // the borrowed list is copied, never adopted.
 #Export(c) fn jet_raw_bytes_into_text(data: I64, length: I64) -> I64 { text_bytes_owned(data, length) }
 
-// MathRandomTime.rs jet_string_bytes: the UTF-8 bytes as a fresh List<U8>.
+// MathRandomTime.rs jet_string_bytes: the UTF-8 bytes as a fresh List<U8>,
+// one block move into the packed buffer (not a store per byte).
 #Export(c) fn jet_string_bytes(value: I64, output: I64) -> I64 {
     length :: rt_text_len(value)
     if (length == I64{0}) {
@@ -119,10 +120,14 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     }
     bytes :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     data :: rt_text_data(value)
-    at := I64{0}
-    loop at < length {
-        host_u8_put(bytes, at, rt_text_byte(data + at))
-        at += I64{1}
+    if (RT_HOST_U8_STRIDE == I64{1}) {
+        jet_rt_mem_move(bytes, data, length)
+    } else {
+        at := I64{0}
+        loop at < length {
+            host_u8_put(bytes, at, rt_text_byte(data + at))
+            at += I64{1}
+        }
     }
     rt_text_store(output, bytes)
     length
