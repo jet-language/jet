@@ -4,17 +4,15 @@ use std.collections.[VecDeque]
 use jet_foundation.Dyn.[Dyn]
 use jet_foundation.Devtools.[jet_observe_live_value_update]
 use jet_foundation.DevtoolsControl.[JetDevtoolsCommandReceipt]
-use jet_foundation.HotSwap.[HotSwapDecision]
 use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
-use jet_foundation.SHA256.[sha256_hex]
 use jet_foundation.[
     foundation_json_escape,
 ]
 use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserDock, BrowserHost, BrowserHostAction, BrowserHostEffect, BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserNodeKind, BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection, BrowserSessionState, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT, MAX_BROWSER_VALUE]
 use jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection]
 use jet_devserver.Session.[DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession, JET_DEVTOOLS_PROTOCOL]
-use jet_devserver.WebModuleSwap.[WebFocusFact, WebFormDraftFact, WebIslandFact, WebModuleFact, WebModuleSwapIdentity, WebModuleSwapPlan, WebModuleSwapReceipt, WebModuleSwapSnapshot, WebModuleSwapState, WebModuleSwapStateFact, WebPageFact, WebQueryCacheFact, WebScrollFact, WebSignalFact, WebStateValue, WebStoreFact]
-use jet_devserver.[MAX_REQUEST_BODY_BYTES, MAX_STATIC_RESPONSE_BYTES]
+use jet_devserver.WebModuleSwap.[WebFocusFact, WebFormDraftFact, WebIslandFact, WebModuleSwapReceipt, WebModuleSwapSnapshot, WebModuleSwapState, WebModuleSwapStateFact, WebQueryCacheFact, WebScrollFact, WebSignalFact, WebStateValue, WebStoreFact]
+use jet_devserver.[MAX_REQUEST_BODY_BYTES]
 use core.encoding.[Dyn]
 use core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelCapability]
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:38
@@ -323,117 +321,6 @@ fn release_json(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProject
         output.push_str("]}}")
     }
     output.push_str("]}}"); output
-}
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:645
-fn apply_web_swap_from_manifest(state: &BrowserWebState?, session_id: String, source_revision: String, build_revision: String, manifest: String, decision: &HotSwapDecision?) Err! {
-    dom_state := state.as_ref().map((state) -> state.dom_state.clone()).unwrap_or_default()
-    candidate := snapshot_from_manifest(source_revision, build_revision, manifest, dom_state) ?? {
-        resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
-        resident.swap_error = .Val(err.clone())
-        return .Err(err)
-    }
-    apply_web_swap_snapshot(state, session_id, candidate, decision)
-}
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:669
-fn manifest_artifact_identity(manifest: String) -> String Err! {
-    value := parse_manifest(manifest)?
-    root := object_map(value) ?? return .Err("web manifest must be a JSON object")
-    package := required_json_string(root, "package")?
-    if package.is_empty() -> return .Err("web manifest package identity is empty")
-    artifact_value := root.get("artifact").ok_or("web manifest has no selected artifact")?
-    artifact := object_map(artifact_value) ?? return .Err("web manifest artifact must be an object")
-    identity := required_json_string(artifact, "artifact_identity")?
-    if identity.is_empty() -> return .Err("web manifest artifact identity is empty")
-    .Ok(identity)
-}
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:688
-fn parse_manifest(manifest: String) -> Dyn Err! {
-    root := parse_json_with_limit(manifest, USize{MAX_STATIC_RESPONSE_BYTES}) ?? return .Err("web manifest is not valid bounded JSON")
-    object := object_map(root) ?? return .Err("web manifest must be a JSON object")
-    schema := required_json_string(object, "schema")?
-    if schema != "mir-web-v1" -> return .Err("unsupported web manifest schema `{schema}`")
-    .Ok(root)
-}
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:699
-fn snapshot_from_manifest(source_revision: String, build_revision: String, manifest: String, state: [WebModuleSwapStateFact]) -> WebModuleSwapSnapshot Err! {
-    if source_revision.is_empty() || build_revision.is_empty() -> return .Err("web swap requires non-empty source and build revisions")
-    value := parse_manifest(manifest)?
-    root := object_map(value) ?? return .Err("web manifest must be a JSON object")
-    package := required_json_string(root, "package")?
-    artifact_value := root.get("artifact").ok_or("web manifest has no selected artifact")?
-    artifact := object_map(artifact_value) ?? return .Err("web manifest artifact must be an object")
-    artifact_identity := required_json_string(artifact, "artifact_identity")?
-    selected_value := artifact.get("modules").ok_or("web manifest artifact has no modules")?
-    selected_modules := selected_value.as_array() ?? return .Err("web manifest artifact modules must be an array")
-    modules_value := root.get("modules").ok_or("web manifest has no module table")?
-    modules := modules_value.as_array() ?? return .Err("web manifest modules must be an array")
-    module_facts := [WebModuleFact]{[].with_capacity(selected_modules.len())}
-    loop selected in selected_modules {
-        module_id := if selected == {
-            .Int(id) -> id
-            else -> { return .Err("web manifest module id must be an integer") }
-        }
-        module_value := modules.iter().find((module_ref) -> {
-            object := object_map(module_ref) ?? return false
-            if object.get("id") == {
-                .Val(.Int(id)) -> id == module_id
-                else -> false
-            }
-        }).ok_or("web manifest selected module {module_id} is missing")?
-        module_ref := object_map(module_value) ?? return .Err("web manifest module must be an object")
-        identity := required_json_string(module_ref, "key")?
-        path := required_json_string(module_ref, "path")?
-        imports_value := module_ref.get("imports").ok_or("web manifest module has no imports")?
-        import_rows := imports_value.as_array() ?? return .Err("web manifest module imports must be an array")
-        imports := [String]{}
-        loop id in import_rows {
-            if id == {
-                .Int(n) -> imports.push(n.to_string())
-                else -> { return .Err("web manifest module import id must be an integer") }
-            }
-        }
-        imports_text := imports.join(",")
-        items_value := module_ref.get("item_order").ok_or("web manifest module has no item_order")?
-        item_rows := items_value.as_array() ?? return .Err("web manifest module item_order must be an array")
-        items := [String]{}
-        loop item in item_rows {
-            text := item.as_str() ?? return .Err("web manifest module item_order entries must be strings")
-            items.push(text.to_string())
-        }
-        item_order := items.join(TEXT_NUL)
-        interface_seed := "{identity}{TEXT_NUL}{path}{TEXT_NUL}{imports_text}{TEXT_NUL}{item_order}"
-        interface_fingerprint := "sha256-{sha256_hex(interface_seed.as_bytes())}"
-        body_seed := "{artifact_identity}{TEXT_NUL}{module_id}{TEXT_NUL}{path}"
-        body_fingerprint := "sha256-{sha256_hex(body_seed.as_bytes())}"
-        module_facts.push(WebModuleFact.new(identity, interface_fingerprint, body_fingerprint))
-    }
-    WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new(package, "application"), source_revision, build_revision, WebPageFact.new("application", artifact_identity), module_facts, state).map_err((error) -> "web swap candidate rejected: {error}")
-}
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:791
-fn apply_web_swap_snapshot(state: &BrowserWebState?, session_id: String, candidate: WebModuleSwapSnapshot, decision: &HotSwapDecision?) Err! {
-    resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
-    if resident.swap.is_none() {
-        if decision.is_some() {
-            error := "web swap decision has no resident snapshot; rebuild was rejected"
-            resident.swap_error = .Val(error.clone())
-            return .Err(error)
-        }
-        swap := WebModuleSwapState.new(candidate) ?? return .Err("web swap state rejected: {err}")
-        resident.swap = .Val(swap); resident.last_swap = .None; resident.swap_error = .None
-        return .Ok(_)
-    }
-    canonical_decision := decision.ok_or_else(() -> {
-        error := "web rebuild has no canonical HotSwapDecision; compatibility planning was rejected"
-        resident.swap_error = .Val(error.clone()); error
-    })?
-    swap := resident.swap.as_mut().expect("web swap state initialized")
-    plan := WebModuleSwapPlan.from_hot_swap_decision(swap.committed(), candidate, canonical_decision) ?? return .Err("web swap plan rejected: {err}")
-    receipt := swap.apply_decision(plan) ?? {
-        resident.swap_error = .Val(err.to_string())
-        return .Err("web swap transaction rejected: {err}")
-    }
-    resident.last_swap = .Val(receipt); resident.swap_error = .None
-    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:837
 fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {

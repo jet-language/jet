@@ -29,8 +29,7 @@ const repoPaths = tracked.filter(p => !coupled.has(p)
   && !/^(Docs\/(audits|research)\/|\.agent-worktrees\/|\.claude\/worktrees\/|target(?:[^/]*)\/|build\/|\.jet\/|\.tmp\/)/.test(p)
   && !/(^|\/)\.tower(\/|$)/.test(p)
   && !/^Tools\/agent-eval\/.*\/_defects[^/]*\//.test(p)
-  && !/^Tools\/gauntlet\/performance-surface-evidence-\d/.test(p)
-  && p !== 'Docs/proposals/automatic-build-optimization.md');
+  && !/^Tools\/gauntlet\/performance-surface-evidence-\d/.test(p));
 const cachePaths = [];
 function tooling(dir, recursive) {
   if (!fs.existsSync(dir)) return;

@@ -642,9 +642,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             devtools_projection :: session.devtools_events_since(.None)
             request_id :: next_web_error_request_id()
             source_id :: devtools_projection.source_id.filter((value) -> !value.is_empty()).unwrap_or_else(() -> canvas_file.to_string())
-            build_id :: devtools_projection.build_id.filter((value) -> !value.is_empty()).or_else(() -> {
-                std.fs.read_to_string(static_root.join("web.manifest.json")).ok().and_then((manifest) -> browser_web_adapter.manifest_artifact_identity(manifest).ok())
-            }) ?? return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
+            build_id :: devtools_projection.build_id.filter((value) -> !value.is_empty()) ?? return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
             accept :: request.headers.get("accept").map((v) -> v.as_str()).unwrap_or("*/*")
             identity :: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(^request_id, session.id(), source_id.clone(), ^build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))
             rendered :: if !facts.is_error() { .Ok(.None) } else {

@@ -172,34 +172,8 @@ impl WebHost {
     fn mark_building(self: Self) -> Unit { self.status.mark_building(); self.session.mark_building() }
     // Rust: crates/jet-devserver/src/WebHost.rs:2111
     fn mark_ready(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
-        decision :: self.hot_swap_decision.lock().unwrap().take()
-        if self.web_swap_enabled {
-            manifest :: fs.read_to_string(self.static_root.join("web.manifest.json")).ok()
-            build_id :: manifest.as_deref().and_then((m) -> browser_web_adapter.manifest_artifact_identity(m).ok())
-            source_revision := String?{.None}
-            browser_error := String?{.None}
-            if Canvas.read_source_without_symlinks(&OSPath.from(self.canvas_file)) == .Ok(source) {
-                revision :: Canvas.source_revision(source)
-                source_revision = .Val(revision.clone())
-                if build_id.as_deref() == .Val(id) -> _ :: self.session.set_devtools_source_identity(.Val(self.canvas_file.clone()), .Val(id.to_string()), .Val(revision.clone()), .None)
-                self.session.observe_source(revision)
-                if (_0: manifest.as_deref(), _1: build_id.as_deref()) == (_0: .Val(m), _1: .Val(id)) {
-                    if self.browser_state.lock() == {
-                        .Ok(state) -> {
-                            if browser_web_adapter.apply_web_swap_from_manifest(&state, self.session.id(), revision, id, m, decision.as_ref()) == .Err(error) -> browser_error = .Val(^error)
-                        }
-                        .Err(_) -> browser_error = .Val("browser swap state lock was poisoned; rebuild was rejected")
-                    }
-                }
-            } else if decision.is_some() -> browser_error = .Val("web rebuild has no readable source revision; compatibility application was rejected")
-            if decision.is_some() && (manifest.is_none() || build_id.is_none()) -> _ :: browser_error.get_or_insert_with(() -> "web rebuild has no published manifest/artifact identity; canonical HotSwapDecision was not applied")
-            if browser_error == .Val(error) {
-                self.status.mark_error("E2210", error.clone(), is_rebuild)
-                self.session.mark_error("E2210", error)
-                return
-            }
-            if (_0: build_id.as_deref(), _1: source_revision.as_deref()) == (_0: .Val(id), _1: .Val(revision)) -> self.session.mark_last_good(revision, id)
-        }
+        _ :: self.hot_swap_decision.lock().unwrap().take()
+        if self.web_swap_enabled && Canvas.read_source_without_symlinks(&OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
         self.status.mark_ready(elapsed_ms, is_rebuild)
         self.session.mark_ready()
     }
