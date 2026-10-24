@@ -4,6 +4,10 @@
 // Node words: kind,meta,source,other,count,index,env,invoke,release,callback-meta,
 // scratch,second-scratch,saved,saved-meta,list,extra,flags,initialized,done,context.
 
+// The high kind-word bit of an Option descriptor (kind 7) whose value is an
+// inline Int? word, not a box (JetIR IR_LAZY_INLINE_OPTION).
+ITER_INLINE_OPTION :: I64{4294967296}
+
 fn iter_meta(iter: I64) -> I64 { trap_word(iter + I64{8}) }
 
 fn iter_new(kind: I64, meta: I64) -> I64 {
@@ -915,12 +919,20 @@ fn iter_release_callback(node: I64) {
 }
 
 // Unbox one initialized failure carrier into target (an Ok/present payload)
-// or error (an Err payload). Returns 1=success, 0=failure.
+// or error (an Err payload). Returns 1=success, 0=failure. An Option whose
+// kind word carries ITER_INLINE_OPTION is an inline Int? (JetIR
+// ir_lazy_meta): the word is the Int, INT_OPTION_NONE its None.
 fn iter_unbox(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool {
     raw :: trap_word(carrier_slot)
-    optional :: (trap_word(carrier + I64{48}).bit_and(I64{4294967295})) == I64{7}
+    kind :: trap_word(carrier + I64{48})
+    optional :: kind.bit_and(I64{4294967295}) == I64{7}
     ok :: trap_word(carrier + I64{56})
     if optional {
+        if (kind.bit_and(ITER_INLINE_OPTION) != I64{0}) {
+            if (raw == INT_OPTION_NONE) { return false }
+            trap_store(target, raw)
+            return true
+        }
         if (raw == I64{0}) { return false }
         iter_box_take(raw, I64{0}, coll_size(ok), target, ok)
         return true

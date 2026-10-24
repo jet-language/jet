@@ -952,6 +952,80 @@ fn alloc_try(size: I64, align: I64) -> I64 {
     alloc_free_validated(pointer, size, align)
 }
 
+// The align-8 entries (#5925): jet_rt_alloc_8(size) is jet_rt_alloc(size, 8)
+// and jet_rt_free_8(pointer, size) is jet_rt_free(pointer, size, 8). A code
+// generator calls them for a constant align 8 (JetIR X64Select
+// ir_x64_alloc_entry), the align every box, record and word buffer has.
+// With the align known, the fast path needs no layout validation but the
+// size's range and no header choice, and the entry has a small frame. The
+// class row is alloc_class's comparisons for align 8 (size + 24 bytes, so
+// row k of class 32 << k serves the sizes above (16 << k) - 24 and at most
+// (32 << k) - 24, row 0 from 0), as the TCB offset of the row
+// (alloc_cache_row). Everything else takes the general entry.
+#Export(c) fn jet_rt_alloc_8(size: I64) -> I64 {
+    if (size >= I64{0}) {
+        if (size < alloc_class_limit) {
+            offset := I64{0}
+            if (size <= I64{232}) {
+                if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
+            } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
+            if (offset != I64{0}) {
+                #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned") {
+                    base :: os_tls_base_i64()
+                    if (base != I64{0}) {
+                        if (os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                            row :: wrapping(base + offset)
+                            block :: os_load_i64(row)
+                            if (block != I64{0}) {
+                                os_store_i64(row, os_load_i64(block))
+                                os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                                os_store_i64(wrapping(block + I64{16}), block)
+                                os_store_i64(block, I64{1})
+                                return wrapping(block + I64{24})
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    jet_rt_alloc(size, I64{8})
+}
+
+#Export(c) fn jet_rt_free_8(pointer: I64, size: I64) {
+    if (pointer != I64{0}) {
+        if (size >= I64{0}) {
+            if (size < alloc_class_limit) {
+                // An ending process leaves its heap to the kernel (#5478, Main.jet).
+                if (main_process_ending != I64{0}) -> return
+                offset := I64{0}
+                if (size <= I64{232}) {
+                    if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
+                } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
+                if (offset != I64{0}) {
+                    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word") {
+                        base :: os_tls_base_i64()
+                        if (base != I64{0}) {
+                            if (os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                                row :: wrapping(base + offset)
+                                count :: os_load_i64(wrapping(row + I64{8}))
+                                if (count < I64{64}) {
+                                    block :: os_load_i64(wrapping(pointer - I64{8}))
+                                    os_store_i64(block, os_load_i64(row))
+                                    os_store_i64(row, block)
+                                    os_store_i64(wrapping(row + I64{8}), wrapping(count + I64{1}))
+                                    return
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    jet_rt_free(pointer, size, I64{8})
+}
+
 // Checked mode (alloc_class_limit 0) sends every free to alloc_check_give.
 fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
     slot :: alloc_class(size, align, alloc_class_limit)

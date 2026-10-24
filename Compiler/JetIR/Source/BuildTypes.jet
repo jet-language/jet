@@ -19,6 +19,11 @@ fn ir_untag(ty: Type) -> Type Never! {
     ty.copy()
 }
 
+fn ir_raw_pointer(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Apply(name, args) -> return name == "Ptr" && args.len() == 1
+    false
+}
+
 fn ir_never_type(ty: Type) -> Bool Never! {
     ir_untag(ty) == (Type.Named{name: "Never"})
 }
@@ -162,8 +167,16 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
     if ty == .Tagged(_, inner) -> return ir_value_type_in(&m, p, inner, laying)
     if ty == .InlineRange(base, _, _) -> return ir_value_type_in(&m, p, base, laying)
     if ty == .Option(inner) {
-        // A box pointer, null when absent; its payload lies at offset 0.
         if !ir_pointee_lays_out(&m, p, inner, laying) -> return None
+        if ir_option_int_payload(&m, p, inner, laying) {
+            // One word (Build.jet IR_OPTION_INT_NONE): the Int's own when
+            // present, the niche 2^62 when absent; it drops and copies as
+            // the Int does.
+            word := ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "jet_rt_int_drop")
+            word.clone = "jet_rt_int_clone"
+            return Val(ir_intern_type(&m, type_carrier_identity(ty), word))
+        }
+        // A box pointer, null when absent; its payload lies at offset 0.
         boxed :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
         return Val(ir_mark_box(&m, boxed))
     }
@@ -242,6 +255,8 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
     if ir_event_type(ty) -> return Val(ir_event_row(&m, ty))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
     if ir_atomic_scalar(ty) == .Val(scalar) -> return Val(ir_atomic_row(&m, ty, ir_atomic_lane(scalar) ?? ""))
+    // A raw pointer `*T` is a bare address: no drop and no copy fixup.
+    if ir_raw_pointer(ty) -> return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
     name :: ir_nominal_name(ty) ?? return None
     args :: ir_type_args(ty)
     if args.len() == 0 {
@@ -590,7 +605,7 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
     row :: ir_value_type(&m, p, declared) ?? return None
     kind :: m.types[row].kind
     if handle.runtime == "JetTestSuite" && kind != .Int -> return None
-    if kind != .Int && kind != .Bool && kind != .String && kind != .Pointer && kind != .Aggregate -> return None
+    if kind != .Int && kind != .Bool && kind != .String && kind != .Pointer && kind != .Aggregate && !ir_option_inline(m, row) -> return None
     loop (index, field) in fields {
         if field == name -> return Val(IRMember{name: name, offset: 8 * index, ty: row, boxed: kind == .Aggregate})
     }
@@ -914,6 +929,20 @@ fn ir_record_member_arg(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, me
     }
     ty :: m.types[member.ty].ty
     if ir_untag(ty) == .Option(inner) {
+        if ir_option_inline(m, member.ty) {
+            // The runtime borrows a box with the Int at 0: a stack word
+            // stands in for it, null for None.
+            word :: ir_load_at(&m, &b, holder, at, member.ty)
+            scratch :: ir_out_slot(&m, &b, 1)
+            ir_emit(&b.f, IROp.Store, -1, scratch, 0, word, b.line)
+            lent :: ir_temp(&m, &b, pointer_row)
+            ir_emit(&b.f, IROp.Const, lent, 0, -1, -1, b.line)
+            some :: ir_option_is_some(&m, &b, word)
+            ir_open_if(&b.f, some, b.line)
+            ir_emit(&b.f, IROp.Copy, lent, scratch, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            return lent
+        }
         box :: ir_temp(&m, &b, pointer_row)
         ir_emit(&b.f, IROp.Load, box, holder, at, -1, b.line)
         if ir_record_runtime(&m, p, inner) == None -> return box
@@ -963,8 +992,17 @@ fn ir_record_load_value(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, 
         zero :: ir_word_const(&m, &a, 0)
         present :: ir_bool_op(&m, &a, IROp.Ne, presence, zero)
         joined :: ir_temp(&m, &a, row)
-        ir_emit(&a.f, IROp.Const, joined, 0, -1, -1, a.line)
+        ir_option_none(&m, &a, joined)
         ir_open_if(&a.f, present, a.line)
+        if ir_option_inline(m, row) {
+            // The getter hands its Int over through the out slot.
+            payload :: ir_temp(&m, &a, inner_row)
+            ir_emit(&a.f, IROp.Load, payload, slot, 0, -1, a.line)
+            ir_emit(&a.f, IROp.Move, joined, payload, -1, -1, a.line)
+            ir_end(&a.f, a.line)
+            ir_emit(&a.f, IROp.Store, -1, base, offset, joined, a.line)
+            return
+        }
         inner_size :: m.types[inner_row].size
         boxed :: ir_box_alloc(&m, &a, inner_size, row)
         payload :: ir_temp(&m, &a, if nested -> pointer_row else -> inner_row)
@@ -1042,6 +1080,27 @@ fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [Strin
         }
     }
     ir_value_type_in(&m, p, written, laying) != None
+}
+
+// Whether an Option of `written` (which lays out) is one inline word: its
+// payload is laid out as an exact Int (Int itself, a tagged, ranged or
+// measured Int, or a declared type whose base is Int).
+fn ir_option_int_payload(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
+    ty :: ir_untag(ir_subst(m, written))
+    if ty == {
+        .Int -> return true
+        .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
+        else -> return false
+    }
+    if laying.len() > 0 {
+        if ir_nominal_name(ty) == .Val(name) {
+            if ir_type_def(p, name) == .Val(row) {
+                if ir_laying_decl_at(laying, p.types[row].key) >= 0 -> return false
+            }
+        }
+    }
+    row :: ir_value_type_in(&m, p, ty, laying) ?? return false
+    m.types[row].kind == .Int
 }
 
 // The declared payload-free enum an IR slot type stands for, if any.
@@ -1156,6 +1215,19 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
         .Float -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
         .Float32 -> if mode == .Debug -> "jet_rt_float32_debug" else -> "jet_rt_float32_to_string"
         else -> { return ir_fail_slot(&b, span, "display of {ir_type_name(ty)}") }
+    }
+    if kind == .Float32 {
+        // The F32 display exports read the binary32 bits zero-extended in an
+        // integer word (Display.jet), not an SSE argument: the value crosses
+        // through a zeroed frame word.
+        pointer :: ir_pointer_row(&m)
+        area :: ir_temp(&m, &b, pointer)
+        ir_emit(&b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
+        zero :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, area, 0, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, area, 0, slot, b.line)
+        bits :: ir_load_word(&m, &b, area, 0)
+        return ir_runtime(&m, &b, symbol, [Int]{bits}, string_row)
     }
     ir_runtime(&m, &b, symbol, [Int]{slot}, string_row)
 }
@@ -1626,7 +1698,8 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     site :: if line > 0 -> line else -> b.line
     if ir_compare_op(op) {
-        scalar :: kind == .Int || kind == .Word || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String
+        // An inline Option compares as an Option (ir_equal, ir_order_sign).
+        scalar :: kind == .Int || (kind == .Word && !ir_option_inline(m, b.f.slot_type[left])) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String
         if !scalar {
             if op == .Eq || op == .Ne {
                 same :: ir_equal(&m, p, &b, left, right, span)
@@ -1833,7 +1906,8 @@ fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
     if kind == .Unit -> return
     ty :: ir_untag(m.types[row].ty)
     if left < 0 || right < 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
-    if kind == .Int || kind == .Word || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+    // An inline Option is a Word of its own order (the Option arm).
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
         a := left
         c := right
         if kind == .String {
@@ -1859,8 +1933,8 @@ fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         same :: ir_bool_op(&m, &b, IROp.Eq, left_some, right_some)
         ir_open_if(&b.f, same, b.line)
         ir_open_if(&b.f, left_some, b.line)
-        left_payload :: ir_load_at(&m, &b, left, 0, payload)
-        right_payload :: ir_load_at(&m, &b, right, 0, payload)
+        left_payload :: ir_option_payload(&m, &b, left, payload)
+        right_payload :: ir_option_payload(&m, &b, right, payload)
         ir_order_into(&m, p, &b, payload, left_payload, right_payload, sign, decided, span)
         ir_end(&b.f, b.line)
         ir_else(&b.f, b.line)
@@ -2140,7 +2214,9 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
     if kind == .Unit -> return
     ty :: ir_untag(m.types[row].ty)
     if left < 0 || right < 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
-    if kind == .Int || kind == .Word || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+    // An inline Option compares its Int payloads (the Option arm): two big
+    // Ints of one value are two words.
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
         equal :: ir_bool_op(&m, &b, IROp.Eq, left, right)
         return ir_exit_unless(&m, &b, equal, differ)
     }
@@ -2158,8 +2234,8 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         both :: ir_bool_op(&m, &b, IROp.Eq, left_some, right_some)
         ir_exit_unless(&m, &b, both, differ)
         ir_open_if(&b.f, left_some, b.line)
-        left_payload :: ir_load_at(&m, &b, left, 0, payload)
-        right_payload :: ir_load_at(&m, &b, right, 0, payload)
+        left_payload :: ir_option_payload(&m, &b, left, payload)
+        right_payload :: ir_option_payload(&m, &b, right, payload)
         ir_equal_into(&m, p, &b, payload, left_payload, right_payload, differ, outer, span)
         ir_end(&b.f, b.line)
         return
@@ -2836,7 +2912,7 @@ fn ir_render_option(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slo
     ir_push_static(&m, &b, builder, if mode == .Debug -> "None" else -> "null")
     ir_else(&b.f, b.line)
     if mode == .Debug -> ir_push_static(&m, &b, builder, "Val(")
-    value :: ir_load_at(&m, &b, slot, 0, row)
+    value :: ir_option_payload(&m, &b, slot, row)
     ir_render_push_value(&m, p, &b, builder, value, mode, span)
     if mode == .Debug -> ir_push_static(&m, &b, builder, ")")
     ir_end(&b.f, b.line)
@@ -2952,16 +3028,15 @@ fn ir_native_carrier(ty: Type) -> Bool Never! {
     ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_event_type(ty) || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
 }
 
-// The Bool test of a text pattern on the String `subject`: one 64-byte
-// descriptor row per part [tag, a, b, width, destination, storage, scratch,
-// scratch] for `jet_rt_text_pattern_match`, which writes each capture into
-// its own zeroed frame cell only on a match; the holes bind from those cells.
-fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, parts: [TTextPatternPart], span: Span) -> Int Never! {
-    if ir_kind_of(m, b, subject) != .String -> return ir_fail_slot(&b, span, "text pattern on a non-String subject")
-    word :: ir_word_row(&m)
+// The 64-byte descriptor rows of a text pattern's parts, one per part
+// [tag, a, b, width, destination, storage, scratch, scratch], read by
+// `jet_rt_text_pattern_match` and `jet_rt_cursor_take_pattern`: the runtime
+// writes each named capture into its own zeroed frame cell only on a match,
+// and `pending` gets one row per named capture binding that cell. -1 when a
+// hole has no text carrier.
+fn ir_text_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TTextPatternPart], pending: &[IRPending], span: Span) -> Int Never! {
     pointer :: ir_pointer_row(&m)
     rows :: ir_out_slot(&m, &b, 8 * parts.len())
-    pending := [IRPending]{}
     loop (index, part) in parts {
         at :: 64 * index
         part_kind := 0
@@ -3033,6 +3108,18 @@ fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int,
         if destination >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 32, destination, line)
         ir_emit(&b.f, IROp.Store, -1, rows, at + 40, storage_word, line)
     }
+    rows
+}
+
+// The Bool test of a text pattern on the String `subject`: the holes bind
+// from their capture cells.
+fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, parts: [TTextPatternPart], span: Span) -> Int Never! {
+    if ir_kind_of(m, b, subject) != .String -> return ir_fail_slot(&b, span, "text pattern on a non-String subject")
+    word :: ir_word_row(&m)
+    pointer :: ir_pointer_row(&m)
+    pending := [IRPending]{}
+    rows :: ir_text_pattern_rows(&m, p, &b, parts, &pending, span)
+    if ir_failed(b) -> return -1
     data :: ir_runtime(&m, &b, "jet_rt_string_data", [Int]{subject}, pointer)
     length :: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{subject}, word)
     stride :: ir_word_const(&m, &b, 1)

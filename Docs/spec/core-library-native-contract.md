@@ -628,6 +628,13 @@ reservation even after switching back to system mode. Policy facts retain
 historical allocation/request/high-water counters on cancelled heap requests,
 while live bytes and tracker nodes return to zero.
 
+`jet_rt_alloc_8(size: I64) -> I64` and `jet_rt_free_8(pointer: I64, size: I64)`
+are `jet_rt_alloc(size, 8)` and `jet_rt_free(pointer, size, 8)`: the doors a
+code generator calls when the alignment is the constant 8 (boxes, records and
+word buffers). The runtime owns them and their layout: a thread-cache hit is
+served in place, and every other request, including checked mode, takes the
+ordinary door. A block of either door may be freed by the other.
+
 The explicit native host policy edges are `jet_rt_program_allocator_configure`,
 `jet_rt_program_allocator_restore`, and `jet_rt_program_allocator_fact`
 (allocations, requested, live, high-water, cap, mode at indices 0..5). Hosts

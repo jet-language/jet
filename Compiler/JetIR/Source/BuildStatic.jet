@@ -242,6 +242,8 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
         .Present(inner) -> {
             if ir_untag(ty) == .Option(inner_ty) {
                 inner_row :: ir_value_type(&m, p, inner_ty) ?? return None
+                // An inline Int? is its payload's word.
+                if ir_option_inline(m, row) -> return ir_static_word(&m, p, &s, inner_ty, inner_row, inner)
                 boxed :: ir_static_box(&s, m.types[inner_row].size)
                 if !ir_static_into(&m, p, &s, boxed, IR_STATIC_BOX_HEADER, inner_ty, inner_row, inner) -> return None
                 return Val(ir_static_box_word(boxed))
@@ -265,6 +267,8 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
                 }
             } else if kind == .Pointer && ir_untag(ty) == .Option(_) {
                 return Val(IRStaticWord{word: 0})
+            } else if ir_option_inline(m, row) {
+                return Val(IRStaticWord{word: IR_OPTION_INT_NONE})
             }
             return None
         }

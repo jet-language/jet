@@ -38,6 +38,8 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
             result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            // An inline Int? word (IR_OPTION_INT_NONE) never crosses as an Int.
+            if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
             if m.types[result_row].kind == {
                 .Int | .Word | .Bool | .Float | .String -> {}
                 else -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
@@ -52,6 +54,7 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
         param :: foreign.params[index]
         if param.variadic || param.convention == AccessConvention.Write || arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
         row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
+        if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshalling")
         value :: ir_value_as(&m, p, &b, arg.value, row, span)
         if ir_failed(b) -> return -1
         if value < 0 -> return ir_fail_slot(&b, span, "Unit foreign C argument")
@@ -116,6 +119,7 @@ fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedFo
     leaf_params := [Int]{}
     loop param in foreign.params {
         row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
+        if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "inline asm: parameter {param.name} is not a machine word")
         if m.types[row].kind == {
             .Int -> &leaf_params.push(word_row)
             .Word | .Pointer -> &leaf_params.push(row)
@@ -129,6 +133,7 @@ fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedFo
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
             result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "inline asm: result is not a machine word")
             if m.types[result_row].kind == {
                 .Int -> leaf_result = word_row
                 .Word | .Pointer -> leaf_result = result_row

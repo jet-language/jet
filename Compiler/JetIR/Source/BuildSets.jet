@@ -110,7 +110,7 @@ fn ir_set_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
         ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
     } else {
         null :: ir_temp(&m, &a, option_row)
-        ir_emit(&a.f, IROp.Const, null, 0, -1, -1, a.line)
+        ir_option_none(&m, &a, null)
         ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
     }
     ir_end(&a.f, a.line)
@@ -122,6 +122,10 @@ fn ir_set_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
             removed_key :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
             ir_emit(&a.f, IROp.Drop, -1, removed_key, -1, -1, a.line)
         }
+    } else if ir_option_inline(m, option_row) {
+        taken :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+        boxed = ir_temp(&m, &a, option_row)
+        ir_emit(&a.f, IROp.Move, boxed, taken, -1, -1, a.line)
     } else {
         key_size :: m.types[shape.key.ty].size
         boxed = ir_box_alloc(&m, &a, key_size, option_row)
@@ -180,7 +184,7 @@ fn ir_set_list(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set
 fn ir_set_end(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     result :: ir_fresh_temp(&m, &b, result_row)
-    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    ir_option_none(&m, &b, result)
     length :: ir_load_word(&m, &b, set, 0)
     zero :: ir_word_const(&m, &b, 0)
     present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
@@ -196,9 +200,8 @@ fn ir_set_end(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapS
     entry :: ir_element_address(&m, &b, data, index, shape.stride)
     key :: ir_load_at(&m, &b, entry, shape.key.offset, shape.key.ty)
     size :: m.types[shape.key.ty].size
-    boxed :: ir_box_alloc(&m, &b, size, result_row)
-    ir_store_at(&m, p, &b, boxed, 0, key)
-    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    made :: ir_option_make(&m, p, &b, result_row, key, size)
+    ir_option_set(&m, &b, result, made)
     ir_end(&b.f, b.line)
     result
 }

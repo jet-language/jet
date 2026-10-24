@@ -13,7 +13,7 @@
 // and drops them as any other. Rows are read and interned in the batch's
 // own rows (host_types), whose existing rows are the module's.
 use jet_foundation.[Span, TComptimeValue, Type, type_name]
-use jet_ir.[IRMember, IRModule, IRProgram, ir_align8, ir_enum_box_size, ir_enum_def, ir_host_value_row, ir_list_stride, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_ir.[IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_align8, ir_enum_box_size, ir_enum_def, ir_host_value_row, ir_list_stride, ir_option_inline, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // The compiler value host word `word` holds.
 fn jet_eval_ir_host_value(s: &JetEvalIRState, word: Int) -> TComptimeValue? Never! {
@@ -182,6 +182,16 @@ fn jet_eval_ir_host_store(types: &IRModule, p: IRProgram, s: &JetEvalIRState, va
             if value == .String(text) -> return jet_eval_ir_store_text(&s, text)
         }
         .Word -> {
+            // An inline Int?: None is the niche word, Some its Int's word.
+            if checked == .Option(inner) && ir_option_inline(types, row) {
+                if value == .Failed(_) -> return Val(IR_OPTION_INT_NONE)
+                payload :: if value == .Present(present) -> present else -> value
+                inner_row :: ir_value_type(&types, p, inner) ?? {
+                    jet_eval_ir_host_unwritable(&s, value, checked)
+                    return None
+                }
+                return jet_eval_ir_host_store(&types, p, &s, payload, inner_row, 0)
+            }
             if ir_enum_def(types, p, row) == .Val(definition) {
                 if value == .Enum(_, variant, _) -> return jet_eval_ir_host_variant(&s, p, definition, variant)
             } else if value == .Int(number) {

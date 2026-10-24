@@ -21,6 +21,8 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         .DynDecode(target) -> return Val(ir_dyn_decode(&m, p, &b, ty, receiver, target, args, span))
         .DynIndexKey(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_key", true, site, location, args, span))
         .DynIndexAt(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
+        .DynBinary(op, site, location) -> return Val(ir_dyn_operator(&m, p, &b, ty, receiver, "jet_dyn_binary", op, site, location, args, span))
+        .DynCompare(op, site, location) -> return Val(ir_dyn_operator(&m, p, &b, ty, receiver, "jet_dyn_compare", op, site, location, args, span))
         else -> {}
     }
     // The encoding.dyn routes: the tree is borrowed, an index moves.
@@ -48,10 +50,8 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     Val(ir_route(&m, p, &b, route.symbol, operands, route.mask, ty, span))
 }
 
-// `tree[key]` / `tree[index]`: the jet_dyn_index_key / jet_dyn_index_at route
-// gives Ok(a new owner of the entry) or Err(its stop detail), and an Err
-// stops at the index's line, its source quoted with the caret at the line
-// start (DynRuntime.rs).
+// `tree[key]` / `tree[index]`: the jet_dyn_index_key / jet_dyn_index_at
+// route (ir_dyn_checked).
 fn ir_dyn_index(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn index with {args.len()} arguments")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -59,11 +59,39 @@ fn ir_dyn_index(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
     if ir_failed(b) || tree < 0 -> return -1
     index :: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || index < 0 -> return -1
+    site :: ir_dyn_text(&m, &b, site_text)
+    ir_dyn_checked(&m, p, &b, ty, row, symbol, [Int]{tree, index, site}, [Bool]{true, keyed, true}, location, span)
+}
+
+// `left op right` on Dyn operands (`+ - * /` or `< <= > >=`): the
+// jet_dyn_binary / jet_dyn_compare route over the borrowed trees
+// (ir_dyn_checked).
+fn ir_dyn_operator(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, op: String, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn operator with {args.len()} arguments")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    left :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || left < 0 -> return -1
+    right :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || right < 0 -> return -1
+    spelling :: ir_dyn_text(&m, &b, op)
+    site :: ir_dyn_text(&m, &b, site_text)
+    ir_dyn_checked(&m, p, &b, ty, row, symbol, [Int]{left, right, spelling, site}, [Bool]{true, true, true, true}, location, span)
+}
+
+fn ir_dyn_text(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
     string_row :: ir_string_row(&m)
-    site :: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.ConstText, site, ir_intern_text(&m, site_text), -1, -1, b.line)
+    slot :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, slot, ir_intern_text(&m, text), -1, -1, b.line)
+    slot
+}
+
+// A checked Dyn route gives Ok(its value) or Err(its stop detail), and an
+// Err stops at the expression's line, its source quoted with the caret at
+// the line start (DynRuntime.rs).
+fn ir_dyn_checked(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, symbol: String, operands: [Int], mask: [Bool], location: TPanicLoc, span: Span) -> Int Never! {
+    string_row :: ir_string_row(&m)
     result_ty :: Type.Result{ok: ir_subst(m, ty), err: Type.String}
-    outcome :: ir_route(&m, p, &b, symbol, [Int]{tree, index, site}, [Bool]{true, keyed, true}, result_ty, span)
+    outcome :: ir_route(&m, p, &b, symbol, operands, mask, result_ty, span)
     if ir_failed(b) || outcome < 0 -> return -1
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     failed :: ir_temp(&m, &b, bool_row)
@@ -141,16 +169,14 @@ fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_ro
     }
     value_row :: entry_members[1].ty
     result :: ir_temp(&m, &b, result_row)
-    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    ir_option_none(&m, &b, result)
     present :: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
     ir_open_if(&b.f, present, b.line)
     value :: ir_load_at(&m, &b, hit, entry_members[1].offset, value_row)
     owned :: ir_copy_value(&m, p, &b, value, span)
-    width :: ir_align8(m.types[value_row].size)
-    boxed :: ir_box_alloc(&m, &b, width, result_row)
-    ir_store_at(&m, p, &b, boxed, 0, owned)
-    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
-    b.fresh[boxed] = false
+    size :: m.types[value_row].size
+    made :: ir_option_make(&m, p, &b, result_row, owned, size)
+    ir_option_set(&m, &b, result, made)
     ir_end(&b.f, b.line)
     ir_release(&m, &b, tree)
     ir_release(&m, &b, key)

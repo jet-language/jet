@@ -218,10 +218,10 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
                 }
             }
             .Option(_) -> {
-                if m.types[row].kind != .Pointer {
+                if m.types[row].kind != .Pointer && !ir_option_inline(m, row) {
                     ir_fail(&b, span, "a test returning {ir_type_name(ty)}")
                 } else {
-                    absent :: ir_bool_op(&m, &b, IROp.Eq, result, null)
+                    absent :: ir_is_null(&m, &b, result)
                     ir_open_if(&b.f, absent, b.line)
                     message :: ir_test_text(&m, &b, "test returned no value")
                     ir_emit(&b.f, IROp.Return, -1, message, -1, -1, b.line)

@@ -1,0 +1,22 @@
+// ProcessReceipt.signal is an Int?: the terminating signal when a signal
+// stopped the child, None when it exited. A copy compares equal to it.
+package {
+    name: "process_signal_option"
+    authority: { allow: [Exec, IO, Mem.Alloc, Time.Wait] }
+}
+
+use core.process as process
+
+fn show(label: String, spec: ProcessSpec) -[Exec, IO, Time.Wait]> {
+    r :: process.run_spec(spec) ?? panic("run failed")
+    s :: r.signal
+    dup :: s
+    print("{label}: success={r.success} code={r.code} signal={r.signal ?? 0} some={s != None} dup={dup == s} exited={process.exited(r)}")
+}
+
+fn run() -[Exec, IO, Time.Wait]> {
+    show("term", process.cmd(["sh", "-c", "kill -TERM $$"]))
+    show("kill", process.cmd(["sh", "-c", "kill -KILL $$"]))
+    show("exit3", process.cmd(["sh", "-c", "exit 3"]))
+    show("ok", process.cmd(["true"]))
+}

@@ -45,6 +45,11 @@ fn ir_contract_return(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
     open :: b.contracts
     b.contracts = [IRContractFrame]{}
     mark :: b.bindings.len()
+    // The clauses borrow the returned carrier: a test on `result` must not
+    // hold it as its own fresh box (ir_hold), or the clause scope would drop
+    // the value the return hands on.
+    fresh :: slot >= 0 && b.fresh[slot]
+    if slot >= 0 -> b.fresh[slot] = false
     if frame.result.mode == {
         .Direct -> {
             ir_contract_bind(&b, frame.result, slot)
@@ -60,8 +65,7 @@ fn ir_contract_return(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
                 binding_row :: ir_value_type(&m, p, frame.result.binding_ty) ?? -1
                 payload := -1
                 if binding_row >= 0 {
-                    offset :: if result_mode -> 8 else -> 0
-                    payload = ir_load_at(&m, &b, slot, offset, binding_row)
+                    payload = if result_mode -> ir_load_at(&m, &b, slot, 8, binding_row) else -> ir_option_payload(&m, &b, slot, binding_row)
                 }
                 ir_contract_bind(&b, frame.result, slot)
                 ir_contract_bind_payload(&b, frame.result, payload)
@@ -71,6 +75,7 @@ fn ir_contract_return(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
         }
     }
     ir_truncate_bindings(&b, mark)
+    if slot >= 0 -> b.fresh[slot] = fresh
     b.contracts = open
 }
 

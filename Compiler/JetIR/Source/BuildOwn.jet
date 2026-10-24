@@ -407,10 +407,11 @@ fn ir_box_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> 
     id
 }
 
-// A zero of `slot`'s type (a null box).
+// A zero of `slot`'s type (a null box; IR_OPTION_INT_NONE for an inline
+// Option).
 fn ir_null_like(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
     null :: ir_temp_like(&m, &b, slot)
-    ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+    ir_option_none(&m, &b, null)
     null
 }
 
@@ -433,6 +434,12 @@ fn ir_box_make_unique(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) Neve
 // -1 for a Unit payload.
 fn ir_box_take(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, offset: Int, row: Int) -> Int Never! {
     b.fresh[boxed] = false
+    // An inline Option's payload is its word: the owner hands it over.
+    if ir_option_inline(m, b.f.slot_type[boxed]) {
+        taken :: ir_fresh_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.Move, taken, boxed, -1, -1, b.line)
+        return taken
+    }
     kind :: m.types[row].kind
     if kind == .Unit {
         ir_emit(&b.f, IROp.Drop, -1, boxed, -1, -1, b.line)

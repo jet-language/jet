@@ -293,6 +293,68 @@ fn alloc_test_cache() {
     alloc_test_require(alloc_live_blocks(I64{64}) == baseline)
 }
 
+// The cached block count of the class `width` row of this thread.
+fn alloc_test_row_count(width: I64) -> I64 {
+    row :: alloc_cache_row(width)
+    count := I64{0}
+    #Unsafe("row is this thread's own cache row") { count = os_load_i64(wrapping(row + I64{8})) }
+    count
+}
+
+// A block of jet_rt_alloc_8 is an align-8 payload with its count and block
+// header words, one block out of the class `width` row: the count that row
+// holds now.
+fn alloc_test_row_taken(width: I64, pointer: I64) -> I64 {
+    alloc_test_require(pointer != I64{0} && pointer.bit_and(I64{7}) == I64{0})
+    #Unsafe("the test owns this fresh align-8 block and its header words") {
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{8})) == wrapping(pointer - I64{24}))
+    }
+    alloc_test_require(jet_rt_block_unique(pointer))
+    alloc_test_row_count(width)
+}
+
+// The align-8 entries (jet_rt_alloc_8, jet_rt_free_8): each row's smallest
+// and largest size goes through its row's cache (an empty row's first
+// request refills it by the general entry, so the second takes one more
+// cached block and the frees put both back), a block of either kind of entry
+// may be freed by the other, and a size past the rows is a direct mapping.
+fn alloc_test_rows() {
+    alloc_cache_flush()
+    width := I64{32}
+    // Row `width` serves the sizes past the previous row's, row 32 from 0.
+    smallest := I64{0}
+    loop width <= (I64{4096}) {
+        largest :: wrapping(width - I64{24})
+        first :: jet_rt_alloc_8(smallest)
+        cached :: alloc_test_row_taken(width, first)
+        second :: jet_rt_alloc_8(largest)
+        alloc_test_require(alloc_test_row_taken(width, second) == wrapping(cached - I64{1}))
+        jet_rt_free_8(first, smallest)
+        jet_rt_free_8(second, largest)
+        alloc_test_require(alloc_test_row_count(width) == wrapping(cached + I64{1}))
+        // Either kind of entry frees the other's block.
+        general :: jet_rt_alloc(largest, I64{8})
+        alloc_test_require(alloc_test_row_taken(width, general) == cached)
+        jet_rt_free_8(general, largest)
+        entry :: jet_rt_alloc_8(smallest)
+        alloc_test_require(alloc_test_row_taken(width, entry) == cached)
+        jet_rt_free(entry, smallest, I64{8})
+        alloc_test_require(alloc_test_row_count(width) == wrapping(cached + I64{1}))
+        smallest = wrapping(largest + I64{1})
+        width = wrapping(width + width)
+    }
+    // Past the largest row: a direct mapping, no row block.
+    held :: alloc_test_row_count(I64{4096})
+    large :: jet_rt_alloc_8(I64{4073})
+    alloc_test_require(large != I64{0} && alloc_test_row_count(I64{4096}) == held)
+    jet_rt_free_8(large, I64{4073})
+    alloc_test_require(alloc_test_row_count(I64{4096}) == held)
+    // Null is a no-op, as for jet_rt_free.
+    jet_rt_free_8(I64{0}, I64{200})
+    alloc_cache_flush()
+}
+
 // Probes for AllocCacheWitness.c, the multi-thread cache witness.
 #Export(c) fn alloc_test_live_blocks(width: I64) -> I64 { alloc_live_blocks(width) }
 
@@ -324,6 +386,7 @@ fn alloc_tests() {
     alloc_test_slab_stack()
     alloc_test_counts()
     alloc_test_cache()
+    alloc_test_rows()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {
         _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})
         _ := os_write_word_i64(I64{1}, I64{750815947097601139}, I64{8})

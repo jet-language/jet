@@ -62,6 +62,9 @@ struct IRBuilder {
     subjects: [Int]
     // Pattern bindings of the condition being built, bound when its If opens.
     pending: [IRPending]
+    // The address a write window's inline Int? subject was read from, by
+    // the subject slot (BuildExpr.jet ir_borrow): its payload binds there.
+    windows: [Int:Int]{[Int:Int]{}}
     line: Int
     error: String
     error_span: Span
@@ -1062,9 +1065,9 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
             }
         }
         .Option(_) -> {
-            if m.types[row].kind != .Pointer -> ir_fail(&b, span, "an entry returning {ir_type_name(ty)}")
+            if m.types[row].kind != .Pointer && !ir_option_inline(m, row) -> ir_fail(&b, span, "an entry returning {ir_type_name(ty)}")
             null :: ir_temp_like(&m, &b, result)
-            ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+            ir_option_none(&m, &b, null)
             absent :: ir_bool_op(&m, &b, IROp.Eq, result, null)
             ir_open_if(&b.f, absent, b.line)
             message :: ir_static_text(&m, &b, "entry returned no value")
@@ -1248,6 +1251,18 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
         // (ir_window_subject), and so is a recursive edge's wrapper in it:
         // the name binds the payload's storage, the wrapper's for an edge.
         row_type :: b.f.slot_type[row.slot]
+        subject_row :: b.f.slot_type[row.subject]
+        if row.window && ir_option_inline(m, subject_row) {
+            // An inline Int?'s payload is its word: the name binds the
+            // word's storage at the window's place.
+            address :: b.windows.get(row.subject) ?? -1
+            if address < 0 {
+                ir_fail(&b, Span{start: 0, end: 0}, "a write window into an inline {ir_type_name(m.types[subject_row].ty)} without its place")
+                next
+            }
+            &b.bindings.push(IRBinding{name: row.name, slot: address, indirect: row_type})
+            next
+        }
         // A recursive edge's counted wrapper may be shared by copies of
         // the struct holding it: a window writes through its holder's own.
         if row.window && row.boxed && !row.loaded {
@@ -1280,6 +1295,11 @@ fn ir_pending_windows(p: IRProgram, b: &IRBuilder, subject: Int, from: Int) Neve
 
 // Loads the payload `row` names into `slot`.
 fn ir_pending_load(m: &IRModule, b: &IRBuilder, row: IRPending, slot: Int) Never! {
+    // An inline Option's payload is its own word (ir_option_payload).
+    if ir_option_inline(m, b.f.slot_type[row.subject]) {
+        ir_emit(&b.f, IROp.Move, slot, row.subject, -1, -1, b.line)
+        return
+    }
     op :: if m.types[b.f.slot_type[slot]].kind == .Aggregate -> IROp.Offset else -> IROp.Load
     if row.boxed {
         pointer_row :: ir_pointer_row(&m)
@@ -2171,10 +2191,103 @@ fn ir_result_rebox(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: In
     boxed
 }
 
+// An Option of an Int (or a type laid out as one) is one word, not a box
+// (BuildTypes.jet ir_value_type_laid): the Int's own word when present,
+// IR_OPTION_INT_NONE when absent. That word is never an Int: an inline Int
+// lies in [-2^62, 2^62 - 1], and a big Int is 2^62 | the address of its
+// node (JetRuntime Int.jet int_tag), a heap or data address and never null.
+// Its drop and clone are the Int's; the runtime's pass the niche by.
+IR_OPTION_INT_NONE :: 4611686018427387904
+
+fn ir_option_inline(m: IRModule, row: Int) -> Bool Never! {
+    m.types[row].kind == .Word && m.types[row].clone == "jet_rt_int_clone"
+}
+
+// The word of an absent Option of row `row`: null for a box.
+fn ir_option_none_word(m: IRModule, row: Int) -> Int Never! {
+    if ir_option_inline(m, row) -> return IR_OPTION_INT_NONE
+    0
+}
+
+// Sets the Option `slot` absent.
+fn ir_option_none(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+    none :: ir_option_none_word(m, b.f.slot_type[slot])
+    ir_emit(&b.f, IROp.Const, slot, none, -1, -1, b.line)
+}
+
+// A new absent Option of row `row`.
+fn ir_option_none_temp(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
+    slot :: ir_temp(&m, &b, row)
+    ir_option_none(&m, &b, slot)
+    slot
+}
+
 fn ir_option_is_some(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
     null :: ir_temp_like(&m, &b, value)
-    ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+    ir_option_none(&m, &b, null)
     ir_bool_op(&m, &b, IROp.Ne, value, null)
+}
+
+// The present Option `value`'s payload of row `row`, borrowed: the word
+// itself for an inline Option, else the box's payload at 0.
+fn ir_option_payload(m: &IRModule, b: &IRBuilder, value: Int, row: Int) -> Int Never! {
+    if !ir_option_inline(m, b.f.slot_type[value]) -> return ir_load_at(&m, &b, value, 0, row)
+    slot :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Move, slot, value, -1, -1, b.line)
+    slot
+}
+
+// Makes the inline Option `result` present with `value`, which it owns
+// from here (a copy when `value` was only borrowed).
+fn ir_option_inline_into(m: &IRModule, p: IRProgram, b: &IRBuilder, result: Int, value: Int) Never! {
+    owned :: ir_own(&m, p, &b, value)
+    ir_emit(&b.f, IROp.Move, result, owned, -1, -1, b.line)
+    b.fresh[owned] = false
+}
+
+// A new present inline Option of row `row` owning `value` (fresh, like a
+// new box).
+fn ir_option_inline_wrap(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int) -> Int Never! {
+    slot :: ir_fresh_temp(&m, &b, row)
+    ir_option_inline_into(&m, p, &b, slot, value)
+    slot
+}
+
+// A new present Option of row `row` owning `value`: an inline word, or a
+// box of `size` payload bytes holding it.
+fn ir_option_make(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, size: Int) -> Int Never! {
+    if ir_option_inline(m, row) -> return ir_option_inline_wrap(&m, p, &b, row, value)
+    boxed :: ir_box_alloc(&m, &b, size, row)
+    ir_store_at(&m, p, &b, boxed, 0, value)
+    boxed
+}
+
+// Hands the new Option `made` (ir_option_make) to `result`: a box's Copy
+// aliases it; an inline word moves, as a Copy would clone its Int.
+fn ir_option_set(m: &IRModule, b: &IRBuilder, result: Int, made: Int) Never! {
+    if ir_option_inline(m, b.f.slot_type[made]) {
+        ir_emit(&b.f, IROp.Move, result, made, -1, -1, b.line)
+        b.fresh[made] = false
+        return
+    }
+    ir_emit(&b.f, IROp.Copy, result, made, -1, -1, b.line)
+}
+
+// The inline Option of row `row` a runtime result `boxed` stands for: the
+// runtime's generic Option is a fresh 8-byte block owning the Int (null
+// when absent). The Int moves out and the block is freed.
+fn ir_option_unbox(m: &IRModule, b: &IRBuilder, boxed: Int, row: Int) -> Int Never! {
+    out :: ir_fresh_temp(&m, &b, row)
+    ir_option_none(&m, &b, out)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Ne, boxed, zero)
+    ir_open_if(&b.f, present, b.line)
+    item :: ir_load_at(&m, &b, boxed, 0, row)
+    ir_emit(&b.f, IROp.Move, out, item, -1, -1, b.line)
+    eight :: ir_word_const(&m, &b, 8)
+    ir_free(&m, &b, boxed, eight)
+    ir_end(&b.f, b.line)
+    out
 }
 
 // The address of element `index` (a native word) of the buffer `data`.

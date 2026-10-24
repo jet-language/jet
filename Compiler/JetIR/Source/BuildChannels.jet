@@ -124,7 +124,14 @@ fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
             meta :: ir_lazy_meta(&m, p, &b, element, span)
             if meta < 0 -> return Val(-1)
-            result = ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, row)
+            if ir_option_inline(m, row) {
+                // The runtime answers its generic Option box (ir_option_unbox).
+                pointer_row :: ir_pointer_row(&m)
+                boxed :: ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, pointer_row)
+                result = ir_option_unbox(&m, &b, boxed, row)
+            } else {
+                result = ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, row)
+            }
             b.fresh[result] = m.types[row].drop != ""
         }
         .ChannelReceive -> {

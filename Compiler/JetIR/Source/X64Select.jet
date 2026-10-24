@@ -866,6 +866,21 @@ fn ir_x64_block_retain(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     ir_x64_overflow_trap(&e, overflow)
 }
 
+// The runtime's align-8 entry (JetRuntime Alloc.jet jet_rt_alloc_8 and
+// jet_rt_free_8) for call `at` of jet_rt_alloc(size, align) or
+// jet_rt_free(pointer, size, align) whose align is the constant 8: it takes
+// the call's arguments but the align. "" for any other call.
+fn ir_x64_alloc_entry(f: IRFunction, al: IRX64Allocation, at: Int, symbol: String) -> String Never! {
+    if symbol == "jet_rt_alloc" && f.c[at] == 2 {
+        align :: f.args[f.b[at] + 1]
+        if al.consts[align] && al.values[align] == 8 -> return "jet_rt_alloc_8"
+    } else if symbol == "jet_rt_free" && f.c[at] == 3 {
+        align :: f.args[f.b[at] + 2]
+        if al.consts[align] && al.values[align] == 8 -> return "jet_rt_free_8"
+    }
+    ""
+}
+
 // jet_rt_block_release(block) inline: true when the caller's reference was
 // the last one. A count of 1 is the caller's alone (no other owner can
 // retain it meanwhile), so it is true without a write; an immortal count is
@@ -1482,7 +1497,8 @@ fn ir_x64_transfer(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloca
     // box or a function value is copied by its builder retaining it
     // (ir_clone); its Copy aliases too.
     if f.op[at] == .Copy && drop != "" && ty.kind != .Aggregate && !ir_clone_shares(m.types[f.slot_type[src]].clone) {
-        if ty.kind == .Int {
+        // An inline Int? (Build.jet IR_OPTION_INT_NONE) copies as its Int.
+        if ty.kind == .Int || m.types[f.slot_type[src]].clone == "jet_rt_int_clone" {
             ir_x64_load(&e, m, f, al, src, X64_RAX)
             ir_x64_int_route(&e, "jet_rt_int_clone", X64_RAX)
             return ir_x64_store(&e, m, f, al, dst, X64_RAX)
@@ -1505,7 +1521,7 @@ fn ir_x64_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
     }
     drop :: m.types[f.slot_type[slot]].drop
     if drop == "" -> return
-    if ty.kind == .Int {
+    if ty.kind == .Int || drop == "jet_rt_int_drop" {
         reg :: ir_x64_use(&e, m, f, al, slot, X64_RAX)
         return ir_x64_int_route(&e, drop, reg)
     }
@@ -1738,12 +1754,14 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             symbol :: m.names[f.a[at]]
             // One-argument runtime leaves with a result inline on their fast path.
             leaf :: f.c[at] == 1 && dst >= 0
+            entry :: ir_x64_alloc_entry(f, al, at, symbol)
             if {
                 leaf && (symbol == "jet_int_owned_to_i64" || symbol == "jet_rt_int_clone") -> ir_x64_inline_route(&e, m, f, al, symbol, f.args[f.b[at]], dst)
                 leaf && symbol == "jet_rt_block_unique" -> ir_x64_block_unique(&e, m, f, al, at, f.args[f.b[at]])
                 leaf && symbol == "jet_rt_block_release" -> ir_x64_block_release(&e, m, f, al, at, f.args[f.b[at]])
                 f.c[at] == 1 && dst < 0 && symbol == "jet_rt_block_retain" -> ir_x64_block_retain(&e, m, f, al, f.args[f.b[at]])
                 symbol == "jet_int_checked_fixed" && ir_x64_checked_fixed(&e, m, f, al, at, symbol) -> {}
+                entry != "" -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: entry}, -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
                 else -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
             }
         }

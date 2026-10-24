@@ -5,7 +5,7 @@
 // Present, None as a clean failure and Err as a told one, a fixed-width
 // integer as an Int.
 use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, type_name, FnBody]
-use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, ir_build_roots_in, ir_declared_field_type, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // What one IR evaluation produced: its value (when it completed with data),
 // the failure it reports, and its output.
@@ -109,6 +109,13 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
             return Val(TComptimeValue.String{value: text})
         }
         .Word -> {
+            // An inline Int?: the niche word is None, any other its Int.
+            if checked == .Option(inner) && ir_option_inline(m, row) {
+                if word == IR_OPTION_INT_NONE -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                inner_row :: ir_value_type(&m, p, inner) ?? return jet_eval_ir_transport_fail(&s, checked)
+                value :: jet_eval_ir_data(&m, p, &s, word, inner_row) ?? return None
+                return Val(TComptimeValue.Present{value: value})
+            }
             if ir_host_value_row(m, p, row) != None -> return jet_eval_ir_host_value(&s, word)
             if ir_enum_def(m, p, row) == .Val(definition) {
                 args :: ir_row_args(m, row)

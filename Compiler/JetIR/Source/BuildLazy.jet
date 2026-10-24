@@ -36,6 +36,9 @@ fn ir_lazy_storage(p: IRProgram, ty: Type) -> Type Never! {
     ty.copy()
 }
 
+// The high kind-word bit of an inline Int? Option descriptor (kind 7).
+IR_LAZY_INLINE_OPTION :: 4294967296
+
 // The descriptor kind word the runtime dispatches show, equality and ordering
 // on. A fixed-width integer carries its bit width in the high 32 bits; 11 is
 // a zero-size payload.
@@ -279,7 +282,7 @@ fn ir_lazy_compare_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, spa
         return
     }
     kind :: ir_kind_of(m, a, left)
-    if kind == .Pointer || kind == .Aggregate -> return ir_fail(&a, span, "ordering of {ir_type_name(ty)} is not lowered at O0 yet")
+    if kind == .Pointer || kind == .Aggregate || ir_option_inline(m, row) -> return ir_fail(&a, span, "ordering of {ir_type_name(ty)} is not lowered at O0 yet")
     right :: ir_load_at(&m, &a, right_slot, 0, row)
     less := -1
     greater := -1
@@ -378,7 +381,9 @@ fn ir_lazy_meta(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span)
     ir_emit(&b.f, IROp.StackAddress, descriptor, 72, 8, -1, b.line)
     stride :: ir_list_stride(m, row)
     has_drop :: m.types[row].drop != ""
-    kind :: ir_lazy_kind(&m, p, ty)
+    // An inline Int? carrier is no box: the runtime's iter_unbox reads its
+    // word (JetRuntime Iter.jet ITER_INLINE_OPTION).
+    kind :: ir_lazy_kind(&m, p, ty) + (if ir_option_inline(m, row) -> IR_LAZY_INLINE_OPTION else -> 0)
     zero :: ir_word_const(&m, &b, 0)
     clone := zero
     if ir_lazy_type_can_clone(&m, p, ty) {
@@ -710,6 +715,11 @@ fn ir_lazy_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: 
     if symbol == "jet_iter_len" || symbol == "jet_iter_compare" {
         native :: ir_runtime(&m, &b, runtime, call_args, word_row)
         out = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{native}, result_row)
+    } else if ir_option_inline(m, result_row) {
+        // The runtime answers its generic Option box (ir_option_unbox).
+        box_row :: ir_pointer_row(&m)
+        boxed :: ir_runtime(&m, &b, runtime, call_args, box_row)
+        out = ir_option_unbox(&m, &b, boxed, result_row)
     } else {
         out = ir_runtime(&m, &b, runtime, call_args, result_row)
     }
@@ -839,7 +849,15 @@ fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
         if chunk_meta < 0 -> return -1
         &call_args.push(chunk_meta)
     }
-    out :: ir_runtime(&m, &b, runtime, call_args, result_row)
+    out := -1
+    if ir_option_inline(m, result_row) {
+        // The runtime answers its generic Option box (ir_option_unbox).
+        box_row :: ir_pointer_row(&m)
+        boxed :: ir_runtime(&m, &b, runtime, call_args, box_row)
+        out = ir_option_unbox(&m, &b, boxed, result_row)
+    } else {
+        out = ir_runtime(&m, &b, runtime, call_args, result_row)
+    }
     ir_lazy_consumed(&m, &b, source)
     out
 }
@@ -874,12 +892,22 @@ fn ir_lazy_search(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     if !position -> ir_emit(&b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
-    pulled :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{source}, slot_row)
+    // An Int item's slot is no Option box: the item is dropped and the
+    // runtime's 8-byte block freed.
+    word_slot :: ir_option_inline(m, slot_row)
+    pull_row :: if word_slot -> ir_pointer_row(&m) else -> slot_row
+    pulled :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{source}, pull_row)
     more :: ir_bool_op(&m, &b, IROp.Ne, pulled, zero)
     ir_exit_unless(&m, &b, more, exit)
     item :: ir_load_at(&m, &b, pulled, 0, row)
     keep :: ir_call_closure(&m, &b, callback, [Int]{item}, bool_row)
-    ir_release(&m, &b, pulled)
+    if word_slot {
+        if ir_has_drop(m, b, item) -> ir_emit(&b.f, IROp.Drop, -1, item, -1, -1, b.line)
+        eight :: ir_word_const(&m, &b, 8)
+        ir_free(&m, &b, pulled, eight)
+    } else {
+        ir_release(&m, &b, pulled)
+    }
     stop := keep
     if all {
         no :: ir_int_constant(&m, &b, bool_row, 0)
@@ -900,16 +928,15 @@ fn ir_lazy_search(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     ir_release(&m, &b, source)
     ir_release(&m, &b, callback)
     if !position -> return decided
-    // Some(index) is a box holding the exact Int; None is null.
+    // Some(index) holds the exact Int; None is the Option's none.
     result :: ir_fresh_temp(&m, &b, result_row)
-    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    ir_option_none(&m, &b, result)
     found :: ir_bool_op(&m, &b, IROp.Ge, decided, zero)
     ir_open_if(&b.f, found, b.line)
     exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{decided}, int_row)
     int_size :: ir_type_size(&m, p, Type.Int)
-    boxed :: ir_box_alloc(&m, &b, int_size, result_row)
-    ir_store_at(&m, p, &b, boxed, 0, exact)
-    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    made :: ir_option_make(&m, p, &b, result_row, exact, int_size)
+    ir_option_set(&m, &b, result, made)
     ir_end(&b.f, b.line)
     result
 }
@@ -935,9 +962,16 @@ fn ir_lazy_next(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     handle :: ir_expr(&m, p, &b, place)
     if ir_failed(b) || handle < 0 -> return -1
-    out :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{handle}, row)
+    if !ir_option_inline(m, row) {
+        out :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{handle}, row)
+        ir_release(&m, &b, handle)
+        return out
+    }
+    // An Int item arrives in the runtime's 8-byte block (null at the end).
+    pointer_row :: ir_pointer_row(&m)
+    pulled :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{handle}, pointer_row)
     ir_release(&m, &b, handle)
-    out
+    ir_option_unbox(&m, &b, pulled, row)
 }
 
 // `loop x in iter` / `loop (i, x) in iter`: the runtime cursor takes the Iter

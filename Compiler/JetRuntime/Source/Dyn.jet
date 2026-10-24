@@ -527,6 +527,191 @@ fn data_tree_push_count(target: I64, count: I64) {
     data_tree_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
+// Stores the "{site}: {detail}" stop text into err.
+fn data_tree_operator_stop(site: I64, detail: I64, err: I64) -> I64 {
+    target :: data_tree_stop_begin(site)
+    jet_rt_string_builder_push(target, detail)
+    data_tree_store(err, jet_rt_string_builder_finish(target))
+    I64{0}
+}
+// Stores the "{site}: {verb} {left kind}{joint}{right kind}" stop text into err.
+fn data_tree_kinds_stop(site: I64, verb: I64, left: I64, joint: I64, right: I64, err: I64) -> I64 {
+    target :: data_tree_stop_begin(site)
+    jet_rt_string_builder_push(target, verb)
+    jet_rt_string_builder_push(target, data_tree_kind_name(data_tree_word(left + DATA_TREE_TAG)))
+    jet_rt_string_builder_push(target, joint)
+    jet_rt_string_builder_push(target, data_tree_kind_name(data_tree_word(right + DATA_TREE_TAG)))
+    data_tree_store(err, jet_rt_string_builder_finish(target))
+    I64{0}
+}
+// Stores the "{site}: {detail}{op}" stop text into err.
+fn data_tree_unknown_operator(site: I64, detail: I64, op: I64, err: I64) -> I64 {
+    target :: data_tree_stop_begin(site)
+    jet_rt_string_builder_push(target, detail)
+    jet_rt_string_builder_push(target, op)
+    data_tree_store(err, jet_rt_string_builder_finish(target))
+    I64{0}
+}
+fn data_tree_numeric(kind: I64) -> Bool { kind == DATA_TREE_INT || kind == DATA_TREE_FLOAT }
+fn data_tree_f64(kind: I64, payload: I64) -> Float {
+    if kind == DATA_TREE_INT -> return jet_int_owned_to_f64(payload)
+    rt_f64_from_bits(payload)
+}
+// DynRuntime.rs jet_dyn_binary: `+ - *` of two Int leaves is their exact
+// Int and `/` the correctly rounded Float of their ratio; an Int with a
+// Float, or two Floats, give the Float result. Any other pair stops with
+// "{site}: cannot {verb} {left kind} by {right kind}". ok and err share the
+// caller's slot.
+#Export(c) fn jet_dyn_binary(left: I64, right: I64, op: I64, site: I64, ok: I64, err: I64) -> I64 {
+    left_kind :: data_tree_word(left + DATA_TREE_TAG)
+    right_kind :: data_tree_word(right + DATA_TREE_TAG)
+    a :: data_tree_word(left + DATA_TREE_PAYLOAD)
+    b :: data_tree_word(right + DATA_TREE_PAYLOAD)
+    sum :: jet_rt_string_eq(op, rt_static_text("+"))
+    difference :: jet_rt_string_eq(op, rt_static_text("-"))
+    product :: jet_rt_string_eq(op, rt_static_text("*"))
+    quotient :: jet_rt_string_eq(op, rt_static_text("/"))
+    if left_kind == DATA_TREE_INT && right_kind == DATA_TREE_INT {
+        if quotient {
+            if (b == I64{0}) -> return data_tree_operator_stop(site, rt_static_text("division by zero"), err)
+            data_tree_store(ok, data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(int_ratio_to_f64(a, b))))
+            return I64{1}
+        }
+        if !sum && !difference && !product -> return data_tree_unknown_operator(site, rt_static_text("unknown Dyn operator "), op, err)
+        value :: if {
+            sum -> jet_int_add(a, b)
+            difference -> jet_int_sub(a, b)
+            else -> jet_int_mul(a, b)
+        }
+        data_tree_store(ok, data_tree_new(DATA_TREE_INT, value))
+        return I64{1}
+    }
+    if data_tree_numeric(left_kind) && data_tree_numeric(right_kind) {
+        x :: data_tree_f64(left_kind, a)
+        y :: data_tree_f64(right_kind, b)
+        if !sum && !difference && !product && !quotient -> return data_tree_unknown_operator(site, rt_static_text("unknown Dyn operator "), op, err)
+        if (quotient && y == Float{0.0}) -> return data_tree_operator_stop(site, rt_static_text("division by zero"), err)
+        value :: if {
+            sum -> x + y
+            difference -> x - y
+            product -> x * y
+            else -> x / y
+        }
+        data_tree_store(ok, data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(value)))
+        return I64{1}
+    }
+    verb :: if {
+        sum -> rt_static_text("cannot add ")
+        difference -> rt_static_text("cannot subtract ")
+        product -> rt_static_text("cannot multiply ")
+        quotient -> rt_static_text("cannot divide ")
+        else -> rt_static_text("cannot combine ")
+    }
+    data_tree_kinds_stop(site, verb, left, rt_static_text(" by "), right, err)
+}
+// The exact order of an Int and a finite or infinite Float (Rust
+// dyn_integer_float_compare): -1, 0 or 1, or 2 when the Float is NaN. The
+// Int's nearest Float decides unless it equals the Float; an equal Float is
+// either exact or a whole number, compared as an Int.
+fn data_tree_int_float_order(integer: I64, float: Float) -> I64 {
+    if float != float -> return I64{2}
+    infinity :: Float{1.0} / Float{0.0}
+    if float == infinity -> return I64{-1}
+    if float == -infinity -> return I64{1}
+    near :: jet_int_owned_to_f64(integer)
+    if near < float -> return I64{-1}
+    if near > float -> return I64{1}
+    if (near < Float{9007199254740992.0} && near > Float{-9007199254740992.0}) -> return I64{0}
+    bits :: rt_f64_bits(float)
+    mantissa :: bits.bit_and(I64{4503599627370495}).bit_or(I64{4503599627370496})
+    exponent :: (bits >> I64{52}).bit_and(I64{2047})
+    magnitude :: jet_int_shl(mantissa, exponent - I64{1075}, I64{0}, I64{0}, I64{0})
+    whole :: if (float < Float{0.0}) -> jet_int_sub(I64{0}, magnitude) else -> jet_rt_int_clone(magnitude)
+    order :: jet_int_compare(integer, whole)
+    jet_rt_int_drop(magnitude)
+    jet_rt_int_drop(whole)
+    order
+}
+fn data_tree_word_order(left: I64, right: I64) -> I64 {
+    if {
+        left < right -> I64{-1}
+        left > right -> I64{1}
+        else -> I64{0}
+    }
+}
+// Two Bytes leaves bytewise, a prefix first.
+fn data_tree_bytes_order(left: I64, right: I64) -> I64 {
+    left_length :: data_tree_word(left + DATA_SEQUENCE_LENGTH)
+    right_length :: data_tree_word(right + DATA_SEQUENCE_LENGTH)
+    left_data :: data_tree_word(left + DATA_SEQUENCE_DATA)
+    right_data :: data_tree_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < left_length && at < right_length {
+        order :: data_tree_word_order(host_u8_get(left_data, at), host_u8_get(right_data, at))
+        if (order != I64{0}) -> return order
+        at += I64{1}
+    }
+    data_tree_word_order(left_length, right_length)
+}
+// Two DateTime leaves by instant: POSIX seconds, then the leap label, then
+// nanoseconds (DynDateTime::instant_key); the frozen offset does not count.
+fn data_tree_datetime_order(left: I64, right: I64) -> I64 {
+    seconds :: data_tree_word_order(data_tree_word(left + DYN_DATETIME_SECS), data_tree_word(right + DYN_DATETIME_SECS))
+    if (seconds != I64{0}) -> return seconds
+    leap :: data_tree_word_order(data_tree_word(left + DYN_DATETIME_LEAP), data_tree_word(right + DYN_DATETIME_LEAP))
+    if (leap != I64{0}) -> return leap
+    data_tree_word_order(data_tree_word(left + DYN_DATETIME_NANOS), data_tree_word(right + DYN_DATETIME_NANOS))
+}
+// -1, 0 or 1; 2 for an unordered pair (a NaN); 3 when the kinds don't order.
+fn data_tree_order(left: I64, right: I64) -> I64 {
+    left_kind :: data_tree_word(left + DATA_TREE_TAG)
+    right_kind :: data_tree_word(right + DATA_TREE_TAG)
+    a :: data_tree_word(left + DATA_TREE_PAYLOAD)
+    b :: data_tree_word(right + DATA_TREE_PAYLOAD)
+    if left_kind == DATA_TREE_TEXT && right_kind == DATA_TREE_TEXT -> return jet_rt_string_compare(a, b)
+    if left_kind == DATA_TREE_BYTE_LIST && right_kind == DATA_TREE_BYTE_LIST -> return data_tree_bytes_order(a, b)
+    if left_kind == DATA_TREE_DATETIME && right_kind == DATA_TREE_DATETIME -> return data_tree_datetime_order(a, b)
+    if left_kind == DATA_TREE_INT && right_kind == DATA_TREE_INT -> return jet_int_compare(a, b)
+    if left_kind == DATA_TREE_INT && right_kind == DATA_TREE_FLOAT -> return data_tree_int_float_order(a, rt_f64_from_bits(b))
+    if left_kind == DATA_TREE_FLOAT && right_kind == DATA_TREE_INT {
+        order :: data_tree_int_float_order(b, rt_f64_from_bits(a))
+        return if (order == I64{2}) -> order else -> -order
+    }
+    if left_kind == DATA_TREE_FLOAT && right_kind == DATA_TREE_FLOAT {
+        x :: rt_f64_from_bits(a)
+        y :: rt_f64_from_bits(b)
+        return if {
+            x < y -> I64{-1}
+            x > y -> I64{1}
+            x == y -> I64{0}
+            else -> I64{2}
+        }
+    }
+    I64{3}
+}
+// DynRuntime.rs jet_dyn_compare: `==` and `!=` are structural equality;
+// `< <= > >=` order two Texts or two Bytes bytewise, two DateTimes by
+// instant, and Int and Float leaves by exact value, where a NaN orders with
+// nothing (every test is false). Any other pair stops with "{site}: cannot
+// compare {left kind} with {right kind}". ok and err share the caller's slot.
+#Export(c) fn jet_dyn_compare(left: I64, right: I64, op: I64, site: I64, ok: I64, err: I64) -> I64 {
+    if jet_rt_string_eq(op, rt_static_text("==")) || jet_rt_string_eq(op, rt_static_text("!=")) {
+        equal :: jet_rt_handle_eq_dyn(left, right) == jet_rt_string_eq(op, rt_static_text("=="))
+        rt_text_put(ok, if equal -> I64{1} else -> I64{0})
+        return I64{1}
+    }
+    order :: data_tree_order(left, right)
+    if (order == I64{3}) -> return data_tree_kinds_stop(site, rt_static_text("cannot compare "), left, rt_static_text(" with "), right, err)
+    holds :: if {
+        jet_rt_string_eq(op, rt_static_text("<")) -> order == I64{-1}
+        jet_rt_string_eq(op, rt_static_text("<=")) -> order == I64{-1} || order == I64{0}
+        jet_rt_string_eq(op, rt_static_text(">")) -> order == I64{1}
+        jet_rt_string_eq(op, rt_static_text(">=")) -> order == I64{1} || order == I64{0}
+        else -> { return data_tree_unknown_operator(site, rt_static_text("unknown Dyn comparison "), op, err) }
+    }
+    rt_text_put(ok, if holds -> I64{1} else -> I64{0})
+    I64{1}
+}
 // DynRuntime.rs jet_dyn_remove: an Object's first entry named `key` leaves
 // the tree in place; Some(that value), else None for a miss or a non-Object.
 #Export(c) fn jet_dyn_remove(tree: I64, key: I64, some: I64) -> I64 {

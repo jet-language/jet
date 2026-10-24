@@ -1,8 +1,9 @@
 // Real child plain ProcessSpec native ABI witness. No Rust layout reads: Spec,
 // ProcessReceipt and ProcessChild are opaque; receipt fields are read by the
 // physical offsets in ProcessExecutionReceipt.jet (code0 output8 errors16
-// success24 signal32 timed_out40). IOError is 56 bytes (kind0 op8 resource16
-// has_code24 code32 cause40 limit48).
+// success24 signal32 timed_out40; signal is an inline Int? word, 2^62 when
+// absent). IOError is 56 bytes (kind0 op8 resource16 has_code24 code32 cause40
+// limit48).
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <signal.h>
@@ -137,10 +138,8 @@ static int64_t receipt_code(const ProcessReceipt *r) { return jet_int_owned_to_i
 static const Text *receipt_output(const ProcessReceipt *r) { return (const Text *)(intptr_t)word(r, 8); }
 static const Text *receipt_errors(const ProcessReceipt *r) { return (const Text *)(intptr_t)word(r, 16); }
 static int64_t receipt_success(const ProcessReceipt *r) { return word(r, 24); }
-static bool receipt_has_signal(const ProcessReceipt *r) { return word(r, 32) != 0; }
-static int64_t receipt_signal(const ProcessReceipt *r) {
-    return jet_int_owned_to_i64(word((void *)(intptr_t)word(r, 32), 0));
-}
+static bool receipt_has_signal(const ProcessReceipt *r) { return word(r, 32) != (INT64_C(1) << 62); }
+static int64_t receipt_signal(const ProcessReceipt *r) { return jet_int_owned_to_i64(word(r, 32)); }
 static int64_t receipt_timed_out(const ProcessReceipt *r) { return word(r, 40); }
 
 static Spec *replace(Spec *old, Spec *next) {

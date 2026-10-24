@@ -191,7 +191,7 @@ fn ir_priority_queue_pop_body(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: S
     empty :: ir_bool_op(&m, &a, IROp.Eq, length, zero)
     ir_open_if(&a.f, empty, a.line)
     null :: ir_temp(&m, &a, option_row)
-    ir_emit(&a.f, IROp.Const, null, 0, -1, -1, a.line)
+    ir_option_none(&m, &a, null)
     ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
     ir_end(&a.f, a.line)
     data :: ir_load_word(&m, &a, heap, 16)
@@ -442,14 +442,14 @@ fn ir_priority_queue_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type
         .PriorityQueuePeek -> {
             option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
             found :: ir_fresh_temp(&m, &b, option_row)
-            ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
+            ir_option_none(&m, &b, found)
             length :: ir_load_word(&m, &b, subject, 0)
             zero :: ir_word_const(&m, &b, 0)
             present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
             ir_open_if(&b.f, present, b.line)
             data :: ir_load_word(&m, &b, subject, 16)
             copied :: ir_element_option(&m, p, &b, data, elem_row, option_row, false)
-            ir_emit(&b.f, IROp.Copy, found, copied, -1, -1, b.line)
+            ir_option_set(&m, &b, found, copied)
             ir_end(&b.f, b.line)
             return found
         }

@@ -57,12 +57,12 @@ fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
 // builders (count 1) are written in place. Only these two helpers know the
 // prefix.
 fn rt_text_header_alloc() -> I64 {
-    block :: jet_rt_alloc(I64{32}, I64{8})
+    block :: jet_rt_alloc_8(I64{32})
     rc_init(block)
     block + I64{8}
 }
 
-fn rt_text_header_free(header: I64) { jet_rt_free(header - I64{8}, I64{32}, I64{8}) }
+fn rt_text_header_free(header: I64) { jet_rt_free_8(header - I64{8}, I64{32}) }
 
 // rt_static_text headers (Lower/StaticText.jet) are process-lifetime rodata
 // objects without a count word: cap 0 over a real buffer. Heap headers with

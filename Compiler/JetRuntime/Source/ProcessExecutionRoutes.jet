@@ -82,9 +82,9 @@ fn process_execution_launch_input(spec: I64, input: I64, collect: Bool, err: I64
     jet_rt_string_builder_push(cause, rt_static_text("process exited unsuccessfully: code="))
     rt_text_push_number(cause, jet_int_owned_to_i64(fd_word(receipt, I64{0})))
     signal :: fd_word(receipt, I64{32})
-    if (signal != I64{0}) {
+    if (signal != INT_OPTION_NONE) {
         jet_rt_string_builder_push(cause, rt_static_text(", signal="))
-        rt_text_push_number(cause, jet_int_owned_to_i64(fd_word(signal, I64{0})))
+        rt_text_push_number(cause, jet_int_owned_to_i64(signal))
     }
     jet_rt_string_builder_push(cause, rt_static_text(", stderr="))
     errors :: fd_word(receipt, I64{16})

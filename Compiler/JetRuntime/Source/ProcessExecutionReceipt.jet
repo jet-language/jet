@@ -269,11 +269,7 @@ fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: 
     coll_zero(receipt, I64{144})
     fd_put(receipt, I64{0}, jet_int_owned_from_i64(code))
     fd_put(receipt, I64{24}, if success -> { I64{1} } else -> { I64{0} })
-    if (signal != I64{0}) {
-        box :: jet_rt_alloc(I64{8}, I64{8})
-        fd_put(box, I64{0}, jet_int_owned_from_i64(signal))
-        fd_put(receipt, I64{32}, box)
-    }
+    fd_put(receipt, I64{32}, if (signal != I64{0}) -> jet_int_owned_from_i64(signal) else -> INT_OPTION_NONE)
     fd_put(receipt, I64{40}, if timed_out -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{8}, process_execution_redact(output, secrets))
     fd_put(receipt, I64{16}, process_execution_redact(errors, secrets))
