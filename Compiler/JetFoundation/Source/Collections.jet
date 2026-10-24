@@ -780,13 +780,16 @@ fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, 
 }
 
 // Result-returning set and sequence filters preserve the error type and require Bool success.
+// A callback's Option or Result is unwrapped only where the runtime takes
+// its payload apart: filter_map keeps a present or Ok payload as it is (an
+// Option payload stays an Option), and a Result callback ends a map at its
+// first error. Everywhere else the callback's type is the value's type.
 fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
     element := sema_collection_kind_element(contract.kind)
     key := sema_collection_kind_key(contract.kind)
     family := sema_collection_family(contract.kind)
     eager := family == CollectionReceivers.List || family == CollectionReceivers.View
     callback :: callback_return ?? Type.Named{name: "Unit"}
-    success := if callback == {.Result(ok, _) | .Option(ok) -> ok else -> callback}
     if contract.row.result == {
         .Unit -> Val(Type.Named{name: "Unit"})
         .Bool -> Val(Type.Bool)
@@ -814,14 +817,17 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         .LazyIndexes -> Val(sema_collection_output_iter(contract, Type.Int))
         .LazyScan -> Val(sema_collection_output_iter(contract, callback))
         .LazyFilterMap -> {
-            mapped := if success == {.Option(inner) -> inner else -> success}
-            Val(sema_collection_output_iter(contract, mapped))
-        }
-        .Mapped -> {
-            mapped := if eager -> Type.List{element: success} else -> sema_collection_output_iter(contract, success)
             if callback == {
-                .Result(_, err) -> Val(Type.Result{ok: mapped, err: err})
-                else -> Val(mapped)
+                .Option(payload) | .Result(payload, _) -> Val(sema_collection_output_iter(contract, payload))
+                else -> None
+            }
+        }
+        // A Result callback's error ends the mapping (`[U] E!`); any other
+        // callback, an Option one included, is the element type itself.
+        .Mapped -> {
+            if callback == {
+                .Result(ok, err) -> Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
+                else -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
             }
         }
         .Filtered -> {
@@ -830,7 +836,7 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         }
         .ListMapped -> {
             if callback == {
-                .Result(_, err) -> Val(Type.Result{ok: Type.List{element: success}, err: err})
+                .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
                 else -> Val(Type.List{element: callback})
             }
         }

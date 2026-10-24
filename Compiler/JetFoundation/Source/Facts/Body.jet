@@ -248,7 +248,7 @@ enum NodeKind {
     Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
-    GlobalShared(initializer: SymbolID, lifetime: SharedLifetime)
+    GlobalShared(initializer: DeclID, lifetime: SharedLifetime)
     Call(callee: DeclID, type_args: [Type], args: [BodyCallArg])
     IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type)
     MethodCall(receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg])
@@ -405,8 +405,8 @@ enum BodyCoreClosureKind {
 }
 
 enum BodyFnValueKind {
-    NamedFn(name: String?, lambda: BodyLambda?)
-    Policy(fn_type: Type, policy_args: [BodyCallArg], policy_conventions: [AccessConvention], wrapper_name: String?, captures: [TCapture], callee: Int)
+    NamedFn(function: DeclID?, lambda: BodyLambda?)
+    Policy(fn_type: Type, policy_args: [BodyCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: Int)
     Call(callee: Int, args: [BodyCallArg])
     Send(value: Int)
 }

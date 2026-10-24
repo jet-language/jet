@@ -145,6 +145,15 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
         &diagnostics.push(sema_error("E0108", span, "argument 1 to `.flat_map()` should return a list, not {type_name(callback_return)}", "flat_map concatenates each callback-produced list into the output", "return a list from the callback"))
         return true
     }
+    if method == "filter_map" {
+        accepted := if callback_return == {
+            .Option(_) | .Result(_, _) -> true
+            else -> false
+        }
+        if accepted -> return false
+        &diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter_map()` should return an Option or a Result, not {type_name(callback_return)}", "filter_map keeps each present or Ok payload and drops the rest", "return `Val(value)` or `None` (or a Result) from the callback, or use `.map()`"))
+        return true
+    }
     return false
 }
 

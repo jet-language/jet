@@ -229,13 +229,11 @@ struct IRProgram {
     // a call of one is its machine operation, never a call.
     intrinsics: [String:IRRuntimeIntrinsic]
     // Cutover B L2b: by DeclID row, each declaration's first function row
-    // (-1: none) and its checked foreign row in `foreign_rows` (-1: none),
-    // and by function row its DeclID (None: not a registered declaration).
+    // (-1: none) and its checked foreign row in `foreign_rows` (-1: none).
     // A direct call (NodeKind.Call) finds its callee here, by no key.
     decl_rows: [Int]{[Int]{}}
     decl_foreign: [Int]{[Int]{}}
     foreign_rows: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
-    function_decls: [DeclID?]{[DeclID?]{}}
     // Whether the modules built from it check for a runtime stop after each
     // call that can deliver one (IRModule.stop_points); false only for the
     // runtime library (ir_build_library).
@@ -509,20 +507,16 @@ fn ir_program_bind(p: &IRProgram, functions: ^[FnBody], decls: DeclTable) Never!
     p.close_methods = close_methods
 }
 
-// The bound functions' DeclID rows over `decls` (IRProgram.decl_rows,
-// function_decls): a key's first function row, as `rows` holds it.
+// The bound functions' DeclID rows over `decls` (IRProgram.decl_rows): a
+// key's first function row, as `rows` holds it.
 fn ir_program_bind_decls(p: &IRProgram, decls: DeclTable) Never! {
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
-    function_decls := [DeclID?]{}
     loop (row, function) in p.functions {
-        found :: decl_table_find(decls, function.key)
-        if found == .Val(id) {
+        if decl_table_find(decls, function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = row
         }
-        &function_decls.push(found)
     }
     p.decl_rows = ^decl_rows
-    p.function_decls = ^function_decls
     p.decl_foreign = [Int]{}
     p.foreign_rows = [SemaCheckedForeignFunction]{}
 }

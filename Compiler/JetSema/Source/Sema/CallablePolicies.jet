@@ -152,7 +152,8 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     captured_ty :: all_params[count].ty ?? return None
     tir_expr_retype(&captured, captured_ty)
     conventions := (loop parameter in params -> parameter.convention)
-    value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper_name: Val(wrapper.symbol.id.key), captures: [TCapture]{}, callee: captured}}, policy.name_span)
+    wrapper_decl :: sema_call_callee_decl(program, wrapper.symbol.id, policy.name_span, &diagnostics) ?? return None
+    value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper: Val(wrapper_decl), captures: [TCapture]{}, callee: captured}}, policy.name_span)
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
 }
 
@@ -180,7 +181,8 @@ fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environmen
     // included, on every direct call.
     policies :: if program.registration_graph == .Val(graph) -> sema_policy_registered_calls(graph, target.symbol.id) ?? return None else -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
-    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, span)
+    function :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
     index := policies.len()
     loop index > 0 {
         index -= 1
@@ -198,7 +200,8 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
     last :: call.args[call.args.len() - 1]
     target_name :: if last.expr == .Ident(name, _, _) -> name else -> ""
     target :: sema_call_resolve_direct(target_name, [Type]{}, environment, program, &scopes, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, last.span)
+    function :: sema_call_callee_decl(program, target.symbol.id, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, last.span)
     index := call.args.len() - 1
     loop index > 0 {
         index -= 1

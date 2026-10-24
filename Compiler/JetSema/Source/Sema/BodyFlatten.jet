@@ -574,8 +574,8 @@ fn body_flat_core_closure_kind(value: TCoreClosureKind, flat: &BodyFlat) -> Body
 
 fn body_flat_fn_value_kind(value: TFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
     if value == {
-        .NamedFn(f_name, f_lambda) -> BodyFnValueKind.NamedFn{name: f_name, lambda: body_flat_opt_lambda(f_lambda, &flat)}
-        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper_name, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_flat_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper_name: f_wrapper_name, captures: f_captures, callee: body_flat_expr(f_callee, &flat)}
+        .NamedFn(f_function, f_lambda) -> BodyFnValueKind.NamedFn{function: f_function, lambda: body_flat_opt_lambda(f_lambda, &flat)}
+        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_flat_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper: f_wrapper, captures: f_captures, callee: body_flat_expr(f_callee, &flat)}
         .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_flat_expr(f_callee, &flat), args: body_flat_list_call_arg(f_args, &flat)}
         .Send(f_value) -> BodyFnValueKind.Send{value: body_flat_expr(f_value, &flat)}
     }
@@ -1499,8 +1499,8 @@ fn body_copy_core_closure_kind(value: BodyCoreClosureKind, flat: &BodyFlat) -> B
 
 fn body_copy_fn_value_kind(value: BodyFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
     if value == {
-        .NamedFn(f_name, f_lambda) -> BodyFnValueKind.NamedFn{name: f_name, lambda: body_copy_opt_lambda(f_lambda, &flat)}
-        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper_name, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_copy_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper_name: f_wrapper_name, captures: f_captures, callee: body_copy_expr(f_callee, &flat)}
+        .NamedFn(f_function, f_lambda) -> BodyFnValueKind.NamedFn{function: f_function, lambda: body_copy_opt_lambda(f_lambda, &flat)}
+        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_copy_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper: f_wrapper, captures: f_captures, callee: body_copy_expr(f_callee, &flat)}
         .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_copy_expr(f_callee, &flat), args: body_copy_list_call_arg(f_args, &flat)}
         .Send(f_value) -> BodyFnValueKind.Send{value: body_copy_expr(f_value, &flat)}
     }

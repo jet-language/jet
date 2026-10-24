@@ -813,6 +813,27 @@ fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
     output := ir_iter_element(result_ty)
     if returned != None -> output = returned
     output_ty :: output ?? return ir_fail_slot(&b, span, "Iter closure adapter {symbol} has no checked callback result")
+    // I3 (ir_check_callback_element): map's items are what its callback
+    // makes, filter_map's the present or Ok payload of it.
+    if returned == .Val(made) && ir_iter_element(result_ty) == .Val(item) {
+        method := ""
+        payload := Type?{None}
+        if symbol == "jet_iter_map" || symbol == "jet_iter_map_mut" {
+            method = "map"
+            payload = Val(made)
+        }
+        if symbol == "jet_iter_filter_map" || symbol == "jet_list_filter_map_iter" {
+            method = "filter_map"
+            if ir_untag(made) == {
+                .Option(inner) | .Result(inner, _) -> payload = Val(inner)
+                else -> {}
+            }
+        }
+        if payload == .Val(built) {
+            item_row :: ir_value_type(&m, p, item) ?? return ir_type_fail(&b, span, item)
+            if !ir_check_callback_element(&m, p, &b, method, item_row, built, span) -> return -1
+        }
+    }
     meta :: ir_lazy_meta(&m, p, &b, output_ty, span)
     if meta < 0 -> return -1
     if symbol == "jet_iter_dedup_by" -> ir_lazy_meta_trait(&m, p, &b, meta, output_ty, "equal", span)

@@ -1,7 +1,7 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the old path's route table (argument and result carriers, payloads).
 
-use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, tir_builtin_mutates_receiver, tir_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload]
+use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, tir_builtin_mutates_receiver, tir_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
 // when full, then stores the element at `len` (Lower lower_helper_list_push).
@@ -778,19 +778,21 @@ fn ir_list_binary_search(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, e
 // SendFn conversion).
 fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFnValueKind, span: Span) -> Int Never! {
     if kind == {
-        .NamedFn(name, lambda) -> {
+        .NamedFn(function, lambda) -> {
             if lambda == .Val(value) -> return ir_lambda(&m, p, &b, ty, value, span)
-            key :: name ?? return ir_fail_slot(&b, span, "function value without a function")
-            return ir_function_value(&m, p, &b, ty, key, span)
+            id :: function ?? return ir_fail_slot(&b, span, "function value without a function")
+            row :: ir_decl_row(p, id)
+            if row < 0 -> return ir_fail_slot(&b, span, "named function (declaration {decl_id_index(id)}) outside the checked program")
+            return ir_function_value(&m, p, &b, ty, p.functions[row].key, span)
         }
         .Call(callee, args) -> {
             callee_ty :: ir_ty(p, b, callee)
             return ir_indirect_call(&m, p, &b, callee, args, callee_ty, span)
         }
-        .Policy(fn_type, policy_args, _, wrapper_name, captures, callee) -> {
-            wrapper :: wrapper_name ?? return ir_fail_slot(&b, span, "callable policy function value without a wrapper")
-            wrapper_row :: p.rows.get(wrapper) ?? return ir_fail_slot(&b, span, "callable policy wrapper {wrapper} is outside the checked program")
-            wrapper_decl :: p.function_decls[wrapper_row] ?? return ir_fail_slot(&b, span, "callable policy wrapper {wrapper} is not a registered declaration")
+        .Policy(fn_type, policy_args, _, wrapper, captures, callee) -> {
+            wrapper_decl :: wrapper ?? return ir_fail_slot(&b, span, "callable policy function value without a wrapper")
+            wrapper_row :: ir_decl_row(p, wrapper_decl)
+            if wrapper_row < 0 -> return ir_fail_slot(&b, span, "callable policy wrapper (declaration {decl_id_index(wrapper_decl)}) is outside the checked program")
             params := [Type]{}
             returned := Type?{None}
             if ir_untag(ir_subst(m, fn_type)) == .Fn(fn_params, fn_ret, _, _, _, _) {
@@ -817,7 +819,7 @@ fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFn
                 frame_schedule_derivation: None,
                 capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}},
                 failure_carrier: TFailureCarrier.Infallible,
-                effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{wrapper}, maximal: false, direct_spans: [TEffectSpan]{}},
+                effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{p.functions[wrapper_row].key.copy()}, maximal: false, direct_spans: [TEffectSpan]{}},
                 host_param_conventions: None,
                 source_params: names,
                 source_param_symbols: [SymbolID]{},
@@ -1067,6 +1069,7 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
         .Map -> {
             result :: ir_list_empty(&m, &b, result_row)
             mapped_row :: ir_list_element(&m, p, b, result) ?? return ir_fail_slot(&b, span, "map result {ir_type_name(ty)}")
+            if ir_closure_result(ir_subst(m, callback_ty)) == .Val(produced) && !ir_check_callback_element(&m, p, &b, "map", mapped_row, produced, span) -> return -1
             walk :: ir_walk_open(&m, &b, list, element)
             mapped :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, mapped_row)
             ir_list_push(&m, p, &b, result, mapped_row, mapped)
@@ -1432,6 +1435,18 @@ fn ir_closure_op_name(operation: TClosureOp) -> String Never! {
 fn ir_closure_result(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Fn(_, ret, _, _, _, _) -> return ret
     None
+}
+
+// I3: the element row the checked call type gives a mapping method (`row`)
+// must be the row its callback builds (`produced`, after the method takes
+// any payload apart); otherwise the program would read one layout as
+// another. A difference is a checker bug, reported as an internal error.
+fn ir_check_callback_element(m: &IRModule, p: IRProgram, b: &IRBuilder, method: String, row: Int, produced: Type, span: Span) -> Bool Never! {
+    expanded :: ir_subst(m, produced)
+    built :: ir_value_type(&m, p, expanded) ?? return true
+    if built == row -> return true
+    ir_fail(&b, span, "internal error: `.{method}` is checked as making {ir_type_name(m.types[row].ty)} items, but its callback makes {ir_type_name(produced)}")
+    false
 }
 
 // The byte size of a Result box of type `ty` (ir_result_box).

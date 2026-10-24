@@ -222,8 +222,11 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
             if checked_call == Val(symbol) -> ir_core_reach_add(&keys, symbol.key)
         }
         .FnValue(kind) -> {
-            if kind == .NamedFn(name, _) {
-                if name == Val(key) -> ir_core_reach_add(&keys, key)
+            if kind == .NamedFn(function, _) {
+                if function == .Val(id) {
+                    index :: id.row.index()
+                    if index < decl_rows.len() && decl_rows[index] >= 0 -> &targets.push(decl_rows[index])
+                }
             }
         }
         // A function named as a value checks as a constant reference.
@@ -254,7 +257,10 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
             ir_core_reach_stmt_keys(tree, then_body, functions, &keys)
             ir_core_reach_stmt_keys(tree, else_body, functions, &keys)
         }
-        .GlobalShared(initializer, _) -> ir_core_reach_add(&keys, initializer.key)
+        .GlobalShared(initializer, _) -> {
+            index :: initializer.row.index()
+            if index < decl_rows.len() && decl_rows[index] >= 0 -> &targets.push(decl_rows[index])
+        }
         else -> {}
     }
 }

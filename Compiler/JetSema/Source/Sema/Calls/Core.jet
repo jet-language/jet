@@ -1114,7 +1114,8 @@ fn sema_call_core_global_shared(lifetime: SharedLifetime, member: String, type_a
     context.call_facts[before].shared_lifetime = Val(lifetime)
     context.call_facts[before].shared_member = member
     context.call_facts[before].shared_source = environment.module_identity
-    value :: sema_node(&context, checked.value.ty, NodeKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
+    initializer :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+    value :: sema_node(&context, checked.value.ty, NodeKind.GlobalShared{initializer: initializer, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 

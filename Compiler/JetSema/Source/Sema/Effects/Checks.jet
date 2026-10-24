@@ -1195,19 +1195,11 @@ fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: B
 }
 
 fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, expression: BodyNode) Never! {
-    // A direct call names its callee's node through the callee's DeclID.
-    if expression.kind == .Call(callee, _, _) {
-        target :: sema_effect_decl_node(facts, callee)
-        if target >= 0 {
-            edge_key :: nodes[target].key.copy()
-            sema_effect_node_add_edge(&nodes, node_index, edge_key)
-        } else {
-            sema_effect_record_memory_open(&nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
-        }
-        return
-    }
+    // A direct call and a shared global's initializer name their callee's
+    // node through the callee's DeclID.
+    if expression.kind == .Call(callee, _, _) -> return sema_effect_record_decl_call(&nodes, facts, node_index, callee, expression.span)
+    if expression.kind == .GlobalShared(initializer, _) -> return sema_effect_record_decl_call(&nodes, facts, node_index, initializer, expression.span)
     callee_key :: if expression.kind == {
-        .GlobalShared(initializer, _) -> initializer.key
         .MethodCall(_, method, _, _) -> method.symbol.key
         .StaticCall(_, _, method, _, _) -> method.symbol.key
         else -> ""
@@ -1221,6 +1213,16 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], facts: SemaEffec
             nodes[node_index].maximal_span = Val(expression.span)
             sema_effect_record_memory_open(&nodes, node_index, expression.span, "foreign or dynamically selected function body")
         }
+    }
+}
+
+fn sema_effect_record_decl_call(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, callee: DeclID, span: Span) Never! {
+    target :: sema_effect_decl_node(facts, callee)
+    if target >= 0 {
+        edge_key :: nodes[target].key.copy()
+        sema_effect_node_add_edge(&nodes, node_index, edge_key)
+    } else {
+        sema_effect_record_memory_open(&nodes, node_index, span, "callee body is unavailable and has no verified signed memory summary")
     }
 }
 
