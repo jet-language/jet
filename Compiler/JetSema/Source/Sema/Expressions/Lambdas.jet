@@ -2213,6 +2213,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         context.callback_return_row = lambda_context.callback_return_row
     }
     sema_expression_lambda_merge_context_facts(&lambda_context, &context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
+    // The lambda's flat nodes are rows of its arena, which continues this one.
+    sema_arena_take_back(&context, ^lambda_context.arena)
     // #3708: the callback's propagated failures stay rows of the enclosing
     // body (the Rust body walk reads callbacks too); a callback that
     // propagates into its own inferred carrier is a failure source. Statement

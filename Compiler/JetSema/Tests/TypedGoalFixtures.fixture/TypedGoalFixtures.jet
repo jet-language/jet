@@ -1,10 +1,11 @@
 // Exercise the canonical checked goal type, not a CLI-owned inference.
 fn typed_goal_expect(expected: Type?, wanted: Type, card: String) {
     span :: Span{start: 3, end: 7}
-    rows := [TTypedGoal]{}
-    goal :: sema_expression_todo(expected, span, &rows) ?? panic("goal was not checked")
+    context := sema_check_context_init()
+    goal :: sema_expression_todo(expected, span, &context) ?? panic("goal was not checked")
     if goal.ty != wanted || goal.span != span -> panic("typed goal lost its type or source")
-    if goal.kind != (TExprKind.Never{reason: "todo"}) -> panic("typed goal must diverge")
+    if goal.kind != (TExprKind.Flat{index: 0}) || context.arena.tree.nodes[0].kind != (NodeKind.Never{reason: "todo"}) -> panic("typed goal must diverge")
+    rows :: context.typed_goals
     if rows.len() != 1 || rows[0].span != span || rows[0].expected != card -> panic("typed goal lost its expected-type card")
 }
 

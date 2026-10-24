@@ -474,20 +474,24 @@ fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never!
 // The chain is walked through read parameters (one frame per level), so
 // only the collected conditions are copied: holding each level in a local
 // copied the rest of the chain once per level.
-fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
+fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span, context: SemaCheckContext) -> [TExpr]? {
     // copy: the result owns each collected condition; the chain stays the caller's.
     conditions := [TExpr]{head_condition.copy()}
-    if !sema_coverage_noelse_chain_collect(else_value, span, &conditions) -> return None
+    if !sema_coverage_noelse_chain_collect(else_value, span, context, &conditions) -> return None
     Val(conditions)
 }
 
-fn sema_coverage_noelse_chain_collect(current: TExpr, span: Span, conditions: &[TExpr]) -> Bool Never! {
+fn sema_coverage_noelse_chain_collect(current: TExpr, span: Span, context: SemaCheckContext, conditions: &[TExpr]) -> Bool Never! {
     if current.kind == {
-        .Never(reason) -> return reason == "no else arm"
+        // The chain's `NoElse` end is a flat `Never` row (sema_node).
+        .Flat(index) -> {
+            if context.arena.tree.nodes[index - context.arena.base].kind == .Never(reason) -> return reason == "no else arm"
+            return false
+        }
         .IfExpr(cond, _, _, _, next_value) -> {
             if current.span != span -> return false
             if !sema_coverage_chain_condition(cond, &conditions) -> return false
-            return sema_coverage_noelse_chain_collect(next_value, span, &conditions)
+            return sema_coverage_noelse_chain_collect(next_value, span, context, &conditions)
         }
         else -> return false
     }

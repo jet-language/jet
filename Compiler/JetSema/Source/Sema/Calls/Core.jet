@@ -25,6 +25,7 @@ use jet_foundation.[
     EnumLitArg,
     Expr,
     FunctionDefaultRef,
+    NodeKind,
     SharedLifetime,
     Span,
     StrPart,
@@ -1111,7 +1112,7 @@ fn sema_call_core_global_shared(lifetime: SharedLifetime, member: String, type_a
     context.call_facts[before].shared_lifetime = Val(lifetime)
     context.call_facts[before].shared_member = member
     context.call_facts[before].shared_source = environment.module_identity
-    value :: sema_tir_node(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
+    value :: sema_node(&context, checked.value.ty, NodeKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 

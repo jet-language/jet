@@ -18,6 +18,7 @@ use jet_foundation.[
     Lambda,
     LambdaBody,
     LambdaParam,
+    NodeKind,
     NamedSpan,
     OrFallback,
     Pattern,
@@ -867,7 +868,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     sema_scope_join_hardware_paths(&scopes, before_hardware, hardware_merged, else_hardware, true)
     if !complete -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     if readiness {
-        table_tir :: sema_readiness_tir(^readiness_table, ^branches, ^else_result, span) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
+        table_tir :: sema_readiness_tir(^readiness_table, ^branches, ^else_result, span, &context) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
         return SemaStatementResult{value: [TStmt]{table_tir}, complete: true}
     }
     // Rust `check_switch` notes each all-pattern arm's coverage (E0365/L0301),
@@ -898,7 +899,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         // is unreachable (codegen ends it in an Unreachable terminator), so it
         // never falls through to the join, exactly as
         // sema_stmt_refutable_switch_exits already assumes.
-        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_tir_node(Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span), span: span}})
+        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_node(&context, Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm"}, span), span: span}})
     }
     loop condition in conditions {
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -3207,7 +3208,7 @@ fn sema_stmt_declare_unchecked_binding(binding: Binding, environment: SemaScopeE
 
 fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, &diagnostics) -> return None
-    if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &diagnostics)
+    if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &context, &diagnostics)
     if binding.arena_view -> return None
     if binding.is_comptime -> return sema_stmt_check_prepared_binding(binding, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if binding.pattern == .Val(pattern) {
@@ -3396,7 +3397,7 @@ fn sema_stmt_check_range_conversion(init: Expr, head: String, expected: Type?, e
 // needs `use core.mem` (E0424) and a plain-data type (E0423). The binding is
 // declared without a value and recorded as not yet written, so a read before
 // every path writes it is E0420; it lowers to the uninitialized-local let.
-fn sema_stmt_check_uninit_binding(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> TStmt? {
+fn sema_stmt_check_uninit_binding(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     valid := true
     if !sema_stmt_module_uses_core_mem(environment, program) {
         &diagnostics.push(sema_error("E0424", binding.name_span, "`uninit` needs the low-level memory tier", "`uninit` skips the automatic zero-fill — an expert-tier operation", "add `use core.mem` at the top of this file to opt in"))
@@ -3429,7 +3430,7 @@ fn sema_stmt_check_uninit_binding(binding: Binding, environment: SemaScopeEnviro
     local.mutable = true
     local.uninit_scalar = !fixed
     local.uninit_fixed = fixed
-    init :: sema_tir_node(ty, TExprKind.Uninit, ty_span)
+    init :: sema_node(&context, ty, NodeKind.Uninit, ty_span)
     Val(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: ty, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: Span{start: binding.name_span.start, end: ty_span.end}})
 }
 

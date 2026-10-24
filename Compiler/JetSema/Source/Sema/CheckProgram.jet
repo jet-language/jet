@@ -3,6 +3,7 @@
 // slice so consumers cannot treat its TIR as a complete semantic program.
 use jet_foundation.[
     BodyExpr,
+    BodyTree,
     FnBody,
     body_tree_new,
     AST_NODE_GENERATED,
@@ -436,10 +437,12 @@ struct SemaComptimeFunctionResult {
     obligations_pending: Bool{false}
 }
 
-// A checked item expression as a flat body of its own.
-fn sema_publish_expression(value: TExpr) -> BodyExpr Never! {
-    tree := body_tree_new()
-    root :: body_flat_expr(value, &tree)
+// A checked item expression as a flat body of its own; its Flat nodes are
+// rows of `arena`, the checking context's.
+fn sema_publish_expression(value: TExpr, arena: BodyTree) -> BodyExpr Never! {
+    flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false}
+    root :: body_flat_expr(value, &flat)
+    tree := ^flat.tree
     body_tree_finish(&tree)
     BodyExpr{root: root, tree: ^tree}
 }
@@ -1965,9 +1968,14 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             default_context.host_hooks = context.host_hooks
             // The default's node ids are the function's ids.
             default_context.next_expr_id = context.next_expr_id
+            // The default's flat nodes are rows of the function's arena: it
+            // lends its arena to the default's check and takes it back.
+            default_context.arena = ^context.arena
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork :: sema_ownership_fork(&state)
             checked_default :: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
+            context.arena = ^default_context.arena
+            default_context.arena = BodyFlat{tree: body_tree_new(), arena: body_tree_new(), into_arena: true}
             sema_ownership_fork_rollback(&state, default_fork)
             sema_ownership_fork_close(&state, default_fork)
             if {
@@ -2136,7 +2144,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // The checker's tree ends here, as the function's flat body; nodes the
     // checker gave no id take flat-local ones.
     SemaFunctionResult{
-        value: Val(body_flat_function(tir)),
+        value: Val(body_flat_function(tir, context.arena.tree)),
         complete: true,
         exact_int_reachable: context.exact_int_reachable,
         copy_events: context.copy_events.copy(),
@@ -7107,7 +7115,7 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
             destination_key: source.destination_key,
             source_file: source.source_file,
             kind: source.kind,
-            expression: sema_publish_expression(expression),
+            expression: sema_publish_expression(expression, context.arena.tree),
             expected_type: checked_expected,
             span: source.span,
             dependencies: dependencies,

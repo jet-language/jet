@@ -12,6 +12,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     Marker,
+    NodeKind,
     ParamZone,
     Span,
     Stmt,
@@ -1069,7 +1070,7 @@ fn sema_readiness_result_field(result: TLocal, result_ty: Type, index: Int, ty: 
 // order, which yields `(arm, value: T?)`, then one dense integer dispatch on
 // the selected arm. A receive arm unwraps its payload only once it is
 // selected; a timer arm never reads it. An `else` makes the wait nonblocking.
-fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResult], else_result: ^[TStmt]?, span: Span) -> TStmt? {
+fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResult], else_result: ^[TStmt]?, span: Span, context: &SemaCheckContext) -> TStmt? {
     owned_table := ^table
     owned_branches := ^branches
     if owned_branches.len() != owned_table.arms.len() -> return None
@@ -1083,7 +1084,7 @@ fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResul
     result_local :: tir_user_local("__select_result", span)
     // The wait reads the builder chain from the outer node inward, so the
     // chain is built from the last arm back to keep source order.
-    builder := sema_tir_node(builder_ty, TExprKind.SelectStart, span)
+    builder := sema_node(&context, builder_ty, NodeKind.SelectStart, span)
     reversed := [TMixedArm]{}
     loop owned_table.arms.len() > 0 {
         row := &owned_table.arms.pop() ?? return None

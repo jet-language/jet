@@ -10,6 +10,7 @@ use jet_foundation.[
     Expr,
     ListPatRest,
     MapPatEntry,
+    NodeKind,
     PatternTypeHead,
     TListPatternRest,
     PatSlot,
@@ -575,8 +576,8 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
     SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
 }
 
-fn sema_pattern_invalid_value(span: Span) -> TExpr Never! {
-    TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.InvariantViolation{construct: "invalid pattern value", span: span}, span: span}
+fn sema_pattern_invalid_value(span: Span, context: &SemaCheckContext) -> TExpr Never! {
+    sema_node(&context, Type.Named{name: "Never"}, NodeKind.InvariantViolation{construct: "invalid pattern value", span: span}, span)
 }
 
 fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, span: Span, type_head: PatternTypeHead?, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], mutable: Bool) -> SemaPatternValidation {
@@ -643,7 +644,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
                         }
                         .None -> {
                             complete = false
-                            &tir_fields.push(TPatternField.Value{field: field_name, value: sema_pattern_invalid_value(field_span), span: field_span})
+                            &tir_fields.push(TPatternField.Value{field: field_name, value: sema_pattern_invalid_value(field_span, &context), span: field_span})
                         }
                     }
                 }

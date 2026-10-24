@@ -6,6 +6,10 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     ArithmeticPolicyFact,
     BodyExpr,
+    BodyNode,
+    BodyTree,
+    StmtKind,
+    TExprType,
     CoreMarkerApplication,
     Diagnostic,
     DebugTraceSite,
@@ -661,6 +665,12 @@ struct SemaCheckContext {
     // carrier out: a call root keeps its Result and an unmarked writing
     // receiver is not reported. A `#Test` body is user code and is not.
     compiler_generated: Bool{false}
+    // The rows of the nodes this check built flat (sema_node): a node's
+    // children are row indices of this arena (the flattener's into-arena
+    // mode). A mark never truncates it, so a kept speculative result never
+    // names a row past its end; the rows no published node reaches are
+    // dropped when the function is flattened.
+    arena: BodyFlat{BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true}}
 }
 
  
@@ -1060,6 +1070,10 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
         compiler_generated: source.compiler_generated,
+        // A snapshot's check continues the arena of the check it starts
+        // from: its rows follow that arena's rows, and its caller appends
+        // them there after the check (sema_arena_take_back).
+        arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true, base: source.arena.base + source.arena.tree.nodes.len(), stmt_base: source.arena.stmt_base + source.arena.tree.stmts.len()},
         next_expr_id: source.next_expr_id,
     }
     sema_comptime_body_sources_index(&snapshot)

@@ -286,10 +286,8 @@ enum TExprKind {
     Local(local: TLocal)
     Unit
     InlineBlock(body: [TStmt])
-    Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
-    GlobalShared(initializer: SymbolID, lifetime: SharedLifetime)
     Call(callee: SymbolID, type_args: [Type], args: [TCallArg])
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
@@ -353,7 +351,6 @@ enum TExprKind {
     IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
     ResultHandler(subject: TExpr, ok_pattern: TPattern, ok_body: [TStmt], ok_value: TExpr, err_pattern: TPattern, err_body: [TStmt], err_value: TExpr, terminal: TExpr)
     RawOf(value: TExpr)
-    InvariantViolation(construct: String, span: Span)
     DistinctRaw(value: TExpr)
     Present(value: TExpr)
     Absent
@@ -374,12 +371,13 @@ enum TExprKind {
     TaskGroupAll(tasks: TExpr)
     TaskGroupRace(tasks: TExpr)
     TaskGroupAny(tasks: TExpr)
-    SelectStart
     SelectRecv(builder: TExpr, channel: TExpr)
     SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
     SelectWait(builder: TExpr, nonblocking: Bool)
     FnValue(kind: TFnValueKind)
-    Never(reason: String)
+    // A node the checker built as row `index` of its arena (sema_node): the
+    // row's NodeKind holds the node, with arena row indices as children.
+    Flat(index: Int)
 }
 
 // `id` keys the node's row in its function's flat body (BodyFlatten.jet): the

@@ -556,6 +556,8 @@ fn sema_contract_check_expr(expr: Expr, expected: Type, kind: String, forbid_res
     }
     if check_purity && !sema_contract_check_pure_delta(call_start, checked_context, kind, environment, program, &diagnostics) -> valid = false
     sema_contract_merge_context_delta(checked_context, call_start, view_start, name_start, comptime_start, copy_start, &context)
+    // The condition's flat nodes are rows of its arena, which continues this one.
+    sema_arena_take_back(&context, ^checked_context.arena)
     if !valid -> return None
     value
 }

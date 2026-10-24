@@ -8,6 +8,11 @@ use jet_foundation.[
     ArithmeticOperation,
     ArithmeticPolicyFact,
     BinOp,
+    BodyNode,
+    NodeKind,
+    TExprType,
+    StmtKind,
+    compiler_transfer_rows,
     Call,
     CallArg,
     CallContractRow,
@@ -87,6 +92,37 @@ fn sema_tir_node(ty: Type, kind: ^TExprKind, span: Span) -> TExpr Never! {
 fn sema_tir_expr(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
     // copy: the caller keeps `kind`; the node owns its own.
     sema_tir_node(ty, kind.copy(), span)
+}
+
+// A checked node of `kind` built flat: a row of the context's arena, whose
+// children are arena row indices (sema_arena_adopt). The returned handle
+// names the row; its id and type are the node's (a retype or a filed id
+// lands on the handle, BodyFlatten.jet body_flat_arena_node).
+fn sema_node(context: &SemaCheckContext, ty: Type, kind: ^NodeKind, span: Span) -> TExpr Never! {
+    &context.arena.tree.nodes.push(BodyNode{id: AST_NODE_GENERATED, kind: ^kind, span: span})
+    // copy: node types are shared with the caller's checked children and context.
+    &context.arena.tree.expr_types.push(TExprType{id: AST_NODE_GENERATED, ty: ty.copy()})
+    // copy: the row keeps its type; the handle carries its own.
+    TExpr{ty: ty.copy(), kind: .Flat(index: context.arena.base + context.arena.tree.nodes.len() - 1), span: span}
+}
+
+// The arena row index of checked child `value`, for a flat node's kind: a
+// Flat handle with its row's id and type is that row; any other node (a
+// tree, or a retyped handle) is filed into the arena, children first.
+fn sema_arena_adopt(context: &SemaCheckContext, value: TExpr) -> Int Never! {
+    body_flat_expr(value, &context.arena)
+}
+
+// Appends the arena of a nested check (a snapshot of this context's check,
+// sema_check_context_snapshot) to the context's arena. Its rows continue
+// this arena's, so every index its nodes hold stays valid, and each row
+// moves once: no check copies the arena.
+fn sema_arena_take_back(context: &SemaCheckContext, rows: ^BodyFlat) Never! {
+    nested := ^rows
+    if nested.base != context.arena.base + context.arena.tree.nodes.len() || nested.stmt_base != context.arena.stmt_base + context.arena.tree.stmts.len() -> panic("sema_arena_take_back: the enclosing check built nodes while a nested check ran")
+    compiler_transfer_rows<BodyNode>(&context.arena.tree.nodes, &nested.tree.nodes)
+    compiler_transfer_rows<TExprType>(&context.arena.tree.expr_types, &nested.tree.expr_types)
+    compiler_transfer_rows<StmtKind>(&context.arena.tree.stmts, &nested.tree.stmts)
 }
 
 // (Rust `policy_call` and its TIR lowering): under the
@@ -4167,10 +4203,10 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
 // Rust CheckerInfer/expr.rs: an unconstrained goal continues as Int, but
 // its goal row's card still says "(unknown)". Consumers read the function's
 // checked goal rows, never infer a type from the source spelling.
-fn sema_expression_todo(expected: Type?, span: Span, goals: &[TTypedGoal]) -> TExpr? Never! {
+fn sema_expression_todo(expected: Type?, span: Span, context: &SemaCheckContext) -> TExpr? Never! {
     card :: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
-    &goals.push(TTypedGoal{span: span, expected: card})
-    Val(sema_tir_node(expected ?? Type.Int, TExprKind.Never{reason: "todo"}, span))
+    &context.typed_goals.push(TTypedGoal{span: span, expected: card})
+    Val(sema_node(&context, expected ?? Type.Int, NodeKind.Never{reason: "todo"}, span))
 }
 
 // One expression level. Every recursive check passes through this frame, so
@@ -4281,8 +4317,8 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             &diagnostics.push(sema_error("E2510", span, "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
             None
         }
-        .Todo(span, _, _) -> sema_expression_todo(expected, span, &context.typed_goals)
-        .NoElse(span, _) -> Val(sema_tir_node(expected ?? Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span))
+        .Todo(span, _, _) -> sema_expression_todo(expected, span, &context)
+        .NoElse(span, _) -> Val(sema_node(&context, expected ?? Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm"}, span))
         .RawOf(value, span, _) -> {
             forbidden := context.unsafe_depth == 0
             if forbidden {

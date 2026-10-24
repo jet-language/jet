@@ -12,6 +12,7 @@ use jet_foundation.[
     Diagnostic,
     EnumLitArg,
     Expr,
+    NodeKind,
     ExprField,
     ExprPair,
     Field,
@@ -1094,7 +1095,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
     &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if method_name == "from" {
-        value :: sema_expression_checked_text_from(target, type_name, checked.value, method_span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value :: sema_expression_checked_text_from(target, type_name, checked.value, method_span, &context) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
@@ -1102,7 +1103,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
 
 // Preserve the ordinary checker error while moving the original text into the
 // nominal wrapper on success. The argument and the checker each execute once.
-fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span) -> TExpr? {
+fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span, context: &SemaCheckContext) -> TExpr? {
     error_type :: if checked.ty == {.Result(_, error) -> error else -> { return None }}
     source_local :: tir_generated_local("__checked_text_source_{span.start}", span)
     error_local :: tir_generated_local("__checked_text_error_{span.start}", span)
@@ -1147,7 +1148,7 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
         err_pattern: err_pattern,
         err_body: [TStmt]{},
         err_value: sema_tir_node(result_type, TExprKind.Err{value: error_value}, span),
-        terminal: sema_tir_node(result_type, TExprKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
+        terminal: sema_node(&context, result_type, NodeKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
     }, span)
     Val(sema_tir_node(result_type, TExprKind.InlineBlock{body: [TStmt]{
         TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
@@ -1281,7 +1282,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         type_name: type_name,
         source_file: source_file,
         source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
-        expression: sema_publish_expression(checked),
+        expression: sema_publish_expression(checked, context.arena.tree),
         ty: checked.ty,
         hardware_use: TargetHardwareUse{
             register_accesses: loop index in register_access_start..<context.hardware_use.register_accesses.len() -> context.hardware_use.register_accesses[index],

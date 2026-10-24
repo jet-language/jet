@@ -1296,7 +1296,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                     sema_scope_leave(&scopes, &fallback_state)
                     return None
                 }
-                if payload == (Type.Named{name: "Never"}) -> fallback_payload = (tail_value ?? sema_tir_node(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty
+                if payload == (Type.Named{name: "Never"}) -> fallback_payload = if tail_value == .Val(value) -> value.ty else -> Type.Named{name: "Never"}
             }
             sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
             sema_scope_rollback(&scopes, block_mark)
@@ -1314,7 +1314,9 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             // Both block shapes reach the merge unless the body or its tail
             // value diverges.
             fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body) && !sema_stmt_refutable_block_exits(body)
-            if tail_value != None && (tail_value ?? sema_tir_node(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty == (Type.Named{name: "Never"}) -> fallback_reaches_merge = false
+            if tail_value == .Val(value) {
+                if value.ty == (Type.Named{name: "Never"}) -> fallback_reaches_merge = false
+            }
         }
         .Return(return_value, return_span) -> {
             return_type :: outer_return_type
@@ -2121,7 +2123,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         else -> expected ?? Type.Named{name: "Never"}
     }
     if chain_head {
-        chain_conditions :: sema_coverage_noelse_chain_conditions(checked_condition, else_checked, span)
+        chain_conditions :: sema_coverage_noelse_chain_conditions(checked_condition, else_checked, span, context)
         if chain_conditions == .Val(table) {
             sema_coverage_check_unreachable_arms(table, false, &diagnostics)
             sema_coverage_check_table(table, false, span, environment, program, &diagnostics)

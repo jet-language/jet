@@ -1,6 +1,8 @@
 // Flattens a checked function into its FnBody: every expression becomes a
 // BodyNode row keyed by its node id, children first, every statement a
-// StmtKind row in post order.
+// StmtKind row in post order. A node the checker built as a row of its arena
+// (TExprKind.Flat, sema_node) is copied out of the arena with its children
+// (body_copy_*); sema_arena_adopt runs the same flattener into the arena.
 use jet_foundation.[
     AST_NODE_GENERATED,
     BodyCallArg,
@@ -52,11 +54,26 @@ use jet_foundation.[
     body_tree_new,
 ]
 
-// The FnBody of checked function `value`.
-fn body_flat_function(value: TFunc) -> FnBody Never! {
-    tree := body_tree_new()
-    params :: body_flat_list_parameter(value.params, &tree)
-    body :: body_flat_list_stmt(value.body, &tree)
+// The flattener's rows go to `tree`. Into the output tree a child is named by
+// its node id, and a Flat node is copied out of `arena`. Into the checker's
+// arena (`into_arena`, sema_arena_adopt) `tree` is the arena itself, a child
+// is named by its row index, and a Flat node is its own row. A nested check's
+// arena continues its enclosing check's (sema_check_context_snapshot): its
+// first node row is index `base` and its first statement row `stmt_base`.
+struct BodyFlat {
+    tree: BodyTree
+    arena: BodyTree
+    into_arena: Bool
+    base: Int{0}
+    stmt_base: Int{0}
+}
+
+// The FnBody of checked function `value`, whose Flat nodes are rows of `arena`.
+fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
+    flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false}
+    params :: body_flat_list_parameter(value.params, &flat)
+    body :: body_flat_list_stmt(value.body, &flat)
+    tree := ^flat.tree
     body_tree_finish(&tree)
     FnBody{
         name: value.name,
@@ -117,33 +134,77 @@ fn body_tree_finish(tree: &BodyTree) Never! {
     tree.expr_types = ^types
 }
 
-// Files `value` as a row of `tree`, children first. A node the checker gave no
-// id (AST_NODE_GENERATED) takes the next flat-local id below
-// TEXPR_FIRST_FLAT_ID: one per row, so no two such nodes share one.
-fn body_flat_expr(value: TExpr, tree: &BodyTree) -> Int Never! {
-    kind :: body_flat_expr_kind(value.kind, &tree)
-    id :: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - tree.nodes.len() else -> value.id
-    &tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    &tree.expr_types.push(TExprType{id: id, ty: value.ty})
+// Files `value` as a row of the flattener's tree, children first, and returns
+// how a parent names it. Into the output tree a node the checker gave no id
+// (AST_NODE_GENERATED) takes the next flat-local id below TEXPR_FIRST_FLAT_ID:
+// one per row, so no two such nodes share one.
+fn body_flat_expr(value: TExpr, flat: &BodyFlat) -> Int Never! {
+    if value.kind == .Flat(index) -> return body_flat_arena_node(value, index, &flat)
+    kind :: body_flat_expr_kind(value.kind, &flat)
+    id :: if value.id == AST_NODE_GENERATED && !flat.into_arena -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
+    &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
+    &flat.tree.expr_types.push(TExprType{id: id, ty: value.ty})
+    if flat.into_arena -> return flat.base + flat.tree.nodes.len() - 1
     id
 }
 
-fn body_flat_stmt(value: TStmt, tree: &BodyTree) -> Int Never! {
-    kind :: body_flat_stmt_kind(value, &tree)
-    &tree.stmts.push(kind)
-    tree.stmts.len() - 1
+// A Flat node: arena row `index` under the handle's own id and type (a
+// retype, or an id filed after the row was built, lives on the handle).
+fn body_flat_arena_node(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never! {
+    if flat.into_arena {
+        // A nested check never files a node of the check that encloses it,
+        // whose rows this arena does not hold.
+        row_index :: index - flat.base
+        if row_index < 0 -> panic("body_flat_arena_node: arena row {index} precedes this check's rows")
+        if flat.tree.nodes[row_index].id == value.id && flat.tree.expr_types[row_index].ty == value.ty -> return index
+        row :: flat.tree.nodes[row_index]
+        &flat.tree.nodes.push(BodyNode{id: value.id, kind: row.kind, span: value.span})
+        &flat.tree.expr_types.push(TExprType{id: value.id, ty: value.ty})
+        return flat.base + flat.tree.nodes.len() - 1
+    }
+    row :: flat.arena.nodes[index]
+    kind :: body_copy_expr_kind(row.kind, &flat)
+    id :: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
+    &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
+    &flat.tree.expr_types.push(TExprType{id: id, ty: value.ty})
+    id
 }
 
-fn body_flat_str_part(value: TStrPart, tree: &BodyTree) -> BodyStrPart Never! {
+fn body_flat_stmt(value: TStmt, flat: &BodyFlat) -> Int Never! {
+    kind :: body_flat_stmt_kind(value, &flat)
+    &flat.tree.stmts.push(kind)
+    flat.stmt_base + flat.tree.stmts.len() - 1
+}
+
+// Arena row `index` copied into the output tree, children first; returns its
+// node id there.
+fn body_copy_expr(index: Int, flat: &BodyFlat) -> Int Never! {
+    row :: flat.arena.nodes[index]
+    kind :: body_copy_expr_kind(row.kind, &flat)
+    id :: if row.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> row.id
+    &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: row.span})
+    &flat.tree.expr_types.push(TExprType{id: id, ty: flat.arena.expr_types[index].ty})
+    id
+}
+
+// Arena statement `index` copied into the output tree; returns its index there.
+fn body_copy_stmt(index: Int, flat: &BodyFlat) -> Int Never! {
+    statement :: flat.arena.stmts[index]
+    kind :: body_copy_stmt_kind(statement, &flat)
+    &flat.tree.stmts.push(kind)
+    flat.tree.stmts.len() - 1
+}
+
+fn body_flat_str_part(value: TStrPart, flat: &BodyFlat) -> BodyStrPart Never! {
     if value == {
         .Literal(f_text) -> BodyStrPart.Literal{text: f_text}
-        .Interpolation(f_value, f_format) -> BodyStrPart.Interpolation{value: body_flat_expr(f_value, &tree), format: f_format}
+        .Interpolation(f_value, f_format) -> BodyStrPart.Interpolation{value: body_flat_expr(f_value, &flat), format: f_format}
     }
 }
 
-fn body_flat_call_arg(value: TCallArg, tree: &BodyTree) -> BodyCallArg Never! {
+fn body_flat_call_arg(value: TCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
     BodyCallArg{
-        value: body_flat_expr(value.value, &tree),
+        value: body_flat_expr(value.value, &flat),
         template_items: value.template_items,
         borrow: value.borrow,
         mut_borrow: value.mut_borrow,
@@ -156,54 +217,54 @@ fn body_flat_call_arg(value: TCallArg, tree: &BodyTree) -> BodyCallArg Never! {
     }
 }
 
-fn body_flat_enum_arg(value: TEnumArg, tree: &BodyTree) -> BodyEnumArg Never! {
+fn body_flat_enum_arg(value: TEnumArg, flat: &BodyFlat) -> BodyEnumArg Never! {
     BodyEnumArg{
-        value: body_flat_expr(value.value, &tree),
+        value: body_flat_expr(value.value, &flat),
     }
 }
 
-fn body_flat_enum_payload(value: TEnumPayload, tree: &BodyTree) -> BodyEnumPayload Never! {
+fn body_flat_enum_payload(value: TEnumPayload, flat: &BodyFlat) -> BodyEnumPayload Never! {
     if value == {
         .Unit -> BodyEnumPayload.Unit
-        .Positional(f_args) -> BodyEnumPayload.Positional{args: body_flat_list_enum_arg(f_args, &tree)}
-        .Named(f_fields) -> BodyEnumPayload.Named{fields: body_flat_list_named_enum_arg(f_fields, &tree)}
+        .Positional(f_args) -> BodyEnumPayload.Positional{args: body_flat_list_enum_arg(f_args, &flat)}
+        .Named(f_fields) -> BodyEnumPayload.Named{fields: body_flat_list_named_enum_arg(f_fields, &flat)}
     }
 }
 
-fn body_flat_named_enum_arg(value: TNamedEnumArg, tree: &BodyTree) -> BodyNamedEnumArg Never! {
+fn body_flat_named_enum_arg(value: TNamedEnumArg, flat: &BodyFlat) -> BodyNamedEnumArg Never! {
     BodyNamedEnumArg{
         name: value.name,
-        value: body_flat_enum_arg(value.value, &tree),
+        value: body_flat_enum_arg(value.value, &flat),
     }
 }
 
-fn body_flat_pattern_shape(value: TPatternShape, tree: &BodyTree) -> BodyPatternShape Never! {
+fn body_flat_pattern_shape(value: TPatternShape, flat: &BodyFlat) -> BodyPatternShape Never! {
     if value == {
-        .Variant(f_variant, f_bindings, f_leading_dot, f_span) -> BodyPatternShape.Variant{variant: f_variant, bindings: body_flat_list_pattern_binding(f_bindings, &tree), leading_dot: f_leading_dot, span: f_span}
-        .Present(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Present{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &tree), span: f_span}
+        .Variant(f_variant, f_bindings, f_leading_dot, f_span) -> BodyPatternShape.Variant{variant: f_variant, bindings: body_flat_list_pattern_binding(f_bindings, &flat), leading_dot: f_leading_dot, span: f_span}
+        .Present(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Present{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &flat), span: f_span}
         .Absent(f_span) -> BodyPatternShape.Absent{span: f_span}
-        .Ok(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Ok{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &tree), span: f_span}
-        .Err(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Err{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &tree), span: f_span}
+        .Ok(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Ok{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &flat), span: f_span}
+        .Err(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Err{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &flat), span: f_span}
         .Range(f_lo, f_hi, f_span) -> BodyPatternShape.Range{lo: f_lo, hi: f_hi, span: f_span}
-        .Or(f_alternatives, f_span) -> BodyPatternShape.Or{alternatives: body_flat_list_pattern_shape(f_alternatives, &tree), span: f_span}
-        .Struct(f_fields, f_span) -> BodyPatternShape.Struct{fields: body_flat_list_pattern_field(f_fields, &tree), span: f_span}
-        .List(f_items, f_rest, f_span) -> BodyPatternShape.List{items: body_flat_list_pattern_binding(f_items, &tree), rest: f_rest, span: f_span}
-        .Map(f_entries, f_rest, f_span) -> BodyPatternShape.Map{entries: body_flat_list_map_pattern_entry(f_entries, &tree), rest: f_rest, span: f_span}
+        .Or(f_alternatives, f_span) -> BodyPatternShape.Or{alternatives: body_flat_list_pattern_shape(f_alternatives, &flat), span: f_span}
+        .Struct(f_fields, f_span) -> BodyPatternShape.Struct{fields: body_flat_list_pattern_field(f_fields, &flat), span: f_span}
+        .List(f_items, f_rest, f_span) -> BodyPatternShape.List{items: body_flat_list_pattern_binding(f_items, &flat), rest: f_rest, span: f_span}
+        .Map(f_entries, f_rest, f_span) -> BodyPatternShape.Map{entries: body_flat_list_map_pattern_entry(f_entries, &flat), rest: f_rest, span: f_span}
         .Text(f_parts, f_span) -> BodyPatternShape.Text{parts: f_parts, span: f_span}
         .Binary(f_parts, f_span) -> BodyPatternShape.Binary{parts: f_parts, span: f_span}
     }
 }
 
-fn body_flat_nested_pattern(value: TNestedPattern, tree: &BodyTree) -> BodyNestedPattern Never! {
+fn body_flat_nested_pattern(value: TNestedPattern, flat: &BodyFlat) -> BodyNestedPattern Never! {
     BodyNestedPattern{
-        shape: body_flat_pattern_shape(value.shape, &tree),
+        shape: body_flat_pattern_shape(value.shape, &flat),
         enum_type: value.enum_type,
     }
 }
 
-fn body_flat_pattern(value: TPattern, tree: &BodyTree) -> BodyPattern Never! {
+fn body_flat_pattern(value: TPattern, flat: &BodyFlat) -> BodyPattern Never! {
     BodyPattern{
-        shape: body_flat_pattern_shape(value.shape, &tree),
+        shape: body_flat_pattern_shape(value.shape, &flat),
         bindings: value.bindings,
         enum_type: value.enum_type,
         position: value.position,
@@ -212,53 +273,53 @@ fn body_flat_pattern(value: TPattern, tree: &BodyTree) -> BodyPattern Never! {
     }
 }
 
-fn body_flat_pattern_binding(value: TPatternBinding, tree: &BodyTree) -> BodyPatternBinding Never! {
+fn body_flat_pattern_binding(value: TPatternBinding, flat: &BodyFlat) -> BodyPatternBinding Never! {
     if value == {
         .Wildcard -> BodyPatternBinding.Wildcard
         .Bind(f_name, f_span) -> BodyPatternBinding.Bind{name: f_name, span: f_span}
         .Range(f_lo, f_hi) -> BodyPatternBinding.Range{lo: f_lo, hi: f_hi}
-        .Nested(f_pattern) -> BodyPatternBinding.Nested{pattern: body_flat_nested_pattern(f_pattern, &tree)}
-        .Value(f_value) -> BodyPatternBinding.Value{value: body_flat_expr(f_value, &tree)}
+        .Nested(f_pattern) -> BodyPatternBinding.Nested{pattern: body_flat_nested_pattern(f_pattern, &flat)}
+        .Value(f_value) -> BodyPatternBinding.Value{value: body_flat_expr(f_value, &flat)}
     }
 }
 
-fn body_flat_pattern_field(value: TPatternField, tree: &BodyTree) -> BodyPatternField Never! {
+fn body_flat_pattern_field(value: TPatternField, flat: &BodyFlat) -> BodyPatternField Never! {
     if value == {
         .Bind(f_field, f_local, f_span) -> BodyPatternField.Bind{field: f_field, local: f_local, span: f_span}
-        .Value(f_field, f_value, f_span) -> BodyPatternField.Value{field: f_field, value: body_flat_expr(f_value, &tree), span: f_span}
-        .Nested(f_field, f_pattern, f_span) -> BodyPatternField.Nested{field: f_field, pattern: body_flat_nested_pattern(f_pattern, &tree), span: f_span}
+        .Value(f_field, f_value, f_span) -> BodyPatternField.Value{field: f_field, value: body_flat_expr(f_value, &flat), span: f_span}
+        .Nested(f_field, f_pattern, f_span) -> BodyPatternField.Nested{field: f_field, pattern: body_flat_nested_pattern(f_pattern, &flat), span: f_span}
     }
 }
 
-fn body_flat_map_pattern_entry(value: TMapPatternEntry, tree: &BodyTree) -> BodyMapPatternEntry Never! {
+fn body_flat_map_pattern_entry(value: TMapPatternEntry, flat: &BodyFlat) -> BodyMapPatternEntry Never! {
     BodyMapPatternEntry{
-        key: body_flat_expr(value.key, &tree),
+        key: body_flat_expr(value.key, &flat),
         optional: value.optional,
-        slot: body_flat_pattern_binding(value.slot, &tree),
+        slot: body_flat_pattern_binding(value.slot, &flat),
         span: value.span,
     }
 }
 
-fn body_flat_match_arm(value: TMatchArm, tree: &BodyTree) -> BodyMatchArm Never! {
+fn body_flat_match_arm(value: TMatchArm, flat: &BodyFlat) -> BodyMatchArm Never! {
     BodyMatchArm{
-        pattern: body_flat_pattern(value.pattern, &tree),
-        body: body_flat_list_stmt(value.body, &tree),
+        pattern: body_flat_pattern(value.pattern, &flat),
+        body: body_flat_list_stmt(value.body, &flat),
     }
 }
 
-fn body_flat_if_cond(value: TIfCond, tree: &BodyTree) -> BodyIfCond Never! {
+fn body_flat_if_cond(value: TIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
     if value == {
-        .Plain(f_value) -> BodyIfCond.Plain{value: body_flat_expr(f_value, &tree)}
-        .And(f_left, f_right) -> BodyIfCond.And{left: body_flat_if_cond(f_left, &tree), right: body_flat_if_cond(f_right, &tree)}
-        .IfLet(f_pattern, f_subj) -> BodyIfCond.IfLet{pattern: body_flat_pattern(f_pattern, &tree), subj: body_flat_expr(f_subj, &tree)}
+        .Plain(f_value) -> BodyIfCond.Plain{value: body_flat_expr(f_value, &flat)}
+        .And(f_left, f_right) -> BodyIfCond.And{left: body_flat_if_cond(f_left, &flat), right: body_flat_if_cond(f_right, &flat)}
+        .IfLet(f_pattern, f_subj) -> BodyIfCond.IfLet{pattern: body_flat_pattern(f_pattern, &flat), subj: body_flat_expr(f_subj, &flat)}
     }
 }
 
-fn body_flat_contract(value: TContract, tree: &BodyTree) -> BodyContract Never! {
+fn body_flat_contract(value: TContract, flat: &BodyFlat) -> BodyContract Never! {
     BodyContract{
         kind: value.kind,
-        condition: body_flat_expr(value.condition, &tree),
-        message: body_flat_expr(value.message, &tree),
+        condition: body_flat_expr(value.condition, &flat),
+        message: body_flat_expr(value.message, &flat),
         file: value.file,
         line: value.line,
         span: value.span,
@@ -266,217 +327,214 @@ fn body_flat_contract(value: TContract, tree: &BodyTree) -> BodyContract Never! 
     }
 }
 
-fn body_flat_stmt_kind(value: TStmt, tree: &BodyTree) -> StmtKind Never! {
+fn body_flat_stmt_kind(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
     if value == {
-        .Contract(f_contract) -> StmtKind.Contract{contract: body_flat_contract(f_contract, &tree)}
-        .ContractScope(f_pre, f_body, f_post, f_result, f_span) -> StmtKind.ContractScope{pre: body_flat_list_contract(f_pre, &tree), body: body_flat_list_stmt(f_body, &tree), post: body_flat_list_contract(f_post, &tree), result: f_result, span: f_span}
-        .Let(f_local, f_let_ty, f_init, f_gc_promotion, f_gc_transferred, f_span) -> StmtKind.Let{local: f_local, let_ty: f_let_ty, init: body_flat_expr(f_init, &tree), gc_promotion: f_gc_promotion, gc_transferred: f_gc_transferred, span: f_span}
-        .RefutableBind(f_pattern, f_init, f_fallback, f_span) -> StmtKind.RefutableBind{pattern: body_flat_pattern(f_pattern, &tree), init: body_flat_expr(f_init, &tree), fallback: body_flat_list_stmt(f_fallback, &tree), span: f_span}
-        .TupleDestructure(f_temp, f_init, f_move_fields, f_binds, f_span) -> StmtKind.TupleDestructure{temp: f_temp, init: body_flat_expr(f_init, &tree), move_fields: f_move_fields, binds: f_binds, span: f_span}
-        .StructDestructure(f_temp, f_init, f_move_fields, f_binds, f_span) -> StmtKind.StructDestructure{temp: f_temp, init: body_flat_expr(f_init, &tree), move_fields: f_move_fields, binds: f_binds, span: f_span}
-        .ListDestructure(f_temp, f_init, f_count, f_line, f_elements, f_span) -> StmtKind.ListDestructure{temp: f_temp, init: body_flat_expr(f_init, &tree), count: f_count, line: f_line, elements: f_elements, span: f_span}
-        .Assign(f_place, f_op, f_value, f_line, f_span) -> StmtKind.Assign{place: body_flat_place(f_place, &tree), op: f_op, value: body_flat_expr(f_value, &tree), line: f_line, span: f_span}
-        .CountedLoop(f_label, f_init, f_condition, f_step, f_vectorization, f_body, f_span) -> StmtKind.CountedLoop{label: f_label, init: body_flat_stmt(f_init, &tree), condition: body_flat_expr(f_condition, &tree), step: body_flat_opt_stmt(f_step, &tree), vectorization: f_vectorization, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .ForRange(f_label, f_local, f_start, f_end, f_step, f_exclusive, f_body, f_vectorization, f_span) -> StmtKind.ForRange{label: f_label, local: f_local, start: body_flat_expr(f_start, &tree), end: body_flat_expr(f_end, &tree), step: body_flat_opt_expr(f_step, &tree), exclusive: f_exclusive, body: body_flat_list_stmt(f_body, &tree), vectorization: f_vectorization, span: f_span}
-        .Range(f_label, f_variable, f_source, f_start, f_end, f_step, f_exclusive, f_vectorization, f_body, f_span) -> StmtKind.Range{label: f_label, variable: f_variable, source: body_flat_opt_expr(f_source, &tree), start: body_flat_expr(f_start, &tree), end: body_flat_expr(f_end, &tree), step: body_flat_opt_expr(f_step, &tree), exclusive: f_exclusive, vectorization: f_vectorization, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .ExprStmt(f_value, f_span) -> StmtKind.ExprStmt{value: body_flat_expr(f_value, &tree), span: f_span}
-        .Return(f_value, f_span) -> StmtKind.Return{value: body_flat_opt_expr(f_value, &tree), span: f_span}
-        .TaskGroup(f_group, f_limit, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, limit: body_flat_opt_expr(f_limit, &tree), body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .DeferClose(f_close, f_resource, f_span) -> StmtKind.DeferClose{close: body_flat_expr(f_close, &tree), resource: f_resource, span: f_span}
-        .If(f_condition, f_then_body, f_else_body, f_else_is_elseif, f_span) -> StmtKind.If{condition: body_flat_if_cond(f_condition, &tree), then_body: body_flat_list_stmt(f_then_body, &tree), else_body: body_flat_opt_list_stmt(f_else_body, &tree), else_is_elseif: f_else_is_elseif, span: f_span}
-        .Loop(f_label, f_body, f_span) -> StmtKind.Loop{label: f_label, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .While(f_label, f_condition, f_body, f_span) -> StmtKind.While{label: f_label, condition: body_flat_expr(f_condition, &tree), body: body_flat_list_stmt(f_body, &tree), span: f_span}
+        .Contract(f_contract) -> StmtKind.Contract{contract: body_flat_contract(f_contract, &flat)}
+        .ContractScope(f_pre, f_body, f_post, f_result, f_span) -> StmtKind.ContractScope{pre: body_flat_list_contract(f_pre, &flat), body: body_flat_list_stmt(f_body, &flat), post: body_flat_list_contract(f_post, &flat), result: f_result, span: f_span}
+        .Let(f_local, f_let_ty, f_init, f_gc_promotion, f_gc_transferred, f_span) -> StmtKind.Let{local: f_local, let_ty: f_let_ty, init: body_flat_expr(f_init, &flat), gc_promotion: f_gc_promotion, gc_transferred: f_gc_transferred, span: f_span}
+        .RefutableBind(f_pattern, f_init, f_fallback, f_span) -> StmtKind.RefutableBind{pattern: body_flat_pattern(f_pattern, &flat), init: body_flat_expr(f_init, &flat), fallback: body_flat_list_stmt(f_fallback, &flat), span: f_span}
+        .TupleDestructure(f_temp, f_init, f_move_fields, f_binds, f_span) -> StmtKind.TupleDestructure{temp: f_temp, init: body_flat_expr(f_init, &flat), move_fields: f_move_fields, binds: f_binds, span: f_span}
+        .StructDestructure(f_temp, f_init, f_move_fields, f_binds, f_span) -> StmtKind.StructDestructure{temp: f_temp, init: body_flat_expr(f_init, &flat), move_fields: f_move_fields, binds: f_binds, span: f_span}
+        .ListDestructure(f_temp, f_init, f_count, f_line, f_elements, f_span) -> StmtKind.ListDestructure{temp: f_temp, init: body_flat_expr(f_init, &flat), count: f_count, line: f_line, elements: f_elements, span: f_span}
+        .Assign(f_place, f_op, f_value, f_line, f_span) -> StmtKind.Assign{place: body_flat_place(f_place, &flat), op: f_op, value: body_flat_expr(f_value, &flat), line: f_line, span: f_span}
+        .CountedLoop(f_label, f_init, f_condition, f_step, f_vectorization, f_body, f_span) -> StmtKind.CountedLoop{label: f_label, init: body_flat_stmt(f_init, &flat), condition: body_flat_expr(f_condition, &flat), step: body_flat_opt_stmt(f_step, &flat), vectorization: f_vectorization, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .ForRange(f_label, f_local, f_start, f_end, f_step, f_exclusive, f_body, f_vectorization, f_span) -> StmtKind.ForRange{label: f_label, local: f_local, start: body_flat_expr(f_start, &flat), end: body_flat_expr(f_end, &flat), step: body_flat_opt_expr(f_step, &flat), exclusive: f_exclusive, body: body_flat_list_stmt(f_body, &flat), vectorization: f_vectorization, span: f_span}
+        .Range(f_label, f_variable, f_source, f_start, f_end, f_step, f_exclusive, f_vectorization, f_body, f_span) -> StmtKind.Range{label: f_label, variable: f_variable, source: body_flat_opt_expr(f_source, &flat), start: body_flat_expr(f_start, &flat), end: body_flat_expr(f_end, &flat), step: body_flat_opt_expr(f_step, &flat), exclusive: f_exclusive, vectorization: f_vectorization, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .ExprStmt(f_value, f_span) -> StmtKind.ExprStmt{value: body_flat_expr(f_value, &flat), span: f_span}
+        .Return(f_value, f_span) -> StmtKind.Return{value: body_flat_opt_expr(f_value, &flat), span: f_span}
+        .TaskGroup(f_group, f_limit, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, limit: body_flat_opt_expr(f_limit, &flat), body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .DeferClose(f_close, f_resource, f_span) -> StmtKind.DeferClose{close: body_flat_expr(f_close, &flat), resource: f_resource, span: f_span}
+        .If(f_condition, f_then_body, f_else_body, f_else_is_elseif, f_span) -> StmtKind.If{condition: body_flat_if_cond(f_condition, &flat), then_body: body_flat_list_stmt(f_then_body, &flat), else_body: body_flat_opt_list_stmt(f_else_body, &flat), else_is_elseif: f_else_is_elseif, span: f_span}
+        .Loop(f_label, f_body, f_span) -> StmtKind.Loop{label: f_label, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .While(f_label, f_condition, f_body, f_span) -> StmtKind.While{label: f_label, condition: body_flat_expr(f_condition, &flat), body: body_flat_list_stmt(f_body, &flat), span: f_span}
         .Break(f_label, f_span) -> StmtKind.Break{label: f_label, span: f_span}
-        .BreakValue(f_label, f_value, f_span) -> StmtKind.BreakValue{label: f_label, value: body_flat_expr(f_value, &tree), span: f_span}
+        .BreakValue(f_label, f_value, f_span) -> StmtKind.BreakValue{label: f_label, value: body_flat_expr(f_value, &flat), span: f_span}
         .Continue(f_label, f_span) -> StmtKind.Continue{label: f_label, span: f_span}
-        .Match(f_subject, f_arms, f_exhaustive, f_span) -> StmtKind.Match{subject: body_flat_expr(f_subject, &tree), arms: body_flat_list_match_arm(f_arms, &tree), exhaustive: f_exhaustive, span: f_span}
-        .EnumMatch(f_scrutinee, f_arms, f_else_body, f_fallthrough, f_span) -> StmtKind.EnumMatch{scrutinee: body_flat_expr(f_scrutinee, &tree), arms: body_flat_list_match_arm(f_arms, &tree), else_body: body_flat_opt_list_stmt(f_else_body, &tree), fallthrough: f_fallthrough, span: f_span}
-        .RangeSwitch(f_subject, f_arms, f_else_body, f_span) -> StmtKind.RangeSwitch{subject: body_flat_expr(f_subject, &tree), arms: body_flat_list_range_arm(f_arms, &tree), else_body: body_flat_list_stmt(f_else_body, &tree), span: f_span}
-        .ForIn(f_label, f_variable, f_variable_two, f_source, f_collection, f_step, f_method_kind, f_columnar, f_by_value, f_source_stable, f_body, f_span) -> StmtKind.ForIn{label: f_label, variable: f_variable, variable_two: f_variable_two, source: body_flat_expr(f_source, &tree), collection: body_flat_expr(f_collection, &tree), step: body_flat_opt_expr(f_step, &tree), method_kind: f_method_kind, columnar: f_columnar, by_value: f_by_value, source_stable: f_source_stable, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Inline(f_body, f_span) -> StmtKind.Inline{body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .DebugOnly(f_body, f_span) -> StmtKind.DebugOnly{body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .MixedSwitch(f_subject, f_class, f_arms, f_else_body, f_span) -> StmtKind.MixedSwitch{subject: body_flat_expr(f_subject, &tree), class: f_class, arms: body_flat_list_mixed_arm(f_arms, &tree), else_body: body_flat_opt_list_stmt(f_else_body, &tree), span: f_span}
-        .Unsafe(f_gate, f_body) -> StmtKind.Unsafe{gate: f_gate, body: body_flat_list_stmt(f_body, &tree)}
-        .UnsafeBlock(f_gate, f_body, f_span) -> StmtKind.UnsafeBlock{gate: f_gate, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .SentryPolicy(f_enabled, f_body, f_span) -> StmtKind.SentryPolicy{enabled: f_enabled, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Impure(f_body, f_span) -> StmtKind.Impure{body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Reactive(f_executable, f_span) -> StmtKind.Reactive{executable: body_flat_lambda(f_executable, &tree), span: f_span}
-        .Region(f_body, f_span) -> StmtKind.Region{body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Layout(f_handle, f_label, f_body, f_span) -> StmtKind.Layout{handle: f_handle, label: f_label, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .ContextBlock(f_guards, f_body, f_span) -> StmtKind.ContextBlock{guards: body_flat_list_context_guard(f_guards, &tree), body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Live(f_body, f_span) -> StmtKind.Live{body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Shield(f_body, f_span) -> StmtKind.Shield{body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .ScopeMember(f_kind, f_body, f_span) -> StmtKind.ScopeMember{kind: body_flat_scope_member_kind(f_kind, &tree), body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .Transact(f_handle, f_snapshots, f_stm, f_body, f_span) -> StmtKind.Transact{handle: f_handle, snapshots: f_snapshots, stm: f_stm, body: body_flat_list_stmt(f_body, &tree), span: f_span}
-        .GCEdit(f_root, f_slot, f_edges, f_replace_all, f_index_temp, f_statement, f_span) -> StmtKind.GCEdit{root: f_root, slot: f_slot, edges: f_edges, replace_all: f_replace_all, index_temp: body_flat_opt_expr(f_index_temp, &tree), statement: body_flat_stmt(f_statement, &tree), span: f_span}
+        .Match(f_subject, f_arms, f_exhaustive, f_span) -> StmtKind.Match{subject: body_flat_expr(f_subject, &flat), arms: body_flat_list_match_arm(f_arms, &flat), exhaustive: f_exhaustive, span: f_span}
+        .EnumMatch(f_scrutinee, f_arms, f_else_body, f_fallthrough, f_span) -> StmtKind.EnumMatch{scrutinee: body_flat_expr(f_scrutinee, &flat), arms: body_flat_list_match_arm(f_arms, &flat), else_body: body_flat_opt_list_stmt(f_else_body, &flat), fallthrough: f_fallthrough, span: f_span}
+        .RangeSwitch(f_subject, f_arms, f_else_body, f_span) -> StmtKind.RangeSwitch{subject: body_flat_expr(f_subject, &flat), arms: body_flat_list_range_arm(f_arms, &flat), else_body: body_flat_list_stmt(f_else_body, &flat), span: f_span}
+        .ForIn(f_label, f_variable, f_variable_two, f_source, f_collection, f_step, f_method_kind, f_columnar, f_by_value, f_source_stable, f_body, f_span) -> StmtKind.ForIn{label: f_label, variable: f_variable, variable_two: f_variable_two, source: body_flat_expr(f_source, &flat), collection: body_flat_expr(f_collection, &flat), step: body_flat_opt_expr(f_step, &flat), method_kind: f_method_kind, columnar: f_columnar, by_value: f_by_value, source_stable: f_source_stable, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Inline(f_body, f_span) -> StmtKind.Inline{body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .DebugOnly(f_body, f_span) -> StmtKind.DebugOnly{body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .MixedSwitch(f_subject, f_class, f_arms, f_else_body, f_span) -> StmtKind.MixedSwitch{subject: body_flat_expr(f_subject, &flat), class: f_class, arms: body_flat_list_mixed_arm(f_arms, &flat), else_body: body_flat_opt_list_stmt(f_else_body, &flat), span: f_span}
+        .Unsafe(f_gate, f_body) -> StmtKind.Unsafe{gate: f_gate, body: body_flat_list_stmt(f_body, &flat)}
+        .UnsafeBlock(f_gate, f_body, f_span) -> StmtKind.UnsafeBlock{gate: f_gate, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .SentryPolicy(f_enabled, f_body, f_span) -> StmtKind.SentryPolicy{enabled: f_enabled, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Impure(f_body, f_span) -> StmtKind.Impure{body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Reactive(f_executable, f_span) -> StmtKind.Reactive{executable: body_flat_lambda(f_executable, &flat), span: f_span}
+        .Region(f_body, f_span) -> StmtKind.Region{body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Layout(f_handle, f_label, f_body, f_span) -> StmtKind.Layout{handle: f_handle, label: f_label, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .ContextBlock(f_guards, f_body, f_span) -> StmtKind.ContextBlock{guards: body_flat_list_context_guard(f_guards, &flat), body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Live(f_body, f_span) -> StmtKind.Live{body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Shield(f_body, f_span) -> StmtKind.Shield{body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .ScopeMember(f_kind, f_body, f_span) -> StmtKind.ScopeMember{kind: body_flat_scope_member_kind(f_kind, &flat), body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .Transact(f_handle, f_snapshots, f_stm, f_body, f_span) -> StmtKind.Transact{handle: f_handle, snapshots: f_snapshots, stm: f_stm, body: body_flat_list_stmt(f_body, &flat), span: f_span}
+        .GCEdit(f_root, f_slot, f_edges, f_replace_all, f_index_temp, f_statement, f_span) -> StmtKind.GCEdit{root: f_root, slot: f_slot, edges: f_edges, replace_all: f_replace_all, index_temp: body_flat_opt_expr(f_index_temp, &flat), statement: body_flat_stmt(f_statement, &flat), span: f_span}
     }
 }
 
-fn body_flat_range_arm(value: TRangeArm, tree: &BodyTree) -> BodyRangeArm Never! {
+fn body_flat_range_arm(value: TRangeArm, flat: &BodyFlat) -> BodyRangeArm Never! {
     BodyRangeArm{
         lo: value.lo,
         hi: value.hi,
-        body: body_flat_list_stmt(value.body, &tree),
+        body: body_flat_list_stmt(value.body, &flat),
     }
 }
 
-fn body_flat_mixed_arm(value: TMixedArm, tree: &BodyTree) -> BodyMixedArm Never! {
+fn body_flat_mixed_arm(value: TMixedArm, flat: &BodyFlat) -> BodyMixedArm Never! {
     BodyMixedArm{
-        condition: body_flat_expr(value.condition, &tree),
-        body: body_flat_list_stmt(value.body, &tree),
+        condition: body_flat_expr(value.condition, &flat),
+        body: body_flat_list_stmt(value.body, &flat),
     }
 }
 
-fn body_flat_context_guard(value: TContextGuard, tree: &BodyTree) -> BodyContextGuard Never! {
+fn body_flat_context_guard(value: TContextGuard, flat: &BodyFlat) -> BodyContextGuard Never! {
     BodyContextGuard{
         field: value.field,
-        value: body_flat_expr(value.value, &tree),
+        value: body_flat_expr(value.value, &flat),
     }
 }
 
-fn body_flat_expr_kind(value: TExprKind, tree: &BodyTree) -> NodeKind Never! {
+fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
     if value == {
         .IntLit(f_value, f_width) -> NodeKind.IntLit{value: f_value, width: f_width}
         .FloatLit(f_value) -> NodeKind.FloatLit{value: f_value}
         .BoolLit(f_value) -> NodeKind.BoolLit{value: f_value}
         .CharLit(f_value) -> NodeKind.CharLit{value: f_value}
-        .StrLit(f_parts) -> NodeKind.StrLit{parts: body_flat_list_str_part(f_parts, &tree)}
+        .StrLit(f_parts) -> NodeKind.StrLit{parts: body_flat_list_str_part(f_parts, &flat)}
         .Local(f_local) -> NodeKind.Local{local: f_local}
         .Unit -> NodeKind.Unit
-        .InlineBlock(f_body) -> NodeKind.InlineBlock{body: body_flat_list_stmt(f_body, &tree)}
-        .Uninit -> NodeKind.Uninit
+        .InlineBlock(f_body) -> NodeKind.InlineBlock{body: body_flat_list_stmt(f_body, &flat)}
         .CtLit(f_value) -> NodeKind.CtLit{value: f_value}
         .ConstRef(f_symbol) -> NodeKind.ConstRef{symbol: f_symbol}
-        .GlobalShared(f_initializer, f_lifetime) -> NodeKind.GlobalShared{initializer: f_initializer, lifetime: f_lifetime}
-        .Call(f_callee, f_type_args, f_args) -> NodeKind.Call{callee: f_callee, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &tree)}
-        .IndirectCall(f_callee, f_type_args, f_args, f_signature) -> NodeKind.IndirectCall{callee: body_flat_expr(f_callee, &tree), type_args: f_type_args, args: body_flat_list_call_arg(f_args, &tree), signature: f_signature}
-        .MethodCall(f_receiver, f_method, f_type_args, f_args) -> NodeKind.MethodCall{receiver: body_flat_expr(f_receiver, &tree), method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &tree)}
-        .DistinctCtor(f_argument) -> NodeKind.DistinctCtor{argument: body_flat_expr(f_argument, &tree)}
-        .DistinctConvert(f_owner, f_argument, f_operation, f_range, f_fallible) -> NodeKind.DistinctConvert{owner: f_owner, argument: body_flat_expr(f_argument, &tree), operation: f_operation, range: f_range, fallible: f_fallible}
-        .TraitBox(f_value, f_target) -> NodeKind.TraitBox{value: body_flat_expr(f_value, &tree), target: f_target}
-        .UnitConvert(f_argument, f_scale, f_offset, f_rounding, f_fallible, f_relative_uncertainty, f_file, f_line) -> NodeKind.UnitConvert{argument: body_flat_expr(f_argument, &tree), scale: f_scale, offset: f_offset, rounding: body_flat_opt_unit_rounding(f_rounding, &tree), fallible: f_fallible, relative_uncertainty: f_relative_uncertainty, file: f_file, line: f_line}
-        .MathBuiltin(f_type_name, f_function, f_args) -> NodeKind.MathBuiltin{type_name: f_type_name, function: f_function, args: body_flat_list_expr(f_args, &tree)}
-        .PreciseBuiltin(f_type_name, f_function, f_args) -> NodeKind.PreciseBuiltin{type_name: f_type_name, function: f_function, args: body_flat_list_expr(f_args, &tree)}
-        .Print(f_value) -> NodeKind.Print{value: body_flat_expr(f_value, &tree)}
-        .Drop(f_value) -> NodeKind.Drop{value: body_flat_expr(f_value, &tree)}
-        .Close(f_value) -> NodeKind.Close{value: body_flat_expr(f_value, &tree)}
-        .Move(f_value) -> NodeKind.Move{value: body_flat_expr(f_value, &tree)}
-        .AmbientInput(f_prompt) -> NodeKind.AmbientInput{prompt: body_flat_opt_expr(f_prompt, &tree)}
-        .RequireStop(f_kind, f_location, f_always_stops) -> NodeKind.RequireStop{kind: body_flat_require_kind(f_kind, &tree), location: f_location, always_stops: f_always_stops}
-        .Binary(f_op, f_overflow, f_line, f_lhs, f_rhs) -> NodeKind.Binary{op: f_op, overflow: f_overflow, line: f_line, lhs: body_flat_expr(f_lhs, &tree), rhs: body_flat_expr(f_rhs, &tree)}
-        .CompareChain(f_operands, f_operators, f_hooks) -> NodeKind.CompareChain{operands: body_flat_list_expr(f_operands, &tree), operators: f_operators, hooks: f_hooks}
-        .Unary(f_op, f_operand) -> NodeKind.Unary{op: f_op, operand: body_flat_expr(f_operand, &tree)}
-        .StructLit(f_fields) -> NodeKind.StructLit{fields: body_flat_list_struct_field_value(f_fields, &tree)}
-        .Field(f_receiver, f_field) -> NodeKind.Field{receiver: body_flat_expr(f_receiver, &tree), field: f_field}
-        .Index(f_base, f_index, f_kind, f_access, f_checked_call, f_location) -> NodeKind.Index{base: body_flat_expr(f_base, &tree), index: body_flat_expr(f_index, &tree), kind: f_kind, access: f_access, checked_call: f_checked_call, location: f_location}
-        .Slice(f_base, f_start, f_end, f_range, f_location) -> NodeKind.Slice{base: body_flat_expr(f_base, &tree), start: body_flat_expr(f_start, &tree), end: body_flat_expr(f_end, &tree), range: body_flat_opt_expr(f_range, &tree), location: f_location}
-        .Range(f_start, f_end, f_exclusive) -> NodeKind.Range{start: body_flat_expr(f_start, &tree), end: body_flat_expr(f_end, &tree), exclusive: f_exclusive}
-        .Tuple(f_values) -> NodeKind.Tuple{values: body_flat_list_expr(f_values, &tree)}
-        .List(f_values, f_trait_coercion) -> NodeKind.List{values: body_flat_list_expr(f_values, &tree), trait_coercion: f_trait_coercion}
-        .Map(f_entries) -> NodeKind.Map{entries: body_flat_list_map_entry(f_entries, &tree)}
-        .EnumCtor(f_owner, f_variant, f_payload) -> NodeKind.EnumCtor{owner: f_owner, variant: f_variant, payload: body_flat_enum_payload(f_payload, &tree)}
-        .Try(f_value, f_conversion, f_failure) -> NodeKind.Try{value: body_flat_expr(f_value, &tree), conversion: f_conversion, failure: f_failure}
-        .TryWithContext(f_inner, f_note, f_convert, f_file, f_line, f_function) -> NodeKind.TryWithContext{inner: body_flat_expr(f_inner, &tree), note: body_flat_opt_expr(f_note, &tree), convert: f_convert, file: f_file, line: f_line, function: f_function}
-        .Lambda(f_value) -> NodeKind.Lambda{value: body_flat_lambda(f_value, &tree)}
-        .Borrow(f_place, f_access) -> NodeKind.Borrow{place: body_flat_expr(f_place, &tree), access: f_access}
-        .RawAddressOf(f_place) -> NodeKind.RawAddressOf{place: body_flat_place(f_place, &tree)}
-        .Deref(f_value) -> NodeKind.Deref{value: body_flat_expr(f_value, &tree)}
-        .PtrFromAddr(f_address, f_element) -> NodeKind.PtrFromAddr{address: body_flat_expr(f_address, &tree), element: f_element}
-        .LayoutLiteral(f_value) -> NodeKind.LayoutLiteral{value: body_flat_expr(f_value, &tree)}
-        .LayoutCompare(f_op, f_lhs, f_rhs) -> NodeKind.LayoutCompare{op: f_op, lhs: body_flat_expr(f_lhs, &tree), rhs: body_flat_expr(f_rhs, &tree)}
-        .SharedGuardValue(f_guard) -> NodeKind.SharedGuardValue{guard: body_flat_expr(f_guard, &tree)}
-        .SharedGuardMap(f_guard, f_path, f_editable) -> NodeKind.SharedGuardMap{guard: body_flat_expr(f_guard, &tree), path: f_path, editable: f_editable}
-        .SharedGuardSplit(f_guard, f_first, f_second, f_editable) -> NodeKind.SharedGuardSplit{guard: body_flat_expr(f_guard, &tree), first: f_first, second: f_second, editable: f_editable}
-        .SharedGuardWait(f_guard, f_condition, f_predicate) -> NodeKind.SharedGuardWait{guard: body_flat_expr(f_guard, &tree), condition: body_flat_expr(f_condition, &tree), predicate: body_flat_lambda(f_predicate, &tree)}
-        .ConditionNotify(f_condition, f_all) -> NodeKind.ConditionNotify{condition: body_flat_expr(f_condition, &tree), all: f_all}
-        .CoreCall(f_record, f_args, f_source_span, f_type_args, f_widen_to_vec, f_fallibility) -> NodeKind.CoreCall{record: f_record, args: body_flat_list_expr(f_args, &tree), source_span: f_source_span, type_args: f_type_args, widen_to_vec: f_widen_to_vec, fallibility: f_fallibility}
-        .HostCall(f_call) -> NodeKind.HostCall{call: body_flat_host_call(f_call, &tree)}
-        .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_flat_list_call_arg(f_args, &tree)}
-        .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_flat_enum_payload(f_payload, &tree)}
-        .JSONLit(f_variant, f_arg, f_clone_arg) -> NodeKind.JSONLit{variant: f_variant, arg: body_flat_opt_expr(f_arg, &tree), clone_arg: f_clone_arg}
-        .DBValueLit(f_variant, f_arg, f_clone_arg) -> NodeKind.DBValueLit{variant: f_variant, arg: body_flat_opt_expr(f_arg, &tree), clone_arg: f_clone_arg}
-        .ListLit(f_values) -> NodeKind.ListLit{values: body_flat_list_expr(f_values, &tree)}
-        .ListSpread(f_parts) -> NodeKind.ListSpread{parts: body_flat_list_list_spread_part(f_parts, &tree)}
-        .MapLit(f_entries) -> NodeKind.MapLit{entries: body_flat_list_map_entry(f_entries, &tree)}
-        .PoolSlot(f_pool, f_id, f_mutable, f_field, f_line, f_source_line) -> NodeKind.PoolSlot{pool: body_flat_expr(f_pool, &tree), id: body_flat_expr(f_id, &tree), mutable: f_mutable, field: f_field, line: f_line, source_line: f_source_line}
-        .MathLaneIndex(f_lane_type, f_base, f_index, f_line) -> NodeKind.MathLaneIndex{lane_type: f_lane_type, base: body_flat_expr(f_base, &tree), index: body_flat_expr(f_index, &tree), line: f_line}
-        .MathSwizzleRead(f_type_name, f_receiver, f_lanes) -> NodeKind.MathSwizzleRead{type_name: f_type_name, receiver: body_flat_expr(f_receiver, &tree), lanes: f_lanes}
-        .Clone(f_value, f_fact) -> NodeKind.Clone{value: body_flat_expr(f_value, &tree), fact: f_fact}
-        .ExplicitCopy(f_value) -> NodeKind.ExplicitCopy{value: body_flat_expr(f_value, &tree)}
-        .MaterializeView(f_value) -> NodeKind.MaterializeView{value: body_flat_expr(f_value, &tree)}
-        .StaticCall(f_owner, f_owner_type, f_method, f_type_args, f_args) -> NodeKind.StaticCall{owner: f_owner, owner_type: f_owner_type, method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &tree)}
-        .DecodeUnder(f_segment, f_inner) -> NodeKind.DecodeUnder{segment: body_flat_expr(f_segment, &tree), inner: body_flat_expr(f_inner, &tree)}
-        .BuiltinMethod(f_receiver, f_operation, f_args) -> NodeKind.BuiltinMethod{receiver: body_flat_expr(f_receiver, &tree), operation: f_operation, args: body_flat_list_expr(f_args, &tree)}
-        .IfExpr(f_cond, f_then_body, f_then_value, f_else_body, f_else_value) -> NodeKind.IfExpr{cond: body_flat_if_cond(f_cond, &tree), then_body: body_flat_list_stmt(f_then_body, &tree), then_value: body_flat_expr(f_then_value, &tree), else_body: body_flat_list_stmt(f_else_body, &tree), else_value: body_flat_expr(f_else_value, &tree)}
-        .ResultHandler(f_subject, f_ok_pattern, f_ok_body, f_ok_value, f_err_pattern, f_err_body, f_err_value, f_terminal) -> NodeKind.ResultHandler{subject: body_flat_expr(f_subject, &tree), ok_pattern: body_flat_pattern(f_ok_pattern, &tree), ok_body: body_flat_list_stmt(f_ok_body, &tree), ok_value: body_flat_expr(f_ok_value, &tree), err_pattern: body_flat_pattern(f_err_pattern, &tree), err_body: body_flat_list_stmt(f_err_body, &tree), err_value: body_flat_expr(f_err_value, &tree), terminal: body_flat_expr(f_terminal, &tree)}
-        .RawOf(f_value) -> NodeKind.RawOf{value: body_flat_expr(f_value, &tree)}
-        .InvariantViolation(f_construct, f_span) -> NodeKind.InvariantViolation{construct: f_construct, span: f_span}
-        .DistinctRaw(f_value) -> NodeKind.DistinctRaw{value: body_flat_expr(f_value, &tree)}
-        .Present(f_value) -> NodeKind.Present{value: body_flat_expr(f_value, &tree)}
+        .Call(f_callee, f_type_args, f_args) -> NodeKind.Call{callee: f_callee, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat)}
+        .IndirectCall(f_callee, f_type_args, f_args, f_signature) -> NodeKind.IndirectCall{callee: body_flat_expr(f_callee, &flat), type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat), signature: f_signature}
+        .MethodCall(f_receiver, f_method, f_type_args, f_args) -> NodeKind.MethodCall{receiver: body_flat_expr(f_receiver, &flat), method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat)}
+        .DistinctCtor(f_argument) -> NodeKind.DistinctCtor{argument: body_flat_expr(f_argument, &flat)}
+        .DistinctConvert(f_owner, f_argument, f_operation, f_range, f_fallible) -> NodeKind.DistinctConvert{owner: f_owner, argument: body_flat_expr(f_argument, &flat), operation: f_operation, range: f_range, fallible: f_fallible}
+        .TraitBox(f_value, f_target) -> NodeKind.TraitBox{value: body_flat_expr(f_value, &flat), target: f_target}
+        .UnitConvert(f_argument, f_scale, f_offset, f_rounding, f_fallible, f_relative_uncertainty, f_file, f_line) -> NodeKind.UnitConvert{argument: body_flat_expr(f_argument, &flat), scale: f_scale, offset: f_offset, rounding: body_flat_opt_unit_rounding(f_rounding, &flat), fallible: f_fallible, relative_uncertainty: f_relative_uncertainty, file: f_file, line: f_line}
+        .MathBuiltin(f_type_name, f_function, f_args) -> NodeKind.MathBuiltin{type_name: f_type_name, function: f_function, args: body_flat_list_expr(f_args, &flat)}
+        .PreciseBuiltin(f_type_name, f_function, f_args) -> NodeKind.PreciseBuiltin{type_name: f_type_name, function: f_function, args: body_flat_list_expr(f_args, &flat)}
+        .Print(f_value) -> NodeKind.Print{value: body_flat_expr(f_value, &flat)}
+        .Drop(f_value) -> NodeKind.Drop{value: body_flat_expr(f_value, &flat)}
+        .Close(f_value) -> NodeKind.Close{value: body_flat_expr(f_value, &flat)}
+        .Move(f_value) -> NodeKind.Move{value: body_flat_expr(f_value, &flat)}
+        .AmbientInput(f_prompt) -> NodeKind.AmbientInput{prompt: body_flat_opt_expr(f_prompt, &flat)}
+        .RequireStop(f_kind, f_location, f_always_stops) -> NodeKind.RequireStop{kind: body_flat_require_kind(f_kind, &flat), location: f_location, always_stops: f_always_stops}
+        .Binary(f_op, f_overflow, f_line, f_lhs, f_rhs) -> NodeKind.Binary{op: f_op, overflow: f_overflow, line: f_line, lhs: body_flat_expr(f_lhs, &flat), rhs: body_flat_expr(f_rhs, &flat)}
+        .CompareChain(f_operands, f_operators, f_hooks) -> NodeKind.CompareChain{operands: body_flat_list_expr(f_operands, &flat), operators: f_operators, hooks: f_hooks}
+        .Unary(f_op, f_operand) -> NodeKind.Unary{op: f_op, operand: body_flat_expr(f_operand, &flat)}
+        .StructLit(f_fields) -> NodeKind.StructLit{fields: body_flat_list_struct_field_value(f_fields, &flat)}
+        .Field(f_receiver, f_field) -> NodeKind.Field{receiver: body_flat_expr(f_receiver, &flat), field: f_field}
+        .Index(f_base, f_index, f_kind, f_access, f_checked_call, f_location) -> NodeKind.Index{base: body_flat_expr(f_base, &flat), index: body_flat_expr(f_index, &flat), kind: f_kind, access: f_access, checked_call: f_checked_call, location: f_location}
+        .Slice(f_base, f_start, f_end, f_range, f_location) -> NodeKind.Slice{base: body_flat_expr(f_base, &flat), start: body_flat_expr(f_start, &flat), end: body_flat_expr(f_end, &flat), range: body_flat_opt_expr(f_range, &flat), location: f_location}
+        .Range(f_start, f_end, f_exclusive) -> NodeKind.Range{start: body_flat_expr(f_start, &flat), end: body_flat_expr(f_end, &flat), exclusive: f_exclusive}
+        .Tuple(f_values) -> NodeKind.Tuple{values: body_flat_list_expr(f_values, &flat)}
+        .List(f_values, f_trait_coercion) -> NodeKind.List{values: body_flat_list_expr(f_values, &flat), trait_coercion: f_trait_coercion}
+        .Map(f_entries) -> NodeKind.Map{entries: body_flat_list_map_entry(f_entries, &flat)}
+        .EnumCtor(f_owner, f_variant, f_payload) -> NodeKind.EnumCtor{owner: f_owner, variant: f_variant, payload: body_flat_enum_payload(f_payload, &flat)}
+        .Try(f_value, f_conversion, f_failure) -> NodeKind.Try{value: body_flat_expr(f_value, &flat), conversion: f_conversion, failure: f_failure}
+        .TryWithContext(f_inner, f_note, f_convert, f_file, f_line, f_function) -> NodeKind.TryWithContext{inner: body_flat_expr(f_inner, &flat), note: body_flat_opt_expr(f_note, &flat), convert: f_convert, file: f_file, line: f_line, function: f_function}
+        .Lambda(f_value) -> NodeKind.Lambda{value: body_flat_lambda(f_value, &flat)}
+        .Borrow(f_place, f_access) -> NodeKind.Borrow{place: body_flat_expr(f_place, &flat), access: f_access}
+        .RawAddressOf(f_place) -> NodeKind.RawAddressOf{place: body_flat_place(f_place, &flat)}
+        .Deref(f_value) -> NodeKind.Deref{value: body_flat_expr(f_value, &flat)}
+        .PtrFromAddr(f_address, f_element) -> NodeKind.PtrFromAddr{address: body_flat_expr(f_address, &flat), element: f_element}
+        .LayoutLiteral(f_value) -> NodeKind.LayoutLiteral{value: body_flat_expr(f_value, &flat)}
+        .LayoutCompare(f_op, f_lhs, f_rhs) -> NodeKind.LayoutCompare{op: f_op, lhs: body_flat_expr(f_lhs, &flat), rhs: body_flat_expr(f_rhs, &flat)}
+        .SharedGuardValue(f_guard) -> NodeKind.SharedGuardValue{guard: body_flat_expr(f_guard, &flat)}
+        .SharedGuardMap(f_guard, f_path, f_editable) -> NodeKind.SharedGuardMap{guard: body_flat_expr(f_guard, &flat), path: f_path, editable: f_editable}
+        .SharedGuardSplit(f_guard, f_first, f_second, f_editable) -> NodeKind.SharedGuardSplit{guard: body_flat_expr(f_guard, &flat), first: f_first, second: f_second, editable: f_editable}
+        .SharedGuardWait(f_guard, f_condition, f_predicate) -> NodeKind.SharedGuardWait{guard: body_flat_expr(f_guard, &flat), condition: body_flat_expr(f_condition, &flat), predicate: body_flat_lambda(f_predicate, &flat)}
+        .ConditionNotify(f_condition, f_all) -> NodeKind.ConditionNotify{condition: body_flat_expr(f_condition, &flat), all: f_all}
+        .CoreCall(f_record, f_args, f_source_span, f_type_args, f_widen_to_vec, f_fallibility) -> NodeKind.CoreCall{record: f_record, args: body_flat_list_expr(f_args, &flat), source_span: f_source_span, type_args: f_type_args, widen_to_vec: f_widen_to_vec, fallibility: f_fallibility}
+        .HostCall(f_call) -> NodeKind.HostCall{call: body_flat_host_call(f_call, &flat)}
+        .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_flat_list_call_arg(f_args, &flat)}
+        .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_flat_enum_payload(f_payload, &flat)}
+        .JSONLit(f_variant, f_arg, f_clone_arg) -> NodeKind.JSONLit{variant: f_variant, arg: body_flat_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
+        .DBValueLit(f_variant, f_arg, f_clone_arg) -> NodeKind.DBValueLit{variant: f_variant, arg: body_flat_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
+        .ListLit(f_values) -> NodeKind.ListLit{values: body_flat_list_expr(f_values, &flat)}
+        .ListSpread(f_parts) -> NodeKind.ListSpread{parts: body_flat_list_list_spread_part(f_parts, &flat)}
+        .MapLit(f_entries) -> NodeKind.MapLit{entries: body_flat_list_map_entry(f_entries, &flat)}
+        .PoolSlot(f_pool, f_id, f_mutable, f_field, f_line, f_source_line) -> NodeKind.PoolSlot{pool: body_flat_expr(f_pool, &flat), id: body_flat_expr(f_id, &flat), mutable: f_mutable, field: f_field, line: f_line, source_line: f_source_line}
+        .MathLaneIndex(f_lane_type, f_base, f_index, f_line) -> NodeKind.MathLaneIndex{lane_type: f_lane_type, base: body_flat_expr(f_base, &flat), index: body_flat_expr(f_index, &flat), line: f_line}
+        .MathSwizzleRead(f_type_name, f_receiver, f_lanes) -> NodeKind.MathSwizzleRead{type_name: f_type_name, receiver: body_flat_expr(f_receiver, &flat), lanes: f_lanes}
+        .Clone(f_value, f_fact) -> NodeKind.Clone{value: body_flat_expr(f_value, &flat), fact: f_fact}
+        .ExplicitCopy(f_value) -> NodeKind.ExplicitCopy{value: body_flat_expr(f_value, &flat)}
+        .MaterializeView(f_value) -> NodeKind.MaterializeView{value: body_flat_expr(f_value, &flat)}
+        .StaticCall(f_owner, f_owner_type, f_method, f_type_args, f_args) -> NodeKind.StaticCall{owner: f_owner, owner_type: f_owner_type, method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, &flat)}
+        .DecodeUnder(f_segment, f_inner) -> NodeKind.DecodeUnder{segment: body_flat_expr(f_segment, &flat), inner: body_flat_expr(f_inner, &flat)}
+        .BuiltinMethod(f_receiver, f_operation, f_args) -> NodeKind.BuiltinMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation, args: body_flat_list_expr(f_args, &flat)}
+        .IfExpr(f_cond, f_then_body, f_then_value, f_else_body, f_else_value) -> NodeKind.IfExpr{cond: body_flat_if_cond(f_cond, &flat), then_body: body_flat_list_stmt(f_then_body, &flat), then_value: body_flat_expr(f_then_value, &flat), else_body: body_flat_list_stmt(f_else_body, &flat), else_value: body_flat_expr(f_else_value, &flat)}
+        .ResultHandler(f_subject, f_ok_pattern, f_ok_body, f_ok_value, f_err_pattern, f_err_body, f_err_value, f_terminal) -> NodeKind.ResultHandler{subject: body_flat_expr(f_subject, &flat), ok_pattern: body_flat_pattern(f_ok_pattern, &flat), ok_body: body_flat_list_stmt(f_ok_body, &flat), ok_value: body_flat_expr(f_ok_value, &flat), err_pattern: body_flat_pattern(f_err_pattern, &flat), err_body: body_flat_list_stmt(f_err_body, &flat), err_value: body_flat_expr(f_err_value, &flat), terminal: body_flat_expr(f_terminal, &flat)}
+        .RawOf(f_value) -> NodeKind.RawOf{value: body_flat_expr(f_value, &flat)}
+        .DistinctRaw(f_value) -> NodeKind.DistinctRaw{value: body_flat_expr(f_value, &flat)}
+        .Present(f_value) -> NodeKind.Present{value: body_flat_expr(f_value, &flat)}
         .Absent -> NodeKind.Absent
-        .Ok(f_value) -> NodeKind.Ok{value: body_flat_expr(f_value, &tree)}
-        .Err(f_value) -> NodeKind.Err{value: body_flat_expr(f_value, &tree)}
-        .OrFallback(f_value, f_fallback, f_ambient_err) -> NodeKind.OrFallback{value: body_flat_expr(f_value, &tree), fallback: body_flat_or_fallback(f_fallback, &tree), ambient_err: f_ambient_err}
-        .OptField(f_base, f_member, f_flatten) -> NodeKind.OptField{base: body_flat_expr(f_base, &tree), member: f_member, flatten: f_flatten}
-        .OptMethodCall(f_base, f_binding, f_call, f_flatten) -> NodeKind.OptMethodCall{base: body_flat_expr(f_base, &tree), binding: f_binding, call: body_flat_expr(f_call, &tree), flatten: f_flatten}
-        .PatternMatches(f_subject, f_pattern) -> NodeKind.PatternMatches{subject: body_flat_expr(f_subject, &tree), pattern: body_flat_pattern(f_pattern, &tree)}
-        .OptionLift2(f_function, f_left, f_right) -> NodeKind.OptionLift2{function: body_flat_expr(f_function, &tree), left: body_flat_expr(f_left, &tree), right: body_flat_expr(f_right, &tree)}
-        .ClosureMethod(f_receiver, f_operation, f_args) -> NodeKind.ClosureMethod{receiver: body_flat_expr(f_receiver, &tree), operation: f_operation, args: body_flat_list_expr(f_args, &tree)}
-        .HostBorrowCallback(f_callable, f_params) -> NodeKind.HostBorrowCallback{callable: body_flat_expr(f_callable, &tree), params: f_params}
-        .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_flat_expr(f_receiver, &tree), operation: f_operation}
-        .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_flat_expr(f_receiver, &tree), operation: f_operation, argument: body_flat_expr(f_argument, &tree)}
-        .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_flat_expr(f_lhs, &tree), rhs: body_flat_expr(f_rhs, &tree)}
-        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_flat_expr(f_receiver, &tree), operation: body_flat_handle_op(f_operation, &tree), args: body_flat_list_expr(f_args, &tree)}
-        .CoreClosureCall(f_kind) -> NodeKind.CoreClosureCall{kind: body_flat_core_closure_kind(f_kind, &tree)}
-        .TaskGroupAll(f_tasks) -> NodeKind.TaskGroupAll{tasks: body_flat_expr(f_tasks, &tree)}
-        .TaskGroupRace(f_tasks) -> NodeKind.TaskGroupRace{tasks: body_flat_expr(f_tasks, &tree)}
-        .TaskGroupAny(f_tasks) -> NodeKind.TaskGroupAny{tasks: body_flat_expr(f_tasks, &tree)}
-        .SelectStart -> NodeKind.SelectStart
-        .SelectRecv(f_builder, f_channel) -> NodeKind.SelectRecv{builder: body_flat_expr(f_builder, &tree), channel: body_flat_expr(f_channel, &tree)}
-        .SelectAfter(f_builder, f_duration, f_value) -> NodeKind.SelectAfter{builder: body_flat_expr(f_builder, &tree), duration: body_flat_expr(f_duration, &tree), value: body_flat_opt_expr(f_value, &tree)}
-        .SelectWait(f_builder, f_nonblocking) -> NodeKind.SelectWait{builder: body_flat_expr(f_builder, &tree), nonblocking: f_nonblocking}
-        .FnValue(f_kind) -> NodeKind.FnValue{kind: body_flat_fn_value_kind(f_kind, &tree)}
-        .Never(f_reason) -> NodeKind.Never{reason: f_reason}
+        .Ok(f_value) -> NodeKind.Ok{value: body_flat_expr(f_value, &flat)}
+        .Err(f_value) -> NodeKind.Err{value: body_flat_expr(f_value, &flat)}
+        .OrFallback(f_value, f_fallback, f_ambient_err) -> NodeKind.OrFallback{value: body_flat_expr(f_value, &flat), fallback: body_flat_or_fallback(f_fallback, &flat), ambient_err: f_ambient_err}
+        .OptField(f_base, f_member, f_flatten) -> NodeKind.OptField{base: body_flat_expr(f_base, &flat), member: f_member, flatten: f_flatten}
+        .OptMethodCall(f_base, f_binding, f_call, f_flatten) -> NodeKind.OptMethodCall{base: body_flat_expr(f_base, &flat), binding: f_binding, call: body_flat_expr(f_call, &flat), flatten: f_flatten}
+        .PatternMatches(f_subject, f_pattern) -> NodeKind.PatternMatches{subject: body_flat_expr(f_subject, &flat), pattern: body_flat_pattern(f_pattern, &flat)}
+        .OptionLift2(f_function, f_left, f_right) -> NodeKind.OptionLift2{function: body_flat_expr(f_function, &flat), left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat)}
+        .ClosureMethod(f_receiver, f_operation, f_args) -> NodeKind.ClosureMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation, args: body_flat_list_expr(f_args, &flat)}
+        .HostBorrowCallback(f_callable, f_params) -> NodeKind.HostBorrowCallback{callable: body_flat_expr(f_callable, &flat), params: f_params}
+        .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation}
+        .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_flat_expr(f_receiver, &flat), operation: f_operation, argument: body_flat_expr(f_argument, &flat)}
+        .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_flat_expr(f_lhs, &flat), rhs: body_flat_expr(f_rhs, &flat)}
+        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_flat_expr(f_receiver, &flat), operation: body_flat_handle_op(f_operation, &flat), args: body_flat_list_expr(f_args, &flat)}
+        .CoreClosureCall(f_kind) -> NodeKind.CoreClosureCall{kind: body_flat_core_closure_kind(f_kind, &flat)}
+        .TaskGroupAll(f_tasks) -> NodeKind.TaskGroupAll{tasks: body_flat_expr(f_tasks, &flat)}
+        .TaskGroupRace(f_tasks) -> NodeKind.TaskGroupRace{tasks: body_flat_expr(f_tasks, &flat)}
+        .TaskGroupAny(f_tasks) -> NodeKind.TaskGroupAny{tasks: body_flat_expr(f_tasks, &flat)}
+        .SelectRecv(f_builder, f_channel) -> NodeKind.SelectRecv{builder: body_flat_expr(f_builder, &flat), channel: body_flat_expr(f_channel, &flat)}
+        .SelectAfter(f_builder, f_duration, f_value) -> NodeKind.SelectAfter{builder: body_flat_expr(f_builder, &flat), duration: body_flat_expr(f_duration, &flat), value: body_flat_opt_expr(f_value, &flat)}
+        .SelectWait(f_builder, f_nonblocking) -> NodeKind.SelectWait{builder: body_flat_expr(f_builder, &flat), nonblocking: f_nonblocking}
+        .FnValue(f_kind) -> NodeKind.FnValue{kind: body_flat_fn_value_kind(f_kind, &flat)}
+        // body_flat_expr files a Flat node before it asks for its kind.
+        .Flat(_) -> panic("body_flat_expr_kind: a Flat node is an arena row, not a checker kind")
     }
 }
 
-fn body_flat_struct_field_value(value: TStructFieldValue, tree: &BodyTree) -> BodyStructFieldValue Never! {
+fn body_flat_struct_field_value(value: TStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
     BodyStructFieldValue{
         field: value.field,
-        value: body_flat_expr(value.value, &tree),
+        value: body_flat_expr(value.value, &flat),
         boxed: value.boxed,
     }
 }
 
-fn body_flat_map_entry(value: TMapEntry, tree: &BodyTree) -> BodyMapEntry Never! {
+fn body_flat_map_entry(value: TMapEntry, flat: &BodyFlat) -> BodyMapEntry Never! {
     BodyMapEntry{
-        key: body_flat_expr(value.key, &tree),
-        value: body_flat_expr(value.value, &tree),
+        key: body_flat_expr(value.key, &flat),
+        value: body_flat_expr(value.value, &flat),
     }
 }
 
-fn body_flat_list_spread_part(value: TListSpreadPart, tree: &BodyTree) -> BodyListSpreadPart Never! {
+fn body_flat_list_spread_part(value: TListSpreadPart, flat: &BodyFlat) -> BodyListSpreadPart Never! {
     if value == {
-        .Element(f_value) -> BodyListSpreadPart.Element{value: body_flat_expr(f_value, &tree)}
-        .Spread(f_value) -> BodyListSpreadPart.Spread{value: body_flat_expr(f_value, &tree)}
+        .Element(f_value) -> BodyListSpreadPart.Element{value: body_flat_expr(f_value, &flat)}
+        .Spread(f_value) -> BodyListSpreadPart.Spread{value: body_flat_expr(f_value, &flat)}
     }
 }
 
-fn body_flat_scope_member_kind(value: TScopeMemberKind, tree: &BodyTree) -> BodyScopeMemberKind Never! {
+fn body_flat_scope_member_kind(value: TScopeMemberKind, flat: &BodyFlat) -> BodyScopeMemberKind Never! {
     if value == {
         .Setup -> BodyScopeMemberKind.Setup
         .ExpectFail(f_code, f_message) -> BodyScopeMemberKind.ExpectFail{code: f_code, message: f_message}
-        .Timeout(f_duration) -> BodyScopeMemberKind.Timeout{duration: body_flat_expr(f_duration, &tree)}
+        .Timeout(f_duration) -> BodyScopeMemberKind.Timeout{duration: body_flat_expr(f_duration, &flat)}
         .Measure -> BodyScopeMemberKind.Measure
         .Skip -> BodyScopeMemberKind.Skip
     }
 }
 
-fn body_flat_or_fallback(value: TOrFallback, tree: &BodyTree) -> BodyOrFallback Never! {
+fn body_flat_or_fallback(value: TOrFallback, flat: &BodyFlat) -> BodyOrFallback Never! {
     if value == {
-        .Value(f_value) -> BodyOrFallback.Value{value: body_flat_expr(f_value, &tree)}
-        .Return(f_value) -> BodyOrFallback.Return{value: body_flat_opt_expr(f_value, &tree)}
-        .Panic(f_message, f_location) -> BodyOrFallback.Panic{message: body_flat_expr(f_message, &tree), location: f_location}
+        .Value(f_value) -> BodyOrFallback.Value{value: body_flat_expr(f_value, &flat)}
+        .Return(f_value) -> BodyOrFallback.Return{value: body_flat_opt_expr(f_value, &flat)}
+        .Panic(f_message, f_location) -> BodyOrFallback.Panic{message: body_flat_expr(f_message, &flat), location: f_location}
         .Break -> BodyOrFallback.Break
         .Continue -> BodyOrFallback.Continue
         .BreakLabel(f_label) -> BodyOrFallback.BreakLabel{label: f_label}
@@ -484,46 +542,46 @@ fn body_flat_or_fallback(value: TOrFallback, tree: &BodyTree) -> BodyOrFallback 
     }
 }
 
-fn body_flat_host_call(value: THostCall, tree: &BodyTree) -> BodyHostCall Never! {
+fn body_flat_host_call(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never! {
     if value == {
-        .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_flat_expr(f_receiver, &tree), method: f_method, args: body_flat_list_expr(f_args, &tree)}
-        .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_flat_expr(f_receiver, &tree), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
-        .TypedText(f_kind, f_argument) -> BodyHostCall.TypedText{kind: f_kind, argument: body_flat_expr(f_argument, &tree)}
-        .OptionProbe(f_inner, f_kind) -> BodyHostCall.OptionProbe{inner: body_flat_expr(f_inner, &tree), kind: f_kind}
-        .TupleIndex(f_base, f_index) -> BodyHostCall.TupleIndex{base: body_flat_expr(f_base, &tree), index: f_index}
+        .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_flat_expr(f_receiver, &flat), method: f_method, args: body_flat_list_expr(f_args, &flat)}
+        .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_flat_expr(f_receiver, &flat), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
+        .TypedText(f_kind, f_argument) -> BodyHostCall.TypedText{kind: f_kind, argument: body_flat_expr(f_argument, &flat)}
+        .OptionProbe(f_inner, f_kind) -> BodyHostCall.OptionProbe{inner: body_flat_expr(f_inner, &flat), kind: f_kind}
+        .TupleIndex(f_base, f_index) -> BodyHostCall.TupleIndex{base: body_flat_expr(f_base, &flat), index: f_index}
         .SwitchSubjectValue -> BodyHostCall.SwitchSubjectValue
-        .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_flat_expr(f_value, &tree)}
-        .TypedTextInterp(f_kind, f_literals, f_holes, f_trusted_html) -> BodyHostCall.TypedTextInterp{kind: f_kind, literals: f_literals, holes: body_flat_list_expr(f_holes, &tree), trusted_html: f_trusted_html}
+        .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_flat_expr(f_value, &flat)}
+        .TypedTextInterp(f_kind, f_literals, f_holes, f_trusted_html) -> BodyHostCall.TypedTextInterp{kind: f_kind, literals: f_literals, holes: body_flat_list_expr(f_holes, &flat), trusted_html: f_trusted_html}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
     }
 }
 
-fn body_flat_core_closure_kind(value: TCoreClosureKind, tree: &BodyTree) -> BodyCoreClosureKind Never! {
+fn body_flat_core_closure_kind(value: TCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
     if value == {
-        .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_flat_opt_expr(f_group, &tree), site: f_site, label: f_label, executable: body_flat_lambda(f_executable, &tree)}
-        .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_flat_expr(f_rate, &tree), frames: body_flat_expr(f_frames, &tree), executable: body_flat_lambda(f_executable, &tree)}
-        .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_flat_lambda(f_executable, &tree)}
-        .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, &tree)}
-        .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, &tree)}
-        .UIButtonOnClick(f_label, f_shortcut, f_accessible_label, f_executable) -> BodyCoreClosureKind.UIButtonOnClick{label: body_flat_expr(f_label, &tree), shortcut: body_flat_expr(f_shortcut, &tree), accessible_label: body_flat_expr(f_accessible_label, &tree), executable: body_flat_lambda(f_executable, &tree)}
-        .UITextInputOnDrop(f_state, f_ime, f_executable) -> BodyCoreClosureKind.UITextInputOnDrop{state: body_flat_expr(f_state, &tree), ime: body_flat_expr(f_ime, &tree), executable: body_flat_lambda(f_executable, &tree)}
-        .ReactiveDerived(f_executable) -> BodyCoreClosureKind.ReactiveDerived{executable: body_flat_lambda(f_executable, &tree)}
-        .ReactiveEffect(f_executable) -> BodyCoreClosureKind.ReactiveEffect{executable: body_flat_lambda(f_executable, &tree)}
-        .UIReactiveRender(f_executable) -> BodyCoreClosureKind.UIReactiveRender{executable: body_flat_lambda(f_executable, &tree)}
+        .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_flat_opt_expr(f_group, &flat), site: f_site, label: f_label, executable: body_flat_lambda(f_executable, &flat)}
+        .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_flat_expr(f_rate, &flat), frames: body_flat_expr(f_frames, &flat), executable: body_flat_lambda(f_executable, &flat)}
+        .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_flat_lambda(f_executable, &flat)}
+        .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, &flat)}
+        .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, &flat)}
+        .UIButtonOnClick(f_label, f_shortcut, f_accessible_label, f_executable) -> BodyCoreClosureKind.UIButtonOnClick{label: body_flat_expr(f_label, &flat), shortcut: body_flat_expr(f_shortcut, &flat), accessible_label: body_flat_expr(f_accessible_label, &flat), executable: body_flat_lambda(f_executable, &flat)}
+        .UITextInputOnDrop(f_state, f_ime, f_executable) -> BodyCoreClosureKind.UITextInputOnDrop{state: body_flat_expr(f_state, &flat), ime: body_flat_expr(f_ime, &flat), executable: body_flat_lambda(f_executable, &flat)}
+        .ReactiveDerived(f_executable) -> BodyCoreClosureKind.ReactiveDerived{executable: body_flat_lambda(f_executable, &flat)}
+        .ReactiveEffect(f_executable) -> BodyCoreClosureKind.ReactiveEffect{executable: body_flat_lambda(f_executable, &flat)}
+        .UIReactiveRender(f_executable) -> BodyCoreClosureKind.UIReactiveRender{executable: body_flat_lambda(f_executable, &flat)}
     }
 }
 
-fn body_flat_fn_value_kind(value: TFnValueKind, tree: &BodyTree) -> BodyFnValueKind Never! {
+fn body_flat_fn_value_kind(value: TFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
     if value == {
-        .NamedFn(f_name, f_lambda) -> BodyFnValueKind.NamedFn{name: f_name, lambda: body_flat_opt_lambda(f_lambda, &tree)}
-        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper_name, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_flat_list_call_arg(f_policy_args, &tree), policy_conventions: f_policy_conventions, wrapper_name: f_wrapper_name, captures: f_captures, callee: body_flat_expr(f_callee, &tree)}
-        .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_flat_expr(f_callee, &tree), args: body_flat_list_call_arg(f_args, &tree)}
-        .Send(f_value) -> BodyFnValueKind.Send{value: body_flat_expr(f_value, &tree)}
+        .NamedFn(f_name, f_lambda) -> BodyFnValueKind.NamedFn{name: f_name, lambda: body_flat_opt_lambda(f_lambda, &flat)}
+        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper_name, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_flat_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper_name: f_wrapper_name, captures: f_captures, callee: body_flat_expr(f_callee, &flat)}
+        .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_flat_expr(f_callee, &flat), args: body_flat_list_call_arg(f_args, &flat)}
+        .Send(f_value) -> BodyFnValueKind.Send{value: body_flat_expr(f_value, &flat)}
     }
 }
 
-fn body_flat_handle_op(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Never! {
+fn body_flat_handle_op(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .Hardware(f_operation) -> BodyHandleOp.Hardware{operation: f_operation}
         .DurationNew(f_unit, f_float) -> BodyHandleOp.DurationNew{unit: f_unit, float: f_float}
@@ -645,11 +703,11 @@ fn body_flat_handle_op(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Never!
         .UDPSocketReceiveDeadline -> BodyHandleOp.UDPSocketReceiveDeadline
         .UDPSocketSendToDeadline -> BodyHandleOp.UDPSocketSendToDeadline
         .UnixListenerAcceptDeadline -> BodyHandleOp.UnixListenerAcceptDeadline
-        else -> body_flat_handle_op_1(value, &tree)
+        else -> body_flat_handle_op_1(value, &flat)
     }
 }
 
-fn body_flat_handle_op_1(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Never! {
+fn body_flat_handle_op_1(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .UnixStreamReadDeadline -> BodyHandleOp.UnixStreamReadDeadline
         .UnixStreamWriteAllDeadline -> BodyHandleOp.UnixStreamWriteAllDeadline
@@ -731,7 +789,7 @@ fn body_flat_handle_op_1(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Neve
         .ChannelDelayMs -> BodyHandleOp.ChannelDelayMs
         .ChannelClose -> BodyHandleOp.ChannelClose
         .SenderSend -> BodyHandleOp.SenderSend
-        .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_flat_expr(f_handler, &tree), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
+        .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_flat_expr(f_handler, &flat), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
         .MathMethod(f_type_name, f_method, f_reduce_op) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method, reduce_op: f_reduce_op}
         .ReactiveGet -> BodyHandleOp.ReactiveGet
         .ReactiveSet -> BodyHandleOp.ReactiveSet
@@ -770,11 +828,11 @@ fn body_flat_handle_op_1(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Neve
         .JSONText -> BodyHandleOp.JSONText
         .JSONBool -> BodyHandleOp.JSONBool
         .JSONFloat -> BodyHandleOp.JSONFloat
-        else -> body_flat_handle_op_2(value, &tree)
+        else -> body_flat_handle_op_2(value, &flat)
     }
 }
 
-fn body_flat_handle_op_2(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Never! {
+fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .JSONToText -> BodyHandleOp.JSONToText
         .JSONEqualUnordered -> BodyHandleOp.JSONEqualUnordered
@@ -853,17 +911,17 @@ fn body_flat_handle_op_2(value: THandleOp, tree: &BodyTree) -> BodyHandleOp Neve
     }
 }
 
-fn body_flat_require_kind(value: TRequireKind, tree: &BodyTree) -> BodyRequireKind Never! {
+fn body_flat_require_kind(value: TRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
-        .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_flat_expr(f_cond, &tree), msg: body_flat_opt_expr(f_msg, &tree)}
-        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &tree), right: body_flat_expr(f_right, &tree)}
-        .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_flat_expr(f_msg, &tree)}
+        .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_flat_expr(f_cond, &flat), msg: body_flat_opt_expr(f_msg, &flat)}
+        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat)}
+        .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_flat_expr(f_msg, &flat)}
     }
 }
 
-fn body_flat_lambda(value: TLambda, tree: &BodyTree) -> BodyLambda Never! {
+fn body_flat_lambda(value: TLambda, flat: &BodyFlat) -> BodyLambda Never! {
     BodyLambda{
-        executable: body_flat_lambda_body(value.executable, &tree),
+        executable: body_flat_lambda_body(value.executable, &flat),
         source_span: value.source_span,
         frame_schedule: value.frame_schedule,
         frame_schedule_derivation: value.frame_schedule_derivation,
@@ -885,14 +943,14 @@ fn body_flat_lambda(value: TLambda, tree: &BodyTree) -> BodyLambda Never! {
     }
 }
 
-fn body_flat_lambda_body(value: TLambdaBody, tree: &BodyTree) -> BodyLambdaBody Never! {
+fn body_flat_lambda_body(value: TLambdaBody, flat: &BodyFlat) -> BodyLambdaBody Never! {
     if value == {
-        .Expr(f_value) -> BodyLambdaBody.Expr{value: body_flat_expr(f_value, &tree)}
-        .Block(f_body) -> BodyLambdaBody.Block{body: body_flat_list_stmt(f_body, &tree)}
+        .Expr(f_value) -> BodyLambdaBody.Expr{value: body_flat_expr(f_value, &flat)}
+        .Block(f_body) -> BodyLambdaBody.Block{body: body_flat_list_stmt(f_body, &flat)}
     }
 }
 
-fn body_flat_parameter(value: TParameter, tree: &BodyTree) -> BodyParameter Never! {
+fn body_flat_parameter(value: TParameter, flat: &BodyFlat) -> BodyParameter Never! {
     BodyParameter{
         local: value.local,
         name: value.name,
@@ -901,158 +959,1004 @@ fn body_flat_parameter(value: TParameter, tree: &BodyTree) -> BodyParameter Neve
         convention: value.convention,
         public_label: value.public_label,
         zone: value.zone,
-        default: body_flat_opt_expr(value.default, &tree),
+        default: body_flat_opt_expr(value.default, &flat),
         variadic: value.variadic,
     }
 }
 
-fn body_flat_place(value: TPlace, tree: &BodyTree) -> BodyPlace Never! {
+fn body_flat_place(value: TPlace, flat: &BodyFlat) -> BodyPlace Never! {
     if value == {
         .Local(f_local) -> BodyPlace.Local{local: f_local}
-        .Expr(f_value) -> BodyPlace.Expr{value: body_flat_expr(f_value, &tree)}
+        .Expr(f_value) -> BodyPlace.Expr{value: body_flat_expr(f_value, &flat)}
     }
 }
 
-fn body_flat_list_parameter(values: [TParameter], tree: &BodyTree) -> [BodyParameter] Never! {
+fn body_flat_list_parameter(values: [TParameter], flat: &BodyFlat) -> [BodyParameter] Never! {
     result := [BodyParameter]{}
-    loop value in values -> &result.push(body_flat_parameter(value, &tree))
+    loop value in values -> &result.push(body_flat_parameter(value, &flat))
     result
 }
 
-fn body_flat_list_stmt(values: [TStmt], tree: &BodyTree) -> [Int] Never! {
+fn body_flat_list_stmt(values: [TStmt], flat: &BodyFlat) -> [Int] Never! {
     result := [Int]{}
-    loop value in values -> &result.push(body_flat_stmt(value, &tree))
+    loop value in values -> &result.push(body_flat_stmt(value, &flat))
     result
 }
 
-fn body_flat_list_enum_arg(values: [TEnumArg], tree: &BodyTree) -> [BodyEnumArg] Never! {
+fn body_flat_list_enum_arg(values: [TEnumArg], flat: &BodyFlat) -> [BodyEnumArg] Never! {
     result := [BodyEnumArg]{}
-    loop value in values -> &result.push(body_flat_enum_arg(value, &tree))
+    loop value in values -> &result.push(body_flat_enum_arg(value, &flat))
     result
 }
 
-fn body_flat_list_named_enum_arg(values: [TNamedEnumArg], tree: &BodyTree) -> [BodyNamedEnumArg] Never! {
+fn body_flat_list_named_enum_arg(values: [TNamedEnumArg], flat: &BodyFlat) -> [BodyNamedEnumArg] Never! {
     result := [BodyNamedEnumArg]{}
-    loop value in values -> &result.push(body_flat_named_enum_arg(value, &tree))
+    loop value in values -> &result.push(body_flat_named_enum_arg(value, &flat))
     result
 }
 
-fn body_flat_list_pattern_binding(values: [TPatternBinding], tree: &BodyTree) -> [BodyPatternBinding] Never! {
+fn body_flat_list_pattern_binding(values: [TPatternBinding], flat: &BodyFlat) -> [BodyPatternBinding] Never! {
     result := [BodyPatternBinding]{}
-    loop value in values -> &result.push(body_flat_pattern_binding(value, &tree))
+    loop value in values -> &result.push(body_flat_pattern_binding(value, &flat))
     result
 }
 
-fn body_flat_opt_nested_pattern(value: TNestedPattern?, tree: &BodyTree) -> BodyNestedPattern? Never! {
-    if value == .Val(inner) -> return Val(body_flat_nested_pattern(inner, &tree))
+fn body_flat_opt_nested_pattern(value: TNestedPattern?, flat: &BodyFlat) -> BodyNestedPattern? Never! {
+    if value == .Val(inner) -> return Val(body_flat_nested_pattern(inner, &flat))
     None
 }
 
-fn body_flat_list_pattern_shape(values: [TPatternShape], tree: &BodyTree) -> [BodyPatternShape] Never! {
+fn body_flat_list_pattern_shape(values: [TPatternShape], flat: &BodyFlat) -> [BodyPatternShape] Never! {
     result := [BodyPatternShape]{}
-    loop value in values -> &result.push(body_flat_pattern_shape(value, &tree))
+    loop value in values -> &result.push(body_flat_pattern_shape(value, &flat))
     result
 }
 
-fn body_flat_list_pattern_field(values: [TPatternField], tree: &BodyTree) -> [BodyPatternField] Never! {
+fn body_flat_list_pattern_field(values: [TPatternField], flat: &BodyFlat) -> [BodyPatternField] Never! {
     result := [BodyPatternField]{}
-    loop value in values -> &result.push(body_flat_pattern_field(value, &tree))
+    loop value in values -> &result.push(body_flat_pattern_field(value, &flat))
     result
 }
 
-fn body_flat_list_map_pattern_entry(values: [TMapPatternEntry], tree: &BodyTree) -> [BodyMapPatternEntry] Never! {
+fn body_flat_list_map_pattern_entry(values: [TMapPatternEntry], flat: &BodyFlat) -> [BodyMapPatternEntry] Never! {
     result := [BodyMapPatternEntry]{}
-    loop value in values -> &result.push(body_flat_map_pattern_entry(value, &tree))
+    loop value in values -> &result.push(body_flat_map_pattern_entry(value, &flat))
     result
 }
 
-fn body_flat_list_contract(values: [TContract], tree: &BodyTree) -> [BodyContract] Never! {
+fn body_flat_list_contract(values: [TContract], flat: &BodyFlat) -> [BodyContract] Never! {
     result := [BodyContract]{}
-    loop value in values -> &result.push(body_flat_contract(value, &tree))
+    loop value in values -> &result.push(body_flat_contract(value, &flat))
     result
 }
 
-fn body_flat_opt_stmt(value: TStmt?, tree: &BodyTree) -> Int? Never! {
-    if value == .Val(inner) -> return Val(body_flat_stmt(inner, &tree))
+fn body_flat_opt_stmt(value: TStmt?, flat: &BodyFlat) -> Int? Never! {
+    if value == .Val(inner) -> return Val(body_flat_stmt(inner, &flat))
     None
 }
 
-fn body_flat_opt_expr(value: TExpr?, tree: &BodyTree) -> Int? Never! {
-    if value == .Val(inner) -> return Val(body_flat_expr(inner, &tree))
+fn body_flat_opt_expr(value: TExpr?, flat: &BodyFlat) -> Int? Never! {
+    if value == .Val(inner) -> return Val(body_flat_expr(inner, &flat))
     None
 }
 
-fn body_flat_opt_unit_rounding(value: TUnitRounding?, tree: &BodyTree) -> BodyUnitRounding? Never! {
-    if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_flat_expr(inner.digits, &tree)})
+fn body_flat_opt_unit_rounding(value: TUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
+    if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_flat_expr(inner.digits, &flat)})
     None
 }
 
-fn body_flat_opt_list_stmt(value: [TStmt]?, tree: &BodyTree) -> [Int]? Never! {
-    if value == .Val(inner) -> return Val(body_flat_list_stmt(inner, &tree))
+fn body_flat_opt_list_stmt(value: [TStmt]?, flat: &BodyFlat) -> [Int]? Never! {
+    if value == .Val(inner) -> return Val(body_flat_list_stmt(inner, &flat))
     None
 }
 
-fn body_flat_list_match_arm(values: [TMatchArm], tree: &BodyTree) -> [BodyMatchArm] Never! {
+fn body_flat_list_match_arm(values: [TMatchArm], flat: &BodyFlat) -> [BodyMatchArm] Never! {
     result := [BodyMatchArm]{}
-    loop value in values -> &result.push(body_flat_match_arm(value, &tree))
+    loop value in values -> &result.push(body_flat_match_arm(value, &flat))
     result
 }
 
-fn body_flat_list_range_arm(values: [TRangeArm], tree: &BodyTree) -> [BodyRangeArm] Never! {
+fn body_flat_list_range_arm(values: [TRangeArm], flat: &BodyFlat) -> [BodyRangeArm] Never! {
     result := [BodyRangeArm]{}
-    loop value in values -> &result.push(body_flat_range_arm(value, &tree))
+    loop value in values -> &result.push(body_flat_range_arm(value, &flat))
     result
 }
 
-fn body_flat_list_mixed_arm(values: [TMixedArm], tree: &BodyTree) -> [BodyMixedArm] Never! {
+fn body_flat_list_mixed_arm(values: [TMixedArm], flat: &BodyFlat) -> [BodyMixedArm] Never! {
     result := [BodyMixedArm]{}
-    loop value in values -> &result.push(body_flat_mixed_arm(value, &tree))
+    loop value in values -> &result.push(body_flat_mixed_arm(value, &flat))
     result
 }
 
-fn body_flat_list_context_guard(values: [TContextGuard], tree: &BodyTree) -> [BodyContextGuard] Never! {
+fn body_flat_list_context_guard(values: [TContextGuard], flat: &BodyFlat) -> [BodyContextGuard] Never! {
     result := [BodyContextGuard]{}
-    loop value in values -> &result.push(body_flat_context_guard(value, &tree))
+    loop value in values -> &result.push(body_flat_context_guard(value, &flat))
     result
 }
 
-fn body_flat_list_str_part(values: [TStrPart], tree: &BodyTree) -> [BodyStrPart] Never! {
+fn body_flat_list_str_part(values: [TStrPart], flat: &BodyFlat) -> [BodyStrPart] Never! {
     result := [BodyStrPart]{}
-    loop value in values -> &result.push(body_flat_str_part(value, &tree))
+    loop value in values -> &result.push(body_flat_str_part(value, &flat))
     result
 }
 
-fn body_flat_list_call_arg(values: [TCallArg], tree: &BodyTree) -> [BodyCallArg] Never! {
+fn body_flat_list_call_arg(values: [TCallArg], flat: &BodyFlat) -> [BodyCallArg] Never! {
     result := [BodyCallArg]{}
-    loop value in values -> &result.push(body_flat_call_arg(value, &tree))
+    loop value in values -> &result.push(body_flat_call_arg(value, &flat))
     result
 }
 
-fn body_flat_list_expr(values: [TExpr], tree: &BodyTree) -> [Int] Never! {
+fn body_flat_list_expr(values: [TExpr], flat: &BodyFlat) -> [Int] Never! {
     result := [Int]{}
-    loop value in values -> &result.push(body_flat_expr(value, &tree))
+    loop value in values -> &result.push(body_flat_expr(value, &flat))
     result
 }
 
-fn body_flat_list_struct_field_value(values: [TStructFieldValue], tree: &BodyTree) -> [BodyStructFieldValue] Never! {
+fn body_flat_list_struct_field_value(values: [TStructFieldValue], flat: &BodyFlat) -> [BodyStructFieldValue] Never! {
     result := [BodyStructFieldValue]{}
-    loop value in values -> &result.push(body_flat_struct_field_value(value, &tree))
+    loop value in values -> &result.push(body_flat_struct_field_value(value, &flat))
     result
 }
 
-fn body_flat_list_map_entry(values: [TMapEntry], tree: &BodyTree) -> [BodyMapEntry] Never! {
+fn body_flat_list_map_entry(values: [TMapEntry], flat: &BodyFlat) -> [BodyMapEntry] Never! {
     result := [BodyMapEntry]{}
-    loop value in values -> &result.push(body_flat_map_entry(value, &tree))
+    loop value in values -> &result.push(body_flat_map_entry(value, &flat))
     result
 }
 
-fn body_flat_list_list_spread_part(values: [TListSpreadPart], tree: &BodyTree) -> [BodyListSpreadPart] Never! {
+fn body_flat_list_list_spread_part(values: [TListSpreadPart], flat: &BodyFlat) -> [BodyListSpreadPart] Never! {
     result := [BodyListSpreadPart]{}
-    loop value in values -> &result.push(body_flat_list_spread_part(value, &tree))
+    loop value in values -> &result.push(body_flat_list_spread_part(value, &flat))
     result
 }
 
-fn body_flat_opt_lambda(value: TLambda?, tree: &BodyTree) -> BodyLambda? Never! {
-    if value == .Val(inner) -> return Val(body_flat_lambda(inner, &tree))
+fn body_flat_opt_lambda(value: TLambda?, flat: &BodyFlat) -> BodyLambda? Never! {
+    if value == .Val(inner) -> return Val(body_flat_lambda(inner, &flat))
+    None
+}
+
+// The arena copier: a Body value whose expression children are arena row
+// indices, rewritten with its children copied into the output tree (body_copy_expr).
+fn body_copy_str_part(value: BodyStrPart, flat: &BodyFlat) -> BodyStrPart Never! {
+    if value == {
+        .Literal(f_text) -> BodyStrPart.Literal{text: f_text}
+        .Interpolation(f_value, f_format) -> BodyStrPart.Interpolation{value: body_copy_expr(f_value, &flat), format: f_format}
+    }
+}
+
+fn body_copy_call_arg(value: BodyCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
+    BodyCallArg{
+        value: body_copy_expr(value.value, &flat),
+        template_items: value.template_items,
+        borrow: value.borrow,
+        mut_borrow: value.mut_borrow,
+        fn_coerce: value.fn_coerce,
+        widen_to_vec: value.widen_to_vec,
+        widen_to_union: value.widen_to_union,
+        box_as_trait: value.box_as_trait,
+        label: value.label,
+        spread: value.spread,
+    }
+}
+
+fn body_copy_enum_arg(value: BodyEnumArg, flat: &BodyFlat) -> BodyEnumArg Never! {
+    BodyEnumArg{
+        value: body_copy_expr(value.value, &flat),
+    }
+}
+
+fn body_copy_enum_payload(value: BodyEnumPayload, flat: &BodyFlat) -> BodyEnumPayload Never! {
+    if value == {
+        .Unit -> BodyEnumPayload.Unit
+        .Positional(f_args) -> BodyEnumPayload.Positional{args: body_copy_list_enum_arg(f_args, &flat)}
+        .Named(f_fields) -> BodyEnumPayload.Named{fields: body_copy_list_named_enum_arg(f_fields, &flat)}
+    }
+}
+
+fn body_copy_named_enum_arg(value: BodyNamedEnumArg, flat: &BodyFlat) -> BodyNamedEnumArg Never! {
+    BodyNamedEnumArg{
+        name: value.name,
+        value: body_copy_enum_arg(value.value, &flat),
+    }
+}
+
+fn body_copy_pattern_shape(value: BodyPatternShape, flat: &BodyFlat) -> BodyPatternShape Never! {
+    if value == {
+        .Variant(f_variant, f_bindings, f_leading_dot, f_span) -> BodyPatternShape.Variant{variant: f_variant, bindings: body_copy_list_pattern_binding(f_bindings, &flat), leading_dot: f_leading_dot, span: f_span}
+        .Present(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Present{binding: f_binding, binding_span: f_binding_span, inner: body_copy_opt_nested_pattern(f_inner, &flat), span: f_span}
+        .Absent(f_span) -> BodyPatternShape.Absent{span: f_span}
+        .Ok(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Ok{binding: f_binding, binding_span: f_binding_span, inner: body_copy_opt_nested_pattern(f_inner, &flat), span: f_span}
+        .Err(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Err{binding: f_binding, binding_span: f_binding_span, inner: body_copy_opt_nested_pattern(f_inner, &flat), span: f_span}
+        .Range(f_lo, f_hi, f_span) -> BodyPatternShape.Range{lo: f_lo, hi: f_hi, span: f_span}
+        .Or(f_alternatives, f_span) -> BodyPatternShape.Or{alternatives: body_copy_list_pattern_shape(f_alternatives, &flat), span: f_span}
+        .Struct(f_fields, f_span) -> BodyPatternShape.Struct{fields: body_copy_list_pattern_field(f_fields, &flat), span: f_span}
+        .List(f_items, f_rest, f_span) -> BodyPatternShape.List{items: body_copy_list_pattern_binding(f_items, &flat), rest: f_rest, span: f_span}
+        .Map(f_entries, f_rest, f_span) -> BodyPatternShape.Map{entries: body_copy_list_map_pattern_entry(f_entries, &flat), rest: f_rest, span: f_span}
+        .Text(f_parts, f_span) -> BodyPatternShape.Text{parts: f_parts, span: f_span}
+        .Binary(f_parts, f_span) -> BodyPatternShape.Binary{parts: f_parts, span: f_span}
+    }
+}
+
+fn body_copy_nested_pattern(value: BodyNestedPattern, flat: &BodyFlat) -> BodyNestedPattern Never! {
+    BodyNestedPattern{
+        shape: body_copy_pattern_shape(value.shape, &flat),
+        enum_type: value.enum_type,
+    }
+}
+
+fn body_copy_pattern(value: BodyPattern, flat: &BodyFlat) -> BodyPattern Never! {
+    BodyPattern{
+        shape: body_copy_pattern_shape(value.shape, &flat),
+        bindings: value.bindings,
+        enum_type: value.enum_type,
+        position: value.position,
+        mutable: value.mutable,
+        boxed: value.boxed,
+    }
+}
+
+fn body_copy_pattern_binding(value: BodyPatternBinding, flat: &BodyFlat) -> BodyPatternBinding Never! {
+    if value == {
+        .Wildcard -> BodyPatternBinding.Wildcard
+        .Bind(f_name, f_span) -> BodyPatternBinding.Bind{name: f_name, span: f_span}
+        .Range(f_lo, f_hi) -> BodyPatternBinding.Range{lo: f_lo, hi: f_hi}
+        .Nested(f_pattern) -> BodyPatternBinding.Nested{pattern: body_copy_nested_pattern(f_pattern, &flat)}
+        .Value(f_value) -> BodyPatternBinding.Value{value: body_copy_expr(f_value, &flat)}
+    }
+}
+
+fn body_copy_pattern_field(value: BodyPatternField, flat: &BodyFlat) -> BodyPatternField Never! {
+    if value == {
+        .Bind(f_field, f_local, f_span) -> BodyPatternField.Bind{field: f_field, local: f_local, span: f_span}
+        .Value(f_field, f_value, f_span) -> BodyPatternField.Value{field: f_field, value: body_copy_expr(f_value, &flat), span: f_span}
+        .Nested(f_field, f_pattern, f_span) -> BodyPatternField.Nested{field: f_field, pattern: body_copy_nested_pattern(f_pattern, &flat), span: f_span}
+    }
+}
+
+fn body_copy_map_pattern_entry(value: BodyMapPatternEntry, flat: &BodyFlat) -> BodyMapPatternEntry Never! {
+    BodyMapPatternEntry{
+        key: body_copy_expr(value.key, &flat),
+        optional: value.optional,
+        slot: body_copy_pattern_binding(value.slot, &flat),
+        span: value.span,
+    }
+}
+
+fn body_copy_match_arm(value: BodyMatchArm, flat: &BodyFlat) -> BodyMatchArm Never! {
+    BodyMatchArm{
+        pattern: body_copy_pattern(value.pattern, &flat),
+        body: body_copy_list_stmt(value.body, &flat),
+    }
+}
+
+fn body_copy_if_cond(value: BodyIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
+    if value == {
+        .Plain(f_value) -> BodyIfCond.Plain{value: body_copy_expr(f_value, &flat)}
+        .And(f_left, f_right) -> BodyIfCond.And{left: body_copy_if_cond(f_left, &flat), right: body_copy_if_cond(f_right, &flat)}
+        .IfLet(f_pattern, f_subj) -> BodyIfCond.IfLet{pattern: body_copy_pattern(f_pattern, &flat), subj: body_copy_expr(f_subj, &flat)}
+    }
+}
+
+fn body_copy_contract(value: BodyContract, flat: &BodyFlat) -> BodyContract Never! {
+    BodyContract{
+        kind: value.kind,
+        condition: body_copy_expr(value.condition, &flat),
+        message: body_copy_expr(value.message, &flat),
+        file: value.file,
+        line: value.line,
+        span: value.span,
+        disposition: value.disposition,
+    }
+}
+
+fn body_copy_stmt_kind(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
+    if value == {
+        .Contract(f_contract) -> StmtKind.Contract{contract: body_copy_contract(f_contract, &flat)}
+        .ContractScope(f_pre, f_body, f_post, f_result, f_span) -> StmtKind.ContractScope{pre: body_copy_list_contract(f_pre, &flat), body: body_copy_list_stmt(f_body, &flat), post: body_copy_list_contract(f_post, &flat), result: f_result, span: f_span}
+        .Let(f_local, f_let_ty, f_init, f_gc_promotion, f_gc_transferred, f_span) -> StmtKind.Let{local: f_local, let_ty: f_let_ty, init: body_copy_expr(f_init, &flat), gc_promotion: f_gc_promotion, gc_transferred: f_gc_transferred, span: f_span}
+        .RefutableBind(f_pattern, f_init, f_fallback, f_span) -> StmtKind.RefutableBind{pattern: body_copy_pattern(f_pattern, &flat), init: body_copy_expr(f_init, &flat), fallback: body_copy_list_stmt(f_fallback, &flat), span: f_span}
+        .TupleDestructure(f_temp, f_init, f_move_fields, f_binds, f_span) -> StmtKind.TupleDestructure{temp: f_temp, init: body_copy_expr(f_init, &flat), move_fields: f_move_fields, binds: f_binds, span: f_span}
+        .StructDestructure(f_temp, f_init, f_move_fields, f_binds, f_span) -> StmtKind.StructDestructure{temp: f_temp, init: body_copy_expr(f_init, &flat), move_fields: f_move_fields, binds: f_binds, span: f_span}
+        .ListDestructure(f_temp, f_init, f_count, f_line, f_elements, f_span) -> StmtKind.ListDestructure{temp: f_temp, init: body_copy_expr(f_init, &flat), count: f_count, line: f_line, elements: f_elements, span: f_span}
+        .Assign(f_place, f_op, f_value, f_line, f_span) -> StmtKind.Assign{place: body_copy_place(f_place, &flat), op: f_op, value: body_copy_expr(f_value, &flat), line: f_line, span: f_span}
+        .CountedLoop(f_label, f_init, f_condition, f_step, f_vectorization, f_body, f_span) -> StmtKind.CountedLoop{label: f_label, init: body_copy_stmt(f_init, &flat), condition: body_copy_expr(f_condition, &flat), step: body_copy_opt_stmt(f_step, &flat), vectorization: f_vectorization, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .ForRange(f_label, f_local, f_start, f_end, f_step, f_exclusive, f_body, f_vectorization, f_span) -> StmtKind.ForRange{label: f_label, local: f_local, start: body_copy_expr(f_start, &flat), end: body_copy_expr(f_end, &flat), step: body_copy_opt_expr(f_step, &flat), exclusive: f_exclusive, body: body_copy_list_stmt(f_body, &flat), vectorization: f_vectorization, span: f_span}
+        .Range(f_label, f_variable, f_source, f_start, f_end, f_step, f_exclusive, f_vectorization, f_body, f_span) -> StmtKind.Range{label: f_label, variable: f_variable, source: body_copy_opt_expr(f_source, &flat), start: body_copy_expr(f_start, &flat), end: body_copy_expr(f_end, &flat), step: body_copy_opt_expr(f_step, &flat), exclusive: f_exclusive, vectorization: f_vectorization, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .ExprStmt(f_value, f_span) -> StmtKind.ExprStmt{value: body_copy_expr(f_value, &flat), span: f_span}
+        .Return(f_value, f_span) -> StmtKind.Return{value: body_copy_opt_expr(f_value, &flat), span: f_span}
+        .TaskGroup(f_group, f_limit, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, limit: body_copy_opt_expr(f_limit, &flat), body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .DeferClose(f_close, f_resource, f_span) -> StmtKind.DeferClose{close: body_copy_expr(f_close, &flat), resource: f_resource, span: f_span}
+        .If(f_condition, f_then_body, f_else_body, f_else_is_elseif, f_span) -> StmtKind.If{condition: body_copy_if_cond(f_condition, &flat), then_body: body_copy_list_stmt(f_then_body, &flat), else_body: body_copy_opt_list_stmt(f_else_body, &flat), else_is_elseif: f_else_is_elseif, span: f_span}
+        .Loop(f_label, f_body, f_span) -> StmtKind.Loop{label: f_label, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .While(f_label, f_condition, f_body, f_span) -> StmtKind.While{label: f_label, condition: body_copy_expr(f_condition, &flat), body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Break(f_label, f_span) -> StmtKind.Break{label: f_label, span: f_span}
+        .BreakValue(f_label, f_value, f_span) -> StmtKind.BreakValue{label: f_label, value: body_copy_expr(f_value, &flat), span: f_span}
+        .Continue(f_label, f_span) -> StmtKind.Continue{label: f_label, span: f_span}
+        .Match(f_subject, f_arms, f_exhaustive, f_span) -> StmtKind.Match{subject: body_copy_expr(f_subject, &flat), arms: body_copy_list_match_arm(f_arms, &flat), exhaustive: f_exhaustive, span: f_span}
+        .EnumMatch(f_scrutinee, f_arms, f_else_body, f_fallthrough, f_span) -> StmtKind.EnumMatch{scrutinee: body_copy_expr(f_scrutinee, &flat), arms: body_copy_list_match_arm(f_arms, &flat), else_body: body_copy_opt_list_stmt(f_else_body, &flat), fallthrough: f_fallthrough, span: f_span}
+        .RangeSwitch(f_subject, f_arms, f_else_body, f_span) -> StmtKind.RangeSwitch{subject: body_copy_expr(f_subject, &flat), arms: body_copy_list_range_arm(f_arms, &flat), else_body: body_copy_list_stmt(f_else_body, &flat), span: f_span}
+        .ForIn(f_label, f_variable, f_variable_two, f_source, f_collection, f_step, f_method_kind, f_columnar, f_by_value, f_source_stable, f_body, f_span) -> StmtKind.ForIn{label: f_label, variable: f_variable, variable_two: f_variable_two, source: body_copy_expr(f_source, &flat), collection: body_copy_expr(f_collection, &flat), step: body_copy_opt_expr(f_step, &flat), method_kind: f_method_kind, columnar: f_columnar, by_value: f_by_value, source_stable: f_source_stable, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Inline(f_body, f_span) -> StmtKind.Inline{body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .DebugOnly(f_body, f_span) -> StmtKind.DebugOnly{body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .MixedSwitch(f_subject, f_class, f_arms, f_else_body, f_span) -> StmtKind.MixedSwitch{subject: body_copy_expr(f_subject, &flat), class: f_class, arms: body_copy_list_mixed_arm(f_arms, &flat), else_body: body_copy_opt_list_stmt(f_else_body, &flat), span: f_span}
+        .Unsafe(f_gate, f_body) -> StmtKind.Unsafe{gate: f_gate, body: body_copy_list_stmt(f_body, &flat)}
+        .UnsafeBlock(f_gate, f_body, f_span) -> StmtKind.UnsafeBlock{gate: f_gate, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .SentryPolicy(f_enabled, f_body, f_span) -> StmtKind.SentryPolicy{enabled: f_enabled, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Impure(f_body, f_span) -> StmtKind.Impure{body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Reactive(f_executable, f_span) -> StmtKind.Reactive{executable: body_copy_lambda(f_executable, &flat), span: f_span}
+        .Region(f_body, f_span) -> StmtKind.Region{body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Layout(f_handle, f_label, f_body, f_span) -> StmtKind.Layout{handle: f_handle, label: f_label, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .ContextBlock(f_guards, f_body, f_span) -> StmtKind.ContextBlock{guards: body_copy_list_context_guard(f_guards, &flat), body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Live(f_body, f_span) -> StmtKind.Live{body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Shield(f_body, f_span) -> StmtKind.Shield{body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .ScopeMember(f_kind, f_body, f_span) -> StmtKind.ScopeMember{kind: body_copy_scope_member_kind(f_kind, &flat), body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .Transact(f_handle, f_snapshots, f_stm, f_body, f_span) -> StmtKind.Transact{handle: f_handle, snapshots: f_snapshots, stm: f_stm, body: body_copy_list_stmt(f_body, &flat), span: f_span}
+        .GCEdit(f_root, f_slot, f_edges, f_replace_all, f_index_temp, f_statement, f_span) -> StmtKind.GCEdit{root: f_root, slot: f_slot, edges: f_edges, replace_all: f_replace_all, index_temp: body_copy_opt_expr(f_index_temp, &flat), statement: body_copy_stmt(f_statement, &flat), span: f_span}
+    }
+}
+
+fn body_copy_range_arm(value: BodyRangeArm, flat: &BodyFlat) -> BodyRangeArm Never! {
+    BodyRangeArm{
+        lo: value.lo,
+        hi: value.hi,
+        body: body_copy_list_stmt(value.body, &flat),
+    }
+}
+
+fn body_copy_mixed_arm(value: BodyMixedArm, flat: &BodyFlat) -> BodyMixedArm Never! {
+    BodyMixedArm{
+        condition: body_copy_expr(value.condition, &flat),
+        body: body_copy_list_stmt(value.body, &flat),
+    }
+}
+
+fn body_copy_context_guard(value: BodyContextGuard, flat: &BodyFlat) -> BodyContextGuard Never! {
+    BodyContextGuard{
+        field: value.field,
+        value: body_copy_expr(value.value, &flat),
+    }
+}
+
+fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
+    if value == {
+        .IntLit(f_value, f_width) -> NodeKind.IntLit{value: f_value, width: f_width}
+        .FloatLit(f_value) -> NodeKind.FloatLit{value: f_value}
+        .BoolLit(f_value) -> NodeKind.BoolLit{value: f_value}
+        .CharLit(f_value) -> NodeKind.CharLit{value: f_value}
+        .StrLit(f_parts) -> NodeKind.StrLit{parts: body_copy_list_str_part(f_parts, &flat)}
+        .Local(f_local) -> NodeKind.Local{local: f_local}
+        .Unit -> NodeKind.Unit
+        .InlineBlock(f_body) -> NodeKind.InlineBlock{body: body_copy_list_stmt(f_body, &flat)}
+        .Uninit -> NodeKind.Uninit
+        .CtLit(f_value) -> NodeKind.CtLit{value: f_value}
+        .ConstRef(f_symbol) -> NodeKind.ConstRef{symbol: f_symbol}
+        .GlobalShared(f_initializer, f_lifetime) -> NodeKind.GlobalShared{initializer: f_initializer, lifetime: f_lifetime}
+        .Call(f_callee, f_type_args, f_args) -> NodeKind.Call{callee: f_callee, type_args: f_type_args, args: body_copy_list_call_arg(f_args, &flat)}
+        .IndirectCall(f_callee, f_type_args, f_args, f_signature) -> NodeKind.IndirectCall{callee: body_copy_expr(f_callee, &flat), type_args: f_type_args, args: body_copy_list_call_arg(f_args, &flat), signature: f_signature}
+        .MethodCall(f_receiver, f_method, f_type_args, f_args) -> NodeKind.MethodCall{receiver: body_copy_expr(f_receiver, &flat), method: f_method, type_args: f_type_args, args: body_copy_list_call_arg(f_args, &flat)}
+        .DistinctCtor(f_argument) -> NodeKind.DistinctCtor{argument: body_copy_expr(f_argument, &flat)}
+        .DistinctConvert(f_owner, f_argument, f_operation, f_range, f_fallible) -> NodeKind.DistinctConvert{owner: f_owner, argument: body_copy_expr(f_argument, &flat), operation: f_operation, range: f_range, fallible: f_fallible}
+        .TraitBox(f_value, f_target) -> NodeKind.TraitBox{value: body_copy_expr(f_value, &flat), target: f_target}
+        .UnitConvert(f_argument, f_scale, f_offset, f_rounding, f_fallible, f_relative_uncertainty, f_file, f_line) -> NodeKind.UnitConvert{argument: body_copy_expr(f_argument, &flat), scale: f_scale, offset: f_offset, rounding: body_copy_opt_unit_rounding(f_rounding, &flat), fallible: f_fallible, relative_uncertainty: f_relative_uncertainty, file: f_file, line: f_line}
+        .MathBuiltin(f_type_name, f_function, f_args) -> NodeKind.MathBuiltin{type_name: f_type_name, function: f_function, args: body_copy_list_expr(f_args, &flat)}
+        .PreciseBuiltin(f_type_name, f_function, f_args) -> NodeKind.PreciseBuiltin{type_name: f_type_name, function: f_function, args: body_copy_list_expr(f_args, &flat)}
+        .Print(f_value) -> NodeKind.Print{value: body_copy_expr(f_value, &flat)}
+        .Drop(f_value) -> NodeKind.Drop{value: body_copy_expr(f_value, &flat)}
+        .Close(f_value) -> NodeKind.Close{value: body_copy_expr(f_value, &flat)}
+        .Move(f_value) -> NodeKind.Move{value: body_copy_expr(f_value, &flat)}
+        .AmbientInput(f_prompt) -> NodeKind.AmbientInput{prompt: body_copy_opt_expr(f_prompt, &flat)}
+        .RequireStop(f_kind, f_location, f_always_stops) -> NodeKind.RequireStop{kind: body_copy_require_kind(f_kind, &flat), location: f_location, always_stops: f_always_stops}
+        .Binary(f_op, f_overflow, f_line, f_lhs, f_rhs) -> NodeKind.Binary{op: f_op, overflow: f_overflow, line: f_line, lhs: body_copy_expr(f_lhs, &flat), rhs: body_copy_expr(f_rhs, &flat)}
+        .CompareChain(f_operands, f_operators, f_hooks) -> NodeKind.CompareChain{operands: body_copy_list_expr(f_operands, &flat), operators: f_operators, hooks: f_hooks}
+        .Unary(f_op, f_operand) -> NodeKind.Unary{op: f_op, operand: body_copy_expr(f_operand, &flat)}
+        .StructLit(f_fields) -> NodeKind.StructLit{fields: body_copy_list_struct_field_value(f_fields, &flat)}
+        .Field(f_receiver, f_field) -> NodeKind.Field{receiver: body_copy_expr(f_receiver, &flat), field: f_field}
+        .Index(f_base, f_index, f_kind, f_access, f_checked_call, f_location) -> NodeKind.Index{base: body_copy_expr(f_base, &flat), index: body_copy_expr(f_index, &flat), kind: f_kind, access: f_access, checked_call: f_checked_call, location: f_location}
+        .Slice(f_base, f_start, f_end, f_range, f_location) -> NodeKind.Slice{base: body_copy_expr(f_base, &flat), start: body_copy_expr(f_start, &flat), end: body_copy_expr(f_end, &flat), range: body_copy_opt_expr(f_range, &flat), location: f_location}
+        .Range(f_start, f_end, f_exclusive) -> NodeKind.Range{start: body_copy_expr(f_start, &flat), end: body_copy_expr(f_end, &flat), exclusive: f_exclusive}
+        .Tuple(f_values) -> NodeKind.Tuple{values: body_copy_list_expr(f_values, &flat)}
+        .List(f_values, f_trait_coercion) -> NodeKind.List{values: body_copy_list_expr(f_values, &flat), trait_coercion: f_trait_coercion}
+        .Map(f_entries) -> NodeKind.Map{entries: body_copy_list_map_entry(f_entries, &flat)}
+        .EnumCtor(f_owner, f_variant, f_payload) -> NodeKind.EnumCtor{owner: f_owner, variant: f_variant, payload: body_copy_enum_payload(f_payload, &flat)}
+        .Try(f_value, f_conversion, f_failure) -> NodeKind.Try{value: body_copy_expr(f_value, &flat), conversion: f_conversion, failure: f_failure}
+        .TryWithContext(f_inner, f_note, f_convert, f_file, f_line, f_function) -> NodeKind.TryWithContext{inner: body_copy_expr(f_inner, &flat), note: body_copy_opt_expr(f_note, &flat), convert: f_convert, file: f_file, line: f_line, function: f_function}
+        .Lambda(f_value) -> NodeKind.Lambda{value: body_copy_lambda(f_value, &flat)}
+        .Borrow(f_place, f_access) -> NodeKind.Borrow{place: body_copy_expr(f_place, &flat), access: f_access}
+        .RawAddressOf(f_place) -> NodeKind.RawAddressOf{place: body_copy_place(f_place, &flat)}
+        .Deref(f_value) -> NodeKind.Deref{value: body_copy_expr(f_value, &flat)}
+        .PtrFromAddr(f_address, f_element) -> NodeKind.PtrFromAddr{address: body_copy_expr(f_address, &flat), element: f_element}
+        .LayoutLiteral(f_value) -> NodeKind.LayoutLiteral{value: body_copy_expr(f_value, &flat)}
+        .LayoutCompare(f_op, f_lhs, f_rhs) -> NodeKind.LayoutCompare{op: f_op, lhs: body_copy_expr(f_lhs, &flat), rhs: body_copy_expr(f_rhs, &flat)}
+        .SharedGuardValue(f_guard) -> NodeKind.SharedGuardValue{guard: body_copy_expr(f_guard, &flat)}
+        .SharedGuardMap(f_guard, f_path, f_editable) -> NodeKind.SharedGuardMap{guard: body_copy_expr(f_guard, &flat), path: f_path, editable: f_editable}
+        .SharedGuardSplit(f_guard, f_first, f_second, f_editable) -> NodeKind.SharedGuardSplit{guard: body_copy_expr(f_guard, &flat), first: f_first, second: f_second, editable: f_editable}
+        .SharedGuardWait(f_guard, f_condition, f_predicate) -> NodeKind.SharedGuardWait{guard: body_copy_expr(f_guard, &flat), condition: body_copy_expr(f_condition, &flat), predicate: body_copy_lambda(f_predicate, &flat)}
+        .ConditionNotify(f_condition, f_all) -> NodeKind.ConditionNotify{condition: body_copy_expr(f_condition, &flat), all: f_all}
+        .CoreCall(f_record, f_args, f_source_span, f_type_args, f_widen_to_vec, f_fallibility) -> NodeKind.CoreCall{record: f_record, args: body_copy_list_expr(f_args, &flat), source_span: f_source_span, type_args: f_type_args, widen_to_vec: f_widen_to_vec, fallibility: f_fallibility}
+        .HostCall(f_call) -> NodeKind.HostCall{call: body_copy_host_call(f_call, &flat)}
+        .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_copy_list_call_arg(f_args, &flat)}
+        .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_copy_enum_payload(f_payload, &flat)}
+        .JSONLit(f_variant, f_arg, f_clone_arg) -> NodeKind.JSONLit{variant: f_variant, arg: body_copy_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
+        .DBValueLit(f_variant, f_arg, f_clone_arg) -> NodeKind.DBValueLit{variant: f_variant, arg: body_copy_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
+        .ListLit(f_values) -> NodeKind.ListLit{values: body_copy_list_expr(f_values, &flat)}
+        .ListSpread(f_parts) -> NodeKind.ListSpread{parts: body_copy_list_list_spread_part(f_parts, &flat)}
+        .MapLit(f_entries) -> NodeKind.MapLit{entries: body_copy_list_map_entry(f_entries, &flat)}
+        .PoolSlot(f_pool, f_id, f_mutable, f_field, f_line, f_source_line) -> NodeKind.PoolSlot{pool: body_copy_expr(f_pool, &flat), id: body_copy_expr(f_id, &flat), mutable: f_mutable, field: f_field, line: f_line, source_line: f_source_line}
+        .MathLaneIndex(f_lane_type, f_base, f_index, f_line) -> NodeKind.MathLaneIndex{lane_type: f_lane_type, base: body_copy_expr(f_base, &flat), index: body_copy_expr(f_index, &flat), line: f_line}
+        .MathSwizzleRead(f_type_name, f_receiver, f_lanes) -> NodeKind.MathSwizzleRead{type_name: f_type_name, receiver: body_copy_expr(f_receiver, &flat), lanes: f_lanes}
+        .Clone(f_value, f_fact) -> NodeKind.Clone{value: body_copy_expr(f_value, &flat), fact: f_fact}
+        .ExplicitCopy(f_value) -> NodeKind.ExplicitCopy{value: body_copy_expr(f_value, &flat)}
+        .MaterializeView(f_value) -> NodeKind.MaterializeView{value: body_copy_expr(f_value, &flat)}
+        .StaticCall(f_owner, f_owner_type, f_method, f_type_args, f_args) -> NodeKind.StaticCall{owner: f_owner, owner_type: f_owner_type, method: f_method, type_args: f_type_args, args: body_copy_list_call_arg(f_args, &flat)}
+        .DecodeUnder(f_segment, f_inner) -> NodeKind.DecodeUnder{segment: body_copy_expr(f_segment, &flat), inner: body_copy_expr(f_inner, &flat)}
+        .BuiltinMethod(f_receiver, f_operation, f_args) -> NodeKind.BuiltinMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation, args: body_copy_list_expr(f_args, &flat)}
+        .IfExpr(f_cond, f_then_body, f_then_value, f_else_body, f_else_value) -> NodeKind.IfExpr{cond: body_copy_if_cond(f_cond, &flat), then_body: body_copy_list_stmt(f_then_body, &flat), then_value: body_copy_expr(f_then_value, &flat), else_body: body_copy_list_stmt(f_else_body, &flat), else_value: body_copy_expr(f_else_value, &flat)}
+        .ResultHandler(f_subject, f_ok_pattern, f_ok_body, f_ok_value, f_err_pattern, f_err_body, f_err_value, f_terminal) -> NodeKind.ResultHandler{subject: body_copy_expr(f_subject, &flat), ok_pattern: body_copy_pattern(f_ok_pattern, &flat), ok_body: body_copy_list_stmt(f_ok_body, &flat), ok_value: body_copy_expr(f_ok_value, &flat), err_pattern: body_copy_pattern(f_err_pattern, &flat), err_body: body_copy_list_stmt(f_err_body, &flat), err_value: body_copy_expr(f_err_value, &flat), terminal: body_copy_expr(f_terminal, &flat)}
+        .RawOf(f_value) -> NodeKind.RawOf{value: body_copy_expr(f_value, &flat)}
+        .InvariantViolation(f_construct, f_span) -> NodeKind.InvariantViolation{construct: f_construct, span: f_span}
+        .DistinctRaw(f_value) -> NodeKind.DistinctRaw{value: body_copy_expr(f_value, &flat)}
+        .Present(f_value) -> NodeKind.Present{value: body_copy_expr(f_value, &flat)}
+        .Absent -> NodeKind.Absent
+        .Ok(f_value) -> NodeKind.Ok{value: body_copy_expr(f_value, &flat)}
+        .Err(f_value) -> NodeKind.Err{value: body_copy_expr(f_value, &flat)}
+        .OrFallback(f_value, f_fallback, f_ambient_err) -> NodeKind.OrFallback{value: body_copy_expr(f_value, &flat), fallback: body_copy_or_fallback(f_fallback, &flat), ambient_err: f_ambient_err}
+        .OptField(f_base, f_member, f_flatten) -> NodeKind.OptField{base: body_copy_expr(f_base, &flat), member: f_member, flatten: f_flatten}
+        .OptMethodCall(f_base, f_binding, f_call, f_flatten) -> NodeKind.OptMethodCall{base: body_copy_expr(f_base, &flat), binding: f_binding, call: body_copy_expr(f_call, &flat), flatten: f_flatten}
+        .PatternMatches(f_subject, f_pattern) -> NodeKind.PatternMatches{subject: body_copy_expr(f_subject, &flat), pattern: body_copy_pattern(f_pattern, &flat)}
+        .OptionLift2(f_function, f_left, f_right) -> NodeKind.OptionLift2{function: body_copy_expr(f_function, &flat), left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat)}
+        .ClosureMethod(f_receiver, f_operation, f_args) -> NodeKind.ClosureMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation, args: body_copy_list_expr(f_args, &flat)}
+        .HostBorrowCallback(f_callable, f_params) -> NodeKind.HostBorrowCallback{callable: body_copy_expr(f_callable, &flat), params: f_params}
+        .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation}
+        .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation, argument: body_copy_expr(f_argument, &flat)}
+        .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_copy_expr(f_lhs, &flat), rhs: body_copy_expr(f_rhs, &flat)}
+        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_copy_expr(f_receiver, &flat), operation: body_copy_handle_op(f_operation, &flat), args: body_copy_list_expr(f_args, &flat)}
+        .CoreClosureCall(f_kind) -> NodeKind.CoreClosureCall{kind: body_copy_core_closure_kind(f_kind, &flat)}
+        .TaskGroupAll(f_tasks) -> NodeKind.TaskGroupAll{tasks: body_copy_expr(f_tasks, &flat)}
+        .TaskGroupRace(f_tasks) -> NodeKind.TaskGroupRace{tasks: body_copy_expr(f_tasks, &flat)}
+        .TaskGroupAny(f_tasks) -> NodeKind.TaskGroupAny{tasks: body_copy_expr(f_tasks, &flat)}
+        .SelectStart -> NodeKind.SelectStart
+        .SelectRecv(f_builder, f_channel) -> NodeKind.SelectRecv{builder: body_copy_expr(f_builder, &flat), channel: body_copy_expr(f_channel, &flat)}
+        .SelectAfter(f_builder, f_duration, f_value) -> NodeKind.SelectAfter{builder: body_copy_expr(f_builder, &flat), duration: body_copy_expr(f_duration, &flat), value: body_copy_opt_expr(f_value, &flat)}
+        .SelectWait(f_builder, f_nonblocking) -> NodeKind.SelectWait{builder: body_copy_expr(f_builder, &flat), nonblocking: f_nonblocking}
+        .FnValue(f_kind) -> NodeKind.FnValue{kind: body_copy_fn_value_kind(f_kind, &flat)}
+        .Never(f_reason) -> NodeKind.Never{reason: f_reason}
+    }
+}
+
+fn body_copy_struct_field_value(value: BodyStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
+    BodyStructFieldValue{
+        field: value.field,
+        value: body_copy_expr(value.value, &flat),
+        boxed: value.boxed,
+    }
+}
+
+fn body_copy_map_entry(value: BodyMapEntry, flat: &BodyFlat) -> BodyMapEntry Never! {
+    BodyMapEntry{
+        key: body_copy_expr(value.key, &flat),
+        value: body_copy_expr(value.value, &flat),
+    }
+}
+
+fn body_copy_list_spread_part(value: BodyListSpreadPart, flat: &BodyFlat) -> BodyListSpreadPart Never! {
+    if value == {
+        .Element(f_value) -> BodyListSpreadPart.Element{value: body_copy_expr(f_value, &flat)}
+        .Spread(f_value) -> BodyListSpreadPart.Spread{value: body_copy_expr(f_value, &flat)}
+    }
+}
+
+fn body_copy_scope_member_kind(value: BodyScopeMemberKind, flat: &BodyFlat) -> BodyScopeMemberKind Never! {
+    if value == {
+        .Setup -> BodyScopeMemberKind.Setup
+        .ExpectFail(f_code, f_message) -> BodyScopeMemberKind.ExpectFail{code: f_code, message: f_message}
+        .Timeout(f_duration) -> BodyScopeMemberKind.Timeout{duration: body_copy_expr(f_duration, &flat)}
+        .Measure -> BodyScopeMemberKind.Measure
+        .Skip -> BodyScopeMemberKind.Skip
+    }
+}
+
+fn body_copy_or_fallback(value: BodyOrFallback, flat: &BodyFlat) -> BodyOrFallback Never! {
+    if value == {
+        .Value(f_value) -> BodyOrFallback.Value{value: body_copy_expr(f_value, &flat)}
+        .Return(f_value) -> BodyOrFallback.Return{value: body_copy_opt_expr(f_value, &flat)}
+        .Panic(f_message, f_location) -> BodyOrFallback.Panic{message: body_copy_expr(f_message, &flat), location: f_location}
+        .Break -> BodyOrFallback.Break
+        .Continue -> BodyOrFallback.Continue
+        .BreakLabel(f_label) -> BodyOrFallback.BreakLabel{label: f_label}
+        .ContinueLabel(f_label) -> BodyOrFallback.ContinueLabel{label: f_label}
+    }
+}
+
+fn body_copy_host_call(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Never! {
+    if value == {
+        .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_copy_expr(f_receiver, &flat), method: f_method, args: body_copy_list_expr(f_args, &flat)}
+        .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_copy_expr(f_receiver, &flat), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
+        .TypedText(f_kind, f_argument) -> BodyHostCall.TypedText{kind: f_kind, argument: body_copy_expr(f_argument, &flat)}
+        .OptionProbe(f_inner, f_kind) -> BodyHostCall.OptionProbe{inner: body_copy_expr(f_inner, &flat), kind: f_kind}
+        .TupleIndex(f_base, f_index) -> BodyHostCall.TupleIndex{base: body_copy_expr(f_base, &flat), index: f_index}
+        .SwitchSubjectValue -> BodyHostCall.SwitchSubjectValue
+        .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_copy_expr(f_value, &flat)}
+        .TypedTextInterp(f_kind, f_literals, f_holes, f_trusted_html) -> BodyHostCall.TypedTextInterp{kind: f_kind, literals: f_literals, holes: body_copy_list_expr(f_holes, &flat), trusted_html: f_trusted_html}
+        .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
+        .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
+    }
+}
+
+fn body_copy_core_closure_kind(value: BodyCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
+    if value == {
+        .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_copy_opt_expr(f_group, &flat), site: f_site, label: f_label, executable: body_copy_lambda(f_executable, &flat)}
+        .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_copy_expr(f_rate, &flat), frames: body_copy_expr(f_frames, &flat), executable: body_copy_lambda(f_executable, &flat)}
+        .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_copy_lambda(f_executable, &flat)}
+        .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_copy_lambda(f_executable, &flat)}
+        .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_copy_lambda(f_executable, &flat)}
+        .UIButtonOnClick(f_label, f_shortcut, f_accessible_label, f_executable) -> BodyCoreClosureKind.UIButtonOnClick{label: body_copy_expr(f_label, &flat), shortcut: body_copy_expr(f_shortcut, &flat), accessible_label: body_copy_expr(f_accessible_label, &flat), executable: body_copy_lambda(f_executable, &flat)}
+        .UITextInputOnDrop(f_state, f_ime, f_executable) -> BodyCoreClosureKind.UITextInputOnDrop{state: body_copy_expr(f_state, &flat), ime: body_copy_expr(f_ime, &flat), executable: body_copy_lambda(f_executable, &flat)}
+        .ReactiveDerived(f_executable) -> BodyCoreClosureKind.ReactiveDerived{executable: body_copy_lambda(f_executable, &flat)}
+        .ReactiveEffect(f_executable) -> BodyCoreClosureKind.ReactiveEffect{executable: body_copy_lambda(f_executable, &flat)}
+        .UIReactiveRender(f_executable) -> BodyCoreClosureKind.UIReactiveRender{executable: body_copy_lambda(f_executable, &flat)}
+    }
+}
+
+fn body_copy_fn_value_kind(value: BodyFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
+    if value == {
+        .NamedFn(f_name, f_lambda) -> BodyFnValueKind.NamedFn{name: f_name, lambda: body_copy_opt_lambda(f_lambda, &flat)}
+        .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper_name, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_copy_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper_name: f_wrapper_name, captures: f_captures, callee: body_copy_expr(f_callee, &flat)}
+        .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_copy_expr(f_callee, &flat), args: body_copy_list_call_arg(f_args, &flat)}
+        .Send(f_value) -> BodyFnValueKind.Send{value: body_copy_expr(f_value, &flat)}
+    }
+}
+
+fn body_copy_handle_op(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+    if value == {
+        .Hardware(f_operation) -> BodyHandleOp.Hardware{operation: f_operation}
+        .DurationNew(f_unit, f_float) -> BodyHandleOp.DurationNew{unit: f_unit, float: f_float}
+        .FileReaderReadLine -> BodyHandleOp.FileReaderReadLine
+        .FileReaderRead -> BodyHandleOp.FileReaderRead
+        .FileReaderSeek -> BodyHandleOp.FileReaderSeek
+        .FileReaderPath -> BodyHandleOp.FileReaderPath
+        .MappedFileWindow -> BodyHandleOp.MappedFileWindow
+        .MappedFileWindowLen -> BodyHandleOp.MappedFileWindowLen
+        .MappedFileLines -> BodyHandleOp.MappedFileLines
+        .MappedFileLen -> BodyHandleOp.MappedFileLen
+        .MappedFileIsEmpty -> BodyHandleOp.MappedFileIsEmpty
+        .FileWriterWriteLine -> BodyHandleOp.FileWriterWriteLine
+        .FileWriterFlush -> BodyHandleOp.FileWriterFlush
+        .FileWriterWriteAll -> BodyHandleOp.FileWriterWriteAll
+        .FileWriterFsync -> BodyHandleOp.FileWriterFsync
+        .FileWriterPath -> BodyHandleOp.FileWriterPath
+        .JSONReaderNext -> BodyHandleOp.JSONReaderNext
+        .JSONWriterWrite -> BodyHandleOp.JSONWriterWrite
+        .JSONWriterFlush -> BodyHandleOp.JSONWriterFlush
+        .JSONWriterFinish -> BodyHandleOp.JSONWriterFinish
+        .JSONLReaderNext -> BodyHandleOp.JSONLReaderNext
+        .JSONLWriterWrite -> BodyHandleOp.JSONLWriterWrite
+        .JSONLWriterFlush -> BodyHandleOp.JSONLWriterFlush
+        .JSONLWriterFinish -> BodyHandleOp.JSONLWriterFinish
+        .DataStreamNext -> BodyHandleOp.DataStreamNext
+        .XMLReaderNext -> BodyHandleOp.XMLReaderNext
+        .XMLWriterWrite -> BodyHandleOp.XMLWriterWrite
+        .XMLWriterFlush -> BodyHandleOp.XMLWriterFlush
+        .XMLWriterFinish -> BodyHandleOp.XMLWriterFinish
+        .CBORReaderNext -> BodyHandleOp.CBORReaderNext
+        .CBORWriterWrite -> BodyHandleOp.CBORWriterWrite
+        .CBORWriterFlush -> BodyHandleOp.CBORWriterFlush
+        .CBORWriterFinish -> BodyHandleOp.CBORWriterFinish
+        .StdinReadLine -> BodyHandleOp.StdinReadLine
+        .StdoutWrite -> BodyHandleOp.StdoutWrite
+        .StdoutWriteLine -> BodyHandleOp.StdoutWriteLine
+        .StdoutWriteBytes -> BodyHandleOp.StdoutWriteBytes
+        .StdoutFlush -> BodyHandleOp.StdoutFlush
+        .StdoutIsTTY -> BodyHandleOp.StdoutIsTTY
+        .StderrWrite -> BodyHandleOp.StderrWrite
+        .StderrWriteLine -> BodyHandleOp.StderrWriteLine
+        .StderrWriteBytes -> BodyHandleOp.StderrWriteBytes
+        .StderrFlush -> BodyHandleOp.StderrFlush
+        .StderrIsTTY -> BodyHandleOp.StderrIsTTY
+        .WorldNow -> BodyHandleOp.WorldNow
+        .WorldAdvance -> BodyHandleOp.WorldAdvance
+        .WorldWaitIdle -> BodyHandleOp.WorldWaitIdle
+        .WorldHistory -> BodyHandleOp.WorldHistory
+        .RealtimeNextDeadline -> BodyHandleOp.RealtimeNextDeadline
+        .RealtimeReceipt -> BodyHandleOp.RealtimeReceipt
+        .RealtimeCancel -> BodyHandleOp.RealtimeCancel
+        .RealtimeIsCancelled -> BodyHandleOp.RealtimeIsCancelled
+        .HistoryRNGNextU64 -> BodyHandleOp.HistoryRNGNextU64
+        .HistoryRNGBelow -> BodyHandleOp.HistoryRNGBelow
+        .GameSceneNew -> BodyHandleOp.GameSceneNew
+        .GameReplayRecord -> BodyHandleOp.GameReplayRecord
+        .GameBackendHeadless -> BodyHandleOp.GameBackendHeadless
+        .GameBackendShouldContinue -> BodyHandleOp.GameBackendShouldContinue
+        .GameBackendPresent -> BodyHandleOp.GameBackendPresent
+        .GameSceneOnFrame(f_schedule, f_derivation) -> BodyHandleOp.GameSceneOnFrame{schedule: f_schedule, derivation: f_derivation}
+        .GameSceneComponent -> BodyHandleOp.GameSceneComponent
+        .GameSceneQuery -> BodyHandleOp.GameSceneQuery
+        .GameAssetsImage -> BodyHandleOp.GameAssetsImage
+        .GameAssetsSound -> BodyHandleOp.GameAssetsSound
+        .GameInputBind -> BodyHandleOp.GameInputBind
+        .GameInputPressed -> BodyHandleOp.GameInputPressed
+        .RNGInt -> BodyHandleOp.RNGInt
+        .RNGFloat -> BodyHandleOp.RNGFloat
+        .RNGFloatRange -> BodyHandleOp.RNGFloatRange
+        .RNGBool -> BodyHandleOp.RNGBool
+        .RNGBoolP -> BodyHandleOp.RNGBoolP
+        .RNGNormal -> BodyHandleOp.RNGNormal
+        .RNGExponential -> BodyHandleOp.RNGExponential
+        .RNGBytes -> BodyHandleOp.RNGBytes
+        .RNGSplit -> BodyHandleOp.RNGSplit
+        .RNGPick -> BodyHandleOp.RNGPick
+        .RNGWeightedPick -> BodyHandleOp.RNGWeightedPick
+        .RNGSample -> BodyHandleOp.RNGSample
+        .RNGShuffle -> BodyHandleOp.RNGShuffle
+        .DurationIn -> BodyHandleOp.DurationIn
+        .DurationIsZero -> BodyHandleOp.DurationIsZero
+        .DurationTotalSeconds -> BodyHandleOp.DurationTotalSeconds
+        .DurationDifference -> BodyHandleOp.DurationDifference
+        .TestSuiteRun -> BodyHandleOp.TestSuiteRun
+        .DurationAbs -> BodyHandleOp.DurationAbs
+        .DurationNegated -> BodyHandleOp.DurationNegated
+        .DurationSign -> BodyHandleOp.DurationSign
+        .DurationTotalIn -> BodyHandleOp.DurationTotalIn
+        .DurationRound -> BodyHandleOp.DurationRound
+        .DurationNsValue -> BodyHandleOp.DurationNsValue
+        .DurationScale -> BodyHandleOp.DurationScale
+        .DurationDivide -> BodyHandleOp.DurationDivide
+        .AllocAlloc -> BodyHandleOp.AllocAlloc
+        .AllocTryAlloc -> BodyHandleOp.AllocTryAlloc
+        .AllocReset -> BodyHandleOp.AllocReset
+        .PreciseMethod(f_type_name, f_method) -> BodyHandleOp.PreciseMethod{type_name: f_type_name, method: f_method}
+        .TCPListenerAccept -> BodyHandleOp.TCPListenerAccept
+        .TCPListenerAcceptDeadline -> BodyHandleOp.TCPListenerAcceptDeadline
+        .TCPListenerLocalAddr -> BodyHandleOp.TCPListenerLocalAddr
+        .TCPStreamRead -> BodyHandleOp.TCPStreamRead
+        .TCPStreamPeerAddr -> BodyHandleOp.TCPStreamPeerAddr
+        .TCPStreamLocalAddr -> BodyHandleOp.TCPStreamLocalAddr
+        .TCPStreamClose -> BodyHandleOp.TCPStreamClose
+        .TCPStreamReadBytes -> BodyHandleOp.TCPStreamReadBytes
+        .TCPStreamReadBytesDeadline -> BodyHandleOp.TCPStreamReadBytesDeadline
+        .TCPStreamReadText -> BodyHandleOp.TCPStreamReadText
+        .TCPStreamReadTextDeadline -> BodyHandleOp.TCPStreamReadTextDeadline
+        .TCPStreamWriteBytes -> BodyHandleOp.TCPStreamWriteBytes
+        .TCPStreamWriteBytesDeadline -> BodyHandleOp.TCPStreamWriteBytesDeadline
+        .TCPStreamWriteAllBytes -> BodyHandleOp.TCPStreamWriteAllBytes
+        .TCPStreamWriteAllBytesDeadline -> BodyHandleOp.TCPStreamWriteAllBytesDeadline
+        .TCPStreamWriteText -> BodyHandleOp.TCPStreamWriteText
+        .TCPStreamWriteTextDeadline -> BodyHandleOp.TCPStreamWriteTextDeadline
+        .TCPStreamShutdown -> BodyHandleOp.TCPStreamShutdown
+        .TCPStreamReady -> BodyHandleOp.TCPStreamReady
+        .UDPSocketReady -> BodyHandleOp.UDPSocketReady
+        .UDPSocketClose -> BodyHandleOp.UDPSocketClose
+        .UDPSocketReceiveDeadline -> BodyHandleOp.UDPSocketReceiveDeadline
+        .UDPSocketSendToDeadline -> BodyHandleOp.UDPSocketSendToDeadline
+        .UnixListenerAcceptDeadline -> BodyHandleOp.UnixListenerAcceptDeadline
+        else -> body_copy_handle_op_1(value, &flat)
+    }
+}
+
+fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+    if value == {
+        .UnixStreamReadDeadline -> BodyHandleOp.UnixStreamReadDeadline
+        .UnixStreamWriteAllDeadline -> BodyHandleOp.UnixStreamWriteAllDeadline
+        .UnixStreamReady -> BodyHandleOp.UnixStreamReady
+        .UnixStreamClose -> BodyHandleOp.UnixStreamClose
+        .UnixStreamSetTimeout -> BodyHandleOp.UnixStreamSetTimeout
+        .TLSStreamReadDeadline -> BodyHandleOp.TLSStreamReadDeadline
+        .TLSStreamWriteAllDeadline -> BodyHandleOp.TLSStreamWriteAllDeadline
+        .TLSStreamReady -> BodyHandleOp.TLSStreamReady
+        .TLSStreamClose -> BodyHandleOp.TLSStreamClose
+        .TLSStreamCloseWrite -> BodyHandleOp.TLSStreamCloseWrite
+        .TLSStreamPeerIdentity -> BodyHandleOp.TLSStreamPeerIdentity
+        .TLSClientConfigDefault -> BodyHandleOp.TLSClientConfigDefault
+        .TLSClientConfigWithALPN -> BodyHandleOp.TLSClientConfigWithALPN
+        .TLSRootCertificatesFromPEM -> BodyHandleOp.TLSRootCertificatesFromPEM
+        .TLSClientIdentityFromPEM -> BodyHandleOp.TLSClientIdentityFromPEM
+        .TLSClientConfigWithTrust -> BodyHandleOp.TLSClientConfigWithTrust
+        .TLSClientConfigWithIdentity -> BodyHandleOp.TLSClientConfigWithIdentity
+        .TLSClientConfigWithVersionBounds -> BodyHandleOp.TLSClientConfigWithVersionBounds
+        .HTTPClientNew -> BodyHandleOp.HTTPClientNew
+        .HTTPReqField(f_field) -> BodyHandleOp.HTTPReqField{field: f_field}
+        .HTTPReqHeader -> BodyHandleOp.HTTPReqHeader
+        .HTTPReqParam -> BodyHandleOp.HTTPReqParam
+        .HTTPReqTrailers -> BodyHandleOp.HTTPReqTrailers
+        .HTTPRespField(f_field) -> BodyHandleOp.HTTPRespField{field: f_field}
+        .HTTPRespHeader -> BodyHandleOp.HTTPRespHeader
+        .HTTPRespTrailers -> BodyHandleOp.HTTPRespTrailers
+        .ArgsSpecFlag -> BodyHandleOp.ArgsSpecFlag
+        .ArgsSpecFlagShort -> BodyHandleOp.ArgsSpecFlagShort
+        .ArgsSpecOption -> BodyHandleOp.ArgsSpecOption
+        .ArgsSpecOptionShort -> BodyHandleOp.ArgsSpecOptionShort
+        .ArgsSpecOptionDefault -> BodyHandleOp.ArgsSpecOptionDefault
+        .ArgsSpecOptionEnv -> BodyHandleOp.ArgsSpecOptionEnv
+        .ArgsSpecOptionInt -> BodyHandleOp.ArgsSpecOptionInt
+        .ArgsSpecOptionFloat -> BodyHandleOp.ArgsSpecOptionFloat
+        .ArgsSpecOptionChoice -> BodyHandleOp.ArgsSpecOptionChoice
+        .ArgsSpecRepeat -> BodyHandleOp.ArgsSpecRepeat
+        .ArgsSpecRequiredOption -> BodyHandleOp.ArgsSpecRequiredOption
+        .ArgsSpecPositional -> BodyHandleOp.ArgsSpecPositional
+        .ArgsSpecDescription -> BodyHandleOp.ArgsSpecDescription
+        .ArgsSpecSubcommand -> BodyHandleOp.ArgsSpecSubcommand
+        .ArgsSpecVersion -> BodyHandleOp.ArgsSpecVersion
+        .ArgsSpecCompletion -> BodyHandleOp.ArgsSpecCompletion
+        .ArgsSpecHelp -> BodyHandleOp.ArgsSpecHelp
+        .ArgsSpecParse -> BodyHandleOp.ArgsSpecParse
+        .ArgsSpecParseOrExit -> BodyHandleOp.ArgsSpecParseOrExit
+        .ParsedArgsFlag -> BodyHandleOp.ParsedArgsFlag
+        .ParsedArgsOption -> BodyHandleOp.ParsedArgsOption
+        .ParsedArgsOptionInt -> BodyHandleOp.ParsedArgsOptionInt
+        .ParsedArgsOptionFloat -> BodyHandleOp.ParsedArgsOptionFloat
+        .ParsedArgsOptions -> BodyHandleOp.ParsedArgsOptions
+        .ParsedArgsSubcommand -> BodyHandleOp.ParsedArgsSubcommand
+        .ParsedArgsPositional -> BodyHandleOp.ParsedArgsPositional
+        .ProcessSpecMethod(f_method, f_args_len) -> BodyHandleOp.ProcessSpecMethod{method: f_method, args_len: f_args_len}
+        .ProcessChildMethod(f_method) -> BodyHandleOp.ProcessChildMethod{method: f_method}
+        .TerminalSessionResize -> BodyHandleOp.TerminalSessionResize
+        .ProcessStdinWrite -> BodyHandleOp.ProcessStdinWrite
+        .ProcessStdinClose -> BodyHandleOp.ProcessStdinClose
+        .ProcessStdinWriteAll -> BodyHandleOp.ProcessStdinWriteAll
+        .ProcessStdoutRead -> BodyHandleOp.ProcessStdoutRead
+        .ProcessStderrRead -> BodyHandleOp.ProcessStderrRead
+        .ReflectValueTypeName -> BodyHandleOp.ReflectValueTypeName
+        .ReflectValuePath -> BodyHandleOp.ReflectValuePath
+        .ReflectValueDisplay -> BodyHandleOp.ReflectValueDisplay
+        .ReflectValueFields -> BodyHandleOp.ReflectValueFields
+        .ReflectFieldName -> BodyHandleOp.ReflectFieldName
+        .ReflectFieldValue -> BodyHandleOp.ReflectFieldValue
+        .TaskJoin -> BodyHandleOp.TaskJoin
+        .TaskDetach -> BodyHandleOp.TaskDetach
+        .TaskPause -> BodyHandleOp.TaskPause
+        .TaskResume -> BodyHandleOp.TaskResume
+        .TaskCancel -> BodyHandleOp.TaskCancel
+        .ChannelReceive -> BodyHandleOp.ChannelReceive
+        .ChannelTryReceive -> BodyHandleOp.ChannelTryReceive
+        .ChannelIsTimer -> BodyHandleOp.ChannelIsTimer
+        .ChannelIsInterval -> BodyHandleOp.ChannelIsInterval
+        .ChannelIsCancelled -> BodyHandleOp.ChannelIsCancelled
+        .ChannelIsReady -> BodyHandleOp.ChannelIsReady
+        .ChannelDelayMs -> BodyHandleOp.ChannelDelayMs
+        .ChannelClose -> BodyHandleOp.ChannelClose
+        .SenderSend -> BodyHandleOp.SenderSend
+        .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_copy_expr(f_handler, &flat), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
+        .MathMethod(f_type_name, f_method, f_reduce_op) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method, reduce_op: f_reduce_op}
+        .ReactiveGet -> BodyHandleOp.ReactiveGet
+        .ReactiveSet -> BodyHandleOp.ReactiveSet
+        .ReactiveEffectMethod -> BodyHandleOp.ReactiveEffectMethod
+        .EventMethod(f_method) -> BodyHandleOp.EventMethod{method: f_method}
+        .LayoutMethod(f_method) -> BodyHandleOp.LayoutMethod{method: f_method}
+        .LoadableMethod(f_method) -> BodyHandleOp.LoadableMethod{method: f_method}
+        .CivilTimeMethod(f_kind, f_method) -> BodyHandleOp.CivilTimeMethod{kind: f_kind, method: f_method}
+        .EmailMethod(f_method) -> BodyHandleOp.EmailMethod{method: f_method}
+        .HTTPClientMethod(f_kind, f_method) -> BodyHandleOp.HTTPClientMethod{kind: f_kind, method: f_method}
+        .HTTPServerMethod(f_kind, f_method) -> BodyHandleOp.HTTPServerMethod{kind: f_kind, method: f_method}
+        .DynField -> BodyHandleOp.DynField
+        .DynAt -> BodyHandleOp.DynAt
+        .DynInt -> BodyHandleOp.DynInt
+        .DynText -> BodyHandleOp.DynText
+        .DynBool -> BodyHandleOp.DynBool
+        .DynFloat -> BodyHandleOp.DynFloat
+        .DynToText -> BodyHandleOp.DynToText
+        .DynEqualUnordered -> BodyHandleOp.DynEqualUnordered
+        .DynDecode(f_ty) -> BodyHandleOp.DynDecode{ty: f_ty}
+        .DynIndexKey(f_site, f_location) -> BodyHandleOp.DynIndexKey{site: f_site, location: f_location}
+        .DynIndexAt(f_site, f_location) -> BodyHandleOp.DynIndexAt{site: f_site, location: f_location}
+        .DynGetKey -> BodyHandleOp.DynGetKey
+        .DynGetAt -> BodyHandleOp.DynGetAt
+        .DynHas -> BodyHandleOp.DynHas
+        .DynKeys -> BodyHandleOp.DynKeys
+        .DynLen(f_site, f_location) -> BodyHandleOp.DynLen{site: f_site, location: f_location}
+        .DynRemove -> BodyHandleOp.DynRemove
+        .DynBinary(f_op, f_site, f_location) -> BodyHandleOp.DynBinary{op: f_op, site: f_site, location: f_location}
+        .DynCompare(f_op, f_site, f_location) -> BodyHandleOp.DynCompare{op: f_op, site: f_site, location: f_location}
+        .DynSetPath(f_keys, f_site, f_location) -> BodyHandleOp.DynSetPath{keys: f_keys, site: f_site, location: f_location}
+        .SerdeEncode -> BodyHandleOp.SerdeEncode
+        .JSONField -> BodyHandleOp.JSONField
+        .JSONAt -> BodyHandleOp.JSONAt
+        .JSONInt -> BodyHandleOp.JSONInt
+        .JSONText -> BodyHandleOp.JSONText
+        .JSONBool -> BodyHandleOp.JSONBool
+        .JSONFloat -> BodyHandleOp.JSONFloat
+        else -> value
+    }
+}
+
+fn body_copy_require_kind(value: BodyRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
+    if value == {
+        .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_copy_expr(f_cond, &flat), msg: body_copy_opt_expr(f_msg, &flat)}
+        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat)}
+        .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_copy_expr(f_msg, &flat)}
+    }
+}
+
+fn body_copy_lambda(value: BodyLambda, flat: &BodyFlat) -> BodyLambda Never! {
+    BodyLambda{
+        executable: body_copy_lambda_body(value.executable, &flat),
+        source_span: value.source_span,
+        frame_schedule: value.frame_schedule,
+        frame_schedule_derivation: value.frame_schedule_derivation,
+        capture_facts: value.capture_facts,
+        failure_carrier: value.failure_carrier,
+        effects: value.effects,
+        host_param_conventions: value.host_param_conventions,
+        source_params: value.source_params,
+        source_param_symbols: value.source_param_symbols,
+        param_types: value.param_types,
+        ret: value.ret,
+        is_move: value.is_move,
+        boxed: value.boxed,
+        rc: value.rc,
+        captures: value.captures,
+        materialized_captures: value.materialized_captures,
+        frozen_captures: value.frozen_captures,
+        uses_stack_sentry: value.uses_stack_sentry,
+    }
+}
+
+fn body_copy_lambda_body(value: BodyLambdaBody, flat: &BodyFlat) -> BodyLambdaBody Never! {
+    if value == {
+        .Expr(f_value) -> BodyLambdaBody.Expr{value: body_copy_expr(f_value, &flat)}
+        .Block(f_body) -> BodyLambdaBody.Block{body: body_copy_list_stmt(f_body, &flat)}
+    }
+}
+
+fn body_copy_parameter(value: BodyParameter, flat: &BodyFlat) -> BodyParameter Never! {
+    BodyParameter{
+        local: value.local,
+        name: value.name,
+        span: value.span,
+        ty: value.ty,
+        convention: value.convention,
+        public_label: value.public_label,
+        zone: value.zone,
+        default: body_copy_opt_expr(value.default, &flat),
+        variadic: value.variadic,
+    }
+}
+
+fn body_copy_place(value: BodyPlace, flat: &BodyFlat) -> BodyPlace Never! {
+    if value == {
+        .Local(f_local) -> BodyPlace.Local{local: f_local}
+        .Expr(f_value) -> BodyPlace.Expr{value: body_copy_expr(f_value, &flat)}
+    }
+}
+
+fn body_copy_list_parameter(values: [BodyParameter], flat: &BodyFlat) -> [BodyParameter] Never! {
+    result := [BodyParameter]{}
+    loop value in values -> &result.push(body_copy_parameter(value, &flat))
+    result
+}
+
+fn body_copy_list_stmt(values: [Int], flat: &BodyFlat) -> [Int] Never! {
+    result := [Int]{}
+    loop value in values -> &result.push(body_copy_stmt(value, &flat))
+    result
+}
+
+fn body_copy_list_enum_arg(values: [BodyEnumArg], flat: &BodyFlat) -> [BodyEnumArg] Never! {
+    result := [BodyEnumArg]{}
+    loop value in values -> &result.push(body_copy_enum_arg(value, &flat))
+    result
+}
+
+fn body_copy_list_named_enum_arg(values: [BodyNamedEnumArg], flat: &BodyFlat) -> [BodyNamedEnumArg] Never! {
+    result := [BodyNamedEnumArg]{}
+    loop value in values -> &result.push(body_copy_named_enum_arg(value, &flat))
+    result
+}
+
+fn body_copy_list_pattern_binding(values: [BodyPatternBinding], flat: &BodyFlat) -> [BodyPatternBinding] Never! {
+    result := [BodyPatternBinding]{}
+    loop value in values -> &result.push(body_copy_pattern_binding(value, &flat))
+    result
+}
+
+fn body_copy_opt_nested_pattern(value: BodyNestedPattern?, flat: &BodyFlat) -> BodyNestedPattern? Never! {
+    if value == .Val(inner) -> return Val(body_copy_nested_pattern(inner, &flat))
+    None
+}
+
+fn body_copy_list_pattern_shape(values: [BodyPatternShape], flat: &BodyFlat) -> [BodyPatternShape] Never! {
+    result := [BodyPatternShape]{}
+    loop value in values -> &result.push(body_copy_pattern_shape(value, &flat))
+    result
+}
+
+fn body_copy_list_pattern_field(values: [BodyPatternField], flat: &BodyFlat) -> [BodyPatternField] Never! {
+    result := [BodyPatternField]{}
+    loop value in values -> &result.push(body_copy_pattern_field(value, &flat))
+    result
+}
+
+fn body_copy_list_map_pattern_entry(values: [BodyMapPatternEntry], flat: &BodyFlat) -> [BodyMapPatternEntry] Never! {
+    result := [BodyMapPatternEntry]{}
+    loop value in values -> &result.push(body_copy_map_pattern_entry(value, &flat))
+    result
+}
+
+fn body_copy_list_contract(values: [BodyContract], flat: &BodyFlat) -> [BodyContract] Never! {
+    result := [BodyContract]{}
+    loop value in values -> &result.push(body_copy_contract(value, &flat))
+    result
+}
+
+fn body_copy_opt_stmt(value: Int?, flat: &BodyFlat) -> Int? Never! {
+    if value == .Val(inner) -> return Val(body_copy_stmt(inner, &flat))
+    None
+}
+
+fn body_copy_opt_expr(value: Int?, flat: &BodyFlat) -> Int? Never! {
+    if value == .Val(inner) -> return Val(body_copy_expr(inner, &flat))
+    None
+}
+
+fn body_copy_opt_unit_rounding(value: BodyUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
+    if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_copy_expr(inner.digits, &flat)})
+    None
+}
+
+fn body_copy_opt_list_stmt(value: [Int]?, flat: &BodyFlat) -> [Int]? Never! {
+    if value == .Val(inner) -> return Val(body_copy_list_stmt(inner, &flat))
+    None
+}
+
+fn body_copy_list_match_arm(values: [BodyMatchArm], flat: &BodyFlat) -> [BodyMatchArm] Never! {
+    result := [BodyMatchArm]{}
+    loop value in values -> &result.push(body_copy_match_arm(value, &flat))
+    result
+}
+
+fn body_copy_list_range_arm(values: [BodyRangeArm], flat: &BodyFlat) -> [BodyRangeArm] Never! {
+    result := [BodyRangeArm]{}
+    loop value in values -> &result.push(body_copy_range_arm(value, &flat))
+    result
+}
+
+fn body_copy_list_mixed_arm(values: [BodyMixedArm], flat: &BodyFlat) -> [BodyMixedArm] Never! {
+    result := [BodyMixedArm]{}
+    loop value in values -> &result.push(body_copy_mixed_arm(value, &flat))
+    result
+}
+
+fn body_copy_list_context_guard(values: [BodyContextGuard], flat: &BodyFlat) -> [BodyContextGuard] Never! {
+    result := [BodyContextGuard]{}
+    loop value in values -> &result.push(body_copy_context_guard(value, &flat))
+    result
+}
+
+fn body_copy_list_str_part(values: [BodyStrPart], flat: &BodyFlat) -> [BodyStrPart] Never! {
+    result := [BodyStrPart]{}
+    loop value in values -> &result.push(body_copy_str_part(value, &flat))
+    result
+}
+
+fn body_copy_list_call_arg(values: [BodyCallArg], flat: &BodyFlat) -> [BodyCallArg] Never! {
+    result := [BodyCallArg]{}
+    loop value in values -> &result.push(body_copy_call_arg(value, &flat))
+    result
+}
+
+fn body_copy_list_expr(values: [Int], flat: &BodyFlat) -> [Int] Never! {
+    result := [Int]{}
+    loop value in values -> &result.push(body_copy_expr(value, &flat))
+    result
+}
+
+fn body_copy_list_struct_field_value(values: [BodyStructFieldValue], flat: &BodyFlat) -> [BodyStructFieldValue] Never! {
+    result := [BodyStructFieldValue]{}
+    loop value in values -> &result.push(body_copy_struct_field_value(value, &flat))
+    result
+}
+
+fn body_copy_list_map_entry(values: [BodyMapEntry], flat: &BodyFlat) -> [BodyMapEntry] Never! {
+    result := [BodyMapEntry]{}
+    loop value in values -> &result.push(body_copy_map_entry(value, &flat))
+    result
+}
+
+fn body_copy_list_list_spread_part(values: [BodyListSpreadPart], flat: &BodyFlat) -> [BodyListSpreadPart] Never! {
+    result := [BodyListSpreadPart]{}
+    loop value in values -> &result.push(body_copy_list_spread_part(value, &flat))
+    result
+}
+
+fn body_copy_opt_lambda(value: BodyLambda?, flat: &BodyFlat) -> BodyLambda? Never! {
+    if value == .Val(inner) -> return Val(body_copy_lambda(inner, &flat))
     None
 }
