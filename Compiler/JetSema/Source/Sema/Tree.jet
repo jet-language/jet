@@ -39,7 +39,6 @@ use jet_foundation.[
     TContractDisposition,
     TContractKind,
     TContractResult,
-    TDBQueryMetadata,
     TDestructureBinding,
     TEffectFacts,
     TFailureCarrier,
@@ -70,7 +69,6 @@ use jet_foundation.[
     TTransactionSnapshot,
     TTryConvert,
     TTypedGoal,
-    TTypedTextForm,
     TUnaryOp,
     TUnitRoundingMode,
     TUnsafeGate,
@@ -423,12 +421,10 @@ enum TOrFallback {
 enum THostCall {
     Method(receiver: TExpr, method: String, args: [TExpr])
     CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
-    TypedText(kind: TTypedTextForm, argument: TExpr)
     OptionProbe(inner: TExpr, kind: TOptionProbe)
     TupleIndex(base: TExpr, index: Int)
     SwitchSubjectValue
     YieldSend(value: TExpr)
-    TypedTextInterp(kind: TypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool])
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
     // checked literal path or glob, relative to the source file being
@@ -711,32 +707,11 @@ enum THandleOp {
     PathWalk
     UIBackendMethod(method: String)
     AppMethod(method: String, args_len: Int)
-    DBWithPolicy
-    DBPoolAcquire
-    DBPoolAcquireDeadline
-    DBPoolReady
-    DBPoolDrain
-    DBPoolReceipt
-    DBLeaseClose
     ServiceRuntimeSend
     ServiceRuntimeRetry
     ServiceRuntimeDeadLetter
     ServiceRuntimeRetain
     ServiceRuntimeCommit
-    DBQuery(metadata: TDBQueryMetadata?)
-    DBQueryOne(metadata: TDBQueryMetadata?)
-    DBExecute(metadata: TDBQueryMetadata?)
-    DBLive
-    DBBegin
-    DBCommit
-    DBRollback
-    DBClose
-    DBValueInt
-    DBValueFloat
-    DBValueText
-    DBValueBool
-    DBValueBlob
-    DBValueIsNull
     PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -1142,11 +1117,9 @@ fn tir_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.R
             loop value in args -> visit(value)
         }
         .CellGuardProject(receiver, _, _, _, _) -> visit(receiver)
-        .TypedText(_, argument) -> visit(argument)
         .OptionProbe(inner, _) -> visit(inner)
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
-        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> visit(hole)
         else -> {}
     }
 }

@@ -24,8 +24,9 @@ fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction], decls
 // A call of the foreign function `foreign`: a direct C function (C language
 // and ABI, no callback, close or undo adapter) whose arguments cross as C
 // scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
-// packed NUL-terminated copy freed after the call; the C result converts
-// back.
+// packed NUL-terminated copy freed after the call, and a written machine
+// scalar (`&U64`, `&I32`, `&F64`) as the address of its place, read back
+// after the call; the C result converts back.
 fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if foreign.language == "asm" -> return ir_asm_call(&m, p, &b, foreign, args, span)
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
@@ -50,11 +51,23 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
     lowered := [Int]{}
     strings := [Int]{}
     sizes := [Int]{}
+    backs := [IRWriteBack]{}
     loop (index, arg) in args {
         param :: foreign.params[index]
-        if param.variadic || param.convention == AccessConvention.Write || arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
+        written :: param.convention == AccessConvention.Write
+        if param.variadic || written != arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
         row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
         if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshalling")
+        if written {
+            if m.types[row].kind == {
+                .Word | .Float -> {}
+                else -> return ir_fail_slot(&b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+            }
+            address :: ir_place_address(&m, p, &b, arg.value, &backs, span)
+            if ir_failed(b) -> return -1
+            &lowered.push(address)
+            next
+        }
         value :: ir_value_as(&m, p, &b, arg.value, row, span)
         if ir_failed(b) -> return -1
         if value < 0 -> return ir_fail_slot(&b, span, "Unit foreign C argument")
@@ -101,6 +114,7 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
         }
         else -> dst = ir_runtime(&m, &b, foreign.symbol, lowered, result_row)
     }
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     loop (index, pointer) in strings {
         _ :: ir_runtime(&m, &b, "jet_rt_c_string_free", [Int]{pointer, sizes[index]}, -1)
     }

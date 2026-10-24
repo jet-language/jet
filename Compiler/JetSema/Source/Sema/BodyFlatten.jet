@@ -532,12 +532,10 @@ fn body_flat_host_call(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never!
     if value == {
         .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_flat_expr(f_receiver, &flat), method: f_method, args: body_flat_list_expr(f_args, &flat)}
         .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_flat_expr(f_receiver, &flat), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
-        .TypedText(f_kind, f_argument) -> BodyHostCall.TypedText{kind: f_kind, argument: body_flat_expr(f_argument, &flat)}
         .OptionProbe(f_inner, f_kind) -> BodyHostCall.OptionProbe{inner: body_flat_expr(f_inner, &flat), kind: f_kind}
         .TupleIndex(f_base, f_index) -> BodyHostCall.TupleIndex{base: body_flat_expr(f_base, &flat), index: f_index}
         .SwitchSubjectValue -> BodyHostCall.SwitchSubjectValue
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_flat_expr(f_value, &flat)}
-        .TypedTextInterp(f_kind, f_literals, f_holes, f_trusted_html) -> BodyHostCall.TypedTextInterp{kind: f_kind, literals: f_literals, holes: body_flat_list_expr(f_holes, &flat), trusted_html: f_trusted_html}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
     }
@@ -835,32 +833,11 @@ fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
         .PathWalk -> BodyHandleOp.PathWalk
         .UIBackendMethod(f_method) -> BodyHandleOp.UIBackendMethod{method: f_method}
         .AppMethod(f_method, f_args_len) -> BodyHandleOp.AppMethod{method: f_method, args_len: f_args_len}
-        .DBWithPolicy -> BodyHandleOp.DBWithPolicy
-        .DBPoolAcquire -> BodyHandleOp.DBPoolAcquire
-        .DBPoolAcquireDeadline -> BodyHandleOp.DBPoolAcquireDeadline
-        .DBPoolReady -> BodyHandleOp.DBPoolReady
-        .DBPoolDrain -> BodyHandleOp.DBPoolDrain
-        .DBPoolReceipt -> BodyHandleOp.DBPoolReceipt
-        .DBLeaseClose -> BodyHandleOp.DBLeaseClose
         .ServiceRuntimeSend -> BodyHandleOp.ServiceRuntimeSend
         .ServiceRuntimeRetry -> BodyHandleOp.ServiceRuntimeRetry
         .ServiceRuntimeDeadLetter -> BodyHandleOp.ServiceRuntimeDeadLetter
         .ServiceRuntimeRetain -> BodyHandleOp.ServiceRuntimeRetain
         .ServiceRuntimeCommit -> BodyHandleOp.ServiceRuntimeCommit
-        .DBQuery(f_metadata) -> BodyHandleOp.DBQuery{metadata: f_metadata}
-        .DBQueryOne(f_metadata) -> BodyHandleOp.DBQueryOne{metadata: f_metadata}
-        .DBExecute(f_metadata) -> BodyHandleOp.DBExecute{metadata: f_metadata}
-        .DBLive -> BodyHandleOp.DBLive
-        .DBBegin -> BodyHandleOp.DBBegin
-        .DBCommit -> BodyHandleOp.DBCommit
-        .DBRollback -> BodyHandleOp.DBRollback
-        .DBClose -> BodyHandleOp.DBClose
-        .DBValueInt -> BodyHandleOp.DBValueInt
-        .DBValueFloat -> BodyHandleOp.DBValueFloat
-        .DBValueText -> BodyHandleOp.DBValueText
-        .DBValueBool -> BodyHandleOp.DBValueBool
-        .DBValueBlob -> BodyHandleOp.DBValueBlob
-        .DBValueIsNull -> BodyHandleOp.DBValueIsNull
         .PluginInvoke(f_export_name, f_signature) -> BodyHandleOp.PluginInvoke{export_name: f_export_name, signature: f_signature}
         .ReaderOver(f_owned) -> BodyHandleOp.ReaderOver{owned: f_owned}
         .ReaderReadU8 -> BodyHandleOp.ReaderReadU8
@@ -1363,7 +1340,6 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_copy_list_call_arg(f_args, &flat)}
         .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_copy_enum_payload(f_payload, &flat)}
         .JSONLit(f_variant, f_arg, f_clone_arg) -> NodeKind.JSONLit{variant: f_variant, arg: body_copy_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
-        .DBValueLit(f_variant, f_arg, f_clone_arg) -> NodeKind.DBValueLit{variant: f_variant, arg: body_copy_opt_expr(f_arg, &flat), clone_arg: f_clone_arg}
         .ListLit(f_values) -> NodeKind.ListLit{values: body_copy_list_expr(f_values, &flat)}
         .ListSpread(f_parts) -> NodeKind.ListSpread{parts: body_copy_list_list_spread_part(f_parts, &flat)}
         .MapLit(f_entries) -> NodeKind.MapLit{entries: body_copy_list_map_entry(f_entries, &flat)}
@@ -1457,12 +1433,10 @@ fn body_copy_host_call(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Nev
     if value == {
         .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_copy_expr(f_receiver, &flat), method: f_method, args: body_copy_list_expr(f_args, &flat)}
         .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_copy_expr(f_receiver, &flat), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
-        .TypedText(f_kind, f_argument) -> BodyHostCall.TypedText{kind: f_kind, argument: body_copy_expr(f_argument, &flat)}
         .OptionProbe(f_inner, f_kind) -> BodyHostCall.OptionProbe{inner: body_copy_expr(f_inner, &flat), kind: f_kind}
         .TupleIndex(f_base, f_index) -> BodyHostCall.TupleIndex{base: body_copy_expr(f_base, &flat), index: f_index}
         .SwitchSubjectValue -> BodyHostCall.SwitchSubjectValue
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_copy_expr(f_value, &flat)}
-        .TypedTextInterp(f_kind, f_literals, f_holes, f_trusted_html) -> BodyHostCall.TypedTextInterp{kind: f_kind, literals: f_literals, holes: body_copy_list_expr(f_holes, &flat), trusted_html: f_trusted_html}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
     }

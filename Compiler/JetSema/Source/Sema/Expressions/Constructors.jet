@@ -45,6 +45,7 @@ use jet_foundation.[
     core_type_modules,
     expr_span,
     typed_head_kind_of,
+    typed_head_literal_constructor,
     symbol_id,
     type_identity_key,
     type_name,
@@ -195,7 +196,7 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
     // carrier builds the compiler-owned data literal, whose variants carry
     // payloads the unit-only Core enum rows don't list. A declared enum of
     // that name keeps its own variants.
-    if path.variant == method && (path.enum_name == "DBValue" || sema_data_is_json_name(path.enum_name)) {
+    if path.variant == method && sema_data_is_json_name(path.enum_name) {
         owner :: sema_expression_type_symbol(&scopes, environment, program, path.enum_name)
         declared_enum := false
         if owner == .Val(symbol) -> declared_enum = sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum)
@@ -630,7 +631,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     // Compiler-owned data cases have no user enum declaration metadata.
     // Route both qualified and contextual cases through the same payload
     // checker as the static-call spelling.
-    if sema_data_is_json_name(resolved_name) || resolved_name == "DBValue" {
+    if sema_data_is_json_name(resolved_name) {
         if !sema_data_check_explicit_type_args(resolved_name, type_args, 0, span, &diagnostics) -> return None
         call_args := [CallArg]{}
         loop argument in args {
@@ -1419,7 +1420,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: TypedHeadKin
                 context.borrow_ctx = old_borrow
                 context.allow_string_view_read = old_string_view
                 hole :: checked ?? return None
-                trusted := kind == TypedHeadKind.HTML && hole.ty == Type.Named{name: "HTML"}
+                trusted := kind == TypedHeadKind.HTML && sema_expression_typed_hole_is(hole.ty, "HTML")
                 if !trusted && !sema_expression_typed_literal_printable(hole.ty, environment, program) {
                     &diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
                     return None
@@ -1582,30 +1583,76 @@ fn sema_expression_typed_literal_text(kind: TypedHeadKind, head: Type, value: Ex
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     checked :: sema_expression_typed_literal_text_parts(parts, kind, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if kind == TypedHeadKind.URL {
-        literal_exprs := [Expr]{}
-        hole_exprs := [Expr]{}
-        loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED})
-        loop part in parts {
-            if part == .Interp(hole, _) -> &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole), id: AST_NODE_GENERATED})
-        }
-        args := [CallArg]{}
-        loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {
-            &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
-        }
-        // `core.net.url.literal` is declared `-> URL Never!`; the head yields its
-        // success value exactly as the automatic `Never!` propagation of a call.
-        url := sema_call_core_check_fixed(environment, program, "core.net.url", "literal", [Type]{}, args, span, None, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        if sema_expr_unwrap_tag(url.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
-            url = sema_expression_propagated(url, TTryConvert.Never, span) ?? return None
-        }
-        return sema_expr_expected(url, expected, environment, program, &diagnostics)
+    // Every holed typed head desugars to its Core constructor: the literal
+    // pieces, one argument per hole, and (HTML) which holes were HTML.
+    target :: typed_head_literal_constructor(kind) ?? {
+        &diagnostics.push(sema_error("E0003", span, "typed head `{type_name(head)}` has no Core literal constructor", "every holed typed head is built by its Core owner", "register the head's constructor in typed_head_literal_constructor"))
+        return None
     }
-    result := sema_tir_node(head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
-    if kind == TypedHeadKind.HTML && checked.holes.len() == 0 {
-        result = sema_tir_node(head, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: checked.literals[0]}}}, span)
+    literal_exprs := [Expr]{}
+    hole_exprs := [Expr]{}
+    loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED})
+    hole_index := 0
+    loop part in parts {
+        if part == .Interp(hole, _) {
+            if kind == TypedHeadKind.SQL {
+                &hole_exprs.push(sema_expression_sql_hole_value(hole, checked.holes[hole_index].ty))
+            } else {
+                &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole), id: AST_NODE_GENERATED})
+            }
+            hole_index += 1
+        }
     }
-    sema_expr_expected(result, expected, environment, program, &diagnostics)
+    lists := [ [Expr] ]{literal_exprs, hole_exprs}
+    if kind == TypedHeadKind.HTML {
+        &lists.push(loop trusted in checked.trusted_html -> Expr.Bool{value: trusted, span: span, id: AST_NODE_GENERATED})
+    }
+    args := [CallArg]{}
+    loop elements in lists {
+        &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+    }
+    // Each constructor is declared `-> Head Never!`; the head yields its
+    // success value exactly as the automatic `Never!` propagation of a call.
+    built := sema_call_core_check_fixed(environment, program, target.module_name, target.member, [Type]{}, args, span, None, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_expr_unwrap_tag(built.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
+        built = sema_expression_propagated(built, TTryConvert.Never, span) ?? return None
+    }
+    sema_expr_expected(built, expected, environment, program, &diagnostics)
+}
+
+// One `SQL{…}` hole as its bound DBValue: DBValue as-is, the Int, Float,
+// Bool, String and byte-list scalars as their own variant, anything else as
+// its display text.
+fn sema_expression_sql_hole_value(hole: Expr, ty: Type) -> Expr Never! {
+    span :: expr_span(hole)
+    if sema_expression_typed_hole_is(ty, "DBValue") -> return Expr.Copy{value: hole, span: span, id: AST_NODE_GENERATED}
+    variant :: if sema_expr_unwrap_tag(ty) == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .List(element) -> if element == (Type.IntN{signed: false, bits: 8}) -> "Blob" else -> "Text"
+        else -> "Text"
+    }
+    argument :: if variant == {
+        "Text" -> Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: span, id: AST_NODE_GENERATED}
+        "Blob" -> Expr.Copy{value: hole, span: span, id: AST_NODE_GENERATED}
+        else -> hole
+    }
+    Expr.MethodCall{
+        receiver: Expr.Ident{name: "DBValue", span: span, id: AST_NODE_GENERATED},
+        method: variant,
+        method_span: span,
+        owner_type_args: [Type]{},
+        type_args: [Type]{},
+        args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}},
+        id: AST_NODE_GENERATED,
+    }
+}
+
+// Whether `ty` is the Core type `leaf`, spelled bare or canonically.
+fn sema_expression_typed_hole_is(ty: Type, leaf: String) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == .Named(name) -> return name == leaf || (name.starts_with("<corelib>/") && name.ends_with("::{leaf}"))
+    false
 }
 
 fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

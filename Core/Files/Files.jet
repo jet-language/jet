@@ -42,6 +42,33 @@ use core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, _
 // symlink and other special entries are never dereferenced.
 
 
+// The checked `Path{…}` literal: each hole's display text is one percent-
+// encoded path component, so its slashes and dot segments never become path
+// grammar.
+fn __path_literal(literals: [String], holes: [String]) -> Path Never! {
+    if literals.len() != holes.len() + 1 -> panic("typed Path literal and hole counts do not match")
+    text := literals[0].copy()
+    loop index in 0..<holes.len() -> text = "{text}{path_component_encode(holes[index])}{literals[index + 1]}"
+    Path.from(text)
+}
+
+fn path_component_encode(component: String) -> String Never! {
+    hex :: "0123456789ABCDEF".bytes()
+    dots :: component == "." || component == ".."
+    out := [U8]{}
+    loop byte in component.bytes() {
+        keep :: !dots && ((byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{45}) || byte == (U8{46}) || byte == (U8{95}) || byte == (U8{126}))
+        if keep {
+            &out.push(byte)
+        } else {
+            &out.push(U8{37})
+            &out.push(hex[Int.from_u8(byte) >> 4])
+            &out.push(hex[Int.from_u8(byte).bit_and(15)])
+        }
+    }
+    String.from_bytes(out) ?? panic("percent-encoded path text is ASCII")
+}
+
 struct DirEntry {
     name: String
     path: String

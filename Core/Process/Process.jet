@@ -11,6 +11,7 @@ package {
 }
 use core as core
 use core.files as files
+use core.text as unicode
 
 // Exact ProcessSignal shape from JetStd/CommonTypes.rs. Signal arming shares
 // the one native interrupt dispatcher; source owns mask and failure policy.
@@ -18,6 +19,57 @@ enum ProcessSignal {
     Term
     Hup
     Int
+}
+
+// An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
+// whitespace and keeps every hole as exactly one argv item; `Sh.raw(text)` is
+// the audited whole-text split.
+struct Sh {
+    argv: [String]
+    impl Display {
+        fn display(self) -> String { self.argv.join(" ") }
+    }
+    impl Debug {
+        fn debug(^self) -> String { self.argv.join(" ") }
+    }
+    impl Equatable {
+        fn equal(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
+    }
+}
+
+impl Sh {
+    fn args(self) -> [String] Never! { self.argv.copy() }
+    fn raw(text: String) -> Sh Never! {
+        argv := [String]{}
+        sh_split_into(text, &argv)
+        Sh{argv: argv}
+    }
+}
+
+fn sh_split_into(text: String, argv: &[String]) Never! {
+    word := ""
+    loop scalar in unicode.scalars(text) {
+        if scalar.is_whitespace() {
+            if word != "" -> &argv.push(word)
+            word = ""
+        } else {
+            word = "{word}{scalar}"
+        }
+    }
+    if word != "" -> &argv.push(word)
+}
+
+// The checked `Sh{…}` literal: literal text splits on whitespace, each hole's
+// display text is one argv item.
+fn __sh_literal(literals: [String], holes: [String]) -> Sh Never! {
+    if literals.len() != holes.len() + 1 -> panic("typed Sh literal and hole counts do not match")
+    argv := [String]{}
+    sh_split_into(literals[0], &argv)
+    loop index in 0..<holes.len() {
+        &argv.push(holes[index].copy())
+        sh_split_into(literals[index + 1], &argv)
+    }
+    Sh{argv: argv}
 }
 
 

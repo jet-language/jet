@@ -263,12 +263,24 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return failed
     }
-    row :: sema_call_export_function_row(environment, program, export) ?? {
+    // A `#Import module c.lib` member is a registered foreign row of the
+    // synthetic library module, called directly like a source function.
+    direct := SemaCallDirectTarget?{None}
+    if sema_call_export_function_row(environment, program, export) == .Val(row) {
+        direct = Val(sema_call_export_function_target(environment, program, export, row, type_args, span, &diagnostics) ?? return failed)
+    } else if sema_call_export_foreign_target(graph, export) == .Val(foreign) {
+        if type_args.len() > 0 {
+            &diagnostics.push(sema_call_not_generic_diagnostic(member, span))
+            loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return failed
+        }
+        direct = Val(foreign)
+    }
+    target :: direct ?? {
         &diagnostics.push(sema_call_import_member_unknown(member, span))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return failed
     }
-    target :: sema_call_export_function_target(environment, program, export, row, type_args, span, &diagnostics) ?? return failed
     scopes.ownership_call_depth += 1
     value := sema_call_core_check_source_owned(target, "{alias}.{member}", type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.ownership_call_depth -= 1
@@ -276,6 +288,19 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
     } else {
         return unhandled
     }
+}
+
+// The direct-call target for an exported foreign (`#Import module c.lib`)
+// function; None when the export names no foreign row.
+fn sema_call_export_foreign_target(graph: SemaRegistrationGraph, export: SemaRegistrationExport) -> SemaCallDirectTarget? {
+    owner_index :: sema_registration_module_index(graph, export.source_module_identity) ?? return None
+    loop index in 0..<graph.modules[owner_index].foreign_functions.len() {
+        if graph.modules[owner_index].foreign_functions[index].symbol.id.key != export.symbol.id.key -> next
+        symbol :: graph.modules[owner_index].foreign_functions[index].symbol
+        signature :: symbol.ty ?? return None
+        return Val(SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}})
+    }
+    None
 }
 
 fn sema_call_import_member_unknown(member: String, span: Span) -> Diagnostic {

@@ -696,7 +696,10 @@ and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
 owned native list header and packed byte buffer allocated at alignment eight;
 the empty header has all three words zero. Native list destruction releases
 `capacity` bytes at that same alignment. Neither conversion transfers or frees
-its borrowed input.
+its borrowed input. Compiled `core.mem.__bytes_unpack` calls reach the same
+copy through `jet_rt_bytes_unpack_route`, which takes the route's exact Int
+carriers and returns the List by the route convention: the length, with the
+fresh packed buffer written through the out word.
 `Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
 `host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
 the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
@@ -901,12 +904,10 @@ Read/Write/Both respectively). They do not own socket resources. Null drops
 release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations,
 low-byte normalization, independent clones and exact-sized shell deallocation.
 
-The native DB connection handle is a move-only 8-byte backend ID wrapper.
-As in the seed's `HandlesRaylib.rs` definition, it has no implicit close action;
-connection close remains explicit. `DbConnectionHandle.jet` releases only the
-wrapper allocation and ignores null handles. `DbConnectionHandleWitness.c`
-pins that shell-only deallocation for zero, ordinary and maximal u64 IDs;
-it does not claim admission of a database transport engine.
+`core.db` has no native handles. `Core/Db/Db.jet` is plain Core source: the
+connection, scope, pool and lease carriers are Jet structs over the vendored
+SQLite C closure (`c.[sqlite3]`), `RowPolicy` and `SQL` are source values, and
+typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
 
 The held native TLS stream handle is 112 bytes: ID, owned canonical FD72,
 optional timeout facts, seven borrowed callback pointers and one nullable
@@ -919,18 +920,6 @@ of a custom seed destructor. Show is exactly `TLSStream(<signed ID>)`.
 `TLSStreamHandleWitness.c` checks real descriptor closure before snapshot
 release, optional ownership and untouched callbacks. This does not claim a
 native TLS handshake engine or transport callback admission.
-
-The held native DB scope is 48 bytes: a raw backend ID, inline canonical
-24-byte row policy, owned user text and a nullable request-ID text owner.
-`RowPolicyHandles.jet` single-sources `row_policy_copy_into` and
-`row_policy_drop_fields`; both standalone row-policy handles and inline
-scope fields use them without temporary owner shells. Clone preserves the
-compiled policy and raw ID while independently cloning every text child.
-Drop releases the inline policy fields, user and optional request text, then
-the scope shell; it does not close the backend ID. Policy projection borrows
-the inline field, and user projection fills a caller-owned read/clone-only
-E4 descriptor. `DbScopeHandleWitness.c` checks those lifetimes, both compiled
-policies, absent versus present-empty requests and exact-once destruction.
 
 The native delivery handle owns three independent text children in a 40-byte
 carrier, plus normalized duplicate Bool and raw signed generation facts.

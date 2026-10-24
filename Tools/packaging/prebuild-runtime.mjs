@@ -58,15 +58,20 @@ const recipeSha256 = nativePackRecipe(source.sha256, backend.sha256, lifecycle.s
   platformInputs.map(row => row.sha256), compilerSha256);
 // User foreign closures link the Jet-only runtime object with these exact
 // platform archives once (Compiler/JetCli ForeignLink.jet); ship them beside it.
+// core.db's `c.sqlite3` import has no package declaration of its own: the link
+// closure compiles the vendored amalgamation from `foreign/sqlite3`.
+const sqliteSources = ['sqlite3.c', 'sqlite3.h', 'sqlite3ext.h', 'LICENSE'].map(name => join(repo, 'Core/Vendor/Sqlite3', name));
 function publishPlatform() {
-  const directory = join(out, 'foreign/platform');
-  mkdirSync(directory, { recursive: true });
-  // Platform archives may come from a read-only store (mode 0444): replace the
-  // published copy instead of writing through it, so a second publish succeeds.
-  for (const path of platform) {
-    const target = join(directory, basename(path));
-    rmSync(target, { force: true });
-    copyFileSync(path, target);
+  for (const [name, paths] of [['platform', platform], ['sqlite3', sqliteSources]]) {
+    const directory = join(out, 'foreign', name);
+    mkdirSync(directory, { recursive: true });
+    // Platform archives may come from a read-only store (mode 0444): replace the
+    // published copy instead of writing through it, so a second publish succeeds.
+    for (const path of paths) {
+      const target = join(directory, basename(path));
+      rmSync(target, { force: true });
+      copyFileSync(path, target);
+    }
   }
 }
 if (existsSync(join(out, 'native.key'))) {

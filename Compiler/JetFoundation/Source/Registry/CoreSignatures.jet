@@ -596,6 +596,17 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
         result :: if member == "__list_reserve_exact" -> Type.Bool else -> Type.Int
         return Val(core_sig_generic(module_name, member, params, Val(result), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
     }
+    // Core-private audited C byte carriers (CoreSurface gates them Audit):
+    // a String's UTF-8 data pointer and byte length, and a packed byte span
+    // that the caller frees with the length it packed.
+    if module_name == "core.mem" && core_sig_one_of(member, [String]{"__string_data", "__string_byte_len", "__bytes_pack", "__bytes_free", "__bytes_unpack"}) {
+        address :: core_sig_named("U64")
+        if member == "__string_data" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(address)))
+        if member == "__string_byte_len" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Int)))
+        if member == "__bytes_pack" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(address)))
+        if member == "__bytes_free" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(address, read), core_sig_positional(Type.Int, read)}, Val(unit)))
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(address, read), core_sig_positional(Type.Int, read)}, Val(bytes)))
+    }
     if module_name != "core.encoding" -> return None
     if member == "__coerce_now" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     if member == "__coerce_emit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(unit)))

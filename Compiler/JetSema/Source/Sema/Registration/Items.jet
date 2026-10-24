@@ -34,6 +34,7 @@ use jet_foundation.[
     ImplDef,
     ImportDecl,
     ImportedItem,
+    ImportKind,
     InternalTag,
     Item,
     SerdeCodec,
@@ -1002,7 +1003,11 @@ fn sema_registration_extern_contract(params: [Param]) -> [CallContractRow]? {
     if has_contract -> Val(contract) else -> None
 }
 
-fn sema_registration_extern_signature(function: ExternFn) -> Type Never! {
+// A written C binding (`#Import module c.lib { … }`) calls a C symbol that has
+// no Jet failure rail: its contract is `T Never!`, and `#Import` declarations
+// cannot spell a contract (E3203). Rust bridge and generated rows keep the
+// declared-return projection.
+fn sema_registration_extern_signature(function: ExternFn, owner: SemaRegistrationForeignOwner) -> Type Never! {
     params := [Type]{}
     names := [String]{}
     defaults := [FunctionDefaultRef?]{}
@@ -1023,7 +1028,8 @@ fn sema_registration_extern_signature(function: ExternFn) -> Type Never! {
         conventions: conventions,
         policies: CallablePolicyChain{policies: [CallablePolicy]{}},
     }
-    Type.Fn{params: params, ret: Val(sema_effective_return_type(function.return_type)), effect_bound: None, param_contract: sema_registration_extern_contract(function.params), call_metadata: Val(metadata), return_view_provenance: None}
+    ret :: if owner == SemaRegistrationForeignOwner.CModule && !function.generated -> Type.Result{ok: function.return_type ?? Type.Named{name: "Unit"}, err: Type.Named{name: "Never"}} else -> sema_effective_return_type(function.return_type)
+    Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: sema_registration_extern_contract(function.params), call_metadata: Val(metadata), return_view_provenance: None}
 }
 
 fn sema_registration_extern_parameters(function: ExternFn, module_identity: String, owner: SymbolID, signature: Type) -> [SemaRegistrationParameter] Never! {
@@ -1159,7 +1165,7 @@ fn sema_registration_foreign_visibility(owner: SemaRegistrationForeignOwner) -> 
 }
 
 fn sema_registration_foreign_function(function: ExternFn, module_identity: String, owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span) -> SemaRegistrationForeignFunction Never! {
-    signature :: sema_registration_extern_signature(function)
+    signature :: sema_registration_extern_signature(function, owner)
     // Foreign declarations are module-level: no owner segment in the id.
     symbol :: Symbol{
         id: symbol_id(SymbolKind.Function, module_identity, "", function.name),
@@ -3358,7 +3364,27 @@ fn sema_registration_declared_import_spans(module_index: Int, imports: [ImportDe
     }
 }
 
-// The imports registered so far, by "{module}|{span start}|{span end}" and,
+// A C library import (`use c.lib`, `use c.lib as x`, `use c.[lib as x, …]`)
+// binds its one library alias to the synthetic `__c_{lib}` module, as a
+// qualified module import does, whichever spelling named it.
+fn sema_registration_foreign_import_declaration(edge: SemaRegistrationImportEdge) -> ImportDecl Never! {
+    declaration := edge.declaration
+    binding :: edge.foreign_binding ?? return declaration
+    alias_span := declaration.alias_span
+    module_name := ""
+    if edge.declaration.kind == .Unqualified(module_alias, _, items, _, _) {
+        loop (index, item) in items {
+            if sema_registration_import_local(item) == binding.alias && index < edge.declaration.local_spans.len() -> alias_span = edge.declaration.local_spans[index]
+        }
+        module_name = "{module_alias}.{binding.alias}"
+    }
+    if module_name != "" -> declaration.kind = ImportKind.Module{name: module_name, span: edge.declaration.span}
+    declaration.alias = binding.alias
+    declaration.alias_span = alias_span
+    declaration
+}
+
+// The imports registered so far, by "{module}|{span start}|{span end}|{alias}" and,
 // for module (qualified) imports, by "{module}|{alias}": a duplicate or alias
 // check per import scanned every registered import of its module, which a
 // package of M files (two compiler-owned imports per sibling) made M³.
@@ -3371,7 +3397,9 @@ fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &Sema
     source_identity := graph.modules[source_index].module_identity
     source_package := graph.modules[source_index].package_identity
     visibility :: sema_registration_import_visibility(declaration)
-    span_key :: "{source_index}|{declaration.span.start}|{declaration.span.end}"
+    // The alias joins the key: one `use c.[a as x, b as y]` declaration
+    // registers one library-module import per C library it names.
+    span_key :: "{source_index}|{declaration.span.start}|{declaration.span.end}|{declaration.alias}"
     if registered.spans.get(span_key) != None {
         sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "an import declaration must be registered once", declaration.span))
         return
@@ -3774,7 +3802,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
                 if edge.source_scope != "" -> next
                 target_package := edge.target_package_identity
                 if target_package == "" -> target_package = graph.modules[target_index ?? 0].package_identity
-                sema_registration_add_import(&graph, &registered, source_module_index, edge.declaration, edge.target_module_identity, target_package)
+                sema_registration_add_import(&graph, &registered, source_module_index, sema_registration_foreign_import_declaration(edge), edge.target_module_identity, target_package)
             }
         }
     }

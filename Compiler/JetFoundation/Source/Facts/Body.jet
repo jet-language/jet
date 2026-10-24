@@ -300,7 +300,6 @@ enum NodeKind {
     AllocNew(ctor: TAllocCtor, args: [BodyCallArg])
     EnumLit(enum_type: String, variant: String, payload: BodyEnumPayload)
     JSONLit(variant: String, arg: Int?, clone_arg: Bool)
-    DBValueLit(variant: String, arg: Int?, clone_arg: Bool)
     ListLit(values: [Int])
     ListSpread(parts: [BodyListSpreadPart])
     MapLit(entries: [BodyMapEntry])
@@ -383,12 +382,10 @@ enum BodyOrFallback {
 enum BodyHostCall {
     Method(receiver: Int, method: String, args: [Int])
     CellGuardProject(receiver: Int, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
-    TypedText(kind: TTypedTextForm, argument: Int)
     OptionProbe(inner: Int, kind: TOptionProbe)
     TupleIndex(base: Int, index: Int)
     SwitchSubjectValue
     YieldSend(value: Int)
-    TypedTextInterp(kind: TypedHeadKind, literals: [String], holes: [Int], trusted_html: [Bool])
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
     // checked literal path or glob, relative to the source file being
@@ -671,32 +668,11 @@ enum BodyHandleOp {
     PathWalk
     UIBackendMethod(method: String)
     AppMethod(method: String, args_len: Int)
-    DBWithPolicy
-    DBPoolAcquire
-    DBPoolAcquireDeadline
-    DBPoolReady
-    DBPoolDrain
-    DBPoolReceipt
-    DBLeaseClose
     ServiceRuntimeSend
     ServiceRuntimeRetry
     ServiceRuntimeDeadLetter
     ServiceRuntimeRetain
     ServiceRuntimeCommit
-    DBQuery(metadata: TDBQueryMetadata?)
-    DBQueryOne(metadata: TDBQueryMetadata?)
-    DBExecute(metadata: TDBQueryMetadata?)
-    DBLive
-    DBBegin
-    DBCommit
-    DBRollback
-    DBClose
-    DBValueInt
-    DBValueFloat
-    DBValueText
-    DBValueBool
-    DBValueBlob
-    DBValueIsNull
     PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -1434,11 +1410,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
                 visit(inner)
             }
         }
-        .DBValueLit(_, f1, _) -> {
-            if f1 == .Val(inner) {
-                visit(inner)
-            }
-        }
         .ListLit(f0) -> {
             loop item in f0 {
                 visit(item)
@@ -1671,9 +1642,6 @@ fn body_each_host_call_child(tree: BodyTree, value: BodyHostCall, visit: fn(Int)
         .CellGuardProject(f0, _, _, _, _) -> {
             visit(f0)
         }
-        .TypedText(_, f1) -> {
-            visit(f1)
-        }
         .OptionProbe(f0, _) -> {
             visit(f0)
         }
@@ -1682,11 +1650,6 @@ fn body_each_host_call_child(tree: BodyTree, value: BodyHostCall, visit: fn(Int)
         }
         .YieldSend(f0) -> {
             visit(f0)
-        }
-        .TypedTextInterp(_, _, f2, _) -> {
-            loop item in f2 {
-                visit(item)
-            }
         }
         else -> {}
     }

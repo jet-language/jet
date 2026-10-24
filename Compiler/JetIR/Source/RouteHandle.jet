@@ -1048,17 +1048,6 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .CursorOver -> return Val(ir_handle_h("cursor.over", "jet_cursor_over", [Bool]{true}, None))
         .CursorTakeUntil -> return Val(ir_handle_h("cursor.take_until", "jet_cursor_take_until", [Bool]{true, true}, None))
         .CursorSkipWs -> return Val(ir_handle_h("cursor.skip_ws", "jet_cursor_skip_ws", [Bool]{true}, None))
-        .DBWithPolicy -> return Val(ir_handle_h("db.with_policy", "jet_db_with_policy", [Bool]{true, false, false}, Val(Effect.DB)))
-        .DBBegin -> return Val(ir_handle_h("db.begin", "jet_db_begin", [Bool]{true}, Val(Effect.DB)))
-        .DBCommit -> return Val(ir_handle_h("db.commit", "jet_db_commit", [Bool]{true}, Val(Effect.DB)))
-        .DBRollback -> return Val(ir_handle_h("db.rollback", "jet_db_rollback", [Bool]{true}, Val(Effect.DB)))
-        .DBClose -> return Val(ir_handle_h("db.close", "jet_db_close", [Bool]{false}, Val(Effect.DB)))
-        .DBLeaseClose -> return Val(ir_handle_h("db_lease.close", "jet_db_lease_close", [Bool]{true}, Val(Effect.DB)))
-        .DBPoolAcquire -> return Val(ir_handle_h("db_pool.acquire", "jet_db_pool_acquire", [Bool]{true}, Val(Effect.DB)))
-        .DBPoolAcquireDeadline -> return Val(ir_handle_h("db_pool.acquire_deadline", "jet_db_pool_acquire_deadline", [Bool]{true, true}, Val(Effect.DB)))
-        .DBPoolReady -> return Val(ir_handle_h("db_pool.ready", "jet_db_pool_ready", [Bool]{true}, Val(Effect.DB)))
-        .DBPoolDrain -> return Val(ir_handle_h("db_pool.drain", "jet_db_pool_drain", [Bool]{true}, Val(Effect.DB)))
-        .DBPoolReceipt -> return Val(ir_handle_h("db_pool.receipt", "jet_db_pool_receipt", [Bool]{true}, Val(Effect.DB)))
         .ReflectValueTypeName -> return Val(ir_handle_core("core.reflect", "value.type_name", "jet_jit_reflect_type_name", [Bool]{true}, None))
         .ReflectValuePath -> return Val(ir_handle_core("core.reflect", "value.path", "jet_jit_reflect_path", [Bool]{true}, None))
         .ReflectValueDisplay -> return Val(ir_handle_core("core.reflect", "value.display", "jet_jit_reflect_display", [Bool]{true}, None))
@@ -1085,7 +1074,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
             if sender_receiver -> return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
-        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) | .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
+        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
         else -> return None
     }
 }

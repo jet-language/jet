@@ -108,19 +108,37 @@ fn typed_head_kind_of(head: Type) -> TypedHeadKind? {
 // The Core module whose runtime serves a boundary typed head (its usage and
 // linkage key), not necessarily a record of the same type.
 fn boundary_head_owner_module(name: String) -> String? {
-    if name == "URL" -> return Val("core.net.url")
     if name == "Path" -> return Val("core.files")
-    if name == "DateTime" -> return Val("core.time")
-    None
+    boundary_head_carrier_module(name)
 }
 
-// The Core module whose same-named record is the built-in value. URL and
-// DateTime use their checked source carriers; Path stays the native boundary
-// carrier, distinct from core.files.path's record.
+// The Core module whose same-named record is the built-in value. Path stays
+// the native boundary carrier, distinct from core.files.path's record.
 fn boundary_head_carrier_module(name: String) -> String? {
     if name == "URL" -> return Val("core.net.url")
     if name == "DateTime" -> return Val("core.time")
+    if name == "HTML" -> return Val("core.text.html")
+    if name == "Sh" -> return Val("core.process")
+    if name == "SQL" -> return Val("core.db")
     None
+}
+
+struct TypedHeadLiteralConstructor {
+    module_name: String
+    member: String
+}
+
+// The Core function that builds a holed `Head{"…{x}…"}` literal from its
+// literal pieces and hole values. DateTime literals have no holes.
+fn typed_head_literal_constructor(kind: TypedHeadKind) -> TypedHeadLiteralConstructor? {
+    if kind == {
+        .URL -> Val(TypedHeadLiteralConstructor{module_name: "core.net.url", member: "literal"})
+        .Path -> Val(TypedHeadLiteralConstructor{module_name: "core.files", member: "__path_literal"})
+        .HTML -> Val(TypedHeadLiteralConstructor{module_name: "core.text.html", member: "__html_literal"})
+        .Sh -> Val(TypedHeadLiteralConstructor{module_name: "core.process", member: "__sh_literal"})
+        .SQL -> Val(TypedHeadLiteralConstructor{module_name: "core.db", member: "__sql_literal"})
+        .DateTime -> None
+    }
 }
 
 // #4318: why a checked clone duplicates its operand. Every copy carries the
@@ -413,13 +431,6 @@ enum TOptionProbe {
     Field(name: String)
 }
 
-enum TTypedTextForm {
-    SQLRaw
-    HTMLRaw
-    SQLTemplate
-    SQLParams
-}
-
 enum TClosureOp {
     EditDisjoint
     Map
@@ -479,19 +490,6 @@ enum THardwareCall {
     RegisterWrite(profile_id: String, block: String, register: String, width: RegisterWidth)
     DMAStart(profile_id: String, channel: String, buffer_ty: Type)
     DMAWait(profile_id: String, channel: String, buffer_ty: Type)
-}
-
-struct TDBTableFact {
-    table_id: String
-    read: Bool
-    write: Bool
-}
-
-struct TDBQueryMetadata {
-    source_file: String
-    source_span: Span
-    statement_identity: String
-    table_facts: [TDBTableFact]
 }
 
 struct TCanonicalField {

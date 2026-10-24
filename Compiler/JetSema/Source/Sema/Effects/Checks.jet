@@ -2907,7 +2907,7 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
         .ConditionNotify(condition, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, condition)
         .CoreCall(_, args, _, _, _, _) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         .HostCall(call) -> sema_effect_walk_host_call_children(walk, &nodes, facts, &diagnostics, caller, tree, call)
-        .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
+        .JSONLit(_, argument, _) -> {
             if argument == .Val(argument_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, argument_value)
         }
         .AllocNew(_, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, argument.value)
@@ -3252,11 +3252,9 @@ fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffect
             loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         }
         .CellGuardProject(receiver, _, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, receiver)
-        .TypedText(_, argument) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, argument)
         .OptionProbe(inner, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, inner)
         .TupleIndex(base, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, base)
         .YieldSend(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
-        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, hole)
         .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) -> {}
     }
 }

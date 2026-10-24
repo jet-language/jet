@@ -33,6 +33,7 @@ use jet_foundation.[
     core_module_export,
     core_root_type,
     typed_head_kind_of,
+    boundary_head_carrier_module,
     symbol_id,
     type_identity_equal,
     type_is_unit_callable_return,
@@ -841,7 +842,8 @@ fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaR
 // declares nor imports names the one type declaration of that name, among the
 // loaded modules, that the caller can see. Two owners leave it unresolved. A
 // built-in typed head names its Core carrier record (`URL` in `core.net.url`,
-// `DateTime` in `core.time`) when that module is loaded, and no other owner;
+// `HTML` in `core.text.html`, …; boundary_head_carrier_module) when that
+// module is loaded, and no other owner;
 // `Limits` is `core.email`'s, and a parameterless Core alias outside the
 // bare-owner and root-type sets is skipped; an alias that re-exports a
 // namespaced type of the same leaf names that type's owner.
@@ -849,12 +851,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index:
     rows :: sema_registration_nominal_rows_named(graph, name)
     if rows.len() == 0 -> return None
     if typed_head_kind_of(Type.Named{name: name}) != None {
-        carrier :: if {
-            name == "URL" -> "core.net.url"
-            name == "DateTime" -> "core.time"
-            else -> ""
-        }
-        if carrier == "" -> return None
+        carrier :: boundary_head_carrier_module(name) ?? return None
         loop row in rows {
             carrier_row :: graph.modules[row.module_index]
             if carrier_row.module_name != carrier || !carrier_row.module_identity.starts_with("<corelib>/") -> next
@@ -1378,7 +1375,7 @@ fn sema_type_core_leaf_name(graph: SemaRegistrationGraph, name: String, caller: 
     loop index in 0..<last -> &owner_parts.push(parts[index])
     module_name :: sema_registration_module_name(graph, owner_parts.join("::")) ?? return None
     if module_name == "core.crypto" -> return None
-    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") && !(leaf == "DateTime" && module_name == "core.time") -> return None
+    if typed_head_kind_of(Type.Named{name: leaf}) != None && boundary_head_carrier_module(leaf) != Val(module_name) -> return None
     exports :: core_module_export(module_name) ?? return None
     if !exports.type_exports.contains(leaf) -> return None
     if sema_type_graph_lookup_symbol_at(graph, caller, leaf) != None -> return None

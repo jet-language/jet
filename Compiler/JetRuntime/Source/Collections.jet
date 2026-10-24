@@ -237,16 +237,33 @@ fn coll_list_drop(header: I64, meta: I64, start: I64) {
 #Export(c) fn jet_rt_bytes_unpack(ptr: I64, len: I64) -> I64 {
     header :: coll_list_new()
     if (len == I64{0}) { return header }
+    trap_store(header, len)
+    trap_store(header + I64{8}, len)
+    trap_store(header + I64{16}, coll_bytes_copy(ptr, len))
+    header
+}
+
+// The `core.mem.__bytes_unpack` route: its Word arguments arrive as exact Int
+// carriers, and the List result follows the route convention (a native length
+// returned, the fresh packed buffer transferred through out_data).
+#Export(c) fn jet_rt_bytes_unpack_route(ptr: I64, len: I64, out_data: I64) -> I64 {
+    length :: jet_int_owned_to_i64(len)
+    if (length == I64{0}) {
+        trap_store(out_data, I64{0})
+        return I64{0}
+    }
+    trap_store(out_data, coll_bytes_copy(jet_int_owned_to_i64(ptr), length))
+    length
+}
+
+fn coll_bytes_copy(ptr: I64, len: I64) -> I64 {
     data :: jet_rt_alloc(len * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
     loop at < len {
         host_u8_put(data, at, trap_byte(ptr + at))
         at += I64{1}
     }
-    trap_store(header, len)
-    trap_store(header + I64{8}, len)
-    trap_store(header + I64{16}, data)
-    header
+    data
 }
 
 fn coll_result_size(ok: I64, error: I64) -> I64 {

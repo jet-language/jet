@@ -3060,8 +3060,6 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
         }
         data := sema_call_try_data_literal(Type.Named{name: owner}, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if data.handled -> return data
-        html := sema_call_try_html_raw(owner, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if html.handled -> return html
     }
 
     game := sema_call_try_game_static(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3102,11 +3100,6 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     if debug.handled -> return debug
     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if data.handled -> return data
-
-    sql := sema_call_try_sql_raw(receiver, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if sql.handled -> return sql
-    database := sema_call_try_database_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if database.handled -> return database
 
     http := sema_call_try_http_method(receiver, receiver_value, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if http.handled -> return http

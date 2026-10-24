@@ -1571,8 +1571,6 @@ fn ir_payload_binding(m: IRModule, b: IRBuilder, carrier: Int) -> Bool Never! {
 // result.
 fn ir_close_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: Int, span: Span) -> Int Never! {
     if !ir_unit_type(ty) -> return ir_fail_slot(&b, span, "close with a {ir_type_name(ty)} result")
-    name :: ir_nominal_name(ir_untag(ir_subst(m, ir_ty(p, b, inner)))) ?? ""
-    if name == "DBLease" || name == "DBConnection" || name == "DBScope" -> return ir_fail_slot(&b, span, "close of {name}")
     value :: if ir_body_node(p, b, inner).kind == .Move(moved) -> moved else -> inner
     ir_drop_value(&m, p, &b, value, span)
 }
@@ -1621,7 +1619,6 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         // the canonical Dyn; another receiver of them has no route here.
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
-        .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> true
         .GameSceneOnFrame(_, _) | .TaskJoin | .TaskDetach -> true
         else -> false
     }

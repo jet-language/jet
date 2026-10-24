@@ -85,6 +85,38 @@ fn unescape_and_strip(text: String) -> String Never! { unescape(strip_tags(text)
 fn attr_escape(text: String) -> String Never! { escape_quote(text, true) }
 fn text_escape(text: String) -> String Never! { escape_quote(text, false) }
 
+// Checked HTML markup. `HTML{"…{value}…"}` escapes each hole unless the hole
+// is itself HTML; `HTML.raw(text)` is the audited escape hatch.
+struct HTML {
+    markup: String
+    impl Display {
+        fn display(self) -> String { self.markup.copy() }
+    }
+    impl Debug {
+        fn debug(^self) -> String { self.markup }
+    }
+    impl Equatable {
+        fn equal(self, rhs: HTML) -> Bool { self.markup == rhs.markup }
+    }
+}
+
+impl HTML {
+    fn text(self) -> String Never! { self.markup.copy() }
+    fn raw(text: String) -> HTML Never! { HTML{markup: text.copy()} }
+}
+
+// The checked `HTML{…}` literal: `holes` hold each hole's display text and
+// `trusted` marks the holes that were HTML values, inserted unescaped.
+fn __html_literal(literals: [String], holes: [String], trusted: [Bool]) -> HTML Never! {
+    if literals.len() != holes.len() + 1 || trusted.len() != holes.len() -> panic("typed HTML literal and hole counts do not match")
+    markup := literals[0].copy()
+    loop index in 0..<holes.len() {
+        hole :: if trusted[index] -> holes[index].copy() else -> escape(holes[index])
+        markup = "{markup}{hole}{literals[index + 1]}"
+    }
+    HTML{markup: markup}
+}
+
 fn entity(name: String) -> String {
     if name == "amp" -> return "&"
     if name == "lt" -> return "<"

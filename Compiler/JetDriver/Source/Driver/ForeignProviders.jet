@@ -948,7 +948,10 @@ fn jet_driver_foreign_generated_source(surface: JetDriverForeignSurface) -> Stri
     }
 }
 
+// A Core module's provider (no authority root) is itself embedded Core text,
+// so its aggregate takes a `<corelib>/` origin and loads as a Core unit.
 fn jet_driver_foreign_aggregate_path(surface: JetDriverForeignSurface) -> String Never! {
+    if surface.root_index < 0 -> return "{JET_DRIVER_CORE_SOURCE_ROOT}/foreign/{surface.language}.{surface.library}"
     "foreign:{surface.language}.{surface.library}#root{surface.root_index}#aggregate"
 }
 
@@ -1042,18 +1045,25 @@ fn jet_driver_foreign_canonical_assembly(load: JetDriverLoadResult, surface: Jet
     overlay_bases := [Int]{}
     overlay_ends := [Int]{}
     overlay_sources := [String]{}
+    // Where each overlay's provenance starts in its own file: past a file-local
+    // `package { }` carrier, which the aggregate holds masked (blanked in
+    // place, as the module parse sees it) and no segment claims.
+    overlay_starts := [Int]{}
     loop path in overlay_paths {
-        source :: jet_driver_foreign_source_for_path(load, path)
-        if source == "" {
+        raw :: jet_driver_foreign_source_for_path(load, path)
+        if raw == "" {
             diagnostic :: jet_driver_foreign_binding_diagnostic(path, surface.library, "an overlay source is absent from the loaded authorized source files")
             &diagnostics.push(diagnostic_with_source_path(^diagnostic, path, 0))
             return None
         }
+        carrier :: jet_driver_inline_package(raw)
+        source :: jet_driver_mask_inline_package(raw, carrier)
         if canonical.len() > 0 && !canonical.ends_with("\n") -> canonical = "{canonical}\n"
         base :: canonical.len()
         canonical = "{canonical}{source}"
         &overlay_bases.push(base)
         &overlay_ends.push(base + source.len())
+        &overlay_starts.push(if carrier.found -> carrier.end else -> 0)
         &overlay_sources.push(source)
     }
     if canonical.len() > 0 && !canonical.ends_with("\n") -> canonical = "{canonical}\n"
@@ -1091,8 +1101,13 @@ fn jet_driver_foreign_canonical_assembly(load: JetDriverLoadResult, surface: Jet
             &source_segments.push(SemaSourceSegment{generated: Span{start: 0, end: cache_source.len()}, source_file: cache_path, source_start: 0, origin: SemaSourceOrigin.Snapshot, line_starts: cache_segments[0].line_starts})
         }
     }
+    // A Core overlay (no authority root) is the loader's retained Core text.
+    overlay_origin :: if surface.root_index < 0 -> SemaSourceOrigin.CompilerGenerated else -> SemaSourceOrigin.Snapshot
     loop overlay_index in 0..<overlay_paths.len() {
-        &source_segments.push(SemaSourceSegment{generated: Span{start: overlay_bases[overlay_index], end: overlay_ends[overlay_index]}, source_file: overlay_paths[overlay_index], source_start: 0, origin: SemaSourceOrigin.Snapshot, line_starts: jet_driver_foreign_fragment_line_starts(overlay_sources[overlay_index])})
+        start :: overlay_starts[overlay_index]
+        source_bytes :: overlay_sources[overlay_index].bytes()
+        fragment :: String.from_bytes(source_bytes.slice(start, source_bytes.len())) ?? ""
+        &source_segments.push(SemaSourceSegment{generated: Span{start: overlay_bases[overlay_index] + start, end: overlay_ends[overlay_index]}, source_file: overlay_paths[overlay_index], source_start: start, origin: overlay_origin, line_starts: jet_driver_foreign_fragment_line_starts(fragment)})
     }
     loop adapter_index in 0..<adapter_sources.len() {
         adapter_path :: jet_driver_foreign_adapter_path(surface, adapter_index)
@@ -1156,8 +1171,11 @@ fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDri
         }
         &rewritten_adapters.push(function)
     }
-    package :: jet_driver_foreign_package_for_root(load, surface.root_index)
-    module_identity :: jet_driver_module_identity(package, aggregate_path)
+    // A Core provider is its own package and module identity, as
+    // jet_driver_core_source_unit and jet_driver_unit_module_identity set them.
+    core_provider :: surface.root_index < 0
+    package :: if core_provider -> aggregate_path.copy() else -> jet_driver_foreign_package_for_root(load, surface.root_index)
+    module_identity :: if core_provider -> aggregate_path.copy() else -> jet_driver_module_identity(package, aggregate_path)
     source_identity :: jet_driver_source_identity(package, aggregate_path)
     synthetic_items := [Item]{}
     loop item in program.items {
@@ -1171,7 +1189,7 @@ fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDri
     &synthetic_items.push(Item.CModule{value: CModule{kind: CModuleKind.Extern, lib: surface.module_library, path_span: span, functions: rewritten_functions, span: span}})
     rewritten := Program{imports: program.imports, items: synthetic_items, script_body: program.script_body, block_spans: program.block_spans, fenced_statements: program.fenced_statements, web_target_ceiling: program.web_target_ceiling, no_prelude: program.no_prelude, default_target: program.default_target, html_path: program.html_path, policy_declarations: program.policy_declarations, user_policy_declarations: program.user_policy_declarations, applied_rules: program.applied_rules, rule_facts: program.rule_facts}
     source_unit_index :: load.source_units.len()
-    root_identity :: jet_driver_foreign_root_identity(load, surface.root_index)
+    root_identity :: if core_provider -> JET_DRIVER_CORE_SOURCE_ROOT else -> jet_driver_foreign_root_identity(load, surface.root_index)
     loop generated_file in canonical.generated_source_files -> jet_driver_add_source_file(&load.generated_source_files, generated_file, &diagnostics)
     &load.source_units.push(JetDriverSourceUnit{root_index: surface.root_index, file_index: -1, root_identity: root_identity, package_identity: package, module_name: "__c_{surface.module_library}", path: aggregate_path, relative_path: aggregate_path, source_segments: canonical.source_segments, source_origin: SemaSourceOrigin.CompilerGenerated, in_namespace: false})
     synthetic := JetDriverLoadedModule{source_unit_index: source_unit_index, source_identity: source_identity, package_identity: package, module_identity: module_identity, module_name: "__c_{surface.module_library}", program: ^rewritten}
