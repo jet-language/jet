@@ -6,7 +6,7 @@
 // built once per Set type (set.find, set.insert, set.take, set.remove,
 // set.equal).
 
-use jet_foundation.[Span, Type, type_carrier_identity]
+use jet_foundation.[Span, Type, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The entry layout of the Set type row `set_row`: the key at offset 0 of a
 // key-sized entry; None when its keys have no order the builder knows.
@@ -22,12 +22,12 @@ fn ir_set_shape(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! 
 // The id of Set helper `name` of the Set type row `set_row`, built on first use.
 fn ir_set_helper(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int Never! {
     key :: "{name}<{type_carrier_identity(m.types[set_row].ty)}>"
-    if m.function_rows.get(key) == .Val(known) -> return known
+    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
     shape :: ir_set_shape(&m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
     id :: m.functions.len()
     symbol :: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
     &m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     set :: ir_new_slot(&a, set_row, IRSlotKind.Param, ir_intern_name(&m, "set"))
     if name == "set.equal" {

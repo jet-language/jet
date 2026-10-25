@@ -4,7 +4,7 @@
 // whose code is its assembled template.
 
 use jet_backend.[x64_assemble_template]
-use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, decl_table_find]
+use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, decl_table_find, name_rows_set, name_rows_value]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // Indexes the checked foreign functions by the function key their calls
@@ -157,7 +157,7 @@ fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedFo
     }
     problem :: ir_asm_leaf(&m, p, foreign, leaf_params, leaf_result)
     if problem != "" -> return ir_fail_slot(&b, span, problem)
-    leaf :: m.function_rows.get("{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(&b, span, "inline asm leaf of {foreign.name} was not built")
+    leaf :: name_rows_value(m.function_rows, "{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(&b, span, "inline asm leaf of {foreign.name} was not built")
     values := [Int]{}
     lowered := [Int]{}
     loop (index, arg) in args {
@@ -184,7 +184,7 @@ fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedFo
 // when the template is missing or does not assemble, else "".
 fn ir_asm_leaf(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
     key :: "{foreign.symbol_id.key}#asm"
-    if m.function_rows.get(key) != None -> return ""
+    if name_rows_value(m.function_rows, key) != None -> return ""
     source :: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"
     names :: loop param in foreign.params -> param.name
     assembled :: x64_assemble_template(source, names, result >= 0)
@@ -202,7 +202,7 @@ fn ir_asm_leaf(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, 
     f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result})
     id :: m.functions.len()
     &m.functions.push(^f)
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     ""
 }
 

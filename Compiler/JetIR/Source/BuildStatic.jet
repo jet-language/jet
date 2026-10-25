@@ -18,7 +18,7 @@
 // A value the build cannot freeze (a Map whose key order the build does not
 // reproduce) keeps the constant on ir_comptime, built at each read.
 
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type]
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type, name_rows_set, name_rows_value]
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
@@ -111,7 +111,7 @@ fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: 
     kind :: m.types[row].kind
     if kind != .Aggregate && kind != .Pointer -> return -1
     memo :: "{key}|{ir_row_key(m, row)}"
-    known :: m.constant_rows.get(memo) ?? -2
+    known :: name_rows_value(m.constant_rows, memo) ?? -2
     if known != -2 -> return known
     s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
     root := -1
@@ -123,7 +123,7 @@ fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: 
         if word.local && word.addend == IR_STATIC_BOX_HEADER -> root = word.target
     }
     if root < 0 {
-        m.constant_rows[memo] = -1
+        name_rows_set(&m.constant_rows, memo, -1)
         return -1
     }
     base :: m.data.len()
@@ -136,7 +136,7 @@ fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: 
         &m.data.push(bytes)
         m.data_relocs[base + object] = relocs
     }
-    m.constant_rows[memo] = base + root
+    name_rows_set(&m.constant_rows, memo, base + root)
     base + root
 }
 
@@ -168,7 +168,7 @@ fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TCo
     kind :: m.types[row].kind
     if kind != .Bool && kind != .Word && kind != .Char && kind != .Float && kind != .Float32 && kind != .Int -> return ir_fail_slot(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
     memo :: "storage:{definition.key}"
-    object := m.constant_rows.get(memo) ?? -1
+    object := name_rows_value(m.constant_rows, memo) ?? -1
     if object < 0 {
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         cell :: ir_static_new(&s, 8)
@@ -179,7 +179,7 @@ fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TCo
         &m.data.push(s.bytes[cell].copy())
         // No address words; the entry marks a word-aligned static object.
         m.data_relocs[object] = [IRDataReloc]{}
-        m.constant_rows[memo] = object
+        name_rows_set(&m.constant_rows, memo, object)
     }
     pointer :: ir_pointer_row(&m)
     address :: ir_temp(&m, &b, pointer)
@@ -194,7 +194,7 @@ fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TCo
 // for the life of the process.
 fn ir_startup_cell(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: Int) -> Int Never! {
     memo :: "startup:{definition.key}"
-    object := m.constant_rows.get(memo) ?? -1
+    object := name_rows_value(m.constant_rows, memo) ?? -1
     if object < 0 {
         object = m.data.len()
         cell := [U8]{}
@@ -202,7 +202,7 @@ fn ir_startup_cell(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: I
         &m.data.push(^cell)
         // No address words; the entry marks a word-aligned static object.
         m.data_relocs[object] = [IRDataReloc]{}
-        m.constant_rows[memo] = object
+        name_rows_set(&m.constant_rows, memo, object)
     }
     pointer :: ir_pointer_row(&m)
     address :: ir_temp(&m, &b, pointer)

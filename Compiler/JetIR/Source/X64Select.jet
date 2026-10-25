@@ -24,6 +24,7 @@
 // jet_int_sub / jet_int_mul, comparisons to jet_int_compare, and Copy / Drop
 // call jet_rt_int_clone / the type's drop only for a big integer.
 
+use jet_foundation.[name_rows_value]
 use jet_backend.[
     X64Alu,
     X64Cond,
@@ -1528,7 +1529,7 @@ fn ir_x64_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
     if ty.kind == .String && drop == "jet_rt_string_drop" -> return ir_x64_string_drop(&e, m, f, al, slot)
     // A drop routine the module builds itself (the ScopeGuard drop) is
     // registered under its symbol.
-    if m.function_rows.get(drop) == .Val(id) -> return ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
+    if name_rows_value(m.function_rows, drop) == .Val(id) -> return ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
     ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: drop}, -1, [Int]{slot}, 0, 1, -1, 0)
 }
 
@@ -2263,8 +2264,8 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         &lines.push(X64LineRow{at: body, line: f.line})
     }
     positions := [Int]{}
-    poll :: m.function_rows.get(IR_STOP_POLL_KEY) ?? -1
-    trap :: m.function_rows.get(IR_STOP_TRAP_KEY) ?? -1
+    poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     // The slow paths of the instruction before `at` start at colds[traps].
     traps := 0
     at := 0

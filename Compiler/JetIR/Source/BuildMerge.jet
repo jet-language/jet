@@ -16,12 +16,11 @@
 // bytes key or, for a constant's static object, by the constant and type
 // (m.constant_rows). A data row with no key belongs to its part alone.
 // Before the walk every part row is put in its sharing group: each part's
-// keys come in ascending order (its key maps keep them so; its functions
-// are sorted) and one merge of those runs numbers the groups, so the walk
-// itself compares no keys, and the merged module's key maps are filled in
-// ascending key order.
+// keys are sorted into one ascending run (its key tables are hashed, its
+// functions listed by row) and one merge of those runs numbers the groups,
+// so the walk itself compares no keys.
 
-use jet_foundation.[compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows]
+use jet_foundation.[NameRows, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, name_rows_set, name_rows_sorted, name_rows_value]
 
 // A function the walk starts from: function `local` of part `part`.
 struct IRMergeRoot { part: Int, local: Int }
@@ -117,20 +116,21 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
             out.data_relocs[row] = loop word in words -> IRDataReloc{offset: word.offset, target: g.sides[part].data_new[word.target], addend: word.addend, text: word.text}
         }
     }
-    // Groups are in ascending key order, so each map below only appends.
     loop group in 0..<g.data_texts {
         row :: g.data_ids[group]
-        if row >= 0 -> out.data_rows[g.data_keys[group].copy()] = row
+        if row >= 0 -> name_rows_set(&out.data_rows, g.data_keys[group], row)
     }
     given := [Int:String]{}
     loop part in 0..<parts.len() {
-        loop (identity, key) in parts[part].trait_keys {
+        table :: parts[part].trait_keys
+        loop (index, identity) in table.texts {
+            key :: table.rows[index]
             if given.get(key) == .Val(other) {
                 if other != identity -> panic("trait payload keys of {other} and {identity} collide")
                 next
             }
             given[key] = identity.copy()
-            out.trait_keys[identity.copy()] = key
+            name_rows_set(&out.trait_keys, identity, key)
         }
     }
     // The parts are read no more: they drop on threads of their own while
@@ -142,13 +142,13 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
     task.group ir_merge_release_group {
         dropped :: task ir_merge_release(released, -1)
         loop (group, id) in g.type_ids {
-            if id >= 0 -> out.type_rows[g.type_keys[group].copy()] = id
+            if id >= 0 -> name_rows_set(&out.type_rows, g.type_keys[group], id)
         }
         loop (group, id) in g.name_ids {
-            if id >= 0 -> out.name_rows[g.name_keys[group].copy()] = id
+            if id >= 0 -> name_rows_set(&out.name_rows, g.name_keys[group], id)
         }
         loop (group, id) in g.function_ids {
-            if id >= 0 -> out.function_rows[g.function_keys[group].copy()] = id
+            if id >= 0 -> name_rows_set(&out.function_rows, g.function_keys[group], id)
         }
         // A hashed symbol ends with its key's 64-bit stable id (IR.jet
         // ir_hashed_function). Two keys can hash alike, which would name two
@@ -212,24 +212,19 @@ fn ir_merge_release_count(released: Shared<[IRModule]>) -> Int Never! {
 }
 
 // Each part's rows as runs in ascending key order (`(key, local)`: the key
-// and the part's row): the type, name and data runs straight from its key
-// maps, the function run sorted. Data groups are the text and bytes keys,
-// then the constants' static objects. The function runs are sorted on a
-// thread per part, and the types, names and data are grouped on threads of
-// their own while this one groups the functions. A task is handed keys and
-// row counts only, never a part: a part it shared would be copied when the
-// merge rewrites it.
+// and the part's row): its function keys and its type, name, data and
+// constant tables, sorted on a thread per part. Data groups are the text and
+// bytes keys, then the constants' static objects. The types, names and data
+// are grouped on threads of their own while this one groups the functions.
+// A task is handed keys and row counts only, never a part: a part it shared
+// would be copied when the merge rewrites it.
 fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
     sides := [IRMergeSide]{}
     function_group := [[Int]]{}
     type_counts := [Int]{}
     name_counts := [Int]{}
     data_counts := [Int]{}
-    function_keys_by_part := [[String]]{}
-    types := [[(key: String, local: Int)]]{}
-    names := [[(key: String, local: Int)]]{}
-    texts := [[(key: String, local: Int)]]{}
-    constants := [[(key: String, local: Int)]]{}
+    keys := [IRMergeKeys]{}
     loop m in parts {
         &sides.push(IRMergeSide{function_new: ir_merge_unset(m.functions.len()), type_new: ir_merge_unset(m.types.len()), name_new: ir_merge_unset(m.names.len()), data_new: ir_merge_unset(m.data.len())})
         &function_group.push(ir_merge_unset(m.functions.len()))
@@ -238,23 +233,22 @@ fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
         &data_counts.push(m.data.len())
         part_keys := [String]{}
         loop f in m.functions -> &part_keys.push(f.key.copy())
-        &function_keys_by_part.push(^part_keys)
-        type_run := [(key: String, local: Int)]{}
-        loop (key, row) in m.type_rows -> &type_run.push((key: key.copy(), local: row))
-        &types.push(^type_run)
-        name_run := [(key: String, local: Int)]{}
-        loop (text, row) in m.name_rows -> &name_run.push((key: text.copy(), local: row))
-        &names.push(^name_run)
-        text_run := [(key: String, local: Int)]{}
-        loop (key, row) in m.data_rows -> &text_run.push((key: key.copy(), local: row))
-        &texts.push(^text_run)
-        constant_run := [(key: String, local: Int)]{}
-        loop (memo, row) in m.constant_rows {
-            if row >= 0 -> &constant_run.push((key: memo.copy(), local: row))
-        }
-        &constants.push(^constant_run)
+        &keys.push(IRMergeKeys{functions: ^part_keys, types: m.type_rows, names: m.name_rows, data: m.data_rows, constants: m.constant_rows})
     }
-    functions :: ir_merge_function_runs(function_keys_by_part, 0)
+    runs := ir_merge_part_runs(keys, 0)
+    functions := [[(key: String, local: Int)]]{}
+    types := [[(key: String, local: Int)]]{}
+    names := [[(key: String, local: Int)]]{}
+    texts := [[(key: String, local: Int)]]{}
+    constants := [[(key: String, local: Int)]]{}
+    loop run in ^runs {
+        part := ^run
+        &functions.push(^part.functions)
+        &types.push(^part.types)
+        &names.push(^part.names)
+        &texts.push(^part.texts)
+        &constants.push(^part.constants)
+    }
     function_keys := [String]{}
     grouped := [IRMergeGroups]{}
     task.group ir_merge_groups {
@@ -281,25 +275,46 @@ fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
     IRMerge{sides: sides, roots: roots.copy(), function_part: [Int]{}, function_local: [Int]{}, function_group: function_group, function_keys: function_keys, function_ids: function_ids, function_job: function_job, type_part: [Int]{}, type_local: [Int]{}, type_group: ^type_groups.groups, type_keys: ^type_groups.keys, type_ids: type_ids, name_part: [Int]{}, name_local: [Int]{}, name_group: ^name_groups.groups, name_keys: ^name_groups.keys, name_ids: name_ids, data_part: [Int]{}, data_local: [Int]{}, data_group: ^data_groups.groups, data_keys: ^data_groups.keys, data_texts: data_groups.texts, data_ids: data_ids}
 }
 
-// The function runs of parts `at` on (`keys`: per part its functions' keys
-// by row), in part order, each part's sorted on its own thread.
-fn ir_merge_function_runs(keys: [[String]], at: Int) -> [[(key: String, local: Int)]] Never! {
-    runs := [[(key: String, local: Int)]]{}
+// One part's keys (ir_merge_new): its functions' keys by row and its key
+// tables.
+struct IRMergeKeys {
+    functions: [String]
+    types: NameRows
+    names: NameRows
+    data: NameRows
+    constants: NameRows
+}
+
+// One part's ascending runs.
+struct IRMergeRuns {
+    functions: [(key: String, local: Int)]
+    types: [(key: String, local: Int)]
+    names: [(key: String, local: Int)]
+    texts: [(key: String, local: Int)]
+    constants: [(key: String, local: Int)]
+}
+
+// The runs of parts `at` on, in part order, each part's sorted on its own
+// thread.
+fn ir_merge_part_runs(keys: [IRMergeKeys], at: Int) -> [IRMergeRuns] Never! {
+    runs := [IRMergeRuns]{}
     if at >= keys.len() -> return runs
-    task.group ir_merge_part_runs {
-        head :: task ir_merge_function_run(keys[at])
-        rest := ir_merge_function_runs(keys, at + 1)
+    task.group part_group {
+        head :: task ir_merge_part_run(keys[at])
+        rest := ir_merge_part_runs(keys, at + 1)
         &runs.push(head.join() ?? panic(compiler_threads_failure_text(err)))
         loop run in ^rest -> &runs.push(^run)
     }
     runs
 }
 
-fn ir_merge_function_run(keys: [String]) -> [(key: String, local: Int)] Never! {
-    run := [(key: String, local: Int)]{}
-    loop (local, key) in keys -> &run.push((key: key.copy(), local: local))
-    &run.sort()
-    run
+// A constant whose value is built at each read (-1) shares no row, so its
+// run leaves it out (name_rows_sorted keeps rows >= 0).
+fn ir_merge_part_run(keys: IRMergeKeys) -> IRMergeRuns Never! {
+    functions := [(key: String, local: Int)]{}
+    loop (local, key) in keys.functions -> &functions.push((key: key.copy(), local: local))
+    &functions.sort()
+    IRMergeRuns{functions: ^functions, types: name_rows_sorted(keys.types), names: name_rows_sorted(keys.names), texts: name_rows_sorted(keys.data), constants: name_rows_sorted(keys.constants)}
 }
 
 // One kind's sharing groups (ir_merge_group): per part row its group and
@@ -405,7 +420,7 @@ fn ir_merge_type(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Nev
     g.sides[part].type_new[row] = added
     drop :: parts[part].types[row].drop
     if drop != "" {
-        glue :: parts[part].function_rows.get(drop) ?? -1
+        glue :: name_rows_value(parts[part].function_rows, drop) ?? -1
         _ :: ir_merge_function(&g, parts, part, glue)
     }
     added

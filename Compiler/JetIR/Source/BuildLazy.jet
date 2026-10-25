@@ -5,7 +5,7 @@
 // element descriptor and helper functions built once per type (lazy.clone,
 // lazy.drop, lazy.equal, lazy.show, lazy.compare, lazy.callback).
 
-use jet_foundation.[AccessConvention, BodyCallArg, Span, Type, TClosureOp, TLocal, TypeTupleField, type_carrier_identity]
+use jet_foundation.[AccessConvention, BodyCallArg, Span, Type, TClosureOp, TLocal, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The C export of an Iter route symbol: `jet_iter_take` is
 // jet_rt_native_iter_take.
@@ -140,13 +140,13 @@ fn ir_lazy_type_can_clone(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
 // failed when its body cannot be built.
 fn ir_lazy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
     key :: "lazy.{role}<{type_carrier_identity(ty)}>"
-    if m.function_rows.get(key) == .Val(known) {
+    if name_rows_value(m.function_rows, key) == .Val(known) {
         if known < 0 -> return ir_fail_slot(&b, span, "lazy.{role} of {ir_type_name(ty)}")
         return known
     }
     id :: m.functions.len()
     &m.functions.push(ir_hashed_function("lazy.{role}", key, "jet_ir_lazy_{role}_", "", 0))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     if role == "clone" {
         ir_lazy_clone_body(&m, p, &a, ty, span)
@@ -178,7 +178,7 @@ fn ir_lazy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: T
     ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     if failed {
-        m.function_rows[key] = -1
+        name_rows_set(&m.function_rows, key, -1)
         return ir_fail_slot(&b, span, message)
     }
     id

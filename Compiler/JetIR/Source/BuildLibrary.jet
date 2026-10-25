@@ -8,7 +8,7 @@
 // validated by signature here; ir_call builds each call of one as its
 // machine operation (ir_intrinsic_call).
 
-use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote]
+use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_value]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One `#Export(c)` row of the entry module: its checked function's key and
@@ -219,7 +219,7 @@ fn ir_library_failed(errors: [String]) -> IRLibraryResult Never! {
 
 // Whether IR function `id` has a CallRuntime of `symbol`.
 fn ir_calls_own_route(m: IRModule, id: Int, symbol: String) -> Bool Never! {
-    own :: m.name_rows.get(symbol) ?? return false
+    own :: name_rows_value(m.name_rows, symbol) ?? return false
     f :: m.functions[id]
     loop at in 0..<f.op.len() {
         if f.op[at] == .CallRuntime && f.a[at] == own -> return true

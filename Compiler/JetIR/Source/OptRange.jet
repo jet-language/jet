@@ -32,6 +32,8 @@
 // ranges decide becomes its constant. Returns the rewritten instructions;
 // `f` and `s` stay one SSA form.
 
+use jet_foundation.[name_rows_value]
+
 // The inline Int bounds; a bound at or past one is unbounded.
 IR_RANGE_LOW :: -4611686018427387904
 IR_RANGE_HIGH :: 4611686018427387903
@@ -475,9 +477,9 @@ fn ir_range_decided(op: IROp, a: IRRange, b: IRRange) -> Int Never! {
 
 // The rewrites the ranges prove (the header comment).
 fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int Never! {
-    to_i64 :: m.name_rows.get("jet_int_owned_to_i64") ?? -2
-    clone :: m.name_rows.get("jet_rt_int_clone") ?? -2
-    fixed :: m.name_rows.get("jet_int_checked_fixed") ?? -2
+    to_i64 :: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
+    clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
     rewritten := 0
     loop at in 0..<f.op.len() {
         block :: s.block[at]

@@ -4,7 +4,7 @@
 // a lookup is a binary search. Its operations are helper functions built once
 // per Map type (map.find, map.set, map.get, map.remove, map.insert).
 
-use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, TPanicLoc, TPanicLocal, type_carrier_identity]
+use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, TPanicLoc, TPanicLocal, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
 fn ir_map_entry_type(ty: Type) -> Type? Never! {
@@ -90,12 +90,12 @@ fn ir_map_order(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: String, left: I
 // The id of Map helper `name` of the Map type row `map_row`, built on first use.
 fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
     key :: "{name}<{type_carrier_identity(m.types[map_row].ty)}>"
-    if m.function_rows.get(key) == .Val(known) -> return known
+    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
     shape :: ir_map_shape(&m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
     id :: m.functions.len()
     symbol :: if name == "map.find" -> "find" else if name == "map.set" -> "set" else if name == "map.get" -> "get" else if name == "map.remove" -> "remove" else -> "insert"
     &m.functions.push(ir_hashed_function(name, key, "jet_ir_map_{symbol}_", "", 0))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     map :: ir_new_slot(&a, map_row, IRSlotKind.Param, ir_intern_name(&m, "map"))
     probe_key :: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))

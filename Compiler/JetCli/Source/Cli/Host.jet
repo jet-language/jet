@@ -90,6 +90,7 @@ use jet_foundation.[
     compiler_transfer_rows,
     compiler_threads_failure_text,
     CompilerThreads,
+    name_rows_value,
     TConstantDef,
     TImplDef,
     TTypeDef,
@@ -275,7 +276,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
         rows :: loop failure in built.failures -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
         jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet evaluator can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), "correct the reported backend problems, then retry `jet eval {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
-    entry :: built.program.function_rows.get(entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
+    entry :: name_rows_value(built.program.function_rows, entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
     config.eval_entry = true
     program := jet_eval_native_load(JetEvalIRComptime{code: ^built.program, layouts: shared [IRProgram]{^layouts}, items: [Int]{entry}, build_failures: [String]{}}, config)
@@ -703,7 +704,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
         item :: "{failure.name} [{failure.key}]"
         message :: "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
         if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
-        if built.program.function_rows.get(failure.key) == .Val(id) -> jet_cli_ir_trap(&built.program.functions[id])
+        if name_rows_value(built.program.function_rows, failure.key) == .Val(id) -> jet_cli_ir_trap(&built.program.functions[id])
     }
     // A runtime call the runtime does not export would fail the whole link;
     // its function fails here instead, like any construct the builder rejects.

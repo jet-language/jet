@@ -17,7 +17,7 @@ use jet_ir.[
     ir_optimize_module_measured, ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
 ]
 use jet_backend.[LINK_BASE, x64_link_executable]
-use jet_foundation.[CompilerThreads, Type, compiler_threads_single]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_single, name_rows_set]
 use core.files as files
 use core.process as process
 use core.time as time
@@ -158,7 +158,7 @@ fn xp_print_int(m: &IRModule, f: &IRFunction, t: XPTypes, value: Int) {
 
 fn xp_add(m: &IRModule, f: IRFunction) -> Int {
     row :: m.functions.len()
-    m.function_rows[f.key] = row
+    name_rows_set(&m.function_rows, f.key, row)
     &m.functions.push(f)
     row
 }

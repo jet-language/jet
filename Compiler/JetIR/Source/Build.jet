@@ -2,7 +2,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set_first]
+use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value]
 use jet_sema.[SemaCheckedForeignFunction]
 
 struct IRBuildFailure {
@@ -747,7 +747,7 @@ fn ir_function_row_id(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -
         made := ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line)
         made.inline_always = function.is_inline_always
         &m.functions.push(^made)
-        m.function_rows[function.key] = id
+        name_rows_set(&m.function_rows, function.key, id)
         m.ids[row] = id
         &m.queue.push(IRQueued{row: row, id: id, args: [Type]{}})
         return Val(id)
@@ -761,13 +761,13 @@ fn ir_function_row_id(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -
         &spelled.push(type_carrier_identity(concrete[concrete.len() - 1]))
     }
     instance :: "{function.key}<{spelled.join(", ")}>"
-    if m.instances.get(instance) == .Val(known) -> return Val(known)
+    if name_rows_value(m.instances, instance) == .Val(known) -> return Val(known)
     id :: m.functions.len()
     made := ir_hashed_function(function.name, instance, "{ir_symbol_name(function)}__", function.source_file, function.line)
     made.inline_always = function.is_inline_always
     &m.functions.push(^made)
-    m.function_rows[instance] = id
-    m.instances[instance] = id
+    name_rows_set(&m.function_rows, instance, id)
+    name_rows_set(&m.instances, instance, id)
     &m.queue.push(IRQueued{row: row, id: id, args: concrete})
     Val(id)
 }
@@ -1033,7 +1033,7 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
     key :: "{m.functions[entry].key}#entry"
     id :: m.functions.len()
     &m.functions.push(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", m.functions[entry].source_file, m.functions[entry].line))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[entry].line
     span :: Span{start: 0, end: 0}
@@ -1782,7 +1782,7 @@ fn ir_stop_point(m: &IRModule, b: &IRBuilder, key: String) Never! {
 // (X64Select ir_x64_stop_poll); IR_STOP_TRAP_KEY's is the same. Built
 // once per module, by key.
 fn ir_stop_poll(m: &IRModule, key: String) -> Int Never! {
-    found :: m.function_rows.get(key) ?? -1
+    found :: name_rows_value(m.function_rows, key) ?? -1
     if found >= 0 -> return found
     name :: if key == IR_STOP_TRAP_KEY -> "jet_ir_stop_trap" else -> "jet_ir_stop_poll"
     f := ir_function_new(name, key, name, "", 0)
@@ -1791,7 +1791,7 @@ fn ir_stop_poll(m: &IRModule, key: String) -> Int Never! {
     f.asm = Val(IRAsmLeaf{code: [U8]{}, regs: [Int]{}, result: 0})
     id :: m.functions.len()
     &m.functions.push(^f)
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     id
 }
 

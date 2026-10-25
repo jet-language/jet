@@ -7,7 +7,7 @@
 // highest-first: to_sorted_list, remove and rendering see the descending
 // sort.
 
-use jet_foundation.[Span, TBuiltinOp, Type, type_carrier_identity]
+use jet_foundation.[Span, TBuiltinOp, Type, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The element of a `PriorityQueue<T>`.
 fn ir_priority_queue_element(ty: Type) -> Type? Never! {
@@ -28,12 +28,12 @@ fn ir_priority_queue_row(m: &IRModule, p: IRProgram, heap_row: Int) -> Int? Neve
 // calls (a user Comparable implementation) resolve before it is stored.
 fn ir_heap_helper(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
     key :: "{name}<{type_carrier_identity(m.types[row].ty)}>"
-    if m.function_rows.get(key) == .Val(known) -> return known
+    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
     kind :: if m.types[elem_row].kind == .Float -> "float" else -> ir_map_key_kind(m, elem_row)
     id :: m.functions.len()
     symbol :: name.split(".").to_list().join("_")
     &m.functions.push(ir_hashed_function(name, key, "jet_ir_{symbol}_", "", 0))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     heap :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "heap"))
     if name == "priority_queue.push" {

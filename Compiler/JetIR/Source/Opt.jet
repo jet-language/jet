@@ -22,7 +22,7 @@
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_transfer_rows]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_transfer_rows, name_rows_set, name_rows_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -197,8 +197,8 @@ fn ir_opt_view(m: &IRModule) -> IRModule Never! {
     view := ir_module_new()
     compiler_transfer_rows<IRType>(&view.types, &m.types)
     loop route in ir_opt_routes() {
-        id :: m.name_rows.get(route) ?? -1
-        if id >= 0 -> view.name_rows[route] = id
+        id :: name_rows_value(m.name_rows, route) ?? -1
+        if id >= 0 -> name_rows_set(&view.name_rows, route, id)
     }
     view
 }
@@ -254,7 +254,7 @@ fn ir_opt_module_size(m: IRModule) -> Int Never! {
 fn ir_opt_glue_table(m: IRModule) -> [Int] Never! {
     table := [Int]{}
     loop ty in m.types {
-        &table.push(if ty.kind == .Int || ty.drop == "" -> -1 else -> m.function_rows.get(ty.drop) ?? -1)
+        &table.push(if ty.kind == .Int || ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1)
     }
     table
 }
@@ -344,7 +344,7 @@ fn ir_opt_routes() -> [String] Never! {
 
 // Whether instruction `at` calls the runtime route `route`.
 fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Bool Never! {
-    f.op[at] == .CallRuntime && f.a[at] == (m.name_rows.get(route) ?? -2)
+    f.op[at] == .CallRuntime && f.a[at] == (name_rows_value(m.name_rows, route) ?? -2)
 }
 
 // One function's passes: at level 2 uniqueness hoisting, then inlining its

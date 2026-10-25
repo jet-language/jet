@@ -26,12 +26,13 @@
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
 
+use jet_foundation.[name_rows_value]
 
 IR_OPT_SIMPLIFY_ROUNDS :: 8
 
 fn ir_opt_simplify(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     round := 0
-    fixed :: m.name_rows.get("jet_int_checked_fixed") ?? -2
+    fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
     loop round < IR_OPT_SIMPLIFY_ROUNDS {
         // The facts stay true until a sweep changes the function, so they
         // are computed again only after one does (most sweeps change

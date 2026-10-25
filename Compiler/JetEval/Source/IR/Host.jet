@@ -12,7 +12,7 @@
 // out, with the runtime's own texts, buffers and boxes so the program owns
 // and drops them as any other. Rows are read and interned in the batch's
 // own rows (host_types), whose existing rows are the module's.
-use jet_foundation.[Span, TComptimeValue, Type, type_name]
+use jet_foundation.[Span, TComptimeValue, Type, name_rows_value, type_name]
 use jet_ir.[IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_align8, ir_enum_box_size, ir_enum_def, ir_host_value_row, ir_list_stride, ir_option_inline, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // The compiler value host word `word` holds.
@@ -112,7 +112,7 @@ fn jet_eval_ir_host_field_route(s: &JetEvalIRState, args: [Int], dst_row: Int, a
 // builder's ir_host_row_key).
 fn jet_eval_ir_host_row(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? Never! {
     text :: jet_eval_ir_text(&s, key) ?? return None
-    if types.type_rows.get(text) == .Val(row) -> return Val(row)
+    if name_rows_value(types.type_rows, text) == .Val(row) -> return Val(row)
     jet_eval_ir_problem(&s, "host operand type `{text}` is not a row of the module")
     None
 }

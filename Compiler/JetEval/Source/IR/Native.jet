@@ -20,7 +20,7 @@
 // ended; a batch whose child was replaced is loaded again at the same
 // addresses (each batch has its own, above the last one).
 use core.math as math
-use jet_foundation.[Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights]
+use jet_foundation.[Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_rows_set, name_rows_value]
 use jet_ir.[IRFunction, IRModule, IROp, IRProgram, IRSlotKind, IRType, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_module_new, ir_pointer_row, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object]
 use jet_backend.[
     X64ComptimeChild,
@@ -280,7 +280,7 @@ fn jet_eval_native_entry_module() -> IRModule {
 fn jet_eval_native_add(m: &IRModule, f: ^IRFunction) -> Int Never! {
     owned := ^f
     id :: m.functions.len()
-    m.function_rows[owned.key.copy()] = id
+    name_rows_set(&m.function_rows, owned.key, id)
     &m.functions.push(^owned)
     id
 }
@@ -348,7 +348,7 @@ fn jet_eval_native_load(built: ^JetEvalIRComptime, config: JetEvalConfig) -> Jet
     none := ir_function_new("{JET_EVAL_NATIVE_PREFIX}none", "{JET_EVAL_NATIVE_PREFIX}none", "{JET_EVAL_NATIVE_PREFIX}none", "", 0)
     loop name in names {
         if name == "" -> next
-        target :: code.function_rows.get(name) ?? next
+        target :: name_rows_value(code.function_rows, name) ?? next
         address :: ir_slot(&none, pointer, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(&none, IROp.FunctionAddress, address, target, -1, -1, 0)
     }

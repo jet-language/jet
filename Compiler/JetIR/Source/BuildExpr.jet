@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
+use jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
 fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
     b.line = function.line
@@ -4512,7 +4512,7 @@ fn ir_startup_read(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConst
 // -1 when the constant's startup function is not among the checked functions.
 fn ir_startup_guard(m: &IRModule, p: IRProgram, definition: TConstantDef) -> Int Never! {
     key :: "{definition.key}#startup"
-    known :: m.function_rows.get(key) ?? -1
+    known :: name_rows_value(m.function_rows, key) ?? -1
     if known >= 0 -> return known
     init_key :: definition.init ?? return -1
     init_row :: ir_function_row(p, init_key) ?? return -1
@@ -4523,7 +4523,7 @@ fn ir_startup_guard(m: &IRModule, p: IRProgram, definition: TConstantDef) -> Int
     init :: ir_function_id(&m, p, init_key, [Type]{}) ?? return -1
     id :: m.functions.len()
     &m.functions.push(ir_function_new("{definition.name}.startup", key, "{ir_symbol_name(init_function)}__guard", init_function.source_file, init_function.line))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     g := ir_builder_new(m.functions[id].copy())
     g.line = init_function.line
     span :: Span{start: 0, end: 0}
@@ -4575,7 +4575,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         return ir_fail_slot(&b, span, "named function as a value of {ir_type_name(ty)}")
     }
     adapter_key :: "{key}#value<{type_carrier_identity(signature)}>"
-    adapter := m.function_rows.get(adapter_key) ?? -1
+    adapter := name_rows_value(m.function_rows, adapter_key) ?? -1
     if adapter < 0 {
         function_row :: ir_function_row(p, key) ?? return ir_fail_slot(&b, span, "named function {key} outside the checked program")
         function :: p.functions[function_row].copy()
@@ -4610,7 +4610,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         target :: ir_function_id(&m, p, key, [Type]{}) ?? return ir_fail_slot(&b, span, "named function {function.name} as a value")
         adapter = m.functions.len()
         &m.functions.push(ir_hashed_function("{function.name}.value", adapter_key, "{ir_symbol_name(function)}__value_", function.source_file, function.line))
-        m.function_rows[adapter_key] = adapter
+        name_rows_set(&m.function_rows, adapter_key, adapter)
         a := ir_builder_new(m.functions[adapter].copy())
         a.line = function.line
         _ :: ir_new_slot(&a, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "closure"))

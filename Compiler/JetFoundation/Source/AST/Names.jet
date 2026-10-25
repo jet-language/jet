@@ -173,7 +173,8 @@ fn name_rows_key(map: NameRows, text: String, hash: Int) -> Int? Never! {
     None
 }
 
-// Binds `text` to `row` (>= 0), replacing any earlier value.
+// Binds `text` to `row`, replacing any earlier value. A negative `row` reads
+// as unbound to name_rows_get and as itself to name_rows_value.
 fn name_rows_set(map: &NameRows, text: String, row: Int) Never! {
     name_rows_set_hashed(&map, text, name_rows_hash(text), row)
 }
@@ -238,6 +239,24 @@ fn name_rows_get(map: NameRows, text: String, hash: Int) -> Int? Never! {
 
 fn name_rows_get_text(map: NameRows, text: String) -> Int? Never! {
     name_rows_get(map, text, name_rows_hash(text))
+}
+
+// The value bound to `text` whatever its sign, if `text` was ever bound: for
+// a map that removes no key and whose negative values are markers of its own
+// (the IR's key tables: a failed helper, a memo of "none").
+fn name_rows_value(map: NameRows, text: String) -> Int? Never! {
+    key :: name_rows_key(map, text, name_rows_hash(text)) ?? return None
+    Val(map.rows[key])
+}
+
+// The bound keys and values in ascending key order (removed keys left out).
+fn name_rows_sorted(map: NameRows) -> [(key: String, local: Int)] Never! {
+    run := [(key: String, local: Int)]{}
+    loop (key, text) in map.texts {
+        if map.rows[key] >= 0 -> &run.push((key: text.copy(), local: map.rows[key]))
+    }
+    &run.sort()
+    run
 }
 
 // Unbinds `text`; its key stays for a later `name_rows_set`.

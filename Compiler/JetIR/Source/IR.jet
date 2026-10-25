@@ -70,7 +70,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[Type, TypeTable, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
+use jet_foundation.[NameRows, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
 
 enum IROp {
     Nop
@@ -212,9 +212,12 @@ struct IRAsmLeaf {
 struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 
 // The program: interned types and names, read-only data rows, functions.
+// Every String-keyed table is a hashed `NameRows` (JetFoundation AST/Names:
+// one hash and one compare per lookup); a table whose values are lists keys
+// an index into a list column beside it.
 // `type_keys[row]` is type row `row`'s intern key (ir_row_key);
-// `key_rows` lists the rows ir_intern_type gave each display key (they
-// differ in layout), so a repeated intern compares layouts, not keys.
+// `key_rows` indexes `key_lists`, the rows ir_intern_type gave each display
+// key (they differ in layout), so a repeated intern compares layouts, not keys.
 // `data_relocs` names the data rows that are static objects (8-byte
 // aligned; BuildStatic.jet) and the words in them that hold an address;
 // `constant_rows` maps "<constant key>|<type key>" to the static object
@@ -226,9 +229,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // (BuildTypes.jet ir_struct_row, ir_struct_members, ir_variant_members,
 // ir_enum_box_size, ir_handle_row, ir_value_type_in): a
 // struct instance's row by identity (-1 when it does not lay out) and its
-// resolved members, an enum instance variant's members by "<declaration
-// row>|<identity>#<index>" and its box size by "<declaration row>|<identity>",
-// a bare nominal name's runtime handle row (-1: none), and the value row of
+// resolved members (an index into `member_lists`), an enum instance variant's
+// members (likewise) by "<declaration row>|<identity>#<index>" and its box
+// size by "<declaration row>|<identity>",
 // each type interned in `value_types`, by its index, with no struct being
 // laid out (-1: none; -2: being laid out). `close_free` holds
 // the type rows BuildOwn.jet ir_close_parts_reach proved free of a Close
@@ -240,8 +243,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `queue` holds the functions waiting to be built and `lambdas` the lambda
 // bodies they build; `close_glue` the close glue built per glue key
 // (BuildOwn.jet; -1: the type closes nothing, -2: its glue failed);
-// `helper_errors` the message of a helper whose body failed, by helper key,
-// which every later use reports again; `trait_keys` a boxed trait value's
+// `helper_errors` the message of a helper whose body failed (an index into
+// `helper_messages`), by helper key, which every later use reports again;
+// `trait_keys` a boxed trait value's
 // payload key by concrete type identity (BuildTraits.jet ir_trait_key);
 // `subst_names`/`subst_types` the type parameters of the instance being
 // built and their arguments. `stop_points`: calls that can deliver a
@@ -252,34 +256,37 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 struct IRModule {
     types: [IRType]
     type_keys: [String]
-    type_rows: [String:Int]
-    key_rows: [String:[Int]]
+    type_rows: NameRows
+    key_rows: NameRows
+    key_lists: [[Int]]
     names: [String]
-    name_rows: [String:Int]
+    name_rows: NameRows
     data: [[U8]]
-    data_rows: [String:Int]
+    data_rows: NameRows
     data_relocs: [Int:[IRDataReloc]]
-    constant_rows: [String:Int]
+    constant_rows: NameRows
     functions: [IRFunction]
-    function_rows: [String:Int]
+    function_rows: NameRows
     entry: Int
-    layouts: [String:Int]
+    layouts: NameRows
     layout_low: Int
-    struct_members: [String:[IRMember]]
-    variant_members: [String:[IRMember]]
-    enum_sizes: [String:Int]
-    handle_rows: [String:Int]
+    struct_members: NameRows
+    variant_members: NameRows
+    member_lists: [[IRMember]]
+    enum_sizes: NameRows
+    handle_rows: NameRows
     value_types: TypeTable{TypeTable{}}
     value_rows: [Int]{[Int]{}}
     close_free: [Int:Bool]
     scalar_rows: [Int]
     ids: [Int]
-    instances: [String:Int]
+    instances: NameRows
     queue: [IRQueued]
     lambdas: [IRLambdaJob]
-    close_glue: [String:Int]
-    helper_errors: [String:String]
-    trait_keys: [String:Int]
+    close_glue: NameRows
+    helper_errors: NameRows
+    helper_messages: [String]
+    trait_keys: NameRows
     subst_names: [String]
     subst_types: [Type]
     stop_points: Bool{false}
@@ -287,7 +294,7 @@ struct IRModule {
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: [String:Int]{}, key_rows: [String:[Int]]{}, names: [String]{}, name_rows: [String:Int]{}, data: [[U8]]{}, data_rows: [String:Int]{}, data_relocs: [Int:[IRDataReloc]]{}, constant_rows: [String:Int]{}, functions: [IRFunction]{}, function_rows: [String:Int]{}, entry: -1, layouts: [String:Int]{}, layout_low: 0, struct_members: [String:[IRMember]]{}, variant_members: [String:[IRMember]]{}, enum_sizes: [String:Int]{}, handle_rows: [String:Int]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: [String:Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: [String:Int]{}, helper_errors: [String:String]{}, trait_keys: [String:Int]{}, subst_names: [String]{}, subst_types: [Type]{}}
+    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}, trait_keys: name_rows(), subst_names: [String]{}, subst_types: [Type]{}}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {
@@ -307,21 +314,28 @@ fn ir_kind_name(kind: IRTypeKind) -> String Never! {
 
 // The row of `row`'s type, interned by its kind, layout and display key.
 fn ir_intern_type(m: &IRModule, key: String, row: IRType) -> Int Never! {
-    known :: m.key_rows.get(key) ?? [Int]{}
-    loop index in known {
-        if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed -> return index
+    hash :: name_rows_hash(key)
+    listed :: name_rows_get(m.key_rows, key, hash) ?? -1
+    if listed >= 0 {
+        loop index in m.key_lists[listed] {
+            if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed -> return index
+        }
     }
     full :: "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
-    found := m.type_rows.get(full) ?? -1
+    full_hash :: name_rows_hash(full)
+    found := name_rows_get(m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
         &m.types.push(row)
         &m.type_keys.push(full.copy())
-        m.type_rows[full] = found
+        name_rows_set_hashed(&m.type_rows, full, full_hash, found)
     }
-    listed := m.key_rows.get(key) ?? [Int]{}
-    &listed.push(found)
-    m.key_rows[key.copy()] = listed
+    if listed >= 0 {
+        &m.key_lists[listed].push(found)
+    } else {
+        name_rows_set_hashed(&m.key_rows, key, hash, m.key_lists.len())
+        &m.key_lists.push([Int]{found})
+    }
     found
 }
 
@@ -353,21 +367,23 @@ fn ir_hashed_function(name: String, key: String, prefix: String, source_file: St
 }
 
 fn ir_intern_name(m: &IRModule, text: String) -> Int Never! {
-    found :: m.name_rows.get(text) ?? -1
+    hash :: name_rows_hash(text)
+    found :: name_rows_get(m.name_rows, text, hash) ?? -1
     if found >= 0 -> return found
     id :: m.names.len()
+    name_rows_set_hashed(&m.name_rows, text, hash, id)
     &m.names.push(text)
-    m.name_rows[text] = id
     id
 }
 
 // A read-only data row holding `text`'s bytes (shared by equal texts).
 fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
-    found :: m.data_rows.get(text) ?? -1
+    hash :: name_rows_hash(text)
+    found :: name_rows_get(m.data_rows, text, hash) ?? -1
     if found >= 0 -> return found
     id :: m.data.len()
     &m.data.push(text.bytes())
-    m.data_rows[text] = id
+    name_rows_set_hashed(&m.data_rows, text, hash, id)
     id
 }
 
@@ -375,12 +391,32 @@ fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
 // by length and digest, linear in the bytes however large the table).
 fn ir_intern_bytes(m: &IRModule, bytes: [U8]) -> Int Never! {
     key :: "bytes:{bytes.len()}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
-    found :: m.data_rows.get(key) ?? -1
+    hash :: name_rows_hash(key)
+    found :: name_rows_get(m.data_rows, key, hash) ?? -1
     if found >= 0 -> return found
     id :: m.data.len()
     &m.data.push(bytes)
-    m.data_rows[key] = id
+    name_rows_set_hashed(&m.data_rows, key, hash, id)
     id
+}
+
+// Records `message` as the failure of helper `key`, which every later use
+// of the helper reports again (ir_helper_error).
+fn ir_helper_failed(m: &IRModule, key: String, message: String) Never! {
+    name_rows_set(&m.helper_errors, key, m.helper_messages.len())
+    &m.helper_messages.push(message)
+}
+
+fn ir_helper_error(m: IRModule, key: String) -> String? Never! {
+    index :: name_rows_value(m.helper_errors, key) ?? return None
+    Val(m.helper_messages[index].copy())
+}
+
+// The members memoized under `memo` in `table` (an index into
+// m.member_lists), if any.
+fn ir_members_memo(m: IRModule, table: NameRows, memo: String) -> [IRMember]? Never! {
+    index :: name_rows_value(table, memo) ?? return None
+    Val(m.member_lists[index].copy())
 }
 
 fn ir_function_new(name: String, key: String, symbol: String, source_file: String, line: Int) -> IRFunction Never! {

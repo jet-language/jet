@@ -2,7 +2,7 @@
 // every function value is, `task` spawns and `core.mem.scope.guard`, with the
 // owned runtime Task handle and the ScopeGuard carrier they produce.
 
-use jet_foundation.[Span, BodyCoreClosureKind, BodyLambda, Type, type_carrier_identity]
+use jet_foundation.[Span, BodyCoreClosureKind, BodyLambda, Type, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The element of a `Task<T>`.
 fn ir_task_element(ty: Type) -> Type? Never! {
@@ -31,12 +31,12 @@ fn ir_task_row(m: &IRModule, ty: Type) -> Int Never! {
 // generated jet_ir_scope_guard_drop) runs the callback, then retires the box.
 fn ir_scope_guard_row(m: &IRModule, ty: Type) -> Int Never! {
     symbol :: "jet_ir_scope_guard_drop"
-    if m.function_rows.get(symbol) == None {
+    if name_rows_value(m.function_rows, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function.
         id :: m.functions.len()
         &m.functions.push(ir_function_new("scope.guard.drop", symbol, symbol, "", 0))
-        m.function_rows[symbol] = id
+        name_rows_set(&m.function_rows, symbol, id)
         a := ir_builder_new(m.functions[id].copy())
         pointer_row :: ir_pointer_row(&m)
         guard :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "guard"))
@@ -81,12 +81,12 @@ fn ir_closure_share() -> String Never! { "#closure.share" }
 // jet_ir_closure_drop (a null box holds nothing).
 fn ir_closure_row(m: &IRModule, ty: Type) -> Int Never! {
     symbol :: "jet_ir_closure_drop"
-    if m.function_rows.get(symbol) == None {
+    if name_rows_value(m.function_rows, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function.
         id :: m.functions.len()
         &m.functions.push(ir_function_new("closure.drop", symbol, symbol, "", 0))
-        m.function_rows[symbol] = id
+        name_rows_set(&m.function_rows, symbol, id)
         a := ir_builder_new(m.functions[id].copy())
         pointer_row :: ir_pointer_row(&m)
         boxed :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "boxed"))
@@ -134,11 +134,11 @@ fn ir_closure_release(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> In
         &owned.push(capture.copy())
     }
     key = "{key}>"
-    known :: m.function_rows.get(key) ?? -1
+    known :: name_rows_value(m.function_rows, key) ?? -1
     if known >= 0 -> return known
     id :: m.functions.len()
     &m.functions.push(ir_hashed_function("closure.release", key, "jet_ir_closure_release_", "", 0))
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     boxed :: ir_new_slot(&a, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "boxed"))
     loop capture in owned {

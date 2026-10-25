@@ -20,7 +20,7 @@
 //   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
 //   after spawning; then, unfiltered, run each Check Output once.
 
-use jet_foundation.[DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type]
+use jet_foundation.[DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, name_rows_set]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One test the harness runs: its checked function `key`, the identity `id`
@@ -103,7 +103,7 @@ fn ir_test_function(m: &IRModule, name: String, from: Int, suffix: String) -> In
     id :: m.functions.len()
     function :: ir_function_new(name, key, symbol, source_file, line)
     &m.functions.push(function)
-    m.function_rows[key] = id
+    name_rows_set(&m.function_rows, key, id)
     id
 }
 
