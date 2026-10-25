@@ -13,10 +13,24 @@
 // (Apply); `fn(A,B)` and `fn(A,B;R)` (no effect row or call metadata);
 // `(name:T,…)` tuple; `callback` (`core_host_callback_type`); any other name
 // is Named. The first row whose module and member match wins; no row is None.
+// The lookup splits the table at `\n{module_name} `, so only that module's
+// rows are copied out and parsed; every other row is passed over by the
+// runtime search.
 fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> CoreTypedCallSignature? {
     prefix :: "{module_name} "
-    loop line in rows.split("\n") {
-        if !line.starts_with(prefix) -> next
+    separator :: "\n{prefix}"
+    first := true
+    loop chunk in rows.split(separator) {
+        // The text before the first separator holds a row of this module only
+        // when the table starts with the module; that row keeps its prefix.
+        at_start := false
+        if first {
+            first = false
+            if !rows.starts_with(prefix) -> next
+            at_start = true
+        }
+        head :: if chunk.split_once("\n") == .Val(parts) -> parts.before else -> chunk
+        line :: if at_start -> head else -> "{prefix}{head}"
         fields :: line.split(" ").to_list()
         if (fields.len() != 4 && fields.len() != 5) || !core_sig_one_of(member, fields[1].split("|").to_list()) -> next
         parameters := [CoreCallTypedParameter]{}
