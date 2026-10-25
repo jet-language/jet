@@ -193,6 +193,11 @@ fn core_call_parameter_contract(module_name: String, member: String) -> [CoreCal
             core_param_required("address"), core_param_required("mux"),
             core_param_optional("tls", ParamZone.LabelOnly, absent), core_param_optional("deadline", ParamZone.LabelOnly, absent),
         })
+        module_name == "core.http.server" && member == "static_files" -> Val([CoreCallParameterContract]{
+            core_param_required("mux"), core_param_required("prefix"), core_param_required("root"),
+            core_param_optional("index", ParamZone.LabelOnly, absent), core_param_optional("dotfiles", ParamZone.LabelOnly, absent),
+            core_param_optional("follow_links", ParamZone.LabelOnly, absent),
+        })
         module_name == "core.http.server" && member == "cors_policy" -> Val([CoreCallParameterContract]{
             core_param_required_either("origins"), core_param_optional("methods", ParamZone.Either, CoreCallDefault.EmptyList),
             core_param_optional("headers", ParamZone.Either, CoreCallDefault.EmptyList),

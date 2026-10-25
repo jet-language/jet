@@ -1,0 +1,8 @@
+use core.http.server as http_server
+
+fn run() {
+    mux :: http_server.mux()
+    http_server.static_files(mux, "/assets", "/tmp")
+    http_server.static_files(mux, "/raw", "/tmp", index: false, dotfiles: true, follow_links: false)
+    print("mounted")
+}

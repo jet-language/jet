@@ -1104,7 +1104,7 @@ returns an `HTTPShutdownReport`. It is distinct from the blocking
 | `response(status, body)` | `HTTPResponse` | Construct a text response. |
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
 | `static_file(path, content_type)` / `static_file_range(request, path, content_type)` | `HTTPResponse !HTTPError` | Serve a file, with a range-aware form for a request. |
-| `static_files(mux, prefix, root)` | unit | Mount a directory below a route prefix. |
+| `static_files(mux, prefix, root, index:, dotfiles:, follow_links:)` | unit | Mount a directory below a route prefix; each optional `Bool` label overrides one default policy. |
 | `tls(cert, key)` | `HTTPServerTLS` | Build explicit server TLS material. |
 | `sse(body)` | `HTTPResponse` | Build a server-sent-events response. |
 | `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
