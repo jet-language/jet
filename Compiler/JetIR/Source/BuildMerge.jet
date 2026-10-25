@@ -19,8 +19,15 @@
 // keys are sorted into one ascending run (its key tables are hashed, its
 // functions listed by row) and one merge of those runs numbers the groups,
 // so the walk itself compares no keys.
+//
+// What the merge reads of a part apart from its rows is made on the part's
+// own build thread before the merge (ir_merge_prepare): its key runs and,
+// per function, the rows it uses in walk order, each row once. The walk then
+// steps through those short lists instead of every function's instructions;
+// a row's second use in a function finds its number already given, so the
+// numbering is the same.
 
-use jet_foundation.[NameRows, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, name_rows_set, name_rows_sorted, name_rows_value]
+use jet_foundation.[compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, name_rows_set, name_rows_sorted, name_rows_value]
 
 // A function the walk starts from: function `local` of part `part`.
 struct IRMergeRoot { part: Int, local: Int }
@@ -33,12 +40,40 @@ struct IRMergeSide {
     data_new: [Int]
 }
 
+// A part's merge input, made on its build thread (ir_merge_prepare): its
+// key runs in ascending key order (the function run sorted), and per
+// function `local` the rows it uses, in walk order and each row once, as
+// (kind, row) pairs `uses[use_starts[local]..<use_starts[local + 1]]`
+// (kinds: IR_MERGE_USE_*).
+struct IRMergePrep {
+    functions: [(key: String, local: Int)]
+    types: [(key: String, local: Int)]
+    names: [(key: String, local: Int)]
+    texts: [(key: String, local: Int)]
+    constants: [(key: String, local: Int)]
+    use_starts: [Int]
+    uses: [Int]
+}
+
+IR_MERGE_USE_TYPE :: 0
+IR_MERGE_USE_NAME :: 1
+IR_MERGE_USE_DATA :: 2
+IR_MERGE_USE_FUNCTION :: 3
+
+// Per row kind, the function that last used each row (ir_merge_uses).
+struct IRMergeSeen {
+    types: [Int]
+    names: [Int]
+    data: [Int]
+    functions: [Int]
+}
+
 // The merged rows (each one's part and row there); each part row's sharing
 // group (`*_group[part][row]`; data: -1 for a row only its part holds); per
 // group its key and merged row (-1: not reached yet). `function_job` is the
 // first root whose function is in the group (-1: none). The data groups
 // below `data_texts` are text or bytes keys, the rest constants' static
-// objects.
+// objects. Per part, its functions' uses (IRMergePrep), read by the walk.
 struct IRMerge {
     sides: [IRMergeSide]
     roots: [IRMergeRoot]
@@ -64,6 +99,8 @@ struct IRMerge {
     data_keys: [String]
     data_texts: Int
     data_ids: [Int]
+    use_starts: [[Int]]
+    uses: [[Int]]
 }
 
 // The module of one part built in queue order (ir_build_tests): its queue,
@@ -77,18 +114,20 @@ fn ir_merge_serial(built: ^IRModule) -> IRModule Never! {
         entry = roots.len()
         &roots.push(IRMergeRoot{part: 0, local: m.entry})
     }
+    prepared := [IRMergePrep]{}
+    &prepared.push(ir_merge_prepare(m))
     parts := [IRModule]{}
     &parts.push(^m)
-    ir_merge(^parts, roots, entry)
+    ir_merge(^parts, ^prepared, roots, entry)
 }
 
-// Merges `built` from the job functions `roots` (in job order); `entry` is
-// the root of the program entry (-1: none). The merged module's layout and
-// build memos start empty (they name part rows); its key maps name the
-// merged rows.
-fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Never! {
+// Merges `built` (each part's preparation in `prepared`, ir_merge_prepare)
+// from the job functions `roots` (in job order); `entry` is the root of the
+// program entry (-1: none). The merged module's layout and build memos start
+// empty (they name part rows); its key maps name the merged rows.
+fn ir_merge(built: ^[IRModule], prepared: ^[IRMergePrep], roots: [IRMergeRoot], entry: Int) -> IRModule Never! {
     parts := ^built
-    g := ir_merge_new(parts, roots)
+    g := ir_merge_new(parts, ^prepared, roots)
     loop root in roots {
         _ :: ir_merge_function(&g, parts, root.part, root.local)
     }
@@ -96,9 +135,11 @@ fn ir_merge(built: ^[IRModule], roots: [IRMergeRoot], entry: Int) -> IRModule Ne
     loop cursor < g.function_part.len() {
         part :: g.function_part[cursor]
         local :: g.function_local[cursor]
-        ir_merge_scan(&g, parts, part, parts[part].functions[local])
+        ir_merge_scan(&g, parts, part, local)
         cursor += 1
     }
+    g.use_starts = [[Int]]{}
+    g.uses = [[Int]]{}
     out := ir_module_new()
     if parts.len() > 0 -> out.stop_points = parts[0].stop_points
     ir_merge_take_functions(&parts, g, &out.functions)
@@ -212,43 +253,52 @@ fn ir_merge_release_count(released: Shared<[IRModule]>) -> Int Never! {
 }
 
 // Each part's rows as runs in ascending key order (`(key, local)`: the key
-// and the part's row): its function keys and its type, name, data and
-// constant tables, sorted on a thread per part. Data groups are the text and
-// bytes keys, then the constants' static objects. The types, names and data
-// are grouped on threads of their own while this one groups the functions.
-// A task is handed keys and row counts only, never a part: a part it shared
-// would be copied when the merge rewrites it.
-fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
+// and the part's row), from its preparation (ir_merge_prepare); data groups
+// are the text and bytes keys, then the constants' static objects. The
+// types, names and data are grouped on threads of their own while this one
+// groups the functions. A task is handed keys and row counts only, never a
+// part: a part it shared would be copied when the merge rewrites it.
+fn ir_merge_new(parts: [IRModule], prepared: ^[IRMergePrep], roots: [IRMergeRoot]) -> IRMerge Never! {
     sides := [IRMergeSide]{}
     function_group := [[Int]]{}
     type_counts := [Int]{}
     name_counts := [Int]{}
     data_counts := [Int]{}
-    keys := [IRMergeKeys]{}
+
     loop m in parts {
         &sides.push(IRMergeSide{function_new: ir_merge_unset(m.functions.len()), type_new: ir_merge_unset(m.types.len()), name_new: ir_merge_unset(m.names.len()), data_new: ir_merge_unset(m.data.len())})
         &function_group.push(ir_merge_unset(m.functions.len()))
         &type_counts.push(m.types.len())
         &name_counts.push(m.names.len())
         &data_counts.push(m.data.len())
-        part_keys := [String]{}
-        loop f in m.functions -> &part_keys.push(f.key.copy())
-        &keys.push(IRMergeKeys{functions: ^part_keys, types: m.type_rows, names: m.name_rows, data: m.data_rows, constants: m.constant_rows})
     }
-    runs := ir_merge_part_runs(keys, 0)
+    preps := ^prepared
+    if preps.len() != parts.len() -> panic("the merge has {preps.len()} part preparations for {parts.len()} parts")
     functions := [[(key: String, local: Int)]]{}
     types := [[(key: String, local: Int)]]{}
     names := [[(key: String, local: Int)]]{}
     texts := [[(key: String, local: Int)]]{}
     constants := [[(key: String, local: Int)]]{}
-    loop run in ^runs {
-        part := ^run
-        &functions.push(^part.functions)
-        &types.push(^part.types)
-        &names.push(^part.names)
-        &texts.push(^part.texts)
-        &constants.push(^part.constants)
+    use_starts := [[Int]]{}
+    uses := [[Int]]{}
+    // Popped from the last part down, then put back in part order.
+    loop preps.len() > 0 {
+        prep := &preps.pop() ?? panic("a nonempty part preparation list failed to pop")
+        &functions.push(^prep.functions)
+        &types.push(^prep.types)
+        &names.push(^prep.names)
+        &texts.push(^prep.texts)
+        &constants.push(^prep.constants)
+        &use_starts.push(^prep.use_starts)
+        &uses.push(^prep.uses)
     }
+    &functions.reverse()
+    &types.reverse()
+    &names.reverse()
+    &texts.reverse()
+    &constants.reverse()
+    &use_starts.reverse()
+    &uses.reverse()
     function_keys := [String]{}
     grouped := [IRMergeGroups]{}
     task.group ir_merge_groups {
@@ -272,49 +322,57 @@ fn ir_merge_new(parts: [IRModule], roots: [IRMergeRoot]) -> IRMerge Never! {
     type_ids :: ir_merge_unset(type_groups.keys.len())
     name_ids :: ir_merge_unset(name_groups.keys.len())
     data_ids :: ir_merge_unset(data_groups.keys.len())
-    IRMerge{sides: sides, roots: roots.copy(), function_part: [Int]{}, function_local: [Int]{}, function_group: function_group, function_keys: function_keys, function_ids: function_ids, function_job: function_job, type_part: [Int]{}, type_local: [Int]{}, type_group: ^type_groups.groups, type_keys: ^type_groups.keys, type_ids: type_ids, name_part: [Int]{}, name_local: [Int]{}, name_group: ^name_groups.groups, name_keys: ^name_groups.keys, name_ids: name_ids, data_part: [Int]{}, data_local: [Int]{}, data_group: ^data_groups.groups, data_keys: ^data_groups.keys, data_texts: data_groups.texts, data_ids: data_ids}
+    IRMerge{sides: sides, roots: roots.copy(), function_part: [Int]{}, function_local: [Int]{}, function_group: function_group, function_keys: function_keys, function_ids: function_ids, function_job: function_job, type_part: [Int]{}, type_local: [Int]{}, type_group: ^type_groups.groups, type_keys: ^type_groups.keys, type_ids: type_ids, name_part: [Int]{}, name_local: [Int]{}, name_group: ^name_groups.groups, name_keys: ^name_groups.keys, name_ids: name_ids, data_part: [Int]{}, data_local: [Int]{}, data_group: ^data_groups.groups, data_keys: ^data_groups.keys, data_texts: data_groups.texts, data_ids: data_ids, use_starts: ^use_starts, uses: ^uses}
 }
 
-// One part's keys (ir_merge_new): its functions' keys by row and its key
-// tables.
-struct IRMergeKeys {
-    functions: [String]
-    types: NameRows
-    names: NameRows
-    data: NameRows
-    constants: NameRows
-}
-
-// One part's ascending runs.
-struct IRMergeRuns {
-    functions: [(key: String, local: Int)]
-    types: [(key: String, local: Int)]
-    names: [(key: String, local: Int)]
-    texts: [(key: String, local: Int)]
-    constants: [(key: String, local: Int)]
-}
-
-// The runs of parts `at` on, in part order, each part's sorted on its own
-// thread.
-fn ir_merge_part_runs(keys: [IRMergeKeys], at: Int) -> [IRMergeRuns] Never! {
-    runs := [IRMergeRuns]{}
-    if at >= keys.len() -> return runs
-    task.group part_group {
-        head :: task ir_merge_part_run(keys[at])
-        rest := ir_merge_part_runs(keys, at + 1)
-        &runs.push(head.join() ?? panic(compiler_threads_failure_text(err)))
-        loop run in ^rest -> &runs.push(^run)
-    }
-    runs
-}
-
-// A constant whose value is built at each read (-1) shares no row, so its
-// run leaves it out (name_rows_sorted keeps rows >= 0).
-fn ir_merge_part_run(keys: IRMergeKeys) -> IRMergeRuns Never! {
+// Part `m`'s merge input (IRMergePrep), made on the thread that built it:
+// its key runs as ir_merge_new groups them (each sorted; a constant whose
+// value is built at each read (-1) shares no row, so its run leaves it out:
+// name_rows_sorted keeps rows >= 0) and its functions' uses (ir_merge_uses).
+fn ir_merge_prepare(m: IRModule) -> IRMergePrep Never! {
     functions := [(key: String, local: Int)]{}
-    loop (local, key) in keys.functions -> &functions.push((key: key.copy(), local: local))
+    loop (local, f) in m.functions -> &functions.push((key: f.key.copy(), local: local))
     &functions.sort()
-    IRMergeRuns{functions: ^functions, types: name_rows_sorted(keys.types), names: name_rows_sorted(keys.names), texts: name_rows_sorted(keys.data), constants: name_rows_sorted(keys.constants)}
+    seen := IRMergeSeen{types: ir_merge_unset(m.types.len()), names: ir_merge_unset(m.names.len()), data: ir_merge_unset(m.data.len()), functions: ir_merge_unset(m.functions.len())}
+    use_starts := [Int]{}
+    uses := [Int]{}
+    loop (local, f) in m.functions {
+        &use_starts.push(uses.len())
+        ir_merge_uses(f, local, &seen, &uses)
+    }
+    &use_starts.push(uses.len())
+    IRMergePrep{functions: ^functions, types: name_rows_sorted(m.type_rows), names: name_rows_sorted(m.name_rows), texts: name_rows_sorted(m.data_rows), constants: name_rows_sorted(m.constant_rows), use_starts: ^use_starts, uses: ^uses}
+}
+
+// What function `local` (`f`) uses, in the walk's order (ir_merge_scan
+// numbers them so): its slot types and names, its result type, then its
+// instructions' operands (IR.jet's operand table), each row once, as
+// (kind, row) pairs on `uses`. `seen` holds per row the function that last
+// used it.
+fn ir_merge_uses(f: IRFunction, local: Int, seen: &IRMergeSeen, uses: &[Int]) Never! {
+    loop slot in 0..<f.slot_type.len() {
+        ir_merge_use(&seen.types, IR_MERGE_USE_TYPE, f.slot_type[slot], local, &uses)
+        ir_merge_use(&seen.names, IR_MERGE_USE_NAME, f.slot_name[slot], local, &uses)
+    }
+    ir_merge_use(&seen.types, IR_MERGE_USE_TYPE, f.result, local, &uses)
+    loop at in 0..<f.op.len() {
+        if f.op[at] == {
+            .ConstText | .DataAddress -> ir_merge_use(&seen.data, IR_MERGE_USE_DATA, f.a[at], local, &uses)
+            .ConstBigInt | .CallRuntime -> ir_merge_use(&seen.names, IR_MERGE_USE_NAME, f.a[at], local, &uses)
+            .Close -> ir_merge_use(&seen.names, IR_MERGE_USE_NAME, f.b[at], local, &uses)
+            .Call | .FunctionAddress -> ir_merge_use(&seen.functions, IR_MERGE_USE_FUNCTION, f.a[at], local, &uses)
+            else -> {}
+        }
+    }
+}
+
+// Puts row `row` (none when negative) of kind `kind` on `uses` unless
+// function `local` used it already.
+fn ir_merge_use(seen: &[Int], kind: Int, row: Int, local: Int, uses: &[Int]) Never! {
+    if row < 0 || seen[row] == local -> return
+    seen[row] = local
+    &uses.push(kind)
+    &uses.push(row)
 }
 
 // One kind's sharing groups (ir_merge_group): per part row its group and
@@ -471,21 +529,28 @@ fn ir_merge_data(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Nev
     id
 }
 
-// Numbers what function `f` of part `part` uses, in order.
-fn ir_merge_scan(g: &IRMerge, parts: [IRModule], part: Int, f: IRFunction) Never! {
-    loop slot in 0..<f.slot_type.len() {
-        _ :: ir_merge_type(&g, parts, part, f.slot_type[slot])
-        _ :: ir_merge_name(&g, parts, part, f.slot_name[slot])
-    }
-    _ :: ir_merge_type(&g, parts, part, f.result)
-    loop at in 0..<f.op.len() {
-        if f.op[at] == {
-            .ConstText | .DataAddress -> { _ :: ir_merge_data(&g, parts, part, f.a[at]) }
-            .ConstBigInt | .CallRuntime -> { _ :: ir_merge_name(&g, parts, part, f.a[at]) }
-            .Close -> { _ :: ir_merge_name(&g, parts, part, f.b[at]) }
-            .Call | .FunctionAddress -> { _ :: ir_merge_function(&g, parts, part, f.a[at]) }
-            else -> {}
+// Numbers what function `local` of part `part` uses, in order, from its
+// uses (ir_merge_uses).
+fn ir_merge_scan(g: &IRMerge, parts: [IRModule], part: Int, local: Int) Never! {
+    at := g.use_starts[part][local]
+    end :: g.use_starts[part][local + 1]
+    loop at < end {
+        kind :: g.uses[part][at]
+        row :: g.uses[part][at + 1]
+        at += 2
+        if kind == IR_MERGE_USE_TYPE {
+            _ :: ir_merge_type(&g, parts, part, row)
+            next
         }
+        if kind == IR_MERGE_USE_NAME {
+            _ :: ir_merge_name(&g, parts, part, row)
+            next
+        }
+        if kind == IR_MERGE_USE_DATA {
+            _ :: ir_merge_data(&g, parts, part, row)
+            next
+        }
+        _ :: ir_merge_function(&g, parts, part, row)
     }
 }
 

@@ -40,10 +40,12 @@ struct IRWaveInputs {
     programs: [IRProgram]
 }
 
-// A part's module, kept across the build, and its builds in claim order.
+// A part's module, kept across the build, its builds in claim order, and
+// its merge input once it is built (ir_merge_prepare).
 struct IRWaveWorker {
     modules: [IRModule]
     built: [IRWaveBuilt]
+    preps: [IRMergePrep]
 }
 
 // The queue the parts share: every job in the order it was queued; the jobs
@@ -95,7 +97,7 @@ fn ir_build_waves_kept(program: ^IRProgram, roots: ^[IRWaveJob], entry: Bool, th
     own := [[Int]]{}
     own_claimed := [Int]{}
     loop _ in 0..<count {
-        slot :: shared IRWaveWorker{modules: [IRModule]{ir_module_for(p)}, built: [IRWaveBuilt]{}}
+        slot :: shared IRWaveWorker{modules: [IRModule]{ir_module_for(p)}, built: [IRWaveBuilt]{}, preps: [IRMergePrep]{}}
         &slots.push(slot)
         &own.push([Int]{})
         &own_claimed.push(0)
@@ -162,8 +164,12 @@ fn ir_build_waves_kept(program: ^IRProgram, roots: ^[IRWaveJob], entry: Bool, th
         &roots_merged.push(entry_root)
     }
     parts := [IRModule]{}
-    loop slot in slots -> &parts.extend(ir_waves_take_modules(slot))
-    merged := ir_merge(^parts, roots_merged, entry_index)
+    preps := [IRMergePrep]{}
+    loop slot in slots {
+        &parts.extend(ir_waves_take_modules(slot))
+        &preps.extend(ir_waves_take_preps(slot))
+    }
+    merged := ir_merge(^parts, ^preps, roots_merged, entry_index)
     IRBuildKept{result: IRBuildResult{program: ^merged, failures: failures}, program: ir_waves_take_program(inputs)}
 }
 
@@ -176,6 +182,11 @@ fn ir_waves_take_program(inputs: Shared<IRWaveInputs>) -> IRProgram Never! {
 fn ir_waves_take_modules(slot: Shared<IRWaveWorker>) -> [IRModule] {
     held := slot.guard_edit()
     compiler_take_rows<IRModule>(&held.value.modules)
+}
+
+fn ir_waves_take_preps(slot: Shared<IRWaveWorker>) -> [IRMergePrep] {
+    held := slot.guard_edit()
+    compiler_take_rows<IRMergePrep>(&held.value.preps)
 }
 
 fn ir_waves_take_built(slot: Shared<IRWaveWorker>) -> [IRWaveBuilt] {
@@ -358,8 +369,8 @@ fn ir_wave_found(m: IRModule, part: Int, before: Int) -> [IRWaveJob] Never! {
     found
 }
 
-// Builds the drop glue of every part's types (ir_drop_glues), a task per
-// part from `at` on.
+// Builds the drop glue of every part's types (ir_drop_glues), then the
+// part's merge input (ir_merge_prepare), a task per part from `at` on.
 fn ir_waves_glues(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], at: Int) -> Int {
     if at >= slots.len() -> return 0
     if at == slots.len() - 1 -> return ir_wave_glues(inputs, slots[at])
@@ -376,5 +387,6 @@ fn ir_wave_glues(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>) -> In
     reads :: inputs.guard_read()
     held := slot.guard_edit()
     ir_drop_glues(&held.value.modules[0], reads.value.programs[0])
+    &held.value.preps.push(ir_merge_prepare(held.value.modules[0]))
     1
 }
