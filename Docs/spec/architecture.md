@@ -213,11 +213,11 @@ over packed bytes, and a result returns such a buffer with exact capacities.
 `&mut Vec<u8>` kernels likewise lend the caller's own data and length for an
 in-place write. These rows name Jet runtime providers only, and Lower refuses
 a nested carrier without `native_lists`.
-The checked-build transport (`HostBuildHTTP.jet`, HTTP.rs:5536-5712) uses this
-carrier for its DNS answers and response rows; plain `http://` runs over the
-native socket and readiness providers, while the `https://` branch connects and
-then returns the runtime's canonical TLS refusal text (D-NATIVE-TLS1=B) as its
-String error without sending a request.
+The checked-build DNS answer (`HostBuildHTTP.jet`, HTTP.rs:5536-5712) uses this
+carrier for its resolved addresses. The pinned GET over them is Jet source,
+`core.http.client.jet_http_build_get` (Core/Http/Client.jet): it connects to the
+checked addresses with `core.net`, wraps `https://` in `core.net.tls` with the
+default client trust, and returns the header lines, body and status as `[[U8]]`.
 
 Held-directory listing reuses the one FD72-backed held-directory table. Each
 call reads a fresh stream, returns packed raw filename rows with a no-follow

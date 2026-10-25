@@ -9,6 +9,8 @@ use core.http as http
 use core.http.[HTTPError, HTTPRequest, HTTPResponse]
 use core.http.client as provider
 use core.net.url as http_url
+use core.net as build_net
+use core.net.tls as build_tls
 C_MAX_BODY_BYTES :: 1048576
 C_MAX_URL_BYTES :: 8192
 C_MAX_REDIRECTS :: 10
@@ -519,4 +521,357 @@ fn has_url_ctl(raw: [U8]) -> Bool Never! {
         if n < 32 || n == 127 -> return true
     }
     false
+}
+
+// ---- Build transport ---------------------------------------------------------
+// One GET for the Driver's checked build fetches (Cli BuildHTTPTransport) to
+// already-resolved addresses, over TCP or, when `secure`, TLS with the default
+// client trust. HTTP/1.1 framing only: `Connection: close`, identity encoding,
+// informational heads skipped (101 excepted), then a chunked, Content-Length or
+// EOF-delimited body. Fetch, redirect, status and size policy stay in the
+// Driver. `limit` bounds the head and the body; a body may run one byte over so
+// the Driver sees the overflow. The rows are the header lines, the body and the
+// status, in that order. One monotonic deadline covers the whole fetch.
+
+C_BUILD_INT_MAX :: 9223372036854775807
+C_BUILD_READ_BYTES :: 8192
+
+#Error
+struct __BuildHTTPFailure { message: String }
+impl __BuildHTTPFailure.Display { fn display(self) -> String { self.message.copy() } }
+impl __BuildHTTPFailure.Debug { fn debug(^self) -> String { self.message } }
+fn __build_fail(message: String) -> __BuildHTTPFailure Never! { __BuildHTTPFailure{message: message} }
+
+// The connection (exactly one of tcp/tls), the bytes of the last read with
+// the cursor into them, and the fetch's absolute deadline.
+struct __BuildWire {
+    tcp: TCPStream?
+    tls: build_tls.TLSStream?
+    buffer: [U8]
+    at: Int
+    end_ns: Int
+}
+
+struct __BuildSpan { from: Int, to: Int }
+
+// state 0 parsed, 1 empty, 2 invalid digit, 3 above u64::MAX; big marks a
+// value above Int's range (value unused then).
+struct __BuildNumber { state: Int, value: Int, big: Bool }
+
+fn jet_http_build_get(host: String, authority: String, target: String, secure: Bool, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+    if port < 0 || port > 65535 || timeout_ms < 0 || limit < 0 -> return Err(__build_fail("out of range integral type conversion attempted"))
+    now :: core.time.__clock_mono_ns()
+    end_ns :: if timeout_ms > (C_BUILD_INT_MAX - now) /% 1000000 -> C_BUILD_INT_MAX else -> now + timeout_ms * 1000000
+    tcp := __build_connect(addresses, port, end_ns) ?? return Err(err)
+    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns}
+    if secure {
+        remaining :: end_ns - core.time.__clock_mono_ns()
+        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        stream := build_tls.__client_deadline_entry(^tcp, host, Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+        wire.tls = Val(stream)
+    } else {
+        wire.tcp = Val(tcp)
+    }
+    request :: "GET {target} HTTP/1.1\r\nHost: {authority}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+    result := __build_exchange(&wire, request.bytes(), limit)
+    // A TLS stream owns its socket until closed: close it on every outcome so
+    // the peer sees close_notify. The response is already decided; a peer that
+    // refuses the alert does not change it.
+    if wire.tls == {
+        .Val(stream) -> {
+            if stream.close() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+        .None -> {}
+    }
+    result
+}
+
+fn __build_exchange(&wire: __BuildWire, request: [U8], limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+    _ :: __build_send(&wire, request) ?? return Err(err)
+    __build_response(&wire, limit)
+}
+
+// Tries each resolver answer (4 or 16 network-order octets) in order within
+// the deadline; the last connect failure when none connects.
+fn __build_connect(addresses: [[U8]], port: Int, end_ns: Int) -[Net, Time.Wait]> TCPStream __BuildHTTPFailure! {
+    failure := "no resolved addresses"
+    loop address in addresses {
+        if address.len() != 4 && address.len() != 16 -> return Err(__build_fail("invalid resolved address carrier"))
+    }
+    loop address in addresses {
+        remaining :: end_ns - core.time.__clock_mono_ns()
+        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        millis :: remaining /% 1000000
+        if build_net.tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
+            .Ok(stream) -> return Ok(stream)
+            .Err(error) -> failure = "{error}"
+        }
+    }
+    Err(__build_fail(failure))
+}
+
+fn __build_socket(address: [U8], port: Int) -> SocketAddr Never! {
+    octets := [U8]{}
+    loop byte in address -> &octets.push(byte)
+    #Unsafe("checked resolver octets and port transferred into the socket carrier") {
+        ip :: core.net.__ip_from_bytes(^octets)
+        return core.net.__socket_from_parts(^ip, U16{port}, U32{0}, U32{0})
+    }
+}
+
+fn __build_send(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    at := 0
+    loop at < bytes.len() {
+        remaining :: wire.end_ns - core.time.__clock_mono_ns()
+        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        rest :: __build_slice(bytes, at, bytes.len())
+        if wire.tls == {
+            .Val(stream) -> {
+                stream.write_all(rest, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+                at = bytes.len()
+            }
+            .None -> {
+                if wire.tcp == {
+                    .Val(stream) -> {
+                        sent :: stream.write(rest, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+                        if sent == 0 -> return Err(__build_fail("failed to write whole buffer"))
+                        at += sent
+                    }
+                    .None -> return Err(__build_fail("HTTP transport has no connection"))
+                }
+            }
+        }
+    }
+    if wire.end_ns - core.time.__clock_mono_ns() <= 0 -> return Err(__build_fail("timed out"))
+    Ok(at)
+}
+
+// One read into the drained buffer: the byte count, 0 at EOF.
+fn __build_fill(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    remaining :: wire.end_ns - core.time.__clock_mono_ns()
+    if remaining <= 0 -> return Err(__build_fail("timed out"))
+    got := [U8]{}
+    if wire.tls == {
+        .Val(stream) -> { got = stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}")) }
+        .None -> {
+            if wire.tcp == {
+                .Val(stream) -> { got = stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}")) }
+                .None -> return Err(__build_fail("HTTP transport has no connection"))
+            }
+        }
+    }
+    count :: got.len()
+    wire.buffer = got
+    wire.at = 0
+    Ok(count)
+}
+
+// BufReader + Take(limit): appends at most `limit` bytes to `out`, stopping
+// after the first newline when `line`; the appended count.
+fn __build_read(&wire: __BuildWire, limit: Int, line: Bool, &out: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    taken := 0
+    loop taken < limit {
+        if wire.at == wire.buffer.len() {
+            got :: __build_fill(&wire) ?? return Err(err)
+            if got == 0 -> break
+        }
+        available :: wire.buffer.len() - wire.at
+        count :: if available > limit - taken -> limit - taken else -> available
+        found := false
+        n := 0
+        loop n < count {
+            byte :: wire.buffer[wire.at + n]
+            &out.push(byte)
+            n += 1
+            if line && byte == (U8{10}) {
+                found = true
+                break
+            }
+        }
+        wire.at += n
+        taken += n
+        if found -> break
+    }
+    Ok(taken)
+}
+
+fn __build_response(&wire: __BuildWire, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+    over :: if limit == C_BUILD_INT_MAX -> limit else -> limit + 1
+    rows := [[U8]]{}
+    status := [U8]{}
+    head := 0
+    loop {
+        loop {
+            line := [U8]{}
+            _ :: __build_read(&wire, over, true, &line) ?? return Err(err)
+            length := line.len()
+            if length == 0 -> return Err(__build_fail("unexpected EOF in HTTP response head"))
+            head = if head > C_BUILD_INT_MAX - length -> C_BUILD_INT_MAX else -> head + length
+            if head > limit -> return Err(__build_fail("HTTP response head exceeds transport byte bound"))
+            if (length == 2 && line[0] == (U8{13}) && line[1] == (U8{10})) || (length == 1 && line[0] == (U8{10})) -> break
+            loop length > 0 && (line[length - 1] == (U8{13}) || line[length - 1] == (U8{10})) -> length -= 1
+            if status.len() == 0 {
+                // The status is the field between the first two spaces.
+                first := 0
+                loop first < length && line[first] != (U8{32}) -> first += 1
+                if first == length -> return Err(__build_fail("HTTP response status is missing"))
+                end := first + 1
+                loop end < length && line[end] != (U8{32}) -> end += 1
+                status = __build_slice(line, first + 1, end)
+            } else {
+                &rows.push(__build_slice(line, 0, length))
+            }
+        }
+        informational :: status.len() == 3 && status[0] == (U8{49})
+        switching :: informational && status[1] == (U8{48}) && status[2] == (U8{49})
+        if informational && !switching {
+            status = [U8]{}
+            rows = [[U8]]{}
+            next
+        }
+        break
+    }
+    body := [U8]{}
+    if __build_chunked(rows) {
+        _ :: __build_chunked_body(&wire, limit, over, &body) ?? return Err(err)
+    } else {
+        // Content-Length is transport framing, not response-size policy. A
+        // malformed length takes nothing; the Driver interprets the head.
+        found := false
+        number := __BuildNumber{state: 0, value: 0, big: false}
+        loop header in rows {
+            colon :: __build_colon(header)
+            if colon >= 0 && __build_named(header, 0, colon, "content-length") {
+                found = true
+                span :: __build_trim(header, colon + 1, header.len())
+                number = __build_parse_u64(header, span.from, span.to, 10)
+                break
+            }
+        }
+        valid :: found && number.state == 0
+        big :: valid && number.big
+        wanted :: if {
+            found && !valid -> 0
+            valid && !big && number.value < over -> number.value
+            else -> over
+        }
+        _ :: __build_read(&wire, wanted, false, &body) ?? return Err(err)
+        if valid && !big && number.value <= limit && body.len() != number.value -> return Err(__build_fail("unexpected EOF in HTTP response body"))
+    }
+    &rows.push(body)
+    &rows.push(status)
+    Ok(rows)
+}
+
+fn __build_chunked_body(&wire: __BuildWire, limit: Int, over: Int, &body: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    loop {
+        line := [U8]{}
+        _ :: __build_read(&wire, over, true, &line) ?? return Err(err)
+        if line.len() > limit -> return Err(__build_fail("HTTP chunk head exceeds transport byte bound"))
+        end := 0
+        loop end < line.len() && line[end] != (U8{59}) -> end += 1
+        span :: __build_trim(line, 0, end)
+        number :: __build_parse_u64(line, span.from, span.to, 16)
+        if number.state != 0 -> return Err(__build_fail(__build_parse_message(number.state)))
+        if !number.big && number.value == 0 -> break
+        room :: over - body.len()
+        wanted :: if !number.big && number.value < room -> number.value else -> room
+        got :: __build_read(&wire, wanted, false, &body) ?? return Err(err)
+        if got != wanted -> return Err(__build_fail("unexpected EOF in HTTP response chunk"))
+        if body.len() > limit -> break
+        crlf := [U8]{}
+        _ :: __build_read(&wire, 2, false, &crlf) ?? return Err(err)
+        if crlf.len() != 2 -> return Err(__build_fail("failed to fill whole buffer"))
+        if crlf[0] != (U8{13}) || crlf[1] != (U8{10}) -> return Err(__build_fail("invalid HTTP response chunk framing"))
+    }
+    Ok(body.len())
+}
+
+fn __build_slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop at in start..<end -> &out.push(raw[at])
+    out
+}
+
+fn __build_lower(byte: Int) -> Int Never! { if byte >= 65 && byte <= 90 -> byte + 32 else -> byte }
+
+fn __build_space(byte: Int) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13 }
+
+// eq_ignore_ascii_case of raw[start..end] against a lowercase literal.
+fn __build_named(raw: [U8], start: Int, end: Int, literal: String) -> Bool Never! {
+    name :: literal.bytes()
+    if end - start != name.len() -> return false
+    loop at in 0..<name.len() {
+        if __build_lower(Int.from_u8(raw[start + at])) != Int.from_u8(name[at]) -> return false
+    }
+    true
+}
+
+fn __build_colon(raw: [U8]) -> Int Never! {
+    loop at in 0..<raw.len() {
+        if raw[at] == (U8{58}) -> return at
+    }
+    -1
+}
+
+fn __build_trim(raw: [U8], start: Int, end: Int) -> __BuildSpan Never! {
+    from := start
+    to := end
+    loop from < to && __build_space(Int.from_u8(raw[from])) -> from += 1
+    loop to > from && __build_space(Int.from_u8(raw[to - 1])) -> to -= 1
+    __BuildSpan{from: from, to: to}
+}
+
+// A Transfer-Encoding header naming chunked among its comma parts.
+fn __build_chunked(rows: [[U8]]) -> Bool Never! {
+    loop line in rows {
+        colon :: __build_colon(line)
+        if colon >= 0 && __build_named(line, 0, colon, "transfer-encoding") {
+            part := colon + 1
+            loop part <= line.len() {
+                end := part
+                loop end < line.len() && line[end] != (U8{44}) -> end += 1
+                span :: __build_trim(line, part, end)
+                if __build_named(line, span.from, span.to, "chunked") -> return true
+                part = end + 1
+            }
+        }
+    }
+    false
+}
+
+// u64 parsing as Rust's FromStr/from_str_radix: one leading '+', stopping at
+// the first invalid digit or overflow. High/low 32-bit limbs keep the u64
+// overflow check exact.
+fn __build_parse_u64(raw: [U8], start: Int, end: Int, radix: Int) -> __BuildNumber Never! {
+    from := start
+    if end - start > 1 && raw[start] == (U8{43}) -> from += 1
+    if from == end -> return __BuildNumber{state: if end == start -> 1 else -> 2, value: 0, big: false}
+    high := 0
+    low := 0
+    loop at in from..<end {
+        byte :: Int.from_u8(raw[at])
+        digit :: if {
+            byte >= 48 && byte <= 57 -> byte - 48
+            radix == 16 && byte >= 97 && byte <= 102 -> byte - 87
+            radix == 16 && byte >= 65 && byte <= 70 -> byte - 55
+            else -> -1
+        }
+        if digit < 0 -> return __BuildNumber{state: 2, value: 0, big: false}
+        low = low * radix + digit
+        high = high * radix + low /% 4294967296
+        low = low % 4294967296
+        if high > 4294967295 -> return __BuildNumber{state: 3, value: 0, big: false}
+    }
+    if high > 2147483647 -> return __BuildNumber{state: 0, value: 0, big: true}
+    __BuildNumber{state: 0, value: high * 4294967296 + low, big: false}
+}
+
+fn __build_parse_message(state: Int) -> String Never! {
+    if state == 1 -> return "cannot parse integer from empty string"
+    if state == 2 -> return "invalid digit found in string"
+    "number too large to fit in target type"
 }

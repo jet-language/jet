@@ -133,10 +133,11 @@ and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
 likewise retain the existing `jet_term_is_terminal_raw` and
 `jet_process_exit_status_raw` runtime spellings, rather than reserved
 double-underscore member aliases or alternate host APIs.
-Checked-build DNS and pinned byte transport likewise use the existing
-`jet_http_build_resolve` and `jet_http_build_get` raw spellings. Driver retains
-address authorization, bounds, digest verification, and error classification;
-these leaves do not supply a second public HTTP or generic host policy.
+Checked-build DNS and pinned byte transport likewise keep the
+`jet_http_build_resolve` (runtime) and `jet_http_build_get` (Jet source over
+`core.net` and `core.net.tls`) spellings. Driver retains address
+authorization, bounds, digest verification, and error classification; these
+leaves do not supply a second public HTTP or generic host policy.
 Compiler-backed inspection and fix planning declare the execution host's actual
 `Exec`, `IO`, `FFI.C`, and `FFI.Asm` ceilings. Fix semantic checks also declare
 `Net` for the checked build-input HTTP provider already admitted by the CLI
