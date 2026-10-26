@@ -54,7 +54,7 @@ fn run() {
     if main_symbol < 0 -> panic("pack lost its program import")
     if link_sym_shndx(c, 0, main_symbol) != LINK_UNDEF -> panic("pack defined the program import")
     files.write_bytes("hybrid.pack.o", result.bytes) ?? panic("write hybrid pack")
-    linked :: x64_link_executable([String]{"consumer.o", "hybrid.pack.o"}, ^[[U8]]{consumer, result.bytes}, LINK_BASE)
+    linked :: x64_link_executable([String]{"consumer.o", "hybrid.pack.o"}, ^[[U8]]{consumer, result.bytes}, LINK_BASE, compiler_threads_single())
     if linked.errors.len() != 0 -> panic("consumer link failed: {linked.errors}")
     files.write_bytes("consumer", linked.bytes) ?? panic("write consumer")
     files.set_mode("consumer", 0o755) ?? panic("make consumer executable")

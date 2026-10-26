@@ -290,7 +290,8 @@ fn link_bind_write(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l:
         at :: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
     }
-    link_write_contents(&c, &out, l, view.program_base)
+    in_place := link_no_pieces()
+    link_write_contents(&c, &out, l, view.program_base, &in_place)
     exe.tail = out
     elf
 }
@@ -329,11 +330,12 @@ fn link_bind_sections(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageV
             &headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - c.base, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
         }
     }
+    in_place := link_no_pieces()
     loop (group, name) in debug.names {
         start :: out.len()
         loop row in debug.rows[group] {
             link_pad_to(&out, start + c.live_addr[row], 0)
-            link_emit_section(&c, &out, row)
+            link_place_row(&c, &out, &in_place, row)
         }
         link_pad_to(&out, start + debug.sizes[group], 0)
         &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: origin + start, size: debug.sizes[group], link: 0, info: 0, align: 1, entry_size: 0})

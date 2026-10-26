@@ -40,6 +40,8 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
+
 LINK_BASE :: 0x400000
 LINK_RUN_BASE :: 0x200000000000
 // 1 GiB: below 2 GiB, so a sign-extended 32-bit address reaches an image of
@@ -684,8 +686,13 @@ fn link_rel_table(c: LinkContext, obj: Int, s: Int) -> Int Never! {
 }
 
 fn link_reloc_error(c: &LinkContext, s: Int, off: Int, message: String) Never! {
+    &c.errors.push(link_reloc_text(c, s, off, message))
+}
+
+// A relocation report: the section's label, the offset and `message`.
+fn link_reloc_text(c: LinkContext, s: Int, off: Int, message: String) -> String Never! {
     site :: link_section_label(c, s)
-    &c.errors.push("{site}+{off}: {message}")
+    "{site}+{off}: {message}"
 }
 
 // ---------------------------------------------------------------------------
@@ -1578,12 +1585,13 @@ fn link_put_bytes(out: &[U8], at: Int, bytes: [Int]) Never! {
 }
 
 // Apply a GOT-relative relocation (link_apply): through its slot, or
-// relaxed as link_got_form decides.
-fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off: Int, symbol: Int, addend: Int, pos: Int, place: Int) -> Bool Never! {
+// relaxed as link_got_form decides (only at `off` >= 3, so the instruction
+// bytes it rewrites are in the section).
+fn link_apply_got(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, kind: Int, off: Int, symbol: Int, addend: Int, pos: Int, place: Int) -> Bool Never! {
     decided :: link_got_form(c, kind, obj, s, off, symbol, addend)
     if decided == 0 {
         slot :: c.got.get(link_got_key(c, obj, symbol)) ?? {
-            link_reloc_error(&c, s, off, "GOT relocation without a slot")
+            &errors.push(link_reloc_text(c, s, off, "GOT relocation without a slot"))
             return false
         }
         link_put32(&out, pos, c.got_start + 8 * slot + addend - place)
@@ -1596,7 +1604,7 @@ fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off:
     // form takes a GOT slot, so the scan's decision stands.
     form :: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int.from_u8(out[pos - 3]).bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
     value :: if form == 4 -> target else -> target + addend - place
-    if !link_fits32(value) -> link_reloc_error(&c, s, off, "relaxed GOT relocation out of range")
+    if !link_fits32(value) -> &errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
     if form == 1 {
         out[pos - 2] = U8{0x8d}
         link_put32(&out, pos, value)
@@ -1622,10 +1630,11 @@ fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off:
 
 // Apply the relocation at absolute offset `at` (a row of the RELA table of
 // section `s` in object `obj`) to `out`, where the relocated field is at
-// `pos` and has address `place`. Returns true when the relocation rewrote a
-// TLS call sequence, so the next relocation (the call to `__tls_get_addr`)
-// must be skipped.
-fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
+// `pos` and has address `place`; its reports go to `errors`. Every byte it
+// reads or rewrites is in the section, so `out` may hold the section alone.
+// Returns true when the relocation rewrote a TLS call sequence, so the next
+// relocation (the call to `__tls_get_addr`) must be skipped.
+fn link_apply(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
     b :: c.obj_buffer[obj].copy()
     kind :: link_u32(c.bufs, b, at + 8)
     addend :: link_s64(c.bufs, b, at + 16)
@@ -1636,7 +1645,7 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
     }
     if kind == LINK_R_NONE -> return false
     symbol :: link_u32(c.bufs, b, at + 12)
-    if link_is_got_reloc(kind) -> return link_apply_got(&c, &out, obj, s, kind, off, symbol, addend, pos, place)
+    if link_is_got_reloc(kind) -> return link_apply_got(c, &errors, &out, obj, s, kind, off, symbol, addend, pos, place)
     target :: link_target_addr(c, obj, symbol)
     if kind == LINK_R_64 {
         link_put64(&out, pos, target + addend)
@@ -1644,13 +1653,13 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
     }
     if kind == LINK_R_PC32 || kind == LINK_R_PLT32 {
         value :: target + addend - place
-        if !link_fits32(value) -> link_reloc_error(&c, s, off, "PC-relative relocation out of range")
+        if !link_fits32(value) -> &errors.push(link_reloc_text(c, s, off, "PC-relative relocation out of range"))
         link_put32(&out, pos, value)
         return false
     }
     if kind == LINK_R_32 || kind == LINK_R_32S {
         value :: target + addend
-        if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) -> link_reloc_error(&c, s, off, "32-bit absolute relocation out of range")
+        if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) -> &errors.push(link_reloc_text(c, s, off, "32-bit absolute relocation out of range"))
         link_put32(&out, pos, value)
         return false
     }
@@ -1673,7 +1682,7 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
         direct :: link_byte_is(&out, pos + 4, [Int]{0x66, 0x66, 0x48, 0xe8})
         indirect :: link_byte_is(&out, pos + 4, [Int]{0x66, 0x48, 0xff, 0x15})
         if !link_byte_is(&out, pos - 4, [Int]{0x66, 0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
-            link_reloc_error(&c, s, off, "unrecognized TLS general-dynamic sequence")
+            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS general-dynamic sequence"))
             return false
         }
         link_put_bytes(&out, pos - 4, [Int]{0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x8d, 0x80})
@@ -1686,7 +1695,7 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
         direct :: link_byte_is(&out, pos + 4, [Int]{0xe8})
         indirect :: link_byte_is(&out, pos + 4, [Int]{0xff, 0x15})
         if !link_byte_is(&out, pos - 3, [Int]{0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
-            link_reloc_error(&c, s, off, "unrecognized TLS local-dynamic sequence")
+            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS local-dynamic sequence"))
             return false
         }
         if direct {
@@ -1708,11 +1717,15 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
     }
     if kind == LINK_R_GOTTPOFF {
         // mov reg, [rip + x@gottpoff] -> mov reg, imm32; add reg, [...] -> add reg, imm32
+        if off < 3 {
+            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
+            return false
+        }
         rex :: Int.from_u8(out[pos - 3])
         opcode :: Int.from_u8(out[pos - 2])
         modrm :: Int.from_u8(out[pos - 1])
         if (rex != 0x48 && rex != 0x4c) || (opcode != 0x8b && opcode != 0x03) || (modrm.bit_and(0xc7)) != 0x05 {
-            link_reloc_error(&c, s, off, "unrecognized TLS initial-exec instruction")
+            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
         }
         out[pos - 3] = U8{if rex == 0x4c -> 0x49 else -> 0x48}
@@ -1729,13 +1742,14 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
         link_put64(&out, pos, link_target_size(c, obj, symbol) + addend)
         return false
     }
-    link_reloc_error(&c, s, off, "unsupported relocation type {kind}")
+    &errors.push(link_reloc_text(c, s, off, "unsupported relocation type {kind}"))
     false
 }
 
-// Copy live row `row` to the end of `out` (which must be at its file
-// offset) and apply its relocations there.
-fn link_emit_section(c: &LinkContext, out: &[U8], row: Int) Never! {
+// Copy live row `row` to the end of `out` and apply its relocations there;
+// its reports go to `errors`. `out` is the image at the row's file offset,
+// or the row's own piece (link_emit_pieces): the bytes are the same.
+fn link_emit_section(c: LinkContext, errors: &[String], out: &[U8], row: Int) Never! {
     s :: c.live_secs[row].copy()
     obj :: link_obj_of(c, s)
     b :: c.obj_buffer[obj].copy()
@@ -1759,7 +1773,7 @@ fn link_emit_section(c: &LinkContext, out: &[U8], row: Int) Never! {
         // Section offsets fit 32 bits.
         off :: link_u32(c.bufs, b, at)
         slot :: c.rel_slot[base + k].copy()
-        skip = link_apply(&c, &out, obj, s, at, off, slot, pos + off, address + off)
+        skip = link_apply(c, &errors, &out, obj, s, at, off, slot, pos + off, address + off)
     }
 }
 
@@ -1767,6 +1781,7 @@ fn link_emit_section(c: &LinkContext, out: &[U8], row: Int) Never! {
 // every FDE's CIE pointer recomputed, then the terminator.
 fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
     base :: out.len()
+    errors := [String]{}
     loop piece in 0..<c.ep_sec.len() {
         if !c.ep_keep[piece] -> next
         s :: c.ep_sec[piece].copy()
@@ -1785,12 +1800,13 @@ fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
             rel_off :: link_u32(c.bufs, b, at)
             off :: rel_off - piece_start
             place :: c.eh_start + pos - base + off
-            _ := link_apply(&c, &out, obj, s, at, rel_off, -1, pos + off, place)
+            _ := link_apply(c, &errors, &out, obj, s, at, rel_off, -1, pos + off, place)
         }
         cie :: c.ep_cie[piece].copy()
         if cie >= 0 -> link_put32(&out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
     }
     loop _ in 0..<4 -> &out.push(U8{0})
+    &c.errors.extend(errors)
 }
 
 // Pad `out` to `offset` with `fill` (0xcc, `int3`, between code sections).
@@ -1818,7 +1834,7 @@ fn link_phdr(out: &[U8], base: Int, kind: Int, flags: Int, start: Int, file_size
     elf64_u64(&out, align)
 }
 
-fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
+fn link_write(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -> [U8] Never! {
     out := [U8]{}
     ident :: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> &out.push(U8{byte})
@@ -1845,16 +1861,21 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int) -> [U8] Never! {
     loop _ in 0..<5 -> elf64_u64(&out, 0)
     elf64_u64(&out, 16)
     base :: c.base
-    link_write_contents(&c, &out, l, base)
+    link_write_contents(&c, &out, l, base, &pieces)
     out
+}
+
+// The classes the image writer emits from file bytes, in file order.
+fn link_file_classes() -> [Int] Never! {
+    [Int]{LINK_RODATA, LINK_EH, LINK_TEXT, LINK_TDATA, LINK_PREINIT, LINK_INIT, LINK_FINI, LINK_RELRO, LINK_DATA}
 }
 
 // Append the loaded sections, unwind tables and GOT of layout `l` to `out`,
 // whose first byte is the one at address `origin` and which ends at or
-// before the first of them.
-fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int) Never! {
-    file_classes :: [Int]{LINK_RODATA, LINK_EH, LINK_TEXT, LINK_TDATA, LINK_PREINIT, LINK_INIT, LINK_FINI, LINK_RELRO, LINK_DATA}
-    loop class in file_classes {
+// before the first of them. A section is its piece in `pieces` when the
+// pieces were built (link_emit_pieces), else emitted in place.
+fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, pieces: &LinkPieces) Never! {
+    loop class in link_file_classes() {
         if class == LINK_EH {
             link_pad_to(&out, c.eh_start - origin, 0)
             link_emit_eh(&c, &out)
@@ -1862,7 +1883,7 @@ fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int) 
         }
         loop row in l.order[class] {
             link_pad_to(&out, c.live_addr[row] - origin, if class == LINK_TEXT -> 0xcc else -> 0)
-            link_emit_section(&c, &out, row)
+            link_place_row(&c, &out, &pieces, row)
         }
         if class == LINK_RELRO {
             // The GOT follows the read-only-after-relocation data.
@@ -1874,6 +1895,147 @@ fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int) 
         }
     }
     if l.has_rw -> link_pad_to(&out, l.file_end - origin, 0)
+}
+
+// Each live row's bytes with its relocations applied and its reports, by
+// live row, built ahead on the compiler threads (link_emit_pieces). With no
+// rows (link_no_pieces) the image writer emits every row in place.
+struct LinkPieces {
+    bytes: [[U8]]
+    errors: [[String]]
+}
+
+fn link_no_pieces() -> LinkPieces Never! {
+    LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
+}
+
+// Append live row `row` to `out`, which is at the row's file offset: its
+// piece, which leaves `pieces` once placed, else the row emitted in place.
+// Its reports join the link's in emit order either way.
+fn link_place_row(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) Never! {
+    if pieces.bytes.len() == 0 {
+        errors := [String]{}
+        link_emit_section(c, &errors, &out, row)
+        &c.errors.extend(errors)
+        return
+    }
+    &out.extend(pieces.bytes[row])
+    &c.errors.extend(pieces.errors[row])
+    pieces.bytes[row] = [U8]{}
+}
+
+// The live rows the image writer emits from file bytes, in emit order: the
+// loaded classes' rows (link_write_contents), then the debug groups' rows
+// (link_write_sections).
+fn link_emitted_rows(l: LinkLayout, debug: LinkDebug) -> [Int] Never! {
+    rows := [Int]{}
+    loop class in link_file_classes() {
+        if class != LINK_EH -> &rows.extend(l.order[class])
+    }
+    loop group in 0..<debug.rows.len() -> &rows.extend(debug.rows[group])
+    rows
+}
+
+// Fewest weight units (a row, each of its relocations and each 64 bytes
+// count one) an emitting thread is admitted for.
+LINK_EMIT_MIN_WEIGHT_PER_THREAD :: 20000
+
+fn link_row_weight(c: LinkContext, row: Int) -> Int Never! {
+    s :: c.live_secs[row].copy()
+    obj :: link_obj_of(c, s)
+    weight := 1 + (link_sec_size(c, obj, s) >> 6)
+    r :: link_rela_of(c, obj, s)
+    if r >= 0 -> weight += link_sec_size(c, obj, r).div_euclid(24)
+    weight
+}
+
+// The emitting threads' inputs, read only: the link context (moved in and
+// back out, one row) and the rows in emit order.
+struct LinkEmitInputs {
+    contexts: [LinkContext]
+    rows: [Int]
+}
+
+// One thread's consecutive range of `rows` and, once it finished, the
+// range's pieces and reports in row order.
+struct LinkEmitPart {
+    start: Int
+    end: Int
+    bytes: [[U8]]
+    errors: [[String]]
+}
+
+struct LinkEmitted {
+    context: LinkContext
+    pieces: LinkPieces
+}
+
+// Every emitted row's piece (link_emit_section into an empty piece), built
+// on the threads `threads` admits over consecutive ranges of `rows`. A
+// row's relocations read and write only its own bytes and the finished
+// layout, so each piece is the bytes the row has in place, and the reports
+// keep their row. One admitted thread builds no pieces: the image writer
+// then emits every row in place, as it would anyway.
+fn link_emit_pieces(c: ^LinkContext, rows: [Int], threads: CompilerThreads) -> LinkEmitted Never! {
+    weights := [Int]{}
+    total := 0
+    loop row in rows {
+        weight :: link_row_weight(c, row)
+        &weights.push(weight)
+        total += weight
+    }
+    workers :: compiler_threads_admit(threads, rows.len(), total, LINK_EMIT_MIN_WEIGHT_PER_THREAD, 0, 0)
+    if workers <= 1 -> return LinkEmitted{context: ^c, pieces: link_no_pieces()}
+    bounds :: compiler_threads_partition(weights, workers)
+    live :: c.live_secs.len()
+    inputs :: shared LinkEmitInputs{contexts: [LinkContext]{^c}, rows: rows}
+    parts := [Shared<LinkEmitPart>]{}
+    loop part in 0..<(bounds.len() - 1) -> &parts.push(shared LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}})
+    _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
+    pieces := LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
+    loop _ in 0..<live {
+        &pieces.bytes.push([U8]{})
+        &pieces.errors.push([String]{})
+    }
+    loop part in parts {
+        held := part.guard_edit()
+        index := held.value.end
+        loop index > held.value.start {
+            index -= 1
+            pieces.bytes[rows[index]] = &held.value.bytes.pop() ?? panic("a link emitting thread lost a piece")
+            pieces.errors[rows[index]] = &held.value.errors.pop() ?? panic("a link emitting thread lost its reports")
+        }
+    }
+    back := inputs.guard_edit()
+    context := &back.value.contexts.pop() ?? panic("the link emitting threads lost the link context")
+    LinkEmitted{context: ^context, pieces: ^pieces}
+}
+
+// Builds `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts were built.
+fn link_emit_parts(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return link_emit_part(inputs, parts[from])
+    built := 0
+    task.group link_emit_threads {
+        head :: task link_emit_part(inputs, parts[from])
+        built = link_emit_parts(inputs, parts, from + 1)
+        built += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    built
+}
+
+// One thread: the pieces of its range of rows.
+fn link_emit_part(inputs: Shared<LinkEmitInputs>, part: Shared<LinkEmitPart>) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    loop index in permit.value.start..<permit.value.end {
+        piece := [U8]{}
+        errors := [String]{}
+        link_emit_section(reads.value.contexts[0], &errors, &piece, reads.value.rows[index])
+        &permit.value.bytes.push(^piece)
+        &permit.value.errors.push(^errors)
+    }
+    1
 }
 
 // Address of the local file symbol `fsym` (a GOT entry for a local).
@@ -1990,7 +2152,7 @@ fn link_image_symbol(symtab: &[U8], strtab: &[U8], name: String, info: Int, head
 
 // Append the debug sections, the symbol table and the section headers to
 // the loaded image `out`, and point the ELF header at the headers.
-fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug) Never! {
+fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) Never! {
     headers := [LinkSectionHeader]{}
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> &class_headers.push(-1)
@@ -2018,7 +2180,7 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         start :: out.len()
         loop row in debug.rows[group] {
             link_pad_to(&out, start + c.live_addr[row], 0)
-            link_emit_section(&c, &out, row)
+            link_place_row(&c, &out, &pieces, row)
         }
         link_pad_to(&out, start + debug.sizes[group], 0)
         &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: debug.sizes[group], link: 0, info: 0, align: 1, entry_size: 0})
@@ -2223,14 +2385,14 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // startup object when the archives provide musl's `__libc_start_main` and
 // no object defines `_start`, else the objects' `_start`. The ELF header is
 // loaded at `base` (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
-fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, ^bufs, base, None)
+fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64ExecutableResult Never! {
+    linked := link_executable_image(names, ^bufs, base, None, threads)
     ^linked.image
 }
 
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
-fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?) -> X64ResidentLinkResult Never! {
+fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads) -> X64ResidentLinkResult Never! {
     c := link_context(^bufs, base)
     if request == .Val(wanted) {
         if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
@@ -2280,8 +2442,11 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     // The unloaded debug tail (`.debug_*`, `.symtab`, section headers) follows
     // the loaded image, so profilers and debuggers name the code.
     debug :: link_debug_sections(&c)
-    image := link_write(&c, layout, entry)
-    link_write_sections(&c, &image, layout, debug)
+    // The sections' bytes, relocated on the threads, then written in order.
+    emitted := link_emit_pieces(^c, link_emitted_rows(layout, debug), threads)
+    c = ^emitted.context
+    image := link_write(&c, layout, entry, &emitted.pieces)
+    link_write_sections(&c, &image, layout, debug, &emitted.pieces)
     if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
     facts := X64ResidentLinkFacts?{None}
     if request == .Val(wanted) {

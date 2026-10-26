@@ -65,7 +65,7 @@ fn lr_status(args: [String]) -> Int {
         image :: &bufs.pop() ?? return 66
         result = x64_link_with_runtime_image(names[1], ^program, ^image)
     } else {
-        result = x64_link_executable(names, ^bufs, LINK_BASE)
+        result = x64_link_executable(names, ^bufs, LINK_BASE, compiler_threads_single())
     }
     link_ms :: started.elapsed_millis()
     if result.errors.len() > 0 {
@@ -107,7 +107,7 @@ fn lr_image_compare(pack_path: String, image_path: String) -> Int {
     link_synth_function(&stub, "main")
     link_synth_code(&stub, [Int]{0xc3})
     request :: X64ResidentLinkRequest?{Val(X64ResidentLinkRequest{runtime_input: 0, callable_exports: exports})}
-    linked :: link_executable_image([String]{pack_path, "stub.o"}, ^[[U8]]{pack.copy(), link_synth_object(stub)}, LINK_RUN_BASE, ^request)
+    linked :: link_executable_image([String]{pack_path, "stub.o"}, ^[[U8]]{pack.copy(), link_synth_object(stub)}, LINK_RUN_BASE, ^request, compiler_threads_single())
     reference :: linked.image.bytes
     if linked.image.errors.len() > 0 {
         loop error in linked.image.errors -> print("reference link: {error}")

@@ -882,7 +882,7 @@ fn xp_status(args: [String]) -> Int {
             next
         }
         bufs := [[U8]]{object.bytes, pack.copy()}
-        linked :: x64_link_executable([String]{"{program.name}.o", args[1]}, ^bufs, LINK_BASE)
+        linked :: x64_link_executable([String]{"{program.name}.o", args[1]}, ^bufs, LINK_BASE, compiler_threads_single())
         if linked.errors.len() > 0 {
             loop error in linked.errors -> print("{program.name}: link: {error}")
             failures += 1
@@ -967,7 +967,7 @@ fn xp_level(m: IRModule, level: Int, pack: [U8], pack_path: String, exe: String,
     object :: ir_x64_object(^compiled, true)
     if object.errors.len() > 0 -> return xp_level_failed(object.errors.join("; "))
     bufs := [[U8]]{object.bytes, pack.copy()}
-    linked :: x64_link_executable([String]{"{exe}.o", pack_path}, ^bufs, LINK_BASE)
+    linked :: x64_link_executable([String]{"{exe}.o", pack_path}, ^bufs, LINK_BASE, compiler_threads_single())
     if linked.errors.len() > 0 -> return xp_level_failed("link: {linked.errors.join("; ")}")
     files.write_bytes(exe, linked.bytes) ?? return xp_level_failed("cannot write {exe}")
     files.set_mode(exe, 0o755) ?? return xp_level_failed("cannot make {exe} executable")

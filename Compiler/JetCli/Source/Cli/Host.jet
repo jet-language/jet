@@ -500,8 +500,10 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     // copy: only a C closure can refuse LINK_RUN_BASE, and the retry at LINK_RUN_LOW_BASE needs the inputs again.
     retry :: if base != LINK_BASE && closure.names.len() > 0 -> Val(bytes.copy()) else -> None
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
-    image := x64_link_executable(names, ^bytes, base)
-    if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, ^inputs_again, LINK_RUN_LOW_BASE)
+    // The memory term is read now: the link's section pieces are new work.
+    link_threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    image := x64_link_executable(names, ^bytes, base, link_threads)
+    if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, ^inputs_again, LINK_RUN_LOW_BASE, link_threads)
     if trace_sink == .Val(sink) {
         sink.end("native.link", input_count)
         sink.progress("counters.native.link.bytes", image.bytes.len(), -1)

@@ -596,8 +596,9 @@ fn x64_link_runtime_image(name: String, pack: ^[U8]) -> X64ExecutableResult Neve
     if c.errors.len() > 0 -> return link_image_failure(c)
     entry :: link_global_addr(c, entry_g)
     debug :: link_debug_sections(&c)
-    image := link_write(&c, layout, entry)
-    link_write_sections(&c, &image, layout, debug)
+    in_place := link_no_pieces()
+    image := link_write(&c, layout, entry, &in_place)
+    link_write_sections(&c, &image, layout, debug, &in_place)
     if c.errors.len() > 0 -> return link_image_failure(c)
     bind := [U8]{}
     elf64_u64(&bind, LINK_IMAGE_BIND_MAGIC)
