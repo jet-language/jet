@@ -8464,22 +8464,20 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
 
     // Tag dataflow over every checked body (the Rust reference's
     // `check_fact_tags_and_states`): a tagged value reaching a denied
-    // destination is reported, whatever else the bundle reported.
-    if trace_sink == .Val(sink) -> sink.begin("sema.taint", "", -1, -1)
+    // destination is reported, whatever else the bundle reported. The Core
+    // usage walk runs beside it (sema_finalize_walks).
+    if trace_sink == .Val(sink) -> sink.begin("sema.walks", "", -1, -1)
     taint_diagnostics := [Diagnostic]{}
     taint_catalog := &taint_prepared.pop() ?? panic("the side checks left no taint catalog")
-    final_graph = sema_taint_check_graph(^final_graph, ^taint_catalog, diagnostics, threads, &taint_diagnostics)
-    if trace_sink == .Val(sink) -> sink.end("sema.taint", taint_diagnostics.len())
+    core_modules := [SemaCoreModuleUsageResult]{}
+    final_graph = sema_finalize_walks(^final_graph, ^taint_catalog, diagnostics, &modules, threads, &taint_diagnostics, &core_modules)
+    core_usage := sema_core_combine_module_usage(core_modules)
+    if trace_sink == .Val(sink) -> sink.end("sema.walks", core_modules.len())
     loop diagnostic in taint_diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
         &diagnostics.push(diagnostic)
     }
 
-    if trace_sink == .Val(sink) -> sink.begin("sema.core", "", -1, -1)
-    core_modules := [SemaCoreModuleUsageResult]{}
-    final_graph = sema_finalize_core_usage(^final_graph, modules, threads, &core_modules)
-    core_usage := sema_core_combine_module_usage(core_modules)
-    if trace_sink == .Val(sink) -> sink.end("sema.core", core_modules.len())
     if !sema_web_host_check_core_usage(final_graph.target_machine.name, core_usage.used_core, &diagnostics) -> complete = false
     if !sema_target_check_socket_surfaces(final_graph, core_usage.used_core, &diagnostics) -> complete = false
     loop module_usage in core_usage.modules {
@@ -8593,34 +8591,58 @@ fn sema_core_source_lint(diagnostic: Diagnostic) -> Bool Never! {
     path == "<corelib>" || path.starts_with("<corelib>/")
 }
 
-// A compiler thread is admitted for at least this many bytes of item source,
-// so a small program walks its Core usage on the calling thread.
-SEMA_CORE_MIN_BYTES_PER_THREAD :: 65536
-// Jobs per admitted thread, claimed dynamically.
+// A compiler thread is admitted for at least this many bytes of item source
+// walked, so a small program walks on the calling thread. The taint and Core
+// walks (sema_finalize_walks) each read every item: twice the 65536 bytes
+// either walk was once admitted a thread for on its own.
+SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD :: 131072
+// Core usage jobs per admitted thread, claimed dynamically.
 SEMA_CORE_JOBS_PER_THREAD :: 8
 
-// The Core usage of every registered module, in module order, on up to
-// `threads` compiler threads. The walk of a module's items is the
-// only part that grows with the program, so the jobs are consecutive item
-// ranges (one module each, about equal source bytes, every module's ranges
-// consecutive), claimed dynamically; each thread walks its claimed ranges
-// into their own rows. A job that covers its whole module also assembles
-// that module's usage on its thread (sema_core_module_usage_assemble: the
-// prefix and script-body usages and the reachable closure); the caller joins
-// any other module's rows in job order (sema_core_collected_append) and
-// assembles it, so the usage sets, the first span of each usage and the
-// callback keys read exactly as one thread's walk of every module in order.
-// The graph and the module contexts move into the threads' shared state and
-// back; the graph is returned. A program whose work admits one thread walks
-// on the calling thread.
-fn sema_finalize_core_usage(graph: ^SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads, cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
+// The finalization's two read-only walks of the graph after the effect
+// publish, run together on up to `threads` compiler threads that claim from
+// one queue: the taint modules first, heaviest source first, then the Core
+// ranges in order.
+//
+// The tag dataflow (the Rust reference's `check_fact_tags_and_states` taint
+// walk) over `prepared` (sema_taint_prepare of `graph`): its reports first,
+// then every function, method, test and conversion body walked once, one job
+// per module. Appends the new reports to `reports`; the E0307 reports among
+// `existing_diagnostics` (the bundle's reports so far) settle switch coverage
+// (sema_taint_coverage_reports), and no report of `existing_diagnostics` is
+// repeated. A module's walk reads only the graph, the catalog and the
+// coverage reports, and each module's reports are kept apart and joined in
+// module order (sema_taint_join_reports).
+//
+// The Core usage of every registered module, appended to `cores` in module
+// order. The walk of a module's items is the only part that grows with the
+// program, so the jobs are consecutive item ranges (one module each, about
+// equal source bytes, every module's ranges consecutive); each thread builds
+// the walk context of a job's module (sema_core_module_context, from the
+// module's checked call facts) and walks its claimed ranges into their own
+// rows. A job that covers its whole module also assembles that module's
+// usage on its thread (sema_core_module_usage_assemble: the prefix and
+// script-body usages and the reachable closure); a module's first job
+// otherwise hands back its context, and the caller joins the module's rows in
+// job order (sema_core_collected_append) and assembles it.
+//
+// So the reports, the usage sets, the first span of each usage and the
+// callback keys read exactly as one thread's taint walk and then Core walk of
+// every module in order. The graph and the modules move into the threads'
+// shared state and back; the graph is returned. A program whose work admits
+// one thread walks on the calling thread.
+fn sema_finalize_walks(graph: ^SemaRegistrationGraph, prepared: ^SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
     owned := ^graph
-    contexts := [SemaCoreModuleContext]{}
+    taken := ^prepared
+    catalog := ^taken.catalog
+    &reports.extend(^taken.reports)
+    taint_weights :: ^taken.weights
+    coverage := sema_taint_coverage_reports(existing_diagnostics)
     weights := [Int]{}
     owners := [Int]{}
     work := 0
+    loop weight in taint_weights -> work += weight
     loop module_index in 0..<owned.modules.len() {
-        &contexts.push(sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts))
         loop item_index in 0..<owned.modules[module_index].program.items.len() {
             span :: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
             weight :: span.end - span.start
@@ -8629,43 +8651,59 @@ fn sema_finalize_core_usage(graph: ^SemaRegistrationGraph, modules: [SemaGraphMo
             work += weight
         }
     }
-    workers :: compiler_threads_admit(threads, weights.len(), work, SEMA_CORE_MIN_BYTES_PER_THREAD, 0, 0)
+    workers :: compiler_threads_admit(threads, taint_weights.len() + weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 {
+        state := SemaTaintFlowState{catalog: ^catalog, module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, coverage_reports: ^coverage}
         loop module_index in 0..<owned.modules.len() {
+            found := [Diagnostic]{}
+            sema_taint_check_module(owned, &state, module_index, &found)
+            sema_taint_join_reports(&reports, existing_diagnostics, found)
+        }
+        loop module_index in 0..<owned.modules.len() {
+            context :: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
             collected := sema_core_collected_empty()
-            sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), contexts[module_index], &collected)
-            &cores.push(sema_core_module_usage_assemble(owned.modules[module_index], contexts[module_index], modules[module_index].exact_int_reachable, collected))
+            sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), context, &collected)
+            &cores.push(sema_core_module_usage_assemble(owned.modules[module_index], context, modules[module_index].exact_int_reachable, collected))
         }
         return owned
     }
     count := workers * SEMA_CORE_JOBS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     jobs :: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)
-    exact_int := loop module_row in modules -> module_row.exact_int_reachable
-    shared_state :: shared SemaFinalizeCoreShared{graphs: [SemaRegistrationGraph]{}, contexts: [SemaCoreModuleContext]{}, jobs: jobs, exact_int: ^exact_int}
-    sema_finalize_core_fill(shared_state, ^owned, &contexts)
+    shared_state :: shared SemaFinalizeWalkShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, catalogs: [SemaTaintCatalog]{}, coverage: [[Diagnostic]]{}, taint_order: compiler_threads_heaviest_first(taint_weights), jobs: jobs}
+    sema_finalize_walk_fill(shared_state, ^owned, &modules, ^catalog, ^coverage)
     queue :: shared SemaFinalizeCoreQueue{next: 0}
+    walked := [[Diagnostic]]{}
+    loop _ in 0..<taint_weights.len() -> &walked.push([Diagnostic]{})
     results := [SemaCoreCollected]{}
     assembled := [SemaCoreModuleUsageResult?]{}
+    contexts := [SemaCoreModuleContext?]{}
     loop _ in 0..<jobs.len() {
         &results.push(sema_core_collected_empty())
         &assembled.push(None)
+        &contexts.push(None)
     }
-    sema_finalize_core_claimers(shared_state, queue, 0, workers, &results, &assembled)
-    returned := sema_finalize_core_take(shared_state, &contexts)
+    sema_finalize_walkers(shared_state, queue, 0, workers, &walked, &results, &assembled, &contexts)
+    returned := sema_finalize_walk_take(shared_state, &modules)
+    loop found in walked -> sema_taint_join_reports(&reports, existing_diagnostics, found)
     // Each module in order: a module walked whole by one job was assembled
     // on its thread; any other module's item ranges are joined in job order
     // (jobs are in module and item order, so a module's jobs are
-    // consecutive) and assembled here.
+    // consecutive) and assembled here, with the context its first job built
+    // (or, for a module without items, built here).
     &results.reverse()
     &assembled.reverse()
+    &contexts.reverse()
     job := 0
     loop module_index in 0..<returned.modules.len() {
         collected := sema_core_collected_empty()
         whole := SemaCoreModuleUsageResult?{None}
+        context := SemaCoreModuleContext?{None}
         loop job < jobs.len() && jobs[job].module_index == module_index {
             part := &results.pop() ?? panic("a Core usage job left its rows")
             done := &assembled.pop() ?? panic("a Core usage job left its rows")
+            built := &contexts.pop() ?? panic("a Core usage job left its rows")
+            if built != None -> context = ^built
             if done == None {
                 sema_core_collected_append(&collected, part)
             } else {
@@ -8673,7 +8711,11 @@ fn sema_finalize_core_usage(graph: ^SemaRegistrationGraph, modules: [SemaGraphMo
             }
             job += 1
         }
-        &cores.push(whole ?? sema_core_module_usage_assemble(returned.modules[module_index], contexts[module_index], modules[module_index].exact_int_reachable, collected))
+        if whole == None {
+            module_context := ^context ?? sema_core_module_context(returned, returned.modules[module_index], modules[module_index].call_facts)
+            whole = Val(sema_core_module_usage_assemble(returned.modules[module_index], module_context, modules[module_index].exact_int_reachable, collected))
+        }
+        &cores.push(^whole ?? panic("a Core usage module left no usage"))
     }
     returned
 }
@@ -8710,15 +8752,18 @@ fn sema_finalize_core_jobs(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJob
     jobs
 }
 
-// What every walking thread reads: the registration graph (the one row of
-// its list, moved in and back out; its modules' items are read in place),
-// each module's walk context, the jobs and whether each module reaches
-// exact Int (for assembling a module one job walks whole).
-struct SemaFinalizeCoreShared {
+// What every walking thread reads (sema_finalize_walks): the registration
+// graph and the checked modules (each list moved in and back out; the graph
+// is its list's one row, and its modules' items are read in place); for the
+// taint walk the catalog and the coverage reports (each the one row of its
+// list) and the modules in claim order; for the Core walk the jobs.
+struct SemaFinalizeWalkShared {
     graphs: [SemaRegistrationGraph]
-    contexts: [SemaCoreModuleContext]
+    modules: [SemaGraphModuleResult]
+    catalogs: [SemaTaintCatalog]
+    coverage: [[Diagnostic]]
+    taint_order: [Int]
     jobs: [SemaFinalizeCoreJob]
-    exact_int: [Bool]
 }
 
 // The next unclaimed job, taken with one atomic add under a read guard each
@@ -8728,60 +8773,101 @@ struct SemaFinalizeCoreQueue {
 }
 
 // One job's rows, walked by one thread, or the module's assembled usage when
-// the job walked the whole module.
+// the job walked the whole module; a module's first job that does not walk
+// it whole hands back the module's walk context.
 struct SemaFinalizeCoreCollected {
     job: Int
     collected: SemaCoreCollected
     assembled: SemaCoreModuleUsageResult?
+    context: SemaCoreModuleContext?
 }
 
-fn sema_finalize_core_fill(shared_state: Shared<SemaFinalizeCoreShared>, graph: ^SemaRegistrationGraph, contexts: &[SemaCoreModuleContext]) {
+// What one walking thread returns: its taint modules' reports and its Core
+// jobs' rows.
+struct SemaFinalizeWalked {
+    taint: [SemaTaintWalked]
+    core: [SemaFinalizeCoreCollected]
+}
+
+fn sema_finalize_walk_fill(shared_state: Shared<SemaFinalizeWalkShared>, graph: ^SemaRegistrationGraph, modules: &[SemaGraphModuleResult], catalog: ^SemaTaintCatalog, coverage: ^[Diagnostic]) {
     permit :: shared_state.guard_edit()
     &permit.value.graphs.push(^graph)
-    compiler_transfer_rows<SemaCoreModuleContext>(&permit.value.contexts, &contexts)
+    compiler_transfer_rows<SemaGraphModuleResult>(&permit.value.modules, &modules)
+    &permit.value.catalogs.push(^catalog)
+    &permit.value.coverage.push(^coverage)
 }
 
-// Moves the contexts back and returns the graph.
-fn sema_finalize_core_take(shared_state: Shared<SemaFinalizeCoreShared>, contexts: &[SemaCoreModuleContext]) -> SemaRegistrationGraph {
+// Moves the modules back and returns the graph.
+fn sema_finalize_walk_take(shared_state: Shared<SemaFinalizeWalkShared>, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     permit :: shared_state.guard_edit()
-    compiler_transfer_rows<SemaCoreModuleContext>(&contexts, &permit.value.contexts)
+    compiler_transfer_rows<SemaGraphModuleResult>(&modules, &permit.value.modules)
     &permit.value.graphs.pop() ?? panic("the finalization graph left the threads' shared state")
 }
 
-// Runs walking threads `from..<workers`, one task each, and moves every job
-// row a thread returned into its slot of `results` and `assembled`.
-fn sema_finalize_core_claimers(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?]) {
+// Runs walking threads `from..<workers`, one task each, and moves each taint
+// module's reports a thread returned into its module's slot of `walked` and
+// every Core job row into its slot of `results`, `assembled` and `contexts`.
+fn sema_finalize_walkers(shared_state: Shared<SemaFinalizeWalkShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, walked: &[[Diagnostic]], results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?], contexts: &[SemaCoreModuleContext?]) {
     if from >= workers -> return
-    task.group sema_finalize_core_threads {
-        head :: task sema_finalize_core_claimed(shared_state, queue)
-        sema_finalize_core_claimers(shared_state, queue, from + 1, workers, &results, &assembled)
+    task.group sema_finalize_walk_threads {
+        head :: task sema_finalize_walk_claimed(shared_state, queue)
+        sema_finalize_walkers(shared_state, queue, from + 1, workers, &walked, &results, &assembled, &contexts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.len() > 0 {
-            done := &claimed.pop() ?? break
+        loop claimed.taint.len() > 0 {
+            done := &claimed.taint.pop() ?? break
+            walked[done.module_index] = ^done.found
+        }
+        loop claimed.core.len() > 0 {
+            done := &claimed.core.pop() ?? break
             results[done.job] = ^done.collected
             assembled[done.job] = ^done.assembled
+            contexts[done.job] = ^done.context
         }
     }
 }
 
-// One thread: walks the jobs it claims, in order, each into its own rows; a
-// job that walks its module's every item assembles the module's usage too.
-fn sema_finalize_core_claimed(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaFinalizeCoreCollected] {
+// One thread: walks the ranks it claims, in order: ranks below the taint
+// module count are taint modules, the rest Core jobs. A taint module is
+// walked with the thread's own flow state, over its own copy of the catalog
+// and the coverage reports made at its first taint module. A Core job builds
+// its module's walk context and walks its range into its own rows; a job
+// that walks its module's every item assembles the module's usage too, and
+// a module's first job otherwise hands its context back.
+fn sema_finalize_walk_claimed(shared_state: Shared<SemaFinalizeWalkShared>, queue: Shared<SemaFinalizeCoreQueue>) -> SemaFinalizeWalked {
     inputs :: shared_state.guard_read()
-    claimed := [SemaFinalizeCoreCollected]{}
+    state := SemaTaintFlowState{catalog: sema_taint_catalog_init(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}}
+    stated := false
+    claimed := SemaFinalizeWalked{taint: [SemaTaintWalked]{}, core: [SemaFinalizeCoreCollected]{}}
+    taint_count :: inputs.value.taint_order.len()
     ranks :: queue.guard_read()
     loop {
-        job :: sema_finalize_core_claim(ranks.value)
-        if job >= inputs.value.jobs.len() -> break
-        module_index :: inputs.value.jobs[job].module_index
-        collected := sema_core_collected_empty()
-        // Passed straight through: a local binding of a guarded row would copy it.
-        sema_core_collect_item_range(inputs.value.graphs[0].modules[module_index].program.items, inputs.value.jobs[job].first, inputs.value.jobs[job].last, inputs.value.contexts[module_index], &collected)
-        if inputs.value.jobs[job].first == 0 && inputs.value.jobs[job].last == inputs.value.graphs[0].modules[module_index].program.items.len() {
-            &claimed.push(SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: Val(sema_core_module_usage_assemble(inputs.value.graphs[0].modules[module_index], inputs.value.contexts[module_index], inputs.value.exact_int[module_index], collected))})
+        rank :: sema_finalize_core_claim(ranks.value)
+        if rank < taint_count {
+            if !stated {
+                state.catalog = inputs.value.catalogs[0].copy()
+                state.coverage_reports = inputs.value.coverage[0].copy()
+                stated = true
+            }
+            module_index :: inputs.value.taint_order[rank]
+            found := [Diagnostic]{}
+            // Passed straight through: a local binding of a guarded row would copy it.
+            sema_taint_check_module(inputs.value.graphs[0], &state, module_index, &found)
+            &claimed.taint.push(SemaTaintWalked{module_index: module_index, found: ^found})
             next
         }
-        &claimed.push(SemaFinalizeCoreCollected{job: job, collected: ^collected, assembled: None})
+        job :: rank - taint_count
+        if job >= inputs.value.jobs.len() -> break
+        module_index :: inputs.value.jobs[job].module_index
+        context := sema_core_module_context(inputs.value.graphs[0], inputs.value.graphs[0].modules[module_index], inputs.value.modules[module_index].call_facts)
+        collected := sema_core_collected_empty()
+        sema_core_collect_item_range(inputs.value.graphs[0].modules[module_index].program.items, inputs.value.jobs[job].first, inputs.value.jobs[job].last, context, &collected)
+        if inputs.value.jobs[job].first == 0 && inputs.value.jobs[job].last == inputs.value.graphs[0].modules[module_index].program.items.len() {
+            &claimed.core.push(SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: Val(sema_core_module_usage_assemble(inputs.value.graphs[0].modules[module_index], context, inputs.value.modules[module_index].exact_int_reachable, collected)), context: None})
+            next
+        }
+        handed := SemaCoreModuleContext?{None}
+        if inputs.value.jobs[job].first == 0 -> handed = Val(^context)
+        &claimed.core.push(SemaFinalizeCoreCollected{job: job, collected: ^collected, assembled: None, context: ^handed})
     }
     claimed
 }

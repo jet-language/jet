@@ -142,7 +142,18 @@ struct SemaTaintFlowState {
     bindings: [SemaTaintBindingFact]
     imports: [SemaTaintImportAlias]
     diagnostics: [Diagnostic]
-    existing_diagnostics: [Diagnostic]
+    // The bundle's switch coverage reports so far (sema_taint_coverage_reports).
+    coverage_reports: [Diagnostic]
+}
+
+// The E0307 reports of `diagnostics`: all that settles switch coverage for
+// the walk (sema_taint_switch_exhaustive).
+fn sema_taint_coverage_reports(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    reports := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0307" -> &reports.push(diagnostic)
+    }
+    reports
 }
 
 fn sema_taint_has(values: [String], value: String) -> Bool Never! {
@@ -1236,7 +1247,7 @@ fn sema_taint_check_stmt(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
             }
             if else_body == {
                 .Val(body) -> &paths.push(sema_taint_walk_path(graph, &state, before, body))
-                .None -> if !sema_taint_switch_exhaustive(arms, state.existing_diagnostics, span) -> &paths.push(before)
+                .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span) -> &paths.push(before)
             }
             sema_taint_merge_paths(&state, before, paths)
         }
@@ -1512,10 +1523,6 @@ fn sema_taint_join_reports(reports: &[Diagnostic], existing_diagnostics: [Diagno
     }
 }
 
-// A compiler thread is admitted for at least this many bytes of module
-// source to walk.
-SEMA_TAINT_MIN_BYTES_PER_THREAD :: 65536
-
 // The tag dataflow's catalog of tags, callables and fields, the reports
 // building it raised, and each module's walk weight (its items' source
 // bytes). It reads only the graph's function, type, extern and tag items,
@@ -1547,111 +1554,10 @@ fn sema_taint_prepare(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
     prepared
 }
 
-// The bundle's tag dataflow (the Rust reference's `check_fact_tags_and_states`
-// taint walk) over `prepared` (sema_taint_prepare of `graph`): its reports
-// first, then every function, method, test and conversion body walked once.
-// Appends the new reports to `reports`; `existing_diagnostics` (the bundle's
-// reports so far) settles switch coverage and is never repeated. A module's
-// walk reads only the graph, the catalog and `existing_diagnostics`, so the
-// modules are walked on up to `threads` compiler threads, claimed heaviest
-// source first, each module's reports kept apart and joined in module order:
-// the reports read exactly as one thread's walk of every module in order. The
-// graph moves into the threads' shared state and back; it is returned.
-fn sema_taint_check_graph(graph: ^SemaRegistrationGraph, prepared: ^SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaRegistrationGraph {
-    owned := ^graph
-    taken := ^prepared
-    catalog := ^taken.catalog
-    &reports.extend(^taken.reports)
-    weights :: ^taken.weights
-    work := 0
-    loop weight in weights -> work += weight
-    workers :: compiler_threads_admit(threads, weights.len(), work, SEMA_TAINT_MIN_BYTES_PER_THREAD, 0, 0)
-    if workers <= 1 {
-        state := SemaTaintFlowState{catalog: ^catalog, module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, existing_diagnostics: existing_diagnostics}
-        loop module_index in 0..<owned.modules.len() {
-            found := [Diagnostic]{}
-            sema_taint_check_module(owned, &state, module_index, &found)
-            sema_taint_join_reports(&reports, existing_diagnostics, found)
-        }
-        return owned
-    }
-    walked := [[Diagnostic]]{}
-    loop _ in 0..<owned.modules.len() -> &walked.push([Diagnostic]{})
-    shared_state :: shared SemaTaintShared{graphs: [SemaRegistrationGraph]{}, catalogs: [SemaTaintCatalog]{}, existing: [[Diagnostic]]{}, order: compiler_threads_heaviest_first(weights)}
-    sema_taint_shared_fill(shared_state, ^owned, ^catalog, existing_diagnostics)
-    queue :: shared SemaTaintQueue{next: 0}
-    sema_taint_walkers(shared_state, queue, 0, workers, &walked)
-    returned := sema_taint_shared_take_graph(shared_state)
-    loop found in walked -> sema_taint_join_reports(&reports, existing_diagnostics, found)
-    returned
-}
-
-// What every walking thread reads: the graph, the catalog and the bundle's
-// reports so far (each the one row of its list, moved in, and the graph
-// moved back out), and the modules in claim order.
-struct SemaTaintShared {
-    graphs: [SemaRegistrationGraph]
-    catalogs: [SemaTaintCatalog]
-    existing: [[Diagnostic]]
-    order: [Int]
-}
-
-// The next unclaimed rank of the walk, taken with one atomic add under a
-// read guard each thread holds for its run.
-struct SemaTaintQueue {
-    next: Atomic<Int>
-}
-
-// One walked module's reports.
+// One walked module's reports (sema_finalize_walks).
 struct SemaTaintWalked {
     module_index: Int
     found: [Diagnostic]
-}
-
-fn sema_taint_shared_fill(shared_state: Shared<SemaTaintShared>, graph: ^SemaRegistrationGraph, catalog: ^SemaTaintCatalog, existing_diagnostics: [Diagnostic]) {
-    permit :: shared_state.guard_edit()
-    &permit.value.graphs.push(^graph)
-    &permit.value.catalogs.push(^catalog)
-    &permit.value.existing.push(existing_diagnostics)
-}
-
-fn sema_taint_shared_take_graph(shared_state: Shared<SemaTaintShared>) -> SemaRegistrationGraph {
-    permit :: shared_state.guard_edit()
-    &permit.value.graphs.pop() ?? panic("the taint walk lost its registration graph")
-}
-
-// Runs threads `from..<workers`, each walking the modules it claims, and
-// places each walked module's reports at its module in `walked`.
-fn sema_taint_walkers(shared_state: Shared<SemaTaintShared>, queue: Shared<SemaTaintQueue>, from: Int, workers: Int, walked: &[[Diagnostic]]) {
-    if from >= workers -> return
-    task.group sema_taint_threads {
-        head :: task sema_taint_walk_claimed(shared_state, queue)
-        sema_taint_walkers(shared_state, queue, from + 1, workers, &walked)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.len() > 0 {
-            done := &claimed.pop() ?? break
-            walked[done.module_index] = ^done.found
-        }
-    }
-}
-
-// One thread: its own flow state over a copy of the catalog, walking the
-// modules it claims until none is left.
-fn sema_taint_walk_claimed(shared_state: Shared<SemaTaintShared>, queue: Shared<SemaTaintQueue>) -> [SemaTaintWalked] {
-    inputs :: shared_state.guard_read()
-    state := SemaTaintFlowState{catalog: inputs.value.catalogs[0].copy(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, existing_diagnostics: inputs.value.existing[0].copy()}
-    claimed := [SemaTaintWalked]{}
-    ranks :: queue.guard_read()
-    loop {
-        rank :: ranks.value.next.add(1)
-        if rank >= inputs.value.order.len() -> break
-        module_index :: inputs.value.order[rank]
-        found := [Diagnostic]{}
-        // Passed straight through: a local binding of a guarded row would copy it.
-        sema_taint_check_module(inputs.value.graphs[0], &state, module_index, &found)
-        &claimed.push(SemaTaintWalked{module_index: module_index, found: ^found})
-    }
-    claimed
 }
 
 fn sema_taint_has_diagnostic(diagnostics: [Diagnostic], candidate: Diagnostic) -> Bool Never! {
