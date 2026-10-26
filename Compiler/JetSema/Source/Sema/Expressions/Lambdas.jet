@@ -1628,11 +1628,12 @@ fn sema_expression_lambda_return_fits(required: Type, offered: Type, environment
 
 // Rust `check_lambda` checks the body against the whole expected return: an
 // `Ok(…)`/`Err(…)` written as the body's value builds that callback result
-// itself, as a function's `return Ok(…)` does; any other value is the
-// success row it is lifted into.
-fn sema_expression_lambda_value_expected(value: Expr, body_expected: Type?, expected_ret: Type?, scopes: SemaScopeTable) -> Type? {
+// itself, as a function's `return Ok(…)` does, and so does a value `if` or
+// match whose arms build it (`if f() == { .Ok(b) -> Ok(b) … }`); any other
+// value is the success row it is lifted into.
+fn sema_expression_lambda_value_expected(value: Expr, body_expected: Type?, expected_ret: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Type? {
     // copy: the chosen expectation is one of the caller's read parameters, which the caller keeps.
-    if expected_ret == .Val(.Result(_, _)) && sema_stmt_is_written_carrier(value, expected_ret, scopes) -> return expected_ret.copy()
+    if expected_ret == .Val(.Result(_, _)) && (sema_stmt_is_written_carrier(value, expected_ret, scopes) || sema_stmt_return_expr_is_carrier(value, expected_ret, environment, scopes)) -> return expected_ret.copy()
     body_expected.copy()
 }
 
@@ -1780,7 +1781,11 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             lambda_scopes.failure_carrier = outer_failure_carrier
         }
         else -> {
-            lambda_scopes.return_type = body_expected
+            // A callback expected to return a Result returns through that
+            // carrier like a function does, so `return Ok(v)`, `return
+            // Err(e)` and a match whose arms are `Ok`/`Err` fit it; a plain
+            // returned value is lifted through `Ok`.
+            lambda_scopes.return_type = if expected_ret == .Val(.Result(_, _)) && !task_body -> expected_ret.copy() else -> body_expected.copy()
             if task_body {
                 // Rust infers a callback carrier only for an expected
                 // callable; a `task` body has none. A failure it propagates
@@ -1836,20 +1841,24 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     executable := TLambdaBody?{None}
     if lambda.body == {
         .Expr(value) -> {
-            checked_value := sema_check_expression(value, sema_expression_lambda_value_expected(value, body_expected, expected_ret, lambda_scopes), environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+            checked_value := sema_check_expression(value, sema_expression_lambda_value_expected(value, body_expected, expected_ret, environment, lambda_scopes), environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
             sema_ownership_keep_share_found(&state, lambda_state)
             checked :: checked_value ?? return None
             body_result_ty = checked.ty
             executable = Val(TLambdaBody.Expr{value: checked})
         }
         .Block(statements) -> {
-            statement_return := if inline_loop -> outer_return_type else -> body_expected
+            statement_return := if inline_loop -> outer_return_type else -> lambda_scopes.return_type.copy()
+            // A callback that returns through an expected Result checks its
+            // last line as a function body's value line, so a value table or a
+            // block-armed `if` whose arms end in `Ok`/`Err` builds that carrier.
+            result_tail :: !inline_loop && !task_body && expected_ret == .Val(.Result(_, _)) && sema_function_returns_value(statement_return ?? Type.Named{name: "Unit"})
             statement_body := [Stmt]{}
             tail_source := Expr?{None}
             statement_index := 0
             loop statement_index < statements.len() {
                 if {
-                    statement_index == statements.len() - 1 && statements[statement_index] == .Expr(value) -> {
+                    !result_tail && statement_index == statements.len() - 1 && statements[statement_index] == .Expr(value) -> {
                         tail_source = Val(value)
                     }
                     else -> {
@@ -1858,7 +1867,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 }
                 statement_index += 1
             }
+            saved_value_tail :: lambda_context.value_tail_span
+            if result_tail -> lambda_context.value_tail_span = sema_stmt_value_tail_marker(statements)
             checked_block :: sema_check_statements(statement_body, statement_return, environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
+            lambda_context.value_tail_span = saved_value_tail
             sema_ownership_keep_share_found(&state, lambda_state)
             sema_single_use_check_scope_end(lambda_state, &diagnostics)
             if !checked_block.complete {
@@ -1873,7 +1885,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             if {
                 tail_source != None -> {
                     tail :: tail_source ?? Expr.Unit{span: lambda.span, id: AST_NODE_GENERATED}
-                    checked_tail_value := sema_check_expression(tail, sema_expression_lambda_value_expected(tail, body_expected, expected_ret, lambda_scopes), environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+                    checked_tail_value := sema_check_expression(tail, sema_expression_lambda_value_expected(tail, body_expected, expected_ret, environment, lambda_scopes), environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
                     sema_ownership_keep_share_found(&state, lambda_state)
                     checked_tail :: checked_tail_value ?? return None
                     body_result_ty = checked_tail.ty

@@ -1,0 +1,69 @@
+#Error
+struct LoadError {
+    message: String
+}
+
+fn fetch(n: Int) -> Int LoadError! {
+    if n < 0 -> return Err(LoadError{message: "negative"})
+    Ok(n * 2)
+}
+
+struct Loader {
+    load: fn(Int) -> Int LoadError!
+}
+
+fn with_lock<T>(name: String, action: fn() -> T IOError!) -> T IOError! {
+    action()
+}
+
+fn with_unit(name: String, action: fn() IOError!) IOError! {
+    action()
+}
+
+fn bad(name: String) -> IOError Never! {
+    IOError.InvalidInput(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("bad")})
+}
+
+fn generic_case(flag: Bool) -> Bool IOError! {
+    with_lock<Bool>("x", () -> {
+        if flag -> return Err(bad("a"))
+        Ok(true)
+    })
+}
+
+fn unit_case(flag: Bool) IOError! {
+    with_unit("x", () -> {
+        if flag -> return Err(bad("b"))
+    })
+}
+
+fn run() {
+    print("{generic_case(false) ?? false} {generic_case(true) ?? false}")
+    unit_case(false) ?? print("unit failed")
+    unit_case(true) ?? print("unit failed")
+    matched :: Loader{load: n -> {
+        if fetch(n) == {
+            .Ok(b) -> Ok(b + 1)
+            .Err(e) -> Err(e)
+        }
+    }}
+    returned :: Loader{load: n -> {
+        if n > 0 -> return Ok(n)
+        Err(LoadError{message: "x"})
+    }}
+    branched :: Loader{load: n -> {
+        if n > 0 {
+            Ok(n)
+        } else {
+            Err(LoadError{message: "x"})
+        }
+    }}
+    plain :: Loader{load: n -> {
+        if n > 5 -> return n
+        n + 1
+    }}
+    print("{matched.load(3) ?? -1} {matched.load(-1) ?? -1}")
+    print("{returned.load(3) ?? -1} {returned.load(-1) ?? -1}")
+    print("{branched.load(3) ?? -1} {branched.load(-1) ?? -1}")
+    print("{plain.load(3) ?? -1} {plain.load(9) ?? -1}")
+}
