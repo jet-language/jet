@@ -165,16 +165,17 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     weights := [Int]{}
     loop f in functions -> &weights.push(1 + f.op.len())
     glue :: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
-    report.direct_calls += ir_opt_prepare(&functions, weights, ^glue, threads)
-    order :: ir_opt_bottom_up(functions)
-    sites :: ir_opt_call_sites(functions)
+    calls := OptCalls{start: [Int]{}, to: [Int]{}}
+    report.direct_calls += ir_opt_prepare(&functions, weights, ^glue, threads, &calls)
+    order :: ir_opt_bottom_up(calls)
+    sites :: ir_opt_call_sites(calls)
     keys := [String]{}
     loop f in functions -> &keys.push(f.key.copy())
     total := 0
     loop weight in weights -> total += weight
     workers :: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers > 1 {
-        ir_opt_scheduled(&m, &functions, ^keys, order, ^sites, weights, options, workers, &report)
+        ir_opt_scheduled(&m, &functions, ^keys, order, ^sites, calls, weights, options, workers, &report)
     } else {
         view := ir_opt_view(&m)
         bodies := ir_opt_rows(&functions)
@@ -259,28 +260,50 @@ fn ir_opt_glue_table(m: IRModule) -> [Int] Never! {
     table
 }
 
-// The functions of one thread of ir_opt_prepare, in order, and the per-type
-// glue table (OptGlue.jet; empty with "glue" off) every thread reads.
+// The functions of one thread of ir_opt_prepare, in order, with the direct
+// Calls it found in them (ir_opt_calls_of): per function how many, then all
+// of them in function order. The per-type glue table (OptGlue.jet; empty
+// with "glue" off) and the module's function count every thread reads.
 struct IROptPart {
     functions: [IRFunction]
+    call_counts: [Int]
+    calls: [Int]
 }
 
 struct IROptGlue {
     table: [Int]
+    functions: Int
+}
+
+// The module's direct Calls of module functions after ir_opt_prepare:
+// function f's callees, in instruction order (repeats kept), are
+// `to[start[f]..<start[f + 1]]`. The call graph (ir_opt_bottom_up), the call
+// counts (ir_opt_call_sites) and the schedule's edges (ir_opt_callee_edges)
+// read these instead of every instruction again.
+struct OptCalls {
+    start: [Int]
+    to: [Int]
 }
 
 // Direct calls, then drop glue as calls, in every function before the call
-// graph is built; returns the direct calls made. A function's rewrite reads
-// only its own body and the glue table, so the functions split into
-// consecutive parts (compiler_threads_partition by `weights`), one thread
-// each, joined in part order: every body is the same for any thread count.
-fn ir_opt_prepare(functions: &[IRFunction], weights: [Int], glue: ^[Int], threads: CompilerThreads) -> Int Never! {
+// graph is built, then the function's Calls listed into `calls`; returns the
+// direct calls made. A function's rewrite reads only its own body and the
+// glue table, so the functions split into consecutive parts
+// (compiler_threads_partition by `weights`), one thread each, joined in part
+// order: every body and the call list are the same for any thread count.
+fn ir_opt_prepare(functions: &[IRFunction], weights: [Int], glue: ^[Int], threads: CompilerThreads, calls: &OptCalls) -> Int Never! {
     total := 0
     loop weight in weights -> total += weight
-    workers :: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    count :: functions.len()
+    workers :: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
         direct := 0
-        loop id in 0..<functions.len() -> direct += ir_opt_prepare_function(&functions[id], glue)
+        loop id in 0..<count {
+            direct += ir_opt_prepare_function(&functions[id], glue)
+            &calls.start.push(calls.to.len())
+            _ :: ir_opt_calls_of(functions[id], count, &calls.to)
+        }
+        &calls.start.push(calls.to.len())
         return direct
     }
     bounds :: compiler_threads_partition(weights, workers)
@@ -294,16 +317,23 @@ fn ir_opt_prepare(functions: &[IRFunction], weights: [Int], glue: ^[Int], thread
             &rows.push(^row)
         }
         &rows.reverse()
-        &slots.push(shared IROptPart{functions: ^rows})
+        &slots.push(shared IROptPart{functions: ^rows, call_counts: [Int]{}, calls: [Int]{}})
         part -= 1
     }
     &slots.reverse()
-    table :: shared IROptGlue{table: ^glue}
+    table :: shared IROptGlue{table: ^glue, functions: count}
     direct :: ir_opt_preparers(slots, table, 0) ?? panic("the IR preparing threads failed")
     loop slot in slots {
         held := slot.guard_edit()
         &functions.extend(compiler_take_rows<IRFunction>(&held.value.functions))
+        at := calls.to.len()
+        loop n in held.value.call_counts {
+            &calls.start.push(at)
+            at += n
+        }
+        &calls.to.extend(compiler_take_rows<Int>(&held.value.calls))
     }
+    &calls.start.push(calls.to.len())
     direct
 }
 
@@ -333,8 +363,26 @@ fn ir_opt_prepare_part(slot: Shared<IROptPart>, table: Shared<IROptGlue>) -> Int
     reads :: table.guard_read()
     held := slot.guard_edit()
     direct := 0
-    loop id in 0..<held.value.functions.len() -> direct += ir_opt_prepare_function(&held.value.functions[id], reads.value.table)
+    counts := [Int]{}
+    calls := [Int]{}
+    loop id in 0..<held.value.functions.len() {
+        direct += ir_opt_prepare_function(&held.value.functions[id], reads.value.table)
+        &counts.push(ir_opt_calls_of(held.value.functions[id], reads.value.functions, &calls))
+    }
+    held.value.call_counts = ^counts
+    held.value.calls = ^calls
     direct
+}
+
+// Appends function `f`'s direct Calls of module functions (ids below
+// `count`), in instruction order, to `to`; returns how many.
+fn ir_opt_calls_of(f: IRFunction, count: Int, to: &[Int]) -> Int Never! {
+    before :: to.len()
+    loop at in 0..<f.op.len() {
+        callee :: f.a[at]
+        if f.op[at] == .Call && callee >= 0 && callee < count -> &to.push(callee)
+    }
+    to.len() - before
 }
 
 // The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet).
@@ -407,15 +455,10 @@ fn ir_opt_ssa(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROpt
 }
 
 // Per function, the direct Calls of it in the whole module.
-fn ir_opt_call_sites(functions: [IRFunction]) -> [Int] Never! {
+fn ir_opt_call_sites(calls: OptCalls) -> [Int] Never! {
     sites := [Int]{}
-    loop _ in functions -> &sites.push(0)
-    loop f in functions {
-        loop at in 0..<f.op.len() {
-            callee :: f.a[at]
-            if f.op[at] == .Call && callee >= 0 && callee < sites.len() -> sites[callee] = sites[callee] + 1
-        }
-    }
+    loop _ in 0..<calls.start.len() - 1 -> &sites.push(0)
+    loop callee in calls.to -> sites[callee] = sites[callee] + 1
     sites
 }
 
@@ -423,15 +466,15 @@ fn ir_opt_call_sites(functions: [IRFunction]) -> [Int] Never! {
 // itself that it calls directly: its passes read those final bodies (the
 // inliner; recursive callees are never inlined). The rows are
 // `callees[callee_start[f]..<callee_start[f + 1]]`.
-fn ir_opt_callee_edges(functions: [IRFunction], recursive: [Bool], callee_start: &[Int], callees: &[Int]) Never! {
+fn ir_opt_callee_edges(calls: OptCalls, recursive: [Bool], callee_start: &[Int], callees: &[Int]) Never! {
+    count :: calls.start.len() - 1
     seen := [Int]{}
-    loop _ in functions -> &seen.push(-1)
-    loop id in 0..<functions.len() {
+    loop _ in 0..<count -> &seen.push(-1)
+    loop id in 0..<count {
         &callee_start.push(callees.len())
-        loop k in 0..<functions[id].op.len() {
-            if functions[id].op[k] != .Call -> next
-            callee :: functions[id].a[k]
-            if callee < 0 || callee >= functions.len() || callee == id || recursive[callee] || seen[callee] == id -> next
+        loop k in calls.start[id]..<calls.start[id + 1] {
+            callee :: calls.to[k]
+            if callee == id || recursive[callee] || seen[callee] == id -> next
             seen[callee] = id
             &callees.push(callee)
         }
@@ -511,10 +554,10 @@ IR_OPT_STALL_CHECKS :: 1073741824
 // is the one the single-threaded bottom-up walk produces, for any thread
 // count. What a stalled run left runs on the calling thread afterward, in
 // bottom-up order.
-fn ir_opt_scheduled(m: &IRModule, functions: &[IRFunction], keys: ^[String], order: OptOrder, sites: ^[Int], weights: [Int], options: IROptOptions, workers: Int, report: &IROptReport) {
+fn ir_opt_scheduled(m: &IRModule, functions: &[IRFunction], keys: ^[String], order: OptOrder, sites: ^[Int], calls: OptCalls, weights: [Int], options: IROptOptions, workers: Int, report: &IROptReport) {
     callee_start := [Int]{}
     callees := [Int]{}
-    ir_opt_callee_edges(functions, order.recursive, &callee_start, &callees)
+    ir_opt_callee_edges(calls, order.recursive, &callee_start, &callees)
     caller_start := [Int]{}
     callers := [Int]{}
     ir_opt_caller_edges(functions.len(), callee_start, callees, &caller_start, &callers)
@@ -866,7 +909,6 @@ struct OptOrder {
 }
 
 struct OptTarjan {
-    edges: [[Int]]
     index: [Int]
     low: [Int]
     on_stack: [Bool]
@@ -876,24 +918,9 @@ struct OptTarjan {
     recursive: [Bool]
 }
 
-fn ir_opt_bottom_up(functions: [IRFunction]) -> OptOrder Never! {
-    edges := [[Int]]{}
-    self_call := [Bool]{}
-    loop f in functions {
-        out := [Int]{}
-        calls_self := false
-        loop at in 0..<f.op.len() {
-            if f.op[at] != .Call -> next
-            callee :: f.a[at]
-            if callee < 0 || callee >= functions.len() -> next
-            if callee == edges.len() -> calls_self = true
-            &out.push(callee)
-        }
-        &edges.push(^out)
-        &self_call.push(calls_self)
-    }
-    count :: functions.len()
-    t := OptTarjan{edges: ^edges, index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
+fn ir_opt_bottom_up(calls: OptCalls) -> OptOrder Never! {
+    count :: calls.start.len() - 1
+    t := OptTarjan{index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
     loop _ in 0..<count {
         &t.index.push(-1)
         &t.low.push(0)
@@ -901,16 +928,22 @@ fn ir_opt_bottom_up(functions: [IRFunction]) -> OptOrder Never! {
         &t.recursive.push(false)
     }
     loop node in 0..<count {
-        if t.index[node] < 0 -> ir_opt_tarjan_visit(&t, node)
+        if t.index[node] < 0 -> ir_opt_tarjan_visit(&t, calls, node)
     }
     loop node in 0..<count {
-        if self_call[node] -> t.recursive[node] = true
+        loop k in calls.start[node]..<calls.start[node + 1] {
+            if calls.to[k] == node {
+                t.recursive[node] = true
+                break
+            }
+        }
     }
     OptOrder{order: ^t.order, recursive: ^t.recursive}
 }
 
-// Iterative Tarjan visit from `root` (the compiler's own call graphs are deep).
-fn ir_opt_tarjan_visit(t: &OptTarjan, root: Int) Never! {
+// Iterative Tarjan visit from `root` over the edges `calls` (the compiler's
+// own call graphs are deep).
+fn ir_opt_tarjan_visit(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     work := [Int]{root}
     edge := [Int]{0}
     t.index[root] = t.next_index
@@ -921,8 +954,8 @@ fn ir_opt_tarjan_visit(t: &OptTarjan, root: Int) Never! {
     loop work.len() > 0 {
         top :: work.len() - 1
         node :: work[top]
-        if edge[top] < t.edges[node].len() {
-            callee :: t.edges[node][edge[top]]
+        if edge[top] < calls.start[node + 1] - calls.start[node] {
+            callee :: calls.to[calls.start[node] + edge[top]]
             edge[top] = edge[top] + 1
             if t.index[callee] < 0 {
                 t.index[callee] = t.next_index
