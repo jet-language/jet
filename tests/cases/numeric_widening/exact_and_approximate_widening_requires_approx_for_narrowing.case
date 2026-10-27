@@ -6,7 +6,7 @@ env: NO_COLOR=1
 step successdefault: jet run success/main.jet
 exit: 0
 stdout: = exact_and_approximate_widening_requires_approx_for_narrowing.successstdout.expected
-step successinterpret: jet run --interpret success/main.jet
+step successrelease: jet run --release success/main.jet
 exit: 0
 stdout: = exact_and_approximate_widening_requires_approx_for_narrowing.successstdout.expected
 when tool rustc
@@ -31,7 +31,7 @@ when exit == 70: stdout: empty
 when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
 when exit == 70: stderr: ~ "[E3010]" # original runtime code
 when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
-step narrowinginterpret: jet run --json --interpret narrowing/main.jet
+step narrowingrelease: jet run --release --json narrowing/main.jet
 exit: in [70, 1]
 when exit == 70: stdout: empty
 when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
