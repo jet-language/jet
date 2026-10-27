@@ -6,4 +6,4 @@ env: JETPACK_ROOT={work}/jetpack
 step: jet check main.jet --json
 exit: 1
 json: stdout doc $.reports[?code="E0621"] #>= 1 # tests/run_entry.rs:26 the explicit-run diagnostic is reported
-json: stdout doc $.reports[?code="E0621"][?fix_edits!=null] #= 0 # tests/run_entry.rs:30 it offers no implicit-run rewrite
+json: stdout doc $.reports[?code="E0621"][0] !has "fix_edits" # tests/run_entry.rs:30 it offers no implicit-run rewrite

@@ -3159,7 +3159,7 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
             hook :: method.symbol.owner != Val(owner)
             previous :: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) {
-                &diagnostics.push(sema_defined_twice(method.symbol.name, "ordinary methods and operator hooks share one method namespace", method.symbol.span))
+                &diagnostics.push(sema_method_defined_twice(method.symbol.name, module_row.nominals[nominal_index].symbol.name, method.symbol.span))
             }
             if previous == None -> &names.add(key, hook).drop("new member name")
         }
@@ -3177,12 +3177,13 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
         }
         row :: sema_type_resolve_nominal_row(graph, module_row.impls[implementation_index].target_type, module_row.module_identity)
         owner :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.id.key else -> type_name(module_row.impls[implementation_index].target_type)
+        owner_name :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.name else -> type_name(module_row.impls[implementation_index].target_type)
         hook :: sema_checked_operator_trait(module_row.impls[implementation_index].trait_name ?? "")
         loop method in module_row.impls[implementation_index].methods {
             key :: "{owner}::{method.symbol.name}"
             previous :: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) {
-                &diagnostics.push(sema_defined_twice(method.symbol.name, "ordinary methods and operator hooks share one method namespace", method.symbol.span))
+                &diagnostics.push(sema_method_defined_twice(method.symbol.name, owner_name, method.symbol.span))
             }
             if previous == None -> &names.add(key, hook).drop("new member name")
         }

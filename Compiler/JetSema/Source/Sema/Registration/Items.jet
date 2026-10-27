@@ -1517,7 +1517,7 @@ fn sema_registration_struct_fields(definition: StructDef, owner: Symbol, diagnos
         duplicate :: seen.get(definition.fields[field_index].name) != None
         seen[definition.fields[field_index].name] = true
         if duplicate {
-            &diagnostics.push(sema_defined_twice(definition.fields[field_index].name, "fields in one nominal declaration share one namespace", definition.fields[field_index].name_span))
+            &diagnostics.push(sema_field_defined_twice(definition.fields[field_index].name, owner.name, definition.fields[field_index].name_span))
         }
         field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, definition.fields[field_index].name)
         field_symbol :: Symbol{

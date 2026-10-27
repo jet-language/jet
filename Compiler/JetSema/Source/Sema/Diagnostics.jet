@@ -215,6 +215,14 @@ fn sema_defined_twice(name: String, why: String, span: Span) -> Diagnostic {
     sema_error("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
 
+fn sema_field_defined_twice(name: String, owner: String, span: Span) -> Diagnostic {
+    sema_error("E0105", span, "field `{name}` is defined twice in `{owner}`", "each field name may appear only once", "rename or remove the duplicate field")
+}
+
+fn sema_method_defined_twice(name: String, owner: String, span: Span) -> Diagnostic {
+    sema_error("E0105", span, "method `{name}` is defined twice on `{owner}`", "each method name may appear only once on a type", "rename or remove one of the definitions")
+}
+
 fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
     sema_error(
         "E0107",
@@ -229,12 +237,15 @@ fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
     required_name :: type_name(required)
     offered_name :: type_name(offered)
+    // `/` of two whole numbers is an exact Fraction; storing it in an Int
+    // most often wants floor division.
+    fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down, or convert the Fraction explicitly" else -> "use a value of the required type or convert it explicitly"
     sema_error(
         "E0108",
         span,
         "this needs {required_name}, but the value is {offered_name}",
         "the value here does not have the type required by this declaration",
-        "use a value of the required type or convert it explicitly",
+        fix,
     )
 }
 
