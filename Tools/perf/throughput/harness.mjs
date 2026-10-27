@@ -341,7 +341,6 @@ export function phaseBudgetCheck(summary, codeLines) {
   for (const row of PINS.phase_budgets) {
     let actual;
     if (row.measure === 'startup') actual = summary.startup_ns ?? null;
-    else if (row.measure === 'backend') actual = summary.backend_wall_ns?.median ?? null;
     else if (row.measure === 'glue') actual = null;
     else actual = row.kinds.reduce((sum, kind) => sum + (summary.phases[kind]?.wall_ns ?? 0), 0);
     if (row.kinds) named += actual ?? 0;
