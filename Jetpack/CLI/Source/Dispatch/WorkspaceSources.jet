@@ -163,8 +163,8 @@ fn cli_workspace_index_required_diagnostic() -> Diagnostic Never! {
     diagnostic_from_registry("E1239", None, "workspace build needs workspace.jet as the index", "an authority declaration is not a member index", "move members into workspace.jet and keep one workspace index")
 }
 
-fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, expected: WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
-    if envmodel_workspace_load_checked_source(resolver, expected) == {
+fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, ^expected: WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
+    if envmodel_workspace_load_checked_source(resolver, ^expected) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(CLIError.Diagnostic(error.diagnostic))
     }
@@ -172,7 +172,7 @@ fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, expected: Wor
 
 // Evaluate a checked workspace index, write its `.jet/lock` entries, and
 // return the plan. A diagnostic is rendered and reported as exit 2.
-fn cli_load_workspace_for_source(cache: &WorkspaceDeclarationCache, dir: String, checked: CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
+fn cli_load_workspace_for_source(cache: &WorkspaceDeclarationCache, dir: String, ^checked: CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
     if checked.resolver.revalidate_source(checked.source) == {
         .Err(error) -> return Err(cli_render_workspace_error(CLIError.Diagnostic(error.diagnostic())))
         .Ok(_) -> {}
@@ -180,7 +180,7 @@ fn cli_load_workspace_for_source(cache: &WorkspaceDeclarationCache, dir: String,
     if checked.source.role != WorkspaceSourceRole.Index {
         return Err(cli_render_workspace_error(CLIError.Diagnostic(cli_workspace_index_required_diagnostic())))
     }
-    if cli_workspace_snapshot_from_source(checked.resolver, checked.source) == {
+    if cli_workspace_snapshot_from_source(checked.resolver, ^checked.source) == {
         .Ok(snapshot) -> cli_finish_workspace_load(&cache, dir, Val(snapshot))
         .Err(error) -> Err(cli_render_workspace_error(error))
     }
@@ -254,7 +254,7 @@ fn cli_cwd_workspace_index(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exe
     if snapshot.source == .Val(checked) {
         allow_lock = false
         if checked.source.role == WorkspaceSourceRole.Index {
-            evaluated :: cli_workspace_snapshot_from_source(checked.resolver, checked.source) ?? cli_report_authority_error(cli_discovery_diagnostic(err))
+            evaluated :: cli_workspace_snapshot_from_source(checked.resolver, ^checked.source) ?? cli_report_authority_error(cli_discovery_diagnostic(err))
             plan = Val(evaluated.plan)
         }
     }

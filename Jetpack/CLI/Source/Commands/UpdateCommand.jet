@@ -102,11 +102,10 @@ fn cli_cmd_update(verification: &StoreVerification, theme: Theme, parsed: CLIPar
             cli_render_project_update_plan(theme, plan)
         }
         has_project_plan :: project_plan != None
-        apply_project :: () -> if project_plan == {
+        return cli_update_user_tools_with_plan(&verification, theme, parsed, &confirmation, has_project_plan, () -> if project_plan == {
             .Val(plan) -> cli_apply_project_update(theme, plan)
             .None -> EXIT_OK
-        }
-        return cli_update_user_tools_with_plan(&verification, theme, parsed, &confirmation, has_project_plan, apply_project)
+        })
     }
     if scopes.tools -> return cli_update_user_tools(&verification, theme, parsed, &confirmation)
     cli_cmd_update_project(&cache, theme, parsed, &confirmation)
@@ -123,8 +122,11 @@ fn cli_update_exit_code(error: CLIError) -> Int Never! {
 // `jetpack update --deps` / `jetpack update <source>`: resolve project
 // channel refs and move only their lock entries; nothing is realized.
 fn cli_cmd_update_project(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    planned :: cli_plan_project_update(&cache, theme, parsed) ?? return cli_update_exit_code(err)
-    plan :: planned ?? return EXIT_OK
+    plan :: if cli_plan_project_update(&cache, theme, parsed) == {
+        .Val(found) -> found
+        .None -> { return EXIT_OK }
+        .Err(error) -> { return cli_update_exit_code(error) }
+    }
     theme.status("Plan channel update")
     cli_render_project_update_plan(theme, plan)
     confirmed :: &confirmation.confirm(theme, parsed.flags.assume_yes)
@@ -209,8 +211,8 @@ fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Never! 
 
 fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     lock_diff := CLILockDiffGuard.new(theme, plan.project_dir)
-    defer close(^lock_diff)
     &lock_diff.set_sizes(cli_sizes_from_bytes(cli_update_download_bytes(plan.updates), None))
+    defer close(^lock_diff)
     ok := true
     loop update in plan.updates {
         source :: update.source

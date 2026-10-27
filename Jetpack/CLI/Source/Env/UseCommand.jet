@@ -35,7 +35,7 @@ fn cli_cmd_use(verification: &StoreVerification, theme: Theme, parsed: CLIParsed
     warm :: store_reuse_verified_user_profile_batch(&verification, roots, references, parsed.flags.local_nix_catalog != None)
     warm_reused :: cli_warm_realizations_complete(plan, warm)
     composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Use, true, warm, false) ?? return cli_exit_for(theme, err)
-    env :: composed.env
+    env := composed.env
     if parsed.flags.prep {
         cli_auto_clean_after_success(&verification, theme, roots)
         return EXIT_OK

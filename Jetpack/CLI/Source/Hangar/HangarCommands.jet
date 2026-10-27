@@ -130,7 +130,7 @@ fn cli_hangar_du_all(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]>
 
 // `jetpack hangar du` — honest root-inclusive closure disk usage (U22 /
 // ). Source-built objects are counted like any other.
-fn cli_hangar_du(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_hangar_du(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     report :: store_du(&verification, pkg_resolve_roots()) ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read Hangar disk usage", err.message(), "run `jetpack hangar recover`, repair the reported state, then retry.")
     }
@@ -173,7 +173,7 @@ fn cli_hangar_du(verification: &StoreVerification, theme: Theme, parsed: CLIPars
 
 // `jetpack hangar recover` — sweep crashed Hangar/build staging and
 // `.partial` objects.
-fn cli_hangar_recover(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_hangar_recover(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait, Rand]> Int Never! {
     if store_recover_hangar(&verification, pkg_resolve_roots()) == {
         .Ok(count) -> {
             if parsed.flags.json {
@@ -275,7 +275,7 @@ fn cli_hangar_doctor(verification: &StoreVerification, theme: Theme, parsed: CLI
 
 // `jetpack hangar verify [<digest-or-id-or-archive>]` — with no target,
 // verify every object.
-fn cli_hangar_verify(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_hangar_verify(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait, Rand]> Int Never! {
     roots :: pkg_resolve_roots()
     key :: parsed.flags.archive_key
     entries :: store_list_for_full_audit(roots) ?? {
@@ -323,7 +323,7 @@ fn cli_hangar_verify(verification: &StoreVerification, theme: Theme, parsed: CLI
 
 // `jetpack hangar referrers <digest>` — objects that declare a dependency on
 // the digest.
-fn cli_hangar_referrers(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_hangar_referrers(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     digest :: cli_positional_path_after(parsed, "referrers") ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar referrers` needs an output digest", "referrers lists objects that declare a dependency on this digest.", "run `jetpack hangar referrers sha256-…`.")
     }

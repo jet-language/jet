@@ -15,7 +15,7 @@ fn cli_task_access_trace_path(cache_key: String) -[Env]> String Never! {
 }
 
 // Run `argv` in `env` under the file-access tracer, writing `trace_path`.
-fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait]> Int CLIError! {
+fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int CLIError! {
     if !sys.is_linux() -> return Err(CLIError.Other("strict cached job access tracing is currently supported only on Linux"))
     base_path :: if clean -> env_shell_clean_path() else -> sys.get("PATH") ?? ""
     composed_path :: env.composed_path(base_path)
@@ -88,7 +88,7 @@ fn cli_normalize_trace_path(path: String) -> String? Never! {
         if part == "" || part == "." -> next
         if part == ".." {
             if parts.len() == 0 -> return None
-            &parts.pop()
+            _ :: &parts.pop()
             next
         }
         &parts.push(part)
@@ -118,7 +118,7 @@ fn cli_strace_path_indices(name: String, count: Int) -> [Int] Never! {
 // The file paths one strace line names.
 fn cli_strace_paths(line: String) -> [String] Never! {
     open :: line.split_once("(") ?? return [String]{}
-    words :: open.before.split_whitespace().to_list()
+    words :: trust_text_words(open.before)
     if words.len() == 0 -> return [String]{}
     name :: words[words.len() - 1]
     args :: cli_strace_argument_tokens(open.after)
@@ -183,7 +183,10 @@ fn cli_strace_quoted_argument(argument: String) -> String? Never! {
         if {
             escaped -> escaped = false
             code == 92 -> escaped = true
-            code == 34 -> return String.from_bytes(raw[1..<index])
+            code == 34 -> {
+                text :: String.from_bytes(raw[1..<index]) ?? return None
+                return Val(text)
+            }
             else -> {}
         }
     }

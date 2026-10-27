@@ -23,7 +23,12 @@ struct BuildArtifactStoreHandle {
     fn get_blob(self, digest: ContentDigest) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
         if !digest.as_str().starts_with("sha256:") -> return Err(BuildIOError.new(.InvalidInput, "artifact digest has no sha256 prefix"))
         parsed :: ArtifactDigest.from_hex(digest.as_str().removeprefix("sha256:")) ?? return Err(build_store_io_error(err))
-        self.store.blob_by_digest(parsed) ?? return Err(build_store_io_error(err))
+        found :: if self.store.blob_by_digest(parsed) == {
+            .Val(bytes) -> Val(bytes)
+            .None -> None
+            .Err(error) -> { return Err(build_store_io_error(error)) }
+        }
+        Ok(found)
     }
 
     fn put_record(self, key: String, bytes: [U8]) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
@@ -31,7 +36,12 @@ struct BuildArtifactStoreHandle {
     }
 
     fn get_record(self, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
-        self.store.get_action(self.store.action(key)) ?? return Err(build_store_io_error(err))
+        found :: if self.store.get_action(self.store.action(key)) == {
+            .Val(bytes) -> Val(bytes)
+            .None -> None
+            .Err(error) -> { return Err(build_store_io_error(error)) }
+        }
+        Ok(found)
     }
 }
 

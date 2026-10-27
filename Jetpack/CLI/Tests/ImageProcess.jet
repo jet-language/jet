@@ -114,7 +114,7 @@ fn cli_test_eval_error(src: String, dir: String) -[FS, Env, Exec, Time.Wait]> En
 
 fn cli_test_image_index(project: String) -[FS, Env, Exec, Time.Wait]> String {
     out :: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
-    assert_eq(out.code, 0, out.errors)
+    assert(out.code == 0, out.errors)
     files.read(files.join(project, ".jet/images/server/index.json")) ?? panic("read index.json")
 }
 
@@ -266,7 +266,7 @@ struct EnvironmentImageClaim {
 
 fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exec, Time.Wait]> String {
     out :: claim.build()
-    assert_eq(out.code, 0, out.errors)
+    assert(out.code == 0, out.errors)
     files.read(files.join(claim.image_dir(), "index.json")) ?? panic("read index.json")
 }
 

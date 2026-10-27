@@ -96,10 +96,7 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
     // JETPACK_TIMING=1 prints one line per entry phase. A 100 percent cache
     // hit has no work beyond reading the stamp and projecting the closure.
     timing :: sys.get("JETPACK_TIMING") != None
-    mark :: (label: String) -> {
-        if timing -> term.eprint("TIMING {label}: {cli_debug_duration(time.elapsed(ready_started))}\n")
-    }
-    mark("roots")
+    cli_env_timing_mark(timing, ready_started, "roots")
     flags := parsed.flags
     // U16: `-p` needs no manifest at all; the "nothing to do" refusal
     // applies only when neither an env file nor ad-hoc packages exist.
@@ -108,7 +105,7 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
     if has_env_file || parsed.flags.packages.len() == 0 {
         plan = cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     }
-    mark("plan-loaded")
+    cli_env_timing_mark(timing, ready_started, "plan-loaded")
     // U16: ad-hoc `-p` packages become ordinary Jetpack refs in the same plan.
     loop name in parsed.flags.packages {
         &plan.refs.push(RefSpec{source: RefSource.Jetpack, package: name, raw: "{name}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"})
@@ -117,12 +114,16 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
     // U19: `jet env` never runs a project function, but it realizes the
     // project's declared packages, so first entry gates on trust.
     if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, flags.trust) == .Val(code) -> return code
-    mark("trust-gate")
+    cli_env_timing_mark(timing, ready_started, "trust-gate")
     previous_receipt :: cli_read_env_entry_receipt(project_dir)
-    secret_identity :: trust_secrets_validation_identity(project_dir, plan.secrets, plan.environment.active_environment) ?? None
+    secret_identity :: if trust_secrets_validation_identity(project_dir, plan.secrets, plan.environment.active_environment) == {
+        .Val(identity) -> Val(identity)
+        .None -> None
+        .Err(_) -> None
+    }
     reuse_verified_store :: cli_receipt_secret_matches(previous_receipt, secret_identity)
     cli_validate_declared_secrets_with_reuse(theme, project_dir, plan.secrets, plan.environment.active_environment, reuse_verified_store) ?? return cli_exit_for(theme, err)
-    mark("secrets-validated")
+    cli_env_timing_mark(timing, ready_started, "secrets-validated")
     fingerprints :: cli_environment_entry_definition_fingerprint(project_dir, parsed.flags.preset, parsed.flags.environment, plan, secret_identity)
     inherited_loader_path :: sys.get("LD_LIBRARY_PATH")
     receipt_matches_plan :: if previous_receipt == {
@@ -132,10 +133,18 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
     warm := [VerifiedRealization]?{None}
     if !flags.prep && receipt_matches_plan {
         receipt :: previous_receipt ?? panic("a matching receipt exists")
-        warm = store_reuse_verified_environment(&verification, roots, receipt.stamp, project_dir, fingerprints.definition, inherited_loader_path, receipt.packages, flags.local_nix_catalog != None) ?? None
+        warm = if store_reuse_verified_environment(&verification, roots, receipt.stamp, project_dir, fingerprints.definition, inherited_loader_path, receipt.packages, flags.local_nix_catalog != None) == {
+            .Val(found) -> Val(found)
+            .None -> None
+            .Err(_) -> None
+        }
         if warm == None {
             expectations :: cli_environment_member_expectations(&verification, roots, project_dir, flags, plan)
-            warm = store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, flags.local_nix_catalog != None) ?? None
+            warm = if store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, flags.local_nix_catalog != None) == {
+                .Val(found) -> Val(found)
+                .None -> None
+                .Err(_) -> None
+            }
         }
     }
     warm_reused :: cli_warm_realizations_complete(plan, warm)
@@ -160,26 +169,25 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
     if !warm_reused && !locked_nix_replayed {
         cli_configure_project_catalog(theme, roots, project_dir, plan, &flags) ?? return cli_exit_for(theme, err)
     }
-    mark("catalog-configured")
+    cli_env_timing_mark(timing, ready_started, "catalog-configured")
     composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, RealizeScope.Project, true, warm, !warm_reused) ?? return cli_exit_for(theme, err)
     env := composed.env
     stats :: composed.stats
-    if fingerprints.hook == .Val(hash) -> env.vars[ENV_HOOK_ACTIVE_HASH_VAR] = hash
-    mark("env-composed")
+    hook :: fingerprints.hook
+    if hook == .Val(hook_hash) {
+        env.vars[ENV_HOOK_ACTIVE_HASH_VAR] = hook_hash
+    }
+    cli_env_timing_mark(timing, ready_started, "env-composed")
     if flags.prep {
         cli_auto_clean_after_success(&verification, theme, roots)
-        if cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) == .Err(error) {
-            theme.detail("couldn't record env entry: {error.message()}")
-        }
+        cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
         return EXIT_OK
     }
     entry :: cli_find_project_entry(project_dir)
     cli_run_lifecycle_hooks(&verification, &cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
-    mark("lifecycle-hooks")
-    if cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) == .Err(error) {
-        theme.detail("couldn't record env entry: {error.message()}")
-    }
-    mark("announced")
+    cli_env_timing_mark(timing, ready_started, "lifecycle-hooks")
+    cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
+    cli_env_timing_mark(timing, ready_started, "announced")
     command :: parsed.command ?? [String]{}
     code :: if {
         command.len() > 0 && warm_reused -> &env.exec_command(command)
@@ -188,11 +196,14 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
     }
     if code == 0 {
         cli_auto_clean_after_success(&verification, theme, roots)
-        if cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) == .Err(error) {
-            theme.detail("couldn't refresh env entry: {error.message()}")
-        }
+        cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't refresh env entry: {err.message()}")
     }
     code
+}
+
+// JETPACK_TIMING=1 prints one line per entry phase.
+fn cli_env_timing_mark(timing: Bool, started: time.Stopwatch, label: String) -[IO, Time]> {
+    if timing -> term.eprint("TIMING {label}: {cli_debug_duration(time.elapsed(started))}\n")
 }
 
 // Whether the previous receipt was written under the same, non-empty secret
@@ -208,8 +219,11 @@ fn cli_receipt_secret_matches(receipt: EnvEntryReceipt?, identity: String?) -> B
 // fold the checked realizations into `warm`. False when the project lock
 // pins no Nix package; an error when it pins only part of the closure.
 fn cli_replay_locked_nix(verification: &StoreVerification, theme: Theme, roots: HangarRoots, project_dir: String, refs: [RefSpec], table: SourceTable, offline: Bool, local_nix_catalog: Bool, warm: &[VerifiedRealization]?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Bool CLIError! {
-    loaded :: pkg_lock_load_strict(project_dir) ?? return Err(CLIError.Other("project lock is invalid: {err.message()}"))
-    if loaded == None -> return Ok(false)
+    if pkg_lock_load_strict(project_dir) == {
+        .Val(_) -> {}
+        .None -> return Ok(false)
+        .Err(error) -> return Err(CLIError.Other("project lock is invalid: {error.message()}"))
+    }
     nix_refs := [RefSpec]{}
     loop spec in refs {
         if provider_uses_nix_provider_for_project(spec, table, offline, roots.root, Val(project_dir)) -> &nix_refs.push(spec)
@@ -218,8 +232,12 @@ fn cli_replay_locked_nix(verification: &StoreVerification, theme: Theme, roots: 
     locked := [RefSpec]{}
     missing_real_nix := false
     loop spec in nix_refs {
-        pinned :: pkg_lock_locked_nix_package_strict(project_dir, spec.raw) ?? return Err(CLIError.Other(err.message()))
-        if pinned != None {
+        pinned :: if pkg_lock_locked_nix_package_strict(project_dir, spec.raw) == {
+            .Val(_) -> true
+            .None -> false
+            .Err(error) -> { return Err(CLIError.Other(error.message())) }
+        }
+        if pinned {
             &locked.push(spec)
         } else if pkg_lock_registry_realization(project_dir, "jetpackage", spec.raw) == None {
             missing_real_nix = true
@@ -360,7 +378,7 @@ fn cli_cmd_env_test(verification: &StoreVerification, cache: &WorkspaceDeclarati
     cli_apply_locked_channels(theme, project_dir, &plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
     if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     entry :: cli_find_project_entry(project_dir)
     cli_run_lifecycle_hooks_clean(&verification, &cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
     cli_run_lifecycle_hooks_clean(&verification, &cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.checks, "check") ?? return cli_exit_for(theme, err)
@@ -470,7 +488,7 @@ fn cli_enter_foreign_flake(verification: &StoreVerification, theme: Theme, proje
         &plan.refs.push(RefSpec{source: RefSource.Jetpack, package: package, raw: "{package}@{REF_SOURCE_JETPACK}"})
     }
     theme.status("entering native projection of foreign shell: {theme.bold(flake_path)}")
-    env :: cli_compose_env(&verification, theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)
     command :: parsed.command ?? [String]{}
     if {
         command.len() > 0 && parsed.flags.pure -> &env.run_clean_command(command)

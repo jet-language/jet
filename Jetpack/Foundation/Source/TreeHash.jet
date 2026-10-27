@@ -478,9 +478,9 @@ struct FoundationFileAuthority {
     fn remove(self, basename: String) IOError! -[FS]> {
         if basename != files.basename(self.relative) -> return Err(foundation_io_error(true, basename, "file authority removal name does not match its held file"))
         self.revalidate()
-        parent :: self.directories[self.directories.len() - 1].handle
-        parent.remove(basename)
-        parent.fsync()
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        self.directories[self.directories.len() - 1].handle.remove(basename)
+        self.directories[self.directories.len() - 1].handle.fsync()
         foundation_ensure_directories_current(self.directories)
     }
 }
@@ -517,9 +517,9 @@ struct FoundationDirectoryAuthority {
     fn remove(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
-        parent :: self.directories[self.directories.len() - 1].handle
-        parent.remove(name)
-        parent.fsync()
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        self.directories[self.directories.len() - 1].handle.remove(name)
+        self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
     }
     // Registry clone installation: mutate only this retained parent, never
@@ -535,16 +535,16 @@ struct FoundationDirectoryAuthority {
         foundation_directory_authority_name(from)
         foundation_directory_authority_name(to)
         self.revalidate()
-        parent :: self.directories[self.directories.len() - 1].handle
-        if replace -> parent.rename(from, to) else -> parent.rename(from, to, if_exists: .Refuse)
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        if replace -> self.directories[self.directories.len() - 1].handle.rename(from, to) else -> self.directories[self.directories.len() - 1].handle.rename(from, to, if_exists: .Refuse)
         self.revalidate()
     }
     fn remove_tree(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
-        parent :: self.directories[self.directories.len() - 1].handle
-        foundation_remove_held_tree(parent, name)
-        parent.fsync()
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        foundation_remove_held_tree(self.directories[self.directories.len() - 1].handle, name)
+        self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
     }
 
@@ -567,26 +567,29 @@ struct FoundationDirectoryAuthority {
     fn child(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
-        parent :: self.directories[self.directories.len() - 1]
-        handle :: if create -> foundation_open_or_create_directory(parent.handle, name) else -> parent.handle.open_directory(name)
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        leaf :: self.directories.len() - 1
+        handle :: if create -> foundation_open_or_create_directory(self.directories[leaf].handle, name) else -> self.directories[leaf].handle.open_directory(name)
+        child_path :: files.join(self.directories[leaf].path, name)
         directories := self.directories
-        &directories.push(FoundationPublicationDirectory{handle: handle, path: files.join(parent.path, name), publication_parent: true})
+        &directories.push(FoundationPublicationDirectory{handle: handle, path: child_path, publication_parent: true})
         foundation_ensure_directories_current(directories)
         Ok(FoundationDirectoryAuthority{directories: directories})
     }
     fn private_child(self, prefix: String) -[FS, Env, Time]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(prefix)
         self.revalidate()
-        parent :: self.directories[self.directories.len() - 1].handle
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        leaf :: self.directories.len() - 1
         pid :: sys.pid()
         stamp :: time.unix_ns()
         loop attempt in 0..<128 {
             name :: ".jet-{prefix}-{pid}-{stamp}-{attempt}"
-            parent.create_directory(name, mode: Val(448)) ?? {
+            self.directories[leaf].handle.create_directory(name, mode: Val(448)) ?? {
                 if err == .AlreadyExists(_) -> next
                 return Err(err)
             }
-            parent.fsync()
+            self.directories[leaf].handle.fsync()
             return self.child(name)
         }
         Err(IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(self.path()), os_code: None, cause: Val("could not reserve a private source directory")}))
@@ -596,8 +599,8 @@ struct FoundationDirectoryAuthority {
     fn tree_hash(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
         self.revalidate()
         rows := [FoundationHeldTreeFile]{}
-        root :: self.directories[self.directories.len() - 1].handle
-        foundation_collect_held_tree(root, "", &rows, 0, reject_hardlinks)
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        foundation_collect_held_tree(self.directories[self.directories.len() - 1].handle, "", &rows, 0, reject_hardlinks)
         &rows.sort_by((left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) -> left.relative <=> right.relative)
         hasher := StreamingSHA256.new()
         total := 0
@@ -626,18 +629,16 @@ struct FoundationDirectoryAuthority {
     fn copy_tree_from(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
         source.revalidate()
         self.revalidate()
-        source_root :: source.directories[source.directories.len() - 1].handle
-        destination :: self.directories[self.directories.len() - 1].handle
-        foundation_copy_held_tree(source_root, destination, "", reject_hardlinks)
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        foundation_copy_held_tree(source.directories[source.directories.len() - 1].handle, self.directories[self.directories.len() - 1].handle, "", reject_hardlinks)
         source.revalidate()
         self.revalidate()
     }
     fn link_tree_from(self, source: FoundationDirectoryAuthority) IOError! -[FS, Env]> {
         source.revalidate()
         self.revalidate()
-        source_root :: source.directories[source.directories.len() - 1].handle
-        destination :: self.directories[self.directories.len() - 1].handle
-        foundation_link_held_tree(source_root, destination, "")
+        // workaround #5942: a `::` binding of a held handle closes it at scope end.
+        foundation_link_held_tree(source.directories[source.directories.len() - 1].handle, self.directories[self.directories.len() - 1].handle, "")
         source.revalidate()
         self.revalidate()
     }

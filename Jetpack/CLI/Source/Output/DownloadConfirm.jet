@@ -71,7 +71,7 @@ impl Theme {
 impl ByteProgress {
     // The Store progress sink that drives this ledger.
     fn handle(self) -> ProgressHandle Never! {
-        progress :: self
+        progress :: ByteProgress{state: self.state}
         ProgressHandle{
             discovered_bytes: (bytes: Int) -[IO, Env, Time.Wait]> { progress.discovered_bytes(bytes) },
             transferred_bytes: (bytes: Int) -[IO, Env, Time.Wait]> { progress.transferred_bytes(bytes) },

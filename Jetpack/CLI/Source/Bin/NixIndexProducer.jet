@@ -227,7 +227,7 @@ fn cli_nix_index_verify_differential(args: [String]) CLIToolError! -[FS, IO]> {
 
 // Build the signed-channel manifest over every staged, digest-checked target
 // under `--target-root/index-v1/<revision>/<system>/`.
-fn cli_nix_index_manifest(args: [String]) CLIToolError! -[FS, IO]> {
+fn cli_nix_index_manifest(args: [String]) CLIToolError! -[IO, FS, Env]> {
     options :: cli_nix_index_options(args)
     channel :: cli_nix_index_required(options, "channel")
     endpoint :: cli_nix_index_required(options, "endpoint")
@@ -419,12 +419,10 @@ fn cli_nix_index_write_immutable(path: String, bytes: [U8]) CLIToolError! -[FS, 
     name :: files.basename(path)
     if name == "" -> return Err(CLIToolError.new("output has no file name"))
     partial :: files.join(parent, ".{name}.partial-{process.current_pid()}")
-    result :: cli_nix_index_publish_partial(partial, path, bytes)
-    if result == {
-        .Ok(_) -> {}
-        .Err(_) -> files.remove(partial).drop("the partial output is best-effort cleanup")
+    cli_nix_index_publish_partial(partial, path, bytes) ?? {
+        files.remove(partial).drop("the partial output is best-effort cleanup")
+        return Err(err)
     }
-    result
 }
 
 fn cli_nix_index_publish_partial(partial: String, path: String, bytes: [U8]) CLIToolError! -[FS]> {

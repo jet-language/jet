@@ -453,7 +453,7 @@ fn cli_test_wait_for_file_contains(path: String, expected: String) -[FS, Time]> 
 fn cli_test_process_is_alive(pid: Int) -[FS, Exec, Time.Wait]> Bool {
     stat :: files.read("/proc/{pid}/stat") ?? ""
     rest :: stat.cut_last(")")?.after ?? ""
-    state :: rest.trim().split(" ").get(0) ?? ""
+    state :: rest.trim().split(" ").to_list().get(0) ?? ""
     if state == "Z" -> return false
     receipt :: process.cmd([String]{"kill", "-0", "{pid}"}).stdout(.Capture).stderr(.Capture).run() ?? return false
     receipt.success

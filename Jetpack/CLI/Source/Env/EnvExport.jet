@@ -126,7 +126,11 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
             return Err(keep)
         }
     }
-    secret_identity :: trust_secrets_validation_identity(root, plan.secrets, plan.environment.active_environment) ?? None
+    secret_identity :: if trust_secrets_validation_identity(root, plan.secrets, plan.environment.active_environment) == {
+        .Val(identity) -> Val(identity)
+        .None -> None
+        .Err(_) -> None
+    }
     previous_receipt :: cli_read_env_entry_receipt(root)
     reuse_verified_store :: cli_receipt_secret_matches(previous_receipt, secret_identity)
     cli_validate_declared_secrets_with_reuse(theme, root, plan.secrets, plan.environment.active_environment, reuse_verified_store) ?? return Err(keep)
@@ -140,10 +144,18 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
     warm := [VerifiedRealization]?{None}
     if receipt_matches_plan {
         receipt :: previous_receipt ?? panic("a matching receipt exists")
-        warm = store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) ?? None
+        warm = if store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) == {
+            .Val(found) -> Val(found)
+            .None -> None
+            .Err(_) -> None
+        }
         if warm == None {
             expectations :: cli_environment_member_expectations(&verification, roots, root, parsed.flags, plan)
-            warm = store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, local_catalog) ?? None
+            warm = if store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, local_catalog) == {
+                .Val(found) -> Val(found)
+                .None -> None
+                .Err(_) -> None
+            }
         }
     }
     warm_reused :: cli_warm_realizations_complete(plan, warm)
@@ -186,9 +198,7 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
     }
     script = "{script}{rendered}"
     if !warm_reused {
-        if cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", composed.stats) == .Err(error) {
-            theme.detail("couldn't record env entry: {error.message()}")
-        }
+        cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", composed.stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     }
     if watched_reload_ready -> env_hook_clear_watch_reload(root)
     Ok(script)

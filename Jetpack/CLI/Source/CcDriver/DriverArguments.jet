@@ -311,7 +311,7 @@ fn cli_cc_parse_prefixed_argument(value: String, options: &DriverOptions) CLIToo
             &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-L"})
         }
         attached != None -> {
-            prefix :: attached ?? ""
+            prefix :: attached
             cli_cc_validate_operand(value.removeprefix(prefix), prefix)
             &options.argv.push(value)
             &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: prefix})
@@ -480,7 +480,8 @@ struct CcResponseExpansion {
             words :: cli_cc_parse_response_words(bytes, raw_path)
             nested_base :: cli_cc_path_parent(canonical) ?? base_dir
             &self.expand(words, nested_base, scope_roots, depth + 1)
-            self.stack.remove_value(canonical)
+            // The nested expansion pops its own entries, so `canonical` is on top.
+            _ :: &self.stack.pop()
         }
     }
 }
@@ -641,7 +642,7 @@ fn cli_cc_absolutize_lexically(base: String, raw: String, label: String) -> Stri
         if part == "" || part == "." -> next
         if part == ".." {
             if output.len() == 0 -> return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
-            &output.pop()
+            _ :: &output.pop()
             if !absolute && output.len() < base_components.len() -> return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
             next
         }
@@ -702,7 +703,7 @@ fn cli_cc_reject_symlinks_in_path(path: String, label: String) CLIToolError! -[F
 
 // A project-relative path without `.`/`..` components, NULs, or a root.
 fn cli_cc_validate_relative_path(path: String, label: String) CLIToolError! {
-    components :: path.split("/")
+    components :: path.split("/").to_list()
     invalid :: path == "" || cli_cc_has_nul(path) || path.starts_with("/") || path == "." || path.starts_with("./") || components.contains("..")
     if invalid -> return Err(CLIToolError.new("{label} path `{path}` must be project-relative and must not contain `..`"))
 }

@@ -57,7 +57,11 @@ fn cli_config_trust(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, En
                 theme.error("`jet os config trust remove` needs a pattern", "removes a previously trusted path pattern.", "try `jet os config trust remove ~/work/*`.")
                 return EXIT_USAGE
             }
-            status :: if trust_remove_pattern(store, pattern) -> "removed: {pattern}" else -> "not found: {pattern}"
+            removed :: trust_remove_pattern(store, pattern) ?? {
+                theme.error("couldn't update the trust store", "{err}", "check write permissions on `{store}` and retry.")
+                return EXIT_USER_ERROR
+            }
+            status :: if removed -> "removed: {pattern}" else -> "not found: {pattern}"
             theme.status(status)
             EXIT_OK
         }

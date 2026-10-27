@@ -22,11 +22,6 @@ struct ChannelSource {
     }
 }
 
-// This rule refreshes automatic channels once per command. Package
-// realization re-applies the source table per ref, so without this memo one
-// warm 28-package env ran `git ls-remote` 56 times. Keyed `base\nchannel`.
-cli_resolved_channels := [String: String]{}
-
 // Every declared source that tracks a channel, in source-table name order.
 fn cli_channel_sources(table: SourceTable) -> [ChannelSource] Never! {
     sources := [ChannelSource]{}
@@ -197,11 +192,9 @@ fn cli_resolve_source_channel(source: ChannelSource, flags: CLIFlags) -[FS, Env,
     if flags.offline || cli_ci_mode() {
         return Err(ProviderError.Channel("source `{source.name}` tracks `{source.lock_channel}` but no exact lock entry exists"))
     }
-    key :: "{source.base}\n{source.resolution_channel()}"
-    if cli_resolved_channels.get(key) == .Val(exact) -> return Ok(exact)
-    exact :: cli_resolve_channel_with_git(source)
-    cli_resolved_channels[key] = exact
-    Ok(exact)
+    // Each command applies its source table once, one resolution per source,
+    // so no per-process memo stands in front of `git ls-remote`.
+    cli_resolve_channel_with_git(source)
 }
 
 // The `<base> <channel> <exact> [<download-bytes>]` rows of a fixture
@@ -211,7 +204,7 @@ fn cli_channel_fixture_rows(flags: CLIFlags) -[FS, Env]> [[String]] Never! {
     dir :: cli_fixtures_for(flags) ?? return [[String]]{}
     raw :: files.read(files.join(dir, "channels.txt")) ?? return [[String]]{}
     rows := [[String]]{}
-    loop line in raw.lines() -> &rows.push(line.split_whitespace().to_list())
+    loop line in raw.lines() -> &rows.push(trust_text_words(line))
     rows
 }
 
@@ -237,7 +230,10 @@ fn cli_resolve_channel_from_fixture(source: ChannelSource, flags: CLIFlags) -[FS
 fn cli_channel_download_size_from_fixture(source: ChannelSource, flags: CLIFlags) -[FS, Env]> Int? Never! {
     rows :: cli_channel_fixture_rows(flags)
     loop columns in rows {
-        if columns.len() >= 4 && cli_fixture_row_matches(source, columns) -> return Int.parse(columns[3])
+        if columns.len() >= 4 && cli_fixture_row_matches(source, columns) {
+            size :: Int.parse(columns[3]) ?? return None
+            return Val(size)
+        }
     }
     None
 }
@@ -250,7 +246,7 @@ fn cli_exact_upstream(base: String, exact: String) -> String Never! {
 }
 
 fn cli_ci_mode() -[Env]> Bool Never! {
-    sys.get("CI") == .Val(value) && value != ""
+    (sys.get("CI") ?? "") != ""
 }
 
 fn cli_resolve_channel_with_git(source: ChannelSource) -[Env, Exec, Time.Wait]> String ProviderError! {
@@ -288,7 +284,7 @@ fn cli_resolve_channel_with_git(source: ChannelSource) -[Env, Exec, Time.Wait]> 
 
 // Rust `split_whitespace().next()`.
 fn cli_first_word(text: String) -> String? Never! {
-    loop word in text.split_whitespace() -> return Val(word)
+    loop word in trust_text_words(text) -> return Val(word)
     None
 }
 
@@ -317,7 +313,9 @@ fn cli_offline_refusal(theme: Theme, command: String) -[IO, Time.Wait]> Int Neve
 fn cli_newest_tag(lines: [String], mask: String?) -> String? Never! {
     major := Int?{None}
     if mask == .Val(series) {
-        if series.starts_with("v") && series.ends_with(".x") -> major = Int.parse(series.removeprefix("v").removesuffix(".x"))
+        if series.starts_with("v") && series.ends_with(".x") {
+            if Int.parse(series.removeprefix("v").removesuffix(".x")) == .Ok(wanted) -> major = Val(wanted)
+        }
     }
     best_nums := [Int]{}
     best := String?{None}

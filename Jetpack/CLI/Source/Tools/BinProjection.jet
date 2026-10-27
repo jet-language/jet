@@ -22,7 +22,7 @@ struct ToolLiveInstall {
 // Copy every tool's executables into `generation_dir/bin`, record each
 // projection digest on the tool, and sync the directory. A live install
 // supplies its own lease; any other tool re-leases its checked StoreEntry.
-fn cli_materialize_generation_bins(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], live: ToolLiveInstall?) CLIError! -[FS, Env, Time]> {
+fn cli_materialize_generation_bins(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], live: ToolLiveInstall?) CLIError! -[FS, Env, Exec, Time, Rand]> {
     bin_dir :: files.join(generation_dir, "bin")
     files.create_dir(bin_dir)
     projected := [String]{}
@@ -65,7 +65,7 @@ fn cli_tool_store_entry(verification: &StoreVerification, roots: HangarRoots, to
 
 // Project one tool's bin/member pairs through `lease`; the projection digests
 // in bin order.
-fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: CacheLease, projected: &[String]) -[FS, Env]> [String] CLIError! {
+fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: CacheLease, projected: &[String]) -[FS, Env, Rand]> [String] CLIError! {
     digests := [String]{}
     loop index in 0..<tool.bins.len() {
         bin :: tool.bins[index]
@@ -86,7 +86,7 @@ fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: CacheL
 }
 
 // The member's no-follow source file inside the tool's checked StoreEntry.
-fn cli_validated_store_member(verification: &StoreVerification, tool: InstalledUserTool, member: String) -[FS, Env]> String CLIError! {
+fn cli_validated_store_member(verification: &StoreVerification, tool: InstalledUserTool, member: String) -[FS, Env, Time]> String CLIError! {
     entry :: cli_tool_store_entry(&verification, HangarRoots{root: tool.store_root, dev_mode: true}, tool)
     source :: files.join(entry.bin, member)
     info :: files.stat(source)
@@ -97,7 +97,7 @@ fn cli_validated_store_member(verification: &StoreVerification, tool: InstalledU
 // The generation's `bin` directory holds exactly the tools' physical names,
 // every member still resolves inside its checked StoreEntry, and every
 // projection matches its recorded digest (and is executable on Unix).
-fn cli_validate_generation_bins(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool]) CLIError! -[FS, Env]> {
+fn cli_validate_generation_bins(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool]) CLIError! -[FS, Env, Time]> {
     bin_dir :: files.join(files.join(cli_tool_generations_dir(), "{generation}"), "bin")
     expected := [String]{}
     loop tool in tools {

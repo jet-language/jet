@@ -19,7 +19,7 @@ enum CacheTransferAction {
     }
 }
 
-fn cli_cmd_cache(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+fn cli_cmd_cache(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     action :: if parsed.positional.len() == 0 -> "list" else -> parsed.positional[0]
     roots :: pkg_resolve_roots()
     if action == {
@@ -34,7 +34,7 @@ fn cli_cmd_cache(verification: &StoreVerification, theme: Theme, parsed: CLIPars
     }
 }
 
-fn cli_cache_bind(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_cache_bind(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() < 2 -> return cli_cache_usage(theme, parsed, "`cache bind` needs a role and mirror", "jetpack hangar cache bind public /absolute/cache")
     role :: parsed.positional[1]
     mirrors :: cli_tail(parsed.positional, 2)
@@ -73,7 +73,7 @@ fn cli_cache_list(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS,
     EXIT_OK
 }
 
-fn cli_cache_remove(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_cache_remove(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() < 2 -> return cli_cache_usage(theme, parsed, "`cache remove` needs a role", "jetpack hangar cache remove public --yes")
     role :: parsed.positional[1]
     if !(cli_cache_confirm_apply(theme, parsed, "cache-remove") ?? return cli_status_encoding_error(err)) -> return EXIT_OK
@@ -89,7 +89,7 @@ fn cli_cache_remove(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, F
     EXIT_OK
 }
 
-fn cli_cache_transfer(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots, action: CacheTransferAction) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+fn cli_cache_transfer(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots, action: CacheTransferAction) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() < 2 -> return cli_cache_usage(theme, parsed, "cache transfer needs an entry, reference, or output digest", "jetpack hangar cache verify <entry> --role public")
     target :: parsed.positional[1]
     role :: parsed.flags.cache_role ?? "public"
@@ -114,7 +114,7 @@ fn cli_cache_transfer(verification: &StoreVerification, theme: Theme, parsed: CL
     }
 }
 
-fn cli_cache_stage(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+fn cli_cache_stage(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
     destination :: parsed.flags.archive_to ?? {
         return cli_cache_usage(theme, parsed, "`cache stage` needs `--to <directory>`", "jetpack hangar cache stage --role public --to <staging-dir> --yes")
     }

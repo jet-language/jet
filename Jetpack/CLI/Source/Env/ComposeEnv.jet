@@ -300,11 +300,17 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     project_scope :: scope == RealizeScope.Project
     needs_stats :: collect_stats || (project_scope && !warm_complete)
     lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
-    defer close(^lock_diff)
     if confirm_download && !warm_complete {
-        download_plan :: cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope)
-        &lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
+        if cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope) == {
+            .Ok(download_plan) -> &lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
+            .Err(error) -> {
+                close(^lock_diff)
+                return Err(error)
+            }
+        }
     }
+    // The sizes are fixed before the guard is handed to its deferred close.
+    defer close(^lock_diff)
     cli_enforce_required_sandbox_policy(theme, flags.json)
     if cli_validate_integration_facts(plan) == {
         .Err(error) -> {
@@ -315,11 +321,14 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     }
     bin_dirs := [String]{}
     if project_scope {
-        profile_bin :: cli_dev_shell_projection(&verification, plan.project_root, plan.environment) ?? {
-            theme.error_coded("E1335", "the active package profile cannot project into the dev shell", err.message(), "build and switch the named package profile, then retry the shell")
-            return Err(CLIError.Reported(EXIT_USAGE))
+        if cli_dev_shell_projection(&verification, plan.project_root, plan.environment) == {
+            .Val(path) -> &bin_dirs.push(path)
+            .None -> {}
+            .Err(error) -> {
+                theme.error_coded("E1335", "the active package profile cannot project into the dev shell", error.message(), "build and switch the named package profile, then retry the shell")
+                return Err(CLIError.Reported(EXIT_USAGE))
+            }
         }
-        if profile_bin == .Val(path) -> &bin_dirs.push(path)
     }
     provider_vars := [String: [String]]{}
     provider_var_order := [String]{}
@@ -673,7 +682,7 @@ fn cli_validate_integration_host_check(check: String, target: String) CLIError! 
 }
 
 // A checked dotenv snapshot, narrowed to `allow` when it names keys.
-fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS]> [String: String] CLIError! {
+fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS, Env]> [String: String] CLIError! {
     bytes :: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CLIError.InvalidData(err.message))
     values :: cli_read_dotenv(bytes)
     if allow.len() == 0 -> return Ok(values)

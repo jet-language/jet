@@ -46,7 +46,7 @@ fn cli_test_ingest_executable_for_platform(verification: &StoreVerification, roo
         provenance: "image-test",
         platform_artifact_kind: ""
     }
-    store_ingest_tree(&verification, roots, request) ?? panic("ingest {name}: {err.message()}")
+    _ :: store_ingest_tree(&verification, roots, request) ?? panic("ingest {name}: {err.message()}")
 }
 
 // Whether `needle` occurs in `haystack`.
@@ -110,7 +110,7 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
     requests := [RegistryTestRequest]{}
     watch :: time.start()
     loop requests.len() < expected_requests && time.elapsed(watch).ns < 20000000000 {
-        stream :: net.tcp_accept(listener) ?? next
+        stream := net.tcp_accept(listener) ?? next
         net.set_read_timeout(&stream, 2000) ?? panic("set registry read timeout")
         request := [U8]{}
         header_end := -1
@@ -124,7 +124,7 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
         if header_end < 0 -> next
         header_text :: String.from_bytes(request.slice(0, header_end)) ?? ""
         lines :: header_text.lines()
-        request_parts :: (lines.get(0) ?? "").split(" ")
+        request_parts :: (lines.get(0) ?? "").split(" ").to_list()
         method :: request_parts.get(0) ?? ""
         path :: request_parts.get(1) ?? ""
         content_length := 0

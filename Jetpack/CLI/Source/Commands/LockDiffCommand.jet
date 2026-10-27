@@ -89,7 +89,11 @@ fn cli_render_lock_diff(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -
 }
 
 fn cli_render_lock_diff_lines(diff: LockDiff, sizes: DiffSizes) -[FS]> [String] Never! {
-    disk :: cli_measured_disk_delta(diff) ?? sizes.disk
+    measured :: cli_measured_disk_delta(diff)
+    disk :: if measured == {
+        .Val(bytes) -> Val(bytes)
+        .None -> sizes.disk
+    }
     lines := [String]{}
     loop change in diff.packages -> &lines.push(cli_render_package_change(change))
     loop change in diff.channels {

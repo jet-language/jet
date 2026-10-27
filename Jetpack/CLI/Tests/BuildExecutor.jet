@@ -453,7 +453,7 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
     decoded :: build_report_from_json(wire) ?? panic("canonical report")
     assert_eq(build_report_to_json(decoded), wire)
     if build_report_from_json(wire.replace(",\"cause\":null", ", \"cause\":null")) == {
-        .Err(error) -> assert_eq(error, "error report is not canonical")
+        .Err(error) -> assert_eq(error.message, "error report is not canonical")
         .Ok(_) -> panic("a non-canonical report must be refused")
     }
     rendered :: build_report_render(report)

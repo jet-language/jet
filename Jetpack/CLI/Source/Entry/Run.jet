@@ -5,6 +5,7 @@
 
 fn cli_run(args: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     invocation :: terminal_begin_invocation()
-    defer close(^invocation)
-    cli_main(args, invocation)
+    code :: cli_main(args, invocation)
+    close(^invocation)
+    code
 }

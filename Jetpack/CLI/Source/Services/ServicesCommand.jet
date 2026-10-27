@@ -65,9 +65,13 @@ fn cli_validate_declared_secrets_with_reuse(theme: Theme, project_dir: String, s
         missing := String?{None}
         if !reuse_verified_store {
             visiting := [String]{}
-            missing = cli_secret_activation_missing(project_dir, spec, specs, &visiting) ?? {
-                theme.error("couldn't read secret named {spec.name}", err.message(), "")
-                return Err(CLIError.Reported(EXIT_USAGE))
+            if cli_secret_activation_missing(project_dir, spec, specs, &visiting) == {
+                .Val(name) -> missing = Val(name)
+                .None -> {}
+                .Err(error) -> {
+                    theme.error("couldn't read secret named {spec.name}", error.message(), "")
+                    return Err(CLIError.Reported(EXIT_USAGE))
+                }
             }
         }
         if missing == .Val(name) {
@@ -87,11 +91,14 @@ fn cli_validate_declared_secrets_with_reuse(theme: Theme, project_dir: String, s
 // A max-age rotation policy: overdue is E1333, an error for a required
 // declaration and a warning for an optional one.
 fn cli_check_secret_rotation(theme: Theme, project_dir: String, spec: SecretSpec, environment: String, seconds: Int) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
-    stored :: trust_secrets_store_age(project_dir) ?? {
-        theme.error("couldn't inspect secret rotation age", err.message(), "")
-        return Err(CLIError.Reported(EXIT_USAGE))
+    age :: if trust_secrets_store_age(project_dir) == {
+        .Val(found) -> found
+        .None -> { return }
+        .Err(error) -> {
+            theme.error("couldn't inspect secret rotation age", error.message(), "")
+            return Err(CLIError.Reported(EXIT_USAGE))
+        }
     }
-    age :: stored ?? return
     if age.ns <= time.duration_seconds(seconds).ns -> return
     headline :: "secret named {spec.name} is past its rotation age for environment {environment}"
     if spec.required {
@@ -103,13 +110,15 @@ fn cli_check_secret_rotation(theme: Theme, project_dir: String, spec: SecretSpec
 
 // The first stored name a declaration needs that the store lacks, following
 // composition inputs; a composition cycle reports the revisited name.
-fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [SecretSpec], visiting: &[String]) -[FS, Env]> String? CLIError! {
+fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [SecretSpec], visiting: &[String]) -[FS, Env, Exec, Time.Wait]> String? CLIError! {
     if visiting.contains(spec.name) -> return Ok(Val(spec.name))
     if spec.declaration == {
         .Stored -> {
-            value :: trust_secrets_get(project_dir, spec.name) ?? return Err(CLIError.Other(err.message()))
-            if value == None -> return Ok(Val(spec.name))
-            Ok(None)
+            if trust_secrets_get(project_dir, spec.name) == {
+                .Val(_) -> Ok(None)
+                .None -> Ok(Val(spec.name))
+                .Err(error) -> Err(CLIError.Other(error.message()))
+            }
         }
         .Compose(_, from) -> {
             &visiting.push(spec.name)
@@ -119,16 +128,16 @@ fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [
                     if candidate.name == input && input_spec == None -> input_spec = Val(candidate)
                 }
                 found :: input_spec ?? {
-                    &visiting.pop()
+                    _ :: &visiting.pop()
                     return Ok(Val(input))
                 }
                 nested :: cli_secret_activation_missing(project_dir, found, specs, &visiting)
                 if nested != None {
-                    &visiting.pop()
+                    _ :: &visiting.pop()
                     return Ok(nested)
                 }
             }
-            &visiting.pop()
+            _ :: &visiting.pop()
             Ok(None)
         }
     }
@@ -256,7 +265,8 @@ fn cli_run_lifecycle_command(theme: Theme, project_dir: String, env: ShellEnv, h
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     spec := process.shell(command).cwd(cwd).stdout(.Capture).stderr(.Capture)
-    spec = &env.apply_in_mode(spec, mode.clean) ?? {
+    hook_env := env
+    spec = &hook_env.apply_in_mode(spec, mode.clean) ?? {
         theme.error("couldn't run {phase} hook '{hook.name}'", err.message(), "run the hook outside the leased environment until Core can pass descriptors to a child.")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
@@ -434,7 +444,7 @@ fn cli_services_restart(verification: &StoreVerification, cache: &WorkspaceDecla
     EXIT_OK
 }
 
-fn cli_services_down(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_services_down(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int Never! {
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
     services_down_ordered(ServiceHost.Platform, plan.project_root, plan.dev_services, order) ?? {
         theme.error("couldn't stop services", err.message, "inspect the service logs and state.")
@@ -469,11 +479,14 @@ fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: C
         loop svc in targets {
             state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), true)
             all_healthy = all_healthy && state.healthy
-            found :: services_lifecycle_json(project_dir, svc.name) ?? {
-                eprint("services JSON: {err.message}")
-                return EXIT_USAGE
+            lifecycle :: if services_lifecycle_json(project_dir, svc.name) == {
+                .Val(json) -> json
+                .None -> "null"
+                .Err(error) -> {
+                    eprint("services JSON: {error.message}")
+                    return EXIT_USAGE
+                }
             }
-            lifecycle :: found ?? "null"
             &records.push("{{\"service\":{cli_json_quote(svc.name)},\"health\":{cli_json_quote(state.label)},\"lifecycle\":{lifecycle}}}")
         }
         print("[{records.join(",")}]")

@@ -50,7 +50,10 @@ fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
                 theme.error("`jet trust revoke` needs a grant selector", "revocation is exact: pass the subject, grant key, hash, pattern, or raw line shown by `jet trust list`.", "try `jet trust revoke service:postgres.service`.")
                 return EXIT_USAGE
             }
-            removed :: trust_revoke(store, selector)
+            removed :: trust_revoke(store, selector) ?? {
+                theme.error("couldn't update the trust store", "{err}", "check write permissions on `{store}` and retry.")
+                return EXIT_USER_ERROR
+            }
             theme.status(if removed -> "revoked: {selector}" else -> "not found: {selector}")
             EXIT_OK
         }

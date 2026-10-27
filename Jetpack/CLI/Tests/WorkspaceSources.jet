@@ -8,10 +8,13 @@ fn cli_ws_test_scratch(label: String) -[FS]> String {
 // The Rust test-only `load_workspace`: the checked index snapshot, written
 // through to `.jet/lock`; None when no index source declares a workspace.
 fn cli_ws_test_load_workspace(cache: &WorkspaceDeclarationCache, dir: String) -> WorkspacePlan? {
-    checked :: cli_checked_workspace_source(&cache, dir) ?? panic("workspace discovery")
-    source :: checked ?? return None
+    source :: if cli_checked_workspace_source(&cache, dir) == {
+        .Val(found) -> found
+        .None -> { return None }
+        .Err(_) -> panic("workspace discovery")
+    }
     if source.source.role != WorkspaceSourceRole.Index -> return None
-    snapshot :: cli_workspace_snapshot_from_source(source.resolver, source.source) ?? panic("workspace snapshot")
+    snapshot :: cli_workspace_snapshot_from_source(source.resolver, ^source.source) ?? panic("workspace snapshot")
     cli_finish_workspace_load(&cache, dir, Val(snapshot)) ?? panic("workspace lock write")
 }
 

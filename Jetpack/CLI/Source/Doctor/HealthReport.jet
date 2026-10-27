@@ -370,7 +370,7 @@ fn cli_doctor_check_locks(project: String, roots: HangarRoots) -[FS, Env]> Docto
 
 // ── Cache ──
 
-fn cli_doctor_check_cache(roots: HangarRoots) -[Time]> DoctorCheck Never! {
+fn cli_doctor_check_cache(roots: HangarRoots) -[FS, Env, Time]> DoctorCheck Never! {
     now :: time.unix_seconds(time.now())
     stale := 0
     entries :: store_list_read_only(roots)
@@ -452,7 +452,7 @@ fn cli_doctor_run_crypto_helper_status(helper: String, command: String) -[Exec, 
 fn cli_doctor_crypto_helper_receipt(helper: String, command: String) -[Exec, Time.Wait]> ProcessReceipt DoctorSigningBridgeError! {
     child :: process.cmd([String]{helper}).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
     child.stdin.write(command) ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
-    child.stdin.close() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
+    child.stdin.close()
     child.wait() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
 }
 

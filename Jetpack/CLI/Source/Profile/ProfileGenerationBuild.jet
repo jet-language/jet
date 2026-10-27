@@ -127,9 +127,16 @@ fn cli_package_profile_owner(project_dir: String) -> String Never! {
 // generation root, record and root its lock, and publish the generation.
 fn cli_build_package_generation(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
     realized := [RealizedProfilePackage]{}
-    built :: cli_build_package_generation_body(&verification, &cache, theme, parsed, project_dir, plan, &realized)
-    loop package in realized -> package.lease.release()
-    built
+    // Every realized lease is released whether or not the build succeeded.
+    generation := 0
+    failure := CLIError?{None}
+    if cli_build_package_generation_body(&verification, &cache, theme, parsed, project_dir, plan, &realized) == {
+        .Ok(built) -> generation = built
+        .Err(error) -> failure = Val(error)
+    }
+    loop package in ^realized -> ^package.lease.release()
+    if failure == .Val(error) -> return Err(error)
+    Ok(generation)
 }
 
 fn cli_build_package_generation_body(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan, realized: &[RealizedProfilePackage]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
@@ -451,7 +458,7 @@ fn cli_ensure_projection_parent(path: String) CLIError! -[FS]> {
 
 // Copy one regular file, keep its permission bits, and prove the copy still
 // has the digest the node recorded.
-fn cli_copy_projection_file(source: String, destination: String, expected: String) CLIError! -[FS]> {
+fn cli_copy_projection_file(source: String, destination: String, expected: String) CLIError! -[FS, Env]> {
     info :: files.stat(source)
     if info.is_symlink || !info.is_file -> return Err(CLIError.Other("profile projection source is not a regular file"))
     files.copy2(source, destination)
@@ -491,7 +498,7 @@ fn cli_next_package_generation(state: String) -[FS]> Int CLIError! {
 }
 
 // Every complete generation, ascending; abandoned stages are removed first.
-fn cli_read_package_generations(verification: &StoreVerification, state: String) -[FS, Env]> [PackageGenerationRecord] CLIError! {
+fn cli_read_package_generations(verification: &StoreVerification, state: String) -[FS, Env, Time]> [PackageGenerationRecord] CLIError! {
     directory :: cli_package_generations_dir(state)
     info :: cli_stat_optional(directory) ?? return Ok([PackageGenerationRecord]{})
     if info.is_symlink || !info.is_dir -> return Err(CLIError.Other("profile generations path is not a real directory"))
@@ -528,7 +535,7 @@ fn cli_positive_json_int(value: Dyn?) -> Int? Never! {
 // profile, number, fingerprint, root hash, each package's provider facts and
 // their digest, the completion witness, the projected root, and its Store
 // root.
-fn cli_read_package_generation_record(verification: &StoreVerification, state: String, generation: Int) -[FS, Env]> PackageGenerationRecord CLIError! {
+fn cli_read_package_generation_record(verification: &StoreVerification, state: String, generation: Int) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
     directory :: files.join(cli_package_generations_dir(state), "{generation}")
     metadata :: cli_read_bounded(files.join(directory, PACKAGE_PROFILE_META_FILE))
     object :: pkg_json_object(cli_json_parse(metadata)) ?? return Err(CLIError.Other(PKG_JSON_NOT_OBJECT))
@@ -594,7 +601,7 @@ fn cli_validate_package_generation_entry(package: [String: Dyn]) -> String CLIEr
 }
 
 // The published pointer, verified against the generation it names.
-fn cli_read_package_current_pointer(verification: &StoreVerification, state: String) -[FS, Env]> PackageGenerationPointer? CLIError! {
+fn cli_read_package_current_pointer(verification: &StoreVerification, state: String) -[FS, Env, Time]> PackageGenerationPointer? CLIError! {
     path :: files.join(state, PACKAGE_PROFILE_CURRENT_FILE)
     info :: cli_stat_optional(path) ?? return Ok(None)
     if info.is_symlink || !info.is_file -> return Err(CLIError.Other("profile current pointer is not a regular file"))
@@ -611,7 +618,7 @@ fn cli_read_package_current_pointer(verification: &StoreVerification, state: Str
 
 // Point `current` at one verified generation (refusing a stale one when the
 // plan fingerprint is given) and re-read the pointer to prove it.
-fn cli_activate_package_generation(verification: &StoreVerification, project_dir: String, profile: String, generation: Int, expected_fingerprint: String?) -[FS, Env]> PackageGenerationRecord CLIError! {
+fn cli_activate_package_generation(verification: &StoreVerification, project_dir: String, profile: String, generation: Int, expected_fingerprint: String?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
     state :: cli_package_profile_state_dir(project_dir, profile)
     record :: cli_read_package_generation_record(&verification, state, generation)
     if expected_fingerprint == .Val(expected) {
@@ -633,7 +640,7 @@ fn cli_activate_package_generation(verification: &StoreVerification, project_dir
 // `switch` selects the active generation; the shell never rebuilds a profile
 // or adds source outputs directly. `--env` selects an environment module,
 // not a package generation.
-fn cli_dev_shell_projection(verification: &StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env]> String? CLIError! {
+fn cli_dev_shell_projection(verification: &StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env, Time]> String? CLIError! {
     name :: "dev"
     declared := false
     loop profile in environment.package_profiles {
