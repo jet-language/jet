@@ -5,6 +5,9 @@ use jet_foundation.[
     BodyExpr,
     BodyTree,
     FnBody,
+    jet_ring_core_module_layer,
+    jet_ring_layer_name,
+    jet_ring_prelude_closure_layer,
     body_tree_new,
     AST_NODE_GENERATED,
     WebPartitionMarker,
@@ -7485,11 +7488,46 @@ fn sema_comptime_layer_name(layer: RuntimeLayer) -> String Never! {
     "Std"
 }
 
-fn sema_comptime_runtime_ceiling_diagnostic(package_identity: String, actual: RuntimeLayer, ceiling: RuntimeLayer, span: Span?) -> Diagnostic {
-    actual_name := sema_comptime_layer_name(actual)
-    ceiling_name := sema_comptime_layer_name(ceiling)
-    sema_error_optional("E1006", span, "package `{package_identity}` reaches runtime layer `{actual_name}` above its `{ceiling_name}` ceiling", "the package's reachable Core closure exceeds `runtime_ceiling`", "raise the package runtime ceiling or remove the higher-layer dependency")
+fn sema_comptime_runtime_ceiling_diagnostic(subject: String, needed: RuntimeLayer, ceiling: RuntimeLayer, span: Span?, chain: String) -> Diagnostic {
+    needed_name :: jet_ring_layer_name(needed)
+    ceiling_name :: jet_ring_layer_name(ceiling)
+    sema_error_optional("E1006", span, "`{subject}` needs `runtime: {needed_name}`", "this package declares `runtime: {ceiling_name}` in `package.jet`, which caps imports at the `{ceiling_name}` runtime profile; `{subject}` needs `{needed_name}`; import chain: {chain}", "remove the import or helper use, raise the ceiling to `runtime: {needed_name}` in `package.jet`, or use a `{ceiling_name}` runtime alternative")
 }
+
+// The Core modules one import declaration names: `use core.files as fs`
+// parses as member `files` of `core`; `use core.mem.[...]` names its module.
+fn sema_runtime_ceiling_import_modules(declaration: ImportDecl) -> [String] Never! {
+    names := [String]{}
+    if declaration.kind == {
+        .Module(name, _) -> {
+            if name.starts_with("core.") -> &names.push(name.copy())
+        }
+        .Unqualified(module_alias, _, items, _, _) -> {
+            if module_alias.starts_with("core.") -> &names.push(module_alias.copy())
+            if module_alias == "core" {
+                loop item in items -> &names.push("core.{item.original}")
+            }
+        }
+        else -> {}
+    }
+    names
+}
+
+// How a written usage reaches its Core helper: the ambient `input()` helper,
+// an import of the helper's module, or the prelude itself.
+fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> String Never! {
+    if usage == "core.term::input" -> return "ambient `input()` (helper `{usage}`)"
+    parts :: usage.split("::").to_list()
+    if parts.len() > 1 {
+        loop declaration in imports {
+            loop module_name in sema_runtime_ceiling_import_modules(declaration) {
+                if module_name == parts[0] -> return "`use {module_name} as {declaration.alias}` → `{usage}`"
+            }
+        }
+    }
+    "prelude helper `{usage}`"
+}
+
 fn sema_compute_module_owns_site(module_result: SemaGraphModuleResult, span: Span) -> Bool Never! {
     loop function_facts in module_result.compute_facts {
         loop call in function_facts.compute_calls {
@@ -8481,21 +8519,43 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
 
     if !sema_web_host_check_core_usage(final_graph.target_machine.name, core_usage.used_core, &diagnostics) -> complete = false
     if !sema_target_check_socket_surfaces(final_graph, core_usage.used_core, &diagnostics) -> complete = false
+    // A Core import above the package's runtime ceiling is reported on the
+    // import; a module whose imports already fail is not reported again for
+    // the helpers those imports reach.
+    import_blocked := [String:Bool]{}
+    loop source_module in final_graph.modules {
+        policy :: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
+        ceiling :: policy.runtime_ceiling ?? next
+        diagnostic_start := diagnostics.len()
+        loop declaration in source_module.program.imports {
+            loop module_name in sema_runtime_ceiling_import_modules(declaration) {
+                needed :: jet_ring_core_module_layer(module_name)
+                if !sema_comptime_layer_exceeds(needed, ceiling) -> next
+                &diagnostics.push(sema_comptime_runtime_ceiling_diagnostic(module_name, needed, ceiling, Val(declaration.span), "`use {module_name}`"))
+                import_blocked[source_module.module_identity] = true
+                complete = false
+            }
+        }
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, source_module.source_segments)
+    }
     loop module_usage in core_usage.modules {
         usage_index :: sema_registration_module_index(final_graph, module_usage.module_identity) ?? next
         source_module :: final_graph.modules[usage_index]
         policy :: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
-        if policy.runtime_ceiling != None {
-            ceiling :: policy.runtime_ceiling ?? next
-            if sema_comptime_layer_exceeds(module_usage.inferred_layer, ceiling) {
-                span := Span?{None}
-                if module_usage.usage_spans.len() > 0 -> span = Val(module_usage.usage_spans[0].span)
-                diagnostic_start := diagnostics.len()
-                &diagnostics.push(sema_comptime_runtime_ceiling_diagnostic(source_module.package_identity, module_usage.inferred_layer, ceiling, span))
-                sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, source_module.source_segments)
-                complete = false
-            }
+        ceiling :: policy.runtime_ceiling ?? next
+        if import_blocked.get(source_module.module_identity) != None -> next
+        if !sema_comptime_layer_exceeds(module_usage.inferred_layer, ceiling) -> next
+        diagnostic_start := diagnostics.len()
+        loop row in module_usage.usage_spans {
+            needed :: jet_ring_prelude_closure_layer([String]{row.usage})
+            if !sema_comptime_layer_exceeds(needed, ceiling) -> next
+            &diagnostics.push(sema_comptime_runtime_ceiling_diagnostic(row.usage, needed, ceiling, Val(row.span), sema_runtime_ceiling_helper_chain(row.usage, source_module.program.imports)))
         }
+        if diagnostics.len() == diagnostic_start {
+            &diagnostics.push(sema_comptime_runtime_ceiling_diagnostic(source_module.module_identity, module_usage.inferred_layer, ceiling, None, "the module's reachable Core closure"))
+        }
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, source_module.source_segments)
+        complete = false
     }
 
     if trace_sink == .Val(sink) -> sink.begin("sema.facts", "", -1, -1)
