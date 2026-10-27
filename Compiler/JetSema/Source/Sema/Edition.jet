@@ -1,7 +1,7 @@
 // Lifecycle is a projection of resolved name/call sites.
 // Adapted from Rust Edition.rs and mod.rs deprecation_from_markers. Payloads
 // belong to written markers or the checked Core registry, never a name table.
-use jet_foundation.[CoreMarkerApplication, Diagnostic, Marker, StructureFact, StructureFactKind, Span, TextEdit, diagnostic_with_edit]
+use jet_foundation.[CoreMarkerApplication, Diagnostic, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, diagnostic_with_edit, symbol_kind_name]
 
 struct SemaLifecycleResult {
     diagnostics: [Diagnostic]
@@ -147,12 +147,23 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         graph_module :: graph.modules[index]
         edition :: editions.get(graph_module.package_identity) ?? "2026"
         start :: result.diagnostics.len()
+        // Only a site written in this module's sources is a use; references
+        // inside compiler-generated members have no source location.
+        segments :: graph_module.source_segments
         loop reference in checked.name_references {
             payload :: payloads.get(reference.symbol.id.key) ?? next
+            if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None -> next
             sema_lifecycle_record(payload, graph_module.module_path, reference.span, edition, &result, &seen)
         }
         loop call in checked.call_facts {
-            payload :: call.lifecycle ?? next
+            // A Core member carries its resolved marker; a declared function
+            // answers through its own written marker.
+            declared := CoreMarkerApplication?{None}
+            if call.callee == .Val(callee) {
+                if callee.key.starts_with("{symbol_kind_name(SymbolKind.Function)}:") -> declared = payloads.get(callee.key)
+            }
+            payload :: call.lifecycle ?? declared ?? next
+            if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
             sema_lifecycle_record(payload, graph_module.module_path, call.span, edition, &result, &seen)
         }
         sema_attach_diagnostic_source_locations(&result.diagnostics, start, graph_module.source_segments)
