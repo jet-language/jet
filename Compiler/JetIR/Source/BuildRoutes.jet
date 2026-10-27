@@ -1034,6 +1034,18 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     receiver_ty :: ir_ty(p, b, receiver)
     if operation == .OptionMap -> return ir_option_map(&m, p, &b, ty, receiver, args, span)
     if ir_lazy_closure_receiver(ir_subst(m, receiver_ty), operation) -> return ir_lazy_closure_method(&m, p, &b, ty, receiver, operation, args, span)
+    // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
+    // same fixed lane tree as `sum`, with the seed in lane 0.
+    if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
+        folded :: ir_expr(&m, p, &b, receiver)
+        if ir_failed(b) || folded < 0 -> return -1
+        folded_element :: ir_list_element(&m, p, b, folded) ?? return ir_fail_slot(&b, span, "closure method fold on {ir_type_name(receiver_ty)}")
+        if m.types[folded_element].kind == .Float {
+            seed :: ir_expr(&m, p, &b, args[0])
+            if ir_failed(b) || seed < 0 -> return -1
+            return ir_list_sum_fixed(&m, &b, folded, folded_element, seed, span)
+        }
+    }
     // The in-place methods write the List's own buffer, reached as a write
     // place (ir_builtin's receiver).
     in_place :: if operation == {
@@ -1056,6 +1068,27 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     // The method only lends its closures.
     loop slot in operands -> ir_release_closure(&m, &b, slot)
     result
+}
+
+// Whether `callback` is the literal step `(acc, x) -> acc + x`: two
+// parameters, no captures, and a body that adds the first to the second.
+fn ir_float_add_fold_step(p: IRProgram, b: IRBuilder, callback: Int) -> Bool Never! {
+    node :: ir_body_node(p, b, callback)
+    if node.kind == .Lambda(lambda) {
+        if lambda.source_params.len() != 2 || lambda.captures.len() != 0 -> return false
+        if lambda.executable == .Expr(value) {
+            body :: ir_body_node(p, b, value)
+            if body.kind == .Binary(op, _, _, lhs, rhs) {
+                if op != .Add -> return false
+                left :: ir_body_node(p, b, lhs)
+                right :: ir_body_node(p, b, rhs)
+                if left.kind == .Local(first) {
+                    if right.kind == .Local(second) -> return first.name == lambda.source_params[0] && second.name == lambda.source_params[1]
+                }
+            }
+        }
+    }
+    false
 }
 
 // The List closure method `operation` over `list` (elements `element`) with
@@ -2155,7 +2188,7 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
         ir_walk_close(&m, &b, walk)
         return total
     }
-    if name == "jet_list_sum_fixed_f64" -> return ir_list_sum_fixed(&m, &b, list, row, span)
+    if name == "jet_list_sum_fixed_f64" -> return ir_list_sum_fixed(&m, &b, list, row, -1, span)
     if name == "jet_list_equal" {
         other :: inputs[1]
         other_ty :: m.types[b.f.slot_type[other]].ty
@@ -2224,9 +2257,10 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
 }
 
 // A Float `xs.sum()` (and a Float fold with step `acc + x`): the D-FRED1=A
-// fixed tree. Item i adds into lane i & 7 in source order, and the lanes
-// combine as ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
-fn ir_list_sum_fixed(m: &IRModule, b: &IRBuilder, list: Int, row: Int, span: Span) -> Int Never! {
+// fixed tree. Item i adds into lane i & 7 in source order, a fold's `seed`
+// starts lane 0 (-1 for none), and the lanes combine as
+// ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
+fn ir_list_sum_fixed(m: &IRModule, b: &IRBuilder, list: Int, row: Int, seed: Int, span: Span) -> Int Never! {
     if m.types[row].kind != .Float -> return ir_fail_slot(&b, span, "fixed Float sum of {ir_type_name(m.types[row].ty)}")
     pointer_row :: ir_pointer_row(&m)
     lanes :: ir_temp(&m, &b, pointer_row)
@@ -2234,6 +2268,7 @@ fn ir_list_sum_fixed(m: &IRModule, b: &IRBuilder, list: Int, row: Int, span: Spa
     zero :: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Const, zero, 0, -1, -1, b.line)
     loop lane in 0..<8 -> ir_emit(&b.f, IROp.Store, -1, lanes, lane * 8, zero, b.line)
+    if seed >= 0 -> ir_emit(&b.f, IROp.Store, -1, lanes, 0, seed, b.line)
     seven :: ir_word_const(&m, &b, 7)
     walk :: ir_walk_open(&m, &b, list, row)
     lane :: ir_word_op(&m, &b, IROp.BitAnd, walk.index, seven)
