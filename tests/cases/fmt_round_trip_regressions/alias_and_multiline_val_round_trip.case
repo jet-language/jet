@@ -1,0 +1,15 @@
+# jet fmt output must parse: an alias line gets no `;` and a multi-line
+# `Val(...)` payload gets no trailing comma; a second format is a fixed point.
+fixture: alias_and_multiline_val_round_trip.fixture
+step: jet fmt main.jet
+exit: 0
+file: main.jet ~ "alias View<T> :: Box<T>" # the alias line survives
+file: main.jet !~ ";" # no explicit semicolon
+file: main.jet !~ "},\n" # no trailing comma after the one Val payload
+copy: main.jet first.jet
+step: jet fmt main.jet
+exit: 0
+file: main.jet == first.jet
+step: jet run main.jet
+exit: 0
+stdout: = alias_and_multiline_val_round_trip.stdout.expected

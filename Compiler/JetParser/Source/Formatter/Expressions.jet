@@ -1206,6 +1206,14 @@ fn jfmt_fmt_enum_lit(f: &JetFmt, type_name: String, variant: String, variant_spa
     }
     jfmt_write(&f, variant)
     if args.len() == 0 -> return
+    // `Val(value)` holds exactly one value and its parser takes no trailing
+    // comma, so it prints inline like the Present form.
+    if type_name.len() == 0 && !leading_dot && variant == "Val" && args.len() == 1 && args[0] == .Positional(value) {
+        jfmt_write(&f, "(")
+        jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(&f, ")")
+        return
+    }
     // Named payloads use braces; positional payloads
     // keep the paren call form.
     named :: if args[0] == {
