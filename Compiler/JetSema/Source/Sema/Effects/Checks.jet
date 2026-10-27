@@ -220,6 +220,8 @@ struct SemaEffectNode {
     memory_opens: [SemaMemoryOpen]{[SemaMemoryOpen]{}}
     loop_spans: [Span]{[Span]{}}
     assume_det_spans: [Span]{[Span]{}}
+    // This pure body made a non-deterministic Core call (E3403 reported).
+    nondeterministic_call: Bool{false}
     memo_span: Span?{None}
     // `module::name` in call paths and the source file name in reports.
     display_key: String{""}
@@ -311,11 +313,34 @@ fn sema_effect_collect_statement_spans(statements: [Stmt], assume_det: Bool, spa
 }
 
 // E2-M16 (Rust core-call E3403): a non-deterministic Core call (a `Time` or
-// `Rand` row) inside a pure function, outside `assume_deterministic`.
-fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode, fact: SemaCallSiteFact) -> String? {
-    if !node.is_pure || fact.callee != None -> return None
+// `Rand` row) inside a pure function, outside `assume_deterministic`. The call
+// is a fixed Core row or a source-owned Core function.
+// The module identity of a direct call's callee body, or "" when the call
+// has no body node in this program.
+fn sema_effect_callee_module(nodes: [SemaEffectNode], facts: SemaEffectCallIndex, expression: BodyNode) -> String Never! {
+    if expression.kind == .Call(callee, _, _) {
+        decl_row :: callee.row.index()
+        target :: if decl_row >= 0 && decl_row < facts.node_by_decl.len() -> facts.node_by_decl[decl_row] else -> -1
+        if target >= 0 && target < nodes.len() -> return nodes[target].module_identity
+    }
+    ""
+}
+
+fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode, fact: SemaCallSiteFact, callee_module: String) -> String? {
+    if !node.is_pure -> return None
     api := ""
-    if expression.kind == .CoreCall(record, _, _, _, _, _) {
+    if expression.kind == .Call(_, _, _) {
+        // A source-owned Core function, or a Core function with no body in
+        // this program; any other callee reports through its own effects.
+        if callee_module != "" && !callee_module.starts_with("<corelib>/") -> return None
+        callee :: fact.callee ?? return None
+        leaf :: callee.key.cut_last(":") ?? return None
+        api = leaf.after
+        if callee_module.cut_last("/") == .Val(split) {
+            parts :: split.after.split(".").to_list()
+            if parts.len() > 0 -> api = "{parts[parts.len() - 1]}.{leaf.after}"
+        }
+    } else if expression.kind == .CoreCall(record, _, _, _, _, _) {
         parts :: record.module_name.split(".").to_list()
         if parts.len() > 0 -> api = "{parts[parts.len() - 1]}.{record.member}"
     }
@@ -1346,10 +1371,11 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTr
             if found == {
                 .Val(position) -> {
                     value :: facts.modules[caller.module_index].facts[position]
-                    nondeterministic :: sema_effect_nondeterministic_core(nodes[node_index], node, value)
+                    nondeterministic :: sema_effect_nondeterministic_core(nodes[node_index], node, value, sema_effect_callee_module(nodes, facts, node))
                     if nondeterministic == .Val(api) {
                         // Rust returns before recording the call's effects, so
                         // the pure function reports E3403 instead of E3401.
+                        nodes[node_index].nondeterministic_call = true
                         &diagnostics.push(sema_error("E3403", node.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else {
                         if !sema_effect_record_static_dispatch(&nodes, facts, node_index, tree, node, value) {
@@ -2116,7 +2142,16 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached
             return false
         }
         node.is_pure -> {
-            over :: sema_effect_without_deny_only(solved)
+            reached :: sema_effect_without_deny_only(solved)
+            // A non-deterministic Core call in this body already reported
+            // E3403 for its `Time`/`Rand` row; any other effect still reports.
+            over := [String]{}
+            loop name in reached {
+                root :: sema_effect_root(name)
+                if node.nondeterministic_call && (root == "Time" || root == "Rand") -> next
+                &over.push(name)
+            }
+            if node.nondeterministic_call -> valid = false
             if over.len() > 0 {
                 &diagnostics.push(sema_effect_pure_diagnostic(node, over))
                 valid = false

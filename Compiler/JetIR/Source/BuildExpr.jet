@@ -4974,13 +4974,17 @@ fn ir_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, ordinal: Int, message: Int
         pointer_row :: ir_pointer_row(&m)
         builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
         b.fresh[builder] = false
-        loop (index, local) in location.locals {
-            binding :: ir_lookup_binding(b, local.local.name) ?? return ir_fail(&b, Span{start: 0, end: 0}, "panic report local {local.display_name} is not visible")
+        // A local this frame cannot read (a binding sema saw but lowering
+        // folded away) is left out of the report rather than failing the build.
+        shown := 0
+        loop local in location.locals {
+            binding :: ir_lookup_binding(b, local.local.name) ?? { next }
             value :: ir_read_binding(&m, &b, binding)
             value_ty :: m.types[b.f.slot_type[value]].ty
             text :: ir_render(&m, p, &b, value_ty, value, IRRender.Debug, Span{start: 0, end: 0})
             if ir_failed(b) -> return
-            ir_push_static(&m, &b, builder, "{if index > 0 -> ", " else -> ""}{local.display_name} = ")
+            ir_push_static(&m, &b, builder, "{if shown > 0 -> ", " else -> ""}{local.display_name} = ")
+            shown += 1
             _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
         }
         string_row :: ir_string_row(&m)

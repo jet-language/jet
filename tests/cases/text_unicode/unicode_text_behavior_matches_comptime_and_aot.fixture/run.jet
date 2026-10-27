@@ -12,7 +12,7 @@ KEYCAP :: comptime { text.display_width("1️⃣") }
 EMOJI :: comptime { text.display_width("©️") }
 IGNORABLE :: comptime { text.display_width("́‍") }
 CLASSES :: comptime { text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ") }
-REGEX_SPACE :: comptime { re.is_match(.{"\s"}, " ") }
+REGEX_SPACE :: comptime { re.is_match(Regex{"\s"}, " ") }
 
 fn run() {
     runtime_folded :: text.casefold("Straßeİς")
@@ -25,10 +25,10 @@ fn run() {
     runtime_emoji :: text.display_width("©️")
     runtime_ignorable :: text.display_width("́‍")
     runtime_classes :: text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
-    runtime_regex_space :: re.is_match(.{"\s"}, " ")
-    regex_alpha :: re.is_match(.{"\p{{Alphabetic}}+"}, "Ж")
-    regex_number :: re.is_match(.{"\p{{Number}}+"}, "٣")
-    regex_whitespace :: re.is_match(.{"\p{{White_Space}}+"}, " ")
+    runtime_regex_space :: re.is_match(Regex{"\s"}, " ")
+    regex_alpha :: re.is_match(Regex{"\p{{Alphabetic}}+"}, "Ж")
+    regex_number :: re.is_match(Regex{"\p{{Number}}+"}, "٣")
+    regex_whitespace :: re.is_match(Regex{"\p{{White_Space}}+"}, " ")
     insensitive :: re.compile_with("k", re.flags(true, false, false)) ?? panic("regex")
     print("{FOLDED}|{runtime_folded}")
     print("{LOWERED}|{runtime_lowered}")

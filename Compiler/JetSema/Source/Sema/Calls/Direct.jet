@@ -622,6 +622,7 @@ fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, 
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     text :: message ?? return SemaDirectSpecialCheck{handled: true, value: None}
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
+    location.locals = sema_expression_panic_locals(scopes, call.name_span)
     stop := sema_tir_node(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: text}, location: location, always_stops: true}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }

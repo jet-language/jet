@@ -77,11 +77,13 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: Se
     TPanicLoc{file: file, source_line: "", line: line, column: column, caret: span.end - span.start, function: function, locals: [TPanicLocal]{}}
 }
 
-// The `assert`/`assert_eq` report's safe locals (Rust safe_locals_snapshot):
+// The `assert`/`assert_eq`/`panic` report's safe locals (Rust safe_locals_snapshot):
 // the visible Int, Float and Bool locals and parameters of the body being
 // checked, sorted by name. A lambda body's locals end at its own frame;
-// compiler-generated `__` names are not the program's locals.
+// compiler-generated `__` names are not the program's locals. Compile-time
+// code reports its stop as a build error, which lists no locals.
 fn sema_expression_panic_locals(scopes: SemaScopeTable, span: Span) -> [TPanicLocal] Never! {
+    if scopes.comptime_execution_depth > 0 -> return [TPanicLocal]{}
     chain := [Int:Bool]{}
     frame := scopes.current
     loop frame > 0 && scopes.frames[frame].parent >= 0 {
@@ -1348,7 +1350,9 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                 return None
             }
             message :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
-            fallback_tir = Val(TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, name_span)})
+            location := sema_expression_panic_location(environment, program, scopes, name_span)
+            location.locals = sema_expression_panic_locals(scopes, name_span)
+            fallback_tir = Val(TOrFallback.Panic{message: message, location: location})
         }
         .Break(route_span) -> {
             if outer_loop_depth <= 0 {
