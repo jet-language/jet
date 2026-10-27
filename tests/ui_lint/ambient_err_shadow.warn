@@ -1,8 +1,8 @@
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
-  --> tests/ui_lint/ambient_err_shadow.jet:8:14
+Warning [L0511] (err_fallback_shadow): Binding `err` shadows the fallback's ambient failure report
+  --> tests/ui_lint/ambient_err_shadow.jet:7:5
     |
-  8 |     value :: fail() ?? "fallback"
-    |              ^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
+  7 |     err :: "user binding"
+    |     ^^^
+ Why: `err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there
+ Fix: Rename the binding, or use it outside a fallback
+More: jet-lang.dev/e/L0511

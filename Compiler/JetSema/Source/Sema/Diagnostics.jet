@@ -197,6 +197,11 @@ fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }
 
+// L0511: a user binding or parameter spelled `err`.
+fn sema_err_shadow_lint(span: Span) -> Diagnostic {
+    sema_lint("L0511", span, "Binding `err` shadows the fallback's ambient failure report", "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there", "Rename the binding, or use it outside a fallback")
+}
+
 fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }

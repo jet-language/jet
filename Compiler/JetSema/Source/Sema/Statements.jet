@@ -3427,6 +3427,7 @@ fn sema_stmt_declare_unchecked_binding(binding: Binding, environment: SemaScopeE
 }
 
 fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    if binding.name == "err" -> &diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, &diagnostics) -> return None
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &context, &diagnostics)
     if binding.arena_view -> return None

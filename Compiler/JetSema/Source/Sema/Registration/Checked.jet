@@ -1185,7 +1185,40 @@ fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegis
     inverse_params := [SemaRegistrationParameter]{}
     inverse_return := Type?{None}
     found := false
+    // A C binding lives in a shared module; its inverse belongs to the module
+    // that imports the binding and defines that name. Two such modules leave
+    // the owner ambiguous.
+    owners := [Int]{}
+    loop edge in graph.edges {
+        if edge.target_module_identity != module_row.module_identity || edge.source_module_identity == module_row.module_identity -> next
+        loop (position, candidate) in graph.modules {
+            if candidate.module_identity != edge.source_module_identity || owners.contains(position) -> next
+            loop function in candidate.functions {
+                if function.declaration.name == inverse.name {
+                    &owners.push(position)
+                    break
+                }
+            }
+        }
+    }
+    if owners.len() > 1 {
+        names := [String]{}
+        loop position in owners -> &names.push(graph.modules[position].module_name)
+        &diagnostics.push(sema_error("E0105", inverse.span, "undo function `{inverse.name}` is ambiguous for foreign binding `{registered.declaration.name}`", "the shared C binding is imported by more than one module that defines `{inverse.name}`: {names.join(", ")}", "give the foreign binding one uniquely named inverse in one defining module"))
+        return false
+    }
+    if owners.len() == 1 {
+        loop function in graph.modules[owners[0]].functions {
+            if function.declaration.name == inverse.name {
+                inverse_params = function.parameters
+                inverse_return = function.declaration.return_type
+                found = true
+                break
+            }
+        }
+    }
     loop function_index in 0..<module_row.functions.len() {
+        if found -> break
         if module_row.functions[function_index].declaration.name == inverse.name {
             inverse_params = module_row.functions[function_index].parameters
             inverse_return = module_row.functions[function_index].declaration.return_type

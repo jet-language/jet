@@ -66,6 +66,14 @@ fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagn
     valid
 }
 
+// L0511: a parameter named `err` is easy to misread as the failure report a
+// `??` fallback names `err`, and a fallback in the body would shadow it.
+fn sema_function_header_lint_err_params(function: Func, diagnostics: &[Diagnostic]) {
+    loop parameter in function.params {
+        if parameter.name == "err" -> &diagnostics.push(sema_err_shadow_lint(parameter.name_span))
+    }
+}
+
 // E0126: a default expression may name only parameters written
 // before its own; defaults fill left to right. `self` is not a parameter here.
 fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {

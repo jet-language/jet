@@ -1943,6 +1943,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // `check_memoized_function`), also proven from the declared signature.
     sema_check_memoized_function(func, updated, program, generic_params, &diagnostics)
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
+    sema_function_header_lint_err_params(func, &diagnostics)
     if !sema_function_header_check_variadic_bound_shape(func, updated, program, &diagnostics) -> complete = false
     // copy: a shared-facts handle and its frontier, not the facts.
     context.comptime_body_values = updated.comptime_body_values.copy()
