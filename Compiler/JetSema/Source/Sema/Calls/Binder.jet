@@ -99,8 +99,10 @@ fn sema_call_fn_param_label(contract: [CallContractRow]?, metadata: FunctionCall
         if index >= 0 && index < rows.len() && rows[index].label != "" -> return rows[index].label
         // An explicitly present contract with an empty label is the
         // unlabelled function-value ABI. Do not fall through to metadata's
-        // local declaration name and accidentally make it public.
-        return ""
+        // local declaration name and accidentally make it public. A declared
+        // function's either-zone parameter still answers to its own name.
+        either :: index >= 0 && index < rows.len() && rows[index].zone == ParamZone.Either
+        if !either || !fallback_name -> return ""
     }
     if fallback_name && metadata == .Val(row) {
         if index >= 0 && index < row.names.len() -> return row.names[index]
