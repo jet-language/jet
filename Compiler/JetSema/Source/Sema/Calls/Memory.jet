@@ -105,6 +105,19 @@ fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environmen
     }
 }
 
+// True when a `Fixed.new` size reads a parameter or local binding, whose value
+// exists only at run time.
+fn sema_call_memory_reads_runtime_local(expression: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    names := [String]{}
+    sema_function_memory_collect_expr_idents(expression, &names)
+    loop name in names {
+        index :: sema_scope_resolve_index(scopes, name) ?? next
+        kind :: scopes.bindings[index].symbol.kind
+        if kind == SymbolKind.Parameter || kind == SymbolKind.Local -> return true
+    }
+    return false
+}
+
 fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
     fixed_bytes := if value.ty == {
         .FixedList(element, length) -> element == Type.IntN{signed: false, bits: 8} && (measure_literal_value(length) ?? 0) > 0
@@ -136,6 +149,10 @@ fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], 
             SemaMethodSpecialCheck{handled: true, value: sema_call_memory_address_of(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
         }
         .Field(base, name, _, _) -> {
+            // A binding's permission for `Fixed` covers this call only, never
+            // a constructor nested in its arguments.
+            fixed_allowed :: context.allow_fixed_constructor
+            context.allow_fixed_constructor = false
             alias := if base == {
                 .Ident(value, _, _) -> value
                 else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
@@ -147,7 +164,7 @@ fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], 
                 sema_call_memory_discard_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            if name == "Fixed" && !context.allow_fixed_constructor {
+            if name == "Fixed" && !fixed_allowed {
                 &diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed :: mem.Fixed.{method}(…)`"))
             }
             if !sema_call_memory_static_arity(name, method, args, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -167,6 +184,10 @@ fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], 
                 if {
                     name == "Fixed" && method == "new" -> {
                         size_value := sema_call_memory_compiletime_int(argument.expr, checked, environment, program, scopes, context)
+                        if size_value == None && sema_call_memory_reads_runtime_local(argument.expr, scopes) {
+                            &diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
+                            return SemaMethodSpecialCheck{handled: true, value: None}
+                        }
                         if size_value == None {
                             staged := sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), argument.span, span)
                             if staged == {

@@ -3382,6 +3382,15 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
     }
 }
 
+// True when the initializer is itself a `<alias>.Fixed.<method>(…)` call;
+// the memory check confirms the alias names `core.mem`.
+fn sema_stmt_init_is_fixed_constructor(init: Expr) -> Bool Never! {
+    if init == .MethodCall(receiver, _, _, _, _, _, _) && receiver == .Field(base, name, _, _) {
+        return name == "Fixed" && base == .Ident(_, _, _)
+    }
+    return false
+}
+
 fn sema_stmt_install_binding_loop_label(expr: Expr, name: String, name_span: Span) -> Expr Never! {
     if expr == {
         .CallValue(callee, args, span, _) -> {
@@ -3445,6 +3454,9 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     range_head :: sema_stmt_range_conversion_head(binding.init, environment, program, &scopes)
     previous_binding_initializer :: context.binding_initializer
     context.binding_initializer = true
+    // `mem.Fixed.new`/`.over` is allowed only as the whole initializer.
+    previous_fixed_constructor :: context.allow_fixed_constructor
+    context.allow_fixed_constructor = sema_stmt_init_is_fixed_constructor(binding.init)
     // (Rust `current_binding_name`): a task spawned by this
     // initializer records its binding for the `.detach()` refusals.
     previous_binding_name :: context.taskgroups.binding_name
@@ -3456,6 +3468,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, binding.ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, binding.ty, environment, program, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
     loop state.deferred_view_opens.len() > deferred_before -> _ := &state.deferred_view_opens.pop()
     context.binding_initializer = previous_binding_initializer
+    context.allow_fixed_constructor = previous_fixed_constructor
     context.taskgroups.binding_name = previous_binding_name
     checked_value :: checked_init ?? {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)

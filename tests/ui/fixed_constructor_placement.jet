@@ -1,0 +1,16 @@
+// A Fixed handle must be the whole initializer of a binding, and its size
+// must be known at compile time.
+use core.mem
+
+fn sized(size: Int) {
+    fixed :: mem.Fixed.new(size: size)
+    _ :: fixed
+}
+
+fn run() {
+    direct :: mem.Fixed.new(size: 64)
+    _ :: direct
+    handles :: [mem.Fixed.new(size: 8)]
+    _ :: handles
+    sized(16)
+}

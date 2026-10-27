@@ -1,0 +1,17 @@
+Error [E0103]: `Fixed.new` needs a positive compile-time byte size
+  --> tests/ui/fixed_constructor_placement.jet:6:28
+    |
+  6 |     fixed :: mem.Fixed.new(size: size)
+    |                            ^^^^
+ Why: Runtime-sized storage cannot become an inline fixed array in the current stack frame
+ Fix: Use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`
+More: jet-lang.dev/e/E0103
+
+Error [E0103]: `Fixed.new` must directly initialize a lexical binding
+  --> tests/ui/fixed_constructor_placement.jet:13:27
+    |
+ 13 |     handles :: [mem.Fixed.new(size: 8)]
+    |                           ^^^
+ Why: The Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration
+ Fix: Write `fixed :: mem.Fixed.new(…)`
+More: jet-lang.dev/e/E0103
