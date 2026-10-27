@@ -49,12 +49,14 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
         .Screaming -> "ALL_CAPS"
     }
     fixed :: sema_casing_canonical(name, case)
+    // The respelling can equal the name (`type_`): never suggest identical text.
+    fix :: if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
     &diagnostics.push(sema_error(
         "E0357",
         span,
         "{category} `{name}` must be {expected}",
         "Jet enforces PascalCase for type-like names, snake_case for value-like names, and ALL_CAPS (SCREAMING_SNAKE_CASE) for module-global constants",
-        "rename it to `{fixed}`",
+        fix,
     ))
 }
 

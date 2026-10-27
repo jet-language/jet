@@ -245,7 +245,7 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     if entry.path == "tests/ui/ffi_no_cargo.jet" {
         // Invoke absolute Jet/trace executables with no Cargo or rustup shims.
         unavailable :: files.join(ctx.scratch, "no-cargo-path")
-        files.remove_all(unavailable) ?? panic("reset no-Cargo case: {err}")
+        if files.exists(unavailable) -> files.remove_all(unavailable) ?? panic("reset no-Cargo case: {err}")
         kit_exec_write(files.join(unavailable, ".case"), "ffi_no_cargo\n")
         &overlay.push(KitEnvVar{name: "PATH", value: Val(unavailable)})
         &overlay.push(KitEnvVar{name: "JET_FFI_CACHE_DIR", value: Val(unavailable)})

@@ -1816,7 +1816,7 @@ whether the call goes through the module alias or a direct import:
 | `setpriority(who, priority)` | `!IOError -[Env]>` | Change scheduling priority. |
 | `utime(path, atime, mtime)` | `!IOError -[FS, Env]>` | Change file timestamps. |
 | `stop(code)` | never returns `-[Env]>` | Request process termination through the process boundary. |
-| `fork()` / `setsid()` | `Int !IOError -[Env]>` | Fork or create a process session. |
+| `fork()` / `setsid()` | `Int !IOError -[Env, Exec]>` | Fork or create a process session. Both change the process tree, so callers need `Exec`, like `process.cmd`. |
 | `wait()` / `waitpid(pid, options)` | `Int !IOError -[Env, Time.Wait]>` | Reap a child or selected child. |
 | `kill(pid, signal)` | `!IOError -[Env]>` | Send a signal. |
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |

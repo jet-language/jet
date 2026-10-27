@@ -242,7 +242,7 @@ struct SemaExpressionResolvedType {
 fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExpressionResolvedType? {
     if type_name == "" {
         expected_ty :: expected ?? {
-            &diagnostics.push(sema_error("E0119", span, "an inferred struct literal needs an expected type", "the `{{ ... }}` form uses the surrounding type to choose its fields", "write the struct name or add a type annotation"))
+            &diagnostics.push(sema_error("E0119", span, "an inferred struct literal needs an expected type", "the `{{ ... }}` form uses the surrounding type to choose its fields", "write the struct name before the braces, like `Point{{ x: 1 }}`"))
             return None
         }
         normalized :: sema_expr_unwrap_tag(sema_expr_expected_type(expected_ty, environment, program))

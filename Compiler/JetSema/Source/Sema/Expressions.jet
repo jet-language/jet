@@ -3282,7 +3282,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if receiver == .Ident(receiver_name, receiver_span, _) && receiver_name == "" {
         owner :: sema_expr_inferred_new_owner(expected) ?? {
             loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            &diagnostics.push(sema_error("E0356", method_span, "`.new(...)` needs one known receiver type here", "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry", "add a type annotation or write the full `Type.new(...)` form"))
+            &diagnostics.push(sema_error("E0356", method_span, "`.new(...)` needs one known receiver type here", "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry", "write the full `Type.new(...)` form, or use `.new(...)` where its type is already expected"))
             return None
         }
         owner_name := ""

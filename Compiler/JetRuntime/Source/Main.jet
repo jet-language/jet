@@ -1,8 +1,7 @@
-// Native process entry: CAbi.rs:178-184, EnvInit.rs:24-27 and
-// Core.rs:1182-1194. Object's libc main captures host arguments first; the
+// Native process entry. Object's libc main captures host arguments first; the
 // logical Env seed validates that ONE captured cell, never creates another.
 
-// Core.rs:1177-1178 ignores both flush results; raw facts avoid creating an
+// Both flush results are ignored; raw facts avoid creating an
 // unused IOError owner. Scratch is one live 16-byte runtime allocation.
 fn main_flush(scratch: I64) {
     jet_stdio_stdout_flush_raw(scratch, scratch + I64{8})
@@ -39,7 +38,7 @@ main_root_control := I64{0}
 
 fn main_process_end() { main_process_ending = I64{1} }
 
-// Core.rs JET_PERF_BITS: core.perf's raw fidelity word, zero until written
+// core.perf's raw fidelity word, zero until written
 // (Core/Perf reads zero as the default). A loaded-image host's next entry
 // starts from zero again, as a fresh process would.
 main_perf_bits := I64{0}
@@ -80,7 +79,7 @@ fn main_exit_claim(code: I64) {
 }
 
 fn main_exit_cleanup() -> I64 {
-    // Core.rs:1171-1175 / 1188-1190: callbacks precede the observer's report.
+    // Exit callbacks run before the observer's report.
     jet_rt_task_exit_handlers()
     scratch :: main_exit_root + I64{16}
     present :: jet_rt_observe_parked_tasks_report(scratch, scratch + I64{8})
@@ -93,7 +92,7 @@ fn main_exit_cleanup() -> I64 {
 }
 
 // Called BEFORE the first fatal diagnostic byte, so callback/parked output
-// precedes the original stop report (Core.rs:1171-1175), rather than follows it.
+// precedes the original stop report, rather than follows it.
 #Export(c) fn jet_rt_process_exit_begin(code: I64) {
     main_exit_claim(code)
     // Only the winner gets here, and it always ends the process.
@@ -129,7 +128,7 @@ fn main_exit_cleanup() -> I64 {
     jet_rt_process_exit_init()
     // Fatal signals print the fault report (Fault.jet), stack overflow too.
     fault_start()
-    // EnvInit.rs:27: exactly once, after TLS/registry initialization and before
+    // Exactly once, after TLS/registry initialization and before
     // the checked no-argument entry. Object main must not start Observe itself.
     jet_rt_observe_runtime_start_from_env()
     // The entry runs under the process root control: a stop (a panic, a
@@ -172,7 +171,7 @@ fn main_exit_cleanup() -> I64 {
     alloc_check_sweep()
     main_flush(main_exit_root + I64{16})
     if (parked_code != I64{0}) {
-        // Core.rs:1192 exits rather than returning to a loaded-image host.
+        // A parked-task stop exits rather than returning to a loaded-image host.
         sync_store(main_exit_root + I64{8}, parked_code)
         jet_rt_process_exit_finish()
     }
@@ -183,6 +182,6 @@ fn main_exit_cleanup() -> I64 {
     main_process_ending = I64{0}
     main_perf_bits = I64{0}
     sync_store(main_exit_root, I64{0})
-    // CAbi.rs:182: normal entry returns zero, not the entry's unused register.
+    // Normal entry returns zero, not the entry's unused register.
     I64{0}
 }

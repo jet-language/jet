@@ -1,5 +1,4 @@
-// Native compiler-owned Arena/Bump/Pool/Fixed storage, not Rust handles.
-// Rust policy: Prelude/Mem.rs:221-337,354-827; FixedAllocator.rs:47-235.
+// Native compiler-owned Arena/Bump/Pool/Fixed storage.
 // Lower passes an address-based lazy.drop thunk (or 0), then immediately
 // initializes the returned reservation without a stop/fault point. This
 // provider owns the thunk records and calls them exactly once in reverse order.
@@ -62,7 +61,7 @@ fn storage_capacity(word: I64) -> I64 {
     value
 }
 
-// As Rust RawVec does for these >1-byte elements, grow geometrically, with
+// For these >1-byte elements, grow geometrically, with
 // a minimum nonzero capacity of four. Copy initialized words only.
 fn storage_grow(list: I64, stride: I64) {
     count :: storage_word(list)
@@ -106,7 +105,7 @@ fn storage_reset_entries(handle: I64) {
     count := storage_word(drops)
     allocations :: count
     data :: storage_word(drops + I64{16})
-    // Rust drain(..) sets len to zero before invoking any user destructor.
+    // The length is zero before any user destructor runs.
     storage_put(drops, I64{0})
     loop count > (I64{0}) {
         count -= I64{1}
@@ -116,7 +115,7 @@ fn storage_reset_entries(handle: I64) {
         if (code != I64{0}) -> storage_drop_at(code, pointer)
         jet_rt_sentry_quarantine(pointer, storage_word(entry + I64{16}))
     }
-    // Mem.rs:455/548/696 drops BEFORE updating observation counters.
+    // Drops run BEFORE the observation counters update.
     storage_arena_reset(allocations, storage_word(handle + I64{56}))
     storage_put(handle + I64{56}, I64{0})
 }
@@ -330,7 +329,7 @@ fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
     if (storage_word(slot) == I64{0} || storage_word(slot + I64{8}) < required || storage_word(slot + I64{16}) < alignment) {
         pointer :: storage_heap(required, alignment, fallible)
         if (pointer == I64{0}) -> return I64{0}
-        // Rust assignment constructs the replacement before dropping its old
+        // Assignment constructs the replacement before dropping its old
         // block. Retained highwater/probes must observe that same ordering.
         storage_arena_retain(required)
         storage_block_drop(slot)
@@ -460,8 +459,8 @@ fn storage_fixed_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
 #Export(c) fn jet_rt_handle_drop_jet_fixed(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_fixed_storage_reset(handle)
-    // Fixed never frees its borrowed backing; the Rust adapter releases its
-    // retained observation BEFORE closing the arena (Mem.rs:824-826).
+    // Fixed never frees its borrowed backing; it releases its retained
+    // observation BEFORE closing the arena.
     storage_arena_release(storage_word(handle + I64{8}))
     storage_arena_close()
     jet_rt_free(handle, I64{64}, I64{8})

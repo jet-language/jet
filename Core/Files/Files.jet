@@ -1833,13 +1833,10 @@ fn with_name(path: String, name: String) -> String Never! {
 fn is_absolute(path: String) -> Bool Never! { is_abs(path) }
 
 
+// Like `is_dir` and a shell's `test -f`, a final link is followed: a link to a
+// file is a file. A PATH search relies on this, since package managers install
+// tools as links.
 fn is_file_impl(path: String) -> Bool Never! {
-    row :: core.files.__stat_at(-1, path, false) ?? return false
-    row[0] == 0
-}
-
-// A PATH search follows a final link, as a shell does: package managers install tools as links.
-fn resolves_to_file(path: String) -> Bool Never! {
     row :: core.files.__stat_at(-1, path, true) ?? return false
     row[0] == 0
 }
@@ -2014,7 +2011,7 @@ fn split_path_env(text: String) -> [String] Never! {
 
 fn which(name: String) -[FS, Env]> String? Never! {
     if is_abs_impl(name) {
-        if resolves_to_file(name) -> return Val(name.copy())
+        if is_file_impl(name) -> return Val(name.copy())
         return None
     }
     path_var :: sys.get("PATH") ?? ""
@@ -2022,7 +2019,7 @@ fn which(name: String) -[FS, Env]> String? Never! {
         base := dir
         if base.bytes().len() == 0 -> base = "."
         cand :: join_impl(base, name)
-        if resolves_to_file(cand) -> return Val(cand)
+        if is_file_impl(cand) -> return Val(cand)
     }
     None
 }

@@ -1,0 +1,31 @@
+// A type's own static `all()` is an ordinary user function, not the list
+// method `.all`, for both enums and structs.
+enum Lang {
+    C
+    Zig
+}
+
+impl Lang {
+    fn all() -> [Lang] {
+        [Lang]{Lang.C, Lang.Zig}
+    }
+}
+
+struct Color {
+    name: String
+}
+
+impl Color {
+    fn all() -> [Color] {
+        [Color]{Color{name: "red"}, Color{name: "blue"}}
+    }
+}
+
+fn run() {
+    colors :: Color.all()
+    print(colors.len())
+    print(colors[1].name)
+    langs :: Lang.all()
+    print(langs.len())
+    print(langs[1] == Lang.Zig)
+}

@@ -513,11 +513,11 @@ fn atexit(handler: fn()) Never! -[Env]> {
     call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
 }
 
-#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fn fork() -[Env]> Int IOError! {
+#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fn fork() -[Env, Exec]> Int IOError! {
     call_value(core.sys.__fork(), "fork", .Resolve, None)
 }
 
-#Unsafe("posix setsid: the caller owns the process session topology it changes") fn setsid() -[Env]> Int IOError! {
+#Unsafe("posix setsid: the caller owns the process session topology it changes") fn setsid() -[Env, Exec]> Int IOError! {
     call_value(core.sys.__setsid(), "setsid", .Write, None)
 }
 

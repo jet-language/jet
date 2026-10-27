@@ -49,7 +49,7 @@ fn check_fixture(jet: String, scratch: String, directory: String, expected: Stri
 
 fn run() {
     args :: process.args()
-    if args.len() != 2 -> fail("usage: node Compiler/JetCli/Tests/run-c-ffi.mjs <jet> <scratch>")
+    if args.len() != 2 -> fail("usage: jet run Compiler/JetCli/Tests/RunCFfi.jet -- <jet> <scratch>")
     jet :: files.canonicalize(args[0].copy()) ?? fail("cannot resolve {args[0]}: {err}")
     scratch :: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
     repo :: files.canonicalize(".") ?? fail("cannot resolve the repository root: {err}")
@@ -58,5 +58,5 @@ fn run() {
     copy_tree("{repo}/Core/Vendor/Sqlite3", "{scratch}/sqlite3")
     native_expected :: files.read("{repo}/Examples/features/expected/lowlevel/native_c/run.out") ?? fail("cannot read run.out: {err}")
     check_fixture(jet.copy(), scratch.copy(), "native_c".copy(), native_expected)
-    check_fixture(jet.copy(), scratch.copy(), "sqlite3/fixture", "sqlite-memory=42\n")
+    check_fixture(jet.copy(), scratch.copy(), "sqlite3/Fixture", "sqlite-memory=42\n")
 }

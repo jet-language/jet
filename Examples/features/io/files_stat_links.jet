@@ -5,7 +5,8 @@ package {
 
 // files.stat(path, links:) chooses what a final symbolic link means: by
 // default the link itself is described, `.Follow` describes its target (and
-// the target's hard-link count), `.Refuse` fails on a link.
+// the target's hard-link count), `.Refuse` fails on a link. `files.is_file`
+// follows a final link, like `is_dir` and a shell's `test -f`.
 
 use core.files as files
 
@@ -29,4 +30,5 @@ fn run() {
         .Err(error) -> print("refuse on a link: {error == .InvalidInput(_)}")
     }
     print("same file: {followed.id.inode == plain.id.inode}")
+    print("is_file follows the link: {files.is_file(link)} symlink={files.is_symlink(link)}")
 }

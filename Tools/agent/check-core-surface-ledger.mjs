@@ -1423,6 +1423,8 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.crypto" && coreCallOneOf(member, ["__x25519_generate", "__signing_generate"])) return "Rand";
   if (moduleName === "core.perf" && coreCallOneOf(member, ["__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"])) return "Env";
   if (moduleName === "core.sys" && member === "success") return null;
+  // fork and setsid change the process tree, like every other child launch.
+  if (moduleName === "core.sys" && coreCallOneOf(member, ["__fork", "__setsid"])) return "Exec";
   if (moduleName === "core.sys") return "Env";
   if (moduleName === "core.process" && member === "status_ok") return null;
   if (moduleName === "core.process") return "Exec";

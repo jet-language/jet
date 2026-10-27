@@ -1,6 +1,6 @@
-// Native Shared<NativeValue>. SharedProtocol.rs:280-330 is the policy:
+// Native Shared<NativeValue>. The policy:
 // concurrent readers, exclusive writer, waiting writers precede new readers.
-// Recursive acquisition has no special exception (it blocks as in Rust).
+// Recursive acquisition has no special exception: it blocks.
 // Cell96: packed refs0 (low32 logical owners, high32 physical pins), mutex8,
 // condition sequence16, readers24, writer32, writers-waiting40, revision48,
 // owned descriptor56, payload64, lifetime physical borrows72 (even suspended),
@@ -91,7 +91,7 @@ fn shared_acquire(shared: I64, editable: Bool) {
             round += I64{1}
             next
         }
-        // These callback doors pass cancelled=||false in the Rust kernel.
+        // These callback doors never observe cancellation.
         // Compensation is required, but cancellation must not change meaning.
         scheduler_blocking_wait_enter()
         _ := sync_cond_wait(shared + I64{16}, mutex, sync_deadline(I64{10000000}))
@@ -177,8 +177,7 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
 // Root guard: one retained cell owner and one canonical permit, no heap token.
 // Cell allocations are 8-aligned. Condition wait writes cell|1 into the
 // caller's token slot when reacquisition fails; its owner remains until drop.
-// SharedProtocol.rs:1572-1591 and MathTaskMem.rs:2770-2775/2995-3005 require
-// an unheld guard's access to stop, while drop must not release another permit.
+// An unheld guard's access must stop, while drop must not release another permit.
 fn shared_guard_cell(guard: I64) -> I64 { guard.bit_and(I64{-2}) }
 
 fn shared_guard_held(guard: I64) -> Bool { guard != I64{0} && (guard.bit_and(I64{1})) == I64{0} }
@@ -244,7 +243,7 @@ fn shared_guard_payload(guard: I64) -> I64 {
     }
     revision :: sync_load(cell + I64{48})
     exhausted :: revision == I64{-1}
-    // Rust JetSharedGuard::edit sets dirty=true on acquisition: even a
+    // An edit guard is dirty from acquisition: even a
     // read-only edit guard, or a drop on a delivered stop rail, commits once.
     if !exhausted -> sync_store(cell + I64{48}, wrapping(revision + I64{1}))
     shared_release(cell, true)
@@ -259,7 +258,7 @@ fn shared_guard_payload(guard: I64) -> I64 {
     shared
 }
 
-// Retirement mirrors MathTaskMem.rs:1198-1214: no logical owners AND no
+// A cell retires when it has no logical owners AND no
 // lifetime physical borrowers. A passive pin retains only the cell allocation.
 fn shared_count_release(shared: I64, pin: Bool) {
     sync_mutex_lock(shared + I64{8})
@@ -540,8 +539,7 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
                 _ := sync_add(cell + I64{40}, I64{-1})
                 sync_store(cell + I64{32}, I64{1})
             } else { _ := sync_add(cell + I64{24}, I64{1}) }
-            // Native payloads are already canonical, unlike Rust scalar shadow
-            // storage; refreshing means read the live slot after reacquisition.
+            // Native payloads are already canonical; refreshing means read the live slot after reacquisition.
             sync_store(guard + I64{16}, I64{1})
             sync_mutex_unlock(mutex)
             return true

@@ -1,5 +1,5 @@
 // Independent Linux x86-64 heap for boxes/storage emitted by native lowering.
-// No Core allocation API, libc, Rust allocator, sentry, or exact-Int operation
+// No Core allocation API, libc allocator, sentry, or exact-Int operation
 // participates. The ABI is three machine words, matching the lowering's calls.
 //
 // State layout: word 0 of the state page is the detached-thread GS target
@@ -57,7 +57,7 @@
 // are. The state page, the arena table, the retained empty slabs and the
 // cached large mappings are bounded allocator-owned process-lifetime
 // metadata/cache, not live payload allocations.
-// ProgramAllocator.rs169-202/242-256/416-445 policy shares this heap: independent
+// The program allocator policy (jet_rt_program_allocator_*) shares this heap: independent
 // lock136, mode144 (0 system/1 counting), cap152, allocations160, requested168,
 // live176, high-water184. Counters saturate; successful reservations count even
 // when a later mmap fails, but that failure cancels live bytes before returning.
@@ -169,7 +169,7 @@ fn alloc_unmap(address: I64, bytes: I64) {
     // mmap is zero-filled: the locks, every free-list head, every live total
     // and the large cache start at zero.
     alloc_root = alloc_map(I64{4096}, I64{4096})
-    // The 32 arenas: 32 * 200 bytes in one zero-filled mapping.
+    // The 32 arenas: 32 * 216 bytes in one zero-filled mapping.
     table :: alloc_map(I64{8192}, I64{8192})
     #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
         os_store_i64(wrapping(alloc_root + I64{208}), table)
@@ -735,8 +735,8 @@ fn alloc_release(requested: I64) {
     alloc_unlock(lock)
 }
 
-// Explicit host policy edge: serialize runs outside this call, as the Rust
-// config guard does. Save fact5 (mode) and fact4 (cap) before configuring, and
+// Explicit host policy edge: the caller serializes runs around this call.
+// Save fact5 (mode) and fact4 (cap) before configuring, and
 // restore them with the distinct restore edge below, retaining run counters.
 #Export(c) fn jet_rt_program_allocator_configure(mode: I64, cap: I64) {
     lock :: wrapping(alloc_root + I64{136})
@@ -753,7 +753,7 @@ fn alloc_release(requested: I64) {
     alloc_unlock(lock)
 }
 
-// ProgramAllocator.rs126-130: restoration changes policy, never historical
+// Restoration changes policy, never historical
 // counters, even after the final counted allocation has been freed.
 #Export(c) fn jet_rt_program_allocator_restore(mode: I64, cap: I64) {
     lock :: wrapping(alloc_root + I64{136})
@@ -779,7 +779,7 @@ fn alloc_release(requested: I64) {
     value
 }
 
-// ProgramAllocator.rs333-394: tracker allocation bypasses selected policy,
+// Tracker allocation bypasses the selected policy,
 // cannot recurse, and exists only for counted payloads. Allocation failures
 // release the reservation and free the payload before returning zero.
 fn alloc_track(pointer: I64, requested: I64) -> Bool {
