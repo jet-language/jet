@@ -1124,6 +1124,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             if op == .And || op == .Or -> return ir_short_circuit(&m, p, &b, op == .And, lhs, rhs)
             if op == .Eq || op == .Ne {
                 if ir_tag_order_test(&m, p, &b, op == .Ne, lhs, rhs) == .Val(tested) -> return tested
+                if ir_absent_test(&m, p, &b, op == .Ne, lhs, rhs) == .Val(tested) -> return tested
             }
             left :: ir_expr(&m, p, &b, lhs)
             right :: ir_expr(&m, p, &b, rhs)
@@ -2414,6 +2415,25 @@ fn ir_tag_order_test(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, lh
     ir_release(&m, &b, left)
     ir_release(&m, &b, right)
     Val(result)
+}
+
+// `value == None` or `value != None`: a presence test of the Option, which
+// never compares payloads, so an Option of a payload without equality (a
+// resource handle) tests too. None when neither operand is `None`.
+fn ir_absent_test(m: &IRModule, p: IRProgram, b: &IRBuilder, present: Bool, lhs: Int, rhs: Int) -> Int? Never! {
+    operand := -1
+    if ir_body_node(p, b, rhs).kind == .Absent -> operand = lhs
+    if operand < 0 && ir_body_node(p, b, lhs).kind == .Absent -> operand = rhs
+    if operand < 0 -> return None
+    value :: ir_expr(&m, p, &b, operand)
+    if ir_failed(b) -> return Val(-1)
+    some :: ir_option_is_some(&m, &b, value)
+    ir_release(&m, &b, value)
+    if present -> return Val(some)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    absent :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Not, absent, some, -1, -1, b.line)
+    Val(absent)
 }
 
 // A precise numeric builtin (`Fraction`/`Decimal`/`Complex` arithmetic and

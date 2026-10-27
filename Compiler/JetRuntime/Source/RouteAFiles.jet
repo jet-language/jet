@@ -587,6 +587,62 @@ fn files_name_valid(text: I64, operation: I64, shown: I64, error: I64) -> Bool {
     I64{1}
 }
 
+// FileHandles.rs:994: lgetxattr on the path itself, sized first (ERANGE
+// sizes again). Option<[U8]> through some, data, length: None when the
+// attribute is absent (ENODATA), or, at sizing, when the file system has no
+// attributes (ENOTSUP).
+#Export(c) fn jet_fs_xattr_get(path: I64, attribute: I64, some: I64, data: I64, length: I64, error: I64) -> I64 {
+    if !files_name_valid(path, HOST_IO_OP_READ, path, error) -> return I64{0}
+    if !files_name_valid(attribute, HOST_IO_OP_READ, path, error) -> return I64{0}
+    name :: fd_c_path(path)
+    key :: fd_c_path(attribute)
+    buffer := I64{0}
+    allocated := I64{0}
+    size := I64{0}
+    failure := I64{0}
+    sizing := true
+    loop {
+        wanted :: host_call5(I64{192}, name, key, I64{0}, I64{0}, I64{0})
+        if (wanted < I64{0}) {
+            failure = wanted
+            break
+        }
+        if (allocated != I64{0}) -> jet_rt_free(buffer, allocated, I64{8})
+        allocated = wanted
+        buffer = if (wanted == I64{0}) -> I64{0} else -> jet_rt_alloc(wanted, I64{8})
+        size = I64{0}
+        if (wanted == I64{0}) -> break
+        got :: host_call5(I64{192}, name, key, buffer, wanted, I64{0})
+        if (got >= I64{0}) {
+            size = got
+            break
+        }
+        if (got != I64{-34}) {
+            failure = got
+            sizing = false
+            break
+        }
+    }
+    fd_c_path_drop(key, attribute)
+    fd_c_path_drop(name, path)
+    if (failure < I64{0}) {
+        if (allocated != I64{0}) -> jet_rt_free(buffer, allocated, I64{8})
+        if (failure == I64{-61} || (sizing && failure == I64{-95})) {
+            rt_text_store(some, I64{0})
+            return I64{1}
+        }
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
+    }
+    rt_text_store(some, I64{1})
+    if (allocated == I64{0}) {
+        rt_text_store(data, I64{0})
+        rt_text_store(length, I64{0})
+        return I64{1}
+    }
+    compiler_fs_bytes_take(buffer, allocated, size, data, length)
+    I64{1}
+}
+
 // std's UTF-8 acceptance (String::from_utf8 / OsString::into_string).
 fn files_utf8_valid(data: I64, length: I64) -> Bool {
     message :: text_bytes_utf8_error(data, length)

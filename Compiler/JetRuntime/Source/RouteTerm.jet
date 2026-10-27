@@ -147,6 +147,73 @@ fn term_read_line(value: I64) -> I64 {
     }
 }
 
+// Terminal8Raw.rs:31 / IoLineStream.rs:132: one stdin read of up to `n`
+// bytes, as (bytes, None), or ([], Some(io::Error Display)). Read errors
+// propagate as read() reports them (no EINTR retry); std's stdin maps EBADF
+// to end of input. Core rejects a negative `n` before the call.
+#Export(c) fn jet_terminal8_take(n: I64, data: I64, length: I64, error_tag: I64, error: I64) {
+    capacity :: if (n > I64{0}) -> n else -> I64{0}
+    got := I64{0}
+    buffer := I64{0}
+    if (capacity != I64{0}) {
+        buffer = jet_rt_alloc(capacity, I64{8})
+        sync_mutex_lock(terminal_input_root)
+        #Unsafe("buffer lends `capacity` writable bytes for a raw Linux read of stdin") {
+            got = os_syscall_i64(I64{0}, I64{0}, buffer, capacity, I64{0}, I64{0}, I64{0})
+        }
+        sync_mutex_unlock(terminal_input_root)
+        if (got == I64{-9}) -> got = I64{0}
+    }
+    if (got < I64{0}) {
+        jet_rt_free(buffer, capacity, I64{8})
+        rt_text_store(data, I64{0})
+        rt_text_store(length, I64{0})
+        rt_text_store(error_tag, I64{1})
+        rt_text_store(error, host_errno_cause(-got))
+        return
+    }
+    if (buffer == I64{0}) {
+        rt_text_store(data, I64{0})
+        rt_text_store(length, I64{0})
+    } else {
+        compiler_fs_bytes_take(buffer, capacity, got, data, length)
+    }
+    rt_text_store(error_tag, I64{0})
+}
+
+// Terminal8Raw.rs:45 / Term.rs:306: one stdin read of up to six bytes (a
+// failed read is no bytes) and the key decoder's platform, 1 for Unix.
+#Export(c) fn jet_terminal8_key_bytes(data: I64, length: I64, platform: I64) {
+    buffer :: jet_rt_alloc(I64{8}, I64{8})
+    got := I64{0}
+    sync_mutex_lock(terminal_input_root)
+    #Unsafe("buffer lends six writable bytes for a raw Linux read of stdin") {
+        got = os_syscall_i64(I64{0}, I64{0}, buffer, I64{6}, I64{0}, I64{0}, I64{0})
+    }
+    sync_mutex_unlock(terminal_input_root)
+    if (got < I64{0}) -> got = I64{0}
+    compiler_fs_bytes_take(buffer, I64{8}, got, data, length)
+    rt_text_store(platform, I64{1})
+}
+
+// Term.rs:230 `stty size` on stdin's terminal: TIOCGWINSZ on fd 0. Some
+// (1) with the size in the checked `(h, w)` member order, rows then
+// columns, when both are positive; None (0) otherwise.
+#Export(c) fn jet_terminal8_stty(height: I64, width: I64) -> I64 {
+    size :: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(size, I64{8})
+    result :: host_call(I64{16}, I64{0}, I64{21523}, size)
+    packed :: rt_text_word(size)
+    jet_rt_free(size, I64{8}, I64{8})
+    rows :: packed.bit_and(I64{65535})
+    columns :: (packed >> I64{16}).bit_and(I64{65535})
+    none :: I64{0}
+    if result != none || rows <= none || columns <= none -> return none
+    rt_text_store(height, rows)
+    rt_text_store(width, columns)
+    I64{1}
+}
+
 // Terminal8Raw.rs:37 jet_std_env_get: the logical environment, UTF-8 only.
 #Export(c) fn jet_terminal8_env(name: I64, some: I64) -> I64 { jet_std_env_get(name, some) }
 

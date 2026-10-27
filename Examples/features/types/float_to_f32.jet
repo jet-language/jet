@@ -1,0 +1,13 @@
+// `F32{x}` narrows a Float to the nearest F32 and stops when `x` is out of
+// F32's range; `F32.from_float(x)` reports that case as an Err instead.
+fn narrow(value: Float) -> F32 {
+    F32{value}
+}
+
+fn run() {
+    print("narrowed: {narrow(0.25)} {narrow(-1.5)}")
+    if F32.from_float(1.0e40) == {
+        .Ok(value) -> print("unexpected: {value}")
+        .Err(message) -> print("checked: {message}")
+    }
+}

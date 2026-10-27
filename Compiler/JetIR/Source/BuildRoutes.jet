@@ -537,6 +537,18 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
                 ir_list_extend(&m, p, &b, subject, element, operands[1], owned)
                 return -1
             }
+            .ConcatList -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "concat without a List")
+                if ir_list_element(&m, p, b, operands[1]) != Val((element)) -> return ir_fail_slot(&b, span, "concat with a List of another element type")
+                // A new List: the receiver's own copy, then the argument's
+                // elements, given up when it is moved or fresh (as extend).
+                joined :: ir_copy_value(&m, p, &b, subject, span)
+                ir_make_unique(&m, p, &b, joined)
+                owned :: b.fresh[operands[1]] || ir_body_node(p, b, args[0]).kind == .Move(_)
+                ir_list_extend(&m, p, &b, joined, element, operands[1], owned)
+                ir_release(&m, &b, subject)
+                return joined
+            }
             .TryReserve -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "try_reserve without a capacity")
                 return ir_list_try_reserve(&m, p, &b, ty, subject, element, operands[1], -1, span)
@@ -1957,30 +1969,35 @@ fn ir_float_to_int(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Ty
 
 // `F32.from(x)` on a Float (Rust jet_numeric_float_narrow): Ok holds the
 // nearest F32 when `x` is finite and within ±F32 max, else Err holds the
-// text "value doesn't fit in F32". NaN fails both ordered bounds.
+// text "value doesn't fit in F32". NaN fails both ordered bounds. The
+// infallible `F32{x}` is the same check, and an out-of-range value stops
+// instead of becoming infinity.
 fn ir_float_narrow(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
     unsupported :: "Prelude conversion float_narrow of this shape is not lowered at O0 yet"
     if m.types[b.f.slot_type[value]].kind != .Float -> return ir_fail_slot(&b, span, unsupported)
+    target_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if m.types[target_row].kind == .Float32 {
+        fits :: ir_float_narrow_fits(&m, &b, value)
+        ir_open_if(&b.f, fits, b.line)
+        ir_else(&b.f, b.line)
+        site :: b.line
+        args := ir_location(&m, &b, site)
+        loop arg in ir_static_text(&m, &b, "value doesn't fit in F32") -> &args.push(arg)
+        _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", args, -1)
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        narrow :: ir_temp(&m, &b, target_row)
+        ir_emit(&b.f, IROp.Convert, narrow, value, -1, -1, b.line)
+        return narrow
+    }
     ok_ty :: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, unsupported) }
     err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, unsupported) }
     err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
     if m.types[err_row].kind != .String -> return ir_fail_slot(&b, span, unsupported)
     ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
     if m.types[ok_row].kind != .Float32 -> return ir_fail_slot(&b, span, unsupported)
-    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    float_row :: b.f.slot_type[value]
-    // F32 max, (2 - 2^-23) * 2^127, as Float bits; its negation sets the sign bit.
-    max_bits :: 5183643170566569984
-    high :: ir_int_constant(&m, &b, float_row, max_bits)
-    low :: ir_int_constant(&m, &b, float_row, max_bits.bit_or(-9223372036854775807 - 1))
-    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
-    fits :: ir_temp(&m, &b, bool_row)
-    ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
-    above :: ir_bool_op(&m, &b, IROp.Ge, value, low)
-    ir_open_if(&b.f, above, b.line)
-    below :: ir_bool_op(&m, &b, IROp.Le, value, high)
-    ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
-    ir_end(&b.f, b.line)
+    result_row :: target_row
+    fits :: ir_float_narrow_fits(&m, &b, value)
     found :: ir_fresh_temp(&m, &b, result_row)
     ir_open_if(&b.f, fits, b.line)
     narrow :: ir_temp(&m, &b, ok_row)
@@ -1996,6 +2013,25 @@ fn ir_float_narrow(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Ty
     ir_emit(&b.f, IROp.Copy, found, failure, -1, -1, b.line)
     ir_end(&b.f, b.line)
     found
+}
+
+// Whether the Float `value` is within ±F32 max, as a Bool slot: NaN fails
+// both ordered bounds and an infinity fails one.
+fn ir_float_narrow_fits(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+    float_row :: b.f.slot_type[value]
+    // F32 max, (2 - 2^-23) * 2^127, as Float bits; its negation sets the sign bit.
+    max_bits :: 5183643170566569984
+    high :: ir_int_constant(&m, &b, float_row, max_bits)
+    low :: ir_int_constant(&m, &b, float_row, max_bits.bit_or(-9223372036854775807 - 1))
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    fits :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
+    above :: ir_bool_op(&m, &b, IROp.Ge, value, low)
+    ir_open_if(&b.f, above, b.line)
+    below :: ir_bool_op(&m, &b, IROp.Le, value, high)
+    ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    fits
 }
 
 // The Float `floating` truncated to the word row `row`. The machine
@@ -2861,6 +2897,7 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
         return ir_route_list_header(&m, &b, base, offset, data, length)
     }
     if carrier == .Option(some) -> return ir_route_store_option(&m, p, &b, base, offset, payload, some, out, span)
+    if carrier == .Tuple(items) -> return ir_route_store_tuple(&m, p, &b, base, offset, payload, items, out, span)
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "payload type {payload}")
     if carrier == .Handle(handle_name) {
         if handle_name == "Dyn" && ir_dyn_def(p, payload) == .Val(dyn_row) {
@@ -2907,6 +2944,22 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     value :: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Load, value, out, 0, -1, b.line)
     ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
+}
+
+// A tuple payload a route wrote as its items' slots, in the checked tuple's
+// member order, stored member by member at `offset` of `base`.
+fn ir_route_store_tuple(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, items: [IRRouteCarrier], out: Int, span: Span) Never! {
+    row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "runtime route tuple payload type {ir_type_name(payload)}")
+    fields :: if ir_untag(ir_subst(m, payload)) == .Tuple(checked) -> checked else -> { return ir_fail(&b, span, "runtime route tuple payload as {payload}") }
+    members :: ir_inline_members(&m, p, row) ?? return ir_fail(&b, span, "runtime route tuple payload as {payload}")
+    if fields.len() != items.len() || members.len() != items.len() -> return ir_fail(&b, span, "runtime route tuple payload as {payload}")
+    start := 0
+    loop (index, member) in members {
+        item_out :: ir_address_at(&m, &b, out, 8 * start)
+        ir_route_store_payload(&m, p, &b, base, offset + member.offset, fields[index].ty, items[index], item_out, span)
+        if ir_failed(b) -> return
+        start += ir_route_carrier_slots(items[index])
+    }
 }
 
 // Whether `ty` is a native source record whose runtime handle is the route
@@ -3042,6 +3095,11 @@ fn ir_route_inline_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: T
 fn ir_route_carrier_slots(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == .Option(some) -> return 1 + ir_route_carrier_slots(some)
     if carrier == .List(_) -> return 2
+    if carrier == .Tuple(items) {
+        words := 0
+        loop item in items -> words += ir_route_carrier_slots(item)
+        return words
+    }
     1
 }
 
@@ -3111,13 +3169,13 @@ fn ir_route_option(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
     payload :: if ir_untag(result) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {export} Option result as {result}") }
     list :: some == .List(_)
-    out :: ir_out_slot(&m, &b, if list -> 2 else -> 1)
+    // A List payload takes its data and length words, a Tuple payload its
+    // items' words, each through its own out pointer; any other one word.
+    slots :: if list || some == .Tuple(_) -> ir_route_carrier_slots(some) else -> 1
+    out :: ir_out_slot(&m, &b, slots)
     call_args := args
     &call_args.push(out)
-    if list {
-        tail :: ir_address_at(&m, &b, out, 8)
-        &call_args.push(tail)
-    }
+    loop index in 1..<slots -> &call_args.push(ir_address_at(&m, &b, out, 8 * index))
     word_row :: ir_word_row(&m)
     selector :: ir_runtime(&m, &b, export, call_args, word_row)
     boxed :: ir_temp(&m, &b, row)

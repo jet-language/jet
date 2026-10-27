@@ -1742,10 +1742,14 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         parameter :: lambda.params[index]
         parameter_ty := parameter.ty
         if parameter_ty == None && expected_params != None && index < (expected_params ?? [Type]{}).len() -> parameter_ty = Val((expected_params ?? [Type]{})[index])
-        parameter_type :: parameter_ty ?? {
+        written_type :: parameter_ty ?? {
             &diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `({parameter.name}: Int) -> …` (or whatever type fits)"))
             return None
         }
+        // A written type names its declaration the way a fn parameter's does
+        // (`files.DirEntry` is core.files' DirEntry), so the lowered lambda
+        // takes the resolved type.
+        parameter_type :: if parameter.ty != None -> sema_expr_expected_type(written_type, environment, program) else -> written_type
         // A written `(item: Item)` and an expected `module::Item` (resolved
         // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {
