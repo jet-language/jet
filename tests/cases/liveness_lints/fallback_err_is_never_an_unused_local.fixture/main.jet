@@ -1,0 +1,22 @@
+use core.math as math
+
+#Unsafe("probe") fn mine(x: Int) -> Int IOError! { return x }
+
+fn safe(x: Int) -> Int IOError! { return x }
+
+fn in_block() -> Int {
+    #Unsafe("probe") { return mine(3) ?? -1 }
+}
+
+fn early() -> Int {
+    value :: safe(4) ?? return 0
+    value
+}
+
+fn run() {
+    print(in_block())
+    print(safe(2) ?? -1)
+    print(math.factorial(5) ?? -1)
+    print(early())
+    err :: 7
+}
