@@ -2940,7 +2940,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
             symbol := Symbol{id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "err"), kind: SymbolKind.Local, name: "err", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_ty), visibility: 0}
             frame :: scopes.current
             sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
-            sema_ownership_declare_binding(&state, symbol, false)
+            sema_ownership_declare_ambient_binding(&state, symbol)
             result.ambient_err = Val(checked_symbol_local("err", span, symbol.id))
         }
         else -> {}
@@ -5143,6 +5143,7 @@ fn sema_stmt_assign_exit(context: &SemaCheckContext, diagnostics: [Diagnostic], 
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     diagnostics_before :: diagnostics.len()
     reasons_before :: context.incomplete_reasons.len()
+    if op == None -> sema_stmt_lint_compound_assignment(target, op_span, expr, &diagnostics)
     checked := sema_stmt_check_assignment_target(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     // Collect-all: an assignment that checks to nothing names its step when
     // no error report or recorded reason already explains it.
@@ -5150,6 +5151,58 @@ fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: E
         sema_check_unsupported(&context, "the assignment at offset {op_span.start} (value at offset {expr_span(expr).start}) checked to no statement without a report")
     }
     checked
+}
+
+// L0503: `place = place op value` restates the place a compound assignment
+// names once. An indexed place stays expanded (its compound form is E0164).
+fn sema_stmt_lint_compound_assignment(target: LValue, op_span: Span, expr: Expr, diagnostics: &[Diagnostic]) {
+    place := ""
+    if target == {
+        .Local(name, _) -> place = name
+        .Field(base, field, _) -> {
+            root :: sema_stmt_compound_place_text(base) ?? return
+            place = "{root}.{field}"
+        }
+        else -> return
+    }
+    value :: sema_stmt_compound_unparen(expr)
+    if value == .Binary(op, left, _, _, _) {
+        if sema_stmt_compound_place_text(left) != (Val(place)) -> return
+        op_text :: sema_stmt_compound_op_text(op) ?? return
+        &diagnostics.push(sema_lint("L0503", op_span, "Prefer `{place} {op_text} …` instead of repeating the left side", "Compound assignment updates a place in one step without restating it", "Write `{place} {op_text} …`"))
+    }
+}
+
+fn sema_stmt_compound_unparen(expr: Expr) -> Expr Never! {
+    if expr == .Paren(inner, _, _) -> return sema_stmt_compound_unparen(inner)
+    expr.copy()
+}
+
+fn sema_stmt_compound_place_text(expr: Expr) -> String? Never! {
+    if expr == {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, member, _, _) -> {
+            root :: sema_stmt_compound_place_text(base) ?? return None
+            Val("{root}.{member}")
+        }
+        .Paren(inner, _, _) -> sema_stmt_compound_place_text(inner)
+        else -> None
+    }
+}
+
+fn sema_stmt_compound_op_text(op: BinOp) -> String? Never! {
+    if op == {
+        .Add -> Val("+=")
+        .Sub -> Val("-=")
+        .Mul -> Val("*=")
+        .Div -> Val("/=")
+        .FloorDiv -> Val("/%=")
+        .Mod -> Val("%=")
+        .Rem -> Val("%%=")
+        .Shl -> Val("<<=")
+        .Shr -> Val(">>=")
+        else -> None
+    }
 }
 
 fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {

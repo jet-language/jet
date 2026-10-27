@@ -1231,7 +1231,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         symbol :: Symbol{id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "err"), kind: SymbolKind.Local, name: "err", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
         frame :: scopes.current
         sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
-        sema_ownership_declare_binding(&fallback_state, symbol, false)
+        sema_ownership_declare_ambient_binding(&fallback_state, symbol)
         ambient_err = Val(checked_symbol_local("err", span, symbol.id))
     }
     fallback_reaches_merge := false

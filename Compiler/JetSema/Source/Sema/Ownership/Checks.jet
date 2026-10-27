@@ -184,6 +184,9 @@ struct SemaOwnershipBindingFact {
     owes_join: Bool{false}
     // Provenance belongs to this exact binding, not its name.
     frozen_site: SemaOwnershipFreezeSite?{None}
+    // The compiler declared this binding (a fallback's `err`); an unread one
+    // is not the user's dead code.
+    ambient: Bool{false}
 }
 
 struct SemaOwnershipReference {
@@ -955,6 +958,14 @@ fn sema_ownership_declare_binding(state: &SemaOwnershipState, symbol: Symbol, pa
     })
 }
 
+// A compiler-declared binding such as a fallback's `err`: tracked like any
+// local, never reported as unused.
+fn sema_ownership_declare_ambient_binding(state: &SemaOwnershipState, symbol: Symbol) Never! {
+    before :: state.declarations.len()
+    sema_ownership_declare_binding(&state, symbol, false)
+    if state.declarations.len() > before -> state.declarations[state.declarations.len() - 1].ambient = true
+}
+
 fn sema_ownership_intentional_name(name: String) -> Bool Never! {
     name == "" || name.starts_with("_") || name.starts_with("@_") || name == "self" || name == "result" || name == "it"
 }
@@ -1009,7 +1020,7 @@ fn sema_ownership_note_place_reference(state: &SemaOwnershipState, expr: Expr, p
 
 fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop fact in state.declarations {
-        if fact.references == 0 && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
+        if fact.references == 0 && !fact.ambient && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
             // Rust `CheckerReferences::emit_unused_binding_lints`: the
             // registry row wording, with the `_name` rename as the edit.
             what := "Local binding `{fact.name}` is never read."
