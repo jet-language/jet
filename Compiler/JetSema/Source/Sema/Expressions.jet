@@ -3237,6 +3237,9 @@ fn sema_expr_function_field(receiver: Type, name: String, method_name: String, e
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row_at(graph, receiver, sema_scope_caller_row(environment, graph)) == .Val(row) {
             nominal :: graph.modules[row.module_index].nominals[row.row]
+            loop method in nominal.methods {
+                if method.symbol.name == method_name -> return false
+            }
             loop implementation_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
                 implementation :: graph.modules[implementation_row.module_index].impls[implementation_row.row]
                 if implementation.target_identity_key != nominal.identity_key -> next
