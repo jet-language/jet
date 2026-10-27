@@ -13,7 +13,7 @@ fn draw(stream: &RNG) {
 }
 fn run() {
     original := random.rng(42)
-    independent := ~original
+    independent := original.copy()
     envelope := Envelope{stream: into_testing(identity<RNG>(^original))}
     round_trip := into_bare(into_random(^envelope.stream))
     draw(&round_trip)
