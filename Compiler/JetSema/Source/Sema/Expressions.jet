@@ -3015,6 +3015,8 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
             if math_abs.handled -> return SemaMethodSpecialCheck{handled: true, value: math_abs.value}
             float_class :: sema_call_try_core_math_float_class(module_name, method, type_args, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if float_class.handled -> return SemaMethodSpecialCheck{handled: true, value: float_class.value}
+            // `csv.query<Row>(path, SQL{…})` checks its literal SQL columns against `Row` (E2420).
+            if module_name == "core.encoding.csv" && method == "query" && type_args.len() == 1 && args.len() == 2 -> sema_data_check_analytics_sql_schema(type_args[0], args[1].expr, expr_span(args[1].expr), environment, program, &diagnostics)
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1
