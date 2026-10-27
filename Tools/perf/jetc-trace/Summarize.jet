@@ -323,6 +323,7 @@ fn number(value: Dyn?) -> Float? Never! {
             if inner == {
                 .Int(whole) -> Val(Float.parse("{whole}") ?? nan())
                 .Float(real) -> Val(real)
+                .Number(lexeme) -> Val(Float.parse(lexeme) ?? nan())
                 else -> None
             }
         }
@@ -344,6 +345,7 @@ fn js_string(value: Dyn?) -> String Never! {
                 .Text(text) -> text
                 .Int(_) -> js_number(number(value) ?? nan())
                 .Float(real) -> js_number(real)
+                .Number(_) -> js_number(number(value) ?? nan())
                 .Bool(flag) -> if flag -> "true" else -> "false"
                 .Null -> "null"
                 .Array(items) -> {
@@ -385,6 +387,10 @@ fn truthy(value: Dyn?) -> Bool Never! {
                 .Text(text) -> text != ""
                 .Int(whole) -> whole != 0
                 .Float(real) -> real != ZERO && !math.is_nan(real)
+                .Number(_) -> {
+                    real :: number(value) ?? nan()
+                    real != ZERO && !math.is_nan(real)
+                }
                 else -> true
             }
         }
@@ -410,6 +416,7 @@ fn map_key(value: Dyn?, unique: Int) -> String Never! {
                 .Text(text) -> "s:{text}"
                 .Int(_) -> "n:{js_number(number(value) ?? nan())}"
                 .Float(real) -> "n:{js_number(real)}"
+                .Number(_) -> "n:{js_number(number(value) ?? nan())}"
                 .Bool(flag) -> "b:{flag}"
                 .Null -> "null"
                 else -> "o:{unique}"

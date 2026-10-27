@@ -112,7 +112,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
 }
 
 fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
-    if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Tuple{fields: [TypeTupleField]{}} else -> result_type
+    if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Named{name: "Unit"} else -> result_type
 }
 
 fn sema_call_builtin_host_arity_diagnostic(method: String, actual: Int, span: Span) -> Diagnostic {
