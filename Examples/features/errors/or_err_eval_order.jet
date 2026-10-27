@@ -20,7 +20,7 @@ fn borrowed(value: &String?) -> String Err! {
 
 fn propagate(value: String?) -> String Err! {
     payload :: value.or_err("propagated absence") ?? {
-        return err
+        return Err(err)
     }
     return Ok(payload)
 }
@@ -28,9 +28,9 @@ fn propagate(value: String?) -> String Err! {
 fn run() {
     print(receiver(true).or_err(reason()) ?? "bad present")
     print(receiver(false).or_err(reason()) ?? err.message)
-    copy :: Int?{Val(7)}
-    print(copy.or_err("copy absence") ?? 0)
-    print(copy ?? 0)
+    number :: Int?{Val(7)}
+    print(number.or_err("number absence") ?? 0)
+    print(number ?? 0)
     owned := String?{Val("kept")}
     print(owned.or_err("owned absence") ?? "bad owned")
     print(owned ?? "lost owned")

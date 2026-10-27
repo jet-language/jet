@@ -161,6 +161,9 @@ fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner:
     callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     kind := TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(why)}}
     value := sema_tir_expr(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind, span)
+    // A success slot (`return opt.or_err("why")` in a `T Err!` body) meets the
+    // carrier the way any fallible call does: the caller propagates it.
+    if expected == .Val(want) && !(sema_expr_unwrap_tag(want) == .Result(_, _)) -> return SemaMethodSpecialCheck{handled: true, value: Val(value)}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
