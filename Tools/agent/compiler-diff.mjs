@@ -351,7 +351,7 @@ function uiCommands(source, file) {
   if (has("cli_build")) return [{ phase: "build", args: ["build", file] }];
   if (complexity) return [{ phase: "check", args: ["lint", "--complexity", file, `--max=${complexity.split(/\s+/u)[1]}`] }];
   if (has("cost_cli")) return [{ phase: "check", args: ["explain", "--cost", file] }];
-  if (has("run_cli") || has("web_run") || has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
+  if (has("run_cli") || has("web_run") || has("runtime_ffi") || has("parent_control_cancel")) {
     return [{ phase: "run", args: ["run", file] }];
   }
   return [{ phase: "check", args: ["check", file] }];

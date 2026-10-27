@@ -69,13 +69,12 @@ export function uiInvocation(source, file, suite = 'ui') {
   else if (has('retired_gate_flag')) args = ['run', file, '--allow-impure'];
   else if (has('cli_build')) args = ['build', file];
   else if (has('web_run') || has('run_cli')) args = ['run', file];
-  else if (has('dev_interpreter')) args = ['run', '--interpret', file];
   else if (has('complexity_cli')) args = ['lint', '--complexity', file, `--max=${arg('complexity_cli').split(/\s+/u)[1]}`];
   else if (has('repl_deny')) { args = ['repl', '--deny=FS']; stdin = source.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('//')).concat(':quit').join('\n'); }
-  const supported = new Set(['check_cli', 'all_diags', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'web_run', 'run_cli', 'dev_interpreter', 'complexity_cli', 'repl_deny', 'compiler_extension']);
+  const supported = new Set(['check_cli', 'all_diags', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'web_run', 'run_cli', 'complexity_cli', 'repl_deny', 'compiler_extension']);
   const unknown = [...directives.keys()].filter((name) => !supported.has(name));
   if (unknown.length) return { refused: `unported fixture directives: ${unknown.join(', ')}` };
-  const direct = ['check_cli', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'web_run', 'run_cli', 'dev_interpreter', 'complexity_cli', 'repl_deny'].some(has);
+  const direct = ['check_cli', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'web_run', 'run_cli', 'complexity_cli', 'repl_deny'].some(has);
   return { args, cwdParent, command, stdin, extension: arg('compiler_extension'), suite, direct, allDiags: has('all_diags') || basename(file) === 'workspace.jet' };
 }
 

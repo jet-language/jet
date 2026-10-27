@@ -1,0 +1,25 @@
+// A compile-time table built by an ordinary helper: each row is a struct
+// with an enum field, made by calling `row` inside `comptime { … }`, so
+// the table is not spelled out field by field.
+enum Kind {
+    Retired
+    Active
+}
+
+struct Row {
+    name: String
+    kind: Kind
+}
+
+fn row(name: String, kind: Kind) -> Row { Row{name: name, kind: kind} }
+
+ROWS :: comptime { [row("alpha", .Retired), row("beta", .Active)] }
+
+fn run() {
+    loop r in ROWS {
+        if r.kind == {
+            .Retired -> print("{r.name} retired")
+            .Active -> print("{r.name} active")
+        }
+    }
+}

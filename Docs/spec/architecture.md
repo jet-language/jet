@@ -1706,10 +1706,10 @@ frames. A failed load leaves a handle whose first call returns the load fault
 with export `load`, without stopping unrelated host work. A propagated failure
 records the host call site in the ordinary failure journey.
 
-The authority, guest-failure, and resource-budget witnesses run on all hosted
-execution routes: default `jet run`, forced `--interpret`, and release/AOT
-`--release`. Each route is required; unavailable release tooling is not a
-passing or skipped authority witness.
+The authority, guest-failure, and resource-budget witnesses run on both hosted
+execution routes: default `jet run` and release/AOT `--release`. Each route is
+required; unavailable release tooling is not a passing or skipped authority
+witness.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and
