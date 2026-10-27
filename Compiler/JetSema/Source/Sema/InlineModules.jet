@@ -665,8 +665,17 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
                 }
             }
             mapped_receiver := receiver
-            if receiver == .Ident(name, span, _) {
-                if rewrite.types.get(name) == .Val(.Named(resolved)) -> mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
+            if receiver == {
+                .Ident(name, span, _) -> {
+                    if rewrite.types.get(name) == .Val(.Named(resolved)) -> mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
+                }
+                // `tokens.Token.from_int(7)`: a member type named through its module.
+                .Field(base, member, span, _) -> {
+                    if base == .Ident(alias, _, _) {
+                        if !sema_inline_is_local(rewrite, alias) && rewrite.types.get("{alias}.{member}") == .Val(.Named(resolved)) -> mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
+                    }
+                }
+                else -> {}
             }
             return Expr.MethodCall{receiver: sema_inline_rewrite_expr(&rewrite, mapped_receiver), method: method, method_span: method_span, owner_type_args: sema_inline_rewrite_types(rewrite, owner_type_args), type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), id: node}
         }
@@ -1072,6 +1081,8 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
             .Enum(definition) -> name = definition.name
             .Trait(definition) -> name = definition.name
             .Tag(definition) -> name = definition.name
+            .Distinct(definition) -> name = definition.name
+            .TypeAlias(definition) -> name = definition.name
             else -> next
         }
         resolved :: Type.Named{name: sema_inline_type_name(module_alias, name)}
@@ -1102,7 +1113,7 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
                 }
                 &kept.push(Item.CodeModule{value: hoisted.code_module})
             }
-            .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) -> &lifted.push(inner)
+            .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) -> &lifted.push(inner)
             else -> &kept.push(inner)
         }
     }
@@ -1141,6 +1152,18 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
                 &hoist.declarations.push(Item.Tag{value: mapped})
             }
             .Impl(definition) -> &hoist.declarations.push(Item.Impl{value: sema_inline_rewrite_impl(&visible, definition)})
+            .Distinct(definition) -> {
+                mapped := definition
+                mapped.name = sema_inline_mapped_name(visible, definition.name)
+                mapped.base = sema_inline_rewrite_type(visible, definition.base)
+                &hoist.declarations.push(Item.Distinct{value: mapped})
+            }
+            .TypeAlias(definition) -> {
+                mapped := definition
+                mapped.name = sema_inline_mapped_name(visible, definition.name)
+                mapped.target = sema_inline_rewrite_type(visible, definition.target)
+                &hoist.declarations.push(Item.TypeAlias{value: mapped})
+            }
             else -> {}
         }
     }
