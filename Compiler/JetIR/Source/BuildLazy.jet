@@ -1296,6 +1296,52 @@ fn ir_shared_same(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, othe
     same
 }
 
+// `shared.downgrade()` / `shared.strong_count()` over the borrowed cell:
+// jet_rt_native_shared_downgrade takes one weak count and hands back the
+// cell as the `Shared.Weak<T>`; jet_rt_shared_owner_strong_count answers
+// the live strong owners as a native word, made an exact Int.
+fn ir_shared_owner_word(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    shared :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || shared < 0 -> return -1
+    result := -1
+    if method == "downgrade" {
+        result = ir_runtime(&m, &b, "jet_rt_native_shared_downgrade", [Int]{shared}, row)
+    } else {
+        word_row :: ir_word_row(&m)
+        count :: ir_runtime(&m, &b, "jet_rt_shared_owner_strong_count", [Int]{shared}, word_row)
+        result = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{count}, row)
+    }
+    ir_release(&m, &b, shared)
+    result
+}
+
+// `weak.upgrade()`: a new strong owner of the cell while a strong owner
+// lives (jet_rt_native_shared_weak_upgrade writes it to `out` and answers
+// true), else None.
+fn ir_shared_upgrade(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    shared_ty :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Shared.Weak.upgrade producing {ir_type_name(ty)}") }
+    shared_row :: ir_value_type(&m, p, shared_ty) ?? return ir_type_fail(&b, span, shared_ty)
+    weak :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || weak < 0 -> return -1
+    out :: ir_out_slot(&m, &b, 1)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    live :: ir_runtime(&m, &b, "jet_rt_native_shared_weak_upgrade", [Int]{weak, out}, bool_row)
+    result :: ir_temp(&m, &b, row)
+    ir_option_none(&m, &b, result)
+    ir_open_if(&b.f, live, b.line)
+    shared :: ir_load_at(&m, &b, out, 0, shared_row)
+    b.fresh[shared] = true
+    size :: m.types[shared_row].size
+    made :: ir_option_make(&m, p, &b, row, shared, size)
+    ir_option_set(&m, &b, result, made)
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, weak)
+    b.fresh[result] = true
+    result
+}
+
 // `guard.value`: the permit's payload is the cell's slot, read in place (an
 // aggregate is its address); the guard keeps owning it.
 fn ir_shared_guard_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, span: Span) -> Int Never! {

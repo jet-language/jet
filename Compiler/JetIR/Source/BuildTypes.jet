@@ -25,6 +25,13 @@ fn ir_raw_pointer(ty: Type) -> Bool Never! {
     false
 }
 
+// Whether `ty` is a `Shared.Weak<T>` (Sema SharedOwner.jet
+// SEMA_SHARED_WEAK_TYPE).
+fn ir_shared_weak(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Apply(name, args) -> return name == "Shared.Weak" && args.len() == 1
+    false
+}
+
 fn ir_never_type(ty: Type) -> Bool Never! {
     ir_untag(ty) == (Type.Named{name: "Never"})
 }
@@ -229,6 +236,12 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
     if ty == .Shared(_) {
         // An owned runtime JetShared handle.
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone")))
+    }
+    if ir_shared_weak(ty) {
+        // `Shared.Weak<T>`: the JetShared cell's address, owning one weak
+        // count; a copy takes another (jet_rt_native_shared_downgrade of a
+        // live weak), a drop gives it back.
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_shared_weak_drop", "jet_rt_native_shared_downgrade")))
     }
     if ir_iter_element(ty) == .Val(element) {
         // An owned native iterator handle that only moves.

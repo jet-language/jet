@@ -1515,7 +1515,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                     if (method == "guard_read" || method == "guard_edit") && args.len() == 0 -> return ir_shared_guard(&m, p, &b, expression_ty, receiver, method == "guard_edit", span)
                     if method == "shared.read" || method == "shared.edit" -> return ir_shared_read(&m, p, &b, expression_ty, receiver, args, method == "shared.edit", span)
                     if method == "same" && args.len() == 1 -> return ir_shared_same(&m, p, &b, receiver, args[0], span)
+                    if (method == "downgrade" || method == "strong_count") && args.len() == 0 -> return ir_shared_owner_word(&m, p, &b, expression_ty, receiver, method, span)
                 }
+                if ir_shared_weak(ir_ty(p, b, receiver)) && method == "upgrade" && args.len() == 0 -> return ir_shared_upgrade(&m, p, &b, expression_ty, receiver, span)
                 host_receiver_ty :: ir_ty(p, b, receiver)
                 receiver_row :: ir_value_type(&m, p, host_receiver_ty) ?? return ir_type_fail(&b, span, host_receiver_ty)
                 if ir_host_value_row(m, p, receiver_row) == .Val(owner) -> return ir_host_method(&m, p, &b, expression_ty, owner, method, receiver, args, span)
