@@ -772,13 +772,22 @@ fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], index: JetCLISemIndex)
     graph
 }
 
-// `DocGraph::undocumented_public`.
+// `DocGraph::undocumented_public`: the public items without a summary, except
+// command entries, which are not library API.
 fn jet_cli_doc_undocumented_public(graph: JetCLIDocGraph) -> [JetCLIDocItem] Never! {
     undocumented := [JetCLIDocItem]{}
     loop item in graph.items {
-        if item.public && item.summary == "" -> &undocumented.push(item)
+        if item.public && item.summary == "" && !jet_cli_doc_command_entry(item) -> &undocumented.push(item)
     }
     undocumented
+}
+
+// Whether `item` is a command entry: a module-level `fn run`, `fn build`,
+// `fn test` or `fn dev` (a `#CLI` program's entry is its `fn run`), or a
+// `#Job fn`, in a loose script or a package alike.
+fn jet_cli_doc_command_entry(item: JetCLIDocItem) -> Bool Never! {
+    if item.kind != "function" || item.qualified_name != item.name -> return false
+    item.name == "run" || item.name == "build" || item.name == "test" || item.name == "dev" || item.markers.contains("Job")
 }
 
 fn jet_cli_doc_source_value(source: JetCLIDocSource) -> JetCLIStatusValue Never! {

@@ -641,6 +641,11 @@ E1803, exit 1; a file with no package manifest leads the Fix with the exact
 receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
 
+`jet doc --check [<file.jet|dir>]` exits 1 when a public API item has no `///`
+summary (L2201). Command entries are not library API: a module-level `fn run`,
+`fn build`, `fn test` or `fn dev` (a `#CLI` program's entry is its `fn run`)
+and a `#Job fn` are exempt, in a loose script and a package alike.
+
 `jet test <file> [<filter>]` compiles the file in test mode: each named
 `#Test` body is checked and lowered as a synthetic function (a property
 test's ungeneratable parameter types are E0613, a file with no named test is

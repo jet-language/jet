@@ -1,0 +1,12 @@
+# Command entries (`fn run`, `fn build`, `fn test`, `fn dev`, `#Job fn`) are not library API: `jet doc --check` exempts them from L2201 in loose scripts and packages alike, and still flags other undocumented public items.
+fixture: doc_check_exempts_command_entries.fixture
+env: NO_COLOR=1
+
+step script: jet doc --check script/tool.jet
+exit: 0 # a loose script's undocumented `fn run` is its entry, not API
+
+step package: jet doc --check lib/run.jet
+exit: nonzero # the package's undocumented `fn helper` is API
+stdout+stderr: ~ "L2201" # the undocumented public API lint
+stdout+stderr: ~ "`helper` has no documentation" # names the API item
+stdout+stderr: !~ "`run` has no documentation" # never the package's `fn run` entry
