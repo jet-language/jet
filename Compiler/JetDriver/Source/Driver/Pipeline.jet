@@ -20,6 +20,7 @@ use jet_sema.[
     SemaFunctionMemoryPlan,
     SemaGraphTrail,
     SemaGraphModuleResult,
+    SemaTotalityRow,
     SemaGraphResult,
     SemaCheckedMemoryFacts,
     sema_comptime_reflection_layout_engine,
@@ -707,8 +708,8 @@ struct JetDriverComptimeFunctionClosure {
     functions: [FnBody]
     waiting_dependencies: [String]
     complete: Bool
-    // Each incomplete reachable function's recorded causes, keyed by function.
-    incomplete_reasons: [String]{[String]{}}
+    // Each incomplete reachable function's recorded causes (its function key).
+    incomplete: [SemaTotalityRow]{[SemaTotalityRow]{}}
     // Every constant a reachable function names, and whether every call
     // site of the reachable functions is pure (sema_comptime_call_facts_pure).
     dependencies: [String]{[String]{}}
@@ -789,7 +790,7 @@ fn jet_driver_comptime_function_closure(
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeFunctionClosure {
     graph_option :: program.registration_graph
-    graph :: graph_option ?? return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false, incomplete_reasons: [String]{"the staged comptime environment lost its registration graph"}}
+    graph :: graph_option ?? return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false, incomplete: [SemaTotalityRow]{SemaTotalityRow{owner: request.module_identity.copy(), function: "-", reason: "the staged comptime environment lost its registration graph"}}}
     // Each function enters the queue once, so the queue is also the set of
     // functions processed.
     queue := [JetDriverComptimeFunctionRef]{}
@@ -809,7 +810,7 @@ fn jet_driver_comptime_function_closure(
     functions := [FnBody]{}
     waiting := [String]{}
     complete := true
-    incomplete_reasons := [String]{}
+    incomplete := [SemaTotalityRow]{}
     dependencies := [String]{}
     pure := true
     // #3708: obligations against unannotated callees settle over the closure.
@@ -833,8 +834,8 @@ fn jet_driver_comptime_function_closure(
         if {
             !checked.obligations_pending && (!checked.complete || jet_driver_has_errors(checked.diagnostics)) -> {
                 loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
-                if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) -> &incomplete_reasons.push("{current.function_key}: incomplete (no recorded cause)")
-                loop reason in checked.incomplete_reasons -> &incomplete_reasons.push("{current.function_key}: {reason}")
+                if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) -> &incomplete.push(SemaTotalityRow{owner: current.module_identity.copy(), function: current.function_key.copy(), reason: "incomplete with no recorded cause"})
+                loop reason in checked.incomplete_reasons -> &incomplete.push(SemaTotalityRow{owner: current.module_identity.copy(), function: current.function_key.copy(), reason: reason})
                 complete = false
             }
             else -> {
@@ -866,7 +867,7 @@ fn jet_driver_comptime_function_closure(
                     complete = false
                 }
                 else -> {
-                    owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: false, incomplete_reasons: incomplete_reasons}
+                    owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: false, incomplete: incomplete}
                     jet_driver_comptime_function_ref_add(&queue, &queued, owner_identity, function_key)
                 }
             }
@@ -875,7 +876,7 @@ fn jet_driver_comptime_function_closure(
     // A waiting closure is checked again once its dependencies land; its rows
     // are not all checked yet, so its obligations settle then.
     if waiting.len() == 0 && !sema_comptime_failure_closure_settle(graph, failure_closure, &diagnostics) -> complete = false
-    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons, dependencies: dependencies, pure: pure}
+    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete: incomplete, dependencies: dependencies, pure: pure}
 }
 
 // The run's comptime staging: `program` holds (its one row, once `staged`:
@@ -1457,7 +1458,7 @@ fn jet_driver_comptime_flush(
             }
             return flushed
         }
-        head :: batch.entries[start].request
+        item_name :: batch.entries[start].source.name
         // A soft item the IR builder refuses is computed at startup; the
         // batch's later literals still land.
         if batch.entries[start].source.soft {
@@ -1469,8 +1470,20 @@ fn jet_driver_comptime_flush(
             }
             return flushed
         }
-        &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0956", head.span, "the comptime evaluator can't build this item's code yet: {built.build_failures.join("; ")}", "compile-time code runs as the IR the backend builds, and the IR builder refused part of this item's checked closure", "keep the computation at runtime until the IR builder supports it"))
-        flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
+        // AGENTS.md I2: checked code the IR builder refuses is a compiler
+        // fault, one ICE row per refused function of the item's closure.
+        census := [JetDriverIceRow]{}
+        loop line in built.build_failures {
+            at :: line.find("]: ")
+            if at < 0 {
+                jet_driver_ice_record(&census, item_name, "comptime.build", "unlowered", line)
+                next
+            }
+            jet_driver_ice_record(&census, line.slice(0..<at + 1), "comptime.build", "unlowered", line.slice(at + 3..<line.len()))
+        }
+        stopped := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+        stopped.internal_problem = Val("the comptime evaluator can't build `{item_name}`: {jet_driver_ice_text(census)}")
+        flushed.stop = Val(^stopped)
         return flushed
     }
     if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.load", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
@@ -1779,6 +1792,11 @@ fn jet_driver_comptime_run(
     // after the last such failure start.
     soft_failed := false
     stop_mark := 0
+    // Sema totality (AGENTS.md I2): an item or closure check that stopped
+    // with neither a value, a wait set nor a report is one ICE row each; the
+    // run goes on, so every such check reports, and stops with them all once
+    // nothing more lands (what waits on such an item waits for good).
+    totality := [JetDriverIceRow]{}
     // Checked functions whose checked-text calls were already queued; the
     // run's checked functions only grow, so each is scanned once.
     scanned_functions := 0
@@ -1944,12 +1962,12 @@ fn jet_driver_comptime_run(
                     next
                 }
                 if !checked_item.complete {
-                    result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                    if !jet_driver_has_errors_since(diagnostics, stop_mark) {
-                        result.internal_problem = Val("comptime item checking did not return a complete typed value or dependency wait set")
+                    if jet_driver_has_errors_since(diagnostics, stop_mark) {
+                        sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                        return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                     }
-                    sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
-                    return result
+                    jet_driver_ice_record(&totality, "comptime item `{source.name}` in {source.module_identity}", "sema.comptime", "totality", "its check returned no complete typed value, dependency wait set or diagnostic")
+                    next
                 }
                 // A precheck thread folded this same request with no landed
                 // values; that value stands (sema_comptime_fold).
@@ -2054,18 +2072,14 @@ fn jet_driver_comptime_run(
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 && keep_going {
-                    &diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {closure.incomplete_reasons.join("; ")}", "JET_KEEP_GOING drops the item and runs the rest", "see the closure's other reports"))
+                    reasons :: loop row in closure.incomplete -> "{jet_driver_totality_function(row)}: {row.reason}"
+                    &diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {reasons.join("; ")}", "JET_KEEP_GOING drops the item and runs the rest", "see the closure's other reports"))
                     next
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 {
-                    result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                    if !jet_driver_has_errors_since(diagnostics, stop_mark) {
-                        problem := "comptime function checking did not return a complete body or dependency wait set"
-                        loop reason in closure.incomplete_reasons -> problem = "{problem}\n  {reason}"
-                        result.internal_problem = Val(problem)
-                    }
-                    sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
-                    return result
+                    if closure.incomplete.len() == 0 -> jet_driver_ice_record(&totality, "comptime item `{source.name}` in {source.module_identity}", "sema.comptime", "totality", "its function closure is incomplete with no recorded cause")
+                    loop row in closure.incomplete -> jet_driver_ice_record(&totality, jet_driver_totality_function(row), "sema.comptime", "totality", "{row.reason} (reached by comptime item `{source.name}`)")
+                    next
                 }
                 if closure.waiting_dependencies.len() > 0 {
                     dependencies := [String]{}
@@ -2142,6 +2156,10 @@ fn jet_driver_comptime_run(
         if next_pending.len() > 0 && !made_progress {
             // What waits on a constant whose startup check failed waits
             // for good; that check's reports are the run's.
+            if totality.len() > 0 {
+                sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                return jet_driver_comptime_totality_stop(values, checked_functions, trace, totality)
+            }
             if soft_failed {
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
@@ -2176,6 +2194,10 @@ fn jet_driver_comptime_run(
             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
             return jet_driver_comptime_lost_graph(values, checked_functions, trace)
         }
+    }
+    if totality.len() > 0 {
+        sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+        return jet_driver_comptime_totality_stop(values, checked_functions, trace, totality)
     }
     if soft_failed && !keep_going {
         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -2467,19 +2489,12 @@ fn jet_driver_doc_graph_facts(mode: JetDriverCompileMode, graph: SemaRegistratio
     Val(sema_name_structure_facts(value))
 }
 
-// An incomplete-graph internal problem that names every incomplete module and
-// each recorded cause, so a stop with no diagnostic still says what stopped it.
-fn jet_driver_incomplete_graph_problem(summary: String, modules: [SemaGraphModuleResult]) -> String Never! {
-    problem := summary
-    loop graph_module in modules {
-        if graph_module.complete -> next
-        if graph_module.incomplete_reasons.len() == 0 {
-            problem = "{problem}\n  {graph_module.module_identity}: incomplete (no recorded cause)"
-            next
-        }
-        loop reason in graph_module.incomplete_reasons -> problem = "{problem}\n  {graph_module.module_identity}: {reason}"
-    }
-    problem
+// The stop of a comptime run whose checks broke sema totality: every row in
+// one ICE report (jet_driver_comptime_run's `totality`).
+fn jet_driver_comptime_totality_stop(values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult], trace: JetDriverCompileTrace, totality: [JetDriverIceRow]) -> JetDriverComptimeRunResult Never! {
+    result := jet_driver_comptime_run_result(values, functions, trace, false, false)
+    result.internal_problem = Val("comptime checking left functions incomplete without a diagnostic: {jet_driver_ice_text(totality)}")
+    result
 }
 
 // The result for a compile whose own failure escaped every stage: no stage
@@ -3389,7 +3404,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         }
         result := jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
         if !jet_driver_has_errors(load.diagnostics) {
-            result.internal_problem = Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({comptime_stage.modules.len()} of {registration_module_count} modules checked)", comptime_stage.modules))
+            result.internal_problem = Val(jet_driver_totality_problem("semantic declaration checking did not return a complete resolved package graph ({comptime_stage.modules.len()} of {registration_module_count} modules checked)", "sema.check", comptime_stage.modules))
         }
         return jet_driver_doc_failure(^result, request.mode, jet_driver_doc_graph_facts(request.mode, comptime_stage.graph))
     }
@@ -3526,7 +3541,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
                 result.internal_problem = body_run.internal_problem
             }
             !jet_driver_has_errors(load.diagnostics) -> {
-                result.internal_problem = Val(jet_driver_incomplete_graph_problem("semantic body rechecking did not return a complete resolved package graph", body_run.graph.modules))
+                result.internal_problem = Val(jet_driver_totality_problem("semantic body rechecking did not return a complete resolved package graph", "sema.body", body_run.graph.modules))
             }
         }
         return jet_driver_doc_failure(^result, request.mode, Val(body_run.graph.names.structure_facts))

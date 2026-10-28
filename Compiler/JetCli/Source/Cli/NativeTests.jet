@@ -97,12 +97,18 @@ fn jet_cli_native_test_selection(tests: [TTestFact], functions: [FnBody], filter
     modules := [String:String]{}
     loop function in functions -> modules[function.key.copy()] = function.module_name.copy()
     rows := [JetNativeTestRow]{}
+    // Every test the harness can't build, all at once (one ICE report).
+    faults := [String]{}
     loop (index, test) in tests {
         if filter == .Val(needle) && !test.name.contains(needle) -> next
-        module_name :: modules.get(test.function.key) ?? return Err("native test selection names an absent checked function")
+        module_name :: modules.get(test.function.key) ?? {
+            &faults.push("{test.name}: native test selection names an absent checked function")
+            next
+        }
         id :: U64.from_int(index + 1) ?? panic("test count fits U64")
         &rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure}, module_name: module_name, start: test.span.start})
     }
+    if faults.len() > 0 -> return Err(faults.join("\n"))
     &rows.sort_by((left: JetNativeTestRow, right: JetNativeTestRow) -> {
         module_order :: left.module_name <=> right.module_name
         if module_order != Ordering.Equal -> module_order else -> {
