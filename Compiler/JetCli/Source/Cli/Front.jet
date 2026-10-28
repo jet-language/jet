@@ -64,6 +64,10 @@ enum JetCLIPlan {
     // entry resolution wrote. The host compiles it and renders the outcome,
     // as machine reports when `json`.
     Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool)
+    // `jet check` of a workspace root (no `-p`): every member's name, entry
+    // and bytes; `roots` marks the members no other member depends on, the
+    // ones checked first (Host.jet `jet_cli_check_workspace`).
+    CheckWorkspace(names: [String], files: [String], sources: [String], roots: [Bool], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool)
     // `jet build <file>`: the entry and its bytes; `options` are the build
     // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows.
@@ -631,8 +635,9 @@ fn jet_cli_trace_refusal(jet_argv: [String], command: String, color: Bool) -> Je
 // (Entry.jet) and checks it in project scope; a file target
 // is read as the user typed it (or with `.jet` appended). A bare or
 // directory `build` is not ported yet. `--show-default` reports the stock
-// default, and `-p <member>` picks a workspace member. `json` carries
-// `--json` to the check outcome.
+// default, and `-p <member>` picks a workspace member; without `-p`, `check`
+// at a workspace root checks every member. `json` carries `--json` to the
+// check outcome.
 fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     show_default :: jet_argv.contains("--show-default")
     member_flag :: jet_cli_option_value(jet_argv, "-p")
@@ -641,6 +646,9 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
         directory :: cli_files.cwd() ?? "."
         if command == "build" {
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+        }
+        if command == "check" && member_flag == None {
+            if jet_cli_check_workspace_plan(directory, color, quiet, threads, status, json) == .Val(workspace) -> return workspace
         }
         notices := [String]{}
         resolved :: jet_cli_resolve_bare_entry(command, directory, member_flag, !show_default, color, &notices)
@@ -652,6 +660,9 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     }
     target :: args[1]
     if cli_files.is_dir(target) {
+        if command == "check" && member_flag == None {
+            if jet_cli_check_workspace_plan(target, color, quiet, threads, status, json) == .Val(workspace) -> return workspace
+        }
         if jet_cli_resolve_directory_target(command, target, member_flag, !show_default, color) == {
             .File(path, _, notice) -> return jet_cli_read_entry(path, command, color, quiet, threads, command == "check", "{notice}{status}", json)
             .Refused(plan) -> return plan
@@ -660,6 +671,37 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
     jet_cli_read_entry(file, command, color, quiet, threads, false, status, json)
+}
+
+// A `jet check` aimed at a workspace root checks its code rather than
+// picking a runnable member (Entry.jet `jet_cli_workspace_check_entries`);
+// None when the directory is not a workspace index.
+fn jet_cli_check_workspace_plan(directory: String, color: Bool, quiet: Bool, threads: Int?, status: String, json: Bool) -[FS, Env]> JetCLIPlan? Never! {
+    notices := [String]{}
+    rows := [JetCLIWorkspaceCheckMember]{}
+    if jet_cli_workspace_check_entries(directory, color, &notices) == {
+        .Absent -> return None
+        .Refused(plan) -> return Val(jet_cli_with_notices(notices, ^plan))
+        .Members(found) -> rows = found
+    }
+    notice :: "{notices.join("")}{status}"
+    names := [String]{}
+    files := [String]{}
+    sources := [String]{}
+    roots := [Bool]{}
+    loop row in rows {
+        planned :: jet_cli_read_entry(row.path, "check", color, quiet, threads, true, notice, json)
+        if planned == .Check(file, source, _, _, _, _, _, _) {
+            &names.push(row.name.copy())
+            &files.push(file)
+            &sources.push(source)
+            &roots.push(row.root)
+        } else {
+            return Val(planned)
+        }
+    }
+    if files.len() == 1 -> return Val(JetCLIPlan.Check{file: files[0], source: sources[0], color: color, quiet: quiet, threads: threads, project: true, notice: notice, json: json})
+    Val(JetCLIPlan.CheckWorkspace{names: names, files: files, sources: sources, roots: roots, color: color, quiet: quiet, threads: threads, notice: notice, json: json})
 }
 
 // Read the entry `jet_cli_check` chose (CmdCompile.rs `run_native_execution`

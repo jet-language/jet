@@ -214,7 +214,9 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         loop row in rows -> &groups.push(row.tokens)
         unit :: units[modules[module_index].source_unit_index]
         original :: jet_driver_marker_group_source(source_files, unit.path) ?? return false
-        source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_inline_package(original, jet_driver_inline_package(original)) else -> original
+        // The relex reads the source the ordinary parse read: any inline
+        // `package { … }` carrier masked away.
+        source :: jet_driver_mask_inline_package(original, jet_driver_inline_package(original))
         source_bytes :: source.bytes()
         if trace_sink == .Val(sink) -> sink.begin("load.marker_groups.relex", unit.path, module_index, modules.len())
         lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source_bytes) else -> lex(source_bytes)

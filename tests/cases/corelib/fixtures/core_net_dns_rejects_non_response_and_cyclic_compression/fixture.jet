@@ -85,7 +85,7 @@ fn fixture_pointer(query: [U8], delta: Int) -> [U8] {
 }
 fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     peer :: net.socket_addr(packet.host, packet.port) ?? panic("peer")
-    net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")
+    (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
 #Test("core_net_dns_rejects_non_response_and_cyclic_compression") {

@@ -59,7 +59,7 @@ token_decoded,
 lex,
 lex_config,
 ]
-use jet_pkg_model.[WorkspaceDeclarationCache]
+use jet_pkg_model.[WorkspaceDeclarationCache, pkg_manifest_parse]
 
 // Syntax.rs `DEFAULT_ENTRY_FILE`, `PACKAGE_FILE`, `WORKSPACE_FILE`, `ENV_FILE`,
 // `CONFIG_FILE`, `UNIFIED_LOCK_FILE`, `COMMAND_ROLE_FILES`.
@@ -87,6 +87,23 @@ enum JetCLIEntryFound {
     Entry(entry: JetCLIEntry)
     Absent
     Refused(plan: JetCLIPlan)
+}
+
+// What a workspace check compiles: the entry of every member, or the
+// refusal that stopped the scan. Absent when the directory is not a
+// workspace index.
+enum JetCLIWorkspaceCheck {
+    Absent
+    Members(rows: [JetCLIWorkspaceCheckMember])
+    Refused(plan: JetCLIPlan)
+}
+
+// One member of a workspace check: its name, its entry file, and whether no
+// other member depends on it.
+struct JetCLIWorkspaceCheckMember {
+    name: String
+    path: String
+    root: Bool
 }
 
 // No package, workspace, or stock entry applies.
@@ -1192,6 +1209,55 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
         .Absent -> {}
     }
     JetCLIEntryFound.Absent
+}
+
+// `jet check` of a workspace root checks code instead of picking an entry.
+// Each member's entry, in index order; `root` marks the members no other
+// member depends on. Their compiles load every other member through their
+// dependency closures, and a member they find failing (E0626) is checked on
+// its own afterwards so its errors are reported.
+fn jet_cli_workspace_check_entries(dir: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceCheck Never! {
+    root :: cli_files.realpath(dir) ?? return JetCLIWorkspaceCheck.Absent
+    source :: jet_cli_workspace_source(root, color)
+    if source == .Failed(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
+    index_path := ""
+    if source == {
+        .Index(path) -> index_path = path
+        else -> return JetCLIWorkspaceCheck.Absent
+    }
+    members := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_members(root, index_path, "check", color) == {
+        .Refused(refusal) -> return JetCLIWorkspaceCheck.Refused{plan: refusal}
+        .Members(found) -> members = found
+    }
+    directories := [String]{}
+    loop member in members {
+        member_root :: jet_cli_entry_join(root, member.path)
+        &directories.push(cli_files.realpath(member_root) ?? member_root)
+    }
+    depended := [String]{}
+    loop directory in directories {
+        manifest_path :: jet_cli_checked_file(directory, JET_CLI_PACKAGE_FILE) ?? next
+        manifest :: pkg_manifest_parse(manifest_path, cli_files.read(manifest_path) ?? "") ?? next
+        loop name in manifest.dependencies.keys() {
+            if manifest.dependencies[name] == .Path(path) {
+                target :: cli_files.realpath(jet_cli_entry_join(directory, path)) ?? next
+                if target != directory && !depended.contains(target) -> &depended.push(target)
+            }
+        }
+    }
+    rows := [JetCLIWorkspaceCheckMember]{}
+    loop (index, directory) in directories {
+        if jet_cli_find_project_entry_at(directory, "check", color, &notices, true) == {
+            .Entry(entry) -> {
+                if cli_files.is_file(entry.path) -> &rows.push(JetCLIWorkspaceCheckMember{name: members[index].name.copy(), path: entry.path.copy(), root: !depended.contains(directory)})
+            }
+            .Refused(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
+            .Absent -> {}
+        }
+    }
+    if rows.len() == 0 -> return JetCLIWorkspaceCheck.Absent
+    JetCLIWorkspaceCheck.Members{rows: rows}
 }
 
 // main.rs `missing_bare_entry`: no file and no project (E2104).

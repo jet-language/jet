@@ -4,7 +4,10 @@ use core.http.server as server
 fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
     assert(if ws.upgrade(req) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .InvalidHandshake -> true; else -> false }
+        .Err(error) -> if error == {
+            .InvalidHandshake -> true
+            else -> false
+        }
     })
     return Ok(server.response(400, "bad"))
 }

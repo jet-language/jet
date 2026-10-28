@@ -53,7 +53,7 @@ bind <name> --update --accept <candidate-digest> Resolve and record a checked fo
   jet remove [args]                    Remove a dependency
   jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
   jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
-  jet run [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
+  jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
   jet search <query>                   Search the local package catalog
   jet self <command>                   Manage the Jet installation and editor tools
   jet shared-store <command>           Manage the optional shared package broker
@@ -271,6 +271,8 @@ Flags:
   --no-prepare                 With run: Refuse Jetpack project environment preparation
   --pure                       With eval: Reject code with side effects
   --allow                      With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS
+  --allow-all                  With run/build: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way
+  -A                           Short form of --allow-all
   --deny                       With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS
   --offline                    With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data
   --fixtures                   With env/run/dev/test/cc/c++: Use an explicit fixture bundle
@@ -358,6 +360,9 @@ Flags:
   --update                     With import: Merge generated Jet into an existing target
   --coverage                   With test/inspect build: Show function or diagnostic coverage
   --verify                     With build: Rebuild and compare one indexed receipt artifact
+  --ast                        With emit: Print the parsed syntax tree
+  --ir                         With emit: Print the slot IR the native backend builds
+  --fn                         With emit --ast/--ir: Print only the named function
   -u                           Short form of --update-snapshots
   --release                    With build/run/dev/jobs/test: Optimize for release
   --profile                    With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle

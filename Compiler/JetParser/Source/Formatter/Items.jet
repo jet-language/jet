@@ -723,6 +723,15 @@ fn jfmt_fmt_marker_decl_params(f: &JetFmt, params: [MarkerDeclParam], source_sta
 fn jfmt_fmt_marker_decl(f: &JetFmt, declaration: MarkerDecl) {
     jfmt_write(&f, "marker ")
     jfmt_write(&f, declaration.name)
+    // A group declaration `marker Name = #[A, B]` has members, not parameters.
+    if declaration.group == .Val(members) {
+        jfmt_write(&f, " = #[")
+        group_source :: if members.len() > 0 -> jfmt_source_marker_group_span(f, members[0].name_span.start) else -> JetFmtSourceList?{None}
+        jfmt_fmt_marker_list(&f, members, group_source)
+        jfmt_write(&f, "]")
+        jfmt_newline(&f)
+        return
+    }
     jfmt_write(&f, "(")
     jfmt_fmt_marker_decl_params(&f, declaration.params, declaration.name_span.end)
     jfmt_write(&f, ")")
