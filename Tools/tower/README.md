@@ -84,9 +84,9 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
-  ratifies. New full ballots contain a complete base draft followed by
-  fresh-agent RLI5 beginner and separate fresh-agent adversarial reviews;
-  model families may match. Historical review records stay unchanged.
+  ratifies. New full ballots contain a complete base draft followed by one
+  fresh-agent adversarial review; model families may match. Historical
+  review records stay unchanged.
   Short ballots contain the same complete base draft without reviews and
   are the default for one mechanism with at most three options. The
   `simple` skill applies to every visible ballot field. Draft ballots are hidden
@@ -264,9 +264,9 @@ and goes dark as you clear them. Two views:
 
 - **Now** — everything blocked on you in one queue: cards needing your visual
   review, and decisions (opens focus mode: ←/→ move, 1–9 pick, Enter
-  record). Focus Mode shows the six review summaries in order: slate base,
-  violet breadth, cyan hybrid, green cooperative, blue beginner, and orange
-  adversarial. The recommendation is blue, while reasons against alternatives
+  record). Focus Mode shows the ballot's review summaries in order: the
+  orange adversarial pass for current ballots, and the stored passes of
+  historical ballots. The recommendation is blue, while reasons against alternatives
   are muted red. Labels and icons repeat every color's meaning. Empty state =
   tower clear.
 - **Board** — idea capture, sidequests, epochs → milestones → cards (frozen

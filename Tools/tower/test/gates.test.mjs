@@ -18,15 +18,16 @@ const fresh = () => {
 };
 
 const reviewPasses = () => ({
-  beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
   adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
 });
 
+// Process 2-3 records stored six passes, including the retired beginner pass.
 const historicalReviewPasses = () => ({
   base: 'The complete first draft compared all options.',
   boilOcean: 'The breadth pass checked for missing choices.',
   hybrid: 'The hybrid pass combined compatible strengths.',
   cooperative: 'The cooperative pass strengthened every option.',
+  beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
   ...reviewPasses(),
 });
 
@@ -74,7 +75,7 @@ test('addDecision requires a reading surface and names its gaps', () => {
     (e) => e.code === 'E_BALLOT' && /must be a question/.test(e.message) && /options\[B\]\.gains/.test(e.message)
       && /whyNot\[B\]/.test(e.message) && /project jargon "facet"/.test(e.message));
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-S1', title: 'Good surface', ...ballot() }));
-  assert.equal(result.ballotProcessVersion, 4);
+  assert.equal(result.ballotProcessVersion, 5);
   assert.equal(result.surface.gist, 'Which option should Jet ship?');
 });
 
@@ -83,7 +84,7 @@ test('new ballots list the recommended option first as A; open ballots keep thei
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const recB = ballot({ rec: 'B', recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' } });
   recB.surface.recommendation = { ...recB.surface.recommendation, rec: 'B', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }] };
-  assert.deepEqual(db.ballotGaps({ ...recB, ballotProcessVersion: 4 }, { requireBeginner: true, requireSurface: true }), [], 'edits of an open ballot do not enforce A-first');
+  assert.deepEqual(db.ballotGaps({ ...recB, ballotProcessVersion: 5 }, { requireSurface: true }), [], 'edits of an open ballot do not enforce A-first');
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Rec B', ...recB })),
     (e) => e.code === 'E_BALLOT' && /recommended option first, as A/.test(e.message));
@@ -135,7 +136,37 @@ test('addDecision accepts a full ballot', () => {
   assert.equal(result.draft, false);
   assert.equal(result.ballotMode, 'full');
   assert.deepEqual(result.reviewPasses, reviewPasses());
-  assert.deepEqual(Object.keys(result.reviewPasses), ['beginner', 'adversarial']);
+  assert.deepEqual(Object.keys(result.reviewPasses), ['adversarial']);
+});
+
+test('a draft with only the adversarial pass can be marked ready', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-ONE-PASS', title: 'Pick one', draft: true, ...ballot() }));
+  const { result } = st.mutate((s) => db.updateDecision(s, 'D-ONE-PASS', { ready: true }, 'agent'));
+  assert.equal(result.draft, false);
+  assert.equal(result.ballotProcessVersion, 5);
+  assert.deepEqual(result.reviewPasses, reviewPasses());
+});
+
+test('load migrates open process-4 ballots to one adversarial pass and keeps ratified records', () => {
+  const twoReaders = { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', ...reviewPasses() };
+  const s = db.normalize({ ...empty('Test'), decisions: [
+    { id: 'D-OPEN', status: 'open', ballotProcessVersion: 4, ballotMode: 'full', reviewPasses: { ...twoReaders } },
+    { id: 'D-DRAFT', status: 'open', draft: true, ballotProcessVersion: 4, ballotMode: 'full', reviewPasses: { ...twoReaders } },
+    { id: 'D-SHORT', status: 'open', ballotProcessVersion: 4, ballotMode: 'short', reviewPasses: null },
+    { id: 'D-LAW', status: 'ratified', ballotProcessVersion: 4, ballotMode: 'full', reviewPasses: { ...twoReaders } },
+  ] });
+  const byId = Object.fromEntries(s.decisions.map(d => [d.id, d]));
+  for (const id of ['D-OPEN', 'D-DRAFT']) {
+    assert.equal(byId[id].ballotProcessVersion, 5);
+    assert.deepEqual(byId[id].reviewPasses, reviewPasses());
+  }
+  assert.equal(byId['D-SHORT'].ballotProcessVersion, 5);
+  assert.equal(byId['D-SHORT'].reviewPasses, null);
+  assert.equal(byId['D-LAW'].ballotProcessVersion, 4);
+  assert.deepEqual(byId['D-LAW'].reviewPasses, twoReaders);
+  assert.deepEqual(db.ballotGaps({ ...ballot(), status: 'ratified', ballotProcessVersion: 4, reviewPasses: twoReaders }), []);
 });
 
 test('verdicts require an existing supersession link', () => {
@@ -167,34 +198,30 @@ test('full ballot rejects retired review summaries', () => {
     (e) => e.code === 'E_BALLOT' && /reviewPasses\.base.*unexpected/.test(e.message));
 });
 
-test('full ballot requires the fresh-agent beginner review', () => {
+test('full ballot requires the fresh adversarial review', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const passes = reviewPasses();
-  delete passes.beginner;
   assert.throws(
-    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
-    (e) => e.code === 'E_BALLOT' && /reviewPasses\.beginner/.test(e.message));
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: {} }) })),
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.adversarial/.test(e.message));
 });
 
-test('beginner review requires fresh-agent RLI5 metadata', () => {
+test('full ballot rejects the retired beginner pass', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const passes = reviewPasses();
-  passes.beginner = 'The beginner pass tested the complete ballot.';
+  const passes = { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', ...reviewPasses() };
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
-    (e) => e.code === 'E_BALLOT' && /Fresh agent: <agent-id>\. Skill: rli5\./.test(e.message));
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.beginner.*unexpected/.test(e.message));
 });
 
-test('full ballot requires string review summaries', () => {
+test('full ballot requires a string review summary', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const passes = reviewPasses();
-  passes.beginner = { text: 'Not a string.' };
+  const passes = { adversarial: { text: 'Not a string.' } };
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
-    (e) => e.code === 'E_BALLOT' && /reviewPasses\.beginner.*need text/.test(e.message));
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.adversarial.*need text/.test(e.message));
 });
 
 test('ballot option keys are unique so every loser needs its own reason', () => {
@@ -242,20 +269,19 @@ test('technical code fences do not count as prose but surrounding text still doe
   }
 });
 
-test('new full ballots require a named adversarial reader separate from the beginner', () => {
+test('new full ballots require a named fresh adversarial reader', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   for (const summary of [
     'The adversarial pass attacked the recommendation.',
     'Fresh agent:   . The adversarial pass attacked the recommendation.',
-    'Fresh agent: reader-1. The adversarial pass attacked the recommendation.',
   ]) {
     const passes = reviewPasses();
     passes.adversarial = 'Author model family: family-a. Adversarial model family: family-a. ' + summary;
     for (const draft of [false, true]) {
       assert.throws(
         () => st.mutate(s => db.addDecision(s, { cardId: '#1', title: 'Missing independent reader', status: 'ratified', draft, ...ballot({ reviewPasses: passes }) })),
-        e => e.code === 'E_BALLOT' && /Fresh agent:|different fresh agent/.test(e.message));
+        e => e.code === 'E_BALLOT' && /Fresh agent:/.test(e.message));
     }
   }
 });
@@ -375,7 +401,7 @@ test('editing an open full ballot keeps the situation gate', () => {
   const revised = `${SITUATION} The fix also helps the owner vote faster.`;
   st.mutate((s) => db.updateDecision(s, 'D-SIT2', { situation: revised }, 'agent'));
   assert.equal(st.load().decisions[0].situation, revised);
-  assert.deepEqual(db.ballotGaps({ ...ballot(), situation: undefined, ballotProcessVersion: 4 }), ['situation'],
+  assert.deepEqual(db.ballotGaps({ ...ballot(), situation: undefined, ballotProcessVersion: 5 }), ['situation'],
     'open full ballots that predate the field report exactly the missing situation');
 });
 
@@ -437,7 +463,7 @@ test('new losses reject obsolete reasons, non-string mitigation, and non-prose m
     { loss: 'One more step', mitigation: '# Copy an example.' },
     { loss: 'One more step', mitigation: '```text\nCopy an example.\n```' },
   ]) {
-    const p = { ...ballot(), ballotProcessVersion: 4 };
+    const p = { ...ballot(), ballotProcessVersion: 5 };
     p.recommendation.losses = [loss];
     p.surface.recommendation.losses = [loss];
     const gaps = db.ballotGaps(p);
@@ -447,7 +473,7 @@ test('new losses reject obsolete reasons, non-string mitigation, and non-prose m
 });
 
 test('mitigation keeps the surface word cap and long-form plain-language limits', () => {
-  const p = { ...ballot(), ballotProcessVersion: 4 };
+  const p = { ...ballot(), ballotProcessVersion: 5 };
   const mitigation = count => Array.from({ length: count }, () => 'word').join(' ') + '.';
   p.surface.recommendation.losses[0].mitigation = mitigation(23);
   assert.deepEqual(db.surfaceGaps(p), []);
@@ -458,7 +484,7 @@ test('mitigation keeps the surface word cap and long-form plain-language limits'
 });
 
 test('a recommendation with no remaining losses needs no mitigation', () => {
-  const p = { ...ballot(), ballotProcessVersion: 4 };
+  const p = { ...ballot(), ballotProcessVersion: 5 };
   p.recommendation.losses = [];
   p.surface.recommendation.losses = [];
   assert.deepEqual(db.ballotGaps(p), []);

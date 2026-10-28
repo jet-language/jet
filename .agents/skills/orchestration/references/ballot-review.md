@@ -4,33 +4,16 @@ Use this reference only for a new, draft, or updated **full ballot**. It does
 not replace ordinary criterion proof or the milestone review in
 [`closeout.md`](closeout.md).
 
-## Beginner pass
-
-Assign a fresh true-beginner agent that did not author or review an earlier pass
-of the ballot. Provide the complete ballot, not a summary, and invoke `/rli5`.
-Require all five observations:
-
-- explain what the ballot decides and why;
-- predict the result of each concrete alternative;
-- modify the smallest example or choice;
-- derive the rule from the stated facts; and
-- return a friction table of terms, missing context, and misleading or
-  unexplained steps.
-
-Record this exact prefix in `reviewPasses.beginner`:
-
-```text
-Fresh agent: agent-id. Skill: rli5. The beginner pass tested the complete ballot.
-```
+A full ballot needs one fresh adversarial pass before it is marked ready.
 
 ## Adversarial pass
 
-Use a separate fresh agent that neither authored the ballot nor performed its
-beginner pass. Give that reviewer the complete ballot and the beginner findings
-and ask it to attack the recommendation, alternatives, assumptions, edge cases,
-trade-offs, and beginner/expert paths. Record actual reviewer identity and
-model-family provenance without requiring a different provider or naming a
-specific model:
+Assign a fresh agent that did not author the ballot or review an earlier pass
+of it. Give that reviewer the complete ballot, not a summary, and ask it to
+attack the recommendation, alternatives, assumptions, edge cases, trade-offs,
+and beginner/expert paths. Record actual reviewer identity and model-family
+provenance without requiring a different provider or naming a specific model.
+The first line of `reviewPasses.adversarial` uses this exact prefix:
 
 ```text
 Author model family: author-family. Adversarial model family: adversarial-family. Fresh agent: reviewer-id. The adversarial review attacked the recommendation.

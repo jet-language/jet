@@ -41,7 +41,6 @@ test('lane derivation follows phases and decisions', () => {
 
   st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one',
     ballotMode: 'full', situation: SITUATION, reviewPasses: {
-      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
@@ -84,7 +83,6 @@ test('deciding card auto-advances when last decision ratifies', () => {
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'deciding', plan: 'plan' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't',
     ballotMode: 'full', situation: SITUATION, reviewPasses: {
-      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
@@ -117,7 +115,7 @@ test('deciding card auto-advances when last decision ratifies', () => {
 test('ratified decisions cannot be mutated by agent attribution', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Protected decision' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PROTECTED', title: 'keep', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PROTECTED', title: 'keep', draft: true, ballotMode: 'full', reviewPasses: { adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } }));
   // Historical ratified fixture; live drafts can no longer be ratified.
   st.mutate((s) => { s.decisions[0].draft = false; s.decisions[0].status = 'ratified'; });
 
@@ -390,7 +388,7 @@ test('deleteCard cascades decisions/questions and clears blockedBy refs', () => 
   st.mutate((s, cfg) => {
     const a = db.addCard(s, { title: 'A' }, cfg);
     db.addCard(s, { title: 'B', blockedBy: [a.id] }, cfg);
-    db.addDecision(s, { cardId: a.id, title: 'd', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } });
+    db.addDecision(s, { cardId: a.id, title: 'd', draft: true, ballotMode: 'full', reviewPasses: { adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } });
     db.addQuestion(s, { cardId: a.id, text: 'q?', by: 'owner' });
   });
   st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner' }));

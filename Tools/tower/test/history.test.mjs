@@ -26,7 +26,6 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
 const ballot = (extra = {}) => ({
   ballotMode: 'full', situation: SITUATION,
   reviewPasses: {
-    beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
     adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
   },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',

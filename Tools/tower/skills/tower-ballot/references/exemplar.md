@@ -114,7 +114,6 @@ The recommended option is `A` first; `whyNot` covers `B`. Apply the
     "tradeoff": "Display prices may lag briefly; payment always checks the current price."
   },
   "reviewPasses": {
-    "beginner": "Fresh agent: reader-17. Skill: rli5. The beginner pass tested the complete ballot and found one undefined term; the lesson was repaired.",
     "adversarial": "Author model family: family-a. Adversarial model family: family-a. Fresh agent: reader-18. The adversarial review attacked the recommendation and repaired one failure mode."
   }
 }

@@ -217,10 +217,10 @@ Remove recommended downsides or reduce them to negligible costs with a concrete
 plain-prose `mitigation` for each (under 24 words on the surface).
 `whyNot` covers every losing option.
 The `simple` skill applies to every user-visible field. A new full ballot
-records one- or two-sentence summaries from two fresh readers: first RLI5
-beginner, then adversarial. Neither reader helped author the ballot, and the
-adversarial reader differs from the beginner reader. Model families may match
-(owner direction, 2026-09-05). Preserve historical review records unchanged.
+records a one- or two-sentence summary from one fresh adversarial reader who
+did not help author the ballot (owner direction, 2026-10-28). Model families
+may match (owner direction, 2026-09-05). Preserve historical review records
+unchanged.
 A short ballot is the complete base draft with no reviews and is the default
 for one mechanism with at most three options. New syntax, invariant changes,
 and owner-tagged full cards require the full profile. Plain prose uses one idea per sentence, defines
