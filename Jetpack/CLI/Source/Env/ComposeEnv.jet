@@ -86,13 +86,14 @@ fn cli_seal_project_producer_records(verification: &StoreVerification, roots: Ha
     store_list_checked(&verification, roots) ?? return Err(CLIError.Other("could not finalize sealed closure state: {err.message()}"))
 }
 
-// Warm verified realizations by their original reference.
-fn cli_index_warm_realizations(warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
+// Warm verified realizations by their original reference, taken over from
+// the receipt's list.
+fn cli_index_warm_realizations(^warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
     indexed := [String: [VerifiedRealization]]{}
-    loop realized in warm {
+    loop realized in ^warm {
         reference :: realized.original_reference()
-        bucket := indexed.get(reference) ?? [VerifiedRealization]{}
-        &bucket.push(realized)
+        bucket := &indexed.remove(reference) ?? [VerifiedRealization]{}
+        &bucket.push(^realized)
         indexed[reference] = bucket
     }
     indexed
@@ -100,13 +101,9 @@ fn cli_index_warm_realizations(warm: [VerifiedRealization]) -> [String: [Verifie
 
 // Take the last warm realization recorded for `reference`.
 fn cli_take_warm_realization(warm: &[String: [VerifiedRealization]], reference: String) -> VerifiedRealization? Never! {
-    bucket := warm.get(reference) ?? return None
+    bucket := &warm.remove(reference) ?? return None
     realized :: &bucket.pop() ?? return None
-    if bucket.len() == 0 {
-        _ := &warm.remove(reference)
-    } else {
-        warm[reference] = bucket
-    }
+    if bucket.len() > 0 -> warm[reference] = bucket
     Val(realized)
 }
 
@@ -273,8 +270,7 @@ fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Th
 }
 
 // Whether the warm realizations cover every ref and adapter of the plan.
-fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> Bool Never! {
-    realized :: warm ?? return false
+fn cli_warm_complete(warm: [String: [VerifiedRealization]], plan: RunPlan) -> Bool Never! {
     required := [String: Int]{}
     loop spec in plan.refs -> required[spec.raw] = (required.get(spec.raw) ?? 0) + 1
     loop adapter in plan.adapters {
@@ -282,8 +278,7 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> B
         required[reference] = (required.get(reference) ?? 0) + 1
     }
     loop entry in required {
-        available :: realized.get(entry.key) ?? return false
-        if available.len() < entry.value -> return false
+        if !warm.has_key(entry.key) || warm[entry.key].len() < entry.value -> return false
     }
     true
 }
@@ -291,12 +286,13 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> B
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
-    warm_realizations := if warm == {
-        .Val(list) -> Val(cli_index_warm_realizations(list))
-        .None -> None
+fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, ^warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+    warm_given :: warm != None
+    warm_pool := if ^warm == {
+        .Val(list) -> cli_index_warm_realizations(^list)
+        .None -> [String: [VerifiedRealization]]{}
     }
-    warm_complete :: cli_warm_complete(warm_realizations, plan)
+    warm_complete :: warm_given && cli_warm_complete(warm_pool, plan)
     project_scope :: scope == RealizeScope.Project
     needs_stats :: collect_stats || (project_scope && !warm_complete)
     lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
@@ -354,15 +350,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     loop spec in plan.refs {
         if live_tty -> &live.set_aggregate_status("Resolving {spec.package}", completed_steps, total_steps)
         style :: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
-        warm_hit :: if warm_realizations == {
-            .Val(index) -> {
-                pool := index
-                taken :: cli_take_warm_realization(&pool, spec.raw)
-                warm_realizations = Val(pool)
-                taken
-            }
-            .None -> None
-        }
+        warm_hit :: cli_take_warm_realization(&warm_pool, spec.raw)
         step_outcome :: if warm_hit == {
             .Val(realized) -> {
                 parts :: ^realized.into_parts()
@@ -428,15 +416,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         &live.clear()
         if total_steps > 1 && !warm_complete -> theme.progress_chain("Adapt", plan.refs.len() + index + 1, total_steps, adapter.name, "adapter")
         warm_reference :: "adapt:{adapter.name}:{adapter.source}"
-        warm_hit :: if warm_realizations == {
-            .Val(pool_index) -> {
-                pool := pool_index
-                taken :: cli_take_warm_realization(&pool, warm_reference)
-                warm_realizations = Val(pool)
-                taken
-            }
-            .None -> None
-        }
+        warm_hit :: cli_take_warm_realization(&warm_pool, warm_reference)
         adapter_outcome :: if warm_hit == {
             .Val(realized) -> {
                 parts :: ^realized.into_parts()

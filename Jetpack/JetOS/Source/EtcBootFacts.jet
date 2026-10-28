@@ -113,18 +113,19 @@ fn jetos_render_boot_facts_parts(boot: JetOSBootProfile, kernel_package: String)
     "{{\"loader\":{foundation_json_quote(boot.loader)},\"kernel\":{foundation_json_quote(boot.kernel)},\"init\":{foundation_json_quote(boot.init)},\"initrd_modules\":[{jetos_strings_json(boot.initrd_modules)}],\"kernel_package\":{kernel_package}}}"
 }
 
-// Rust cachyos_kernel_entry: first match, not latest or a fallback package.
-fn jetos_cachyos_kernel_entry(realized: [JetOSRealizedPackage]) -> JetOSRealizedPackage? Never! {
-    loop entry in realized {
-        if entry.entry.name == JETOS_CACHYOS_KERNEL_PACKAGE -> return Val(entry)
+// The position of the first CachyOS kernel package, not the latest or a
+// fallback package.
+fn jetos_cachyos_kernel_index(realized: [JetOSRealizedPackage]) -> Int? Never! {
+    loop index in 0..<realized.len() {
+        if realized[index].entry.name == JETOS_CACHYOS_KERNEL_PACKAGE -> return Val(index)
     }
     None
 }
 
 fn jetos_render_boot_facts(system: SystemPlan, realized: [JetOSRealizedPackage]) -[FS]> String Never! {
     boot :: jetos_boot_profile(system)
-    kernel_package :: if jetos_cachyos_kernel_entry(realized) == {
-        .Val(entry) -> jetos_kernel_package_json(entry)
+    kernel_package :: if jetos_cachyos_kernel_index(realized) == {
+        .Val(at) -> jetos_kernel_package_json(realized[at])
         .None -> "null"
     }
     jetos_render_boot_facts_parts(boot, kernel_package)
@@ -189,20 +190,19 @@ fn jetos_write_boot_facts(dir: String, system: SystemPlan, realized: [JetOSReali
     boot :: jetos_boot_profile(system)
     boot_dir :: files.join(dir, "boot")
     files.create_dir_all(boot_dir)
-    kernel_entry :: jetos_cachyos_kernel_entry(realized)
-    jetos_write_boot_payload(boot_dir, system, boot, kernel_entry)
+    jetos_write_boot_payload(boot_dir, system, boot, realized, jetos_cachyos_kernel_index(realized))
     files.write(files.join(boot_dir, "facts.json"), jetos_render_boot_facts(system, realized))
 }
 
-// Read access keeps the same selected held package alive for kernel, initrd,
-// and modules, rather than copying a lease or moving an optional repeatedly.
-fn jetos_write_boot_payload(boot_dir: String, system: SystemPlan, boot: JetOSBootProfile, kernel_entry: JetOSRealizedPackage?) IOError! -[FS, Env, Rand]> {
-    kernel_path :: if kernel_entry == {
-        .Val(entry) -> jetos_boot_artifact(entry, [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}) ?? boot.kernel
+// The selected held package is read in place from `realized` for kernel,
+// initrd, and modules, rather than copying a lease out of the list.
+fn jetos_write_boot_payload(boot_dir: String, system: SystemPlan, boot: JetOSBootProfile, realized: [JetOSRealizedPackage], kernel: Int?) IOError! -[FS, Env, Rand]> {
+    kernel_path :: if kernel == {
+        .Val(at) -> jetos_boot_artifact(realized[at], [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}) ?? boot.kernel
         .None -> boot.kernel
     }
-    initrd_path :: if kernel_entry == {
-        .Val(entry) -> jetos_boot_artifact(entry, [String]{"boot/initrd-cachyos", "initrd", "initrd.img"})
+    initrd_path :: if kernel == {
+        .Val(at) -> jetos_boot_artifact(realized[at], [String]{"boot/initrd-cachyos", "initrd", "initrd.img"})
         .None -> None
     }
     files.write(files.join(boot_dir, "limine.conf"), "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/{jetos_release_label(false)} — {system.name}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init={boot.init}\n")
@@ -223,8 +223,8 @@ fn jetos_write_boot_payload(boot_dir: String, system: SystemPlan, boot: JetOSBoo
     }
     module_names :: [String]{"isofs.ko.xz", "bochs.ko.xz", "fat.ko.xz", "vfat.ko.xz", "nls_ascii.ko.xz", "nls_cp437.ko.xz", "serio.ko.xz", "i8042.ko.xz", "libps2.ko.xz", "atkbd.ko.xz", "hid-generic.ko.xz", "usbhid.ko.xz", "uhci-hcd.ko.xz", "ehci-hcd.ko.xz", "xhci-hcd.ko.xz"}
     loop module_name in module_names {
-        if kernel_entry == .Val(entry) {
-            if jetos_boot_artifact(entry, [String]{"boot/modules/{module_name}"}) == .Val(module_path) {
+        if kernel == .Val(at) {
+            if jetos_boot_artifact(realized[at], [String]{"boot/modules/{module_name}"}) == .Val(module_path) {
                 modules_dir :: files.join(boot_dir, "modules")
                 files.create_dir_all(modules_dir)
                 jetos_copy_file_replace(module_path, files.join(modules_dir, module_name))

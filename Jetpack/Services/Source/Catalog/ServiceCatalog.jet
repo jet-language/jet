@@ -344,11 +344,11 @@ enum ServicePresetKind {
     }
 
     // First-start state setup inside `data_dir`, run through `env`'s PATH.
-    fn prepare(self, port: Int, data_dir: String, env: ShellEnv) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+    fn prepare(self, port: Int, data_dir: String, env: &ShellEnv) ServicesError! -[FS, Env, Exec, Time.Wait]> {
         if self == {
-            .Postgres -> services_prepare_database(port, data_dir, env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
-            .Mysql -> services_prepare_database(port, data_dir, env, "mysqld", [String]{"--initialize-insecure", "--datadir={data_dir}"})
-            .Mariadb -> services_prepare_database(port, data_dir, env, "mariadb-install-db", [String]{"--auth-root-authentication-method=normal", "--skip-test-db", "--datadir={data_dir}"})
+            .Postgres -> services_prepare_database(port, data_dir, &env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
+            .Mysql -> services_prepare_database(port, data_dir, &env, "mysqld", [String]{"--initialize-insecure", "--datadir={data_dir}"})
+            .Mariadb -> services_prepare_database(port, data_dir, &env, "mariadb-install-db", [String]{"--auth-root-authentication-method=normal", "--skip-test-db", "--datadir={data_dir}"})
             .Nginx -> services_prepare_nginx(port, data_dir)
             .Garage -> services_prepare_config(files.join(data_dir, "garage.toml"), "metadata_dir = \"{data_dir}/meta\"\ndata_dir = \"{data_dir}/data\"\nrpc_bind_addr = \"127.0.0.1:{services_saturating_add(port, 1)}\"\n[s3_api]\napi_bind_addr = \"127.0.0.1:{port}\"\n", "Garage")
             .Kafka -> {
@@ -482,22 +482,21 @@ fn services_prepare_nginx(port: Int, data_dir: String) ServicesError! -[FS, Env]
 
 // Initialize a database directory once; an existing initialized directory
 // only gains the marker.
-fn services_prepare_database(port: Int, data_dir: String, env: ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+fn services_prepare_database(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     marker :: services_catalog_marker(data_dir)
     if files.is_file(marker) -> return
     initialized :: files.is_file(files.join(data_dir, "PG_VERSION")) || files.is_dir(files.join(data_dir, "mysql"))
-    if !initialized -> services_run_catalog_tool(env, tool, args, data_dir)
+    if !initialized -> services_run_catalog_tool(&env, tool, args, data_dir)
     if services_write_atomic(marker, "port={port}\n".bytes()) == .Err(error) {
         return Err(ServicesError.new("couldn't record service preset initialization: {error}"))
     }
 }
 
-fn services_run_catalog_tool(env: ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+fn services_run_catalog_tool(env: &ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     argv := [String]{tool}
     loop arg in args -> &argv.push(arg)
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)
-    shell_env := env
-    spec = &shell_env.apply_to(spec) ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err.message()}"))
+    spec = &env.apply_to(spec) ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err.message()}"))
     receipt :: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))
     if receipt.success -> return
     detail :: receipt.errors.trim()

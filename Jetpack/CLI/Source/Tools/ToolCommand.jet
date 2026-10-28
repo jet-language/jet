@@ -774,9 +774,9 @@ fn cli_realize_tool_manifest(verification: &StoreVerification, theme: Theme, par
             }
         }
         &leases.push(lease)
-        held :: leases[leases.len() - 1]
-        held.validate()
-        receipt :: held.profile_install_receipt()
+        held :: leases.len() - 1
+        leases[held].validate()
+        receipt :: leases[held].profile_install_receipt()
         if receipt.reference != spec.raw || receipt.output_hash == "" -> return Err(CLIError.Other("verified user-tools receipt disagrees with `{entry.resolved}`"))
         bins :: cli_collect_manifest_bins(receipt, entry)
         bin_names := [String]{}

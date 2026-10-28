@@ -97,7 +97,7 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
         &dependents.push([Int]{})
         &indegree.push(0)
     }
-    packages := [CheckedPackage]{}
+    packages := [Int: CheckedPackage]{}
     loop index in 0..<count {
         checked :: resolver.checked_package(members[index].path)
         resolver.revalidate_member(checked.member)
@@ -109,7 +109,7 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
             &dependents[dependency].push(index)
             indegree[index] = indegree[index] + 1
         }
-        &packages.push(checked)
+        packages[index] = checked
     }
     // Ready members leave in source order, so selection is stable even when a
     // caller builds a plan with duplicate names.
@@ -141,7 +141,10 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
     }
     resolver.revalidate_root()
     out := [(member: WorkspacePlanMember, package: CheckedPackage)]{}
-    loop index in order -> &out.push((member: members[index], package: packages[index]))
+    loop index in order {
+        package :: &packages.remove(index) ?? panic("each member is ordered exactly once")
+        &out.push((member: members[index], package: ^package))
+    }
     Ok(out)
 }
 

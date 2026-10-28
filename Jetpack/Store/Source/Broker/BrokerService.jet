@@ -31,9 +31,8 @@ fn store_broker_connect_absent(failure: NetError) -> Bool Never! {
     }
 }
 
-fn store_broker_send(stream: UnixStream, bytes: [U8]) StoreError! {
-    writer := stream
-    net.unix_write_all_bytes(&writer, bytes) ?? return Err(store_broker_net_error(err))
+fn store_broker_send(stream: &UnixStream, bytes: [U8]) StoreError! {
+    net.unix_write_all_bytes(&stream, bytes) ?? return Err(store_broker_net_error(err))
 }
 
 // Rust `reuse_shared_entry`: import a published shared entry into the
@@ -45,8 +44,8 @@ fn store_reuse_shared_entry(verification: &StoreVerification, roots: HangarRoots
     if !files.exists(config.socket) -> return Ok(None)
     if sys.family() == "windows" -> return Err(store_broker_invalid("shared-store sockets are unsupported on this host"))
     found_stream :: store_broker_connect(config.socket)
-    stream :: found_stream ?? return Ok(None)
-    store_broker_send(stream, store_broker_encode_read_request(reference))
+    stream := found_stream ?? return Ok(None)
+    store_broker_send(&stream, store_broker_encode_read_request(reference))
     reader := BrokerWireReader.socket(stream)
     found_bytes :: store_broker_read_archive_response(&reader)
     bytes :: found_bytes ?? return Ok(None)
@@ -71,8 +70,8 @@ fn store_promote_shared_entry(verification: &StoreVerification, roots: HangarRoo
     found_credential :: store_broker_writer_credential(config)
     credential :: found_credential ?? return Ok(false)
     found_stream :: store_broker_connect(config.socket)
-    stream :: found_stream ?? return Ok(false)
-    store_broker_send(stream, store_broker_encode_write_request(binding, credential, archive))
+    stream := found_stream ?? return Ok(false)
+    store_broker_send(&stream, store_broker_encode_write_request(binding, credential, archive))
     reader := BrokerWireReader.socket(stream)
     store_broker_read_response(&reader)
 }
@@ -83,10 +82,10 @@ fn store_promote_shared_entry(verification: &StoreVerification, roots: HangarRoo
 fn store_serve_shared_store(verification: &StoreVerification, roots: HangarRoots) StoreError! {
     if sys.family() == "windows" -> return Err(store_broker_invalid("shared-store socket activation is unsupported on this host"))
     listener :: store_broker_activation_listener()
-    stream :: net.unix_accept(listener) ?? return Err(store_broker_net_error(err))
+    stream := net.unix_accept(listener) ?? return Err(store_broker_net_error(err))
     found_config :: store_broker_read_config(store_broker_admin_layout())
     config :: found_config ?? return Err(store_broker_invalid("shared-store broker is not installed"))
-    store_broker_serve_connection(&verification, stream, config)
+    store_broker_serve_connection(&verification, &stream, config)
 }
 
 // The one Unix listener the service manager handed over (Rust takes exactly
@@ -104,13 +103,13 @@ fn store_broker_peer_user(stream: UnixStream) -> Int StoreError! {
 
 // Rust `serve_shared_store_connection`: authorize the kernel-reported peer,
 // then promote one write or answer one read.
-fn store_broker_serve_connection(verification: &StoreVerification, stream: UnixStream, config: SharedStoreConfig) StoreError! {
+fn store_broker_serve_connection(verification: &StoreVerification, stream: &UnixStream, config: SharedStoreConfig) StoreError! {
     user :: store_broker_peer_user(stream)
-    store_broker_serve_peer(&verification, stream, config, user)
+    store_broker_serve_peer(&verification, &stream, config, user)
 }
 
 // Serve one connection whose peer is `user`.
-fn store_broker_serve_peer(verification: &StoreVerification, stream: UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
+fn store_broker_serve_peer(verification: &StoreVerification, stream: &UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
     shared :: HangarRoots.at(config.shared_root)
     key :: store_broker_trust_key(config)
     reader := BrokerWireReader.socket(stream)
@@ -119,14 +118,14 @@ fn store_broker_serve_peer(verification: &StoreVerification, stream: UnixStream,
             store_broker_authorize_peer(config, user, true, Val(header.binding), Val(header.credential))
             archive :: &reader.read_exact(header.length)
             store_broker_promote_staged_archive(&verification, shared, config, key, archive, header.binding)
-            store_broker_send(stream, store_broker_encode_response("ok"))
+            store_broker_send(&stream, store_broker_encode_response("ok"))
         }
         .Read(reference) -> {
             store_broker_authorize_peer(config, user, false, None, None)
-            entry :: store_find_by_reference(&verification, shared, reference) ?? return store_broker_send(stream, store_broker_encode_response("missing"))
+            entry :: store_find_by_reference(&verification, shared, reference) ?? return store_broker_send(&stream, store_broker_encode_response("missing"))
             store_verify_hangar_object(&verification, shared, entry) ?? return Err(StoreError.Other(err.what()))
             exported :: store_export_archive(&verification, shared, entry.id, true, Val(key))
-            store_broker_send(stream, store_broker_encode_archive_response(exported.bytes))
+            store_broker_send(&stream, store_broker_encode_archive_response(exported.bytes))
         }
     }
 }

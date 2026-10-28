@@ -170,10 +170,9 @@ fn cli_build_package_generation_body(verification: &StoreVerification, cache: &W
             }
         }
         index :: realized.len() - 1
-        current :: realized[index]
-        current.lease.validate()
-        if !cli_is_canonical_digest(current.entry.envelope.output_hash) -> return Err(CLIError.ProviderFacts("realized `{package.raw}` has no canonical output digest"))
-        leased_output :: current.lease.stable_path(current.entry.out)
+        realized[index].lease.validate()
+        if !cli_is_canonical_digest(realized[index].entry.envelope.output_hash) -> return Err(CLIError.ProviderFacts("realized `{package.raw}` has no canonical output digest"))
+        leased_output :: realized[index].lease.stable_path(realized[index].entry.out)
         realized[index].nodes = cli_collect_output_nodes(leased_output, package.raw)
     }
     groups := [String: [PackageOutputNode]]{}

@@ -144,8 +144,10 @@ fn store_reuse_verified_environment(verification: &StoreVerification, roots: Han
     }
     leases :: store_snapshot_leases_with_entries_unlocked(&verification, roots, selected, entries)
     realizations := [VerifiedRealization]{}
-    loop index_at in 0..<selected.len() {
-        &realizations.push(VerifiedRealization{entry: selected[index_at], source_state_value: SourceState.Cached, lease: leases[index_at]})
+    index_at := 0
+    loop lease in ^leases {
+        &realizations.push(VerifiedRealization{entry: selected[index_at], source_state_value: SourceState.Cached, lease: ^lease})
+        index_at += 1
     }
     Ok(Val(realizations))
 }

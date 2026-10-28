@@ -29,17 +29,18 @@ fn services_state_lock(project_dir: String) -[FS, Env, Time]> RuntimeLock Servic
 
 // Start `plan` if it is not already running. `env` composes the PATH the
 // project's realized packages live on, so a preset binary resolves.
-fn services_up_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+fn services_up_one(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
     if sys.get(SERVICES_SUPERVISOR_ENV) != None {
-        started :: services_start_one(host, project_dir, env, plan)
+        started :: services_start_one(host, project_dir, &env, plan)
         found :: started ?? return
-        services_monitor_service(host, found, project_dir, services_restart_env(env), plan)
+        restart_env := services_restart_env(env)
+        services_monitor_service(host, found, project_dir, &restart_env, plan)
         return
     }
     if host == ServiceHost.Platform || plan.restart != None || plan.watch.len() > 0 {
-        return services_spawn_service_supervisor(project_dir, env, plan)
+        return services_spawn_service_supervisor(project_dir, &env, plan)
     }
-    started :: services_start_one(host, project_dir, env, plan)
+    started :: services_start_one(host, project_dir, &env, plan)
     found :: started ?? return
     // `services up` is a supervisor hand-off: keep the child reaped without
     // making the caller wait for a long-lived service to exit.
@@ -54,12 +55,11 @@ fn services_reap_child(child: ^ProcessChild) -[Exec, Time.Wait]> {
 
 // Re-execute this program as the detached supervisor of `plan`, then wait
 // (bounded) until it publishes the service's state or its failure.
-fn services_spawn_service_supervisor(project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn services_spawn_service_supervisor(project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
     // The parent already loaded, realized, and trust-gated this exact plan;
     // the detached child must not prompt or replay a trust decision.
     spec := process.cmd([String]{sys.executable(), "services", "up", plan.name, "--trust", "--no-color"}).cwd(project_dir).detached()
-    shell_env := env
-    spec = &shell_env.apply_to(spec) ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err.message()}"))
+    spec = &env.apply_to(spec) ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err.message()}"))
     spec = spec.env(SERVICES_SUPERVISOR_ENV, "1")
     spec.spawn() ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err}"))
     dir :: services_service_dir(project_dir, plan.name)
@@ -85,11 +85,11 @@ fn services_restart_env(env: ShellEnv) -> ShellEnv Never! {
     }
 }
 
-fn services_start_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> StartedService? ServicesError! {
-    services_start_one_with_recovery(host, project_dir, env, plan, "none")
+fn services_start_one(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> StartedService? ServicesError! {
+    services_start_one_with_recovery(host, project_dir, &env, plan, "none")
 }
 
-fn services_start_one_with_recovery(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan, recovery: String) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> StartedService? ServicesError! {
+fn services_start_one_with_recovery(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan, recovery: String) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> StartedService? ServicesError! {
     guard :: services_state_lock(project_dir)
     if !plan.enable -> return Ok(None)
     resolved := services_resolve(project_dir, plan)
@@ -119,7 +119,7 @@ fn services_start_one_with_recovery(host: ServiceHost, project_dir: String, env:
     if services_write_lifecycle(resolved.dir, lifecycle) == .Err(error) {
         return Err(ServicesError.new("couldn't publish service lifecycle state: {error}"))
     }
-    if services_launch(project_dir, env, plan, &resolved, authority, &lifecycle) == {
+    if services_launch(project_dir, &env, plan, &resolved, authority, &lifecycle) == {
         .Ok(started) -> Ok(started)
         .Err(error) -> {
             services_record_start_failure(resolved.dir, &lifecycle, error.message)
@@ -130,10 +130,10 @@ fn services_start_one_with_recovery(host: ServiceHost, project_dir: String, env:
 
 // Reserve ports and sockets, prepare preset state, spawn, and publish the
 // generation's ports, identity, and running lifecycle, in that order.
-fn services_launch(project_dir: String, env: ShellEnv, plan: DevServicePlan, resolved: &ServiceResolved, authority: ServiceAuthority, lifecycle: &LifecycleFacts) -[FS, Env, Exec, Net, Rand, Time.Wait]> StartedService? ServicesError! {
+fn services_launch(project_dir: String, env: &ShellEnv, plan: DevServicePlan, resolved: &ServiceResolved, authority: ServiceAuthority, lifecycle: &LifecycleFacts) -[FS, Env, Exec, Net, Rand, Time.Wait]> StartedService? ServicesError! {
     allocated :: services_allocate_ports(resolved.ports)
     sockets :: services_prepare_sockets(project_dir, plan.sockets)
-    spec :: services_service_spec(env, plan, &resolved, authority, allocated.ports, sockets.paths) ?? {
+    spec :: services_service_spec(&env, plan, &resolved, authority, allocated.ports, sockets.paths) ?? {
         ^sockets.abandon()
         return Err(err)
     }
@@ -174,7 +174,7 @@ fn services_launch(project_dir: String, env: ShellEnv, plan: DevServicePlan, res
 
 // The spawn specification: the preset rebuilt for allocated ports, preset
 // state prepared, logs opened, and the activation environment composed.
-fn services_service_spec(env: ShellEnv, plan: DevServicePlan, resolved: &ServiceResolved, authority: ServiceAuthority, allocated_ports: [Int], socket_paths: [String]) -[FS, Env, Exec, Time.Wait]> ProcessSpec ServicesError! {
+fn services_service_spec(env: &ShellEnv, plan: DevServicePlan, resolved: &ServiceResolved, authority: ServiceAuthority, allocated_ports: [Int], socket_paths: [String]) -[FS, Env, Exec, Time.Wait]> ProcessSpec ServicesError! {
     preset :: services_catalog(plan.name)
     if allocated_ports != resolved.ports {
         resolved.ports = allocated_ports
@@ -185,7 +185,7 @@ fn services_service_spec(env: ShellEnv, plan: DevServicePlan, resolved: &Service
         }
     }
     if plan.run == None && preset == .Val(kind) {
-        kind.prepare(if resolved.ports.len() > 0 -> resolved.ports[0] else -> kind.port(), resolved.data_dir, env)
+        kind.prepare(if resolved.ports.len() > 0 -> resolved.ports[0] else -> kind.port(), resolved.data_dir, &env)
     }
     services_remove_quiet(services_stopping_path(resolved.dir))
     // Create (truncate) both logs up front, as Rust's `File::create` did, so
@@ -218,8 +218,7 @@ fn services_service_spec(env: ShellEnv, plan: DevServicePlan, resolved: &Service
     }
     &argv.extend(services_log_redirect_argv(services_stdout_path(resolved.dir), services_stderr_path(resolved.dir), resolved.run))
     spec := process.cmd(argv).cwd(resolved.data_dir)
-    shell_env := env
-    spec = &shell_env.apply_to(spec) ?? return Err(ServicesError.new("couldn't prepare service `{plan.name}`: {err.message()}"))
+    spec = &env.apply_to(spec) ?? return Err(ServicesError.new("couldn't prepare service `{plan.name}`: {err.message()}"))
     spec = spec.env_remove(SERVICES_SUPERVISOR_ENV)
     if authority.unit() == None {
         loop name in names -> spec = spec.env(name, service_env[name])
@@ -289,7 +288,7 @@ fn services_record_start_failure(dir: String, lifecycle: &LifecycleFacts, error:
 // Supervise one service until it stops: restart on exit per the restart
 // policy, restart after a debounced watched-file change, and hand every
 // terminal outcome to `services_finish_supervisor`.
-fn services_monitor_service(host: ServiceHost, first: StartedService, project_dir: String, env: ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+fn services_monitor_service(host: ServiceHost, first: StartedService, project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
     started := first
     budget :: services_restart_budget(plan)
     watched := [String]{}
@@ -345,7 +344,7 @@ fn services_monitor_service(host: ServiceHost, first: StartedService, project_di
                 .Ok(found) -> if found == .Val(facts) && facts.phase == ServicePhase.Ready -> "post-ready-crash" else -> "restart"
                 .Err(_) -> "restart"
             }
-            if !services_restart_generation(host, project_dir, env, plan, recovery, watched, &started, &stamps, "service restart did not produce a running process") -> return
+            if !services_restart_generation(host, project_dir, &env, plan, recovery, watched, &started, &stamps, "service restart did not produce a running process") -> return
             next
         }
         if watched.len() > 0 {
@@ -377,7 +376,7 @@ fn services_monitor_service(host: ServiceHost, first: StartedService, project_di
                 started.child.wait().drop("the replaced child is reaped")
                 restarts += 1
                 time.sleep(time.duration_ms(services_restart_delay(budget.backoff_ms, budget.exponential, restarts)))
-                if !services_restart_generation(host, project_dir, env, plan, "watch-restart", watched, &started, &stamps, "service watch restart did not produce a running process") -> return
+                if !services_restart_generation(host, project_dir, &env, plan, "watch-restart", watched, &started, &stamps, "service watch restart did not produce a running process") -> return
                 next
             }
         }
@@ -387,8 +386,8 @@ fn services_monitor_service(host: ServiceHost, first: StartedService, project_di
 
 // Start the next generation in place of `started`; false after a terminal
 // outcome was handed to `services_finish_supervisor`.
-fn services_restart_generation(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan, recovery: String, watched: [String], started: &StartedService, stamps: &[String], missing: String) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> Bool Never! {
-    if services_start_one_with_recovery(host, project_dir, env, plan, recovery) == {
+fn services_restart_generation(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan, recovery: String, watched: [String], started: &StartedService, stamps: &[String], missing: String) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> Bool Never! {
+    if services_start_one_with_recovery(host, project_dir, &env, plan, recovery) == {
         .Ok(found) -> {
             if found == .Val(next_generation) {
                 started = next_generation

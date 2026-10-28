@@ -170,7 +170,7 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
         cli_configure_project_catalog(theme, roots, project_dir, plan, &flags) ?? return cli_exit_for(theme, err)
     }
     cli_env_timing_mark(timing, ready_started, "catalog-configured")
-    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, RealizeScope.Project, true, warm, !warm_reused) ?? return cli_exit_for(theme, err)
+    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, RealizeScope.Project, true, ^warm, !warm_reused) ?? return cli_exit_for(theme, err)
     env := composed.env
     stats :: composed.stats
     hook :: fingerprints.hook
@@ -184,7 +184,7 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
         return EXIT_OK
     }
     entry :: cli_find_project_entry(project_dir)
-    cli_run_lifecycle_hooks(&verification, &cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
+    cli_run_lifecycle_hooks(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
     cli_env_timing_mark(timing, ready_started, "lifecycle-hooks")
     cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     cli_env_timing_mark(timing, ready_started, "announced")
@@ -380,8 +380,8 @@ fn cli_cmd_env_test(verification: &StoreVerification, cache: &WorkspaceDeclarati
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
     env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     entry :: cli_find_project_entry(project_dir)
-    cli_run_lifecycle_hooks_clean(&verification, &cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
-    cli_run_lifecycle_hooks_clean(&verification, &cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.checks, "check") ?? return cli_exit_for(theme, err)
+    cli_run_lifecycle_hooks_clean(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
+    cli_run_lifecycle_hooks_clean(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, plan.environment.lifecycle.checks, "check") ?? return cli_exit_for(theme, err)
     if parsed.command == .Val(command) {
         if command.len() > 0 -> return &env.run_clean_command(command)
     }

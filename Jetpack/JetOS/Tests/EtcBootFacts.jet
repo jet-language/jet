@@ -177,9 +177,9 @@ fn jetos_identity_test_realized(verification: &StoreVerification, root: String, 
     }
     assert_eq(jetos_missing_kernel_source_files(package), None)
     packages := [JetOSRealizedPackage]{package}
-    selected :: jetos_cachyos_kernel_entry(packages) ?? panic("selected CachyOS")
-    assert_eq(selected.entry.reference, "kernel@jetpack")
-    if jetos_cachyos_kernel_entry([JetOSRealizedPackage]{}) == {
+    selected :: jetos_cachyos_kernel_index(packages) ?? panic("selected CachyOS")
+    assert_eq(packages[selected].entry.reference, "kernel@jetpack")
+    if jetos_cachyos_kernel_index([JetOSRealizedPackage]{}) == {
         .None -> {}
         .Val(_) -> panic("empty realization has no CachyOS entry")
     }
@@ -191,7 +191,7 @@ fn jetos_identity_test_realized(verification: &StoreVerification, root: String, 
     assert_eq(jetos_boot_artifact(unprojected, [String]{"vmlinuz"}), None)
     assert_eq(jetos_missing_kernel_source_files(unprojected), None)
     unprojected_packages := [JetOSRealizedPackage]{unprojected}
-    if jetos_cachyos_kernel_entry(unprojected_packages) == {
+    if jetos_cachyos_kernel_index(unprojected_packages) == {
         .None -> {}
         .Val(_) -> panic("other package is not the CachyOS kernel")
     }

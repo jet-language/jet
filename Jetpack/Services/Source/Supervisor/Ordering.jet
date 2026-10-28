@@ -69,10 +69,10 @@ fn services_dependency_names(plan: DevServicePlan) -> [String] Never! {
 }
 
 // Start and wait for every enabled service in dependency order.
-fn services_up_ordered(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], timeout: Duration) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [String] ServicesError! {
+fn services_up_ordered(host: ServiceHost, project_dir: String, env: &ShellEnv, plans: [DevServicePlan], timeout: Duration) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [String] ServicesError! {
     selected := [Int]{}
     loop index in 0..<plans.len() -> &selected.push(index)
-    started :: services_up_ordered_with(host, project_dir, env, plans, selected, timeout, services_no_before_start)
+    started :: services_up_ordered_with(host, project_dir, &env, plans, selected, timeout, services_no_before_start)
     names := [String]{}
     loop index in started -> &names.push(plans[index].name)
     Ok(names)
@@ -81,7 +81,7 @@ fn services_up_ordered(host: ServiceHost, project_dir: String, env: ShellEnv, pl
 // Start selected enabled services in one dependency-first lifecycle. The
 // hook is the only caller-owned step; startup, readiness, and rollback stay
 // here for both the CLI and dev entry points.
-fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: &ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
     order :: services_dependency_order(plans)
     chosen :: services_selected_dependency_order(plans, order, selected)
     started := [Int]{}
@@ -90,7 +90,7 @@ fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: ShellEn
         plan :: plans[index]
         was_running :: services_health_one_with_env(project_dir, Val(env), plan).is_running()
         if before_start(plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
-        if services_up_one(host, project_dir, env, plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        if services_up_one(host, project_dir, &env, plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
         // A restart policy does not weaken readiness: the supervisor owns
         // retries, but dependents still wait for the same healthy state.
         if !services_wait_healthy_with_env(project_dir, Val(env), plan, timeout) {
@@ -153,17 +153,17 @@ fn services_down_ordered(host: ServiceHost, project_dir: String, plans: [DevServ
 }
 
 // Restart one service under its declared bounded restart budget.
-fn services_restart_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
-    _ :: services_restart_ordered_with(host, project_dir, env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
+fn services_restart_one(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+    _ :: services_restart_ordered_with(host, project_dir, &env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
 }
 
 // Restart a dependency-first selection through the `services up` lifecycle:
 // dependents stop before dependencies, then everything starts in order.
-fn services_restart_ordered_with(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+fn services_restart_ordered_with(host: ServiceHost, project_dir: String, env: &ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
     order :: services_dependency_order(plans)
     chosen :: services_selected_dependency_order(plans, order, selected)
     services_down_ordered(host, project_dir, plans, chosen)
-    services_up_ordered_with(host, project_dir, env, plans, chosen, timeout, before_start)
+    services_up_ordered_with(host, project_dir, &env, plans, chosen, timeout, before_start)
 }
 
 // The selection in dependency order; every selected service must be enabled
@@ -197,15 +197,15 @@ fn services_plan_index(plans: [DevServicePlan], name: String) -> Int? Never! {
 
 // Check watched files once; restart only after the recorded fingerprint
 // changes. The first call records a baseline and does not restart.
-fn services_watch_once(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> Bool ServicesError! {
-    changed :: services_watch_once_ordered_with(host, project_dir, env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
+fn services_watch_once(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> Bool ServicesError! {
+    changed :: services_watch_once_ordered_with(host, project_dir, &env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
     Ok(changed.len() > 0)
 }
 
 // Observe and, when needed, restart a dependency-complete selection. A
 // changed baseline is committed only after the ordered restart succeeds, so
 // a failed restart stays retryable.
-fn services_watch_once_ordered_with(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+fn services_watch_once_ordered_with(host: ServiceHost, project_dir: String, env: &ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
     order :: services_dependency_order(plans)
     chosen :: services_selected_dependency_order(plans, order, selected)
     watched := [Int]{}
@@ -239,7 +239,7 @@ fn services_watch_once_ordered_with(host: ServiceHost, project_dir: String, env:
         loop index in watched -> services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
         return Ok(changed)
     }
-    services_restart_ordered_with(host, project_dir, env, plans, chosen, timeout, before_start)
+    services_restart_ordered_with(host, project_dir, &env, plans, chosen, timeout, before_start)
     loop index in changed -> services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
     Ok(changed)
 }
@@ -249,11 +249,11 @@ fn services_watch_once_ordered_with(host: ServiceHost, project_dir: String, env:
 // from the start command until the declared `ready:` passes; process and
 // port liveness are not readiness evidence. Exactly `trials` samples, in
 // nanoseconds.
-fn services_measure_readiness(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan, trials: Int) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
-    services_measure_readiness_with_timeout(host, project_dir, env, plan, trials, time.duration_seconds(10))
+fn services_measure_readiness(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan, trials: Int) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+    services_measure_readiness_with_timeout(host, project_dir, &env, plan, trials, time.duration_seconds(10))
 }
 
-fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan, trials: Int, timeout: Duration) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan, trials: Int, timeout: Duration) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
     resolved :: services_resolve(project_dir, plan)
     if resolved.ready == None && resolved.ready_probe == None {
         return Err(ServicesError.new("ServiceProbe `{plan.name}` has no declared `ready:` event; process and port liveness are not readiness evidence"))
@@ -263,7 +263,7 @@ fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: Strin
     samples := [Int]{}
     loop trial in 0..<trials {
         started :: time.instant()
-        if services_up_one(host, project_dir, env, plan) == .Err(error) {
+        if services_up_one(host, project_dir, &env, plan) == .Err(error) {
             return Err(ServicesError.new("ServiceProbe trial {trial}: failed to start: {error.message}"))
         }
         if !services_wait_healthy_with_env(project_dir, Val(env), plan, timeout) {

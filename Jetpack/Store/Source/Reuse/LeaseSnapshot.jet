@@ -182,10 +182,10 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     loop output in output_sources {
         stable := output.lease_root
         if !store_reuse_same_path(output.lease_root, snapshot_root) && sys.name() == "linux" {
-            binding :: store_reuse_binding_for(opened.bindings, output.lease_root) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
+            at :: store_reuse_binding_index(opened.bindings, output.lease_root) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
             // Symlink-root objects have no handle; the canonical source path
             // is the lease root and its target is witnessed at validation.
-            if binding.handle != None -> stable = store_lease_descriptor_path(binding.slot)
+            if opened.bindings[at].handle != None -> stable = store_lease_descriptor_path(opened.bindings[at].slot)
         }
         &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, lease_root: stable})
     }
@@ -264,9 +264,9 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     })
 }
 
-fn store_reuse_binding_for(bindings: [NixProjectionBinding], source: String) -> NixProjectionBinding? Never! {
-    loop binding in bindings {
-        if store_reuse_same_path(binding.source, source) -> return Val(binding)
+fn store_reuse_binding_index(bindings: [NixProjectionBinding], source: String) -> Int? Never! {
+    loop index in 0..<bindings.len() {
+        if store_reuse_same_path(bindings[index].source, source) -> return Val(index)
     }
     None
 }

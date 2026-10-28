@@ -23,8 +23,8 @@ struct ProfileExecutableProof {
 // Rust `copy_open_profile_file`: stream the leased handle into a freshly
 // created destination (exclusive create), hashing as it copies, apply the
 // source mode, sync, and re-hash the destination.
-fn store_reuse_copy_open_profile_file(source: FileReader, destination: String) -> ProfileExecutableProof IOError! {
-    input := source
+fn store_reuse_copy_open_profile_file(source: ^FileReader, destination: String) -> ProfileExecutableProof IOError! {
+    input := ^source
     &input.seek(0)
     info :: input.stat()
     if !info.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile executable is not a regular file")}))

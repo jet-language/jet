@@ -287,17 +287,16 @@ fn env_overlay_commit_staged(source: OverlayAuthority, stage: &OverlayStage, aft
     committed := [String]{}
     keys :: stage.sorted_keys()
     loop key in keys {
-        entry :: stage.entries[key]
-        if entry.output == entry.original -> next
-        parent :: source.resolver.directory_handle(entry.parent)
-        if env_overlay_write_atomically(entry, root_handle, parent, entry.output, true) == .Err(error) {
+        if stage.entries[key].output == stage.entries[key].original -> next
+        parent :: source.resolver.directory_handle(stage.entries[key].parent)
+        if env_overlay_write_atomically(stage.entries[key], root_handle, parent, stage.entries[key].output, true) == .Err(error) {
             rollback_errors := [String]{}
             at := committed.len() - 1
             loop at >= 0 {
-                done :: stage.entries[committed[at]]
-                rollback_parent :: source.resolver.directory_handle(done.parent)
-                if env_overlay_write_atomically(done, root_handle, rollback_parent, done.original, false) == .Err(rollback) {
-                    &rollback_errors.push("{done.path}: {rollback}")
+                done_key :: committed[at]
+                rollback_parent :: source.resolver.directory_handle(stage.entries[done_key].parent)
+                if env_overlay_write_atomically(stage.entries[done_key], root_handle, rollback_parent, stage.entries[done_key].original, false) == .Err(rollback) {
+                    &rollback_errors.push("{stage.entries[done_key].path}: {rollback}")
                 }
                 at -= 1
             }
@@ -305,7 +304,7 @@ fn env_overlay_commit_staged(source: OverlayAuthority, stage: &OverlayStage, aft
             return Err(OverlayError.IO("could not commit patched file `{stage.entries[key].path}`: {error}{suffix}"))
         }
         &committed.push(key)
-        after_commit(entry.path)
+        after_commit(stage.entries[key].path)
     }
 }
 

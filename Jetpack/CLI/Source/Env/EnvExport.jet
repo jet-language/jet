@@ -167,15 +167,15 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
             return Err(keep)
         }
     }
-    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, warm, !warm_reused) ?? return Err(keep)
-    env :: composed.env
+    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, ^warm, !warm_reused) ?? return Err(keep)
+    env := composed.env
     // Reconcile the source graph after realization. If a prompt races an
     // edit, keep the prior activation and let the next prompt retry the new
     // hash instead of emitting a plan assembled from mixed revisions.
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     plan_hash :: target_hash ?? ""
     entry :: cli_find_project_entry(root)
-    cli_run_lifecycle_hooks_silent(&verification, &cache, theme, parsed, roots, root, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
+    cli_run_lifecycle_hooks_silent(&verification, &cache, theme, parsed, roots, root, entry, &env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     script := ""
     if active -> script = env_hook_render_unload(kind, base_path)

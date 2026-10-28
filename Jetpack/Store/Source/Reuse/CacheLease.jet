@@ -255,11 +255,15 @@ struct CacheLease {
         Ok(ProfileInstallReceipt{store_root: self.store_root, package: self.package, version: self.version, reference: self.reference, output_hash: self.expected_digest, executable_members: members})
     }
 
+    // The copy reads the member through a fresh handle on the very file the
+    // lease holds, so the lease's own descriptor and offset stay untouched.
     fn copy_profile_executable(self, member: String, destination: String) -> ProfileExecutableProof IOError! {
         self.validate()
-        source :: store_lease_find_member(self.executables, member) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
-        file :: source.file ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
-        store_reuse_copy_open_profile_file(file, destination)
+        index :: store_lease_member_index(self.executables, member) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        if self.executables[index].file == None -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        input :: files.open(self.executable_file_path(index))
+        if input.stat().id != self.executables[index].id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))
+        store_reuse_copy_open_profile_file(^input, destination)
     }
 
     fn require_consumable(self) IOError! {
@@ -274,8 +278,8 @@ struct CacheLease {
             .Err(_) -> return None
             else -> {}
         }
-        member :: self.executable_file(name) ?? return None
-        Val(self.executable_file_path(member))
+        index :: self.executable_index(name) ?? return None
+        Val(self.executable_file_path(index))
     }
 
     // Resolve a caller-supplied executable only when it is an exact lease
@@ -293,8 +297,8 @@ struct CacheLease {
     fn executable_for_command_at(self, requested: String, caller_dir: String) -> String? IOError! {
         self.require_consumable()
         resolved :: if files.is_abs(requested) -> requested else -> files.join(caller_dir, requested)
-        if self.executable_file_at(requested, resolved) == {
-            .Val(member) -> return Ok(Val(self.executable_file_path(member)))
+        if self.executable_index_at(requested, resolved) == {
+            .Val(index) -> return Ok(Val(self.executable_file_path(index)))
             .None -> {}
         }
         resolved_paths :: store_reuse_path_variants(resolved)
@@ -321,11 +325,11 @@ struct CacheLease {
         Ok(None)
     }
 
-    fn executable_file(self, requested: String) -> SnapshotFile? Never! {
-        self.executable_file_at(requested, requested)
+    fn executable_index(self, requested: String) -> Int? Never! {
+        self.executable_index_at(requested, requested)
     }
 
-    fn executable_file_at(self, requested: String, requested_path: String) -> SnapshotFile? Never! {
+    fn executable_index_at(self, requested: String, requested_path: String) -> Int? Never! {
         if requested == "" || requested.contains("/") || requested.contains("\\") {
             member :: store_reuse_file_name(requested_path) ?? return None
             bin :: self.bin_relative ?? return None
@@ -336,16 +340,16 @@ struct CacheLease {
                 .None -> false
             }
             if !matches_bin_output && !matches_projected && !matches_wrapper -> return None
-            return store_lease_find_member(self.executables, member)
+            return store_lease_member_index(self.executables, member)
         }
-        store_lease_find_member(self.executables, requested)
+        store_lease_member_index(self.executables, requested)
     }
 
-    fn executable_file_path(self, member: SnapshotFile) -> String Never! {
-        if sys.family() != "windows" -> return store_lease_descriptor_path(member.slot)
+    fn executable_file_path(self, index: Int) -> String Never! {
+        if sys.family() != "windows" -> return store_lease_descriptor_path(self.executables[index].slot)
         bin :: self.bin_relative ?? panic("executable member has a bin-relative path")
         root :: self.projected_bin_root ?? panic("executable member has a projected bin root")
-        files.join(files.join(root, bin), member.relative)
+        files.join(files.join(root, bin), self.executables[index].relative)
     }
 
     fn projected_executable(self, name: String) -> String? Never! {
@@ -355,7 +359,7 @@ struct CacheLease {
         }
         separator :: if sys.family() == "windows" -> "\\" else -> "/"
         if name.contains(separator) -> return None
-        if store_lease_find_member(self.executables, name) == None -> return None
+        if store_lease_member_index(self.executables, name) == None -> return None
         root :: self.projected_bin_root ?? return None
         bin :: self.bin_relative ?? return None
         Val(files.join(files.join(root, bin), name))
@@ -382,8 +386,8 @@ struct CacheLease {
         }
         if at_bin_output && unix && store_lease_parent_is(relative, self.bin_relative) {
             name :: store_reuse_file_name(relative) ?? ""
-            if store_lease_find_member(self.executables, name) == {
-                .Val(member) -> return Ok(store_lease_descriptor_path(member.slot))
+            if store_lease_member_index(self.executables, name) == {
+                .Val(index) -> return Ok(store_lease_descriptor_path(self.executables[index].slot))
                 .None -> {}
             }
         }
@@ -514,9 +518,9 @@ fn store_lease_lock_held(path: String) -> Bool Never! {
     }
 }
 
-fn store_lease_find_member(members: [SnapshotFile], name: String) -> SnapshotFile? Never! {
-    loop member in members {
-        if member.relative == name -> return Val(member)
+fn store_lease_member_index(members: [SnapshotFile], name: String) -> Int? Never! {
+    loop index in 0..<members.len() {
+        if members[index].relative == name -> return Val(index)
     }
     None
 }
