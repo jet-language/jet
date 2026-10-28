@@ -90,7 +90,7 @@ fn ir_dyn_text(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
 // the line start (DynRuntime.rs).
 fn ir_dyn_checked(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, symbol: String, operands: [Int], mask: [Bool], location: TPanicLoc, span: Span) -> Int Never! {
     string_row :: ir_string_row(&m)
-    result_ty :: Type.Result{ok: ir_subst(m, ty), err: Type.String}
+    result_ty :: Type.Result{ok: ty, err: Type.String}
     outcome :: ir_route(&m, p, &b, symbol, operands, mask, result_ty, span)
     if ir_failed(b) || outcome < 0 -> return -1
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -294,7 +294,8 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
 // jet_rt_codec_decode_<scalar>, which borrows the tree.
 fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
-    concrete :: ir_subst(m, target)
+    concrete :: ir_fact(p, &b, target, span)
+    if ir_failed(b) -> return -1
     tree_arg :: ir_codec_arg(receiver)
     if ir_codec_impl(p, concrete, "Decode", "decode") == .Val(found) -> return ir_call(&m, p, &b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     if ir_codec_decode_helper(p, concrete) == .Val(helper) {
@@ -304,15 +305,14 @@ fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     scalar :: ir_codec_scalar(concrete) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
     tree :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || tree < 0 -> return -1
-    result_ty :: ir_subst(m, ty)
-    ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, result_ty, span)
+    ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
 }
 
 // `FieldError.under(segment, inner)`: Core/Encoding/Encoding.jet
 // __decode_under frames every error of the inner Result under `segment` and
 // passes a success through.
 fn ir_decode_under(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
-    success :: if ir_untag(ir_subst(m, ty)) == {
+    success :: if ir_untag(ty) == {
         .Result(ok, _) -> ok.copy()
         else -> { return ir_fail_slot(&b, span, "FieldError.under as {ir_type_name(ty)}") }
     }
@@ -378,14 +378,14 @@ fn ir_codec_scalar(target: Type) -> String? Never! {
 // of its encoded values. The builtin and typed codec routes have no lowering
 // here.
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
-    concrete :: ir_subst(m, ir_ty(p, b, receiver))
+    concrete :: ir_ty(p, b, receiver)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
     if ir_codec_impl(p, concrete, "Encode", "encode") == .Val(found) {
         self_slot :: ir_expr(&m, p, &b, receiver)
         if ir_failed(b) || self_slot < 0 -> return -1
         return ir_call(&m, p, &b, found.key, found.args, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
     }
-    if ir_dyn_def(p, ir_subst(m, ty)) != None {
+    if ir_dyn_def(p, ty) != None {
         receiver_node :: ir_body_node(p, b, receiver)
         typed :: ir_node(&b, concrete, receiver_node.kind.copy(), receiver_node.span)
         if ir_untag(concrete) == .Map(map_key, _, _) {
@@ -400,7 +400,7 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         .String | .Char -> "Text"
         else -> ""
     }
-    if variant == "" || ir_dyn_def(p, ir_subst(m, ty)) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
+    if variant == "" || ir_dyn_def(p, ty) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
     slot :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || slot < 0 -> return -1
     payload := slot
@@ -428,21 +428,21 @@ fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
         ir_scope_close(&m, &b)
         return -1
     }
-    source_local :: checked_generated_local("encode_source_{source}", span)
+    value_ty :: ir_ty(p, b, value)
+    source_local :: checked_generated_local("encode_source_{source}", span, value_ty)
     source_owned :: b.fresh[source] && ir_has_drop(m, b, source)
     &b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
     b.fresh[source] = false
     // The item List leaves the scope as the payload: its binding never owns it.
     output :: ir_list_empty(&m, &b, output_row)
     b.fresh[output] = false
-    output_local :: checked_generated_local("encode_output_{output}", span)
+    output_local :: checked_generated_local("encode_output_{output}", span, output_ty)
     &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
-    item_local :: checked_user_local("encode_item_{output}", span)
+    item_local :: checked_user_local("encode_item_{output}", span, element)
     item_expr :: ir_node(&b, element, NodeKind.Local{local: item_local}, span)
     encoded :: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
     output_expr :: ir_node(&b, output_ty, NodeKind.Local{local: output_local}, span)
     push :: ir_node(&b, Type.Named{name: "Unit"}, NodeKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [Int]{encoded}}, span)
-    value_ty :: ir_ty(p, b, value)
     source_expr :: ir_node(&b, value_ty, NodeKind.Local{local: source_local}, span)
     push_stmt :: ir_stmt_node(&b, StmtKind.ExprStmt{value: push, span: span})
     walk :: ir_stmt_node(&b, StmtKind.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [Int]{push_stmt}, span: span})

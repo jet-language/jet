@@ -246,9 +246,8 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `helper_errors` the message of a helper whose body failed (an index into
 // `helper_messages`), by helper key, which every later use reports again;
 // `trait_keys` a boxed trait value's
-// payload key by concrete type identity (BuildTraits.jet ir_trait_key);
-// `subst_names`/`subst_types` the type parameters of the instance being
-// built and their arguments. `stop_points`: calls that can deliver a
+// payload key by concrete type identity (BuildTraits.jet ir_trait_key).
+// `stop_points`: calls that can deliver a
 // runtime stop are followed by a stop check (Build.jet ir_stop_check); the
 // runtime library manages its own stops and has none. `debug_directory`:
 // the compilation directory the image's DWARF records ("": the working
@@ -287,14 +286,12 @@ struct IRModule {
     helper_errors: NameRows
     helper_messages: [String]
     trait_keys: NameRows
-    subst_names: [String]
-    subst_types: [Type]
     stop_points: Bool{false}
     debug_directory: String{""}
 }
 
 fn ir_module_new() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}, trait_keys: name_rows(), subst_names: [String]{}, subst_types: [Type]{}}
+    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}, trait_keys: name_rows()}
 }
 
 fn ir_kind_name(kind: IRTypeKind) -> String Never! {

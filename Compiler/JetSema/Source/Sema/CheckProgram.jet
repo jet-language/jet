@@ -2045,7 +2045,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
                 }
             }
         }
-        local := checked_symbol_local(func.params[param_index].name, func.params[param_index].name_span, param_symbol.id)
+        local := checked_symbol_local(func.params[param_index].name, func.params[param_index].name_span, param_symbol.id, parameter_ty)
         local.mutable = param_mutable
         if !sema_function_explicit_receiver(function_kind, param_index, func.params[param_index]) {
             public_label :: func.params[param_index].public_label.map((label) -> label.name) ?? func.params[param_index].name
@@ -3586,7 +3586,9 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
         rewritten := ^taken ?? panic("a checked Close method lost its lowered function")
         raw_return :: Type.Named{name: "Unit"}
         rewritten.ret = Val(raw_return)
-        rewritten.failure_carrier = sema_failure_carrier(Val(raw_return))
+        failure :: sema_failure_carrier(Val(raw_return))
+        sema_body_fact_return(&rewritten.tree, raw_return, failure)
+        rewritten.failure_carrier = failure
         checked.value = Val(^rewritten)
     }
     position :: functions.len()
@@ -8227,7 +8229,9 @@ fn sema_failure_reconcile_infallible(modules: &[SemaGraphModuleResult], projecte
             if modules[module_index].functions[function_index].ret == .Val(.Result(ok, _)) {
                 ret :: Type.Result{ok: ok, err: Type.Named{name: "Never"}}
                 modules[module_index].functions[function_index].ret = Val(ret)
-                modules[module_index].functions[function_index].failure_carrier = sema_failure_carrier(Val(ret))
+                failure :: sema_failure_carrier(Val(ret))
+                sema_body_fact_return(&modules[module_index].functions[function_index].tree, ret, failure)
+                modules[module_index].functions[function_index].failure_carrier = failure
             }
         }
         loop fact_index in 0..<modules[module_index].call_facts.len() {

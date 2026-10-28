@@ -158,7 +158,7 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
         ir_emit(&b.f, IROp.Store, -1, boxed, 0, zero, b.line)
         ir_emit(&b.f, IROp.Store, -1, boxed, 8, zero, b.line)
         ir_emit(&b.f, IROp.Store, -1, boxed, 16, zero, b.line)
-        ir_bind_local(&m, p, &b, local, boxed)
+        ir_bind_local(&m, p, &b, local, boxed, span)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction {local.name} without its binding")
         handle_slot = binding.slot
     }
@@ -166,8 +166,8 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
     if stm != None {
         stm_row :: ir_stm_row(&m)
         state :: ir_runtime(&m, &b, "jet_rt_native_stm_begin", [Int]{}, stm_row)
-        local :: checked_generated_local("jet_stm_{b.f.slot_type.len()}", span)
-        ir_bind_local(&m, p, &b, local, state)
+        local :: checked_generated_local("jet_stm_{b.f.slot_type.len()}", span, m.types[stm_row].ty.copy())
+        ir_bind_local(&m, p, &b, local, state, span)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction Stm without its binding")
         stm_slot = binding.slot
     }
@@ -252,7 +252,9 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
     ty :: m.types[value_row].ty.copy()
     saved_ty := ty.copy()
     value := -1
-    if snapshot.rollback_type == .Val(owner) {
+    rollback :: if snapshot.rollback_type == .Val(written) -> Val(ir_fact(p, &b, written, span)) else -> Type?{None}
+    if ir_failed(b) -> return None
+    if rollback == .Val(owner) {
         method :: snapshot.snapshot_method ?? {
             ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
             return None
@@ -278,9 +280,9 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
         ir_fail(&b, span, "transaction snapshot of {snapshot.local.name} without a value")
         return None
     }
-    saved :: checked_generated_local("jet_txn_snapshot_{value}", span)
-    ir_bind_local(&m, p, &b, saved, value)
-    Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: snapshot.rollback_type, restore: snapshot.restore_method})
+    saved :: checked_generated_local("jet_txn_snapshot_{value}", span, m.types[b.f.slot_type[value]].ty.copy())
+    ir_bind_local(&m, p, &b, saved, value, span)
+    Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: rollback, restore: snapshot.restore_method})
 }
 
 // `local.<method>(args)` of its Rollback implementation, typed by the

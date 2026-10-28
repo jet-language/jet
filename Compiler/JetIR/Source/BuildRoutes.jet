@@ -366,14 +366,13 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
 // `capacity` elements, or the try_reserve `Err(AllocError)`.
 fn ir_list_try_with_capacity(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "List.try_with_capacity with {args.len()} arguments")
-    list_ty :: if ir_untag(ir_subst(m, ty)) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}") }
+    list_ty :: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}") }
     list_row :: ir_value_type(&m, p, list_ty) ?? return ir_type_fail(&b, span, list_ty)
     capacity :: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || capacity < 0 -> return -1
     list :: ir_list_empty(&m, &b, list_row)
     element :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}")
-    subst_ty :: ir_subst(m, ty)
-    ir_list_try_reserve(&m, p, &b, subst_ty, list, element, capacity, list, span)
+    ir_list_try_reserve(&m, p, &b, ty, list, element, capacity, list, span)
 }
 
 // `xs.remove(value)` (the first equal element, None when there is none) and
@@ -452,7 +451,11 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     if operation == .ListTryWithCapacity -> return ir_list_try_with_capacity(&m, p, &b, ty, args, span)
     if operation == .ViewNew(line) -> return ir_view_new(&m, p, &b, ty, receiver, args, line, span)
     if operation == .OptionZip(_) -> return ir_option_zip(&m, p, &b, ty, receiver, args, span)
-    if operation == .Zip(mode, fields, flatten, input_count, fill_mode, field_types) -> return ir_zip(&m, p, &b, ty, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types, span)
+    if operation == .Zip(mode, fields, flatten, input_count, fill_mode, field_types) {
+        concrete :: ir_facts(p, &b, field_types, span)
+        if ir_failed(b) -> return -1
+        return ir_zip(&m, p, &b, ty, receiver, args, mode, fields, flatten, input_count, fill_mode, concrete, span)
+    }
     if operation == .Unzip -> return ir_unzip(&m, p, &b, ty, receiver, span)
     if operation == .AtomicMethod(method) -> return ir_atomic_method(&m, p, &b, ty, receiver, method, args, span)
     // `to_string()` on a non-numeric receiver (String, Bool, ...) is its
@@ -482,12 +485,12 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     if mutates -> ir_make_unique(&m, p, &b, subject)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     int_row :: ir_type_row(&m, Type.Int) ?? 0
-    if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(ir_subst(m, receiver_ty)) != None {
+    if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(receiver_ty) != None {
         set_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
         if ir_set_builtin(&m, p, &b, ty, set_route.symbol, subject, operands, span) == .Val(result) -> return result
         return ir_fail_slot(&b, span, "set builtin {set_route.symbol}")
     }
-    if operation == .PriorityQueueFrom || ir_priority_queue_element(ir_subst(m, receiver_ty)) != None {
+    if operation == .PriorityQueueFrom || ir_priority_queue_element(receiver_ty) != None {
         return ir_priority_queue_builtin(&m, p, &b, ty, operation, subject, operands, span)
     }
     if ir_map_entry_type(receiver_ty) != None {
@@ -618,8 +621,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
 // `list.indexed()`: an Iter over the (index, item) pair of each element, in
 // order. A List is finite and each pair owns a copy of its item either way,
 // so the pairs gather into a fresh List the Iter takes over.
-fn ir_list_indexed(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, span: Span) -> Int Never! {
-    iter_ty :: ir_subst(m, ty)
+fn ir_list_indexed(m: &IRModule, p: IRProgram, b: &IRBuilder, iter_ty: Type, list: Int, element: Int, span: Span) -> Int Never! {
     result_row :: ir_value_type(&m, p, iter_ty) ?? return ir_type_fail(&b, span, iter_ty)
     pair_ty :: ir_iter_element(iter_ty) ?? return ir_fail_slot(&b, span, "indexed producing {ir_type_name(iter_ty)}")
     fields :: if ir_untag(pair_ty) == .Tuple(checked) -> checked else -> { return ir_fail_slot(&b, span, "indexed pair {ir_type_name(pair_ty)}") }
@@ -661,7 +663,7 @@ fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
     if route.arity != operands.len() -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
     if ir_list_value_builtin(&m, p, &b, ty, route.symbol, operands, span) == .Val(expanded) -> return expanded
-    if ir_lazy_symbol(route.symbol, ir_subst(m, receiver_ty)) -> return ir_lazy_route(&m, p, &b, route.symbol, ty, operands, span)
+    if ir_lazy_symbol(route.symbol, receiver_ty) -> return ir_lazy_route(&m, p, &b, route.symbol, ty, operands, span)
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     ir_route(&m, p, &b, route.symbol, operands, route.borrow_mask, result, span)
 }
@@ -803,7 +805,9 @@ fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFn
             if wrapper_row < 0 -> return ir_fail_slot(&b, span, "callable policy wrapper (declaration {decl_id_index(wrapper_decl)}) is outside the checked program")
             params := [Type]{}
             returned := Type?{None}
-            if ir_untag(ir_subst(m, fn_type)) == .Fn(fn_params, fn_ret, _, _, _, _) {
+            policy_ty :: ir_fact(p, &b, fn_type, span)
+            if ir_failed(b) -> return -1
+            if ir_untag(policy_ty) == .Fn(fn_params, fn_ret, _, _, _, _) {
                 params = fn_params
                 returned = fn_ret
             } else {
@@ -814,7 +818,7 @@ fn ir_fn_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyFn
             names := [String]{}
             loop (index, param) in params {
                 name :: "policy_arg_{index}"
-                local :: ir_node(&b, param, NodeKind.Local{local: checked_generated_local(name, span)}, span)
+                local :: ir_node(&b, param, NodeKind.Local{local: checked_generated_local(name, span, param.copy())}, span)
                 &args.push(ir_policy_arg(local, true))
                 &names.push(name)
             }
@@ -898,12 +902,12 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
     from_result :: from_ret ?? unit
     to_result :: returned ?? unit
     inner_name :: "fn_widen_inner"
-    inner :: ir_node(&b, from_ty, NodeKind.Local{local: checked_generated_local(inner_name, span)}, span)
+    inner :: ir_node(&b, from_ty, NodeKind.Local{local: checked_generated_local(inner_name, span, from_ty.copy())}, span)
     names := [String]{}
     args := [BodyCallArg]{}
     loop (index, param) in params {
         name :: "fn_widen_arg_{index}"
-        local :: ir_node(&b, param, NodeKind.Local{local: checked_generated_local(name, span)}, span)
+        local :: ir_node(&b, param, NodeKind.Local{local: checked_generated_local(name, span, param.copy())}, span)
         &args.push(ir_policy_arg(local, true))
         &names.push(name)
     }
@@ -946,7 +950,7 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
     id :: m.functions.len()
     key :: "{b.f.key}#fn_widen@{span.start}.{b.f.op.len()}"
     &m.functions.push(ir_hashed_function("{b.f.name}.fn_widen@{span.start}", key, "{b.f.symbol}__fn_widen_", b.f.source_file, b.line))
-    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
+    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)
     code :: ir_temp(&m, &b, pointer_row)
@@ -958,7 +962,7 @@ fn ir_fn_widen(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, s
 // `Atomic.new(value)`: fresh 8-aligned frame storage the runtime initializes
 // with the scalar; an exact Int moves into the word.
 fn ir_atomic_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [BodyCallArg], span: Span) -> Int Never! {
-    scalar :: ir_atomic_scalar(ir_subst(m, ty)) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
+    scalar :: ir_atomic_scalar(ty) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
     lane :: ir_atomic_lane(scalar) ?? return ir_fail_slot(&b, span, "Atomic constructor of {ir_type_name(ty)}")
     if args.len() != 1 || args[0].spread -> return ir_fail_slot(&b, span, "Atomic constructor with {args.len()} arguments")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -985,7 +989,7 @@ fn ir_atomic_taken(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, lane: 
 // value of an add returns a fresh owner.
 fn ir_atomic_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
-    scalar :: ir_atomic_scalar(ir_subst(m, receiver_ty)) ?? return ir_fail_slot(&b, span, "Atomic method {method} on {ir_type_name(receiver_ty)}")
+    scalar :: ir_atomic_scalar(receiver_ty) ?? return ir_fail_slot(&b, span, "Atomic method {method} on {ir_type_name(receiver_ty)}")
     lane :: ir_atomic_lane(scalar) ?? return ir_fail_slot(&b, span, "Atomic method {method} on {ir_type_name(receiver_ty)}")
     operation :: if method == "observe" -> "load" else if method == "publish" -> "store" else -> method
     arity :: if operation == "load" -> 0 else if operation == "compare_exchange" -> 2 else -> 1
@@ -1033,7 +1037,7 @@ fn ir_call_closure(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_
 fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     if operation == .OptionMap -> return ir_option_map(&m, p, &b, ty, receiver, args, span)
-    if ir_lazy_closure_receiver(ir_subst(m, receiver_ty), operation) -> return ir_lazy_closure_method(&m, p, &b, ty, receiver, operation, args, span)
+    if ir_lazy_closure_receiver(receiver_ty, operation) -> return ir_lazy_closure_method(&m, p, &b, ty, receiver, operation, args, span)
     // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
@@ -1108,7 +1112,7 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
         .Map -> {
             result :: ir_list_empty(&m, &b, result_row)
             mapped_row :: ir_list_element(&m, p, b, result) ?? return ir_fail_slot(&b, span, "map result {ir_type_name(ty)}")
-            if ir_closure_result(ir_subst(m, callback_ty)) == .Val(produced) && !ir_check_callback_element(&m, p, &b, "map", mapped_row, produced, span) -> return -1
+            if ir_closure_result(callback_ty) == .Val(produced) && !ir_check_callback_element(&m, p, &b, "map", mapped_row, produced, span) -> return -1
             walk :: ir_walk_open(&m, &b, list, element)
             mapped :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, mapped_row)
             ir_list_push(&m, p, &b, result, mapped_row, mapped)
@@ -1129,7 +1133,7 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
         // order, is appended as a copy and the produced List ends.
         .FlatMap -> {
             step_ty :: ir_ty(p, b, args[args.len() - 1])
-            part_ty :: ir_closure_result(ir_subst(m, step_ty)) ?? return ir_fail_slot(&b, span, "flat_map callback has no checked single-input type")
+            part_ty :: ir_closure_result(step_ty) ?? return ir_fail_slot(&b, span, "flat_map callback has no checked single-input type")
             part_row :: ir_value_type(&m, p, part_ty) ?? return ir_type_fail(&b, span, part_ty)
             result :: ir_list_empty(&m, &b, result_row)
             produced :: ir_list_element(&m, p, b, result) ?? return ir_fail_slot(&b, span, "flat_map result {ir_type_name(ty)}")
@@ -1309,12 +1313,12 @@ fn ir_closure_group_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: In
 // (D-CALLBACK-ERR1); where it returns an Option, that is the map's result.
 fn ir_option_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
-    inner_ty :: if ir_untag(ir_subst(m, receiver_ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map on {ir_type_name(receiver_ty)}") }
-    mapped_ty :: if ir_untag(ir_subst(m, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map to {ir_type_name(ty)}") }
+    inner_ty :: if ir_untag(receiver_ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map on {ir_type_name(receiver_ty)}") }
+    mapped_ty :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option map to {ir_type_name(ty)}") }
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Option map with {args.len()} arguments")
     if ir_unit_type(inner_ty) || ir_unit_type(mapped_ty) -> return ir_fail_slot(&b, span, "Option map over Unit")
     returned := mapped_ty
-    if ir_closure_result(ir_subst(m, ir_ty(p, b, args[0]))) == .Val(callback_ret) -> returned = ir_subst(m, callback_ret)
+    if ir_closure_result(ir_ty(p, b, args[0])) == .Val(callback_ret) -> returned = callback_ret
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     inner_row :: ir_value_type(&m, p, inner_ty) ?? return ir_type_fail(&b, span, inner_ty)
     mapped_row :: ir_value_type(&m, p, mapped_ty) ?? return ir_type_fail(&b, span, mapped_ty)
@@ -1361,10 +1365,10 @@ fn ir_option_map(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
 fn ir_option_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Option zip with {args.len()} arguments")
     receiver_ty :: ir_ty(p, b, receiver)
-    left_ty :: if ir_untag(ir_subst(m, receiver_ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option zip on {ir_type_name(receiver_ty)}") }
+    left_ty :: if ir_untag(receiver_ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option zip on {ir_type_name(receiver_ty)}") }
     arg_ty :: ir_ty(p, b, args[0])
-    right_ty :: if ir_untag(ir_subst(m, arg_ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option zip with {ir_type_name(arg_ty)}") }
-    tuple_ty :: if ir_untag(ir_subst(m, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option zip to {ir_type_name(ty)}") }
+    right_ty :: if ir_untag(arg_ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option zip with {ir_type_name(arg_ty)}") }
+    tuple_ty :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option zip to {ir_type_name(ty)}") }
     fields :: if ir_untag(tuple_ty) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_fail_slot(&b, span, "Option zip to {ir_type_name(ty)}") }
     if fields.len() != 2 || ir_unit_type(left_ty) || ir_unit_type(right_ty) -> return ir_fail_slot(&b, span, "Option zip to {ir_type_name(ty)}")
     members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, tuple_ty)
@@ -1413,13 +1417,13 @@ fn ir_option_zip_store(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, of
 // `Option.lift2(f, left, right)`: both present lend their payloads to `f`,
 // whose result is boxed fresh; otherwise None. Both operands are only read.
 fn ir_option_lift2(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function: Int, left: Int, right: Int, span: Span) -> Int Never! {
-    result_ty :: if ir_untag(ir_subst(m, ty)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 to {ir_type_name(ty)}") }
+    result_ty :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 to {ir_type_name(ty)}") }
     left_checked :: ir_ty(p, b, left)
     right_checked :: ir_ty(p, b, right)
     function_ty :: ir_ty(p, b, function)
-    left_ty :: if ir_untag(ir_subst(m, left_checked)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(left_checked)}") }
-    right_ty :: if ir_untag(ir_subst(m, right_checked)) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(right_checked)}") }
-    called_ty :: ir_closure_result(ir_subst(m, function_ty)) ?? return ir_fail_slot(&b, span, "Option.lift2 with {ir_type_name(function_ty)}")
+    left_ty :: if ir_untag(left_checked) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(left_checked)}") }
+    right_ty :: if ir_untag(right_checked) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(right_checked)}") }
+    called_ty :: ir_closure_result(function_ty) ?? return ir_fail_slot(&b, span, "Option.lift2 with {ir_type_name(function_ty)}")
     if type_carrier_identity(called_ty) != type_carrier_identity(result_ty) -> return ir_fail_slot(&b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(result_ty)}")
     if ir_unit_type(left_ty) || ir_unit_type(right_ty) || ir_unit_type(result_ty) -> return ir_fail_slot(&b, span, "Option.lift2 over Unit")
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
@@ -1474,8 +1478,7 @@ fn ir_closure_result(ty: Type) -> Type? Never! {
 // any payload apart); otherwise the program would read one layout as
 // another. A difference is a checker bug, reported as an internal error.
 fn ir_check_callback_element(m: &IRModule, p: IRProgram, b: &IRBuilder, method: String, row: Int, produced: Type, span: Span) -> Bool Never! {
-    expanded :: ir_subst(m, produced)
-    built :: ir_value_type(&m, p, expanded) ?? return true
+    built :: ir_value_type(&m, p, produced) ?? return true
     if built == row -> return true
     ir_fail(&b, span, "internal error: `.{method}` is checked as making {ir_type_name(m.types[row].ty)} items, but its callback makes {ir_type_name(produced)}")
     false
@@ -2105,12 +2108,10 @@ fn ir_float_word(m: &IRModule, b: &IRBuilder, floating: Int, row: Int, unsigned:
 // list.index_of); None for any other route. Every argument is borrowed.
 fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int? Never! {
     if name == "std::collections::BinaryHeap::new" {
-        subst_ty :: ir_subst(m, result)
-        return Val(ir_priority_queue_new(&m, p, &b, inputs, subst_ty, span))
+        return Val(ir_priority_queue_new(&m, p, &b, inputs, result, span))
     }
     if name == "std::collections::HashSet::new" || name == "std::collections::BTreeSet::new" {
-        subst_ty :: ir_subst(m, result)
-        return Val(ir_set_new(&m, p, &b, inputs, subst_ty, span))
+        return Val(ir_set_new(&m, p, &b, inputs, result, span))
     }
     // `a.equal(b)` (core.compare eq): the values' structural equality, both
     // borrowed.
@@ -2126,8 +2127,7 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     }
     if name == "jet_map_from_keys_kernel" || name == "jet_map_from_keys_int" || name == "jet_map_from_keys_composite" {
         if inputs.len() != 2 || inputs[0] < 0 || inputs[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map.from_keys with {inputs.len()} arguments"))
-        subst_ty :: ir_subst(m, result)
-        built :: ir_map_from_keys(&m, p, &b, inputs[0], inputs[1], subst_ty, span)
+        built :: ir_map_from_keys(&m, p, &b, inputs[0], inputs[1], result, span)
         if ir_failed(b) -> return Val(-1)
         loop slot in inputs -> ir_release(&m, &b, slot)
         return Val(built)
@@ -2985,7 +2985,7 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
 // member order, stored member by member at `offset` of `base`.
 fn ir_route_store_tuple(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, items: [IRRouteCarrier], out: Int, span: Span) Never! {
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "runtime route tuple payload type {ir_type_name(payload)}")
-    fields :: if ir_untag(ir_subst(m, payload)) == .Tuple(checked) -> checked else -> { return ir_fail(&b, span, "runtime route tuple payload as {payload}") }
+    fields :: if ir_untag(payload) == .Tuple(checked) -> checked else -> { return ir_fail(&b, span, "runtime route tuple payload as {payload}") }
     members :: ir_inline_members(&m, p, row) ?? return ir_fail(&b, span, "runtime route tuple payload as {payload}")
     if fields.len() != items.len() || members.len() != items.len() -> return ir_fail(&b, span, "runtime route tuple payload as {payload}")
     start := 0
@@ -3164,7 +3164,7 @@ fn ir_route_tuple_order(fields: [TypeTupleField], count: Int, labels: [String]) 
 // one zeroed frame slot, read back into the checked tuple's members.
 fn ir_route_tuple(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], items: [IRRouteCarrier], labels: [String], result: Type, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
-    fields :: if ir_untag(ir_subst(m, result)) == .Tuple(checked) -> checked else -> { return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}") }
+    fields :: if ir_untag(result) == .Tuple(checked) -> checked else -> { return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}") }
     members :: ir_inline_members(&m, p, row) ?? return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}")
     if fields.len() != items.len() || members.len() != items.len() -> return ir_fail_slot(&b, span, "runtime route {export} tuple result as {result}")
     order :: ir_route_tuple_order(fields, items.len(), labels)
@@ -3363,7 +3363,7 @@ fn ir_comptime_ambient_refusal(symbol: String) -> String? Never! {
 // n elements (jet_rt_encoding_list_reserve_exact).
 fn ir_core_list_leaf(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
     if type_args.len() != 1 -> return ir_fail_slot(&b, span, "raw List layout leaf requires its checked element type")
-    element_ty :: ir_subst(m, type_args[0])
+    element_ty :: type_args[0].copy()
     element :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     stride :: if m.types[element].kind == .Unit -> 1 else -> ir_list_stride(m, element)

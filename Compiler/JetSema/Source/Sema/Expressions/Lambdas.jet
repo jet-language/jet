@@ -2073,7 +2073,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         if binding.frame < frame && sema_expression_lambda_name_contains(capture_keys, key) {
             sema_expression_lambda_add_capture_key(&found_capture_keys, key)
             capture_ty :: sema_scope_binding_type(environment, lambda_scopes, index) ?? return None
-            local := checked_symbol_local(binding.symbol.name, binding.symbol.span, binding.symbol.id)
+            local := checked_symbol_local(binding.symbol.name, binding.symbol.span, binding.symbol.id, capture_ty)
             local.mutable = binding.mutable
             local.integer_bounds = binding.integer_bounds
             &captures.push(TCapture{source: binding.symbol.name, local: local, ty: capture_ty})

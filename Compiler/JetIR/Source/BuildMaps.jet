@@ -20,7 +20,7 @@ fn ir_map_entry_type(ty: Type) -> Type? Never! {
 fn ir_map_row(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if ir_untag(ty) == .Map(key, _, value) {
         if !ir_pointee_lays_out(&m, p, key, laying) || !ir_pointee_lays_out(&m, p, value, laying) -> return None
-        if ir_unit_type(ir_untag(ir_subst(m, value))) -> return None
+        if ir_unit_type(ir_untag(value)) -> return None
         key_row :: ir_value_type_in(&m, p, key, laying) ?? return None
         if ir_map_key_kind(m, key_row) == "" -> return None
         interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
@@ -473,13 +473,11 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
     }
     if symbol == "jet_map_keys" || symbol == "jet_map_values" {
         if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
-        subst_ty :: ir_subst(m, ty)
-        return Val(ir_map_view(&m, p, &b, subst_ty, shape, subject, symbol == "jet_map_keys", span))
+        return Val(ir_map_view(&m, p, &b, ty, shape, subject, symbol == "jet_map_keys", span))
     }
     if symbol == "jet_map_top_n" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map top_n without a count"))
-        subst_ty :: ir_subst(m, ty)
-        return Val(ir_map_top_n(&m, p, &b, subst_ty, shape, subject, operands[1], span))
+        return Val(ir_map_top_n(&m, p, &b, ty, shape, subject, operands[1], span))
     }
     // `equal(other)` is the maps' equality; `merge(other)` is a copy of the
     // receiver with each entry of `other`, in key order, set as a copy: the
@@ -506,8 +504,7 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
     }
     if symbol == "jet_map_first_key" || symbol == "jet_map_min_value_kernel" || symbol == "jet_map_max_value_kernel" {
         if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
-        result_ty :: ir_subst(m, ty)
-        return Val(ir_map_pick(&m, p, &b, result_ty, shape, subject, symbol, span))
+        return Val(ir_map_pick(&m, p, &b, ty, shape, subject, symbol, span))
     }
     if symbol == "jet_map_merge_with" {
         if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return Val(ir_fail_slot(&b, span, "Map merge_with with {operands.len() - 1} arguments"))

@@ -2,8 +2,8 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value]
-use jet_sema.[SemaCheckedForeignFunction]
+use jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value]
+use jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 
 struct IRBuildFailure {
     key: String
@@ -124,7 +124,25 @@ struct IRBuilder {
     // (`store.guard_edit().value.items[key] = text`): their permits end with
     // the statement (ir_stmt).
     statement_guards: [Int]{[Int]{}}
+    // The instance this body builds (IRInstance; none for a body that is no
+    // generic instance).
+    instance: IRInstance{IRInstance{names: [String]{}, args: [Type]{}, types: [Type]{}}}
+    // The failures of the statements of the body's outermost block kept so
+    // far (ir_stmt_collecting), and the binders those statements declared,
+    // whose later reads follow from those failures.
+    failures: [IRFailureRow]{[IRFailureRow]{}}
+    poisoned: [String]{[String]{}}
 }
+
+// One failure of a body: its message and the span it names.
+struct IRFailureRow { message: String, span: Span }
+
+// A generic instance being built: the type parameters it binds
+// (ir_generic_names), their arguments, and sema's types of its checked
+// function's tree at those arguments, row for row with the tree's type table
+// (jet_sema sema_instance_types). The builder reads an instance type by row
+// and never substitutes one (ir_fact_type).
+struct IRInstance { names: [String], args: [Type], types: [Type] }
 
 // The Call at instruction `at` of function `function` (-1: the function
 // being built) names the checked function `key` applied to `args`.
@@ -334,16 +352,15 @@ fn ir_source_line_text(p: IRProgram, path: String, line: Int) -> String? Never! 
 struct IRQueued { row: Int, id: Int, args: [Type], lambda: Int{-1} }
 
 // A lambda body to build as its own function: the box holds its captures
-// at their offsets; the instance substitution it was created under; the
-// checked function whose tree holds its nodes and the nodes the creating
-// builder made (IRBuilder `row`, `made`, `next_node`).
+// at their offsets; the instance it was created under; the checked
+// function whose tree holds its nodes and the nodes the creating builder
+// made (IRBuilder `row`, `made`, `next_node`).
 struct IRLambdaJob {
     lambda: BodyLambda
     captures: [IRCaptureSlot]
     source_file: String
     line: Int
-    subst_names: [String]
-    subst_types: [Type]
+    instance: IRInstance
     row: Int
     made: BodyTree
     next_node: Int
@@ -578,10 +595,12 @@ fn ir_declared_owners(functions: &[FnBody], types: [TTypeDef]) Never! {
         if functions[index].kind == {
             .Method(convention, owner_type) -> {
                 owner :: ir_declared_owner(declared, functions[index].module_identity, owner_type) ?? next
+                _ :: type_table_intern(&functions[index].tree.types, owner)
                 functions[index].kind = TFuncKind.Method{self_convention: convention, owner_type: owner}
             }
             .TraitMethod(is_unsafe, convention, owner_type, trait_name, codec) -> {
                 owner :: ir_declared_owner(declared, functions[index].module_identity, owner_type) ?? next
+                _ :: type_table_intern(&functions[index].tree.types, owner)
                 functions[index].kind = TFuncKind.TraitMethod{is_unsafe: is_unsafe, self_convention: convention, owner_type: owner, trait_name: trait_name, serde_codec: codec}
             }
             .TopLevel -> {}
@@ -735,8 +754,39 @@ fn ir_type_def(p: IRProgram, name: String) -> Int? Never! {
     p.type_rows.get(name)
 }
 
-// The IR id of the checked function `key` applied to `type_args` (written
-// in the current instance's terms), queueing it on first use.
+// `ty` with each nominal head spelled by its type row's key: a type named by
+// its key (`module.Name`) and by its name (`Name`) is one type, so two
+// checked types are the same type when their keyed spellings are equal. A
+// nominal with no type row (a runtime or host carrier) keeps its spelling.
+fn ir_keyed_nominals(p: IRProgram, ty: Type) -> Type Never! {
+    if ty == {
+        .Named(name) -> Type.Named{name: ir_nominal_key(p, name)}
+        .Apply(name, args) -> Type.Apply{name: ir_nominal_key(p, name), args: loop arg in args -> ir_keyed_nominals(p, arg)}
+        .List(inner) -> Type.List{element: ir_keyed_nominals(p, inner)}
+        .Shared(inner) -> Type.Shared{inner: ir_keyed_nominals(p, inner)}
+        .Option(inner) -> Type.Option{inner: ir_keyed_nominals(p, inner)}
+        // copy: `key_span` is a payload of read parameter `ty`; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: ir_keyed_nominals(p, key), key_span: key_span.copy(), value: ir_keyed_nominals(p, value)}
+        .Result(ok, err) -> Type.Result{ok: ir_keyed_nominals(p, ok), err: ir_keyed_nominals(p, err)}
+        // copy: `len` is a payload of read parameter `ty`; field `len` of the new Type.FixedList owns this one
+        .FixedList(elem, len) -> Type.FixedList{elem: ir_keyed_nominals(p, elem), len: len.copy()}
+        // copy: `marker` is a payload of read parameter `ty`; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: ir_keyed_nominals(p, inner)}
+        .Union(members) -> Type.Union{members: loop member in members -> ir_keyed_nominals(p, member)}
+        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: ir_keyed_nominals(p, field.ty)}}
+        // copy: a type with no nominal head is returned as a new tree; the
+        // caller keeps the read parameter.
+        else -> ty.copy()
+    }
+}
+
+fn ir_nominal_key(p: IRProgram, name: String) -> String Never! {
+    row :: ir_type_def(p, name) ?? return name.copy()
+    p.types[row].key.copy()
+}
+
+// The IR id of the checked function `key` applied to `type_args` (concrete
+// types: the instance's own), queueing it on first use.
 fn ir_function_id(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -> Int? Never! {
     row :: ir_function_row(p, key) ?? return None
     ir_function_row_id(&m, p, row, type_args)
@@ -758,12 +808,8 @@ fn ir_function_row_id(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -
     }
     // An instance binds every one of its type parameters.
     if type_args.len() != ir_generic_names(p, function).len() -> return None
-    concrete := [Type]{}
-    spelled := [String]{}
-    loop arg in type_args {
-        &concrete.push(ir_subst(m, arg))
-        &spelled.push(type_carrier_identity(concrete[concrete.len() - 1]))
-    }
+    spelled :: loop arg in type_args -> type_carrier_identity(arg)
+    concrete :: type_args.copy()
     instance :: "{function.key}<{spelled.join(", ")}>"
     if name_rows_value(m.instances, instance) == .Val(known) -> return Val(known)
     id :: m.functions.len()
@@ -843,114 +889,82 @@ fn ir_owner_args(p: IRProgram, function: FnBody, owner: Type) -> [Type]? Never! 
     Val(args)
 }
 
-// The owner arguments a static call of `function` binds when its owner is
-// written without them (`Box.new(7)`): what the call's type `ty` and its
-// arguments' types give the owner parameters in the method's signature.
-// None when they leave one unbound.
-fn ir_infer_owner_args(p: IRProgram, b: IRBuilder, function: FnBody, ty: Type, args: [BodyCallArg]) -> [Type]? Never! {
-    names := [String]{}
-    bound := [Type?]{}
-    loop binder in ir_owner_binders(p, function) {
-        &names.push(binder.name)
-        &bound.push(None)
-    }
-    if function.ret == .Val(ret) -> ir_bind_names(names, ret, ty, &bound)
-    loop (index, param) in function.params {
-        if index < args.len() -> ir_bind_names(names, param.ty, ir_ty(p, b, args[index].value), &bound)
-    }
-    inferred := [Type]{}
-    loop slot in bound {
-        found :: slot ?? return None
-        &inferred.push(found)
-    }
-    Val(inferred)
+// The checked return type `declared` of `function` (sema's row for it in
+// the instance a call builds), as the type a call of it produces: the plain
+// success of a `T Never!` carrier it hands back directly (ir_plain_return).
+fn ir_executable_return_in(function: FnBody, declared: Type?) -> Type? Never! {
+    if ir_plain_return(function) == None -> return declared.copy()
+    if declared == .Val(written) -> return ir_never_carrier_success(written)
+    None
 }
 
-// Binds each of `names` not yet in `bound` to what `actual` holds where
-// `pattern` (written with them) names it.
-fn ir_bind_names(names: [String], pattern: Type, actual: Type, bound: &[Type?]) Never! {
-    if ir_type_parameter_name(pattern) == .Val(name) {
-        loop (index, parameter) in names {
-            if parameter == name && bound[index] == None -> bound[index] = Val(ir_untag(actual))
-        }
-        return
-    }
-    concrete :: ir_untag(actual)
-    if pattern == {
-        .Apply(_, args) -> {
-            if concrete == .Apply(_, actuals) {
-                if actuals.len() == args.len() {
-                    loop (index, arg) in args -> ir_bind_names(names, arg, actuals[index], &bound)
-                }
-            }
-        }
-        .List(element) -> {
-            if concrete == .List(actual_element) -> ir_bind_names(names, element, actual_element, &bound)
-        }
-        .Option(inner) -> {
-            if concrete == .Option(actual_inner) -> ir_bind_names(names, inner, actual_inner, &bound)
-        }
-        .Result(ok, err) -> {
-            if concrete == .Result(actual_ok, actual_err) {
-                ir_bind_names(names, ok, actual_ok, &bound)
-                ir_bind_names(names, err, actual_err, &bound)
-            }
-        }
-        .Tagged(_, inner) -> ir_bind_names(names, inner, concrete, &bound)
-        else -> {}
-    }
+// Fact type `ty` of the builder's checked function (a binder's, a call's
+// type argument, a signature's, a lambda's) in the instance being built:
+// sema's row for it (IRInstance). None when sema published no row for a type
+// that names one of the instance's type parameters.
+fn ir_fact_type(p: IRProgram, b: IRBuilder, ty: Type) -> Type? Never! {
+    if b.instance.names.len() == 0 || b.row < 0 -> return Val(ty.copy())
+    ir_instance_row(p.functions[b.row].tree.types, b.instance.names, b.instance.types, ty)
 }
 
-// `ty` in the terms of the instance being built.
-fn ir_subst(m: IRModule, ty: Type) -> Type Never! {
-    if m.subst_names.len() == 0 -> return ty.copy()
-    ir_subst_in(m.subst_names, m.subst_types, ty)
+// The row of `ty` in `generic` read from `instance` (row for row with it);
+// `ty` itself when it names none of `names`. None when the table has no row
+// for a type that names one of them.
+fn ir_instance_row(generic: TypeTable, names: [String], instance: [Type], ty: Type) -> Type? Never! {
+    if type_table_find(generic, ty) == .Val(row) -> return Val(instance[row].copy())
+    if ir_names_any(ty, names) -> return None
+    Val(ty.copy())
 }
 
-// `ty` with each type parameter `names[i]` replaced by `types[i]`.
-fn ir_subst_in(names: [String], types: [Type], ty: Type) -> Type Never! {
-    if ty == {
-        .Named(name) -> {
-            loop (index, parameter) in names {
-                if parameter == name -> return types[index].copy()
-            }
-            return ty.copy()
-        }
-        .Apply(name, args) -> {
-            if args.len() == 0 {
-                loop (index, parameter) in names {
-                    if parameter == name -> return types[index].copy()
-                }
-                return ty.copy()
-            }
-            return Type.Apply{name: name, args: ir_subst_list(names, types, args)}
-        }
-        .List(element) -> return Type.List{element: ir_subst_in(names, types, element)}
-        .Option(inner) -> return Type.Option{inner: ir_subst_in(names, types, inner)}
-        .Result(ok, err) -> return Type.Result{ok: ir_subst_in(names, types, ok), err: ir_subst_in(names, types, err)}
-        .Shared(inner) -> return Type.Shared{inner: ir_subst_in(names, types, inner)}
-        .Map(key, key_span, value) -> return Type.Map{key: ir_subst_in(names, types, key), key_span: key_span, value: ir_subst_in(names, types, value)}
-        .Tagged(marker, inner) -> return Type.Tagged{marker: marker, inner: ir_subst_in(names, types, inner)}
-        .FixedList(elem, len) -> return Type.FixedList{elem: ir_subst_in(names, types, elem), len: len}
-        .Union(members) -> return Type.Union{members: ir_subst_list(names, types, members)}
-        .Tuple(fields) -> {
-            mapped := [TypeTupleField]{}
-            loop field in fields -> &mapped.push(TypeTupleField{name: field.name, ty: ir_subst_in(names, types, field.ty)})
-            return Type.Tuple{fields: mapped}
-        }
-        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            mapped_ret := Type?{None}
-            if ret == .Val(returned) -> mapped_ret = Val(ir_subst_in(names, types, returned))
-            return Type.Fn{params: ir_subst_list(names, types, params), ret: mapped_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
-        }
-        else -> return ty.copy()
+// Whether `ty` names one of the type parameters `names`.
+fn ir_names_any(ty: Type, names: [String]) -> Bool Never! {
+    loop name in names {
+        if sema_inference_type_mentions_param(ty, name) -> return true
+    }
+    false
+}
+
+// ir_fact_type, failing the body (a missing checked fact) when sema
+// published no row for `ty`.
+fn ir_fact(p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Type Never! {
+    if ir_fact_type(p, b, ty) == .Val(found) -> return found
+    ir_fail(&b, span, "missing checked fact: no instance row for {ir_type_name(ty)}")
+    ty.copy()
+}
+
+// ir_fact of each of `types`.
+fn ir_facts(p: IRProgram, b: &IRBuilder, types: [Type], span: Span) -> [Type] Never! {
+    loop ty in types -> ir_fact(p, &b, ty, span)
+}
+
+// Failure carrier `failure` (a function's, a lambda's or a `?`'s) with each
+// type ir_fact reads.
+fn ir_fact_failure(p: IRProgram, b: &IRBuilder, failure: TFailureCarrier, span: Span) -> TFailureCarrier Never! {
+    if failure == {
+        .Result(success, error) -> return TFailureCarrier.Result{success: ir_fact(p, &b, success, span), error: ir_fact(p, &b, error, span)}
+        .Optional(value) -> return TFailureCarrier.Optional{value: ir_fact(p, &b, value, span)}
+        .Diverges(value) -> return TFailureCarrier.Diverges{value: ir_fact(p, &b, value, span)}
+        .Infallible -> return TFailureCarrier.Infallible
     }
 }
 
-fn ir_subst_list(names: [String], types: [Type], list: [Type]) -> [Type] Never! {
-    mapped := [Type]{}
-    loop item in list -> &mapped.push(ir_subst_in(names, types, item))
-    mapped
+// Error conversion `conversion` of a `?` with each type ir_fact reads.
+fn ir_fact_conversion(p: IRProgram, b: &IRBuilder, conversion: TTryConvert, span: Span) -> TTryConvert Never! {
+    if conversion == .Typed(fn_name, source, target) -> return TTryConvert.Typed{fn_name: fn_name.copy(), source: ir_fact(p, &b, source, span), target: ir_fact(p, &b, target, span)}
+    conversion.copy()
+}
+
+// Signature type `ty` of checked function `row` (a parameter's or its
+// return) in its instance at `args` (concrete): sema's row for it
+// (jet_sema sema_instance_type), `ty` itself when it names none of the
+// callee's type parameters, and otherwise a failure of the body.
+fn ir_callee_fact(p: IRProgram, b: &IRBuilder, row: Int, args: [Type], ty: Type, span: Span) -> Type Never! {
+    if args.len() == 0 -> return ty.copy()
+    names :: ir_generic_names(p, p.functions[row])
+    if sema_instance_type(p.functions[row].tree.types, names, args, ty) == .Val(found) -> return found
+    if !ir_names_any(ty, names) -> return ty.copy()
+    ir_fail(&b, span, "missing checked fact: no instance row for {ir_type_name(ty)} in {p.functions[row].key}")
+    ty.copy()
 }
 
 // The object symbol of a function: its module and name, made a C identifier.
@@ -1128,8 +1142,6 @@ fn ir_build_queue(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], from:
         cursor += 1
         ir_build_queued(&m, p, &failures, queued)
     }
-    m.subst_names = [String]{}
-    m.subst_types = [Type]{}
     cursor
 }
 
@@ -1139,33 +1151,43 @@ fn ir_build_queued(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], queu
     b := ir_builder_new(m.functions[queued.id].copy())
     if queued.lambda >= 0 {
         job :: m.lambdas[queued.lambda].copy()
-        m.subst_names = job.subst_names
-        m.subst_types = job.subst_types
+        b.instance = job.instance
         b.row = job.row
         b.bounds = ir_bounds_mode(p, job.row)
         b.made = job.made
         b.next_node = job.next_node
         ir_build_lambda(&m, p, &b, job)
-        if b.error != "" {
-            &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: m.functions[queued.id].name, message: b.error, source_file: job.source_file, span: if b.error_span.end > 0 -> b.error_span else -> job.lambda.source_span})
-        }
+        ir_keep_failures(&failures, b, m.functions[queued.id].key, m.functions[queued.id].name, job.source_file, job.lambda.source_span)
         ir_resolve_deferred(&m, p, &b)
         m.functions[queued.id] = ^b.f
         return
     }
     // copy: the checked function is read while later calls queue more rows.
     function :: p.functions[queued.row].copy()
-    m.subst_names = if queued.args.len() > 0 -> ir_generic_names(p, function) else -> [String]{}
-    m.subst_types = queued.args.copy()
+    if queued.args.len() > 0 {
+        names :: ir_generic_names(p, function)
+        types :: sema_instance_types(function.tree.types, names, queued.args)
+        b.instance = IRInstance{names: names, args: queued.args.copy(), types: types}
+    }
     b.row = queued.row
     b.bounds = ir_bounds_mode(p, queued.row)
     b.entry = queued.row == p.entry && queued.args.len() == 0
     ir_build_function(&m, p, &b, function)
-    if b.error != "" {
-        &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: function.name, message: b.error, source_file: function.source_file, span: if b.error_span.end > 0 -> b.error_span else -> function.source_span})
-    }
+    ir_keep_failures(&failures, b, m.functions[queued.id].key, function.name, function.source_file, function.source_span)
     ir_resolve_deferred(&m, p, &b)
     m.functions[queued.id] = ^b.f
+}
+
+// One IRBuildFailure per failure of body `b` (IRBuilder.failures, then the
+// failure that ended its build); `whole` is the span of a failure that names
+// none.
+fn ir_keep_failures(failures: &[IRBuildFailure], b: IRBuilder, key: String, name: String, source_file: String, whole: Span) Never! {
+    loop row in b.failures {
+        &failures.push(IRBuildFailure{key: key.copy(), name: name.copy(), message: row.message.copy(), source_file: source_file.copy(), span: if row.span.end > 0 -> row.span else -> whole})
+    }
+    if b.error != "" {
+        &failures.push(IRBuildFailure{key: key.copy(), name: name.copy(), message: b.error.copy(), source_file: source_file.copy(), span: if b.error_span.end > 0 -> b.error_span else -> whole})
+    }
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
@@ -1202,14 +1224,16 @@ fn ir_body_stmt(p: IRProgram, b: IRBuilder, index: Int) -> StmtKind Never! {
 }
 
 // The checked type of `value`: its row in the expression-type column of the
-// builder's checked function, or of the nodes the builder made (ir_node).
+// builder's checked function (in an instance, sema's row at the instance:
+// IRInstance), or of the nodes the builder made (ir_node).
 fn ir_ty(p: IRProgram, b: IRBuilder, value: Int) -> Type Never! {
     if value <= IR_FIRST_NODE_ID {
         loop row in b.made.expr_types {
             if row.id == value -> return b.made.types.types[row.ty].copy()
         }
     } else if b.row >= 0 {
-        return body_type(p.functions[b.row].tree, value)
+        if b.instance.names.len() == 0 -> return body_type(p.functions[b.row].tree, value)
+        return b.instance.types[body_type_id(p.functions[b.row].tree, value)].copy()
     }
     panic("{b.f.name}: node {value} has no expression-type row")
 }

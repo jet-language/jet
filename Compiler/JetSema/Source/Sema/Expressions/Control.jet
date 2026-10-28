@@ -114,7 +114,8 @@ fn sema_expression_panic_locals(scopes: SemaScopeTable, span: Span) -> [TPanicLo
     loop name in names {
         row :: rows.get(name) ?? { next }
         symbol :: scopes.bindings[row].symbol
-        &locals.push(TPanicLocal{display_name: name, local: checked_symbol_local(name, symbol.span, symbol.id)})
+        local_ty :: symbol.ty ?? { next }
+        &locals.push(TPanicLocal{display_name: name, local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)})
     }
     locals
 }
@@ -1237,7 +1238,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         frame :: scopes.current
         sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         sema_ownership_declare_ambient_binding(&fallback_state, symbol)
-        ambient_err = Val(checked_symbol_local("err", span, symbol.id))
+        ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_type))
     }
     fallback_reaches_merge := false
     // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback, which
@@ -1518,7 +1519,7 @@ fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: E
     if in_place -> sema_scope_mark_place_alias(&scopes, name)
     sema_ownership_declare_binding(&state, symbol, false)
     _ := sema_ownership_record_pattern_views(&state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, scopes)
-    local := checked_symbol_local(name, subject_span, id)
+    local := checked_symbol_local(name, subject_span, id, init.ty)
     local.generated = true
     local.integer_bounds = bounds
     Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span})

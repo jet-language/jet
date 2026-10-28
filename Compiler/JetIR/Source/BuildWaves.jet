@@ -334,8 +334,6 @@ fn ir_waves_entry_in(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, p
 }
 
 fn ir_wave_entry(m: &IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBuilt Never! {
-    m.subst_names = [String]{}
-    m.subst_types = [Type]{}
     before :: m.queue.len()
     failures := [IRBuildFailure]{}
     local :: ir_entry_function(&m, p, entry, &failures)
@@ -347,8 +345,6 @@ fn ir_wave_entry(m: &IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBui
 fn ir_wave_job(m: &IRModule, p: IRProgram, job: IRWaveJob, part: Int) -> IRWaveBuilt Never! {
     local := job.local
     if job.lambda < 0 {
-        m.subst_names = [String]{}
-        m.subst_types = [Type]{}
         local = ir_function_id(&m, p, p.functions[job.row].key, job.args) ?? panic("an IR build job names no checked function")
         if m.functions[local].key != job.key -> panic("IR build job {job.key} rebuilt as {m.functions[local].key}")
     }

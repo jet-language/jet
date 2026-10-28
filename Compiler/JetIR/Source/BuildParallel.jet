@@ -210,7 +210,7 @@ fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     true_list := -1
     false_list := -1
     if partition {
-        fields :: if ir_untag(ir_subst(m, ty)) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(&b, span, ty) }
+        fields :: if ir_untag(ty) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(&b, span, ty) }
         members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, ty)
         false_offset := -1
         true_offset := -1

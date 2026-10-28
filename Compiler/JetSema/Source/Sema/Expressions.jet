@@ -3685,7 +3685,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
     kind :: scopes.bindings[index].symbol.kind
     result := TExpr?{None}
     if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
-        local := checked_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id)
+        local := checked_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id, ty)
         local.mutable = scopes.bindings[index].mutable
         local.integer_bounds = scopes.bindings[index].integer_bounds
         value :: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span}

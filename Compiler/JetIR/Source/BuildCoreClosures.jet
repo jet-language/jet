@@ -210,10 +210,9 @@ fn ir_core_closure_name(kind: BodyCoreClosureKind) -> String Never! {
 // closure whose result is the checked Task element (3698-3727); the runtime
 // takes the box over with its task.body (lazy.callback) and task.release
 // helpers and the result's descriptor. A grouped spawn joins its group.
-fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, group: Int?, site: Int, label: String, executable: BodyLambda, span: Span) -> Int Never! {
-    task_ty :: ir_subst(m, ty)
-    element :: ir_task_element(task_ty) ?? return ir_fail_slot(&b, span, "spawn producing {ir_type_name(ty)}")
-    task_row :: ir_value_type(&m, p, task_ty) ?? return ir_type_fail(&b, span, ty)
+fn ir_task_spawn(m: &IRModule, p: IRProgram, b: &IRBuilder, task_ty: Type, group: Int?, site: Int, label: String, executable: BodyLambda, span: Span) -> Int Never! {
+    element :: ir_task_element(task_ty) ?? return ir_fail_slot(&b, span, "spawn producing {ir_type_name(task_ty)}")
+    task_row :: ir_value_type(&m, p, task_ty) ?? return ir_type_fail(&b, span, task_ty)
     group_slot := -1
     if group == .Val(group_value) {
         group_slot = ir_expr(&m, p, &b, group_value)
@@ -310,13 +309,12 @@ fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span
 // `^task.join()`: the runtime takes the handle over, waits for the task and
 // writes the body's outcome into the Result box (jet_rt_native_task_join
 // without flattening).
-fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
-    result_ty :: ir_subst(m, ty)
+fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, span: Span) -> Int Never! {
     err_ty := Type.Int
     if ir_untag(result_ty) == .Result(_, failure) {
         err_ty = failure
     } else {
-        return ir_fail_slot(&b, span, "Task.join result {ir_type_name(ty)}")
+        return ir_fail_slot(&b, span, "Task.join result {ir_type_name(result_ty)}")
     }
     handle :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1

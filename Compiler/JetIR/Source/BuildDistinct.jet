@@ -12,7 +12,7 @@ fn ir_distinct_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argu
         .CastAs(_) -> {}
         else -> return ir_numeric_method(&m, p, &b, ty, argument, operation, span)
     }
-    success := ir_subst(m, ty)
+    success := ty.copy()
     if fallible {
         if ir_untag(success) == .Result(ok_ty, _) {
             success = ok_ty

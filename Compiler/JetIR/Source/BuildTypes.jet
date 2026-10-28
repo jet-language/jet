@@ -3,6 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+use jet_sema.[sema_type_def_instance_type]
 
 // A rendered type's identity: its declaration key when it names one (every
 // instance of a generic declaration shares it).
@@ -93,7 +94,9 @@ fn ir_type_row(m: &IRModule, ty: Type) -> Int? Never! {
             bytes :: ir_packed_bytes(bits)
             ir_layout(IRTypeKind.Word, ty, bytes, bytes, IRClass.Integer, signed, bits, "")
         }
-        .InlineRange(base, _, _) -> { return ir_type_row(&m, base) }
+        // A range-checked number and a dimensioned quantity are carried as
+        // their base number.
+        .InlineRange(base, _, _) | .Quantity(base, _) -> { return ir_type_row(&m, base) }
         .Tagged(_, inner) -> { return ir_type_row(&m, inner) }
         .Named(name) -> {
             if name != "Unit" && name != "()" && name != "Never" { return None }
@@ -143,8 +146,7 @@ fn ir_value_type(m: &IRModule, p: IRProgram, written: Type) -> Int? Never! {
 // A type's row rests on the type alone when no struct is being laid out, so
 // it is kept in m.value_rows by the type's index in m.value_types; a type
 // reached again while its own row is being laid out (-2) is laid out anew.
-fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Int? Never! {
-    ty :: ir_subst(m, written)
+fn ir_value_type_in(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if ir_type_row(&m, ty) == .Val(row) -> return Val(row)
     if laying.len() > 0 -> return ir_value_type_laid(&m, p, ty, laying)
     index :: type_table_intern(&m.value_types, ty)
@@ -291,8 +293,8 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
             return Val(ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "")))
         }
         .Struct(_, _) -> { return ir_struct_row(&m, p, ty, row, args, identity, laying) }
-        .Distinct(base, _) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, base), laying) }
-        .Alias(target) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, target), laying) }
+        .Distinct(base, _) -> { return ir_value_type_in(&m, p, sema_type_def_instance_type(p.types[row], args, base), laying) }
+        .Alias(target) -> { return ir_value_type_in(&m, p, sema_type_def_instance_type(p.types[row], args, target), laying) }
         else -> { return None }
     }
 }
@@ -410,14 +412,6 @@ fn ir_instance_identity(key: String, args: [Type]) -> String Never! {
     if args.len() == 0 -> return key.copy()
     spelled :: loop arg in args -> type_carrier_identity(arg)
     "{key}<{spelled.join(", ")}>"
-}
-
-// `written` (a member type of declaration `row`) in the terms of the
-// instance whose type parameters are bound to `args`.
-fn ir_instance_type(p: IRProgram, row: Int, args: [Type], written: Type) -> Type Never! {
-    if args.len() == 0 -> return written.copy()
-    names :: loop parameter in p.types[row].generic_params -> parameter.name
-    ir_subst_in(names, args, written)
 }
 
 // The runtime type behind a handle of nominal type `name`: the default Err is
@@ -1083,7 +1077,7 @@ fn ir_text_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
 // being laid out does (the pointer breaks the cycle).
 fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
     if laying.len() > 0 {
-        if ir_nominal_name(ir_untag(ir_subst(m, written))) == .Val(name) {
+        if ir_nominal_name(ir_untag(written)) == .Val(name) {
             if ir_type_def(p, name) == .Val(row) {
                 at :: ir_laying_decl_at(laying, p.types[row].key)
                 if at >= 0 {
@@ -1100,7 +1094,7 @@ fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [Strin
 // payload is laid out as an exact Int (Int itself, a tagged, ranged or
 // measured Int, or a declared type whose base is Int).
 fn ir_option_int_payload(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
-    ty :: ir_untag(ir_subst(m, written))
+    ty :: ir_untag(written)
     if ty == {
         .Int -> return true
         .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -1573,7 +1567,7 @@ fn ir_struct_members(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRM
     // Memoized by the instance's arguments in the terms of the instance
     // being built, as its member types are laid out. A SharedGuard argument's
     // member row follows its read/edit tag, which the identity does not spell.
-    bound :: loop arg in args -> ir_subst(m, arg)
+    bound :: args.copy()
     memo :: ir_instance_identity(p.types[row].key, bound)
     if memo.contains("SharedGuard<") -> return ir_struct_members_in(&m, p, row, bound, [String]{}, true)
     if ir_members_memo(m, m.struct_members, memo) == .Val(known) -> return Val(known)
@@ -1595,7 +1589,7 @@ fn ir_struct_members_in(m: &IRModule, p: IRProgram, row: Int, args: [Type], layi
         offset := 0
         loop field in fields {
             if field.computed -> next
-            field_ty :: ir_instance_type(p, row, args, field.ty)
+            field_ty :: sema_type_def_instance_type(p.types[row], args, field.ty)
             boxed :: definition.boxed_edges.contains(field.name)
             ty := -1
             if boxed && resolve {
@@ -2497,10 +2491,11 @@ fn ir_collect_unions(ty: Type, found: &[Type]) Never! {
 
 // The call argument `value` widened to the union `union_ty` (sema
 // widen_to_union).
-fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, union_ty: Type, span: Span) -> Int Never! {
+fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, span: Span) -> Int Never! {
+    union_ty :: ir_fact(p, &b, written, span)
+    if ir_failed(b) -> return -1
     value_ty :: ir_ty(p, b, value)
-    subst_ty :: ir_subst(m, value_ty)
-    member_row :: ir_value_type(&m, p, subst_ty) ?? return ir_type_fail(&b, span, value_ty)
+    member_row :: ir_value_type(&m, p, value_ty) ?? return ir_type_fail(&b, span, value_ty)
     payload :: ir_value_as(&m, p, &b, value, member_row, span)
     if ir_failed(b) -> return -1
     ir_union_box(&m, p, &b, payload, value_ty, union_ty, span)
@@ -2509,10 +2504,10 @@ fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, union_t
 // A new box of the structural enum of union `union_ty` holding `payload`
 // (of member type `member_ty`) as the variant that member's tag names.
 fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_ty: Type, union_ty: Type, span: Span) -> Int Never! {
-    target :: ir_untag(ir_subst(m, union_ty))
+    target :: ir_untag(union_ty)
     row :: ir_type_def(p, ir_union_key(target)) ?? return ir_fail_slot(&b, span, "union {ir_type_name(target)} without a definition")
     slot_type :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
-    member_tag :: type_union_member_tag(ir_untag(ir_subst(m, member_ty)))
+    member_tag :: type_union_member_tag(ir_untag(member_ty))
     index :: ir_variant_index(p, row, member_tag) ?? return ir_fail_slot(&b, span, "{ir_type_name(member_ty)} is no member of {ir_type_name(target)}")
     members :: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
     size :: ir_enum_box_size(&m, p, row, [Type]{}) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
@@ -2782,7 +2777,7 @@ fn ir_carrier_type(ty: Type) -> Bool Never! {
 // being built, as ir_struct_members is (a SharedGuard argument's row follows
 // its unspelled read/edit tag).
 fn ir_variant_members(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
-    bound :: loop arg in args -> ir_subst(m, arg)
+    bound :: args.copy()
     identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
     ir_variant_members_bound(&m, p, row, bound, identity, index)
 }
@@ -2826,7 +2821,7 @@ fn ir_variant_members_laid(m: &IRModule, p: IRProgram, row: Int, args: [Type], i
         }
         offset := 8
         loop (position, name) in names {
-            ty :: ir_value_type(&m, p, ir_instance_type(p, row, args, types[position])) ?? return None
+            ty :: ir_value_type(&m, p, sema_type_def_instance_type(p.types[row], args, types[position])) ?? return None
             boxed :: definition.boxed_edges.contains(edges[position])
             size :: if boxed -> 8 else -> m.types[ty].size
             align :: if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
@@ -2841,7 +2836,7 @@ fn ir_variant_members_laid(m: &IRModule, p: IRProgram, row: Int, args: [Type], i
 // The end of the widest variant, in whole words. Memoized in m.enum_sizes by
 // instance identity, as ir_variant_members is.
 fn ir_enum_box_size(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
-    bound :: loop arg in args -> ir_subst(m, arg)
+    bound :: args.copy()
     identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
     guarded :: identity.contains("SharedGuard<")
     if !guarded && name_rows_value(m.enum_sizes, identity) == .Val(known) -> return Val(known)
@@ -3150,7 +3145,7 @@ fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int,
 // The declared type of member `name` of the struct or tuple type `ty` (in
 // the terms of a generic struct's instance).
 fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> Type? Never! {
-    plain :: ir_untag(ir_subst(m, ty))
+    plain :: ir_untag(ty)
     if plain == .Tuple(fields) {
         loop field in fields {
             if field.name == name -> return Val(field.ty)
@@ -3161,7 +3156,7 @@ fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> 
     row :: ir_type_def(p, nominal) ?? return None
     if p.types[row].kind == .Struct(fields, _) {
         loop field in fields {
-            if field.name == name -> return Val(ir_instance_type(p, row, ir_type_args(plain), field.ty))
+            if field.name == name -> return Val(sema_type_def_instance_type(p.types[row], ir_type_args(plain), field.ty))
         }
     }
     None

@@ -10,7 +10,7 @@ use jet_foundation.[Span, TStrFormat, Type]
 // the value cast to its type.
 fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, format: TStrFormat, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
-    concrete :: ir_subst(m, value_ty)
+    concrete :: value_ty
     member :: ir_string_format_member(concrete, format) ?? return ir_fail_slot(&b, span, "interpolation format {format}")
     row := -1
     loop (index, function) in p.functions {

@@ -1170,8 +1170,8 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
 // nominal wrapper on success. The argument and the checker each execute once.
 fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span, context: &SemaCheckContext) -> TExpr? {
     error_type :: if checked.ty == {.Result(_, error) -> error else -> { return None }}
-    source_local :: checked_generated_local("__checked_text_source_{span.start}", span)
-    error_local :: checked_generated_local("__checked_text_error_{span.start}", span)
+    source_local :: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
+    error_local :: checked_generated_local("__checked_text_error_{span.start}", span, error_type)
     source_value :: sema_tir_node(Type.String, TExprKind.Local{local: source_local}, span)
     original := TExpr?{None}
     checker_call := TExpr?{None}

@@ -271,8 +271,7 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
     symbol :: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
         if operands.len() != 1 -> return None
-        subst_ty :: ir_subst(m, ty)
-        return Val(ir_set_from(&m, p, &b, subst_ty, subject, span))
+        return Val(ir_set_from(&m, p, &b, ty, subject, span))
     }
     set_row :: b.f.slot_type[subject]
     shape :: ir_set_shape(&m, p, set_row) ?? return None
@@ -287,8 +286,7 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
     }
     if route == "jet_sorted_set_first" || route == "jet_sorted_set_last" {
         if operands.len() != 1 -> return None
-        result_ty :: ir_subst(m, ty)
-        return Val(ir_set_end(&m, p, &b, result_ty, shape, subject, route == "jet_sorted_set_last", span))
+        return Val(ir_set_end(&m, p, &b, ty, shape, subject, route == "jet_sorted_set_last", span))
     }
     if symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
         if operands.len() != 1 -> return None
