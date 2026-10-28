@@ -353,7 +353,10 @@ fn sema_expr_integer_literal_value(value: TExpr) -> Int? {
 fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: Int) -> TExpr? {
     source := sema_expr_numeric_base(value.ty)
     destination := sema_expr_numeric_base(target)
-    if type_identity_equal(value.ty, target) -> return Val(value)
+    // A transparent fact tag (`#Raw Int`) has its inner type's identity; the
+    // operand still takes the plain numeric type the operator computes in.
+    tagged :: value.ty == .Tagged(_, _)
+    if type_identity_equal(value.ty, target) && !tagged -> return Val(value)
     if type_identity_equal(source, destination) {
         return Val(TExpr{ty: target, kind: value.kind, span: span})
     }
@@ -1498,9 +1501,20 @@ fn sema_expr_check_time_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
 
 struct SemaExprDistinctFacts {
     name: String
+    // The declaration's symbol key: one distinct type under any spelling
+    // (`Severity`, `module.Severity`).
+    key: String
     base: Type
     numeric: Bool
     range: TIntegerBounds?
+}
+
+fn sema_expr_distinct_same(lhs: Type, rhs: Type, left_facts: SemaExprDistinctFacts?, right_facts: SemaExprDistinctFacts?) -> Bool Never! {
+    if lhs == rhs -> return true
+    if left_facts == .Val(left) {
+        if right_facts == .Val(right) -> return left.key == right.key
+    }
+    false
 }
 
 // A quantity unit type's declared base: `.raw()` extracts its unchanged
@@ -1542,7 +1556,7 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, program
         value :: definition_value.range ?? return None
         range = Val(TIntegerBounds{lo: value.lo, hi: value.hi})
     }
-    Val(SemaExprDistinctFacts{name: name, base: base, numeric: numeric, range: range})
+    Val(SemaExprDistinctFacts{name: name, key: owner.id.key, base: base, numeric: numeric, range: range})
 }
 
 fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, left_facts: SemaExprDistinctFacts?, right_facts: SemaExprDistinctFacts?, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1554,7 +1568,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available on `{distinct.name}`", "`{distinct.name}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"))
             return None
         }
-        if lhs.ty != rhs.ty {
+        if !sema_expr_distinct_same(lhs.ty, rhs.ty, left_facts, right_facts) {
             &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "`#Numeric` distinct types only support arithmetic between the same type", "both sides must be `{distinct.name}`"))
             return None
         }
@@ -1571,7 +1585,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
         return Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: effective_lhs, rhs: effective_rhs}, span))
     }
     if op == BinOp.Eq || op == BinOp.Ne {
-        if lhs.ty != rhs.ty {
+        if !sema_expr_distinct_same(lhs.ty, rhs.ty, left_facts, right_facts) {
             distinct :: if left_facts != None -> left_facts else -> right_facts ?? return None
             &diagnostics.push(sema_error("E0128", span, "a `{type_name(lhs.ty)}` can't be compared with a `{type_name(rhs.ty)}`", "`{distinct.name}` is a distinct type; it only compares equal to another `{distinct.name}`", "use `.raw()` to compare the underlying values, or construct a `{distinct.name}`"))
             return None
@@ -2133,6 +2147,17 @@ fn sema_expr_int_literal_tir(value: Int, ty: Type, width: TIntegerWidth?, span: 
     sema_expr_numeric_conversion(big, ty, span, line)
 }
 
+// A bare numeral in an `Int(lo..hi)` slot is a value of that
+// range, proved at compile time (E0135 outside it). The slot's bounds, or
+// None when it is not an integer range.
+fn sema_expr_literal_range(expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaIntegerRange? {
+    resolved :: sema_expr_expected_type(expected, environment, program)
+    if resolved == .InlineRange(base, lo, hi) {
+        if base == Type.Int -> return Val(SemaIntegerRange{lo: lo, hi: hi})
+    }
+    None
+}
+
 fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     // D-INTLIT-WIDTH1: a bare numeral in a Float/F32 slot widens there,
     // checked exactly at compile time (E1003 past 2^53 / 2^24).
@@ -2156,6 +2181,13 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
             if contextual == .IntN(signed, bits) {
                 ty = contextual
                 tir_width = Val(TIntegerWidth{signed: signed, bits: bits})
+            }
+            if sema_expr_literal_range(contextual, environment, program) == .Val(range) {
+                if value < range.lo || value > range.hi {
+                    &diagnostics.push(sema_inline_range_out_of_bounds(value, range.lo, range.hi, span))
+                    return None
+                }
+                ty = Type.InlineRange{base: Type.Int, lo: range.lo, hi: range.hi}
             }
         }
         else -> {}
@@ -2197,6 +2229,13 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
                 ty = contextual
                 tir_width = Val(TIntegerWidth{signed: signed, bits: bits})
             }
+            if sema_expr_literal_range(contextual, environment, program) == .Val(range) {
+                if -value < range.lo || -value > range.hi {
+                    &diagnostics.push(sema_inline_range_out_of_bounds(-value, range.lo, range.hi, literal_span))
+                    return None
+                }
+                ty = Type.InlineRange{base: Type.Int, lo: range.lo, hi: range.hi}
+            }
         }
         else -> {}
     }
@@ -2223,22 +2262,25 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
 
 // Rust CheckerInfer/expr.rs interpolation check: each numeric or text
 // selector names the one value family its Core/Text/Fmt.jet formatter takes,
-// and any other value is E0112 at the interpolated value.
+// and any other value is E0112 at the interpolated value. Every integer
+// width meets the integer formatters as an exact `Int`, and padding takes a
+// scalar's Display text.
 fn sema_expr_check_format_selector(checked: TExpr, format: StrFormat, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     ty :: checked.ty
     shown :: sema_type_show(ty)
+    integer :: sema_expr_is_integer(ty)
     if format == {
         .Fixed(_) -> {
-            if ty == Type.Float || ty == Type.Int -> return true
-            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Fixed(n)`", "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or exact `Int` values", "pass a `Float` or exact `Int`, or use bare interpolation for this value"))
+            if ty == Type.Float || integer -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Fixed(n)`", "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or integer values", "pass a `Float` or an integer, or use bare interpolation for this value"))
         }
         .Grouped(_) -> {
-            if ty == Type.Float || ty == Type.Int -> return true
-            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Grouped(n)`", "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or exact `Int` values", "pass a `Float` or exact `Int`, or use bare interpolation for this value"))
+            if ty == Type.Float || integer -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Grouped(n)`", "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or integer values", "pass a `Float` or an integer, or use bare interpolation for this value"))
         }
         .Hex(_) -> {
-            if ty == Type.Int -> return true
-            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Hex(n)`", "hex interpolation uses `core.text.fmt.hex`, which formats `Int` values", "pass an `Int`, or use bare interpolation for this value"))
+            if integer -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Hex(n)`", "hex interpolation uses `core.text.fmt.hex`, which formats integer values", "pass an integer, or use bare interpolation for this value"))
         }
         .Sci(_) -> {
             if ty == Type.Float -> return true
@@ -2249,20 +2291,20 @@ fn sema_expr_check_format_selector(checked: TExpr, format: StrFormat, environmen
             &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Percent(n)`", "percent interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value"))
         }
         .Bin -> {
-            if ty == Type.Int -> return true
-            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Bin`", "binary interpolation formats exact Int values", "pass an exact `Int`, or use bare interpolation for this value"))
+            if integer -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Bin`", "binary interpolation formats integer values", "pass an integer, or use bare interpolation for this value"))
         }
         .Oct -> {
-            if ty == Type.Int -> return true
-            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Oct`", "octal interpolation formats exact Int values", "pass an exact `Int`, or use bare interpolation for this value"))
+            if integer -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Oct`", "octal interpolation formats integer values", "pass an integer, or use bare interpolation for this value"))
         }
         .Pad(_, _) | .PadLeft(_, _) -> {
-            if ty == Type.String -> return true
+            if ty == Type.String || ty == Type.Float || integer -> return true
             selector :: if format == {
                 .Pad(_, _) -> "Pad"
                 else -> "PadLeft"
             }
-            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:{selector}(n)`", "padding interpolation formats String values", "pass a `String`, or use bare interpolation for this value"))
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:{selector}(n)`", "padding interpolation formats String, integer, or Float values", "pass a `String`, an integer, or a `Float`, or use bare interpolation for this value"))
         }
         .Unit(_) -> {
             if sema_expr_scalable_unit_type(ty, environment, program) -> return true
@@ -3726,9 +3768,26 @@ fn sema_expr_paren_decimal_spelling(expr: Expr) -> String? Never! {
 
 // An untyped decimal literal is exact Decimal by default
 // and adopts the machine carrier only where Float or F32 is expected (Rust
-// `Expr::Float` inference).
+// `Expr::Float` inference), a union slot included when it has no Decimal
+// member.
 fn sema_expr_expects_machine_float(expected: Type?) -> Bool Never! {
+    if expected == .Val(.Union(members)) -> return sema_expr_union_machine_float(members) != None
     expected == (Val(Type.Float)) || expected == (Val(Type.Float32)) || expected == (Val(sema_dyn_type()))
+}
+
+// The machine float a union slot takes for a decimal literal: Float when it
+// is a member, else F32; None when the union has neither or takes Decimal.
+fn sema_expr_union_machine_float(members: [Type]) -> Type? Never! {
+    float := false
+    narrow := false
+    loop member in members {
+        if member == (Type.Named{name: "Decimal"}) -> return None
+        if member == Type.Float -> float = true
+        if member == Type.Float32 -> narrow = true
+    }
+    if float -> return Val(Type.Float)
+    if narrow -> return Val(Type.Float32)
+    None
 }
 
 fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {
@@ -3742,6 +3801,9 @@ fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span,
     }
     ty := Type.Float
     if expected == (Val(Type.Float32)) || (is_f32 && expected != (Val(Type.Float))) -> ty = Type.Float32
+    if expected == .Val(.Union(members)) {
+        if sema_expr_union_machine_float(members) == .Val(machine) -> ty = machine
+    }
     sema_expr_expected_owned(sema_node(&context, ty, NodeKind.FloatLit{value: value}, span), expected, environment, program, &diagnostics)
 }
 

@@ -461,7 +461,11 @@ fn sema_call_builtin_static_coerce(value: TExpr, required: Type, span: Span, env
 fn sema_call_builtin_static_argument(argument: CallArg, declared: Type, row: BuiltinStaticRow, bindings: &[SemaInferenceBinding], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_call_builtin_static_open(declared, row, bindings) {
         required := sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), environment, program)
+        // A Union slot hints only a decimal literal, which takes its machine
+        // float member instead of exact Decimal.
         hint := if required == {.Union(_) -> None else -> Val(required)}
+        // copy: `required` stays the coercion target below
+        if required == .Union(_) && sema_expr_decimal_literal_operand(argument.expr, false) -> hint = Val(required.copy())
         checked :: sema_check_expression(argument.expr, hint, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         return sema_call_builtin_static_coerce(checked, required, argument.span, environment, program, &diagnostics)
     }

@@ -5441,7 +5441,8 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, environment
         }
         .Option(_) -> {
             if value == {
-                .Present(_, _, _) | .Absent(_, _) -> return true
+                // An optional chain always yields the `T?` carrier itself.
+                .Present(_, _, _) | .Absent(_, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) -> return true
                 .EnumLit(owner, variant, _, args, _, _, _) -> {
                     if owner == "" {
                         if variant == "None" && args.len() == 0 -> return true
@@ -5714,7 +5715,9 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
         if sema_stmt_type_is_fallible_result(table.ty) -> context.failure_direct_source = true
         return Val(table)
     }
-    if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, &state, &tail_store, &context) {
+    success :: sema_stmt_return_success_type(return_type)
+    widened_call :: sema_stmt_return_call_widening(value, success, environment, program, &scopes, &state, &tail_store, &context)
+    if widened_call == None && (sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, &state, &tail_store, &context)) {
         carrier :: sema_check_expression(value, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
         // here) is this body's own failure source.
@@ -5722,9 +5725,9 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
         return Val(carrier)
     }
     if !sema_stmt_return_is_carrier(return_type) {
-        return sema_stmt_check_return_payload(value, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_stmt_check_return_payload(value, required, widened_call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    payload :: sema_stmt_check_return_payload(value, sema_stmt_return_success_type(return_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    payload :: sema_stmt_check_return_payload(value, success, widened_call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     normalized := sema_expr_unwrap_tag(required)
     if normalized == {
         .Result(_, _) -> return Val(sema_tir_node(required, TExprKind.Ok{value: payload}, expr_span(value)))
@@ -5732,16 +5735,36 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
         else -> return Val(payload)
     }
 }
+
+// A returned call whose own success type widens losslessly into a numeric
+// success slot: the call is inferred alone, its failure propagates, and its
+// payload converts like any other widened return. A checked widening keeps
+// the slot as the call's inference target. The call's own success type.
+fn sema_stmt_return_call_widening(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
+    if !sema_expr_is_numeric(success) || !sema_stmt_return_call_shape(value) -> return None
+    probe_diagnostics := [Diagnostic]{}
+    probe :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
+    own := probe.ty
+    unwrapped :: sema_expr_unwrap_tag(probe.ty)
+    if unwrapped == .Result(ok, _) -> own = ok
+    if !sema_expr_is_numeric(own) || type_identity_equal(own, success) -> return None
+    if sema_expr_numeric_widening_to(own, success) != (Val(false)) -> return None
+    Val(own)
+}
+
 // Return-position numeric widening, exactly as at a call argument: a value
 // whose type is already known and widens into the numeric success slot is
 // checked on its own type and then converted, so every tier receives the
 // explicit conversion instead of the source bits under the slot's type.
 // Rust `widen_numeric_return` takes any widening (`numeric_widening_to` is
-// Some): a lossless one (U8 into Int) as well as a checked one.
-fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// Some): a lossless one (U8 into Int) as well as a checked one. A widened
+// call (`sema_stmt_return_call_widening`) is checked on its own success type.
+fn sema_stmt_check_return_payload(value: Expr, success: Type, call_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     known := sema_stmt_return_numeric_source(value, environment, scopes)
+    // copy: `call_type` is the caller's read parameter, which keeps its value
+    if call_type == .Val(own) -> known = Val(own.copy())
     if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
-        checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        checked :: sema_check_expression(value, call_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, success, checked.span, line, &diagnostics)
     }
@@ -5752,6 +5775,14 @@ fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaS
         if value == .Ident(name, name_span, _) -> return sema_string_view_materialize(name, name_span, Val(success), environment, program, &scopes, &state, &context, &diagnostics)
     }
     sema_check_expression(value, Val(success), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_stmt_return_call_shape(value: Expr) -> Bool Never! {
+    if value == {
+        .Paren(inner, _, _) -> sema_stmt_return_call_shape(inner)
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> true
+        else -> false
+    }
 }
 
 // Rust `widen_numeric_return` widens whatever type the value inferred to, so

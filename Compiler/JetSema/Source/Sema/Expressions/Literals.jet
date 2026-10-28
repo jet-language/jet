@@ -474,6 +474,11 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
                 }
                 result_ty = Val(normalized)
             }
+            // `[]` is the one empty spelling for both collections: a map
+            // context makes it an empty map.
+            .Map(_, _, _) -> {
+                if elements.len() == 0 -> return sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span, id: AST_NODE_GENERATED}, [ExprPair]{}, span, Val(normalized), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
             else -> {}
         }
     }
@@ -723,13 +728,20 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         else -> None
     }
     // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
-    // named index keeps its own type when it is a stored `Range` (a window
-    // selection, classified below) or a sized integer (every integer indexes,
-    // as for a written index); any other named index meets `Int` as before.
-    named_position :: index == .Ident(_, _, _) && index_expected == (Val(Type.Int))
+    // named or written-type index (`i`, `U8{1}`) keeps its own type when it
+    // is a stored `Range` (a window selection, classified below) or a sized
+    // integer (every integer indexes); any other such index meets `Int` as
+    // before.
+    named_position :: sema_expression_index_self_typed(index) && index_expected == (Val(Type.Int))
     hint :: if named_position -> Type?{None} else -> index_expected
     inferred_index :: sema_check_expression(index, hint, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    checked_index :: if named_position && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty) -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? return None else -> inferred_index
+    checked_index := if named_position && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty) -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? return None else -> inferred_index
+    // A fixed-width position is the Int it names; one outside the list fails
+    // the bounds check like any other position.
+    if index_expected == (Val(Type.Int)) && sema_expr_unwrap_tag(checked_index.ty) == .IntN(_, _) {
+        line :: sema_source_line_at(environment.source_segments, checked_index.span) ?? 0
+        checked_index = sema_expr_numeric_conversion(checked_index, Type.Int, checked_index.span, line) ?? return None
+    }
     // (Rust `infer` Index arm): `tree[key]` / `tree[i]` on a
     // `Dyn` reads an object member or array position as a checked Dyn.
     if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment, program)) {
@@ -842,6 +854,15 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     kind :: sema_expression_index_kind(resolved_kind, base_ty)
     value :: sema_tir_node(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// An index whose type is its own: a name or a literal that writes its type.
+fn sema_expression_index_self_typed(index: Expr) -> Bool Never! {
+    if index == {
+        .Ident(_, _, _) | .StructLit(_, _, _, _, _, _, _, _) -> true
+        .TypedLit(head, _, _, _) -> head != None
+        else -> false
+    }
 }
 
 // Whether the applied type `name` is Core's `kind` (`Rows` or `Row`,

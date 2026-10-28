@@ -6735,16 +6735,14 @@ fn sema_comptime_add_meta_sources(sources: &SemaComptimeSourceList, graph: SemaR
                 destination_key := "{owner_key}::meta::category::{span.start}"
                 sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, "category", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
             }
-            .Maturity(expression, span) -> {
-                destination_key := "{owner_key}::meta::maturity::{span.start}"
-                sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, "maturity", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
-            }
             .Unknown(name, expression, span) -> {
                 if expression == .Val(source_expression) {
                     destination_key := "{owner_key}::meta::{name}::{span.start}"
                     sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, name, SemaComptimeItemKind.MarkerArgument, source_expression, None)
                 }
             }
+            // `maturity:` names the parser's closed documentation scale, read
+            // from `Func.maturity`; it is no evaluated value.
             else -> {}
         }
     }

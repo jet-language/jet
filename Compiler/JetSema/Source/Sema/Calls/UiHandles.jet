@@ -15,6 +15,7 @@ use jet_foundation.[
     Span,
     SymbolKind,
     Type,
+    core_identity_is,
     type_name,
 ]
 
@@ -311,7 +312,7 @@ fn sema_ui_handle_mount(args: [CallArg], span: Span, expected: Type?, environmen
     }
     if args.len() == 3 {
         constraint_name :: sema_expr_type_base_name(typed_args[2].ty) ?? type_name(typed_args[2].ty)
-        if constraint_name != "SizeConstraint" {
+        if constraint_name != "SizeConstraint" && !core_identity_is(constraint_name, "core.ui", "SizeConstraint") {
             &diagnostics.push(sema_error("E0108", args[2].span, "`ui.mount` optional third argument is a `SizeConstraint`, but got {sema_type_show(typed_args[2].ty)}", "use `ui.constraint(min_w, min_h, max_w, max_h)`", "ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))"))
             valid = false
         }
