@@ -307,8 +307,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
 // D-ROLEFILE1=A / D-CMDOVERRIDE1=A (card #1866) add no source token: the four
-// optional package-root command homes are `@run.jet`, `@build.jet`, `@dev.jet`,
-// and `@test.jet`, and ordinary `fn run|build|dev|test` overrides use the
+// optional package-root command homes are `run.jet`, `build.jet`, `dev.jet`,
+// and `test.jet`, and ordinary `fn run|build|dev|test` overrides use the
 // existing function surface. `--show-default` selects the stock behavior.
 // D-CMD-OVERRIDE1=C (card #1451) remains the older test-suite API detail.
 // D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker

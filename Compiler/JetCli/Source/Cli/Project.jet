@@ -34,7 +34,7 @@ fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> Je
     names := [String]{}
     loop file in files {
         filename :: jet_cli_file_name(file.relative_path)
-        if filename == "package.jet" || filename == "pkg.jet" || filename == "@run.jet" || filename == "@build.jet" || filename == "@test.jet" || filename == "@dev.jet" {
+        if filename == "package.jet" || filename == "pkg.jet" || (jet_cli_relative_parent(file.relative_path) == "" && JET_CLI_COMMAND_ROLE_FILES.contains(filename)) {
             next
         }
         program :: jet_cli_parsed_program(file.source) ?? next

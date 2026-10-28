@@ -3570,7 +3570,8 @@ path. It writes `package.jet`, a print-only `run.jet` with one test claim, a
 `.gitignore`, and a toolchain lock record. `--template cli|ui|web|overrides`
 selects a richer starter: a typed CLI entry, a native UI tree, the browser app,
 or the print-only entry plus the commented command homes
-`@run.jet`/`@build.jet`/`@dev.jet`/`@test.jet` (D-NEW-TEMPLATE1); an unknown
+`build.jet`/`dev.jet`/`test.jet` beside it, `run.jet` being the `jet run`
+home itself (D-NEW-TEMPLATE1); an unknown
 name is E2104. `--annotated` includes commented example dependencies.
 The same command family also provides `jet new service|route|job|migration` for
 backend source scaffolds; those subcommands have their own `--path`, `--route`,
@@ -3824,7 +3825,7 @@ Ctrl-C clears nonempty editor input and exits from an empty prompt
 
 ### Semantic assistance and history
 
-REPL documentation and completion, LSP hover and completion, and `jet ?` help
+REPL documentation and completion, and LSP hover and completion
 read the shared `jet-semindex` facts. A fact carries stable module/member
 identity, kind, signature, summary, examples, provenance, and an optional
 source span. Definitions, members, parameters, locals, imports, and aliases

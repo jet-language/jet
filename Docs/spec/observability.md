@@ -1,10 +1,6 @@
 # Jet observation guide
 
-Use one query when a program is slow:
-
-```text
-jet ? why is my program slow
-```
+Start here when a program is slow.
 
 This page is the terminal guide for package authors and toolchain maintainers.
 It covers live runtime facts, GC evidence, wall-clock traces, browser rows, and
@@ -180,6 +176,3 @@ the program through time, or keep a standing per-variable history buffer.
 - Wall-clock session: `Compiler/JetCli/Source/Cli/Perf/` and `Compiler/JetFoundation/Source/Trace/JetTrace.jet`
 - Browser rows: `Compiler/JetDevserver/Source/BrowserTrace.jet`, merged by `Compiler/JetCli/Source/Cli/Perf/BrowserCapture.jet`
 - Devtools protocol and panel policy: `Compiler/JetFoundation/Source/Devtools/` and the panel catalog projection in `Compiler/JetDevserver/Source/Session.jet`
-
-The `jet ? why is my program slow` route prints this file verbatim. The guide
-and the CLI output therefore have one home.

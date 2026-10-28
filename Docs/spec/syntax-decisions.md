@@ -7149,6 +7149,13 @@ one shared entry-resolution rule makes `run`, `dev`, and `debug`,
 the current usage error. An explicit directory target uses this same resolver;
 an explicit file argument always wins.
 
+**D-DX-ENTRY1 amendment — bare `jet` is the command palette** *(owner ruling
+2026-10-28, card #5952)*: bare `jet`, with no command, prints the command
+palette and exits 0; it never starts the REPL. Only `jet repl` starts the REPL.
+`jet ?` is removed with no alias: `?` is an unknown command (E2101). The palette
+is static text when no terminal is attached and never needs `/dev/tty`; an
+interactive picker, once built, runs only on a terminal.
+
 **D-CLI-SURFACE2=A**: `jet fuzz` remains flat beside testing. The language
 server is canonically `jet self lsp`; first-party editors launch that argv.
 Bare `jet self lsp` is E2101 before external-command discovery, preserves following
@@ -7222,29 +7229,31 @@ filter; the value exposes `run()`, `iteration`, and `result`. A zero-parameter
 The retired benchmark override is deleted with its command. The rule adds no
 token: it extends the existing named-function entry convention.
 
-**D-ROLEFILE1=A — command homes use the `@` mark** *(ratified 2026-08-10,
-card #1866)*: the four commands have optional, package-root-only home files:
-`@run.jet`, `@build.jet`, `@dev.jet`, and `@test.jet`. `package.jet` and
-`module.jet` remain plain names. The marked namespace is closed to this command
-set; there is no command directory and no second mark or unmarked role-file
-form. A home file with no matching function is inert and leaves the stock
-command behavior selected.
+**D-ROLEFILE1=A — command homes** *(ratified 2026-08-10, card #1866; amended
+by owner ruling 2026-10-28, card #6034)*: the four commands have optional,
+package-root-only home files: `run.jet`, `build.jet`, `dev.jet`, and
+`test.jet`. The names carry no mark (card #6034 retired the `@` mark with no
+alias). `package.jet` and `module.jet` remain plain names. The home namespace
+is closed to this command set; there is no command directory and no second
+role-file form. A home file with no matching function is inert and leaves the
+stock command behavior selected. The same names below the package root are
+ordinary source files.
 
 **D-CMDOVERRIDE1=A — command override or stock default** *(ratified
 2026-08-10, card #1866)*: a package-scoped invocation may select one ordinary
 top-level `fn run`, `fn build`, `fn dev`, or `fn test` as its command function.
 When a file argument is present, that file is the scope; when the command has
-package scope, the package source tree is the scope and the `@…jet` home sorts
-first. No matching function selects the command's stock default. More than one
-matching command function in one scope is an error. `jet <cmd> --show-default`
-reports the stock default and ignores command overrides. The ruling adds no
-token or command directory.
+package scope, the package source tree is the scope and the command's home
+file sorts first. No matching function selects the command's stock default.
+More than one matching command function in one scope is an error. `jet <cmd>
+--show-default` reports the stock default and ignores command overrides. The
+ruling adds no token or command directory.
 
-**D-VERDICT-678-1 amendment — `run.jet` is ordinary source** *(ratified
-2026-08-10, card #1866)*: `run.jet` is no longer reserved as a command-role
-file. It remains the conventional stock entry fallback for `jet run`; the
-optional command home is `@run.jet`, and ordinary source discovery treats
-`run.jet` like every other source file.
+**D-VERDICT-678-1 amendment — `run.jet` is the `jet run` home** *(ratified
+2026-08-10, card #1866; amended by owner ruling 2026-10-28, card #6034)*: the
+package-root `run.jet` is the `jet run` home and remains the conventional
+stock entry fallback, so a root `fn run` there is both. A `run.jet` below the
+package root is ordinary source.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
@@ -7536,7 +7545,7 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-FENCE-GLYPH1=A** *(card #1516; spelling superseded by D-FENCE2=A)* — expression fences accept expression entries. It spelled fences `@[ … ]@`, superseding `$[ … ]$` under the D-ONCE-AT1 prefix migration; the retired `$` spelling has no compatibility path.
 - **D-FENCE-RANGE1=A** *(card #1516)* — inside an expression fence, an ascending integer-literal range `0..3` expands to the four entries `0`, `1`, `2`, and `3`. Descending ranges and ranges with non-integer-literal endpoints remain one ordinary Range value and add no diagnostic. Binding-name ranges keep their existing numbered-name rule.
 - **D-FENCE2=A** *(ratified 2026-09-28, card #3662; shipped 2026-09-28)* — the statement-expansion fence is spelled `<: … :>`: `<: t1..t8 :> :: task transfer(from, to, 100)`, `print(<: "a", total(1, 2) :>)`. Statement repetition, lock-step fences, numbered names, and D-FENCE-RANGE1 are unchanged; `print(<: (0..3) :>)` prints one range. `<:` and `:>` are longest-match lexer tokens; `<`, `<=`, `<=>`, `>`, and generic `<T>` never form them. `:>` is reclaimed from the D-ARROW-RESPELL1 retired arrow: a `:>` with no opening `<:` teaches `->` through E0070. The old `@[` / `]@` digraphs teach the new spelling through E-FENCE-SPELLING with a formatting-safe edit; they are not aliases.
-- **D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — compiler facts carry `$`. A fact is a `$` member of its subject (`T.$layout`, `T.$fields`, `field.$name`, `Severity.$range`, `send_report.$effects`, `value.$origin`); build facts hang off `$build` (`$build.os`, `.profile`, `.settings.*`, `.stamp.*`) and package facts off `$package` (`$package.name`, `$package.version`); `$phase` and `$program` are the other subjectless roots. Marker and fact declarations mark compiler metadata the same way: `marker Audited($sites: [.Type], $repeatable: false)`, `fact Flow($holds: .Value, $safe: .Gain, $gates: [])`, `migration … $irreversible`. `@TYPE(T)`, `@FUNCTION(f)`, `@METHOD`, `@CLOSURE` and `@VALUE(v)` are removed in favour of subject members; `@SOURCE()` and `@TYPES()` keep their registry spelling until a ballot names a `$` root. The lexer reads `$name` as one word; programs never declare a `$` name (E0003), and config surfaces read the same word as the `$NAME` environment read (D-ONCE-DOLLAR1=B). Every retired `@` fact spelling (`T.@layout`, `@build.os`, `@build.package.name`, `@sites:`, `@PHASE()`) teaches E0003 with a machine-applicable `$` respelling (retirement row `fact-mark`). Template name splices carry `$` too (D-NAME-SPLICE1=B, below); `@run.jet` filenames and `pkg@provider#v` references are unchanged (D-AT-INFIX1=A).
+- **D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — compiler facts carry `$`. A fact is a `$` member of its subject (`T.$layout`, `T.$fields`, `field.$name`, `Severity.$range`, `send_report.$effects`, `value.$origin`); build facts hang off `$build` (`$build.os`, `.profile`, `.settings.*`, `.stamp.*`) and package facts off `$package` (`$package.name`, `$package.version`); `$phase` and `$program` are the other subjectless roots. Marker and fact declarations mark compiler metadata the same way: `marker Audited($sites: [.Type], $repeatable: false)`, `fact Flow($holds: .Value, $safe: .Gain, $gates: [])`, `migration … $irreversible`. `@TYPE(T)`, `@FUNCTION(f)`, `@METHOD`, `@CLOSURE` and `@VALUE(v)` are removed in favour of subject members; `@SOURCE()` and `@TYPES()` keep their registry spelling until a ballot names a `$` root. The lexer reads `$name` as one word; programs never declare a `$` name (E0003), and config surfaces read the same word as the `$NAME` environment read (D-ONCE-DOLLAR1=B). Every retired `@` fact spelling (`T.@layout`, `@build.os`, `@build.package.name`, `@sites:`, `@PHASE()`) teaches E0003 with a machine-applicable `$` respelling (retirement row `fact-mark`). Template name splices carry `$` too (D-NAME-SPLICE1=B, below); `pkg@provider#v` references are unchanged (D-AT-INFIX1=A).
 - **D-NAME-SPLICE1=B** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — inside a derive or marker template the fact sigil also splices a template binding: `fn $method(self)` and `impl $type_name` name a declaration from text, `self.$field` and `rhs.$field` read the member named by a loop value, `.$left` matches the variant it names, and `{$count}` or a bare `$count` reads the binding's build-time value. A `$` word that names no template binding, or that is read on a bound value (`field.$name`), stays a compiler fact. The retired `@` splice (`fn @method`, `self.@field`, `.@left`, `{@count}`) teaches E0388 with a machine-applicable `$` respelling, which completes the #3662 cutover: prefix `@` in code marks only a live link.
 - **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.

@@ -306,14 +306,35 @@ fn jet_cli_usage_page(order: String) -> String Never! {
     out
 }
 
-// The flags-only greeting: the headline commands in `jet help` order.
-fn jet_cli_greeting() -> String Never! {
-    out := "Welcome to {JET_CLI_LANG_NAME}! (v{JET_CLI_VERSION})\n\nGet started:\n"
-    loop index in jet_cli_commands_in("frequency") {
-        command :: JET_CLI_COMMANDS[index]
-        if command.headline -> out = "{out}  {jet_cli_pad("{JET_CLI_BINARY} {command.name}", 12)} {command.summary}\n"
+// The categories of the bare `jet` command palette, in display order.
+JET_CLI_PALETTE_CATEGORIES :: [String]{"Build & Run", "Projects & Environments", "Packages", "Jetos", "Development Server", "Reference"}
+
+fn jet_cli_palette_category(name: String) -> String Never! {
+    if name == {
+        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" | "package" | "flash" | "cc" | "c++" | "jobs" -> "Build & Run"
+        "new" | "fmt" | "fix" | "lint" | "env" | "init" | "project" | "import" | "split" | "fold" | "generate" -> "Projects & Environments"
+        "registry" | "add" | "remove" | "fetch" | "update" | "search" | "clean" | "audit" | "gc" | "shared-store" | "cache" -> "Packages"
+        "os" | "image" | "bind" | "trust" | "remote" -> "Jetos"
+        "dev" | "notebook" -> "Development Server"
+        else -> "Reference"
     }
-    "{out}\n  {jet_cli_pad("{JET_CLI_BINARY} help", 12)} see every command\n"
+}
+
+// Bare `jet`: the command palette, every canonical command under its
+// category. It prints the same static text with or without a terminal.
+fn jet_cli_palette() -> String Never! {
+    out := "{JET_CLI_LANG_NAME} command palette\n"
+    commands :: jet_cli_commands_in("frequency")
+    loop category in JET_CLI_PALETTE_CATEGORIES {
+        out = "{out}\n{category}\n"
+        loop index in commands {
+            command :: JET_CLI_COMMANDS[index]
+            if !jet_cli_is_canonical_top_level(command.name) || jet_cli_palette_category(command.name) != category -> next
+            out = "{out}  {jet_cli_pad("{JET_CLI_BINARY} {command.name}", 18)} {command.summary}\n"
+        }
+    }
+    out = "{out}\nError Codes\n  {jet_cli_pad("{JET_CLI_BINARY} explain <CODE>", 18)} Show a diagnostic's full help, such as `{JET_CLI_BINARY} explain E0102`\n"
+    "{out}\nRun `{JET_CLI_BINARY} help` for every command's usage and flags.\n"
 }
 
 fn jet_cli_flag_rows(flags: [JetCLIFlagSpec]) -> String Never! {

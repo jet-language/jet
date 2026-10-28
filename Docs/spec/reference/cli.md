@@ -179,6 +179,14 @@ order, positional ordering, and duplicate visible job names; internal jobs do
 not become argv-reachable.
 ## Root command index
 
+Bare `jet`, with no command (global flags such as `--color=never` allowed),
+prints the command palette and exits 0: every canonical command under its
+category (Build & Run, Projects & Environments, Packages, Jetos, Development
+Server, Reference), then the Error Codes row and a pointer to `jet help`. The
+palette is the same static text with or without a terminal and never opens
+`/dev/tty`. Only `jet repl` starts the REPL; it reports E2104 until the REPL is
+built. `?` is not a command: `jet ?` gets the unknown-command E2101.
+
 The root index below mirrors `jet help` from this checkout's compiler. It lists
 the most used commands first, in the order `node Tools/cli-census/census.mjs`
 measures from the guides, examples, and tests; `jet help --sort az` lists the
@@ -664,8 +672,9 @@ harness exit (the outcome for a package without a claims floor).
 project: `package.jet`
 with the template's `authority: { allow: [...] }` row, `.jet/lock` with the running toolchain
 pin and the build stamp (the git revision when the folder is inside a
-repository), the template's `run.jet`, the four comment-only `@*.jet` command
-homes for `overrides`, and `.gitignore`, then the status lines on stderr
+repository), the template's `run.jet` (the `jet run` home), the three
+comment-only command homes `build.jet`, `dev.jet` and `test.jet` for
+`overrides`, and `.gitignore`, then the status lines on stderr
 (muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.

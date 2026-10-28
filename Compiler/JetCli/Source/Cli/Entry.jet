@@ -69,7 +69,7 @@ JET_CLI_PACKAGE_FILE :: "package.jet"
 
 JET_CLI_WORKSPACE_FILE :: "workspace.jet"
 
-JET_CLI_COMMAND_ROLE_FILES :: [String]{"@run.jet", "@build.jet", "@dev.jet", "@test.jet"}
+JET_CLI_COMMAND_ROLE_FILES :: [String]{"run.jet", "build.jet", "dev.jet", "test.jet"}
 
 JET_CLI_RESERVED_SOURCE_NAMES :: [String]{"package.jet", "pkg.jet", "env.jet", "config.jet", "workspace.jet"}
 
@@ -801,10 +801,10 @@ fn jet_cli_find_project_entry_at(root_path: String, command: String, color: Bool
     JetCLIEntryFound.Entry{entry: JetCLIEntry{path: jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE), callable: None}}
 }
 
-// Syntax.rs `command_role_file`.
+// Syntax.rs `command_role_file`: the package-root home of a command.
 fn jet_cli_command_role_file(command: String) -> String? Never! {
     if command == "run" || command == "build" || command == "dev" || command == "test" {
-        return Val("@{command}.jet")
+        return Val("{command}.jet")
     }
     None
 }
@@ -830,7 +830,7 @@ fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[F
         if {
             parent == "" && name == role -> &role_files.push(file)
             parent == "" && !is_role_file -> &root_files.push(file)
-            parent == "src" && !is_role_file -> &src_files.push(file)
+            parent == "src" -> &src_files.push(file)
             else -> {}
         }
     }

@@ -27,10 +27,9 @@ pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 /// E1225 and points users to the Jet-grammar files that replace its jobs.
 pub const JETPACK_TOML: &str = "jetpack.toml";
 
-/// D-VERDICT-678-1, amended by D-ROLEFILE1 (ratified 2026-08-10): `run.jet`
-/// remains the ordinary zero-ceremony fallback source for `jet run`, but it
-/// is not a reserved command-role filename. The optional command home is
-/// `@run.jet`.
+/// `run.jet` is the conventional stock entry for `jet run` and the `jet run`
+/// command home: a root `run.jet` without `fn run` is an inert home that the
+/// stock entry runs.
 pub const DEFAULT_ENTRY_FILE: &str = "run.jet";
 
 /// D-ECO-INLINEPACKAGE1=A: one optional leading contextual Package carrier
@@ -41,13 +40,14 @@ pub const INLINE_PACKAGE_DECL: &str = "package";
 /// Pre-ruling project entry name, retained only as a one-time migration sentinel.
 pub const LEGACY_ENTRY_FILE: &str = "main.jet";
 
-/// D-ROLEFILE1=A (ratified 2026-08-10, card #1866): optional package-root
-/// command homes. The marked namespace is closed to these four command names;
-/// there is no command directory and no package/module role-file spelling.
-pub const COMMAND_FILE_RUN: &str = "@run.jet";
-pub const COMMAND_FILE_BUILD: &str = "@build.jet";
-pub const COMMAND_FILE_DEV: &str = "@dev.jet";
-pub const COMMAND_FILE_TEST: &str = "@test.jet";
+/// The optional package-root command homes, named for their commands with no
+/// mark. The home names are closed to these four commands; there is no
+/// command directory and no package/module role-file spelling. The same
+/// names below the package root are ordinary source.
+pub const COMMAND_FILE_RUN: &str = "run.jet";
+pub const COMMAND_FILE_BUILD: &str = "build.jet";
+pub const COMMAND_FILE_DEV: &str = "dev.jet";
+pub const COMMAND_FILE_TEST: &str = "test.jet";
 pub const COMMAND_ROLE_FILES: &[&str] = &[
     COMMAND_FILE_RUN,
     COMMAND_FILE_BUILD,

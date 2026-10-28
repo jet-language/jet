@@ -1,0 +1,17 @@
+# Bare `jet` prints the command palette and exits 0; with no terminal it is the
+# same static text and never touches `/dev/tty`. Only `jet repl` starts the
+# REPL (not built yet: E2104), and `?` is an ordinary unknown command (E2101).
+env: NO_COLOR=1
+step: jet
+exit: 0
+stdout: = bare_jet_palette.txt
+stderr: !~ "/dev/tty" # the palette needs no terminal
+step: jet --color=never
+exit: 0
+stdout: = bare_jet_palette.txt
+step: jet repl
+exit: 2
+stderr: ~ "Error [E2104]: `jet repl` is not built yet" # the one REPL entry
+step: jet ?
+exit: 2
+stderr: ~ "Error [E2101]: `?` isn't a jet command." # no `?` alias

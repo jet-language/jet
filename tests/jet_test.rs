@@ -1415,7 +1415,7 @@ fn jet_new_every_template_runs_and_tests() {
     let _parent_scratch = common::Scratch::new("jet_new_templates_parent");
     let parent = &_parent_scratch.path;
     tir_support::write_test_package(parent, tir_support::TIR_TEST_PACKAGE);
-    let homes = ["@run.jet", "@build.jet", "@dev.jet", "@test.jet"];
+    let homes = ["build.jet", "dev.jet", "test.jet"];
     for template in ["cli", "ui", "web", "overrides"] {
         let name = format!("starter_{template}");
         let dir = parent.join(&name);

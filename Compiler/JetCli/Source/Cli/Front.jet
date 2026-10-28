@@ -76,7 +76,9 @@ enum JetCLIPlan {
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints.
     // `watch` (`jet dev`): rerun the program whenever a package source changes.
-    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool)
+    // `entry` is the command function the program starts at (`fn dev` for a
+    // `jet dev` that selected one); None starts at the package's own entry.
+    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?)
     // `jet test <file>`: compile the checked test harness and run it under
     // `options` (native O0 unless its build options say otherwise).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
@@ -826,11 +828,11 @@ fn jet_cli_with_build_options(plan: ^JetCLIPlan, jet_argv: [String], quiet: Bool
                 .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: ^file, color: color, options: ^options, build_args: ^build_args, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
             }
         }
-        .Run(file, source, color, _, verbose, threads, program_args, invocation, notice, watch) -> {
+        .Run(file, source, color, _, verbose, threads, program_args, invocation, notice, watch, entry) -> {
             command :: if watch -> "dev" else -> "run"
             if jet_cli_build_options(jet_argv, command, file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
-                .Selected(options, notes) -> return JetCLIPlan.Run{file: ^file, source: ^source, color: color, options: ^options, verbose: verbose, threads: threads, program_args: ^program_args, invocation: ^invocation, notice: "{notice}{notes}", watch: watch}
+                .Selected(options, notes) -> return JetCLIPlan.Run{file: ^file, source: ^source, color: color, options: ^options, verbose: verbose, threads: threads, program_args: ^program_args, invocation: ^invocation, notice: "{notice}{notes}", watch: watch, entry: ^entry}
             }
         }
         else -> {}
@@ -971,7 +973,7 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]
 // `jet build <entry> -- words` where no `fn build` runs: nothing reads the
 // words, so they are refused, never dropped.
 fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `fn build`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `@build.jet` declares `fn build(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
+    jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `fn build`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `build.jet` declares `fn build(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // The jet flags `jet run` honors. Any other registered flag on a run is
@@ -980,20 +982,30 @@ fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
 // the Rust host ignores it.
 JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default"}
 
-// `jet run [<file>]` under its build options (jet_cli_build_options).
-fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    jet_cli_with_build_options(jet_cli_run_entry(jet_argv, args, passthrough, shorthand, color, quiet, verbose, threads), jet_argv, quiet)
+// `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
+// makes it `jet dev`.
+fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    jet_cli_with_build_options(jet_cli_run_entry(jet_argv, args, passthrough, shorthand, watch, color, quiet, verbose, threads), jet_argv, quiet)
 }
 
 // `jet run [<file>]` (`args` = `run`, the target, then the positional
 // words), also the `jet <file>` shorthand (`shorthand`). The target resolves
 // as `jet check` resolves it (Source/main.rs `resolve_command_target`). The
 // program's arguments are the words after the first standalone `--`
-// (`passthrough`), or else the positional words after the target.
-fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+// (`passthrough`), or else the positional words after the target. A `jet dev`
+// (`watch`) resolves its own command home and starts at the `fn dev` its
+// target declares, unless `--show-default` asks for the stock entry;
+// `--watch=off` runs it once instead of rerunning it on every change.
+fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
+    keep_watching := watch
     loop argument in jet_argv {
         if !argument.starts_with("-") || argument == "-" -> next
+        if watch && (argument == "--watch" || argument == "--watch=on") -> next
+        if watch && argument == "--watch=off" {
+            keep_watching = false
+            next
+        }
         head :: argument.split("=").to_list()[0]
         if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
         return jet_cli_not_ported("run {head}", color)
@@ -1008,11 +1020,14 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
         .Refused(refusal) -> return refusal
         .Rows(rows) -> invocation = rows
     }
-    entry :: jet_cli_check(jet_argv, args, "run", color, quiet, threads, false)
+    command :: if watch -> "dev" else -> "run"
+    entry :: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _) -> {
             program_args :: passthrough ?? jet_cli_tail(args, 2)
-            return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: false}
+            selects_dev :: watch && !jet_argv.contains("--show-default") && jet_cli_top_level_function_lines(source, "dev").len() > 0
+            function :: if selects_dev -> String?{Val("dev")} else -> String?{None}
+            return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: keep_watching, entry: function}
         }
         else -> {}
     }
@@ -1503,8 +1518,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
     quiet :: owned.contains("--quiet")
     verbose :: owned.contains("--verbose") || owned.contains("-v")
     json :: jet_cli_wants_json(owned)
-    if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
-    if raw[0] == "?" -> return jet_cli_not_ported("?", color)
+    if raw.len() == 0 -> return jet_cli_renderable(jet_cli_palette(), json)
 
     // Moved and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
@@ -1577,7 +1591,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
             return jet_cli_renderable(jet_cli_usage_page(order), json)
         }
-        return jet_cli_renderable(jet_cli_greeting(), json)
+        return jet_cli_renderable(jet_cli_palette(), json)
     }
     command :: args[0]
 
@@ -1620,7 +1634,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             if jet_cli_trace_refusal(jet_argv, "run", color) == .Val(refusal) -> return refusal
             run_args := [String]{"run"}
             loop word in args -> &run_args.push(word)
-            return jet_cli_run(jet_argv, run_args, passthrough, true, color, quiet, verbose, threads)
+            return jet_cli_run(jet_argv, run_args, passthrough, true, false, color, quiet, verbose, threads)
         }
         fix :: if jet_cli_closest_command(command) == .Val(close) -> "did you mean `jet {close}`? Run `jet help` to see them all." else -> "run `jet help` to see every command."
         return jet_cli_fail("E2101", "`{command}` isn't a jet command.", "every jet run starts with a command like `run`, `check`, or `new`.", fix, color, JET_DRIVER_EXIT_USAGE)
@@ -1674,16 +1688,13 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "explain" -> return jet_cli_explain(jet_argv, args, color, json)
         "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
         "build" -> return jet_cli_build(jet_argv, args, passthrough, color, quiet, threads)
-        "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
-        // Stock `jet dev`: the `jet run` entry, rebuilt and rerun on every source change.
+        "run" -> return jet_cli_run(jet_argv, args, passthrough, false, false, color, quiet, verbose, threads)
+        // `jet dev`: the program rebuilt and rerun on every source change, from
+        // the `fn dev` its command home declares, else the stock `jet run` entry.
         // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.
         "dev" -> {
             if !jet_argv.contains("--canvas") && !jet_cli_has(jet_argv, "--app") && !jet_cli_has(jet_argv, "--share") {
-                plan :: jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
-                if plan == .Run(file, source, color_flag, options, verbose_flag, threads_cap, program_args, invocation, notice, _) {
-                    return JetCLIPlan.Run{file: file, source: source, color: color_flag, options: options, verbose: verbose_flag, threads: threads_cap, program_args: program_args, invocation: invocation, notice: notice, watch: true}
-                }
-                return plan
+                return jet_cli_run(jet_argv, args, passthrough, false, true, color, quiet, verbose, threads)
             }
         }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
