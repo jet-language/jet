@@ -129,9 +129,14 @@ fn fraction_cross(left: I64, right: I64, subtract: Bool) -> I64 {
     fraction_make(sum, jet_int_mul(precise_bottom(left), precise_bottom(right)))
 }
 
+// A zero denominator is the user's division by zero: the ordinary runtime
+// trap (exit 1), never the host-fault status.
 fn fraction_parts(numerator: I64, denominator: I64) -> I64 {
     result :: fraction_make(jet_rt_int_clone(numerator), jet_rt_int_clone(denominator))
-    if (result == I64{0}) -> return precise_fault(rt_static_text("invalid exact quotient"))
+    if (result == I64{0}) {
+        jet_rt_panic_division_by_zero()
+        return I64{0}
+    }
     result
 }
 
@@ -196,7 +201,10 @@ fn fraction_render(value: I64) -> I64 {
 
 #Export(c) fn jet_fraction_div(left: I64, right: I64) -> I64 {
     result :: fraction_make(jet_int_mul(precise_top(left), precise_bottom(right)), jet_int_mul(precise_bottom(left), precise_top(right)))
-    if (result == I64{0}) -> return precise_fault(rt_static_text("divided by zero"))
+    if (result == I64{0}) {
+        jet_rt_panic_division_by_zero()
+        return I64{0}
+    }
     result
 }
 

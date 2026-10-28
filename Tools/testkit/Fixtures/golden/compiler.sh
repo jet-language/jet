@@ -11,7 +11,7 @@ case "$1" in
     check) exit 0 ;;
     build)
         directory=$(dirname "$2")
-        name=$(basename "$2" .jet | tr . _)
+        name=$(basename "$2" .jet)
         artifact="$directory/.jet/build/$name"
         mkdir -p "$directory/.jet/build"
         program="$here/program.sh"

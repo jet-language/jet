@@ -48,9 +48,10 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], decls: De
             if !shallow {
                 found :: sema_pure_root_function(root, modules, decls, positions, calls, callee_body, shallow, &visited, &path)
                 if found != None -> return found
-            } else if node.kind == .Call(_, _, _) {
-                // A callee outside the checked modules (a Core body) has no
-                // stamped row; its call fact carries its declared one.
+            } else {
+                // A callee outside the checked modules (a Core body or
+                // method) has no stamped row; its call fact carries its
+                // declared one.
                 impure := sema_effect_without_deny_only(callee_body.effects.solved).len() > 0
                 if !impure && fact == .Val(at) {
                     if modules[module_index].call_facts[at].facts.effect_bound == .Val(row) {
@@ -58,7 +59,11 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], decls: De
                         impure = sema_effect_without_deny_only(names).len() > 0
                     }
                 }
-                if impure -> return Val(sema_pure_root_diagnostic(root, sema_effect_decl_label(key), path, node.span))
+                call :: if node.kind == {
+                    .Call(_, _, _) -> sema_effect_decl_label(key)
+                    else -> sema_effect_node_call_api(decls, node.kind)
+                }
+                if impure -> return Val(sema_pure_root_diagnostic(root, call, path, node.span))
             }
         } else {
             denied := false

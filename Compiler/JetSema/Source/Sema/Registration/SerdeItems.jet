@@ -701,8 +701,13 @@ fn sema_serde_items_struct_decode_body(definition: StructDef, items: [Item], spa
     if definition.validate_block.len() == 0 {
         &success.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_ident("decoded", span), span: span, id: AST_NODE_GENERATED}, span))
     } else {
+        // A generated body keeps its callees' Result carriers (no automatic
+        // propagation), so the validated carrier is bound with its own type
+        // and returned as-is.
         validate :: Expr.MethodCall{receiver: sema_serde_items_ident(definition.name, span), method: "validate", method_span: span, owner_type_args: sema_serde_items_type_args(definition.type_params), type_args: [Type]{}, args: [CallArg]{sema_serde_items_arg(sema_serde_items_ident("decoded", span), span)}, id: AST_NODE_GENERATED}
-        &success.push(sema_serde_items_return(validate, span))
+        validated_type :: sema_data_result(sema_serde_items_target_type(definition.name, definition.type_params), sema_data_decode_error())
+        &success.push(sema_serde_items_binding("jet_serde_validated", Val(validated_type), validate, false, span))
+        &success.push(sema_serde_items_return(sema_serde_items_ident("jet_serde_validated", span), span))
     }
     position := decoded_slots.len() - 1
     loop position >= 0 {

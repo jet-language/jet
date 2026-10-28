@@ -30,7 +30,7 @@ function jet_fraction_gcd(left, right) {
 function jet_fraction_value(numerator, denominator) {
   let n = BigInt(numerator);
   let d = BigInt(denominator);
-  if (d === 0n) throw new Error("invalid exact quotient");
+  if (d === 0n) jet_runtime_stop("E3010", "<core.prelude>", 0, "divided by zero");
   if (d < 0n) {
     n = -n;
     d = -d;

@@ -7405,6 +7405,12 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
         if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, &probe.table, &state)
         checked := sema_check_expression(source.expression, source.expected_type, environment, program, &probe.table, &state, &tail_store, &context, &diagnostics)
         sema_scope_rollback(&probe.table, mark)
+        // A compile-time value never reads the clock or randomness; a startup
+        // or soft item runs at startup, and an unevaluable field default
+        // lowers at construction instead.
+        if !source.soft && !source.startup && source.kind != SemaComptimeItemKind.FieldDefault {
+            loop fact in context.call_facts -> sema_effect_comptime_nondeterministic(fact, &diagnostics)
+        }
         dependencies := sema_comptime_dependencies_from_references(resolved_graph, context.name_references, [SemaComptimeItemValue]{})
         loop dependency in source.dependencies {
             already := false

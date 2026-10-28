@@ -351,6 +351,24 @@ fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode,
     None
 }
 
+// A compile-time value's call site `fact` whose callee reads ambient time or
+// randomness is refused by the API it calls (E3403), before evaluation
+// reaches the host clock or random source.
+fn sema_effect_comptime_nondeterministic(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+    callee :: fact.callee ?? return
+    row :: fact.facts.effect_bound ?? return
+    loop entry in row {
+        if entry.name.starts_with("!") -> next
+        root :: sema_effect_root(entry.name)
+        if root == "Time" || root == "Rand" {
+            api :: sema_effect_decl_label(callee.key)
+            diagnostic :: sema_error("E3403", fact.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or keep it at runtime outside the `comptime` value.")
+            &diagnostics.push(diagnostic_with_rights(^diagnostic, "pure", [String]{api}, [String]{}, None))
+            return
+        }
+    }
+}
+
 // Rust `memory_control_multiplier`: one execution, or None inside a loop.
 fn sema_effect_memory_executions(node: SemaEffectNode, span: Span) -> Int? {
     loop loop_span in node.loop_spans {
