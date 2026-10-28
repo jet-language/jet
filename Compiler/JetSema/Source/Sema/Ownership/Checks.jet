@@ -141,9 +141,9 @@ struct SemaOwnershipClosureWrites {
     names: [String]
 }
 
-// A lambda binding `key` that views the captured `places` where they live
-// (it neither escapes nor copies, takes or materializes them): each call
-// reads them, so a call after one of them moved is E0121.
+// A lambda binding `key` that is only ever called directly and reads or
+// writes the captured `places` (it takes or materializes none of them):
+// each call reads them, so a call after one of them moved is E0121.
 struct SemaOwnershipClosureCaptures {
     key: String
     places: [SemaOwnershipPlace]
@@ -240,7 +240,9 @@ struct SemaOwnershipState {
     once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}}
     // Lambda bindings that write a capture, by binding key.
     closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}}
-    // Lambda bindings that view their captures in place, by binding key.
+    // Lambda bindings that only direct calls reach, by lambda span.
+    direct_call_lambdas: [Span]{[Span]{}}
+    // Lambda bindings whose calls read their captures, by binding key.
     closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}}
     // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
@@ -3340,24 +3342,44 @@ fn sema_ownership_closure_writes(state: &SemaOwnershipState, callee: Expr, scope
     [String]{}
 }
 
-// The binding `key` holds a non-escaping lambda with `captures`: those it
-// views in place (not copied, taken or materialized) are its outer bindings.
-fn sema_ownership_bind_closure_captures(state: &SemaOwnershipState, key: String, captures: [TCapture], facts: TCaptureFacts, scopes: SemaScopeTable) Never! {
-    if facts.escapes -> return
+// The lambda at `site` is bound to a local that only direct calls reach.
+fn sema_ownership_note_direct_call_lambda(state: &SemaOwnershipState, site: Span) Never! {
+    loop known in state.direct_call_lambdas {
+        if sema_ownership_span_same(known, site) -> return
+    }
+    &state.direct_call_lambdas.push(site)
+}
+
+// The binding `key` holds the lambda at `site` with `captures`. When only
+// direct calls reach it, each call reads its outer bindings, whether they
+// are viewed in place or were copied at creation: a capture is shared read
+// access to its owner (spec "Captures and escaping lambdas").
+fn sema_ownership_bind_closure_captures(state: &SemaOwnershipState, key: String, site: Span, captures: [TCapture], facts: TCaptureFacts, scopes: SemaScopeTable) Never! {
+    if facts.escapes {
+        direct := false
+        loop known in state.direct_call_lambdas {
+            if sema_ownership_span_same(known, site) -> direct = true
+        }
+        if !direct -> return
+    }
     places := [SemaOwnershipPlace]{}
     loop capture in captures {
         name :: capture.source
-        if facts.cloned.contains(name) || facts.moved.contains(name) || facts.materialized.contains(name) -> next
+        if facts.moved.contains(name) || facts.materialized.contains(name) -> next
         index :: sema_scope_resolve_index(scopes, name) ?? -1
         if index < 0 -> next
         symbol :: scopes.bindings[index].symbol
-        &places.push(SemaOwnershipPlace{root: symbol.name, root_key: symbol.id.key, root_span: symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}})
+        place :: SemaOwnershipPlace{root: symbol.name, root_key: symbol.id.key, root_span: symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
+        // A capture already moved here was moved by the lambda's own body
+        // (`^name`): that lambda runs once, which its own check enforces.
+        if sema_ownership_place_moved(&state, place) != None -> next
+        &places.push(place)
     }
     if places.len() > 0 -> &state.closure_captures.push(SemaOwnershipClosureCaptures{key: key, places: places})
 }
 
-// A call of the lambda binding `callee` reads the captures it views: one
-// that moved since is a use after move at the call.
+// A call of the lambda binding `callee` reads its captures: one that moved
+// since is a use after move at the call.
 fn sema_ownership_check_closure_captures(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if callee == .Ident(_, span, _) {
         binding :: sema_ownership_binding_for_expr(&state, callee, scopes) ?? return

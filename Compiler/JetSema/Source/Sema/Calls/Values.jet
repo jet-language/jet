@@ -95,7 +95,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         resolved :: sema_call_materialize_defaults(params, binding, &checked_args, resolved_defaults, span, &diagnostics) ?? return None
         resolved_binding = resolved
     }
-    // A call reads the captures the lambda views in place: not after a move.
+    // A call reads the lambda's captures: not after one moved.
     sema_ownership_check_closure_captures(&state, callee, scopes, &diagnostics)
     // A lambda that takes a capture with `^` runs once.
     sema_ownership_call_once_lambda(&state, callee, scopes)

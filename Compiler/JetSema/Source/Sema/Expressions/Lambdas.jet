@@ -515,6 +515,7 @@ fn sema_expression_lambda_bound_expr_use(expr: Expr, name: String) -> Bool {
     if expr == {
         .Ident(value, _, _) -> return value == name
         .Call(call, _) -> {
+            if call.name == name -> return true
             loop argument in call.args {
                 if sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true
             }
@@ -572,10 +573,7 @@ fn sema_expression_lambda_bound_expr_use(expr: Expr, name: String) -> Bool {
 
 fn sema_expression_lambda_bound_statement_use(statement: Stmt, name: String) -> Bool {
     if statement == {
-        .Expr(value) -> {
-            if value == .Call(call, _) && call.name == name -> return true
-            return sema_expression_lambda_bound_expr_use(value, name)
-        }
+        .Expr(value) -> return sema_expression_lambda_bound_expr_use(value, name)
         .Val(binding) -> return sema_expression_lambda_bound_expr_use(binding.init, name)
         .Assign(target, _, _, value) -> {
             if target == .Local(target_name, _) && target_name == name -> return true
@@ -947,6 +945,7 @@ fn sema_expression_lambda_bound_escapes(binding: Binding, statements: [Stmt], st
     }
     if !saw_use -> return Val(true)
     if binding.init == .Lambda(lambda, _) {
+        sema_ownership_note_direct_call_lambda(&state, lambda.span)
         return sema_expression_lambda_bound_capture_escapes(lambda, environment, program, &scopes, &context, &diagnostics)
     }
     None

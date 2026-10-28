@@ -1,0 +1,20 @@
+// A lambda bound to a local and only called directly has shared access to
+// each captured owner, whether it writes the capture in place or only reads
+// it, so calling it after the owner moved away is a use after move (E0121 at
+// the call).
+fn keep(^items: [Int]) -> Int { items.len() }
+
+fn run() {
+    v := [1]
+    add :: () -> { &v.push(2) }
+    print(keep(^v))
+    add()
+    w := [1, 2, 3]
+    show :: () -> { print(w.len()) }
+    print(keep(^w))
+    show()
+    u :: [4, 5]
+    count :: () -> u.len()
+    print(keep(^u))
+    print(count())
+}

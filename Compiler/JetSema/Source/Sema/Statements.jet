@@ -3565,7 +3565,9 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // capture changes it at each call.
     if binding.init == .Lambda(bound_lambda, _) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
     if init.kind == .Lambda(checked_lambda) && checked_lambda.capture_facts.mutable.len() > 0 -> sema_ownership_bind_closure_writes(&state, symbol.id.key, checked_lambda.capture_facts.mutable)
-    if init.kind == .Lambda(viewing_lambda) -> sema_ownership_bind_closure_captures(&state, symbol.id.key, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
+    if binding.init == .Lambda(captured_lambda, _) {
+        if init.kind == .Lambda(viewing_lambda) -> sema_ownership_bind_closure_captures(&state, symbol.id.key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
+    }
     sema_single_use_note_binding(&state, symbol, environment, program)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
     sema_stmt_track_origin(binding, environment, program, &scopes)
