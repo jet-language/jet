@@ -2927,7 +2927,11 @@ fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr, sco
 // later arguments that overlap it with a write on either side conflict.
 // `reserved` is Rust's two-phase `&mut self` reservation: a later read does
 // not conflict with it, and it activates after the arguments against only
-// the `retained` loans (Rust `record_call_place_access`).
+// the `retained` loans (Rust `record_call_place_access`). A `&` argument is
+// reserved and retained: nothing writes through it until the call runs, so a
+// later read that ends with its own evaluation (`grow(&xs, xs.len())`) passes,
+// while one the call keeps holding, a move, or a second write conflicts at the
+// later argument.
 struct SemaOwnershipCallAccess {
     place: SemaOwnershipPlace
     access: AccessConvention
@@ -2939,8 +2943,10 @@ struct SemaOwnershipCallAccess {
 // Rust `check_call_place_access_kind`: the latest access of the call that
 // overlaps `place` with a write on either side. A later read (not itself a
 // reservation) passes a reserved `&` receiver, which activates after the
-// arguments.
-fn sema_ownership_call_access_conflict(accesses: [SemaOwnershipCallAccess], place: SemaOwnershipPlace, access: AccessConvention, reserved: Bool) -> AccessConvention? Never! {
+// arguments. `holds` marks an access that outlives its argument's evaluation
+// (a retained read, a move, a lambda capture), which a reserved `&` argument
+// does not let pass.
+fn sema_ownership_call_access_conflict(accesses: [SemaOwnershipCallAccess], place: SemaOwnershipPlace, access: AccessConvention, reserved: Bool, holds: Bool) -> AccessConvention? Never! {
     index := accesses.len() - 1
     loop index >= 0 {
         active :: accesses[index]
@@ -2949,20 +2955,21 @@ fn sema_ownership_call_access_conflict(accesses: [SemaOwnershipCallAccess], plac
         // scalar or moved argument does not (`check_call_argument_access`).
         if !active.retained && !active.reserved -> next
         if !sema_ownership_places_overlap(active.place, place) -> next
-        if active.reserved && access != AccessConvention.Write && !reserved -> next
+        if active.reserved && access != AccessConvention.Write && !reserved && !(active.retained && holds) -> next
         if active.access == AccessConvention.Write || access == AccessConvention.Write -> return Val(active.access)
     }
     None
 }
 
 // Rust `activate_call_reservations`: once the arguments are evaluated, a
-// reserved receiver conflicts with every loan the call still retains.
+// reserved receiver conflicts with every loan the call still retains. A
+// reserved `&` argument was already checked against each later argument.
 fn sema_ownership_activate_call_reservations(accesses: [SemaOwnershipCallAccess], diagnostics: &[Diagnostic]) -> Bool {
     accepted := true
     loop reservation in accesses {
-        if !reservation.reserved -> next
+        if !reservation.reserved || reservation.retained -> next
         loop active in accesses {
-            if active.reserved || !active.retained || !sema_ownership_places_overlap(active.place, reservation.place) -> next
+            if !active.retained || !sema_ownership_places_overlap(active.place, reservation.place) -> next
             accepted = false
             &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(reservation.place), active.access == AccessConvention.Write, reservation.span))
             break
@@ -3148,9 +3155,11 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
         // (`pair(d.title, ^d.title)`), a take parameter would receive.
         take_lent :: param.convention == AccessConvention.Move && !binder_rooted && (sema_ownership_unmarked_moves_name(arg.expr) || sema_ownership_takes_projected_place(arg)) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) && sema_ownership_call_places_lent(accesses, places)
         if !binder_rooted && !sema_ownership_check_argument_evaluation(&state, accesses, arg, places.len() > 0, scopes, known, &diagnostics) -> accepted = false
+        read_held :: arg.convention == AccessConvention.Read && param.convention == AccessConvention.Read && borrowed_read && !sema_ownership_type_is_scalar(param.ty ?? Type.Named{name: "Unit"})
+        holds :: read_held || arg.convention == AccessConvention.Move || (param.convention == AccessConvention.Move && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}))
         if places.len() > 0 && write_place_ok {
             loop actual in places {
-                if sema_ownership_call_access_conflict(accesses, actual, arg.convention, false) == .Val(active) {
+                if sema_ownership_call_access_conflict(accesses, actual, arg.convention, false, holds) == .Val(active) {
                     accepted = false
                     &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(actual), active == AccessConvention.Write, expr_span(arg.expr)))
                 }
@@ -3173,8 +3182,8 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             // nothing to the call, as in Rust `take_unmarked_last_use`.
             twice :: decision == SemaCallConventionDecision.NeedsImplicitClone && !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_twice, arg.expr)
             if !twice && (arg.convention != AccessConvention.Move || !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"})) {
-                retained :: arg.convention == AccessConvention.Write || (arg.convention == AccessConvention.Read && param.convention == AccessConvention.Read && borrowed_read && !sema_ownership_type_is_scalar(param.ty ?? Type.Named{name: "Unit"}))
-                loop place in places -> &accesses.push(SemaOwnershipCallAccess{place: place, access: arg.convention, span: arg.span, reserved: false, retained: retained})
+                write :: arg.convention == AccessConvention.Write
+                loop place in places -> &accesses.push(SemaOwnershipCallAccess{place: place, access: arg.convention, span: arg.span, reserved: write, retained: write || read_held})
             }
         }
         if !binder_rooted && !sema_ownership_check_argument_captures(&state, &accesses, arg, scopes, known, &diagnostics) -> accepted = false
@@ -3824,11 +3833,15 @@ struct SemaOwnershipEvaluatedAccess {
     moves_owner: Bool
 }
 
-// One place check a nested call makes against the enclosing call.
+// One place check a nested call makes against the enclosing call. `holds`
+// marks an access that may outlive its evaluation: a nested call's own
+// argument (whose parameter may take or keep it), a move, or a taking
+// receiver. A reserved `&` argument lets only the other accesses pass.
 struct SemaOwnershipNestedCheck {
     place: SemaOwnershipPlace
     access: AccessConvention
     reserved: Bool
+    holds: Bool
     span: Span
 }
 
@@ -3996,7 +4009,7 @@ fn sema_ownership_record_call_result_views(state: SemaOwnershipState, accesses: 
     }
     accepted := true
     loop loan in loans {
-        if sema_ownership_call_access_conflict(accesses, loan.place, loan.access, false) == .Val(active) {
+        if sema_ownership_call_access_conflict(accesses, loan.place, loan.access, false, true) == .Val(active) {
             accepted = false
             &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(loan.place), active == AccessConvention.Write, span))
         }
@@ -4662,11 +4675,11 @@ fn sema_ownership_collect_call_projection_accesses(state: &SemaOwnershipState, e
 }
 
 fn sema_ownership_append_nested_events(events: [SemaOwnershipEvaluatedAccess], checks: &[SemaOwnershipNestedCheck]) Never! {
-    loop event in events -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(event.place), access: event.access, reserved: false, span: expr_span(event.site)})
+    loop event in events -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(event.place), access: event.access, reserved: false, holds: event.access == AccessConvention.Move || event.moves_owner, span: expr_span(event.site)})
 }
 
 fn sema_ownership_append_nested_checks(found: [SemaOwnershipNestedCheck], checks: &[SemaOwnershipNestedCheck]) Never! {
-    loop check in found -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(check.place), access: check.access, reserved: check.reserved, span: check.span})
+    loop check in found -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(check.place), access: check.access, reserved: check.reserved, holds: check.holds, span: check.span})
 }
 
 // Rust `check_call_argument_access` (evaluating now) or
@@ -4686,7 +4699,7 @@ fn sema_ownership_nested_argument_checks(state: &SemaOwnershipState, arg: CallAr
         sema_ownership_append_nested_events(transient, &checks)
         sema_ownership_append_nested_checks(inner, &checks)
         access :: if arg.convention == AccessConvention.Write -> AccessConvention.Write else -> AccessConvention.Read
-        loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: access, reserved: false, span: expr_span(arg.expr)})
+        loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: access, reserved: false, holds: true, span: expr_span(arg.expr)})
         return
     }
     sema_ownership_collect_evaluated_expr_accesses(&state, arg.expr, mode, [String]{}, true, scopes, &transient, &inner)
@@ -4719,10 +4732,10 @@ fn sema_ownership_nested_receiver_checks(state: &SemaOwnershipState, receiver: E
     sema_ownership_collect_call_projection_accesses(&state, unmarked, true, scopes, &transient, &inner)
     sema_ownership_append_nested_events(transient, &checks)
     sema_ownership_append_nested_checks(inner, &checks)
-    loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: AccessConvention.Read, reserved: false, span: method_span})
+    loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: AccessConvention.Read, reserved: false, holds: false, span: method_span})
     resolved :: state.receiver_accesses.get(sema_ownership_span_key(expr_span(unmarked))) ?? return
     access :: if resolved.reserved || resolved.convention == AccessConvention.Write -> AccessConvention.Write else -> AccessConvention.Read
-    loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: access, reserved: resolved.reserved, span: method_span})
+    loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: access, reserved: resolved.reserved, holds: resolved.convention == AccessConvention.Move, span: method_span})
 }
 
 // Rust `infer_call_value`: the callee reads as a receiver, then its lambda
@@ -4750,7 +4763,7 @@ fn sema_ownership_nested_receiver_value_check(state: &SemaOwnershipState, callee
     }
     sema_ownership_append_nested_events(transient, &checks)
     sema_ownership_append_nested_checks(inner, &checks)
-    loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: AccessConvention.Read, reserved: false, span: expr_span(callee)})
+    loop place in places -> &checks.push(SemaOwnershipNestedCheck{place: sema_ownership_place_snapshot(place), access: AccessConvention.Read, reserved: false, holds: false, span: expr_span(callee)})
 }
 
 fn sema_ownership_alias_reported(diagnostics: [Diagnostic], known: Int, span: Span) -> Bool Never! {
@@ -4767,7 +4780,7 @@ fn sema_ownership_alias_reported(diagnostics: [Diagnostic], known: Int, span: Sp
 fn sema_ownership_check_nested_accesses(accesses: [SemaOwnershipCallAccess], checks: [SemaOwnershipNestedCheck], known: Int, diagnostics: &[Diagnostic]) -> Bool {
     accepted := true
     loop check in checks {
-        active :: sema_ownership_call_access_conflict(accesses, check.place, check.access, check.reserved) ?? next
+        active :: sema_ownership_call_access_conflict(accesses, check.place, check.access, check.reserved, check.holds) ?? next
         if sema_ownership_alias_reported(diagnostics, known, check.span) -> next
         accepted = false
         &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(check.place), active == AccessConvention.Write, check.span))
@@ -4788,7 +4801,7 @@ fn sema_ownership_check_argument_evaluation(state: &SemaOwnershipState, accesses
     }
     accepted := true
     loop event in events {
-        active :: sema_ownership_call_access_conflict(accesses, event.place, event.access, false) ?? next
+        active :: sema_ownership_call_access_conflict(accesses, event.place, event.access, false, event.access == AccessConvention.Move || event.moves_owner) ?? next
         accepted = false
         &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(event.place), active == AccessConvention.Write, expr_span(event.site)))
     }
@@ -4805,7 +4818,7 @@ fn sema_ownership_check_argument_captures(state: &SemaOwnershipState, accesses: 
     sema_ownership_collect_evaluated_expr_accesses(&state, arg.expr, SemaOwnershipAccessWalk.ConstructCaptures, [String]{}, true, scopes, &events, &checks)
     accepted := sema_ownership_check_nested_accesses(accesses, checks, known, &diagnostics)
     loop event in events {
-        if sema_ownership_call_access_conflict(accesses, event.place, event.access, false) == .Val(active) {
+        if sema_ownership_call_access_conflict(accesses, event.place, event.access, false, event.access == AccessConvention.Move || event.through_call || event.moves_owner) == .Val(active) {
             accepted = false
             &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(event.place), active == AccessConvention.Write, expr_span(event.site)))
         }

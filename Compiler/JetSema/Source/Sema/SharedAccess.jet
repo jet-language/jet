@@ -15,9 +15,11 @@ use jet_foundation.[
     LambdaBody,
     LambdaParam,
     NamedSpan,
+    PlaceAccess,
     Span,
     Stmt,
     Type,
+    ast_binding,
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
     expr_span,
@@ -298,22 +300,7 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
         .Field(base, member, _, _) -> {
             owner_ty := sema_shared_access_place_type(base, environment, program, &scopes) ?? return None
             if owner_ty == .Shared(inner) -> owner_ty = inner
-            owner_name :: if owner_ty == {
-                .Named(name) | .Apply(name, _) -> name
-                else -> { return None }
-            }
-            owner_args :: if owner_ty == {
-                .Apply(_, args) -> args
-                else -> [Type]{}
-            }
-            owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
-            if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
-            owner_symbol :: owner ?? return None
-            definition :: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
-            names :: loop parameter in definition.type_params -> parameter.name
-            loop field in definition.fields {
-                if field.name == member -> return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args))
-            }
+            return sema_shared_access_field_type(owner_ty, member, environment, program, &scopes)
         }
         .Index(base, _, _, _, _) -> {
             owner_ty :: sema_shared_access_place_type(base, environment, program, &scopes) ?? return None
@@ -324,6 +311,28 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
             }
         }
         else -> { return sema_stmt_return_known_type(value, environment, scopes) }
+    }
+    None
+}
+
+// The declared type of field `member` of a stored `owner_ty` struct, with the
+// struct's type arguments substituted.
+fn sema_shared_access_field_type(owner_ty: Type, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
+    owner_name :: if owner_ty == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> { return None }
+    }
+    owner_args :: if owner_ty == {
+        .Apply(_, args) -> args
+        else -> [Type]{}
+    }
+    owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
+    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    owner_symbol :: owner ?? return None
+    definition :: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
+    names :: loop parameter in definition.type_params -> parameter.name
+    loop field in definition.fields {
+        if field.name == member -> return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args))
     }
     None
 }
@@ -344,6 +353,13 @@ fn sema_shared_access_project_place(value: Expr, environment: SemaScopeEnvironme
         .Paren(inner, _, _) -> { return sema_shared_access_project_place(inner, environment, program, &scopes) }
         else -> { return None }
     }
+}
+
+// True when a projected place is the cell's whole value (the place was the
+// `Shared` handle itself).
+fn sema_shared_access_is_payload(place: Expr) -> Bool Never! {
+    if place == .Ident(name, _, _) -> return name == SEMA_SHARED_PAYLOAD_PARAM
+    false
 }
 
 // The locked-edit callback spans the whole written place, from its first
@@ -375,4 +391,50 @@ fn sema_shared_access_place_start(value: Expr) -> Int Never! {
 fn sema_shared_access_desugar_place_write(handle: Expr, target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr Never! {
     assignment :: Stmt.Assign{target: target, op: op, op_span: op_span, value: value}
     sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{assignment}}, span)
+}
+
+// `&handle.place.method(args)` -> the locked-edit callback, so a writing call
+// edits the stored value rather than a read copy of it.
+fn sema_shared_access_desugar_place_call(handle: Expr, place: Expr, place_span: Span, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {
+    call :: Expr.MethodCall{receiver: Expr.Place{value: place, access: PlaceAccess.Write, span: place_span, id: AST_NODE_GENERATED}, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: AST_NODE_GENERATED}
+    sema_shared_access_call(handle, "edit", LambdaBody.Expr{value: call}, span)
+}
+
+// The shared cell a writing call `&place.method(…)` edits: the cell handle,
+// the place below it, and the call's span from the place's first byte. None
+// when the receiver is not a written place inside a cell.
+fn sema_shared_access_call_place(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr, place_span: Span, span: Span)? {
+    if receiver == .Place(value, access, place_span, _) {
+        if access != PlaceAccess.Write -> return None
+        projected :: sema_shared_access_project_place(value, environment, program, &scopes) ?? return None
+        if sema_shared_access_is_payload(projected.place) -> return None
+        return Val((handle: projected.handle, place: projected.place, place_span: place_span, span: Span{start: sema_shared_access_place_start(value), end: method_span.end}))
+    }
+    None
+}
+
+// A statement `&cell.place.method(args)` whose arguments read shared state
+// binds those arguments first, inside one implicit transaction with the edit,
+// as a shared place assignment's right side does.
+fn sema_shared_access_place_call_transaction(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Stmt? {
+    if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
+        if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, scopes) -> return None
+        found :: sema_shared_access_call_place(receiver, method_span, environment, program, &scopes) ?? return None
+        body := [Stmt]{}
+        hoisted := [CallArg]{}
+        loop index in 0..<args.len() {
+            // copy: `args` is a read parameter the caller keeps; the hoisted call owns its arguments.
+            argument := args[index].copy()
+            if sema_shared_access_expr_touches_shared(argument.expr, scopes) {
+                name :: "{SEMA_SHARED_HOISTED_RHS}_{index}"
+                span :: expr_span(argument.expr)
+                &body.push(Stmt.Val{binding: ast_binding(name, span, false, argument.expr, None)})
+                argument.expr = Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+            }
+            &hoisted.push(argument)
+        }
+        &body.push(Stmt.Expr{expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: hoisted, id: node}})
+        return Val(Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: Span{start: found.span.start, end: expr_span(expr).end}})
+    }
+    None
 }

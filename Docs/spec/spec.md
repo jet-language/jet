@@ -1080,7 +1080,12 @@ fn run() {
 Writing through a read receiver is E0205 and points to `&self`. Calling a
 `&self` method requires a changeable receiver binding and is checked with E0202.
 Using the same name twice while a write access is live is E0204: pass `&x` once,
-or materialize `x.copy()` first. A written `&` always means the call edits
+or materialize `x.copy()` first. A `&x` argument writes only once the call runs,
+so a later argument may read `x` when that read ends with its own evaluation
+(`grow(&xs, xs.len())`, like `&xs.push(xs.len())`, or a copied scalar in
+`add(&n, n)`); a later argument the call keeps holding, moves, or writes is
+still E0204, and so is `x` passed on to a nested call (`grow(&xs, f(xs))`),
+whose parameter may keep or take it. A written `&` always means the call edits
 (D-CALLSITE-MARK1=A): `&x` passed to a parameter that only reads is E0225,
 whose Safe fix removes the mark. A `ViewMut<T>` parameter keeps the `&` that
 builds its write window.
@@ -1309,9 +1314,19 @@ write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
 cheap handle, not the payload, so it can cross a task boundary without `^`
 (D-SHARED-API1, D-CONC-SHARE1=A).
-Stored fields that can close a strong `Shared` cycle are rejected with E0221.
-Weak `Shared.Weak<T>` back-edges do not keep the cycle alive; computed fields
-are not stored edges (D-SHARED-CYCLE1=C).
+A type may declare strong `Shared` edges back to itself (a linked list, a tree);
+the cycle check runs at the write. A write into a shared cell, its edit guard's
+`.value`, or `try_replace`, whose place can hold a strong edge back to the cell's
+type, is rejected with E0221 unless the stored value is built in place: a
+literal, a new cell (`shared T{…}`) whose fields are built the same way, a value
+whose type has no strong path back, or a `::` name bound to a new cell in the
+same run of its scope and read nowhere else since. A writing call
+(`&cell.kids.push(kid)`) is checked the same way for each argument. Building a
+list by prepending or adding new children never closes a cycle; storing an
+existing handle does, so use a `Shared.Weak<T>` back-edge (`.downgrade()`) or an
+id. Weak back-edges do not keep a cycle alive; computed fields are not stored
+edges. A writing call on a place inside a cell (`&cell.items.push(x)`) edits the
+stored value under the cell's write lock, like a field write.
 
 The complete assignment place stays under that lock: `store.items[key] = value`
 updates the stored map, and nested field or indexed-record writes update the

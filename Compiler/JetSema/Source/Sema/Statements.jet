@@ -5237,6 +5237,7 @@ fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: E
     reasons_before :: context.incomplete_reasons.len()
     if op == None -> sema_stmt_lint_compound_assignment(target, op_span, expr, &diagnostics)
     checked := sema_stmt_check_assignment_target(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_shared_cycle_check_write(target, expr, environment, program, &scopes, state, &diagnostics)
     // Collect-all: an assignment that checks to nothing names its step when
     // no error report or recorded reason already explains it.
     if checked == None && !sema_has_error_since(diagnostics, diagnostics_before) && context.incomplete_reasons.len() == reasons_before {
@@ -6101,7 +6102,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
                 checked :: sema_stmt_check_binding(binding, lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if checked == {
-                    .Val(value) -> &output.push(value)
+                    .Val(value) -> {
+                        &output.push(value)
+                        if !binding.mutable && binding.pattern == None && sema_shared_cycle_cell_init(binding.init) -> sema_scope_mark_fresh_cell(&scopes, binding.name, binding.init)
+                    }
                     .None -> complete = false
                 }
             }
@@ -6729,6 +6733,19 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
         if dropped.value == {
             .Val(statement_value) -> &output.push(statement_value)
             .None -> complete = false
+        }
+    }
+    // A writing call on a shared place whose arguments read shared state runs
+    // in one implicit transaction with them (sema_shared_access_place_call_transaction).
+    if !dropped.handled {
+        if sema_shared_access_place_call_transaction(expr, environment, program, &scopes) == .Val(transaction) {
+            checked :: sema_stmt_check_shared_transaction(transaction, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_shared_cycle_check_hoisted_call(expr, environment, program, &scopes, state, &diagnostics)
+            if checked == {
+                .Val(value) -> &output.push(value)
+                .None -> complete = false
+            }
+            return complete
         }
     }
     if !dropped.handled {

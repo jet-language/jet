@@ -1,0 +1,26 @@
+// A `&` argument writes only once the call runs, so a later argument may read
+// the same place when the read finishes with its own evaluation.
+struct Pair {
+    left: [Int]
+    count: Int
+}
+
+fn grow(items: &[Int], extra: Int) {
+    &items.push(extra)
+}
+
+fn add(total: &Int, extra: Int) {
+    total += extra
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    grow(&xs, xs.len())
+    grow(&xs, xs[0] + xs[1])
+    p := Pair{left: [1], count: 2}
+    grow(&p.left, p.left.len())
+    grow(&p.left, p.count)
+    n := 2
+    add(&n, n)
+    print("{xs.len()} {p.left.len()} {n}")
+}

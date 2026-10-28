@@ -98,6 +98,10 @@ struct SemaScopeBinding {
     // does not own. It owns nothing to give away: an exact `^` on it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
     place_alias: Bool{false}
+    // A `::` name bound to a new `Shared` cell keeps its initializer, so a
+    // write into another cell can see the stored value is built in place
+    // (SharedCycles.jet).
+    fresh_cell: Expr?{None}
 }
 
 struct SemaOriginFact {
@@ -2071,6 +2075,15 @@ fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Boo
 fn sema_scope_mark_place_alias(table: &SemaScopeTable, name: String) Never! {
     index :: sema_scope_resolve_index(table, name) ?? return
     table.bindings[index].place_alias = true
+}
+
+// Keeps `init` on the `::` binding `name` just declared (see
+// SemaScopeBinding.fresh_cell).
+fn sema_scope_mark_fresh_cell(table: &SemaScopeTable, name: String, init: Expr) Never! {
+    index :: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(&table, index)
+    // copy: `init` is the binding statement's initializer, which the statement keeps.
+    table.bindings[index].fresh_cell = Val(init.copy())
 }
 
 // A proven payload refines a stable Optional name for the rest

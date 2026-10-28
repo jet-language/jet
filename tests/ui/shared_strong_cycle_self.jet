@@ -1,0 +1,12 @@
+struct Node {
+    label: String
+    next: Shared<Node>?
+}
+
+fn run() {
+    a :: shared Node{label: "a", next: None}
+    a.next = Val(a)
+    // A new cell that points back at `a` closes the same loop.
+    a.next = Val(shared Node{label: "b", next: Val(a)})
+    print(a.label)
+}

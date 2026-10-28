@@ -1,0 +1,15 @@
+struct Node {
+    label: String
+    next: Shared<Node>?
+}
+
+// Either handle may already reach the other, so both writes can close a loop.
+fn link(a: Shared<Node>, b: Shared<Node>) {
+    a.next = Val(b)
+    guard :: b.guard_edit()
+    guard.value.next = Val(a)
+}
+
+fn run() {
+    link(shared Node{label: "a", next: None}, shared Node{label: "b", next: None})
+}

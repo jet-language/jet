@@ -1,0 +1,47 @@
+// A later argument that the call keeps holding, moves, or writes still
+// conflicts with a `&` argument of the same place, and so does the place
+// passed on to a nested call or taken by a nested receiver.
+struct Bag {
+    items: [Int]
+}
+
+impl Bag {
+    fn drain(^self) -> Int { self.items.len() }
+}
+
+fn grow(items: &[Int], extra: [Int]) {
+    &items.push(extra.len())
+}
+
+fn grow_taken(items: &[Int], extra: ^[Int]) {
+    &items.push(extra.len())
+}
+
+fn grow_both(items: &[Int], more: &[Int]) {
+    &items.push(more.len())
+}
+
+fn count(items: ^[Int]) -> Int { items.len() }
+
+fn grow_by(items: &[Int], extra: Int) {
+    &items.push(extra)
+}
+
+fn fill(bag: &Bag, extra: Int) {
+    &bag.items.push(extra)
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    grow(&xs, xs)
+    grow_taken(&xs, ^xs)
+    ys := [1]
+    grow_both(&ys, &ys)
+    zs := [1]
+    grow_by(&zs, count(^zs))
+    counter :: count
+    ws := [1]
+    grow_by(&ws, counter(^ws))
+    bag := Bag{items: [1]}
+    fill(&bag, ^bag.drain())
+}

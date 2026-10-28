@@ -124,6 +124,7 @@ fn sema_call_shared_owner_try_replace(receiver: Expr, receiver_value: TExpr, inn
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     replacement_checked :: sema_check_expression(updated_args[1].expr, Val(inner), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_shared_cycle_check_replace(inner, updated_args[1].expr, expr_span(updated_args[1].expr), environment, program, &scopes, state, &diagnostics)
     replacement :: sema_expr_expected(replacement_checked, Val(inner), environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params :: [SemaCallParam]{sema_call_shared_owner_param("snapshot", AccessConvention.Move, snapshot.ty), sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
     ownership := sema_ownership_check_method_call(&state, "Shared.try_replace", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)

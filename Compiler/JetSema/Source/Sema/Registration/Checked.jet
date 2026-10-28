@@ -2584,18 +2584,6 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
     }
 }
 
-fn sema_checked_shared_cycles(graph: SemaRegistrationGraph, module_identity: String, nominal: SemaRegistrationNominal, definition: StructDef, diagnostics: &[Diagnostic]) Never! {
-    owner :: nominal.symbol.id.key
-    memo := [String:Bool]{}
-    walk := SemaSharedWitnessWalk{stack: [String]{}, clear: [String:Bool]{}, met_path: false}
-    loop field_index in 0..<definition.fields.len() {
-        if definition.fields[field_index].computed != None -> next
-        if sema_checked_shared_witness(graph, owner, module_identity, definition.fields[field_index].ty, &memo, &walk) == .Val(through) {
-            &diagnostics.push(sema_error("E0221", definition.fields[field_index].name_span, "field `{definition.fields[field_index].name}` on `{definition.name}` can form a strong `Shared` cycle", "a strong `Shared` edge through `{through}` can point back at `{definition.name}`, so reference counting alone cannot free the graph", "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle"))
-        }
-    }
-}
-
 fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]], module_row: SemaRegistrationModule, layout_engine: TargetLayoutEngine?, nominal: SemaRegistrationNominal, diagnostics: &[Diagnostic]) -> TTypeDef? {
     definition :: sema_registration_nominal_source_item(nominal.source) ?? return None
     if nominal.kind == SemaRegistrationNominalKind.Trait -> return None
@@ -2636,7 +2624,6 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             sema_checked_validate_patchable(value, &diagnostics)
             sema_checked_validate_layout(value, &diagnostics)
             fields :: sema_checked_struct_fields(graph, module_row, value, generic_params, &diagnostics)
-            sema_checked_shared_cycles(graph, module_row.module_identity, nominal, value, &diagnostics)
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(definition, nominal.methods)})
         }
         .Enum(value) -> {
