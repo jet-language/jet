@@ -3508,6 +3508,22 @@ checked assertion. Duplicate names report E0105; a nested `#Test` reports
 E0601. `jet run` and `jet build` ignore test claims, while `jet test` compiles
 and runs them. (S43, D-CASING1)
 
+A top-level `#Test fn name(p: T, ...) { ... }` is a property test. Each
+parameter type must be generatable: `Int`, a sized integer, an inline range,
+`Float`, `Float32`, `Bool`, `Char`, `String`, or a list, fixed list, or
+optional of a generatable type; any other type reports E0613. `jet test` runs
+the body on 200 generated cases, each behind the same unwind boundary as a
+claim. Every generated value comes from one recorded sequence of bounded
+choices. The first failing case is shrunk: spans of choices are deleted and
+single choices lowered while the case still fails, so integers move toward
+zero and lists toward fewer, simpler elements. The failure report names the
+failing case, the run seed, the minimized inputs (`minimized_inputs: n = 50`,
+each parameter as `name = value` in Debug form), and the minimized case's own
+report; only that case's output is
+captured. A seed is fresh entropy unless `JET_PROP_SEED` (an integer from 0 to
+2^63-1) names one; rerunning with the printed seed reproduces the run.
+(D-TEST1)
+
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for
 that file. Each claim runs behind a process-local unwind boundary, and the
 harness emits one result per claim plus a summary. Human output names `pass`,

@@ -8,8 +8,14 @@
 // Per test:
 //   test.invoke(env) -> String?  calls the body; null on success, else the
 //                                failure message (a Result error's Debug
-//                                text, or "test returned no value" for None)
-//   test.unit(env) -> outcome    jet_rt_test_unit(name, expected, env, invoke)
+//                                text, or "test returned no value" for None).
+//                                A property body's env is the property
+//                                context: each parameter is generated from
+//                                it and the rendered inputs handed over
+//                                before the call.
+//   test.unit(env) -> outcome    jet_rt_test_unit(name, expected, env, invoke),
+//                                jet_rt_test_property for a property body
+//                                (JetRuntime TestProperty.jet)
 // and one shared test.release(env), a no-op (the environment is null).
 // The entry `main`:
 //   JET_NATIVE_TEST_REPORT_PATH set: report the outcome file and exit
@@ -20,7 +26,7 @@
 //   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
 //   after spawning; then, unfiltered, run each Check Output once.
 
-use jet_foundation.[DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, name_rows_set]
+use jet_foundation.[DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One test the harness runs: its checked function `key`, the identity `id`
@@ -181,24 +187,24 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
     pointer_row :: ir_pointer_row(&m)
     string_row :: ir_string_row(&m)
     env_name :: ir_intern_name(&m, "env")
-    _ :: ir_new_slot(&b, pointer_row, IRSlotKind.Param, env_name)
+    env :: ir_new_slot(&b, pointer_row, IRSlotKind.Param, env_name)
     b.f.result = pointer_row
     no_args :: [Int]{}
     null :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
-    row :: m.functions[body].result
+    result := -1
     if m.functions[body].param_count > 0 {
-        ir_fail(&b, span, "native unit tests require a parameterless Unit, Option<Unit>, or Result<Unit, E> body")
-    } else if row < 0 || m.types[row].kind == .Unit {
-        operands :: ir_args(&b.f, no_args)
-        ir_emit(&b.f, IROp.Call, -1, body, operands, 0, b.line)
-        ir_stop_check(&m, &b)
+        result = ir_test_property_call(&m, p, &b, body, env, span)
     } else {
-        ty :: m.types[row].ty.copy()
-        result :: ir_temp(&m, &b, row)
+        row :: m.functions[body].result
+        if row >= 0 && m.types[row].kind != .Unit -> result = ir_temp(&m, &b, row)
         operands :: ir_args(&b.f, no_args)
         ir_emit(&b.f, IROp.Call, result, body, operands, 0, b.line)
         ir_stop_check(&m, &b)
+    }
+    if result >= 0 && !ir_failed(b) {
+        row :: b.f.slot_type[result]
+        ty :: m.types[row].ty.copy()
         if ir_untag(ty) == {
             .Result(_, err_ty) -> {
                 // A kept `T Never!` carrier never holds an Err.
@@ -237,6 +243,120 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
     id
 }
 
+// The call of property body `body` on parameters generated from the property
+// context `ctx`. The rendered inputs (`name = value, …`) go to the context
+// first, so a failing case reports them. The result is owned by the caller,
+// -1 for Unit.
+fn ir_test_property_call(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, ctx: Int, span: Span) -> Int Never! {
+    row :: ir_function_row(p, m.functions[body].key) ?? return ir_fail_slot(&b, span, "a property test outside the checked program")
+    params :: p.functions[row].params
+    values := [Int]{}
+    loop param in params {
+        value :: ir_test_generate(&m, p, &b, ctx, param.ty, span)
+        if ir_failed(b) -> return -1
+        &values.push(value)
+    }
+    pointer_row :: ir_pointer_row(&m)
+    string_row :: ir_string_row(&m)
+    builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
+    b.fresh[builder] = false
+    loop (index, param) in params {
+        if index > 0 -> ir_push_static(&m, &b, builder, ", ")
+        ir_push_static(&m, &b, builder, "{param.name} = ")
+        ir_render_push(&m, p, &b, builder, values[index], IRRender.Debug, true, span)
+        if ir_failed(b) -> return -1
+    }
+    text :: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_test_property_inputs", [Int]{ctx, text}, -1)
+    b.fresh[text] = false
+    result :: ir_call_row_values(&m, p, &b, row, values, span)
+    if result >= 0 -> b.fresh[result] = false
+    result
+}
+
+// A value of the property parameter type `ty` drawn from the context `ctx`
+// (JetRuntime TestProperty.jet): fresh where its type owns storage. An
+// integer stays within ±2^62.
+fn ir_test_generate(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    word_row :: ir_word_row(&m)
+    limit :: 4611686018427387904
+    untagged :: ir_untag(ty)
+    if untagged == .Int -> return ir_test_generate_word(&m, p, &b, ctx, 0 - limit, limit, row, span)
+    if untagged == .InlineRange(_, lo, hi) {
+        return ir_test_generate_word(&m, p, &b, ctx, if lo < 0 - limit -> 0 - limit else -> lo, if hi > limit -> limit else -> hi, row, span)
+    }
+    if untagged == .IntN(signed, bits) {
+        top :: if signed -> (if bits >= 64 -> limit else -> (1 << (bits - 1)) - 1) else -> (if bits >= 63 -> limit else -> (1 << bits) - 1)
+        bottom :: if !signed -> 0 else if bits >= 64 -> 0 - limit else -> 0 - (1 << (bits - 1))
+        return ir_test_generate_word(&m, p, &b, ctx, bottom, top, row, span)
+    }
+    if untagged == .Bool {
+        two :: ir_word_const(&m, &b, 2)
+        drawn :: ir_runtime(&m, &b, "jet_rt_test_property_draw", [Int]{ctx, two}, word_row)
+        zero :: ir_word_const(&m, &b, 0)
+        return ir_bool_op(&m, &b, IROp.Ne, drawn, zero)
+    }
+    if untagged == .Char -> return ir_runtime(&m, &b, "jet_rt_test_property_char", [Int]{ctx}, row)
+    if untagged == .String -> return ir_runtime(&m, &b, "jet_rt_test_property_string", [Int]{ctx}, row)
+    if untagged == .Float -> return ir_runtime(&m, &b, "jet_rt_test_property_float", [Int]{ctx}, row)
+    if untagged == .Float32 {
+        float_row :: ir_type_row(&m, Type.Float) ?? return ir_type_fail(&b, span, Type.Float)
+        wide :: ir_runtime(&m, &b, "jet_rt_test_property_float", [Int]{ctx}, float_row)
+        return ir_numeric_cast(&m, p, &b, wide, row, span)
+    }
+    if untagged == .List(element) {
+        bound :: ir_word_const(&m, &b, 17)
+        count :: ir_runtime(&m, &b, "jet_rt_test_property_draw", [Int]{ctx, bound}, word_row)
+        return ir_test_generate_list(&m, p, &b, ctx, row, element, count, span)
+    }
+    if untagged == .FixedList(element, measure) {
+        length :: measure_literal_value(measure) ?? return ir_fail_slot(&b, span, "a property input of {ir_type_name(ty)} without a literal length")
+        count :: ir_word_const(&m, &b, length)
+        return ir_test_generate_list(&m, p, &b, ctx, row, element, count, span)
+    }
+    if untagged == .Option(inner) {
+        inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+        result :: ir_option_none_temp(&m, &b, row)
+        two :: ir_word_const(&m, &b, 2)
+        drawn :: ir_runtime(&m, &b, "jet_rt_test_property_draw", [Int]{ctx, two}, word_row)
+        zero :: ir_word_const(&m, &b, 0)
+        present :: ir_bool_op(&m, &b, IROp.Ne, drawn, zero)
+        ir_open_if(&b.f, present, b.line)
+        value :: ir_test_generate(&m, p, &b, ctx, inner, span)
+        if ir_failed(b) -> return -1
+        size :: m.types[inner_row].size
+        made :: ir_option_make(&m, p, &b, row, value, size)
+        ir_option_set(&m, &b, result, made)
+        ir_end(&b.f, b.line)
+        b.fresh[result] = true
+        return result
+    }
+    ir_fail_slot(&b, span, "a property input of {ir_type_name(ty)}")
+}
+
+// An integer of type row `row` in lo...hi.
+fn ir_test_generate_word(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, lo: Int, hi: Int, row: Int, span: Span) -> Int Never! {
+    low :: ir_word_const(&m, &b, lo)
+    high :: ir_word_const(&m, &b, hi)
+    word_row :: ir_word_row(&m)
+    drawn :: ir_runtime(&m, &b, "jet_rt_test_property_word", [Int]{ctx, low, high}, word_row)
+    ir_numeric_cast(&m, p, &b, drawn, row, span)
+}
+
+// A List of type row `row` holding `count` (a word slot) generated
+// `element`s, in fresh frame storage.
+fn ir_test_generate_list(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, row: Int, element: Type, count: Int, span: Span) -> Int Never! {
+    element_row :: ir_value_type(&m, p, element) ?? return ir_type_fail(&b, span, element)
+    list :: ir_list_empty(&m, &b, row)
+    index :: ir_count_open(&m, &b, count)
+    value :: ir_test_generate(&m, p, &b, ctx, element, span)
+    if ir_failed(b) -> return -1
+    ir_list_push(&m, p, &b, list, element_row, value)
+    ir_count_close(&m, &b, index)
+    list
+}
+
 // test.unit(env) for `test`, whose body is `body`: the canonical test rail
 // over its test.invoke.
 fn ir_test_unit(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
@@ -252,7 +372,8 @@ fn ir_test_unit(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failure
     expected :: ir_test_bool(&m, &b, test.expected_failure)
     code :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.FunctionAddress, code, invoke, -1, -1, b.line)
-    outcome :: ir_runtime(&m, &b, "jet_rt_test_unit", [Int]{name, expected, env, code}, pointer_row)
+    symbol :: if m.functions[body].param_count > 0 -> "jet_rt_test_property" else -> "jet_rt_test_unit"
+    outcome :: ir_runtime(&m, &b, symbol, [Int]{name, expected, env, code}, pointer_row)
     ir_test_drop(&m, &b, name)
     ir_emit(&b.f, IROp.Return, -1, outcome, -1, -1, b.line)
     ir_test_finish(&m, p, ^b, id, &failures)

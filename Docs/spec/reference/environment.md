@@ -31,7 +31,7 @@ one exists instead of adding another spelling for the same job.
 | `JET_FUZZ_SEED` | unsigned integer | Makes fuzz generation reproducible. |
 | `JET_FUZZ_TIME_MS` | non-negative integer | Sets the fuzz time budget in milliseconds. |
 | `JET_KEYS_DIR` | path | Overrides the signing-key directory used by publishing and secrets tooling. |
-| `JET_PROP_SEED` | unsigned integer | Replays a property-test run with the printed seed. |
+| `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. |
 | `JET_RAYLIB_DISPLAY` | `1` | Enables the real raylib display bridge; without it the bridge stays headless. |
 | `JET_REGISTRY_CACHE_DIR` | path | Overrides the local registry-index cache. |
 | `JET_REGISTRY_NAME` | registry name | Selects the named registry used by Jetpack doctor checks. |

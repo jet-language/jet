@@ -60,7 +60,7 @@ fn jet_cli_native_test_records(output: String, incomplete: Bool) -> [JetNativeTe
         stdout_length :: jet_native_test_byte_count(fields[2])
         stderr_length :: jet_native_test_byte_count(fields[3])
         length :: name_length + stdout_length + stderr_length
-        if fields[4] != "-" -> return Err("a native unit-test outcome unexpectedly contains property cases")
+        if fields[4] != "-" -> return Err("native test outcome header has an unknown fifth field")
         if length >= cursor.bytes.len() - cursor.at {
             if incomplete -> break
             return Err("native test outcome payload is truncated")
@@ -100,7 +100,6 @@ fn jet_cli_native_test_selection(tests: [TTestFact], functions: [FnBody], filter
     loop (index, test) in tests {
         if filter == .Val(needle) && !test.name.contains(needle) -> next
         module_name :: modules.get(test.function.key) ?? return Err("native test selection names an absent checked function")
-        if test.kind != .Unit -> return Err("{test.name}: native property-test generation and shrinking are not implemented in Jet")
         id :: U64.from_int(index + 1) ?? panic("test count fits U64")
         &rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure}, module_name: module_name, start: test.span.start})
     }

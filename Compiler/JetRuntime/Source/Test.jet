@@ -1,8 +1,8 @@
 // Native unit outcomes and reporting use the one E4 text carrier. The Rust
 // tier keeps TEST_PRELUDE; the native pack replaces only these exports.
 // Outcome layout: [flags, owned name, owned stdout, owned stderr] (32 bytes).
-// Flags: ok=1, expected_failure=2, skipped=4. No property engine is present;
-// property rows are refused by the producer and by this wire consumer.
+// Flags: ok=1, expected_failure=2, skipped=4. The fifth header field is
+// always '-': a property test (TestProperty.jet) reports through stderr.
 // Capture is in TestCapture; unit invocation still needs L8a's stop boundary.
 
 fn test_text_new(length: I64) -> I64 { rt_text_with_length(length, length) }
@@ -233,13 +233,7 @@ fn test_parse_record(data: I64, end: I64, start: I64, record: I64) {
         test_invalid()
         return
     }
-    if (trap_byte(data + at) != I64{45}) {
-        trap_root_prepare()
-        test_msg_property_gap(I64{2})
-        jet_rt_process_exit_finish()
-        return
-    }
-    if (trap_byte(data + at + I64{1}) != I64{10}) {
+    if (trap_byte(data + at) != I64{45} || trap_byte(data + at + I64{1}) != I64{10}) {
         test_invalid()
         return
     }

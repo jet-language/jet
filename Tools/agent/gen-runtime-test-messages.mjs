@@ -8,7 +8,6 @@ const args = process.argv.slice(2);
 if (args.some(arg => arg !== "--check") || args.length > 1) throw new Error("usage: gen-runtime-test-messages.mjs [--check]");
 const literals = {
   invalid: "internal error: native test record is invalid\n",
-  property_gap: "native property tests require a Jet property engine\n",
   pass: "pass", fail: "FAIL", skip: "skip", expected: "expected-fail",
   unexpected: "UNEXPECTED-PASS (remove expected_fail: true)",
   passed: " passed, ", failed: " failed, ", skipped: " skipped",
