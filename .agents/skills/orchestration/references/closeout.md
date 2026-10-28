@@ -23,6 +23,23 @@ branch, worktree, or ref (see `AGENTS.md`).
 gate passes. Use the commit-bound sweep and fresh review below; individual
 patches do not substitute for milestone evidence.
 
+## Compiler releases
+
+The a0_NNN releases in `~/.local/share/jet-seeds` carry a validated compiler
+from `dev` to `master`; `jet` on PATH runs `current`. After landings, run
+`node Tools/agent/release-compiler.mjs <dev HEAD>` on the newest HEAD, one run
+at a time (it holds a lock and takes a build slot). It builds the self-host
+chain from `current` without Rust and requires the fixed point, checks that the
+runtime pack rebuilds byte for byte, runs the Jetpack census and the golden, ui
+and cases suites against `current`, and reports every result. A row `current`
+passes and the candidate loses needs a line in `--dispositions` naming its card.
+It releases only with at least `--min-gains` (default 10) gained rows. On a pass
+it writes the next a0_NNN and prints the commands; Main runs them: `jet-use
+a0_NNN`, `git merge --no-ff -F a0_NNN/MERGE_MSG` on `master`, the annotated tag,
+and the push. The tool never moves `current`, merges, tags or pushes. `jet-use`
+also rolls back, but only to a release whose evidence passed; `jet-which` names
+the current one.
+
 ## Card loop
 
 Repeat this sequence for each requested card or bounded slice:
