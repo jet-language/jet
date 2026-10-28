@@ -1,0 +1,15 @@
+// A non-escaping lambda that writes its capture views the captured list in
+// place, so calling it after the list moved away is a use after move (E0121
+// at the call). A lambda that only reads its capture took a copy and may run.
+fn keep(^items: [Int]) -> Int { items.len() }
+
+fn run() {
+    v := [1]
+    add :: () -> { &v.push(2) }
+    print(keep(^v))
+    add()
+    w := [1, 2, 3]
+    show :: () -> { print(w.len()) }
+    print(keep(^w))
+    show()
+}

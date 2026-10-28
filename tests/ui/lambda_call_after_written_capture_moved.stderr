@@ -1,0 +1,12 @@
+Error [E0121]: `v` was consumed by `keep`, so it can't be used here
+  --> tests/ui/lambda_call_after_written_capture_moved.jet:10:5
+    |
+ 10 |     add()
+    |     ^^^
+  --> tests/ui/lambda_call_after_written_capture_moved.jet:9:17
+    |
+  9 |     print(keep(^v))
+    |                 ^ `v` moved to `keep` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `v` after the move, or give `keep` a copy with `v.copy()` where it moved.
+More: jet-lang.dev/e/E0121

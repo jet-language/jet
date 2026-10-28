@@ -681,7 +681,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         // Graph-free local checks retain their existing declaration rules.
         if !(visible ?? true) {
             name :: candidate.method.name
-            &diagnostics.push(sema_error("E0605", span, "`{name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{name}`, or don't reach across files here"))
+            &diagnostics.push(sema_error("E0605", span, "`{name}` is private to its module", "a `priv` method is usable only inside the module that declares it", "call `{name}` from inside its module, or remove `priv` from it"))
             return None
         }
     }

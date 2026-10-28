@@ -1,0 +1,34 @@
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn show(r: Res, label: String) {
+    print("{label} {r.name}")
+}
+
+fn show_default(r: Res, width: Int{2}, label: String) {
+    print("{label} {r.name} {width}")
+}
+
+impl Res {
+    fn tell(self, into: String?{None}, label: String) {
+        print("{label} {self.name} {into ?? "-"}")
+    }
+}
+
+// A read argument pinned out of declaration order (reordered labels, or a
+// skipped default before a written argument) views its owner; the owner
+// closes once, at its own scope end, after every use.
+fn run() {
+    a := Res{name: "a"}
+    show(label: "reordered", r: a)
+    show(label: "again", r: a)
+    b :: Res{name: "b"}
+    show_default(b, label: "skipped")
+    show_default(b, label: "skipped again")
+    c :: Res{name: "c"}
+    c.tell(label: "method")
+    c.tell(label: "method again")
+    print("end")
+}

@@ -141,6 +141,14 @@ struct SemaOwnershipClosureWrites {
     names: [String]
 }
 
+// A lambda binding `key` that views the captured `places` where they live
+// (it neither escapes nor copies, takes or materializes them): each call
+// reads them, so a call after one of them moved is E0121.
+struct SemaOwnershipClosureCaptures {
+    key: String
+    places: [SemaOwnershipPlace]
+}
+
 // An unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
 // the authored copy `name.copy()`.
@@ -223,11 +231,17 @@ struct SemaOwnershipState {
     // argument of the same call also names. Such a name has no last use in
     // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
     implicit_take_twice: [Span]{[Span]{}}
+    // `^`-marked field arguments the typed argument check found to be exact
+    // moves into a consuming parameter; the call ownership check records the
+    // move, so a later use of the field is E0121.
+    exact_field_takes: [Span]{[Span]{}}
     // Run-once lambdas found in this function, and the
     // bindings holding them (Rust `once_lambda_sites` / `once_lambdas`).
     once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}}
     // Lambda bindings that write a capture, by binding key.
     closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}}
+    // Lambda bindings that view their captures in place, by binding key.
+    closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}}
     // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
     fixed_length_write_params: [String]
@@ -1792,8 +1806,22 @@ fn sema_ownership_string_list_snapshot(source: [String]) -> [String] Never! {
 }
 
 fn sema_ownership_diag_view_return_owner(place: SemaOwnershipPlace, span: Span, aggregate: Bool) -> Diagnostic {
-    owner := if aggregate -> place.root else -> sema_ownership_place_name(place)
+    owner := if aggregate -> place.root else -> sema_ownership_view_owner_name(place)
     sema_error("E2305", span, "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it")
+}
+
+// The place a returned window points into: the window's own trailing element
+// and range projections are not part of its owner.
+fn sema_ownership_view_owner_name(place: SemaOwnershipPlace) -> String Never! {
+    kept := place.projections.len()
+    loop kept > 0 && place.projections[kept - 1].starts_with("[") -> kept -= 1
+    name := place.root
+    loop index in 0..<kept {
+        projection :: place.projections[index]
+        shown :: if projection.starts_with("[") && projection != "[fresh]" -> "[…]" else -> projection
+        name = "{name}{shown}"
+    }
+    name
 }
 
 fn sema_ownership_diag_view_return_boundary(span: Span) -> Diagnostic {
@@ -1818,7 +1846,7 @@ fn sema_ownership_consumed_view_owner(place: SemaOwnershipPlace, scopes: SemaSco
 }
 
 fn sema_ownership_diag_view_return_consumed(place: SemaOwnershipPlace, span: Span, aggregate: Bool) -> Diagnostic {
-    owner := if aggregate -> place.root else -> sema_ownership_place_name(place)
+    owner := if aggregate -> place.root else -> sema_ownership_view_owner_name(place)
     sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `.copy()`")
 }
 
@@ -2128,8 +2156,16 @@ fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Expr, s
     if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
         // Rust `validate_write_place`: a parameter is E0205, a local E0202.
         if info.symbol.kind == SymbolKind.Parameter {
-            param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
-            &diagnostics.push(sema_error("E0205", span, "cannot take a write window into `{places[0].root}`", "an unmarked parameter gives read access only; a write window needs the write-access marker `&`", "change the parameter to `{places[0].root}: &{param_type}` with the write-access marker `&`"))
+            param_ty :: info.symbol.ty ?? Type.Named{name: "Unit"}
+            // A `View<T>` lends read windows only; a `&` marker on it would
+            // still be a read view, so the fix names `ViewMut<T>`.
+            read_view := false
+            if sema_expr_unwrap_tag(param_ty) == .Apply(view_name, _) -> read_view = view_name == "View"
+            if read_view {
+                &diagnostics.push(sema_error("E0205", span, "cannot take a write window through {sema_type_show(param_ty)} — it has read access only", "a `View<T>` may inspect its owner's elements, but it cannot change them", "take the write window from a `ViewMut<T>` or from the mutable owner instead"))
+            } else {
+                &diagnostics.push(sema_error("E0205", span, "cannot take a write window into `{places[0].root}`", "an unmarked parameter gives read access only; a write window needs the write-access marker `&`", "change the parameter to `{places[0].root}: &{type_name(param_ty)}` with the write-access marker `&`"))
+            }
         } else {
             &diagnostics.push(sema_error("E0202", span, "cannot take a write window into `{places[0].root}`", "a write window can change its owner, so the owner must be mutable", "declare `{places[0].root} := ...`"))
         }
@@ -2694,7 +2730,7 @@ fn sema_ownership_reject_partial_close_move(state: SemaOwnershipState, place: Se
         if owner.place.projections.len() >= place.projections.len() || !sema_ownership_place_extends(owner.place, place) -> next
         if owner.place.projections.len() == 0 && owner.place.root_key == state.close_receiver_key -> next
         name :: sema_ownership_place_name(place)
-        &diagnostics.push(sema_error("E0222", span, "A part of `{name}` cannot be moved independently", "`{type_name(owner.ty)}` has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", "Move the Close owner as a whole, or copy the field if its type supports copying"))
+        &diagnostics.push(sema_error("E0222", span, "A part of `{name}` cannot be moved independently", "`{type_name(owner.ty)}` has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", "Move the Close owner as a whole, copy the field if its type supports copying, or call a method `{type_name(owner.ty)}` provides"))
         return true
     }
     false
@@ -3163,6 +3199,14 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             }
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
         }
+        if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted && sema_ownership_exact_field_take(state, arg.expr) {
+            // A place the use check above already found moved is reported there.
+            moved_before := false
+            loop place in places {
+                if sema_ownership_place_moved(&state, place) != None -> moved_before = true
+            }
+            if !moved_before && !sema_ownership_mark_move(&state, arg.expr, scopes, "the move `^{sema_expression_move_mark_text(arg.expr)}`", &diagnostics) -> accepted = false
+        }
         if mark_implicit_take -> args[index].convention = AccessConvention.Move
     }
     if !sema_ownership_activate_call_reservations(accesses, &diagnostics) -> accepted = false
@@ -3244,6 +3288,16 @@ fn sema_ownership_expr_site_listed(sites: [Span], expr: Expr) -> Bool Never! {
     false
 }
 
+fn sema_ownership_exact_field_take(state: SemaOwnershipState, expr: Expr) -> Bool Never! {
+    if expr == .Field(_, _, _, _) {
+        span :: expr_span(expr)
+        loop site in state.exact_field_takes {
+            if sema_ownership_span_same(site, span) -> return true
+        }
+    }
+    false
+}
+
 // The move of an eligible unmarked take argument: an exact move whose origin
 // names the callee, so a later use reports E0209 at the argument.
 fn sema_ownership_mark_implicit_take(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, callee: String, diagnostics: &[Diagnostic]) -> Bool {
@@ -3284,6 +3338,36 @@ fn sema_ownership_closure_writes(state: &SemaOwnershipState, callee: Expr, scope
         if writes.key == binding.symbol.id.key -> return writes.names.copy()
     }
     [String]{}
+}
+
+// The binding `key` holds a non-escaping lambda with `captures`: those it
+// views in place (not copied, taken or materialized) are its outer bindings.
+fn sema_ownership_bind_closure_captures(state: &SemaOwnershipState, key: String, captures: [TCapture], facts: TCaptureFacts, scopes: SemaScopeTable) Never! {
+    if facts.escapes -> return
+    places := [SemaOwnershipPlace]{}
+    loop capture in captures {
+        name :: capture.source
+        if facts.cloned.contains(name) || facts.moved.contains(name) || facts.materialized.contains(name) -> next
+        index :: sema_scope_resolve_index(scopes, name) ?? -1
+        if index < 0 -> next
+        symbol :: scopes.bindings[index].symbol
+        &places.push(SemaOwnershipPlace{root: symbol.name, root_key: symbol.id.key, root_span: symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}})
+    }
+    if places.len() > 0 -> &state.closure_captures.push(SemaOwnershipClosureCaptures{key: key, places: places})
+}
+
+// A call of the lambda binding `callee` reads the captures it views: one
+// that moved since is a use after move at the call.
+fn sema_ownership_check_closure_captures(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if callee == .Ident(_, span, _) {
+        binding :: sema_ownership_binding_for_expr(&state, callee, scopes) ?? return
+        loop captured in state.closure_captures {
+            if captured.key != binding.symbol.id.key -> next
+            loop place in captured.places {
+                if sema_ownership_place_moved(&state, place) == .Val(origin) -> sema_ownership_report_moved(&state, origin, place, span, &diagnostics)
+            }
+        }
+    }
 }
 
 // A call of a run-once lambda binding moves the binding,

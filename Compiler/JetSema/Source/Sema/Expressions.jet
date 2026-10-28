@@ -3940,8 +3940,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
 
+    // `Int / Int` is the exact Fraction quotient; IR stops a zero divisor at
+    // the operator (`Fraction.from_parts` names the same parts with no operator).
     if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int {
-        value := sema_tir_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{lhs, rhs}}, span)
+        value := sema_tir_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "quotient", args: [TExpr]{lhs, rhs}}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     // (Rust `infer_binary`, E2512): `Matrix * Matrix`

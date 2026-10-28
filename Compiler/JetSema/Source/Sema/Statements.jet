@@ -3565,6 +3565,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // capture changes it at each call.
     if binding.init == .Lambda(bound_lambda, _) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
     if init.kind == .Lambda(checked_lambda) && checked_lambda.capture_facts.mutable.len() > 0 -> sema_ownership_bind_closure_writes(&state, symbol.id.key, checked_lambda.capture_facts.mutable)
+    if init.kind == .Lambda(viewing_lambda) -> sema_ownership_bind_closure_captures(&state, symbol.id.key, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
     sema_single_use_note_binding(&state, symbol, environment, program)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
     sema_stmt_track_origin(binding, environment, program, &scopes)
@@ -5598,13 +5599,19 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     // An owning materialization returns new storage, not the source window's
     // provenance. A view return must instead prove its original owner.
     // An `Ok(view)` exit proves its success payload's owners; an `Err(..)`
-    // exit carries no view (Rust `check_return` `failure_exit`).
+    // exit carries no view (Rust `check_return` `failure_exit`). A window
+    // read at the boundary, or a view binding, is lifted into the success
+    // rail, so it proves its owners as the success view it is.
     recorded_value := value
     recorded_ty := checked.ty
     if sema_stmt_return_is_view_boundary(return_type) && checked.ty == .Result(ok_ty, _) {
         if value == .Ok(ok_value, _, _) {
             recorded_value = ok_value
             recorded_ty = ok_ty
+        }
+        if value == .Place(_, _, _, _) -> recorded_ty = ok_ty
+        if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
+            if sema_stmt_view_access(known) != None -> recorded_ty = ok_ty
         }
     }
     failure_exit := false

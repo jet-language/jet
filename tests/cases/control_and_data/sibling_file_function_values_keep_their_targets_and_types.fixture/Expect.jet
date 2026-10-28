@@ -1,0 +1,19 @@
+struct KitOutcome {
+    name: String
+    ok: Bool
+}
+
+struct Hooks {
+    check: fn(KitOutcome) -> Bool
+}
+
+fn kit_expect_diagnostics(outcome: KitOutcome) -> Bool { outcome.ok }
+
+fn kit_expect_exact(outcomes: [KitOutcome]) -> Int {
+    hooks :: Hooks{check: kit_expect_diagnostics}
+    runner :: Runner{label: "exact"}
+    a :: runner.count_with(outcomes, kit_expect_diagnostics)
+    b :: runner.count_with(outcomes, hooks.check)
+    c :: count_free(outcomes, hooks.check)
+    a + b + c
+}

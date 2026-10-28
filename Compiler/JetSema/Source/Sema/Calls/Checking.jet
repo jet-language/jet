@@ -267,7 +267,7 @@ fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: 
     missing := 0
     loop index in 0..<params.len() {
         if !seen[index] && !sema_call_param_optional_for_check(params[index]) {
-            &diagnostics.push(sema_error("E0766", span, "this call to `{callee}` is missing `{params[index].label}`", "the parameter has no default, so every call has to supply it", "add the missing argument"))
+            &diagnostics.push(sema_call_diag_missing(callee, params[index].label, span))
             missing += 1
         }
     }
@@ -423,6 +423,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         if marked_place && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return None
         taken_place := marked_place
         if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
+        if taken_place && args[index].expr == .Field(_, _, _, _) -> &state.exact_field_takes.push(expr_span(args[index].expr))
         stored :: sema_call_marked_move_value(&state, taken_place, args[index].expr, ^value, scopes, &diagnostics) ?? return None
         &values.push(stored)
         &slots.push(slot)

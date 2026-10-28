@@ -1,8 +1,8 @@
 Error [E0222]: A part of `CONFIG.name` cannot be moved independently
-  --> static_partial_move.jet:11:27
+  --> tests/ui/static_partial_move.jet:11:34
     |
  11 |     size :: consume_name(^CONFIG.name)
-    |                           ^^^^^^
- Why: Persistent and static storage must stay complete, and a value with its own Close implementation needs all its fields when it closes.
- Fix: Move the complete owner, copy a copyable field, or update persistent state atomically.
+    |                                  ^^^^
+ Why: Persistent and static storage is shared state; safe lowering can only take or replace the complete root.
+ Fix: Move or take `CONFIG.name` as a whole, or update it atomically.
 More: jet-lang.dev/e/E0222

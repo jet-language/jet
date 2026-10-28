@@ -970,7 +970,7 @@ fn __fraction_new(numerator: Int, denominator: Int) -> Fraction? Never! {
     Val(Fraction{num_value: top /% divisor, den_value: bottom /% divisor})
 }
 fn __fraction_from_parts(numerator: Int, denominator: Int) -> Fraction Never! {
-    __fraction_new(numerator, denominator) ?? panic("divided by zero")
+    __fraction_new(numerator, denominator) ?? core.math.__numeric_stop("divided by zero")
 }
 fn __fraction_from_owned_parts(numerator: Int, denominator: Int) -> Fraction Never! {
     __fraction_from_parts(numerator, denominator)
@@ -988,7 +988,7 @@ fn __fraction_mul(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.num_value, left.den_value * right.den_value)
 }
 fn __fraction_div(left: Fraction, right: Fraction) -> Fraction Never! {
-    if right.num_value == 0 -> panic("divided by zero")
+    if right.num_value == 0 -> core.math.__numeric_stop("divided by zero")
     __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
 fn __fraction_numerator(value: Fraction) -> Int Never! { value.num_value.copy() }

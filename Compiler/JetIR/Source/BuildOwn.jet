@@ -1330,7 +1330,7 @@ fn ir_close_deferred(b: &IRBuilder, mark: Int) Never! {
         if !close.deferred -> next
         bound := false
         loop at in mark..<b.bindings.len() {
-            if b.bindings[at].slot == close.slot && b.bindings[at].indirect < 0 -> bound = true
+            if b.bindings[at].slot == close.slot && b.bindings[at].indirect < 0 && !ir_binding_is_alias(b, at) -> bound = true
         }
         if bound -> ir_close_now(&b, close.slot)
     }

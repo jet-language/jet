@@ -2311,6 +2311,29 @@ fn ir_call_row(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [
         &slots.push(if params[index].convention == .Move -> ir_own(&m, p, &b, slot) else -> slot)
         &moves.push(params[index].convention == .Move)
     }
+    ir_call_row_emit(&m, p, &b, row, type_args, names, concrete, slots, moves, backs, span)
+}
+
+// The call of non-generic function row `row` on argument values already
+// evaluated (`values`, one per read or move parameter).
+fn ir_call_row_values(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, values: [Int], span: Span) -> Int Never! {
+    params :: p.functions[row].params
+    if params.len() != values.len() -> return ir_fail_slot(&b, span, "call of {p.functions[row].key} with {values.len()} values")
+    slots := [Int]{}
+    moves := [Bool]{}
+    loop (index, value) in values {
+        if params[index].convention == .Write -> return ir_fail_slot(&b, span, "call of {p.functions[row].key} writing a value")
+        moving :: params[index].convention == .Move
+        if moving -> ir_close_disarm(&b, value)
+        &slots.push(if moving -> ir_own(&m, p, &b, value) else -> value)
+        &moves.push(moving)
+    }
+    ir_call_row_emit(&m, p, &b, row, [Type]{}, [String]{}, [Type]{}, slots, moves, [IRWriteBack]{}, span)
+}
+
+// The Call of function row `row` on its argument `slots` (moved where
+// `moves`), the write-backs reloaded after it.
+fn ir_call_row_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], names: [String], concrete: [Type], slots: [Int], moves: [Bool], backs: [IRWriteBack], span: Span) -> Int Never! {
     // #5473: a derived `equal`/`compare` of a payload-free enum compares the
     // discriminant words in place; the callee is not built.
     if slots.len() == 2 && type_args.len() == 0 {
@@ -2458,28 +2481,20 @@ fn ir_absent_test(m: &IRModule, p: IRProgram, b: &IRBuilder, present: Bool, lhs:
 // conversions) calls its core.math source helper; when the program holds no
 // core.math (the type is then its runtime handle) it is the
 // `jet_<type>_<function>` route, its constructors taking their arguments by
-// value.
+// value. A Fraction division (`Int / Int` is `quotient`) stops first on a
+// zero divisor, at its own line (ir_precise_division).
 fn ir_precise_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, args: [Int], span: Span) -> Int Never! {
+    if type_name == "Fraction" && (function == "quotient" || function == "div") && args.len() == 2 -> return ir_precise_division(&m, p, &b, ty, function, args[0], args[1], span)
     helper :: ir_precise_source_helper(type_name, function) ?? ""
     key :: "function:<corelib>/core.math::{helper}"
     if helper == "" || ir_function_row(p, key) == None {
-        type_key :: if type_name == {
-            "Decimal" -> "decimal"
-            "Fraction" -> "fraction"
-            "Complex" -> "complex"
-            "Measurement" -> "measurement"
-            else -> { return ir_fail_slot(&b, span, "precise builtin {type_name}.{function}") }
-        }
-        by_value :: function == "new" || function == "from_parts" || (function.starts_with("from_") && function != "from_str")
         slots := [Int]{}
-        borrowed := [Bool]{}
         loop argument in args {
             slot :: ir_expr(&m, p, &b, argument)
             if ir_failed(b) -> return -1
             &slots.push(slot)
-            &borrowed.push(!by_value)
         }
-        return ir_route(&m, p, &b, "jet_{type_key}_{function}", slots, borrowed, ty, span)
+        return ir_precise_route(&m, p, &b, ty, type_name, function, slots, span)
     }
     call_args := [BodyCallArg]{}
     loop argument in args {
@@ -2487,6 +2502,66 @@ fn ir_precise_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_
         &call_args.push(BodyCallArg{value: argument.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
     }
     ir_call(&m, p, &b, key, [Type]{}, -1, [IRWriteBack]{}, call_args, span)
+}
+
+// The `jet_<type>_<function>` route of a precise builtin on evaluated
+// `slots`; constructors take them by value, the rest borrow them.
+fn ir_precise_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, slots: [Int], span: Span) -> Int Never! {
+    type_key :: if type_name == {
+        "Decimal" -> "decimal"
+        "Fraction" -> "fraction"
+        "Complex" -> "complex"
+        "Measurement" -> "measurement"
+        else -> { return ir_fail_slot(&b, span, "precise builtin {type_name}.{function}") }
+    }
+    by_value :: function == "new" || function == "from_parts" || (function.starts_with("from_") && function != "from_str")
+    borrowed := [Bool]{}
+    loop _ in slots -> &borrowed.push(!by_value)
+    ir_route(&m, p, &b, "jet_{type_key}_{function}", slots, borrowed, ty, span)
+}
+
+// A precise builtin on evaluated `slots`: its core.math source helper when
+// the program holds it, else its route.
+fn ir_precise_values(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, slots: [Int], span: Span) -> Int Never! {
+    helper :: ir_precise_source_helper(type_name, function) ?? ""
+    if helper != "" {
+        row :: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? -1
+        if row >= 0 -> return ir_call_row_values(&m, p, &b, row, slots, span)
+    }
+    ir_precise_route(&m, p, &b, ty, type_name, function, slots, span)
+}
+
+// A Fraction division: `Int / Int` (`quotient`, the Fraction of the two
+// parts) or `Fraction / Fraction` (`div`). A zero divisor is the numeric stop
+// `divided by zero` at the operator's file and line, on every tier, before
+// the helper or route runs.
+fn ir_precise_division(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function: String, dividend: Int, divisor: Int, span: Span) -> Int Never! {
+    left :: ir_expr(&m, p, &b, dividend)
+    if ir_failed(b) -> return -1
+    right :: ir_expr(&m, p, &b, divisor)
+    if ir_failed(b) -> return -1
+    if left < 0 || right < 0 -> return ir_fail_slot(&b, span, "Fraction division of a Unit operand")
+    quotient :: function == "quotient"
+    zero := -1
+    if quotient {
+        nothing :: ir_const_like(&m, &b, right, 0)
+        zero = ir_bool_op(&m, &b, IROp.Eq, right, nothing)
+    } else {
+        // The divisor is only read here; the division itself releases it.
+        fresh :: b.fresh[right]
+        b.fresh[right] = false
+        zero = ir_precise_values(&m, p, &b, Type.Bool, "Fraction", "is_zero", [Int]{right}, span)
+        b.fresh[right] = fresh
+        if ir_failed(b) -> return -1
+    }
+    ir_open_if(&b.f, zero, b.line)
+    site :: b.line
+    stop := ir_location(&m, &b, site)
+    loop arg in ir_static_text(&m, &b, "divided by zero") -> &stop.push(arg)
+    _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", stop, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_precise_values(&m, p, &b, ty, "Fraction", if quotient -> "from_parts" else -> "div", [Int]{left, right}, span)
 }
 
 // The storage a write through `place` reaches. A path through a List element,

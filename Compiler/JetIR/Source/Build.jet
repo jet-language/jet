@@ -1363,17 +1363,30 @@ fn ir_entry_ending(m: &IRModule, b: &IRBuilder) Never! {
 // Drops the owned variables among bindings[mark..], latest first; a
 // variable that still owns a value that closes closes it first. The
 // variables a `defer close` closes close before all of them, the latest
-// defer first (ir_close_deferred).
+// defer first (ir_close_deferred). An alias of a variable (a pinned
+// argument, a place read in place) closes nothing: its variable does.
 fn ir_drop_bindings(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
     ir_close_deferred(&b, mark)
     index := b.bindings.len() - 1
     loop index >= mark {
         binding :: b.bindings[index]
+        alias :: ir_binding_is_alias(b, index)
         index -= 1
-        if binding.indirect < 0 && !ir_close_is_deferred(b, binding.slot) -> ir_close_now(&b, binding.slot)
+        if binding.indirect < 0 && !alias && !ir_close_is_deferred(b, binding.slot) -> ir_close_now(&b, binding.slot)
         if !binding.owned -> next
         ir_drop_binding(&m, &b, binding)
     }
+}
+
+// Whether bindings[index] names the slot of an earlier variable: an alias
+// that never owns the value it reads.
+fn ir_binding_is_alias(b: IRBuilder, index: Int) -> Bool Never! {
+    slot :: b.bindings[index].slot
+    if slot < 0 || b.bindings[index].indirect >= 0 -> return false
+    loop earlier in 0..<index {
+        if b.bindings[earlier].slot == slot && b.bindings[earlier].indirect < 0 -> return true
+    }
+    false
 }
 
 // Drops the value the owned variable `binding` holds; one some paths moved

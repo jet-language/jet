@@ -351,11 +351,18 @@ fn ir_named_function_tree(tree: BodyTree, expression: Int, keys: &[String], decl
     body_each_expr_child(tree, node, (child: Int) -> ir_named_function_tree(tree, child, &keys, decls))
 }
 
+// A Fraction division also tests its divisor (ir_precise_division).
 fn ir_precise_tree_names(tree: BodyTree, expression: Int, names: &[String]) Never! {
     node :: body_node(tree, expression)
     helper :: ir_precise_expr_helper(node)
     if helper == .Val(name) {
         if !names.contains(name) -> &names.push(name)
+    }
+    if node.kind == .PreciseBuiltin(owner, operation, _) {
+        if owner == "Fraction" && operation == "div" {
+            zero_test :: ir_precise_source_helper("Fraction", "is_zero") ?? ""
+            if zero_test != "" && !names.contains(zero_test) -> &names.push(zero_test)
+        }
     }
     body_each_expr_child(tree, node, (child: Int) -> ir_precise_tree_names(tree, child, &names))
 }
