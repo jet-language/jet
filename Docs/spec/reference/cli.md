@@ -582,11 +582,14 @@ script alone, and the source walk of a package leaves every script out.
 applies to scripts and to any other file. There is one program per entry file
 and profile. Its record names the toolchain it was built with (the compiler,
 runtime pack and Core source file identities) and a hash of its source
-snapshot. A rerun with the same toolchain and sources runs the kept program
-without compiling. Any change, including a different compiler, compiles again
-and replaces the kept program. The cache holds at most 64 programs; keeping
-another removes the least recently run one. A compile that read a comptime
-input file keeps nothing, and a `--verbose` or traced run always compiles.
+snapshot: the source files and the tree's directories. Other files in the
+tree, such as one the program writes beside its source, are not compile
+inputs and don't change the hash. A rerun with the same toolchain and sources
+runs the kept program without compiling. Any change, including a different
+compiler, compiles again and replaces the kept program. The cache holds at
+most 64 programs; keeping another removes the least recently run one. A
+compile that read a comptime input file keeps nothing, and a `--verbose` or
+traced run always compiles.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed

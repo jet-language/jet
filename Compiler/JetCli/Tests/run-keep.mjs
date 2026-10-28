@@ -88,6 +88,10 @@ check('source edit', run(), 'hello two\n');
 state = rebuilt('source edit', state);
 check('rerun after the edit', run(), 'hello two\n');
 state = reused('rerun after the edit', state);
+// A file the program writes beside its source is no compile input.
+writeFileSync(join(work, 'greet.out'), 'written beside the source\n');
+check('non-source file beside the entry', run(), 'hello two\n');
+state = reused('non-source file beside the entry', state);
 
 appendFileSync(join(root, 'Core/Time/Time.jet'), '\n// run-keep: a Core change\n');
 check('Core change', run(), 'hello two\n');

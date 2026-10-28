@@ -5,8 +5,9 @@
 // its kept program and what that program was built from:
 // - the toolchain: this compiler, its runtime pack and the Core sources, by
 //   file identity;
-// - a hash of the schema snapshots its checks read and of every file of its
-//   authorized source snapshot.
+// - a hash of the schema snapshots its checks read, of every file of its
+//   authorized source snapshot and of the source tree's shape (its
+//   directories and source names; other files a compile never reads).
 // A rerun whose toolchain and sources match the record runs the program and
 // marks the record used. Any other compile replaces the slot, so the cache
 // holds one program per entry file, and at most JET_CLI_SCRIPT_KEEP_MAX
@@ -134,9 +135,20 @@ fn jet_cli_script_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> String
             jet_cli_script_frame(&framed, file.path)
             jet_cli_script_frame(&framed, file.source)
         }
+        // Of each retained listing only the names a compile can read: its
+        // directories (convention routing reads the tree's shape, empty
+        // directories included) and its sources. Any other file, such as one
+        // the program writes beside its source or a cache kept in the tree,
+        // changes nothing a compile reads, so it must not miss the slot.
         loop directory in root.directories {
             jet_cli_script_frame(&framed, directory.path)
-            loop entry in directory.entries -> jet_cli_script_frame(&framed, if entry.is_directory -> "{entry.name}/" else -> entry.name)
+            loop entry in directory.entries {
+                if entry.is_directory {
+                    jet_cli_script_frame(&framed, "{entry.name}/")
+                } else if entry.name.ends_with(".jet") {
+                    jet_cli_script_frame(&framed, entry.name)
+                }
+            }
         }
     }
     loop dependency in snapshot.script_dependencies {
