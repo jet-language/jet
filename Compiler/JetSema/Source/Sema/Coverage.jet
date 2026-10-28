@@ -320,6 +320,51 @@ fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [S
     missing
 }
 
+// A partly matched `Ok`/`Err` names the payload cases its nested arms leave
+// open (`Err(.High)`, `Err(.BadNumStr(_))`) instead of `Err(...)`.
+fn sema_coverage_nested_witnesses(subject_ty: Type, missing: [String], shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
+    named := [String]{}
+    loop entry in missing {
+        key :: if entry == "Ok(...)" -> "Ok" else if entry == "Err(...)" -> "Err" else -> ""
+        cases :: if key == "" -> [String]{} else -> sema_coverage_nested_cases(subject_ty, key, shapes, environment, program)
+        if cases.len() == 0 {
+            &named.push(entry)
+            next
+        }
+        loop case in cases -> &named.push("{key}({case})")
+    }
+    named
+}
+
+fn sema_coverage_nested_cases(subject_ty: Type, key: String, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
+    inner := [TPatternShape]{}
+    seen := [String]{}
+    loop shape in shapes -> sema_coverage_collect_nested(shape, key, &inner, &seen)
+    if inner.len() == 0 -> return [String]{}
+    payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment, program) ?? return [String]{})
+    if !(payload_ty == .Named(_) || payload_ty == .Apply(_, _) || payload_ty == .Union(_)) -> return [String]{}
+    ranges := [SemaIntegerRange]{}
+    keys :: sema_coverage_keys(payload_ty, inner, environment, program, &ranges)
+    loop name in sema_coverage_missing(payload_ty, keys, environment, program) -> ".{name}{if sema_coverage_case_has_payload(payload_ty, name, environment, program) -> "(_)" else -> ""}"
+}
+
+fn sema_coverage_case_has_payload(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if ty == .Union(_) -> return true
+    if program.registration_graph == .Val(graph) {
+        nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return false
+        nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+        loop row in nominal.variants {
+            if row.symbol.name == name {
+                if row.payload == {
+                    .Unit -> return false
+                    else -> return true
+                }
+            }
+        }
+    }
+    false
+}
+
 // Port of the Rust checker's `check_pattern_coverage_complete`: reports E0307
 // for an else-less table whose checked pattern conditions leave a case open.
 fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
@@ -373,6 +418,7 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
         ok_ty :: sema_pattern_unwrap_tags(ok)
         if sema_pattern_is_option(ok_ty) -> missing = sema_coverage_three_state_missing(ok_ty, table.shapes, keys, environment, program)
     }
+    missing = sema_coverage_nested_witnesses(subject_ty, missing, table.shapes, environment, program)
     if missing.len() == 0 -> return
     names :: missing.join(", ")
     if multi_head {

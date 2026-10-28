@@ -20,13 +20,13 @@ Error [E0740]: `read_only` uses the effect `Env`, which its signature doesn't al
  Call chain: read_only
 More: jet-lang.dev/e/E0740
 
-Error [E3401]: `pure` calls the impure function `core_time::zone`
+Error [E3401]: `pure` calls the impure function `time.zone`
   --> tests/ui/time_zone_effects.jet:4:51
     |
   4 | fn pure(name: String) -[]> Zone TimeError! { time.zone(name) }
     |                                                   ^^^^
- Why: `core_time::zone` is impure, but `pure` declares `-[]>`
+ Why: `time.zone` is impure, but `pure` declares `-[]>`
  Fix: Remove the call from `pure`, or drop the `-[]>` bound from `pure` so its effects are inferred
  Denial: pure
- Call chain: pure → core_time::zone
+ Call chain: pure → time.zone
 More: jet-lang.dev/e/E3401

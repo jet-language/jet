@@ -3238,7 +3238,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                     .None -> false
                 }
                 if !actual_is_struct {
-                    &diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {type_name(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
+                    &diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {sema_type_show(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
                     sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, &scopes, &state, &diagnostics)
                     return None
                 }
@@ -3308,7 +3308,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                     element
                 }
                 else -> {
-                    &diagnostics.push(sema_error("E0313", pattern_span, "`[ … ]` can only destructure a list, but this is {type_name(ty)}", "destructuring with `[ ]` pulls elements out of a list value", "destructure a list, or bind the whole value with a name"))
+                    &diagnostics.push(sema_error("E0313", pattern_span, "`[ … ]` can only destructure a list, but this is {sema_type_show(ty)}", "destructuring with `[ ]` pulls elements out of a list value", "destructure a list, or bind the whole value with a name"))
                     sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, &scopes, &state, &diagnostics)
                     return None
                 }
@@ -3331,7 +3331,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                 else -> {}
             }
             if fields.len() == 0 && ty != (Type.Tuple{fields: [TypeTupleField]{}}) {
-                &diagnostics.push(sema_error("E0313", pattern_span, "`( … )` can only destructure a tuple, but this is {type_name(ty)}", "destructuring with `( )` pulls named members out of a tuple value", "destructure a tuple, or bind the whole value with a name"))
+                &diagnostics.push(sema_error("E0313", pattern_span, "`( … )` can only destructure a tuple, but this is {sema_type_show(ty)}", "destructuring with `( )` pulls named members out of a tuple value", "destructure a tuple, or bind the whole value with a name"))
                 sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, &scopes, &state, &diagnostics)
                 return None
             }
@@ -3514,7 +3514,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     init :: sema_stmt_owning_view_init(^checked_value, binding, environment, program, scopes, &context)
-    if !sema_copy_site_check_guard_owned(init, environment, program, scopes, context, &diagnostics, false) {
+    if !sema_copy_site_check_guard_owned(init, environment, program, scopes, context, &diagnostics, false) || (binding.mutable && !sema_copy_site_refuse_borrowed_copy(binding.init, "the binding `{binding.name}`", environment, program, scopes, context, &diagnostics)) {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
@@ -3843,7 +3843,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !binding.mutable {
-        &diagnostics.push(sema_error("E0111", name_span, "`{name}` was made immutable, so it can't change", "only mutable bindings and write-access parameters can be changed", "declare it as a mutable binding"))
+        &diagnostics.push(sema_error("E0111", name_span, "`{name}` was made with `::`, so it can't change", "only `:=` bindings and parameters marked with the write-access marker `&` can be changed", "declare it with `{name} := ...` instead"))
         return None
     }
     if binding.symbol.ty == None {
@@ -3866,6 +3866,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
     checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return None
+    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, context, &diagnostics) -> return None
     checked := checked_value
     // A compound operand widens into the place's numeric type first
     // (`total += byte`), as Rust `widen_numeric_expr` does after inference.
@@ -3885,7 +3886,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         operator :: op
         result :: sema_stmt_compound_result(operator, required, checked.ty, op_span, &diagnostics) ?? return None
         if !sema_type_assignable(required, result) {
-            &diagnostics.push(sema_type_mismatch(required, result, op_span))
+            &diagnostics.push(sema_slot_holds_mismatch("`{name}`", "binding", required, result, name_span))
             return None
         }
         tir_op = Val(sema_stmt_binary_type(operator))
@@ -3965,6 +3966,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
         tir_op = Val(sema_stmt_binary_type(operator))
     }
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, context, &diagnostics) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
     storage := checked_persistent_local(name, environment.module_identity, required, name_span)
@@ -5012,11 +5014,14 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)
     value_diagnostics :: diagnostics.len()
     value_reasons :: context.incomplete_reasons.len()
-    checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+    checked_value_or :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if op == None -> sema_stmt_field_write_mismatch(target, place.ty, expr, value_diagnostics, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_value :: checked_value_or ?? {
         if !sema_has_error_since(diagnostics, value_diagnostics) && context.incomplete_reasons.len() == value_reasons -> sema_check_unsupported(&context, "the assigned value at offset {expr_span(expr).start} checked to no value without a report")
         return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 15")
     }
     if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
+    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment", environment, program, scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     checked := checked_value
     if op != None && sema_stmt_compound_widens(checked.ty, place.ty) {
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
@@ -5029,7 +5034,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         operator :: op
         result :: sema_stmt_compound_result(operator, place.ty, checked.ty, op_span, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
         if !sema_type_assignable(place.ty, result) {
-            &diagnostics.push(sema_type_mismatch(place.ty, result, op_span))
+            &diagnostics.push(if target == .Field(_, member, _) -> sema_slot_holds_mismatch("field `{member}`", "field", place.ty, result, op_span) else -> sema_type_mismatch(place.ty, result, op_span))
             return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 16")
         }
         tir_op = Val(sema_stmt_binary_type(operator))
@@ -5059,6 +5064,18 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         }
     }
     Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: assigned, line: line, span: assign_span})
+}
+
+// A plain field write whose value doesn't fit the field reports about the
+// field, with the value's own type inferred without the field as a target.
+fn sema_stmt_field_write_mismatch(target: LValue, required: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if target == .Field(_, member, _) {
+        value_span :: expr_span(value)
+        mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+        probe_diagnostics := [Diagnostic]{}
+        offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+        diagnostics[mismatch_index] = sema_slot_holds_mismatch("field `{member}`", "field", sema_expr_expected_type(required, environment, program), sema_expr_expected_type(offered.ty, environment, program), value_span)
+    }
 }
 
 // A compound update `place op= value` of a fixed-width integer under the
@@ -5559,7 +5576,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
         }
     }
     checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if !sema_stmt_return_is_view_boundary(return_type) && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_stmt_return_is_view_boundary(return_type) && !context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
     if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
         &diagnostics.push(sema_error("E0201", expr_span(value), "an ExpiringSecret loan cannot be returned", "the callback parameter is valid only while `.with` is running", "return a non-secret result computed from the loan"))
     }
@@ -6318,7 +6335,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 cond_valid := cond_tir != None
                 if cond_tir != None && sema_stmt_condition_type(cond_tir) != Type.Bool {
                     cond_ty :: sema_stmt_condition_type(cond_tir)
-                    &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
+                    &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", expr_span(cond), "a `loop` condition must be Bool (true or false), but this is {sema_type_show(cond_ty)}", "the program needs a clear yes or no here", "compare the value to something, e.g. `x > 0` or `name == \"ok\"`"))
                     cond_valid = false
                 }
                 // Each iteration starts from this mark; the join base is the
@@ -6364,7 +6381,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     }
                     sema_stmt_condition_type(cond) != Type.Bool -> {
                         cond_ty :: sema_stmt_condition_type(cond)
-                        &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
+                        &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", expr_span(condition), "a `loop` condition must be Bool (true or false), but this is {sema_type_show(cond_ty)}", "the program needs a clear yes or no here", "compare the value to something, e.g. `x > 0` or `name == \"ok\"`"))
                         complete = false
                     }
                     else -> {

@@ -1251,13 +1251,13 @@ fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegis
         inverse_type :: sema_checked_qualify_type(graph, inverse_parameter.ty, module_row.module_identity)
         if forward.convention != inverse_parameter.convention || !type_identity_equal(forward_type, inverse_type) {
             reason :: if forward.convention != inverse_parameter.convention -> "access convention `{sema_checked_foreign_access_keyword(inverse_parameter.convention)}` does not match `{sema_checked_foreign_access_keyword(forward.convention)}`" else -> "type `{type_name(inverse_type)}` does not match `{type_name(forward_type)}`"
-            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`: {reason}", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make the parameter use the same type and access convention as the foreign call"))
+            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`: {reason}", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make parameter {index + 1} of `{inverse.name}` use the same type and access convention as `{registered.declaration.name}`"))
             valid = false
         }
     }
     if inverse_return == .Val(return_type) {
         if return_type != (Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove the return type so `{inverse.name}` returns Unit"))
+            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove `{type_name(return_type)}` from `{inverse.name}` so it returns Unit"))
             valid = false
         }
     }
@@ -1389,13 +1389,13 @@ fn sema_checked_inline_undo(graph: SemaRegistrationGraph, module_row: SemaRegist
         forward_type :: sema_checked_qualify_type(graph, forward.ty, module_row.module_identity)
         inverse_type :: sema_checked_qualify_type(graph, inverse_parameter.ty, module_row.module_identity)
         if forward.convention != inverse_parameter.convention || !type_identity_equal(forward_type, inverse_type) {
-            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make the parameter use the same type and access convention as the foreign call"))
+            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make parameter {index + 1} of `{inverse.name}` use the same type and access convention as `{registered.declaration.name}`"))
             valid = false
         }
     }
     if inverse_return == .Val(return_type) {
         if return_type != (Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove the return type so `{inverse.name}` returns Unit"))
+            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove `{type_name(return_type)}` from `{inverse.name}` so it returns Unit"))
             valid = false
         }
     }
@@ -2004,7 +2004,7 @@ fn sema_checked_validate_struct_field(definition: StructDef, field: Field, diagn
         &diagnostics.push(sema_error("E1110", field.name_span, "`Group` cannot be stored in a struct field", "a task group is a scoped spawn authority, not a value that can escape its call stack", "pass `group: Group` directly to a helper function or method instead"))
     }
     if sema_checked_layout_is_c(definition.layout) && sema_checked_type_is_growable(field.ty) {
-        &diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "a C-layout struct cannot contain a growable field", "lists, maps, and strings have no stable C layout", "use a fixed-size array or remove the C layout marker"))
+        &diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "`#Layout(c)` struct `{definition.name}` has a growable field `{field.name}` ({type_name(field.ty)})", "growable types (`[T]`, `Map`, `String`) don't have a stable C layout", "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`"))
     }
 }
 

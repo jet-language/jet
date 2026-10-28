@@ -535,6 +535,9 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     // field facts are resolved once per check (sema_expression_struct_field_facts).
     facts :: if names.len() == 0 -> sema_expression_struct_field_facts(owner, struct_def.fields, environment, program, &context) else -> -1
     values := [TStructFieldValue]{}
+    // Every written field is checked, so one literal reports all of its bad
+    // values together.
+    failed := false
     loop (written, source) in fields {
         position :: positions[written]
         checked := TStructFieldValue?{None}
@@ -544,9 +547,13 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         } else {
             checked = sema_expression_struct_field_value(struct_def.fields[position], source.value, source.name_span, true, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        value :: checked ?? return None
-        &values.push(value)
+        if checked == None {
+            failed = true
+            next
+        }
+        &values.push(checked ?? return None)
     }
+    if failed -> return None
     loop (index, field) in struct_def.fields {
         if supplied[index] || field.computed != None -> next
         default_value :: field.default ?? {

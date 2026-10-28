@@ -18,6 +18,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     core_receiver_method,
     core_source_owns_type,
+    expr_source_span,
     expr_span,
     type_name,
     UnOp,
@@ -104,12 +105,12 @@ fn sema_dyn_site(expr: Expr) -> String Never! {
     }
 }
 
-fn sema_dyn_index_operation(ty: Type, site: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> THandleOp? {
+fn sema_dyn_index_operation(ty: Type, site: String, span: Span, index_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> THandleOp? {
     location :: sema_expression_panic_location(environment, program, scopes, span)
     resolved :: sema_expr_expected_type(ty, environment, program)
     if resolved == Type.String -> return Val(THandleOp.DynIndexKey{site: site, location: location})
     if resolved == Type.Int -> return Val(THandleOp.DynIndexAt{site: site, location: location})
-    &diagnostics.push(sema_error("E0505", span, "a Dyn index must be String or Int, not {type_name(ty)}", "Dyn objects use String keys and Dyn arrays use Int positions", "use a String key or Int index"))
+    &diagnostics.push(sema_error("E0505", index_span, "Dyn index must be String or Int, not {sema_type_show(ty)}", "Dyn indexes object keys and array positions", "use a String key or an Int index"))
     None
 }
 
@@ -137,7 +138,7 @@ fn sema_dyn_try_member(receiver: Expr, receiver_value: TExpr, method: String, ar
         if method == "get" {
             index_ty :: sema_expr_expected_type(argument.ty, environment, program)
             if index_ty != Type.String && index_ty != Type.Int {
-                &diagnostics.push(sema_error("E0505", args[0].span, "a Dyn index must be String or Int, not {type_name(argument.ty)}", "Dyn objects use String keys and Dyn arrays use Int positions", "use a String key or Int index"))
+                &diagnostics.push(sema_error("E0505", args[0].span, "Dyn index must be String or Int, not {sema_type_show(argument.ty)}", "Dyn indexes object keys and array positions", "use a String key or an Int index"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             operation = if index_ty == Type.String -> THandleOp.DynGetKey else -> THandleOp.DynGetAt
@@ -799,7 +800,14 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         borrowed := sema_data_argument_is_borrowed(argument.expr, scopes)
         if argument.convention != AccessConvention.Move && borrowed && !sema_ownership_type_is_copy(want) {
             if sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
-            &diagnostics.push(sema_error("E0209", argument.span, "implicit clone of this borrowed payload", "the Dyn constructor stores its own value, so borrowed storage cannot be moved", "copy the payload explicitly before constructing the value"))
+            shown :: sema_expression_simple_place_text(argument.expr)
+            what := "implicit clone of this consumed expression"
+            fix := "call `.copy()` on the highlighted expression to copy it explicitly"
+            if shown == .Val(text) {
+                what = "implicit clone of `{text}`"
+                fix = "write `{text}.copy()` to copy explicitly"
+            }
+            &diagnostics.push(sema_error("E0209", expr_source_span(argument.expr), what, "`{variant}` stores its own copy of this value", fix))
         }
         if argument.convention == AccessConvention.Move -> clone_arg = false
         taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED} else -> argument.expr

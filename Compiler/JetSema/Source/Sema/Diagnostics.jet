@@ -267,6 +267,13 @@ fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     )
 }
 
+// E0108: a write whose value doesn't fit the binding or field it lands in;
+// `holder` is "binding" or "field".
+fn sema_slot_holds_mismatch(slot: String, holder: String, required: Type, offered: Type, span: Span) -> Diagnostic {
+    fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down (`/%=` in place), or make the {holder} a Float" else -> sema_type_fix_hint(required, offered)
+    sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(offered)}", "a {holder} keeps one type for its whole life", fix)
+}
+
 // (Rust `typed_text_mismatch`): a runtime `String` never becomes a checked
 // typed text or a `Regex`.
 fn sema_typed_text_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic? {

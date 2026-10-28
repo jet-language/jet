@@ -369,7 +369,7 @@ fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             field := sema_incomparable_field(environment, program, lhs.ty)
             field_name := field ?? ""
             if {
-                sema_call_reflection_secret_bearing(lhs.ty) -> &diagnostics.push(sema_error("E0312", span, "secret-bearing `{shown}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
+                sema_call_reflection_secret_bearing(lhs.ty) -> &diagnostics.push(sema_error("E0312", span, "secret-bearing `{sema_call_reflection_leaf_name(shown)}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
                 field != None -> &diagnostics.push(sema_error("E0312", span, "`{shown}` can't be compared with `{type_name(rhs.ty)}` because field `{field_name}` doesn't support {label}", "value equality needs every field to support the comparison", "compare individual fields instead"))
                 else -> &diagnostics.push(sema_error("E0312", span, "`{shown}` doesn't support {label}", "value equality requires the Equatable trait", "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields"))
             }

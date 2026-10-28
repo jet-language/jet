@@ -334,15 +334,9 @@ fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode,
         // this program; any other callee reports through its own effects.
         if callee_module != "" && !callee_module.starts_with("<corelib>/") -> return None
         callee :: fact.callee ?? return None
-        leaf :: callee.key.cut_last(":") ?? return None
-        api = leaf.after
-        if callee_module.cut_last("/") == .Val(split) {
-            parts :: split.after.split(".").to_list()
-            if parts.len() > 0 -> api = "{parts[parts.len() - 1]}.{leaf.after}"
-        }
+        api = sema_effect_decl_label(callee.key)
     } else if expression.kind == .CoreCall(record, _, _, _, _, _) {
-        parts :: record.module_name.split(".").to_list()
-        if parts.len() > 0 -> api = "{parts[parts.len() - 1]}.{record.member}"
+        api = sema_effect_member_label(record.module_name, record.member)
     }
     if api == "" -> return None
     row :: fact.facts.effect_bound ?? return None
@@ -578,10 +572,27 @@ fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program
     Val(true)
 }
 
+// The name a diagnostic gives a module member: its module's last segment
+// and the member (`files.read` for `<corelib>/core.files`).
+fn sema_effect_member_label(module_name: String, member: String) -> String Never! {
+    path :: module_name.split("/").to_list()
+    parts :: path[path.len() - 1].split(".").to_list()
+    "{parts[parts.len() - 1]}.{member}"
+}
+
+// The name a diagnostic gives a declaration key: a Core function is
+// `{module}.{name}`, any other declaration its bare name.
+fn sema_effect_decl_label(key: String) -> String Never! {
+    leaf :: sema_effect_symbol_leaf(key)
+    owner_module :: sema_effect_symbol_module(key) ?? return leaf
+    if !owner_module.starts_with("<corelib>/") -> return leaf
+    sema_effect_member_label(owner_module, leaf)
+}
+
 fn sema_effect_call_api(program: SemaProgramTables, value: TExpr) -> String Never! {
     if value.kind == {
-        .CoreCall(record, _, _, _, _, _) -> "{record.module_name}.{record.member}"
-        .Call(callee, _, _) -> sema_program_decl_key(program, callee)
+        .CoreCall(record, _, _, _, _, _) -> sema_effect_member_label(record.module_name, record.member)
+        .Call(callee, _, _) -> sema_effect_decl_label(sema_program_decl_key(program, callee))
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
         .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) -> "intrinsic method"
@@ -596,8 +607,8 @@ fn sema_effect_call_api(program: SemaProgramTables, value: TExpr) -> String Neve
 // direct callee.
 fn sema_effect_node_call_api(decls: DeclTable, kind: NodeKind) -> String Never! {
     if kind == {
-        .CoreCall(record, _, _, _, _, _) -> "{record.module_name}.{record.member}"
-        .Call(callee, _, _) -> decls.rows[callee.row].key.copy()
+        .CoreCall(record, _, _, _, _, _) -> sema_effect_member_label(record.module_name, record.member)
+        .Call(callee, _, _) -> sema_effect_decl_label(decls.rows[callee.row].key)
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
         .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) -> "intrinsic method"
@@ -693,7 +704,9 @@ fn sema_effect_apply_via(nodes: &[SemaEffectNode], node_index: Int, function: Fn
 
 // Rust `Effects.rs` `e0740`: the span is the row's first entry.
 fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnostic {
-    over_list :: sema_effect_show(over)
+    sorted := over.copy()
+    &sorted.sort()
+    over_list :: sema_effect_show(sorted)
     declared :: if node.declared.len() == 0 -> "no effects" else -> "`-[{sema_effect_show(node.declared)}]>`"
     span :: node.row_span ?? node.name_span
     diagnostic :: sema_error("E0740", span, "`{node.name}` uses the effect `{over_list}`, which its signature doesn't allow", "the signature declares {declared}, so the body may only use those; `{over_list}` is outside that set", "add `{over_list}` to the effect list, or stop using it in `{node.name}`")
@@ -2111,7 +2124,9 @@ fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: NameRo
     }
 }
 
-fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_site: String, diagnostics: &[Diagnostic]) -> Bool {
+// A pure body's reached effects go to `pure_reached`; E3401 is reported once
+// the solved rows are stamped, so it can name the call that reaches them.
+fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_site: String, pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     // This rule with (Rust `check_inferred_memo`, E0938): a
     // `#Memo` function that is not declared pure is judged by its solved row;
@@ -2153,7 +2168,7 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached
             }
             if node.nondeterministic_call -> valid = false
             if over.len() > 0 {
-                &diagnostics.push(sema_effect_pure_diagnostic(node, over))
+                loop name in over -> &pure_reached.push(name)
                 valid = false
             }
         }
@@ -2355,8 +2370,11 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     secret_reach :: sema_effect_secret_reach(nodes, callers)
     dispatch_reach :: sema_effect_dispatch_reach(nodes, callers)
     dispatch_seen := (loop _ in nodes -> false)
+    pure_nodes := [Int]{}
+    pure_rows := [[String]]{}
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
+        pure_reached := [String]{}
         dispatch := Diagnostic?{None}
         if (nodes[node_index].has_declared_row || nodes[node_index].is_pure) && dispatch_reach[node_index] {
             visited := [Int]{}
@@ -2371,9 +2389,13 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             seen := (loop _ in nodes -> false)
             if sema_effect_panic_site(nodes, calls.node_by_key, node_index, &seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
         }
-        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_site, &function_diagnostics) {
+        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_site, &pure_reached, &function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
+        }
+        if pure_reached.len() > 0 {
+            &pure_nodes.push(node_index)
+            &pure_rows.push(pure_reached)
         }
         sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^function_diagnostics)
     }
@@ -2430,6 +2452,13 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             node_index :: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
             modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
+    }
+    // Rust `Purity.rs` e3401 names the first impure call and its chain; the
+    // reached row is the report when no single call carries it.
+    loop (pending, node_index) in pure_nodes {
+        pure_diagnostics := [Diagnostic]{}
+        &pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^pure_diagnostics)
     }
     complete :: !sema_has_error_since(diagnostics, 0)
     SemaEffectGraphResult{diagnostics: ^diagnostics, complete: complete, memory_declarations: ^memory_facts.declarations, memory_projections: ^memory_facts.projections}

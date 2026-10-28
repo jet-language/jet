@@ -1,13 +1,12 @@
-Error [E0121]: `resource` was consumed by `close`, so it can't be used here
-  --> defer_close_twice.jet:12:12
+Error [E0121]: `resource` was consumed by the deferred `close`, so it can't be used here
+  --> tests/ui/defer_close_twice.jet:12:12
     |
  12 |     close(^resource)
     |            ^^^^^^^^
-  --> defer_close_twice.jet:11:18
+  --> tests/ui/defer_close_twice.jet:11:18
     |
  11 |     defer close(^resource)
-    |                  ^^^^^^^^ `resource` moved to `close` here
+    |                  ^^^^^^^^ `resource` moved to the deferred `close` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `resource` after the move, or give `close` a copy with `resource.copy()` where it moved.
- Note: acquire a new `Resource` resource; closed resources cannot be copied or reused
+ Fix: Stop using `resource` after the move, or give the deferred `close` a copy with `resource.copy()` where it moved.
 More: jet-lang.dev/e/E0121

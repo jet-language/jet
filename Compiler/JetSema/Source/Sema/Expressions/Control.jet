@@ -719,8 +719,8 @@ fn sema_failure_callee_inferred_never(callee: SemaFailureCallee?, program: SemaP
 fn sema_failure_domain_mismatch(expr: Expr?, span: Span, source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> Diagnostic {
     provenance :: sema_failure_call_provenance(expr, environment, program, scopes)
     callee :: provenance.callee
-    source_name :: type_name(source)
-    target_name :: type_name(target)
+    source_name :: sema_failure_conversion_leaf(source)
+    target_name :: sema_failure_conversion_leaf(target)
     caller :: context.failure_contract_source
     diagnostic :: sema_error(
         "E2404",
@@ -825,7 +825,7 @@ fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, 
             return None
         }
         else -> {
-            &diagnostics.push(sema_error("E0403", span, "`?` only works on a fallible value, not {type_name(operand_ty)}", "`?` unwraps success or returns early with the failure", "call something that returns `T E!` or an optional value, or remove `?`"))
+            &diagnostics.push(sema_error("E0403", span, "`?` only works on a fallible value, not {sema_type_show(operand_ty)}", "`?` unwraps success or returns early with the failure", "call something that returns `T E!` or an optional value, or remove `?`"))
             return None
         }
     }
@@ -1146,7 +1146,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         else -> None
     }
     payload :: payload_ty ?? {
-        &diagnostics.push(sema_error("E0405", span, "`??` only works on a fallible value, not {type_name(subject.ty)}", "the left side must be a `Result` or optional value", "call something that can fail, then write `... ?? fallback`"))
+        &diagnostics.push(sema_error("E0405", span, "`??` only works on a fallible value, not {sema_type_show(subject.ty)}", "the left side must be a `Result` or optional value", "call something that can fail, then write `... ?? fallback`"))
         return None
     }
     // The fallback route runs in its own frame on the live scope table and on
@@ -2119,7 +2119,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
                         // Two numeric producers follow the one widening law, as
                         // an operator's operands do.
                         numeric :: sema_expr_numeric_join(then_checked.ty, else_checked.ty) ?? {
-                            &diagnostics.push(sema_error("E0124", span, "this `if` has branches with different types", "a value-producing `if` must agree on one type at its merge point", "make both branches produce the same type"))
+                            &diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
                             return None
                         }
                         line :: sema_source_line_at(environment.source_segments, span) ?? 0

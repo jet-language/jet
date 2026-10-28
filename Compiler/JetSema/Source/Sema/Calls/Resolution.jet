@@ -124,7 +124,7 @@ fn sema_call_unknown_function(name: String, span: Span) -> Diagnostic {
 }
 
 fn sema_call_not_callable(name: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0803", span, "`{name}` is {type_name(ty)}, not a function", "a direct call target must have a function type", "call a function or use a function value with a callable type")
+    sema_error("E0803", span, "`{name}` is {sema_type_show(ty)}, not a function", "a direct call target must have a function type", "call a function or use a function value with a callable type")
 }
 
 // Parentheses call functions and lambdas only. A value binding
@@ -137,6 +137,7 @@ fn sema_call_not_callable_value(name: String, ty: Type, environment: SemaScopeEn
         .Apply(type_name, _) -> type_name
         else -> ""
     }
+    described :: if owner != "" -> shown else -> sema_type_show(ty)
     found := [String]{}
     if owner != "" {
         loop declaration_index in 0..<environment.declarations.len() {
@@ -165,8 +166,8 @@ fn sema_call_not_callable_value(name: String, ty: Type, environment: SemaScopeEn
     loop method in found {
         if methods.len() == 0 || methods[methods.len() - 1] != method -> &methods.push(method)
     }
-    if methods.len() == 0 -> return sema_error("E0803", span, "`{name}` is {shown}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
-    sema_error("E0803", span, "`{name}` is {shown}, not a function", "parentheses call functions and lambdas only; `{shown}` has the methods {methods.join(", ")}", "call one of its methods, such as `{name}.{methods[0]}(…)`, or write a method that returns a lambda")
+    if methods.len() == 0 -> return sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
+    sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only; `{shown}` has the methods {methods.join(", ")}", "call one of its methods, such as `{name}.{methods[0]}(…)`, or write a method that returns a lambda")
 }
 
 fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {

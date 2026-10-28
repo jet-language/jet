@@ -1123,7 +1123,7 @@ fn sema_expr_contract_has_strict_zone(rows: [CallContractRow]) -> Bool Never! {
     false
 }
 fn sema_expr_precise_error(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0133", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs)}` and `{type_name(rhs)}`", "`Decimal` supports `+`, `-`, `*`, and `==`/`!=`; `Fraction` and `Complex` support only their declared exact operations", "use a named exact constructor or make both operands the same precise type"))
+    &diagnostics.push(sema_error("E0133", span, "`{sema_expr_binary_name(op)}` isn't defined between `{type_name(lhs)}` and `{type_name(rhs)}`", "`Decimal` supports `+`, `-`, `*`, and `==`/`!=`; `Fraction` and `Complex` support only their declared exact operations", "use a named exact constructor or make both operands the same precise type"))
 }
 
 fn sema_expr_precise_orders_by_compare(op: BinOp, lhs: Type, rhs: Type) -> Bool Never! {
@@ -1170,7 +1170,7 @@ fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span,
         }
     }
     if (lname == (Val("Decimal")) && (rhs.ty == Type.Float || rhs.ty == Type.Float32)) || (rname == (Val("Decimal")) && (lhs.ty == Type.Float || lhs.ty == Type.Float32)) {
-        &diagnostics.push(sema_error("E0131", span, "`Float` and `Decimal` can't be mixed — got `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "exact Decimal values do not silently cross the approximate floating-point boundary", "use `Decimal` for both operands, or convert explicitly at the call site"))
+        &diagnostics.push(sema_error("E0131", span, "`Float` and `Decimal` can't be mixed — got `{sema_type_show(lhs.ty)}` and `{sema_type_show(rhs.ty)}`", "precise numeric types never mix with fixed-width integers or floats without an explicit constructor", "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science"))
         return None
     }
     if lname == None || rname == None || lname != rname {
@@ -1550,7 +1550,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     if arithmetic {
         distinct :: if left_facts != None -> left_facts else -> right_facts ?? return None
         if !distinct.numeric {
-            &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available on `{distinct.name}`", "`{distinct.name}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"))
+            &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available on `{distinct.name}`", "`{distinct.name}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"))
             return None
         }
         if lhs.ty != rhs.ty {
@@ -4067,7 +4067,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     math_left := sema_expr_type_base_name(lhs.ty)
     math_right := sema_expr_type_base_name(rhs.ty)
     if (math_left != None && sema_expr_is_math_type_name(math_left ?? "")) || (math_right != None && sema_expr_is_math_type_name(math_right ?? "")) {
-        &diagnostics.push(sema_error("E2511", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "built-in lane and linalg operators keep fixed shapes and scalar rules", "match the operand shapes or call a named math method"))
+        &diagnostics.push(sema_error("E2511", span, "`{sema_expr_binary_name(op)}` isn't defined between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook", "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair"))
         return None
     }
     if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {

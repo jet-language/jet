@@ -50,7 +50,9 @@ fn sema_value_method_check_labels(method: String, args: [CallArg], diagnostics: 
 // the expected type, so `&bytes.write([66, 67])` types the literal as [U8].
 fn sema_value_method_argument(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     reported :: diagnostics.len()
-    value :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    value :: checked ?? return None
     if sema_call_type_assignable(required, value.ty, environment, program) == (Val(true)) -> return Val(value)
     if sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
@@ -58,8 +60,23 @@ fn sema_value_method_argument(argument: CallArg, method: String, index: Int, req
     }
     // The expected type already reported its own mismatch.
     if sema_has_error_since(diagnostics, reported) -> return None
-    &diagnostics.push(sema_error("E0108", expr_span(argument.expr), "argument {index + 1} to `.{method}()` should be {sema_type_show(required)}, not {sema_type_show(value.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, value.ty)))
+    &diagnostics.push(sema_value_method_argument_mismatch(method, index, required, value.ty, expr_span(argument.expr)))
     None
+}
+
+fn sema_value_method_argument_mismatch(method: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
+    sema_error("E0108", span, "argument {index + 1} to `.{method}()` should be {sema_type_show(required)}, not {sema_type_show(offered)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, offered))
+}
+
+// The argument's own check rejected it against the parameter with the generic
+// E0108 at the value; that report becomes the method-argument one, with the
+// value's own type inferred without the parameter as a target.
+fn sema_value_method_replace_mismatch(argument: Expr, method: String, index: Int, required: Type, start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    value_span :: expr_span(argument)
+    mismatch_index :: sema_value_mismatch_index(diagnostics, start, value_span) ?? return
+    probe_diagnostics := [Diagnostic]{}
+    offered :: sema_probe_expression(argument, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_value_method_argument_mismatch(method, index, sema_expr_expected_type(required, environment, program), sema_expr_expected_type(offered.ty, environment, program), value_span)
 }
 
 fn sema_value_method_owner(receiver: Type) -> String Never! {

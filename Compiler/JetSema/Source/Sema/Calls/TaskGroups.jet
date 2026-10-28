@@ -932,7 +932,7 @@ fn sema_call_check_channel(call: Call, expected: Type?, environment: SemaScopeEn
     if call.args.len() == 1 {
         if sema_channel_capacity_literal(call.args[0].expr) == .Val(capacity) {
             if capacity < 1 {
-                &diagnostics.push(sema_error("E0395", call.args[0].span, "A bounded channel capacity is below 1", "A channel capacity must be at least 1, not `{capacity}`. A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
+                &diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
         }

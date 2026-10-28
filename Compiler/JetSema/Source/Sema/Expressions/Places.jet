@@ -107,6 +107,29 @@ fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
     }
 }
 
+// The source text of a place whose reads have no effects (`e.addr`,
+// `e.items[i + 1].text`), for a diagnostic that names it; None for a place
+// read through a call, a branch or another computed index.
+fn sema_expression_simple_place_text(expr: Expr) -> String? {
+    if !sema_expression_simple_place(expr, false) -> return None
+    formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+    jfmt_fmt_expr(&formatter, expr, 0)
+    Val(jfmt_out_text(formatter))
+}
+
+fn sema_expression_simple_place(expr: Expr, index_part: Bool) -> Bool Never! {
+    if expr == {
+        .Ident(_, _, _) -> true
+        .Field(base, _, _, _) -> sema_expression_simple_place(base, index_part)
+        .Index(base, index, _, _, _) -> sema_expression_simple_place(base, index_part) && sema_expression_simple_place(index, true)
+        .Paren(inner, _, _) -> sema_expression_simple_place(inner, index_part)
+        .Int(_, _, _, _, _) -> index_part
+        .Unary(_, operand, _, _) -> index_part && sema_expression_simple_place(operand, true)
+        .Binary(_, left, right, _, _) -> index_part && sema_expression_simple_place(left, true) && sema_expression_simple_place(right, true)
+        else -> false
+    }
+}
+
 // Rust `note_exact_move`'s element walk: a place whose field or paren chain
 // passes through an index names storage inside a collection element.
 fn sema_expression_place_below_element(expr: Expr) -> Bool Never! {
@@ -717,7 +740,7 @@ fn sema_expression_optional_field(base: Expr, member: String, member_span: Span,
     inner_ty :: if checked_base.ty == {
         .Option(value) -> value
         else -> {
-            &diagnostics.push(sema_error("E0047", member_span, "`?.` needs an optional on the left, but this is `{type_name(checked_base.ty)}`", "optional chaining short-circuits a T? when a link is absent", "use plain `.` here, or make the value optional first"))
+            &diagnostics.push(sema_error("E0047", member_span, "`?.` needs an optional on the left, but this is `{sema_type_show(checked_base.ty)}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first"))
             return None
         }
     }
@@ -740,7 +763,7 @@ fn sema_expression_optional_method_call(receiver: Expr, method: String, method_s
     inner_ty :: if checked_base.ty == {
         .Option(value) -> value
         else -> {
-            &diagnostics.push(sema_error("E0047", method_span, "`?.` needs an optional on the left, but this is `{type_name(checked_base.ty)}`", "optional chaining short-circuits a T? when a link is absent", "use plain `.` here, or make the value optional first"))
+            &diagnostics.push(sema_error("E0047", method_span, "`?.` needs an optional on the left, but this is `{sema_type_show(checked_base.ty)}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first"))
             return None
         }
     }

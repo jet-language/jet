@@ -1,0 +1,26 @@
+Error [E0211]: `Held` can't be copied out of the place it is read from
+  --> tests/ui/resource_copied_out_of_place.jet:16:28
+    |
+ 16 |         parent :: self.dirs[0]
+    |                            ^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use the element where it is, or remove it from its collection to own it
+More: jet-lang.dev/e/E0211
+
+Error [E0211]: `Directory` can't be copied out of the place it is read from
+  --> tests/ui/resource_copied_out_of_place.jet:21:27
+    |
+ 21 |         h :: self.dirs[0].handle
+    |                           ^^^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use the element where it is, or remove it from its collection to own it
+More: jet-lang.dev/e/E0211
+
+Error [E0211]: `[Held]` can't be copied out of the place it is read from
+  --> tests/ui/resource_copied_out_of_place.jet:26:22
+    |
+ 26 |         dirs := self.dirs
+    |                      ^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use it where it is, or take `self` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+More: jet-lang.dev/e/E0211

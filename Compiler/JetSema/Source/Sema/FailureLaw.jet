@@ -569,7 +569,18 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
                 if !declared -> &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first"))
             }
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, &diagnostics)
+        // An alias can hide a second optional layer: `Maybe<Int>?` where
+        // `alias Maybe<T> :: T?` is `Int??`, which has no meaning.
+        .Option(inner) -> {
+            if program.registration_graph == .Val(graph) && !(inner == .Option(_)) {
+                resolved :: sema_type_resolve_declared_recursive(graph, inner, sema_scope_caller_row(environment, graph), environment.generic_params)
+                if resolved == .Option(_) {
+                    &diagnostics.push(sema_error("E0309", span, "an optional type can't hold another optional type", "`{type_name(resolved)}?` isn't supported — use one `?` only", "drop the inner `?` or unwrap before wrapping again"))
+                }
+            }
+            sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, &diagnostics)
+        }
+        .List(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, &diagnostics)
         .Map(key, _, value) -> {
             sema_check_failure_contract_type(key, span, false, generic_names, environment, program, &diagnostics)
             sema_check_failure_contract_type(value, span, false, generic_names, environment, program, &diagnostics)

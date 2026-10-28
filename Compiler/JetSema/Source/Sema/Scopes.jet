@@ -666,6 +666,9 @@ struct SemaCheckContext {
     // carrier out: a call root keeps its Result and an unmarked writing
     // receiver is not reported. A `#Test` body is user code and is not.
     compiler_generated: Bool{false}
+    // The function being checked declares its result's owners (`-> T from
+    // self | param`): a returned place read is a view of them, not a copy.
+    return_view_declared: Bool{false}
     // The rows of the nodes this check built flat (sema_node): a node's
     // children are row indices of this arena (the flattener's into-arena
     // mode). A mark never truncates it, so a kept speculative result never
@@ -1099,6 +1102,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
         compiler_generated: source.compiler_generated,
+        return_view_declared: source.return_view_declared,
         // A snapshot's check continues the arena of the check it starts
         // from: its rows follow that arena's rows, and its caller appends
         // them there after the check (sema_arena_take_back).
@@ -1241,6 +1245,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             subject_shorthand_depth: context.subject_shorthand_depth,
             arithmetic_policy: context.arithmetic_policy,
             compiler_generated: context.compiler_generated,
+            return_view_declared: context.return_view_declared,
         },
     }
 }
@@ -1330,6 +1335,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.subject_shorthand_depth = saved.subject_shorthand_depth
     context.arithmetic_policy = saved.arithmetic_policy
     context.compiler_generated = saved.compiler_generated
+    context.return_view_declared = saved.return_view_declared
 }
 
 // Records why the body being checked is incomplete when no diagnostic says so.

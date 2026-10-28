@@ -2187,7 +2187,9 @@ fn sema_ownership_move_origin(expr: Expr, ty: Type, consumer: String, unmarked: 
 // A use after a move stays E0121 in this check. When the move was
 // unmarked, the use also records the move site, so the next check of the
 // function treats that site as a share and this use is valid.
-fn sema_ownership_report_moved(state: &SemaOwnershipState, place: SemaOwnershipPlace, moved: SemaOwnershipMovedPlace, span: Span, diagnostics: &[Diagnostic]) {
+// An exact `^` move names the moved place; an unmarked move of a whole
+// binding names the place this use reads (`a.id`).
+fn sema_ownership_report_moved(state: &SemaOwnershipState, moved: SemaOwnershipMovedPlace, used: SemaOwnershipPlace, span: Span, diagnostics: &[Diagnostic]) {
     if moved.origin.once_capture == .Val(capture) {
         name :: sema_ownership_place_name(moved.place)
         label :: if sema_ownership_span_same(moved.origin.span, span) -> "`{name}` ran here on an earlier loop iteration" else -> "`{name}` ran here"
@@ -2200,7 +2202,8 @@ fn sema_ownership_report_moved(state: &SemaOwnershipState, place: SemaOwnershipP
     }
     // copy: `ty` is a payload of read parameter `moved`, which keeps the original; field `ty` of the new SemaOwnershipShareSite owns this one
     if moved.origin.share_ty == .Val(ty) -> sema_ownership_note_share_found(&state, SemaOwnershipShareSite{span: moved.origin.span, ty: ty.copy()})
-    &diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(place), moved.origin, span))
+    shown :: if moved.origin.share_ty != None -> used else -> moved.place
+    &diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(shown), moved.origin, span))
 }
 
 // E0209 (Rust `implicit_take_reused`): an unmarked argument to a take
@@ -2364,7 +2367,7 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
     if sema_ownership_report_own_place_moved(&state, expr, scopes, &diagnostics) -> return false
     loop place in places {
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
-            sema_ownership_report_moved(&state, place, origin, expr_span(expr), &diagnostics)
+            sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
             return false
         }
         if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Read, expr, scopes) == .Val(fact) {
@@ -2386,7 +2389,7 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
 fn sema_ownership_report_own_place_moved(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     own :: sema_ownership_place_from_expr_inner(expr, scopes) ?? return false
     moved :: sema_ownership_place_moved(&state, own) ?? return false
-    sema_ownership_report_moved(&state, own, moved, expr_span(expr), &diagnostics)
+    sema_ownership_report_moved(&state, moved, own, expr_span(expr), &diagnostics)
     true
 }
 
@@ -2397,7 +2400,7 @@ fn sema_ownership_check_moved_place_use(state: &SemaOwnershipState, expr: Expr, 
     if sema_ownership_report_own_place_moved(&state, expr, scopes, &diagnostics) -> return false
     loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
-            sema_ownership_report_moved(&state, place, origin, expr_span(expr), &diagnostics)
+            sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
             return false
         }
     }
@@ -2412,7 +2415,7 @@ fn sema_ownership_check_root_base_use(state: &SemaOwnershipState, expr: Expr, sc
     if sema_ownership_report_invalidated_view(&state, expr, scopes, expr_span(expr), &diagnostics) -> return false
     loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
         if sema_ownership_place_moved_ancestor(state, place) == .Val(origin) {
-            sema_ownership_report_moved(&state, place, origin, expr_span(expr), &diagnostics)
+            sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
             return false
         }
     }
@@ -2782,7 +2785,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     loop place in places {
         if !unmarked && sema_ownership_reject_partial_static_move(&state, place, expr, &diagnostics) -> return false
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
-            sema_ownership_report_moved(&state, place, origin, expr_span(expr), &diagnostics)
+            sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
             return false
         }
         if borrowed {
@@ -3374,13 +3377,15 @@ fn sema_ownership_argument_name(arg: CallArg) -> String Never! {
 // receiver convention.  It reserves the receiver only for the duration of a
 // call and therefore cannot leak a Rust-style borrow into later statements.
 fn sema_ownership_check_call_receiver(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_call_receiver_as(&state, receiver, convention, true, "", scopes, span, expr_span(receiver), &diagnostics)
+    sema_ownership_check_call_receiver_as(&state, receiver, convention, true, "", "", scopes, span, expr_span(receiver), &diagnostics)
 }
 
 // `change_span` anchors the missing write-capability report: the receiver for
 // a built-in method, the method name for a declared one (Rust passes
 // `receiver.span()` or the call span to `check_mutating_method_receiver`).
-fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
+// `consumer` names the method a consuming receiver moves into; empty when the
+// caller has no method spelling to show.
+fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     sema_ownership_note_call_receiver(&state, receiver, convention)
     places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     if places.len() == 0 {
@@ -3397,7 +3402,7 @@ fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: E
             capability -> sema_ownership_check_write(&state, receiver, "", scopes, &diagnostics)
             else -> sema_ownership_check_write_change(&state, receiver, "", scopes, &diagnostics)
         }
-        .Move -> sema_ownership_mark_move(&state, receiver, scopes, "a consuming method call", &diagnostics)
+        .Move -> sema_ownership_mark_move(&state, receiver, scopes, if consumer == "" -> "a consuming method call" else -> consumer, &diagnostics)
         else -> sema_ownership_check_use(&state, receiver, scopes, &diagnostics)
     }
 }
@@ -3568,11 +3573,11 @@ fn sema_receiver_mark_finish(state: &SemaOwnershipState, receiver: Expr, scopes:
     verb :: if needed == "&" -> "writes" else -> "takes"
     place_name :: sema_ownership_place_name(places[0])
     span :: expr_span(receiver)
-    &diagnostics.push(diagnostic_with_edit(sema_error("E0224", span, "this call {verb} `{place_name}`, but it has no `{needed}` mark", "the method's receiver convention {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments", "write `{needed}` before the place"), TextEdit{span: Span{start: span.start, end: span.start}, new_text: needed}))
+    &diagnostics.push(diagnostic_with_edit(sema_error("E0224", span, "this call {verb} `{place_name}`, but `{place_name}` has no `{needed}` mark", "the method's receiver convention {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments", "write `{needed}` before the place"), TextEdit{span: Span{start: span.start, end: span.start}, new_text: needed}))
 }
 
 fn sema_ownership_check_method_call(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    sema_ownership_check_method_call_as(&state, callee, receiver, receiver_convention, true, false, true, params, &args, scopes, span, expr_span(receiver), &diagnostics)
+    sema_ownership_check_method_call_as(&state, callee, sema_ownership_receiver_consumer(callee), receiver, receiver_convention, true, false, true, params, &args, scopes, span, expr_span(receiver), &diagnostics)
 }
 
 // Rust `record_call_receiver_reservation`: ordinary method-call syntax
@@ -3581,19 +3586,25 @@ fn sema_ownership_check_method_call(state: &SemaOwnershipState, callee: String, 
 // the receiver before the edit begins. `borrowed_read` is false for a
 // built-in collection method, whose arguments retain no call loan;
 // `change_span` is where a missing write capability is reported.
-fn sema_ownership_check_two_phase_method_call(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    sema_ownership_check_method_call_as(&state, callee, receiver, receiver_convention, true, receiver_convention == AccessConvention.Write, borrowed_read, params, &args, scopes, span, change_span, &diagnostics)
+fn sema_ownership_check_two_phase_method_call(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+    sema_ownership_check_method_call_as(&state, callee, consumer, receiver, receiver_convention, true, receiver_convention == AccessConvention.Write, borrowed_read, params, &args, scopes, span, change_span, &diagnostics)
 }
 
 // Rust `record_call_receiver_access`: a Core stream or codec handle writes
 // through the handle it names, so a write receiver keeps its call access and
 // change checks but asks no write capability of the binding holding it.
 fn sema_ownership_check_handle_method_call(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    sema_ownership_check_method_call_as(&state, callee, receiver, receiver_convention, false, false, true, params, &args, scopes, span, expr_span(receiver), &diagnostics)
+    sema_ownership_check_method_call_as(&state, callee, sema_ownership_receiver_consumer(callee), receiver, receiver_convention, false, false, true, params, &args, scopes, span, expr_span(receiver), &diagnostics)
 }
 
-fn sema_ownership_check_method_call_as(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    accepted :: sema_ownership_check_call_receiver_as(&state, receiver, receiver_convention, capability, sema_window_plain_name(callee), scopes, span, change_span, &diagnostics)
+// A type-qualified callee (`Option.map`) names the consumer of a moved
+// receiver; a bare method name leaves the generic wording.
+fn sema_ownership_receiver_consumer(callee: String) -> String Never! {
+    if callee.contains(".") -> "`{callee}`" else -> ""
+}
+
+fn sema_ownership_check_method_call_as(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+    accepted :: sema_ownership_check_call_receiver_as(&state, receiver, receiver_convention, capability, sema_window_plain_name(callee), consumer, scopes, span, change_span, &diagnostics)
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: receiver_convention, reserved: reserved}
     receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     // Rust `record_call_receiver_access` keeps no loan for a consuming receiver.

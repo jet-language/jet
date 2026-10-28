@@ -16,6 +16,7 @@ use jet_foundation.[
     Item,
     NamedType,
     Param,
+    PlaceAccess,
     Span,
     Stmt,
     StructDef,
@@ -114,7 +115,9 @@ fn sema_validate_build(definition: StructDef, rules: [SemaValidateRule], span: S
     loop name in referenced -> &checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
     loop rule in rules {
         failure :: sema_serde_items_field_error_value(sema_serde_items_string(rule.field, span), rule.message.copy(), span)
-        push :: Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "push", [Expr]{failure}, span)}
+        // `&__errors.push(failure)`: the push writes the collected list.
+        errors :: Expr.Place{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), access: PlaceAccess.Write, span: span, id: AST_NODE_GENERATED}
+        push :: Stmt.Expr{expr: sema_serde_items_method_call(errors, "push", [Expr]{failure}, span)}
         &checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond.copy(), span), [Stmt]{push}, span))
     }
     body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}

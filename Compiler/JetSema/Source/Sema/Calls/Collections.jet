@@ -42,7 +42,8 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
 // A self-typed numeric read (`map.get(id)` with `id: Int` on a `[U64:V]`)
 // checks on its own and then widens into the slot, as Rust
 // `widen_numeric_argument` does after inference.
-fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_collections_check_argument(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    reported :: diagnostics.len()
     previous_lending :: context.lambda_lending_views
     context.lambda_lending_views = lending
     // Rust `open_ret`: a callback slot whose result type is still open
@@ -70,6 +71,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
         }
     }
     context.lambda_lending_views = previous_lending
+    if !callback && !open_slot && !self_typed -> sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     value :: checked ?? return None
     if self_typed -> return sema_stmt_numeric_slot_value(value, required, environment, program, &diagnostics)
     if open_slot {
@@ -86,7 +88,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
-    &diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
+    &diagnostics.push(if callback -> sema_type_mismatch(required, value.ty, argument.span) else -> sema_value_method_argument_mismatch(method, index, required, value.ty, argument.span))
     return None
 }
 
@@ -202,7 +204,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     labels_valid := sema_value_method_check_labels(method, updated_args, &diagnostics)
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_collections_arity_error(method, contract, updated_args.len(), span))
+        &diagnostics.push(sema_call_builtin_method_arity(receiver_value.ty, method, updated_args.len(), span) ?? sema_call_collections_arity_error(method, contract, updated_args.len(), span))
         _ := sema_ownership_check_call_receiver(&state, receiver, contract.receiver_access, scopes, span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -243,7 +245,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                 sema_check_expression(updated_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
             else -> {
-                sema_call_collections_check_argument(updated_args[index], required, callback, method == "edit_disjoint" && index == 1, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_call_collections_check_argument(updated_args[index], method, index, required, callback, method == "edit_disjoint" && index == 1, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         if seed_argument {
@@ -320,12 +322,14 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     loop index in 0..<updated_args.len() {
         if updated_args[index].convention == AccessConvention.Move -> updated_args[index].convention = AccessConvention.Read
     }
-    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(&state, "collection.{method}", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, expr_span(receiver), &diagnostics) else -> sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
+    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(&state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, expr_span(receiver), &diagnostics) else -> sema_ownership_check_method_call_as(&state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, expr_span(receiver), &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     // An unmarked argument the method stores is shared by lowering; a value
-    // a clone refuses moves into the collection instead (CopySites.jet).
+    // a clone refuses moves into the collection instead, and one holding a
+    // resource read in place is refused (CopySites.jet).
     if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove" {
         loop index in 0..<updated_args.len() {
+            if !marked[index] && index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, context, &diagnostics, false) -> return SemaMethodSpecialCheck{handled: true, value: None}
             if !marked[index] && !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, &state, context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }

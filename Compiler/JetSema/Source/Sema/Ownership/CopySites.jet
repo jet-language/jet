@@ -91,7 +91,17 @@ fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
     }
 }
 
+// An owning position (binding, assignment, return, field, payload, element,
+// take argument, `break` or `yield` value) filled from `value`: a guard's
+// payload or a value holding a resource read from a place this position
+// does not take with `^` is refused instead of copied. `exact_move` is a
+// `^` mark at the position itself.
 fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
+    sema_copy_site_check_owned_walk(value, environment, program, scopes, context, &diagnostics, exact_move, exact_move)
+}
+
+// `taken` holds below a `.Move`: the `^` mark's own checks govern the place.
+fn sema_copy_site_check_owned_walk(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool, taken: Bool) -> Bool {
     if sema_copy_site_guard_projection(value) {
         // Rust `note_exact_move` has no guard rule: `^guard.value` takes the
         // payload out of the edit guard (the owner then refills it), so only
@@ -109,15 +119,81 @@ fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironm
         return false
     }
     if value.kind == {
-        .Present(inner) | .Ok(inner) | .Err(inner) | .Move(inner) | .TraitBox(inner, _) -> sema_copy_site_check_guard_owned(inner, environment, program, scopes, context, &diagnostics, exact_move)
+        .Present(inner) | .Ok(inner) | .Err(inner) | .TraitBox(inner, _) -> sema_copy_site_check_owned_walk(inner, environment, program, scopes, context, &diagnostics, exact_move, taken)
+        .Move(inner) -> sema_copy_site_check_owned_walk(inner, environment, program, scopes, context, &diagnostics, exact_move, true)
         .IfExpr(_, _, then_value, _, else_value) -> {
-            left :: sema_copy_site_check_guard_owned(then_value, environment, program, scopes, context, &diagnostics, exact_move)
-            right :: sema_copy_site_check_guard_owned(else_value, environment, program, scopes, context, &diagnostics, exact_move)
+            left :: sema_copy_site_check_owned_walk(then_value, environment, program, scopes, context, &diagnostics, exact_move, taken)
+            right :: sema_copy_site_check_owned_walk(else_value, environment, program, scopes, context, &diagnostics, exact_move, taken)
             left && right
         }
+        .Field(_, _) | .Index(_, _, _, _, _, _) | .OptField(_, _, _) | .Local(_) -> taken || sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, &diagnostics)
         // An authored copy or a window is not a payload move.
         else -> true
     }
+}
+
+// An element read in place (`items[i]`, `items[i].handle`), a field of
+// storage this scope does not own (`self.dirs` on a read or write receiver,
+// `param.handle`), or a name that reads one through a view (`x :: items[i]`,
+// a loop name over a borrowed collection) leaves its place owning the value:
+// an unmarked owning position would copy its bits. A value holding a
+// resource has one cleanup duty, so the copy and the place would both close
+// it (spec "Copies, moves, and owned destinations": a non-cloneable value
+// needs `^`). A field of an owned variable is no copy: lowering moves it out.
+// E0211 here; true when the read is no such copy.
+fn sema_copy_site_refuse_resource_copy(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_ownership_type_is_copy(value.ty) || value.ty == .String -> return true
+    fix :: sema_copy_site_in_place_fix(value, scopes) ?? return true
+    facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    if !facts.complete || !facts.holds_resource -> return true
+    &diagnostics.push(sema_error("E0211", value.span, "`{type_name(value.ty)}` can't be copied out of the place it is read from", "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource", fix))
+    false
+}
+
+// The fix for a read in place that an owning position would copy, or None
+// when `value` reads a field of an owned variable or of a temporary (which
+// lowering moves out) or is not a place read at all. A bare borrowed
+// parameter is the binding and return audits' E0120 and the field rule's
+// E0201 (sema_copy_site_refuse_borrowed_copy), not a place read here.
+fn sema_copy_site_in_place_fix(value: TExpr, scopes: SemaScopeTable) -> String? {
+    if value.kind == {
+        .Index(_, _, _, _, _, _) -> Val("use the element where it is, or remove it from its collection to own it")
+        .Field(base, _) | .OptField(base, _, _) -> {
+            if base.kind == .Local(root) {
+                index :: sema_scope_resolve_index(scopes, root.name) ?? return None
+                binding :: scopes.bindings[index]
+                if sema_ownership_binding_lends(binding) -> return Val("use it where it is, or take `{root.name}` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`")
+                if binding.place_alias -> return Val("use it where it is: `{root.name}` reads its value in place")
+                return None
+            }
+            sema_copy_site_in_place_fix(base, scopes)
+        }
+        .Local(local) -> {
+            index :: sema_scope_resolve_index(scopes, local.name) ?? return None
+            if scopes.bindings[index].place_alias -> return Val("use `{local.name}` where it is, or move the place it reads with the move marker `^` when this scope owns it")
+            None
+        }
+        else -> None
+    }
+}
+
+// A bare read or write parameter holding a resource at an owning position
+// no other audit covers (a `:=` binding, an assignment, a list element):
+// refused (E0201) as in a field (sema_copy_site_refuse_copy), since its
+// caller keeps the one cleanup duty. True when the value holds none or is
+// no borrowed parameter.
+fn sema_copy_site_refuse_borrowed_copy(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    site :: sema_copy_site_borrowed_param(sema_copy_site_payload(value), scopes) ?? return true
+    // An ExpiringSecret loan is refused where it is stored, by its own E0201.
+    if sema_contains_expiring_secret_loan(site.ty) -> return true
+    facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    if !facts.complete || !facts.holds_resource -> return true
+    &diagnostics.push(sema_copy_site_borrowed_diagnostic(site, consumer))
+    false
+}
+
+fn sema_copy_site_borrowed_diagnostic(site: SemaCopySite, consumer: String) -> Diagnostic {
+    sema_error("E0201", site.span, "`{site.name}` cannot be moved from borrowed storage", "`{site.name}` is a read or write parameter, so its caller keeps the value, and `{type_name(site.ty)}` can't be copied into {consumer}", "declare the parameter `^` so the caller hands the value over")
 }
 
 // A bare read or write parameter of a non-scalar type (Rust `is_scalar`, not
@@ -213,7 +289,7 @@ fn sema_copy_site_refuse_copy(payload: Expr, site: SemaCopySite, consumer: Strin
     facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || facts.accepted -> return true
     if site.borrowed {
-        &diagnostics.push(sema_error("E0201", site.span, "`{site.name}` cannot be moved from borrowed storage", "`{site.name}` is a read or write parameter, so its caller keeps the value, and `{type_name(site.ty)}` can't be copied into {consumer}", "declare the parameter `^` so the caller hands the value over"))
+        &diagnostics.push(sema_copy_site_borrowed_diagnostic(site, consumer))
         return false
     }
     sema_ownership_mark_unmarked_move(&state, payload, scopes, consumer, &diagnostics)

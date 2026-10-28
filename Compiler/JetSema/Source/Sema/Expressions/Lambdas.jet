@@ -1719,6 +1719,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         lambda_context.collect_item_types = [Type?]{}
         lambda_context.last_loop_result_type = None
         lambda_context.arrow_loop_body = false
+        // A closure's `return` leaves the closure, not the function whose
+        // signature declares its result's owners.
+        lambda_context.return_view_declared = false
     }
     lambda_context.local_view_provenance = [SemaLocalViewProvenance]{}
     lambda_context.return_view_receiver_key = ""

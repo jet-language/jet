@@ -98,7 +98,7 @@ fn sema_call_check_special_approx(call: Call, expected: Type?, environment: Sema
     sema_call_leave_gate(&scopes, scope)
     argument :: checked_argument ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_expr_is_integer(argument.ty) {
-        &diagnostics.push(sema_error("E0109", call.args[0].span, "`approx` needs a whole number, but this is {type_name(argument.ty)}", "`approx(value)` only opts one integer-to-float crossing out of its exactness check", "remove `approx`, or pass a whole number that is crossing into a decimal"))
+        &diagnostics.push(sema_error("E0109", call.args[0].span, "`approx` needs a whole number, but this is {sema_type_show(argument.ty)}", "`approx(value)` only opts one integer-to-float crossing out of its exactness check", "remove `approx`, or pass a whole number that is crossing into a decimal"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     target :: if expected == {

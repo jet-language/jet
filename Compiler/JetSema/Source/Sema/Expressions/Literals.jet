@@ -199,6 +199,13 @@ fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool Never
     }
 }
 
+fn sema_expression_list_element_is_inferred_struct(element: Expr) -> Bool Never! {
+    if element == {
+        .StructLit(_, _, _, _, _, inferred, _, _) -> inferred
+        else -> false
+    }
+}
+
 // `[["41"], [], ["x"]]`: an empty item takes its type from a sibling.
 fn sema_expression_list_element_is_empty_list(element: Expr) -> Bool Never! {
     if element == {
@@ -222,7 +229,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
             if sema_ownership_report_own_place_moved(&state, value, scopes, &diagnostics) -> return false
             loop place in places {
                 if sema_ownership_place_moved(&state, place) == .Val(origin) {
-                    sema_ownership_report_moved(&state, place, origin, span, &diagnostics)
+                    sema_ownership_report_moved(&state, origin, place, span, &diagnostics)
                     return false
                 }
                 if sema_ownership_active_view_conflict_for_expr(&state, place, AccessConvention.Move, value, scopes) {
@@ -308,6 +315,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
                 checked :: if expected_element != None -> sema_check_expression(element, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 value :: checked ?? return None
                 if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+                if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
                 if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
                 if expected_element == .Val(required) {
                     compatible :: sema_expr_expected_assignable(required, value.ty, environment, program) ?? return None
@@ -333,9 +341,15 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
         if first == None {
             loop deferred_index in deferred {
                 element := elements[deferred_index]
+                // No sibling names a type, so an inferred struct item has none.
+                if sema_expression_list_element_is_inferred_struct(element) {
+                    &diagnostics.push(sema_error("E0119", expr_span(element), "`{{ … }}` needs a known struct type here", "the inferred construction form requires an expected type from the surrounding context (binding annotation, return type, etc.)", "name the type at the value, e.g. `x :: Point{{x: 1, y: 2}}`, or inside a list `[Point{{ … }}, {{ … }}]`"))
+                    next
+                }
                 checked :: sema_check_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if checked == .Val(value) {
                     if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+                    if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
                     if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
                     checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
                     element_types[deferred_index] = Val(value.ty)
@@ -349,6 +363,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
             element := elements[deferred_index]
             value :: sema_check_expression(element, Val(first_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+            if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
             if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
             checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
             element_types[deferred_index] = Val(value.ty)
@@ -719,7 +734,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     // `Dyn` reads an object member or array position as a checked Dyn.
     if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment, program)) {
         site :: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
-        operation :: sema_dyn_index_operation(checked_index.ty, site, span, environment, program, scopes, &diagnostics) ?? return None
+        operation :: sema_dyn_index_operation(checked_index.ty, site, span, expr_span(index), environment, program, scopes, &diagnostics) ?? return None
         value :: sema_tir_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{checked_index}}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
@@ -764,7 +779,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
             if tir_expr_known_bounds(checked_index) == {
                 .Val(bounds) -> {
                     if bounds.lo < 0 || bounds.hi >= length {
-                        &diagnostics.push(sema_error("E0965", expr_span(index), "the index is outside this fixed-size list", "valid indexes run from 0 through {length - 1}", "use an index inside the fixed-list bounds"))
+                        &diagnostics.push(sema_error("E0965", expr_span(index), "index {if bounds.lo < 0 -> bounds.lo else -> bounds.hi} is out of range for a fixed-size list of {length} elements", "the valid indexes for `[T#N]` are 0 through N-1", "use an index between 0 and {length - 1}"))
                         return None
                     }
                     resolved_kind = IndexKind.FixedListProof

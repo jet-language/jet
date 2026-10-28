@@ -49,6 +49,7 @@ struct SemaCopyFacts {
     observable_clock: Bool
     memory: SemaCopyMemoryKind
     resource: Bool
+    holds_resource: Bool
     dynamic_loan: Bool
     copyable: Bool
     cloneable: Bool
@@ -67,6 +68,10 @@ struct SemaCopyTypeFacts {
     heap: Bool
     observable_clock: Bool
     resource: Bool
+    // The value is a resource or holds one by value at any depth (a field,
+    // an element, a payload): duplicating its bits would give one cleanup
+    // duty two owners. `resource` is the value's own Close duty only.
+    holds_resource: Bool
     dynamic_loan: Bool
     complete: Bool
 }
@@ -86,9 +91,18 @@ fn sema_copy_type_facts_known(
         heap: heap,
         observable_clock: observable_clock,
         resource: resource,
+        holds_resource: resource,
         dynamic_loan: dynamic_loan,
         complete: complete,
     }
+}
+
+// `facts` with the parts' resources folded in: a container, record or
+// payload holds a resource when any part holds one.
+fn sema_copy_facts_holding(facts: SemaCopyTypeFacts, parts_hold: Bool) -> SemaCopyTypeFacts Never! {
+    result := facts
+    result.holds_resource = facts.holds_resource || parts_hold
+    result
 }
 
 // One copy-facts query. A recursive nominal reaches itself through its
@@ -456,12 +470,12 @@ fn sema_copy_type_facts(
         .String -> sema_copy_type_facts_known(false, true, true, false, false, false, true)
         .List(inner) -> {
             nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .Map(key, _, value) -> {
             key_facts :: sema_copy_type_facts(key, graph, table, caller, generic_params, &walk)
             value_facts :: sema_copy_type_facts(value, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(false, key_facts.cloneable && value_facts.cloneable, true, key_facts.observable_clock || value_facts.observable_clock, false, key_facts.dynamic_loan || value_facts.dynamic_loan, key_facts.complete && value_facts.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, key_facts.cloneable && value_facts.cloneable, true, key_facts.observable_clock || value_facts.observable_clock, false, key_facts.dynamic_loan || value_facts.dynamic_loan, key_facts.complete && value_facts.complete), key_facts.holds_resource || value_facts.holds_resource)
         }
         .Shared(inner) -> {
             nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
@@ -469,12 +483,12 @@ fn sema_copy_type_facts(
         }
         .Option(inner) -> {
             nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(false, nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .Result(ok, err) -> {
             ok_facts :: sema_copy_type_facts(ok, graph, table, caller, generic_params, &walk)
             err_facts :: sema_copy_type_facts(err, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(false, ok_facts.cloneable && err_facts.cloneable, ok_facts.heap || err_facts.heap, ok_facts.observable_clock || err_facts.observable_clock, false, ok_facts.dynamic_loan || err_facts.dynamic_loan, ok_facts.complete && err_facts.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, ok_facts.cloneable && err_facts.cloneable, ok_facts.heap || err_facts.heap, ok_facts.observable_clock || err_facts.observable_clock, false, ok_facts.dynamic_loan || err_facts.dynamic_loan, ok_facts.complete && err_facts.complete), ok_facts.holds_resource || err_facts.holds_resource)
         }
         .Fn(_, _, _, _, _, _) -> sema_copy_type_facts_known(false, false, false, false, false, false, true)
         .TraitObject(_) -> sema_copy_type_facts_known(false, false, true, false, false, false, true)
@@ -485,6 +499,7 @@ fn sema_copy_type_facts(
             clock := false
             dynamic_loan := false
             complete := true
+            holds := false
             loop field in fields {
                 nested :: sema_copy_type_facts(field.ty, graph, table, caller, generic_params, &walk)
                 copyable = copyable && nested.copyable
@@ -493,21 +508,22 @@ fn sema_copy_type_facts(
                 clock = clock || nested.observable_clock
                 dynamic_loan = dynamic_loan || nested.dynamic_loan
                 complete = complete && nested.complete
+                holds = holds || nested.holds_resource
             }
-            sema_copy_type_facts_known(copyable, cloneable, heap, clock, false, dynamic_loan, complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(copyable, cloneable, heap, clock, false, dynamic_loan, complete), holds)
         }
         .FixedList(inner, _) -> {
             nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .InlineRange(base, _, _) -> {
             nested :: sema_copy_type_facts(base, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .Tagged(marker, inner) -> {
             nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
             deterministic :: marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_copy_is_clock_type(inner)
-            sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, if deterministic -> false else -> nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, if deterministic -> false else -> nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .Union(members) -> {
             cloneable := true
@@ -515,6 +531,7 @@ fn sema_copy_type_facts(
             clock := false
             dynamic_loan := false
             complete := true
+            holds := false
             loop member in members {
                 nested :: sema_copy_type_facts(member, graph, table, caller, generic_params, &walk)
                 cloneable = cloneable && nested.cloneable
@@ -522,12 +539,13 @@ fn sema_copy_type_facts(
                 clock = clock || nested.observable_clock
                 dynamic_loan = dynamic_loan || nested.dynamic_loan
                 complete = complete && nested.complete
+                holds = holds || nested.holds_resource
             }
-            sema_copy_type_facts_known(false, cloneable, heap, clock, false, dynamic_loan, complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, cloneable, heap, clock, false, dynamic_loan, complete), holds)
         }
         .Quantity(base, _) -> {
             nested :: sema_copy_type_facts(base, graph, table, caller, generic_params, &walk)
-            sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+            sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .Named(name) -> sema_copy_named_facts(ty, name, graph, table, caller, generic_params, &walk)
         .Apply(name, args) -> sema_copy_apply_facts(ty, name, args, graph, table, caller, generic_params, &walk)
@@ -566,7 +584,7 @@ fn sema_copy_named_facts(
                 // Facts computed with the nominal's own name: only `copyable`
                 // reads the spelling at hand.
                 if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.ForeignHandle -> return known
-                return SemaCopyTypeFacts{copyable: sema_copy_copyable_scalar(ty), cloneable: known.cloneable, heap: known.heap, observable_clock: known.observable_clock, resource: known.resource, dynamic_loan: known.dynamic_loan, complete: known.complete}
+                return SemaCopyTypeFacts{copyable: sema_copy_copyable_scalar(ty), cloneable: known.cloneable, heap: known.heap, observable_clock: known.observable_clock, resource: known.resource, holds_resource: known.holds_resource, dynamic_loan: known.dynamic_loan, complete: known.complete}
             }
             return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, &walk)
         }
@@ -612,6 +630,7 @@ fn sema_copy_core_row_facts(
     clock := false
     dynamic_loan := false
     complete := true
+    holds := false
     loop part in parts {
         nested :: sema_copy_type_facts(part, graph, table, caller, generic_params, &walk)
         cloneable = cloneable && nested.cloneable
@@ -619,9 +638,10 @@ fn sema_copy_core_row_facts(
         clock = clock || nested.observable_clock
         dynamic_loan = dynamic_loan || nested.dynamic_loan
         complete = complete && nested.complete
+        holds = holds || nested.holds_resource
     }
     _ := &walk.active.pop()
-    Val(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), cloneable, heap, clock, false, dynamic_loan, complete))
+    Val(sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), cloneable, heap, clock, false, dynamic_loan, complete), holds))
 }
 
 fn sema_copy_nominal_facts(
@@ -710,6 +730,7 @@ fn sema_copy_nominal_combine(
     clock := false
     dynamic_loan := false
     complete := complete_parts
+    holds := resource
     loop declared in declared_types {
         nested :: sema_copy_type_facts(declared, graph, table, caller, generic_params, &walk)
         cloneable = cloneable && nested.cloneable
@@ -717,6 +738,7 @@ fn sema_copy_nominal_combine(
         clock = clock || nested.observable_clock
         dynamic_loan = dynamic_loan || nested.dynamic_loan
         complete = complete && nested.complete
+        holds = holds || nested.holds_resource
     }
     if distinct -> cloneable = true
     if resource -> cloneable = false
@@ -726,6 +748,7 @@ fn sema_copy_nominal_combine(
         heap: heap,
         observable_clock: clock,
         resource: resource,
+        holds_resource: holds,
         dynamic_loan: dynamic_loan,
         complete: complete,
     }
@@ -750,7 +773,7 @@ fn sema_copy_walk_back_edge(walk: &SemaCopyWalk, key: String, actual: Type) -> B
 }
 
 fn sema_copy_facts_same(left: SemaCopyTypeFacts, right: SemaCopyTypeFacts) -> Bool Never! {
-    left.copyable == right.copyable && left.cloneable == right.cloneable && left.heap == right.heap && left.observable_clock == right.observable_clock && left.resource == right.resource && left.dynamic_loan == right.dynamic_loan && left.complete == right.complete
+    left.copyable == right.copyable && left.cloneable == right.cloneable && left.heap == right.heap && left.observable_clock == right.observable_clock && left.resource == right.resource && left.holds_resource == right.holds_resource && left.dynamic_loan == right.dynamic_loan && left.complete == right.complete
 }
 
 // Finishes one instantiation of a table walk. One whose walk reached further
@@ -830,6 +853,7 @@ fn sema_copy_apply_nested_facts(
     nested_clock := false
     nested_dynamic_loan := false
     nested_complete := true
+    nested_holds := false
     loop arg in args {
         facts :: sema_copy_type_facts(arg, graph, table, caller, generic_params, &walk)
         nested_cloneable = nested_cloneable && facts.cloneable
@@ -837,8 +861,9 @@ fn sema_copy_apply_nested_facts(
         nested_clock = nested_clock || facts.observable_clock
         nested_dynamic_loan = nested_dynamic_loan || facts.dynamic_loan
         nested_complete = nested_complete && facts.complete
+        nested_holds = nested_holds || facts.holds_resource
     }
-    sema_copy_type_facts_known(false, nested_cloneable, nested_heap, nested_clock, false, nested_dynamic_loan, nested_complete)
+    sema_copy_facts_holding(sema_copy_type_facts_known(false, nested_cloneable, nested_heap, nested_clock, false, nested_dynamic_loan, nested_complete), nested_holds)
 }
 
 fn sema_copy_apply_facts(
@@ -854,7 +879,7 @@ fn sema_copy_apply_facts(
     dynamic_loan :: sema_copy_apply_is_dynamic_loan(name)
     nested :: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, &walk)
     if core_source_owns_type(name) && core_identity_is(name, "core.crypto.vault", "ExpiringSecret") {
-        return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
+        return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
     }
     if graph == .Val(registered) {
         // A bare head taints a query, not the table's walk (sema_copy_named_facts).
@@ -867,6 +892,7 @@ fn sema_copy_apply_facts(
                 heap: nominal_facts.heap || nested.heap,
                 observable_clock: nominal_facts.observable_clock || nested.observable_clock,
                 resource: nominal_facts.resource,
+                holds_resource: nominal_facts.holds_resource || nested.holds_resource,
                 dynamic_loan: dynamic_loan || nested.dynamic_loan || nominal_facts.dynamic_loan,
                 complete: nominal_facts.complete && nested.complete,
             }
@@ -874,7 +900,7 @@ fn sema_copy_apply_facts(
         if !walk.table -> walk.tainted = true
     }
     if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller) {
-        return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
+        return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
     }
     if name == "View" && args.len() == 1 {
         return sema_copy_type_facts_known(false, true, false, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
@@ -888,7 +914,7 @@ fn sema_copy_apply_facts(
     // Native generic applications derive Clone from their arguments. A
     // foreign application with a non-cloneable argument is a known E0211;
     // only an unresolved argument keeps this judgment incomplete.
-    sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, nested.complete)
+    sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, nested.complete), nested.holds_resource)
 }
 
 fn sema_copy_classify(
@@ -929,6 +955,7 @@ fn sema_copy_classify(
         observable_clock: source_facts.observable_clock,
         memory: memory,
         resource: source_facts.resource,
+        holds_resource: source_facts.holds_resource,
         dynamic_loan: source_facts.dynamic_loan,
         copyable: source_facts.copyable,
         cloneable: target_facts.cloneable,
