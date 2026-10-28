@@ -643,7 +643,9 @@ keeps the emitted harness path. Native property generation is refused. Both
 paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
 `JET_TEST_SERIAL`, `JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and
 `JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
-never stdout; after a fatal trap only unreported tests rerun individually.
+never stdout; after a fatal trap only unreported tests rerun individually,
+one child per core at a time (fewer when free memory can't hold 1 GiB per
+child; one at a time under `--serial`), reported in test order.
 Output checks run after joins in the same batch process. If that process
 traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its

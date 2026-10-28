@@ -3,6 +3,7 @@
 // survive a fatal child. Only missing tests are rerun in individually selected
 // children, which attributes a process-fatal failure to its exact checked test.
 use core.files as native_test_files
+use core.sys as native_test_sys
 use jet_foundation.[FnBody, TTestFact]
 
 // One selected native unit test: `id` is the identity its outcome record
@@ -163,6 +164,19 @@ fn jet_native_test_read_records(path: String, receipt: ProcessReceipt) -> [JetNa
     jet_cli_native_test_records(text, !receipt.success)
 }
 
+// Memory each concurrently rerun test child may claim.
+JET_NATIVE_TEST_CHILD_MEMORY :: 1073741824
+
+// The selected children a fatal batch reruns at once: one per core the process
+// may use, fewer while the memory free for new work (`None` when the host
+// can't tell) can't hold JET_NATIVE_TEST_CHILD_MEMORY for each, at least one.
+fn jet_cli_native_test_width(cores: Int, available: Int?) -> Int Never! {
+    width := cores
+    if available == .Val(free) && free /% JET_NATIVE_TEST_CHILD_MEMORY < width -> width = free /% JET_NATIVE_TEST_CHILD_MEMORY
+    if width < 1 -> return 1
+    width
+}
+
 fn jet_native_test_one(test: JetNativeTestCase, receipt: ProcessReceipt, path: String) -> String Err! {
     records :: jet_native_test_read_records(path, receipt)
     if records.len() == 1 {
@@ -218,39 +232,48 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
             &outcomes.add(test.id, wire).drop("only missing tests are retried")
         }
     } else {
-        children := [JetNativeTestChild]{}
+        // Children run in waves of `width`, reaped in test order, so every
+        // outcome and stream lands where an unbounded launch put it.
+        width :: jet_cli_native_test_width(native_test_sys.cpu_count(), jet_cli_memory_available())
         spawn_error := String?{None}
-        loop test in missing {
-            path :: "{records_path}.{test.id}"
-            native_test_files.write(path, "") ?? {
-                spawn_error = Val("couldn't create selected native test records: {err}")
-                break
-            }
-            child :: clean.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).spawn() ?? {
-                native_test_files.remove(path).drop("selected native test spawn already failed")
-                spawn_error = Val("couldn't run native test {test.name}: {err}")
-                break
-            }
-            &children.push(JetNativeTestChild{test: test, child: child, path: path})
-        }
-        // Reap every child already launched even when a later spawn fails.
         wait_error := String?{None}
-        loop running in children {
-            receipt :: running.child.wait() ?? {
-                native_test_files.remove(running.path).drop("selected native test wait already failed")
-                wait_error = Val("couldn't wait for native test {running.test.name}: {err}")
-                next
+        start := 0
+        loop start < missing.len() && spawn_error == None {
+            end :: if start + width < missing.len() -> start + width else -> missing.len()
+            children := [JetNativeTestChild]{}
+            loop index in start..<end {
+                test :: missing[index]
+                path :: "{records_path}.{test.id}"
+                native_test_files.write(path, "") ?? {
+                    spawn_error = Val("couldn't create selected native test records: {err}")
+                    break
+                }
+                child :: clean.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).spawn() ?? {
+                    native_test_files.remove(path).drop("selected native test spawn already failed")
+                    spawn_error = Val("couldn't run native test {test.name}: {err}")
+                    break
+                }
+                &children.push(JetNativeTestChild{test: test, child: child, path: path})
             }
-            wire :: jet_native_test_one(running.test, receipt, running.path) ?? {
-                wait_error = Val(err.message)
-                next
+            // Reap every child already launched even when a later spawn fails.
+            loop running in children {
+                receipt :: running.child.wait() ?? {
+                    native_test_files.remove(running.path).drop("selected native test wait already failed")
+                    wait_error = Val("couldn't wait for native test {running.test.name}: {err}")
+                    next
+                }
+                wire :: jet_native_test_one(running.test, receipt, running.path) ?? {
+                    wait_error = Val(err.message)
+                    next
+                }
+                if !receipt.success -> fatal_attributed = true
+                if receipt.success {
+                    &outputs.push(receipt.output)
+                    &errors.push(receipt.errors)
+                }
+                &outcomes.add(running.test.id, wire).drop("only missing tests are retried")
             }
-            if !receipt.success -> fatal_attributed = true
-            if receipt.success {
-                &outputs.push(receipt.output)
-                &errors.push(receipt.errors)
-            }
-            &outcomes.add(running.test.id, wire).drop("only missing tests are retried")
+            start = end
         }
         if spawn_error == .Val(error) -> return Err(error)
         if wait_error == .Val(error) -> return Err(error)
@@ -285,6 +308,13 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
     assert_eq(records.len(), 1)
     assert_eq(records[0].function, U64{7})
     assert_eq(records[0].wire, "1 2 2 0 -\néx\n")
+}
+
+#Test("fatal reruns run one child per core within the free memory") {
+    assert_eq(jet_cli_native_test_width(16, None), 16)
+    assert_eq(jet_cli_native_test_width(16, Val(5 * JET_NATIVE_TEST_CHILD_MEMORY + 1)), 5)
+    assert_eq(jet_cli_native_test_width(16, Val(JET_NATIVE_TEST_CHILD_MEMORY /% 2)), 1)
+    assert_eq(jet_cli_native_test_width(0, None), 1)
 }
 
 #Test("fatal native child retains only completed records") {
