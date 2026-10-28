@@ -1057,17 +1057,60 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
     loop index in 0..<args.len() {
         slot :: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot >= 0 && slot < params.len() {
-            if sema_call_argument_parameter_type(params[slot], args[index]) == .Val(required) && !sema_call_inference_needs_context(args[index].expr) {
-                probe_diagnostics := [Diagnostic]{}
-                value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
-                if value == .Val(checked) {
-                    &parameter_types.push(required)
-                    &argument_types.push(checked.ty)
+            if sema_call_argument_parameter_type(params[slot], args[index]) == .Val(required) {
+                if !sema_call_inference_needs_context(args[index].expr) {
+                    probe_diagnostics := [Diagnostic]{}
+                    value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
+                    if value == .Val(checked) {
+                        &parameter_types.push(required)
+                        &argument_types.push(checked.ty)
+                    }
+                } else if sema_call_lambda_params_written(args[index].expr) {
+                    sema_call_lambda_return_fact(required, args[index].expr, &parameter_types, &argument_types, environment, program, &scopes, &state, &tail_store, &context)
                 }
             }
         }
     }
     SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types}
+}
+
+fn sema_call_lambda_params_written(expr: Expr) -> Bool Never! {
+    if expr == .Lambda(lambda, _) {
+        loop param in lambda.params {
+            if param.ty == None -> return false
+        }
+        return true
+    }
+    false
+}
+
+// A lambda whose parameters are all written is typed on its own, so its
+// return fills the type parameters of the required `fn` return. Of a
+// `U E!` return only `U` is this fact: the failure part is
+// sema_call_lambda_failure_facts' own.
+fn sema_call_lambda_return_fact(required: Type, lambda: Expr, parameter_types: &[Type], argument_types: &[Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) Never! {
+    required_value := Type?{None}
+    if required == .Fn(_, required_ret, _, _, _, _) -> required_value = required_ret
+    ret :: required_value ?? return
+    probe_diagnostics := [Diagnostic]{}
+    checked :: sema_probe_expression(lambda, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    lambda_value := Type?{None}
+    if checked.ty == .Fn(_, lambda_ret, _, _, _, _) -> lambda_value = lambda_ret
+    value :: lambda_value ?? return
+    if value == .Named(name) {
+        if name == "Never" -> return
+    }
+    if ret == .Result(ok, _) {
+        &parameter_types.push(ok)
+        if value == .Result(value_ok, _) {
+            &argument_types.push(value_ok)
+        } else {
+            &argument_types.push(value)
+        }
+        return
+    }
+    &parameter_types.push(ret)
+    &argument_types.push(value)
 }
 
 // A lambda argument fills a failure-type parameter `E`

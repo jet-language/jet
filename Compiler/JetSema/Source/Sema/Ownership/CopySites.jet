@@ -28,11 +28,27 @@ struct SemaCopySite {
 }
 
 // `Val(x)`, `Ok(x)` and `Err(x)` are owning constructors: the field rule
-// applies to `x`, not to the carrier.
+// applies to `x`, not to the carrier, whether the carrier is written in its
+// own expression form, as a bare variant or in call form.
 fn sema_copy_site_payload(value: Expr) -> Expr Never! {
+    sema_copy_site_carrier_payload(value) ?? value
+}
+
+// The payload `x` of a carrier `value` (`Val(x)`, `Ok(x)`, `Err(x)`), or None.
+fn sema_copy_site_carrier_payload(value: Expr) -> Expr? Never! {
     if value == {
-        .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> inner
-        else -> value
+        .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> Val(inner)
+        .EnumLit(type_name, variant, _, args, _, _, _) -> {
+            if type_name != "" || args.len() != 1 || (variant != "Val" && variant != "Ok" && variant != "Err") -> None else -> {
+                if args[0] == .Positional(inner) -> Val(inner) else -> None
+            }
+        }
+        // A `^x` argument is the mark's own move.
+        .Call(call, _) -> {
+            carrier :: (call.name == "Ok" || call.name == "Err") && call.args.len() == 1 && call.args[0].convention != AccessConvention.Move
+            if carrier -> Val(call.args[0].expr) else -> None
+        }
+        else -> None
     }
 }
 
@@ -221,8 +237,14 @@ fn sema_copy_site_check_borrowed_binding(binding: Binding, environment: SemaScop
 }
 
 // Rust `check_return`: a bare borrowed parameter returned as-is is E0120
-// unless its type is one of the function's generic parameters.
+// unless its type is one of the function's generic parameters. A returned
+// carrier owns its payload, so a borrowed resource in it is refused as in
+// any owning position (E0201).
 fn sema_copy_site_check_borrowed_return(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if sema_copy_site_carrier_payload(value) != None {
+        _ := sema_copy_site_refuse_borrowed_copy(value, "the returned value", environment, program, scopes, context, &diagnostics)
+        return
+    }
     site :: sema_copy_site_borrowed_param(value, scopes) ?? return
     if sema_copy_site_is_type_parameter(site.ty, context) -> return
     sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return {site.name}.copy()` — or take ownership with the move marker `^`: `{site.name}: ^{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, program, context, &diagnostics)

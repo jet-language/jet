@@ -261,17 +261,21 @@ fn cli_replay_locked_nix(verification: &StoreVerification, theme: Theme, roots: 
         }
         &checked.push(realized)
     }
-    if warm == .Val(existing) {
+    // Replayed admissions replace the warm entries for the same reference;
+    // the rest stay where they are.
+    if warm == None -> warm = Val([VerifiedRealization]{})
+    if &warm == .Val(existing) {
         replaced := [String]{}
         loop replacement in checked -> &replaced.push(replacement.metadata().reference)
-        merged := [VerifiedRealization]{}
-        loop entry in existing {
-            if !replaced.contains(entry.metadata().reference) -> &merged.push(entry)
+        index := 0
+        loop index < existing.len() {
+            if replaced.contains(existing[index].metadata().reference) {
+                _ := &existing.remove(index, .Slot)
+            } else {
+                index += 1
+            }
         }
-        loop replacement in checked -> &merged.push(replacement)
-        warm = Val(merged)
-    } else {
-        warm = Val(checked)
+        loop replacement in ^checked -> &existing.push(^replacement)
     }
     theme.detail("verified fully locked Nix admissions")
     Ok(true)

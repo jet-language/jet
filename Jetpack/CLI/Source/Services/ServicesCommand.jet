@@ -471,12 +471,12 @@ fn cli_service_health_label(health: ServiceHealth, json: Bool) -> (label: String
 fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, plan: RunPlan, targets: [DevServicePlan]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     all_healthy := true
     if parsed.flags.json {
         records := [String]{}
         loop svc in targets {
-            state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), true)
+            state :: cli_service_health_label(services_health_one(project_dir, &env, svc), true)
             all_healthy = all_healthy && state.healthy
             lifecycle :: if services_lifecycle_json(project_dir, svc.name) == {
                 .Val(json) -> json
@@ -492,7 +492,7 @@ fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: C
         return if all_healthy -> EXIT_OK else -> EXIT_USER_ERROR
     }
     loop svc in targets {
-        state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), false)
+        state :: cli_service_health_label(services_health_one(project_dir, &env, svc), false)
         all_healthy = all_healthy && state.healthy
         if state.healthy {
             theme.ok("service `{svc.name}`: {state.label}")
@@ -506,11 +506,11 @@ fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: C
 fn cli_services_wait(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     loop index in order {
         svc :: plan.dev_services[index]
-        if !services_wait_healthy_with_env(project_dir, Val(env), svc, cli_service_health_timeout()) {
+        if !services_wait_healthy(project_dir, &env, svc, cli_service_health_timeout()) {
             theme.error_coded("E1261", "service `{svc.name}` is not ready", "jet waited for the service's typed readiness contract and it did not pass.", "start it with `jet os services up {svc.name}` or inspect its logs.")
             return EXIT_USER_ERROR
         }

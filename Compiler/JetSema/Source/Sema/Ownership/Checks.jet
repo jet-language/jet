@@ -2770,7 +2770,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
             return false
         }
         if info.place_alias {
-            &diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it", "write `{info.symbol.name}.copy()` when {consumer} should receive a copy, or move the place itself with `^` when this scope owns it"))
+            &diagnostics.push(sema_ownership_diag_place_alias_move(info.symbol.name, consumer, expr_span(expr)))
             return false
         }
     }
@@ -2985,6 +2985,22 @@ fn sema_ownership_reject_read_param_move(state: &SemaOwnershipState, expr: Expr,
     start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
     &diagnostics.push(sema_ownership_diag_move_from_borrowed(root.symbol.name, Span{start: start - 1, end: start}))
     true
+}
+
+// A `^` argument whose root reads its value in place (a `::` name over a
+// field or element, a loop name over borrowed storage, a match payload read
+// in place) has no storage of its own to give up: E0201, as
+// sema_ownership_mark_move_as reports for a call argument. True when
+// rejected.
+fn sema_ownership_reject_place_alias_move(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, diagnostics: &[Diagnostic]) -> Bool {
+    root :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return false
+    if !root.place_alias -> return false
+    &diagnostics.push(sema_ownership_diag_place_alias_move(root.symbol.name, consumer, expr_span(expr)))
+    true
+}
+
+fn sema_ownership_diag_place_alias_move(name: String, consumer: String, span: Span) -> Diagnostic {
+    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "`{name}` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it", "write `{name}.copy()` when {consumer} should receive a copy, or move the place itself with `^` when this scope owns it")
 }
 
 // `borrowed_read` is Rust `check_call_argument_access`'s flag: a read argument

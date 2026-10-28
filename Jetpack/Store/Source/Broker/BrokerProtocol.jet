@@ -152,8 +152,14 @@ struct BrokerWireReader {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
     }
 
-    fn socket(stream: UnixStream) -> BrokerWireReader Never! {
-        BrokerWireReader{stream: Val(stream), bytes: [U8]{}, position: 0}
+    fn socket(^stream: UnixStream) -> BrokerWireReader Never! {
+        BrokerWireReader{stream: Val(^stream), bytes: [U8]{}, position: 0}
+    }
+
+    // Write `bytes` back over this exchange's stream.
+    fn reply(&self, bytes: [U8]) StoreError! {
+        if &self.stream == .Val(stream) -> return store_broker_send(&stream, bytes)
+        Err(StoreError.Other("an in-memory broker exchange has no stream to reply on"))
     }
 
     // Up to `limit` bytes; an empty list is end of input.

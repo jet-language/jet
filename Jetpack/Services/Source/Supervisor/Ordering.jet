@@ -88,18 +88,18 @@ fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: &ShellE
     loop index in order {
         if !chosen.contains(index) -> next
         plan :: plans[index]
-        was_running :: services_health_one_with_env(project_dir, Val(env), plan).is_running()
+        was_running :: services_health_one(project_dir, &env, plan).is_running()
         if before_start(plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
         if services_up_one(host, project_dir, &env, plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
         // A restart policy does not weaken readiness: the supervisor owns
         // retries, but dependents still wait for the same healthy state.
-        if !services_wait_healthy_with_env(project_dir, Val(env), plan, timeout) {
+        if !services_wait_healthy(project_dir, &env, plan, timeout) {
             supervisor_error :: services_supervisor_failure(project_dir, plan)
             current_error :: if supervisor_error == .Val(text) -> "service `{plan.name}` {text}" else -> "service `{plan.name}` did not become healthy"
             cleanup_indexes := started
             // An exhausted supervisor already removed its PID and wrote
             // durable evidence; only a still-running failed service is cleaned.
-            still_running :: services_health_one_with_env(project_dir, Val(env), plan).is_running()
+            still_running :: services_health_one(project_dir, &env, plan).is_running()
             if !was_running && supervisor_error == None && still_running -> &cleanup_indexes.push(index)
             cleanup :: if services_down_ordered(host, project_dir, plans, cleanup_indexes) == {
                 .Ok(_) -> ServicesError?{None}
@@ -266,7 +266,7 @@ fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: Strin
         if services_up_one(host, project_dir, &env, plan) == .Err(error) {
             return Err(ServicesError.new("ServiceProbe trial {trial}: failed to start: {error.message}"))
         }
-        if !services_wait_healthy_with_env(project_dir, Val(env), plan, timeout) {
+        if !services_wait_healthy(project_dir, &env, plan, timeout) {
             services_down_one(host, project_dir, plan)
             return Err(ServicesError.new("ServiceProbe trial {trial}: service did not become ready within {time.duration_as_seconds(timeout)}s"))
         }

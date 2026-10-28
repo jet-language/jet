@@ -46,7 +46,7 @@ fn store_broker_test_serve_once(verification: &StoreVerification, socket: String
 
 fn store_broker_test_serve_result(verification: &StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
     stream := net.unix_accept(listener) ?? panic("broker accept")
-    if store_broker_serve_peer(&verification, &stream, config, store_broker_current_uid() ?? panic("current uid")) == {
+    if store_broker_serve_peer(&verification, ^stream, config, store_broker_current_uid() ?? panic("current uid")) == {
         .Ok(_) -> ""
         .Err(error) -> error.message()
     }
@@ -287,7 +287,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     broker :: task {
         loop _ in 0..<2 {
             stream := net.unix_accept(listener) ?? panic("accept")
-            store_broker_serve_peer(&verification, &stream, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+            store_broker_serve_peer(&verification, ^stream, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
         }
     }
     realized :: store_realize_verified(&verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
@@ -307,7 +307,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     reader_listener :: net.unix_listen(reader_config.socket) ?? panic("listen")
     reader_broker :: task {
         stream := net.unix_accept(reader_listener) ?? panic("accept")
-        store_broker_serve_peer(&verification, &stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(&verification, ^stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
     reused :: store_realize_verified(&verification, reader, store_broker_test_ctx(reader), RealizeRequest.Package{spec: spec, table: table}) ?? panic("reuse")
     assert(reused.source_state() == SourceState.Cached)
@@ -384,7 +384,7 @@ fn store_broker_test_ctx(roots: HangarRoots) -> ProviderCtx Never! {
     client :: net.unix_connect(socket) ?? panic("connect")
     stream := accepting.join() ?? panic("accept task") ?? panic("accept")
     config :: store_broker_test_configure(HangarRoots.at(files.join(roots.root, "served")))
-    if store_broker_serve_connection(&verification, &stream, config) == {
+    if store_broker_serve_connection(&verification, ^stream, config) == {
         .Ok(_) -> panic("a connection without kernel peer credentials must be refused")
         .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("peer's credentials"), "unexpected peer refusal: {error.message()}")
     }

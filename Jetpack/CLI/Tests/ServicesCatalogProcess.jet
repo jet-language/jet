@@ -56,7 +56,7 @@ fn cli_test_catalog_worker(claim: ServicesClaim, tools: String, fake: FakeSystem
     tools :: files.tmpdir("jet-catalog-production-tools-") ?? panic("claim tool scratch")
     cli_test_install_catalog_tools(tools)
     fake :: claim.fake ?? panic("Linux claims install the fake systemd")
-    env :: cli_test_catalog_tool_env(tools, None)
+    env := cli_test_catalog_tool_env(tools, None)
     names :: [String]{"redis", "postgres", "mysql", "mariadb", "nginx", "minio", "mailpit", "mail", "mailhog", "blackfire", "tideways"}
     loop name in names {
         plan :: DevServicePlan{name: name, enable: true, ports: [Int]{0}}
@@ -64,7 +64,7 @@ fn cli_test_catalog_worker(claim: ServicesClaim, tools: String, fake: FakeSystem
         state_name :: if name == "mail" -> "mailpit" else -> name
         service_dir :: claim.service_dir(state_name)
         cli_test_wait_for_file_contains(files.join(service_dir, "pid"), "pid=")
-        assert(services_wait_healthy_with_env(claim.project, Val(env), plan, time.duration_seconds(3)), "catalog service `{name}` did not pass its production readiness command")
+        assert(services_wait_healthy(claim.project, &env, plan, time.duration_seconds(3)), "catalog service `{name}` did not pass its production readiness command")
         data_dir :: files.join(service_dir, "data")
         if name == {
             "redis" -> assert(files.is_file(files.join(data_dir, ".service-running")))

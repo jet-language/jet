@@ -1,0 +1,56 @@
+// A match payload bound from storage this scope does not own reads its
+// value in place: a borrowed parameter's payload, an element subject's
+// payload and a loop name over such a payload can't be copied out. A loop
+// over a `::` field binding reads the field in place, so its names can't be
+// moved out either.
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn keep(r: ^Res) -> Int { r.name.len() }
+
+fn from_param(env: Res?) -> Int {
+    if env == .Val(held) {
+        applied := held
+        return keep(^applied)
+    }
+    0
+}
+
+fn from_element(items: [Res?]) -> Int {
+    if items[0] == .Val(held) {
+        applied := held
+        return keep(^applied)
+    }
+    0
+}
+
+fn from_payload_loop(warm: [Res]?) -> Int {
+    merged := [Res]{}
+    if warm == .Val(existing) {
+        loop entry in existing -> &merged.push(entry)
+    }
+    merged.len()
+}
+
+struct Holder { items: [Res] }
+
+fn from_projection_loop() -> Int {
+    value := Holder{items: [Res{name: "a"}]}
+    items :: value.items
+    value.items = [Res]{}
+    sink := [Res]{}
+    loop item in items -> &sink.push(^item)
+    sink.len()
+}
+
+fn from_param_loop(items: [Res]) -> Int {
+    sink := [Res]{}
+    loop item in items -> &sink.push(^item)
+    sink.len()
+}
+
+fn run() {
+    print("unreached")
+}

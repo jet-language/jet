@@ -1,0 +1,32 @@
+// A `Val`, `Ok` or `Err` built from a borrowed resource owns its payload
+// wherever the carrier is kept: a binding, a stored field, a return and a
+// pushed element each copy the caller's value.
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Slot { held: Res? }
+
+fn bind(env: Res) -> Int {
+    wrapped := Val(env)
+    wrapped.len()
+}
+
+fn store(env: Res) -> Slot {
+    Slot{held: Val(env)}
+}
+
+fn give(env: Res) -> Res? {
+    Val(env)
+}
+
+fn push(env: Res) -> Int {
+    kept := [Res?]{}
+    &kept.push(Val(env))
+    kept.len()
+}
+
+fn run() {
+    print("unreached")
+}

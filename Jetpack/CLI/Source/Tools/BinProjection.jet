@@ -29,26 +29,24 @@ fn cli_materialize_generation_bins(verification: &StoreVerification, generation_
     loop index in 0..<tools.len() {
         tool :: tools[index]
         if tool.bins.len() != tool.members.len() || tool.bins.len() == 0 -> return Err(CLIError.Other("profile tool has mismatched bin/member pairs"))
-        live_match := ToolLiveInstall?{None}
         if live == .Val(install) {
             receipt :: install.receipt
-            if receipt.reference == tool.reference && receipt.output_hash == tool.output_hash && receipt.store_root == tool.store_root -> live_match = Val(install)
+            if receipt.reference == tool.reference && receipt.output_hash == tool.output_hash && receipt.store_root == tool.store_root {
+                tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, install.lease, &projected)
+                next
+            }
         }
-        if live_match == .Val(install) {
-            tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, install.lease, &projected)
-        } else {
-            roots :: HangarRoots{root: tool.store_root, dev_mode: true}
-            entry :: cli_tool_store_entry(&verification, roots, tool)
-            fallback :: store_snapshot_lease(&verification, roots, entry) ?? return Err(CLIError.Store(err))
-            if cli_tool_project_bins(bin_dir, tool, fallback, &projected) == {
-                .Ok(digests) -> {
-                    fallback.release()
-                    tools[index].member_digests = digests
-                }
-                .Err(error) -> {
-                    fallback.release()
-                    return Err(error)
-                }
+        roots :: HangarRoots{root: tool.store_root, dev_mode: true}
+        entry :: cli_tool_store_entry(&verification, roots, tool)
+        fallback :: store_snapshot_lease(&verification, roots, entry) ?? return Err(CLIError.Store(err))
+        if cli_tool_project_bins(bin_dir, tool, fallback, &projected) == {
+            .Ok(digests) -> {
+                fallback.release()
+                tools[index].member_digests = digests
+            }
+            .Err(error) -> {
+                fallback.release()
+                return Err(error)
             }
         }
     }

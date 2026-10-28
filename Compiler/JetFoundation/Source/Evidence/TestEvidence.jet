@@ -150,9 +150,9 @@ fn finalize_test_report(report: ^EvidenceReport) -> EvidenceReport TestEvidenceE
     validate_test_report(report)
     validate_test_records(report)
     value := report
-    records :: value.records
+    records := ^value.records
     value.records = [EvidenceRecord]{}
-    loop record in records -> record_test_case(&value, ^record)
+    loop record in ^records -> record_test_case(&value, ^record)
     Ok(value)
 }
 

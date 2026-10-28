@@ -1511,7 +1511,11 @@ fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: E
         else -> false
     }
     bounds :: tir_expr_known_bounds(init)
+    // The hoisted local reads its subject's place in place when the subject
+    // does, so the arms' payload bindings do too.
+    in_place :: !window && sema_expression_source_reads_in_place(subject, scopes)
     _ := sema_scope_declare_local(&scopes, symbol, window, if window -> AccessConvention.Write else -> AccessConvention.Read, bounds, false)
+    if in_place -> sema_scope_mark_place_alias(&scopes, name)
     sema_ownership_declare_binding(&state, symbol, false)
     _ := sema_ownership_record_pattern_views(&state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, scopes)
     local := checked_symbol_local(name, subject_span, id)
@@ -1896,6 +1900,8 @@ fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnviro
 fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBinding], scopes: &SemaScopeTable, state: &SemaOwnershipState, track: Bool, diagnostics: &[Diagnostic]) {
     loop binding in bindings {
         access :: if binding.window -> AccessConvention.Write else -> AccessConvention.Read
+        // Resolved before the binding can shadow its subject's root name.
+        in_place :: !binding.window && sema_expression_sources_read_in_place(binding.sources, scopes)
         if !sema_scope_declare_local(&scopes, binding.symbol, binding.window, access, None, false) {
             if binding.window || !sema_expression_refines_optional(scopes, binding.symbol) {
                 if track -> &diagnostics.push(sema_already_defined(binding.symbol.name, binding.symbol.span))
@@ -1905,10 +1911,38 @@ fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBinding], 
             // `x` to its payload (Rust `declare_condition_binding`).
             sema_scope_refine_local(&scopes, binding.symbol)
         }
+        if in_place -> sema_scope_mark_place_alias(&scopes, binding.symbol.name)
         if track -> sema_ownership_declare_binding(&state, binding.symbol, false)
         // Also track the temporary `&&` bindings: later tests must resolve
         // their payload origin and reborrow ancestry, not a new local owner.
         _ := sema_ownership_record_pattern_views(&state, binding.symbol.name, binding.symbol.span, binding.sources, access, scopes)
+    }
+}
+
+// Whether a payload bound from `sources` reads storage this scope does not
+// own, so the payload stays in that place and an owning position would copy
+// it (sema_copy_site_in_place_fix): a place inside a collection element
+// (the element keeps owning it), or a place rooted in a read or write
+// parameter or in a name that itself reads its place in place. A `^subject`
+// moves into the match, and a call result is a temporary the match owns.
+fn sema_expression_sources_read_in_place(sources: [Expr], scopes: SemaScopeTable) -> Bool Never! {
+    loop source in sources {
+        if sema_expression_source_reads_in_place(source, scopes) -> return true
+    }
+    false
+}
+
+fn sema_expression_source_reads_in_place(source: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if source == {
+        .Paren(inner, _, _) | .Field(inner, _, _, _) -> sema_expression_source_reads_in_place(inner, scopes)
+        .Place(inner, access, _, _) -> access == PlaceAccess.Read && sema_expression_source_reads_in_place(inner, scopes)
+        .Index(base, _, _, _, _) -> sema_stmt_for_in_plain_place(base)
+        .Ident(name, _, _) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return false
+            binding :: scopes.bindings[index]
+            sema_ownership_binding_is_borrowed_param(binding) || binding.place_alias
+        }
+        else -> false
     }
 }
 

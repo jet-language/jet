@@ -1,0 +1,27 @@
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn peek(r: Res?) -> Int {
+    if r == .Val(inner) -> return inner.name.len()
+    0
+}
+
+fn peek_result(r: Res Err!) -> Int {
+    if r == .Ok(inner) -> return inner.name.len()
+    0
+}
+
+// The carriers built for read arguments view the caller's value; neither
+// one closes it.
+fn wrap(env: Res) {
+    print("val {peek(Val(env))}")
+    print("ok {peek_result(Ok(env))}")
+}
+
+fn run() {
+    owned := Res{name: "owned"}
+    wrap(owned)
+    print("after wrap")
+}

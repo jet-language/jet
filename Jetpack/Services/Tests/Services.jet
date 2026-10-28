@@ -135,15 +135,17 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     plan.enable = false
     services_test_up(dir, plan)
     assert(services_test_read_pid(services_service_dir(dir, "fixture")) == None)
-    assert_eq(services_health_one(dir, plan), ServiceHealth.Disabled)
+    env := services_test_env()
+    assert_eq(services_health_one(dir, &env, plan), ServiceHealth.Disabled)
 }
 
 #Test("fast exit without probe is not reported healthy") {
     dir :: services_test_scratch("fast-exit-no-probe")
     service :: services_test_plan("fixture", "exit 7;")
     services_test_up(dir, service)
-    assert(!services_wait_healthy(dir, service, time.duration_seconds(2)))
-    assert_eq(services_health_one(dir, service), ServiceHealth.NotRunning)
+    env := services_test_env()
+    assert(!services_wait_healthy(dir, &env, service, time.duration_seconds(2)))
+    assert_eq(services_health_one(dir, &env, service), ServiceHealth.NotRunning)
 }
 
 #Test("dependency order is dependency first and rejects cycles") {
@@ -242,14 +244,15 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     dir :: services_test_scratch("health-alive-only")
     plan :: services_test_plan("fixture", "sleep 30")
     services_test_up(dir, plan)
-    assert_eq(services_health_one(dir, plan), ServiceHealth.Healthy)
+    env := services_test_env()
+    assert_eq(services_health_one(dir, &env, plan), ServiceHealth.Healthy)
     services_test_down(dir, plan)
 
     unreachable := services_test_plan("fixture2", "sleep 30")
     // An ephemeral port that `sleep` never accepts on.
     unreachable.ports = [Int]{0}
     services_test_up(dir, unreachable)
-    assert(!services_wait_healthy(dir, unreachable, time.duration_ms(500)), "a port that never accepts must time out, not hang")
+    assert(!services_wait_healthy(dir, &env, unreachable, time.duration_ms(500)), "a port that never accepts must time out, not hang")
     services_test_down(dir, unreachable)
 }
 

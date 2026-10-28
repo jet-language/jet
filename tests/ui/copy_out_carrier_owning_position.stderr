@@ -1,0 +1,35 @@
+Error [E0201]: `env` cannot be moved from borrowed storage
+  --> tests/ui/copy_out_carrier_owning_position.jet:12:20
+    |
+ 12 |     wrapped := Val(env)
+    |                    ^^^
+ Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the binding `wrapped`
+ Fix: Declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201
+
+Error [E0201]: `env` cannot be moved from borrowed storage
+  --> tests/ui/copy_out_carrier_owning_position.jet:17:20
+    |
+ 17 |     Slot{held: Val(env)}
+    |                    ^^^
+ Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the struct literal
+ Fix: Declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201
+
+Error [E0201]: `env` cannot be moved from borrowed storage
+  --> tests/ui/copy_out_carrier_owning_position.jet:21:9
+    |
+ 21 |     Val(env)
+    |         ^^^
+ Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the returned value
+ Fix: Declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201
+
+Error [E0201]: `env` cannot be moved from borrowed storage
+  --> tests/ui/copy_out_carrier_owning_position.jet:26:20
+    |
+ 26 |     &kept.push(Val(env))
+    |                    ^^^
+ Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into `.push()`
+ Fix: Declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201
