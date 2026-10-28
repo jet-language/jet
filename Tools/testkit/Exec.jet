@@ -120,10 +120,14 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
     { sender: done, receiver: watching } :: channel<Int>()
     watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, watching)
+    // Empty input writes nothing: a child that exits before the kit reaches its
+    // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
-    child.stdin.write(stdin) ?? {
-        input_error = "stdin: {err}"
-        ()
+    if stdin != "" {
+        child.stdin.write(stdin) ?? {
+            input_error = "stdin: {err}"
+            ()
+        }
     }
     child.stdin.close()
     receipt :: child.wait() ?? {
@@ -163,14 +167,23 @@ fn kit_exec_watch_resident(pid: Int, limit: Int, done: Receiver<Int>) -> Bool Ne
     false
 }
 
-fn kit_exec_resident_bytes(status: String) -> Int {
-    loop line in status.split("\n") {
-        if !line.starts_with("VmRSS:") -> next
-        loop field in line.slice(6, line.len()).trim().split(" ") {
-            if field.len() > 0 -> return (Int.parse(field.copy()) ?? 0) * 1024
+fn kit_exec_resident_bytes(status: String) -> Int { kit_exec_kib_field(status, "VmRSS:") }
+
+// The byte value of a `/proc` "<field> <n> kB" row, or 0 when the row is absent.
+fn kit_exec_kib_field(text: String, field: String) -> Int {
+    loop line in text.split("\n") {
+        if !line.starts_with(field) -> next
+        loop value in line.slice(field.len(), line.len()).trim().split(" ") {
+            if value.len() > 0 -> return (Int.parse(value.copy()) ?? 0) * 1024
         }
     }
     0
+}
+
+// Memory the host can still hand out (MemAvailable), in bytes; 0 when unknown.
+fn kit_exec_available_memory() -> Int {
+    meminfo :: files.read("/proc/meminfo") ?? return 0
+    kit_exec_kib_field(meminfo, "MemAvailable:")
 }
 
 fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {

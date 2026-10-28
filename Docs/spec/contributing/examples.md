@@ -98,7 +98,11 @@ under `state/` when that directory is staged as `.jet/` in the case workspace.
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.
 Scratch must be disk-backed and outside the checkout; it is staged and removed
-per case. The gate supplies concurrency, not a thread pool inside the kit.
+per case. Selected entries run in one `task.group` whose limit is `--jobs N`;
+without it the kit admits one entry per core, capped so each running entry
+keeps 2 GiB of the host's available memory. Every child process keeps its own
+timeout and resident-memory guard. Rows, diffs and the results file stay in
+corpus order, identical to `--jobs 1`.
 Timeouts must be positive seconds within `Duration`'s representable range;
 out-of-range values are refused before corpus discovery with exit code 2.
 

@@ -50,6 +50,13 @@ fn kit_parse_options(args: [String]) -> KitOptions {
             "--scratch" -> options.scratch = value
             "--results" -> options.results = value
             "--timeout" -> options.timeout = Int.parse(value) ?? 0
+            "--jobs" -> {
+                options.jobs = Int.parse(value) ?? 0
+                if options.jobs <= 0 {
+                    options.error = "--jobs must be a positive count"
+                    return options
+                }
+            }
             "--bless" -> &options.bless.ids.push(value)
             "--reason" -> options.bless.reason = value
             "--allow-shrink" -> &options.bless.allow_shrink.push(value)
@@ -152,6 +159,8 @@ struct KitOptions {
     list: Bool
     coverage: Bool
     opt_in: Bool{false}
+    // Corpus entries run at once; 0 sizes the pool from the host (kit_execute_jobs).
+    jobs: Int{0}
     bless: KitBless
     error: String
 }
@@ -801,28 +810,12 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     } else {
         env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"
     }
+    jobs :: kit_execute_jobs(options.jobs, entries.len(), sys.cpu_count(), kit_exec_available_memory())
     results := [KitCaseResult]{}
     ran_suites := [String]{}
-    loop (index, item) in entries {
-        entry :: item.entry
-        scratch :: files.join(run_scratch, "{index}")
-        files.create_dir_all(scratch) ?? {
-            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
-            next
-        }
-        context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
-        context.env.trace_case = entry.path
-        if !kit_expect_named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
-        loop outcome in kit_suite_run(item.suite, entry, context) {
-            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
-            if outcome.verdict.diff != "" -> print(outcome.verdict.diff)
-        }
-        if env.trace_node == "" {
-            files.remove_all(scratch) ?? {
-                &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
-                ()
-            }
-        }
+    loop run in kit_execute_entries(entries, jobs, options, env, root, run_scratch) {
+        if run.ran && !kit_expect_named(ran_suites, run.suite) -> &ran_suites.push(run.suite)
+        loop result in run.results -> &results.push(result)
     }
     kit_golden_mark_tier_splits(&results)
     loop result in results -> kit_report_row(result)
@@ -841,6 +834,91 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     code :: kit_report_finish(jet, results, options.results, ran_suites)
     if code != 0 && failures.len() == 0 -> &failures.push("ERROR\tresults\t\tthe {options.suite} report could not be written to {options.results}")
     KitExecution{code: code, failures: failures}
+}
+
+// Host memory each concurrently running entry may claim when the pool sizes itself.
+fn kit_job_memory() -> Int { 2147483648 }
+
+// The pool size: an explicit --jobs, else one task per core capped so every running entry
+// keeps kit_job_memory() of the host's available memory (0 is unknown); never more tasks
+// than entries and never fewer than one.
+fn kit_execute_jobs(requested: Int, entries: Int, cores: Int, available: Int) -> Int {
+    jobs := requested
+    if jobs <= 0 {
+        jobs = cores
+        if available > 0 && available /% kit_job_memory() < jobs -> jobs = available /% kit_job_memory()
+    }
+    if jobs > entries -> jobs = entries
+    if jobs < 1 -> jobs = 1
+    jobs
+}
+
+// One corpus entry's rows; `ran` once its private scratch exists, `done` once it reported.
+struct KitEntryRun {
+    index: Int
+    suite: String
+    ran: Bool
+    done: Bool
+    results: [KitCaseResult]
+}
+
+// Runs every entry in a task group admitting `jobs` children at once and returns one run
+// per entry in corpus order. Each child reports its entry on a channel; verdict diffs print
+// in corpus order once the group joins, so the output and the report match a serial
+// (`--jobs 1`) run byte for byte.
+fn kit_execute_entries(entries: [KitSelected], jobs: Int, options: KitOptions, env: KitEnv, root: String, run_scratch: String) -> [KitEntryRun] {
+    { sender: done, receiver: finished } :: channel<KitEntryRun>()
+    task.group pool(limit: jobs) {
+        loop (index, item) in entries {
+            task kit_execute_report(index, item, options, env, root, run_scratch, done.copy())
+        }
+    }
+    runs := [KitEntryRun]{}
+    loop (index, item) in entries -> &runs.push(KitEntryRun{index: index, suite: item.suite, ran: false, done: false, results: [KitCaseResult]{}})
+    loop _ in 0..<entries.len() {
+        run :: finished.try_receive() ?? break
+        runs[run.index] = run
+    }
+    loop index in 0..<runs.len() {
+        // A child that stopped (a panic in its entry) leaves that entry unreported.
+        if !runs[index].done {
+            entry :: entries[index].entry
+            runs[index].results = [KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "testkit task stopped before reporting this entry", exit: -1}]
+            runs[index].done = true
+        }
+        loop result in runs[index].results {
+            if result.diff != "" -> print(result.diff)
+        }
+    }
+    runs
+}
+
+fn kit_execute_report(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, root: String, run_scratch: String, done: Sender<KitEntryRun>) {
+    done.send(kit_execute_entry(index, item, options, env, root, run_scratch))
+}
+
+// One entry in its private scratch `<run>/<index>`, removed afterwards unless tracing.
+fn kit_execute_entry(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, root: String, run_scratch: String) -> KitEntryRun {
+    entry :: item.entry
+    run := KitEntryRun{index: index, suite: item.suite, ran: false, done: true, results: [KitCaseResult]{}}
+    scratch :: files.join(run_scratch, "{index}")
+    files.create_dir_all(scratch) ?? {
+        &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
+        return run
+    }
+    run.ran = true
+    context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+    context.env.trace_case = entry.path
+    loop outcome in kit_suite_run(item.suite, entry, context) {
+        &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
+    }
+    if env.trace_node == "" {
+        files.remove_all(scratch) ?? {
+            &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+            ()
+        }
+    }
+    run
 }
 
 // The checkout this testkit package belongs to: `jet test` runs the harness with
@@ -871,9 +949,9 @@ fn kit_gate_suite(suite: String) -> String {
 // a failing test lists every failing case.
 //   JET                  the compiler under test (required)
 //   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
-//                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --shard I/N, --scratch DIR,
-//                        --jetpack BIN, --list, --coverage (ui), --bless ID, --bless-all
-//                        --reason "TEXT", --allow-shrink ID
+//                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --shard I/N,
+//                        --scratch DIR, --jetpack BIN, --list, --coverage (ui), --bless ID,
+//                        --bless-all --reason "TEXT", --allow-shrink ID
 //   JET_TEST_SCRATCH_DIR disk-backed scratch outside the checkout (default ~/.cache/jet-dev/scratch)
 //   JET_CI_EVIDENCE_DIR  each suite writes its case verdicts to <dir>/<suite>.json
 fn test(t: Test) {
@@ -898,7 +976,7 @@ fn test(t: Test) {
 fn run() {
     args :: process.args()
     if args.len() == 0 || args[0] == "--help" {
-        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--opt-in] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
+        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--jobs N] [--scratch DIR] [--results FILE] [--list] [--opt-in] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
         return
     }
     options :: kit_parse_options(args)
