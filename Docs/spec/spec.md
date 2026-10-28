@@ -3534,6 +3534,14 @@ source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
 
+A fenced ```` ```jet ```` block in a `///` doc comment is a doctest: a claim
+named `doctest at <file>:<fence line>` in the same harness, compiled after the
+file's own items so it can call them. Its lines run in order; each
+`EXPR // => VALUE` line compares the Display rendering of `EXPR` with `VALUE`
+exactly, and a mismatch fails the doctest with E2901 at that line. With
+`--update-snapshots` a mismatched one-line rendering rewrites the claimed
+`VALUE` in the file instead. (D-TEST4)
+
 Bare `jet test` and `jet test <package dir>` discover every source member in the
 package's checked project set, not only the entry file, and run the aggregate
 `#Test` and contract harness exactly once. Documentation examples remain

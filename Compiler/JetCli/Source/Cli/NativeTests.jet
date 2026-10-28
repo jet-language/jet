@@ -13,6 +13,12 @@ struct JetNativeTestRecord { function: U64, wire: String }
 struct JetNativeTestCursor { bytes: [U8], at: Int }
 struct JetNativeTestChild { test: JetNativeTestCase, child: ProcessChild, path: String }
 struct JetNativeTestRun { receipt: ProcessReceipt, output: String, errors: String }
+// The outcome wires of one run (the selected tests' in their order, then any
+// unrun output check's) and the children's raw streams, not yet reported.
+struct JetNativeTestOutcomes { wires: [String], outputs: [String], errors: [String] }
+// One outcome wire's fields: `flags` as the runtime sets them (ok=1,
+// expected_failure=2, skipped=4).
+struct JetNativeTestWire { flags: Int, name: String, stdout: String, stderr: String }
 
 fn jet_native_test_line(cursor: &JetNativeTestCursor) -> String? Never! {
     start :: cursor.at
@@ -196,7 +202,7 @@ fn jet_native_test_one(test: JetNativeTestCase, receipt: ProcessReceipt, path: S
 // `spec` is the caller's already-configured test ProcessSpec, preserving every
 // JET_TEST_* / project / snapshot / tier option without mutating the parent env.
 // Raw child stdout/stderr never enter the separate framed outcome channel.
-fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String) -> JetNativeTestRun Err! {
+fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String) -> JetNativeTestOutcomes Err! {
     clean :: spec.env_remove("JET_NATIVE_TEST_ID").env_remove("JET_NATIVE_TEST_REPORT_PATH").env_remove("JET_NATIVE_TEST_RECORDS_PATH")
     batch_path :: "{records_path}.batch"
     native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
@@ -296,16 +302,46 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
             &wires.push("0 {name.bytes().len()} 0 {report.bytes().len()} -\n{name}{report}")
         }
     }
-    native_test_files.write(records_path, wires.join("")) ?? return Err("couldn't write native test outcomes: {err}")
+    Ok(JetNativeTestOutcomes{wires: wires, outputs: outputs, errors: errors})
+}
+
+// The canonical report of `outcomes`, by the harness `spec` names.
+fn jet_cli_native_test_report(spec: ProcessSpec, outcomes: JetNativeTestOutcomes, records_path: String) -> JetNativeTestRun Err! {
+    clean :: spec.env_remove("JET_NATIVE_TEST_ID").env_remove("JET_NATIVE_TEST_REPORT_PATH").env_remove("JET_NATIVE_TEST_RECORDS_PATH")
+    native_test_files.write(records_path, outcomes.wires.join("")) ?? return Err("couldn't write native test outcomes: {err}")
     reported :: clean.env("JET_NATIVE_TEST_REPORT_PATH", records_path).run() ?? {
         native_test_files.remove(records_path).drop("report already failed")
         return Err("couldn't run native test report: {err}")
     }
     native_test_files.remove(records_path).drop("the outcome file is process-private and one-shot")
     if reported.signal != None -> return Err("canonical native test reporter terminated by a signal")
-    &outputs.push(reported.output)
-    &errors.push(reported.errors)
-    Ok(JetNativeTestRun{receipt: reported, output: outputs.join(""), errors: errors.join("")})
+    Ok(JetNativeTestRun{receipt: reported, output: "{outcomes.outputs.join("")}{reported.output}", errors: "{outcomes.errors.join("")}{reported.errors}"})
+}
+
+// The fields of one well-formed outcome wire (jet_cli_native_test_records
+// validated it): `flags nlen olen elen -\n` then the three byte runs.
+fn jet_cli_native_test_wire_parts(wire: String) -> JetNativeTestWire Err! {
+    bytes :: wire.bytes()
+    header_end := 0
+    loop header_end < bytes.len() && bytes[header_end] != (U8{10}) -> header_end += 1
+    if header_end == bytes.len() -> return Err("native test outcome header is truncated")
+    fields :: (String.from_bytes(bytes.slice(0, header_end)) ?? return Err("native test outcome header is not UTF-8")).split(" ").to_list()
+    if fields.len() != 5 -> return Err("native test outcome header has wrong arity")
+    flags :: Int.parse(fields[0]) ?? return Err("native test outcome flags are invalid")
+    name_end :: header_end + 1 + jet_native_test_byte_count(fields[1])
+    stdout_end :: name_end + jet_native_test_byte_count(fields[2])
+    stderr_end :: stdout_end + jet_native_test_byte_count(fields[3])
+    if stderr_end != bytes.len() -> return Err("native test outcome payload length is wrong")
+    Ok(JetNativeTestWire{
+        flags: flags,
+        name: String.from_bytes(bytes.slice(header_end + 1, name_end)) ?? return Err("native test name is not UTF-8"),
+        stdout: String.from_bytes(bytes.slice(name_end, stdout_end)) ?? return Err("native test stdout is not UTF-8"),
+        stderr: String.from_bytes(bytes.slice(stdout_end, stderr_end)) ?? return Err("native test stderr is not UTF-8"),
+    })
+}
+
+fn jet_cli_native_test_wire(parts: JetNativeTestWire) -> String Never! {
+    "{parts.flags} {parts.name.bytes().len()} {parts.stdout.bytes().len()} {parts.stderr.bytes().len()} -\n{parts.name}{parts.stdout}{parts.stderr}"
 }
 
 #Test("native test records preserve UTF-8 and embedded newlines") {
@@ -313,6 +349,15 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
     assert_eq(records.len(), 1)
     assert_eq(records[0].function, U64{7})
     assert_eq(records[0].wire, "1 2 2 0 -\néx\n")
+}
+
+#Test("native test wire fields round-trip byte-counted UTF-8") {
+    parts :: jet_cli_native_test_wire_parts("1 2 2 1 -\néx\ny") ?? panic("a well-formed wire parses")
+    assert_eq(parts.flags, 1)
+    assert_eq(parts.name, "é")
+    assert_eq(parts.stdout, "x\n")
+    assert_eq(parts.stderr, "y")
+    assert_eq(jet_cli_native_test_wire(parts), "1 2 2 1 -\néx\ny")
 }
 
 #Test("fatal reruns run one child per core within the free memory") {

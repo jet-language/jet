@@ -1327,7 +1327,10 @@ fn jet_cli_native_test_unrun_check_report() -> String Never! {
 // as an IR test harness (JetIR BuildTests.jet), then run by the NativeTests
 // module. ProcessSpec retains the project/snapshot/filter/shuffle/serial/capture
 // policy; its stdout is ordinary output, never the framed outcome transport.
-fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool, options: JetCLITestOptions, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+// `source` is the file as compiled, with the claims of its doctests appended;
+// the outcomes of the claims of `doctests` (Doctests.jet) settle before the
+// report.
+fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFile], color: Bool, verbose: Bool, options: JetCLITestOptions, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     if jet_cli_errors(result.diagnostics).len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
@@ -1343,11 +1346,20 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     stem :: ".test_{jet_cli_stem(file)}.{cli_process.current_pid()}"
     binary :: "{build_dir}/{stem}"
     plan :: ^inputs ?? return jet_cli_ice("the Jet compiler finished tests without their checked functions")
-    native_tests :: jet_cli_native_test_selection(plan.tests, plan.functions, options.filter, options.shuffle_seed) ?? return jet_cli_ice("the test harness of `{file}` can't build:\n{err.message}")
-    check_names :: loop check in plan.output_checks -> check.name
+    selected :: jet_cli_native_test_selection(plan.tests, plan.functions, options.filter, options.shuffle_seed) ?? return jet_cli_ice("the test harness of `{file}` can't build:\n{err.message}")
+    // `--docs` runs the doctest claims alone, without the output checks.
+    native_tests :: if options.docs -> jet_cli_doctest_claims(selected, doctests) else -> selected
+    check_names := [String]{}
+    checks := [IROutputCheck]{}
+    if !options.docs {
+        loop check in plan.output_checks {
+            &check_names.push(check.name)
+            &checks.push(IROutputCheck{name: check.name, key: check.function.key})
+        }
+    }
     harness :: IRTestHarness{
         tests: loop test in native_tests -> IRTestCase{id: Int.from_u64(test.id), key: test.key, name: test.name, expected_failure: test.expected_failure},
-        checks: loop check in plan.output_checks -> IROutputCheck{name: check.name, key: check.function.key},
+        checks: checks,
         serial: options.serial,
     }
     sources :: jet_cli_native_c_sources(snapshot, options.build) ?? return jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err.message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
@@ -1371,7 +1383,30 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     if options.serial -> spec = spec.env("JET_TEST_SERIAL", "1")
     if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
     spec = spec.env("JET_TEST_CAPTURE", options.capture)
-    ran :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, "{binary}.records") ?? {
+    run :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, "{binary}.records") ?? {
+        cli_files.remove(binary).drop("the native run already failed")
+        return jet_cli_ice(err.message)
+    }
+    wires := [String]{}
+    loop wire in run.wires -> &wires.push(wire)
+    loop doctest_file in doctests {
+        rewrites := [JetCLIDocExpectation]{}
+        loop (index, test) in native_tests {
+            doctest :: jet_cli_doctest_named(doctest_file, test.name) ?? next
+            if index >= wires.len() -> next
+            wires[index] = jet_cli_doctest_settle(wires[index], doctest_file, doctest, color, options.update_snapshots, &rewrites) ?? {
+                cli_files.remove(binary).drop("the native run already failed")
+                return jet_cli_ice(err.message)
+            }
+        }
+        if rewrites.len() > 0 {
+            cli_files.write(doctest_file.path, jet_cli_doctest_rewrite(doctest_file.source, rewrites)) ?? {
+                cli_files.remove(binary).drop("the native run already failed")
+                return jet_cli_build_failed("couldn't update the doctest claims in `{doctest_file.shown}`: {err}", jet_cli_why("E2105"), "check that the tested file is writable", color)
+            }
+        }
+    }
+    ran :: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors}, "{binary}.records") ?? {
         cli_files.remove(binary).drop("the native run already failed")
         return jet_cli_ice(err.message)
     }
@@ -1404,12 +1439,25 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Test)
+    snapshotted := jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
+    doctests := [JetCLIDoctestFile]{}
+    tested := source
+    prepared := if ^snapshotted == {
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        .Held(snapshot) -> {
+            held := snapshot
+            doctests = jet_cli_doctest_overlay(&held, options.project_root != None)
+            loop doctest_file in doctests {
+                if doctest_file.path == held.entry_path -> tested = jet_cli_doctest_source(doctest_file)
+            }
+            jet_cli_prepare_request(held, color, threads, JetDriverCompileMode.Test, false)
+        }
+    }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
     compiled := jet_cli_compile_executable(^prepared, None, options.build, None, trace_sink)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_test_result(file, source, color, verbose, options, result, ^inputs, snapshot))
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_test_result(file, tested, doctests, color, verbose, options, result, ^inputs, snapshot))
     }
     output
 }

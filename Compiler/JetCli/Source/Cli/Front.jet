@@ -203,6 +203,8 @@ struct JetCLITestOptions {
     serial: Bool
     trace_tiers: Bool
     update_snapshots: Bool
+    // `--docs`: run only the doctest claims (Doctests.jet).
+    docs: Bool
     project_root: String?
     status: String
 }
@@ -1078,7 +1080,7 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
 
 // `jet test` flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_TEST_UNPORTED_FLAGS :: [String]{
-    "--watch", "--docs", "--where", "--coverage", "--grade", "--iterations", "--time", "--seed",
+    "--watch", "--where", "--coverage", "--grade", "--iterations", "--time", "--seed",
     "--corpus", "--measure", "--record", "--browser", "--browser-retries", "--browser-reporter",
     "--browser-ui", "--browser-visual", "--browser-trace", "--browser-scaffold", "--set",
 }
@@ -1088,42 +1090,15 @@ fn jet_cli_test_option_error(what: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", what, jet_cli_why("E2104"), "use the canonical `jet test` flag spelling", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// Source/Doctest.rs `discover` is non-empty: a ```` ```jet ```` (or bare
-// ```` ``` ````) fence opened and closed inside one `///` comment run.
-fn jet_cli_has_doctests(source: String) -> Bool Never! {
-    lines :: source.split("\n").to_list()
-    index := 0
-    loop index < lines.len() {
-        trimmed :: lines[index].trim()
-        if trimmed.starts_with("///") {
-            inner :: trimmed.slice(3..<trimmed.len()).trim()
-            if inner.starts_with("```") {
-                language :: inner.replace("`", "").trim()
-                if language == "" || jet_cli_ascii_lower(language) == "jet" {
-                    index += 1
-                    loop index < lines.len() {
-                        line :: lines[index].trim()
-                        if !line.starts_with("///") -> break
-                        if line.slice(3..<line.len()).trim().starts_with("```") -> return true
-                        index += 1
-                    }
-                    next
-                }
-            }
-        }
-        index += 1
-    }
-    false
-}
-
 // `jet test [<target>] [<filter>]` (Source/CmdCompile.rs `TestRunOpts::parse`,
 // `run_test_opts`, `run_test_target` up to the compile). A package directory
 // (or no target inside a package) tests through its own `fn test(t: Test)` when
-// it declares one, as `jet build` runs its `fn build`. Doctests, the result
-// cache, and the flags above are not ported yet.
+// it declares one, as `jet build` runs its `fn build`. The tested file's
+// doctests run as claims of the same harness (Doctests.jet). The result cache
+// and JET_CLI_TEST_UNPORTED_FLAGS are not ported yet.
 fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
-    options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, project_root: None, status: ""}
+    options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, project_root: None, status: ""}
     fresh := false
     show_default := false
     positionals := [String]{}
@@ -1153,6 +1128,7 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
             name == "--show-default" -> show_default = true
             name == "--fresh" -> fresh = true
             name == "--update-snapshots" || name == "-u" -> options.update_snapshots = true
+            name == "--docs" -> options.docs = true
             name == "--release" -> {}
             name == "--trace-tiers" -> options.trace_tiers = true
             name == "--serial" -> options.serial = true
@@ -1242,7 +1218,6 @@ fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Boo
     source :: cli_files.read(file) ?? {
         return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
-    if jet_cli_has_doctests(source) -> return jet_cli_not_ported("test <file with doctests>", color)
     if jet_cli_build_options(jet_argv, "test", file, source, color, quiet) == {
         .Refused(refusal) -> return refusal
         .Selected(selected, notes) -> {

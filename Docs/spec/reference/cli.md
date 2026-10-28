@@ -667,9 +667,12 @@ default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
 honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
 `--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
 `--release`, `--profile`, `--verbose`, `--quiet`, `--color`, and `--threads`.
-Directory and package targets, doctests, a `fn test` override, a bare
-`--shuffle`, and the other test flags are refused with E2104 until they are
-ported. The test-result cache, the evidence report, and the package claims
+Doctests (fenced ```` ```jet ```` blocks in `///` comments) run as claims of
+the same harness, named `doctest at <file>:<line>`, and `--docs` runs them alone; a wrong `// =>` value
+fails with E2901, and `-u` rewrites it instead (D-TEST4). Directory and package
+targets, a `fn test` override, a bare `--shuffle`, and the other test flags are
+refused with E2104 until they are ported. The test-result cache, the evidence
+report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
 harness exit (the outcome for a package without a claims floor).
 

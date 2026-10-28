@@ -66,9 +66,11 @@ struct JetCLIDocImpl {
     source: JetCLIDocSource
 }
 
+// `line` is the 1-based source line the `// =>` claim is written on.
 struct JetCLIDocExpectation {
     expression: String
     expected: String
+    line: Int
 }
 
 struct JetCLIDocTest {
@@ -610,6 +612,7 @@ fn jet_cli_doc_discover_doctests(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never! 
             &expectations.push(JetCLIDocExpectation{
                 expression: jet_cli_doc_text(bytes, 0, marker).trim(),
                 expected: jet_cli_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
+                line: line_number,
             })
         } else if doc_line != "" {
             &setup.push(doc_line)
