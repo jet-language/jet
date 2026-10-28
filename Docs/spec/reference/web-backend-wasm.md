@@ -70,8 +70,8 @@ fall back to CPU. Native hosts retain the typed fail-closed WebGPU provider.
 ## Source-backed examples
 
 The top-level source set under `Examples/features/web/` is the contract checked
-by [`tests/web_examples_doc.rs`](../../../tests/web_examples_doc.rs). Each file
-is named here so documentation review cannot silently omit a new example:
+by [`tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case`](../../../tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case).
+Each file is named here so documentation review cannot silently omit a new example:
 
 - `package.jet`
 - `app_hello.jet`

@@ -18,7 +18,7 @@ fn s3_artifact_check_directory(path: String) -[FS, Env]> {
             // Rust metadata follows a symlink for the executable-mode check only.
             target :: artifact_files.canonicalize(entry.path) ?? next
             metadata :: artifact_files.stat(target) ?? next
-            executable :: (metadata.mode & 0o111) != 0
+            executable :: metadata.mode.bit_and(0o111) != 0
             assert(!executable, "generated executable under examples: {entry.path}")
         } else {
             executable :: entry.name.ends_with(".exe") || entry.name.ends_with(".dll") || entry.name.ends_with(".com")

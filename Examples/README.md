@@ -161,5 +161,5 @@ files are the evidence; this manifest does not duplicate the collection API.
 - [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
 - [`Tools/testkit/Golden.jet`](../Tools/testkit/Golden.jet) and
-  [`tests/suite_goldens.rs`](../tests/suite_goldens.rs) are the source of truth
-  for the two golden layouts.
+  [`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
+  are the source of truth for the two golden layouts.
