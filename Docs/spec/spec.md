@@ -1518,6 +1518,10 @@ error[E0029]: two access markers on one parameter
    |           ^^ remove one access marker
 ```
 
+A value takes one marker too: `^^handle.join()` or `&^items` on an argument or
+expression is E0029 ("this value has two access markers"); write
+`^handle.join()` (D-SHAPE-COPY1=A).
+
 `.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
 parameter-access table (D-MEM1, D-COPY-WORD1=A, D-CAP9).

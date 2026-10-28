@@ -662,6 +662,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     // move. Only a fresh value (a literal or call result) has nothing to move.
     if kind == TOKEN_AMP || kind == TOKEN_CARET {
         parser_bump(&state)
+        parser_refuse_second_access_marker(&state, token.span)
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(token.span, operand.span)
         if kind == TOKEN_CARET && !parser_contains_method_call(operand.expr) {
@@ -1897,14 +1898,26 @@ fn parser_mark_maximal_place(state: &JetParserState, expr: Expr, access: PlaceAc
     Expr.Place{value: expr, access: access, span: ^span, id: parser_node_id(&state)}
 }
 
-fn parser_call_access_prefix(state: &JetParserState) -> AccessConvention Never! {
+// A place takes one access marker. A second marker right after the first
+// (`^^x`, `&^x`, `^&x`) is E0029; it is consumed so the place still parses
+// under the first marker.
+fn parser_refuse_second_access_marker(state: &JetParserState, first: Span) {
+    kind := parser_current_kind(&state)
+    if kind != TOKEN_AMP && kind != TOKEN_CARET -> return
+    second :: parser_bump(&state)
+    parser_add_error_code(&state, "E0029", parser_cover(first, second.span), "this value has two access markers", "a value takes one access marker: `&` to write the place or `^` to move it", "keep one marker and remove the other")
+}
+
+fn parser_call_access_prefix(state: &JetParserState) -> AccessConvention {
     kind := parser_current_kind(&state)
     if kind == TOKEN_AMP {
-        parser_bump(&state)
+        marker :: parser_bump(&state)
+        parser_refuse_second_access_marker(&state, marker.span)
         return AccessConvention.Write
     }
     if kind == TOKEN_CARET {
-        parser_bump(&state)
+        marker :: parser_bump(&state)
+        parser_refuse_second_access_marker(&state, marker.span)
         return AccessConvention.Move
     }
     AccessConvention.Read

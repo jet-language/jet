@@ -45,7 +45,7 @@ fn run() {
     source.write_atomic(abc) ?? panic("file source")
     file_recipient :: crypto.X25519SecretKey.new_random() ?? panic("file recipient")
     crypto.file_seal([file_recipient.public_key()], source, sealed) ?? panic("file seal")
-    crypto.file_open(&file_recipient, sealed, opened) ?? panic("file open")
+    crypto.file_open(file_recipient, sealed, opened) ?? panic("file open")
     print((fs.read(opened_text) ?? panic("file read")) == "abc")
     fs.remove(source_text) ?? panic("crypto fixture cleanup")
     fs.remove(sealed_text) ?? panic("crypto fixture cleanup")

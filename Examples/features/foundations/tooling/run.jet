@@ -1,4 +1,4 @@
-use core.build as build
+use core.build as build_api
 use core.compiler as compiler
 
 SOURCE :: comptime { "fn old_name(value: Int) -> Int {{ 41 }}\nfn run() -> Int {{ 2 }}\n" }
@@ -26,7 +26,7 @@ fn build(b: Build) {
     [],
     )
     before_plan :: b.plan(before)
-    before_graph :: build.graph(before_plan)
+    before_graph :: build_api.graph(before_plan)
 
     after :: b.add_executable(
     "tooling_after",
@@ -34,8 +34,8 @@ fn build(b: Build) {
     [],
     )
     after_plan :: b.plan(after)
-    after_graph :: build.graph(after_plan)
-    diff :: build.receipt_diff(before_graph, after_graph)
+    after_graph :: build_api.graph(after_plan)
+    diff :: build_api.receipt_diff(before_graph, after_graph)
 
     if before_graph.targets.len() == 0 -> panic("build graph query returned no target")
     if after_graph.files.len() <= before_graph.files.len() {

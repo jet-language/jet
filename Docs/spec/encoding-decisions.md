@@ -88,8 +88,8 @@ Compact and pretty JSON serialization route through their Jet `Encode` wrappers;
 the old native serializer dispatcher rows are metadata-only source-owned rows.
 The CBOR whole-value rows likewise execute their existing source encoders and
 parser. Alphabet decoders already use source ownership, not native dispatcher
-aliases. `Examples/features/serde/encoding_source_cutover.jet` records focused
-vectors for these routing contracts.
+aliases. `tests/cases/corelib/encoding_source_cutover_retains_decoder_vectors_typed_json_and_error_ladder.case`
+records focused vectors for these routing contracts.
 Untyped `json.decode` performs the D-JSON3 coercion walk in Jet. The wall-clock
 snapshot and stderr emission remain private raw adapters to the existing seed
 operations. Their shipped hidden Time/IO effects are preserved, not promoted

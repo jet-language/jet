@@ -45,7 +45,7 @@ fn run() {
     print("capacity 1 full: ready={frx.is_ready()}")
     filler :: task second_send(ftx)
     print(frx.try_receive() ?? -1)
-    print(^^filler.join() ?? -1)
+    print(^filler.join() ?? -1)
     print(frx.try_receive() ?? -1)
 
     // A send after close returns normally and the value is dropped.
@@ -70,7 +70,7 @@ fn run() {
         tasks.yield_now()
     }
     blocked.cancel()
-    if ^^blocked.join() == {
+    if ^blocked.join() == {
         .Ok(_) -> print("blocked send completed")
         .Err(error) -> print(failure_label(error))
     }

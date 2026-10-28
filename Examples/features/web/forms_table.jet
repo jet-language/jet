@@ -1,5 +1,9 @@
 // A typed Person form renders its canonical progressive endpoint and feeds the
 // matching App action with the same checked model contract.
+package {
+    name: "forms_table"
+    authority: { allow: [Browser, Net] }
+}
 use core.web as web
 #Target(Web)
 
@@ -13,8 +17,8 @@ fn save(input: Person) -> String { "saved {input.name}" }
 
 fn home() -> WebPage {
     form :: web.form(Person, action: save)
-    &form.set("id", "7") ?? panic("id set")
-    &form.set("name", "Ada") ?? panic("name set")
+    form.set("id", "7") ?? panic("id set")
+    form.set("name", "Ada") ?? panic("name set")
     web.page("People", form.render())
 }
 

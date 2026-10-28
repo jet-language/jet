@@ -3,17 +3,17 @@
 use core.math as math
 use core.reflect as reflect
 
-fn fraction_identity(value: Fraction) -> math.Fraction Never! { value }
-fn decimal_identity(value: Decimal) -> math.Decimal Never! { value }
-fn complex_identity(value: Complex) -> math.Complex Never! { value }
-// A real user function with a reserved helper's spelling must not be called
-// by the precise output gate: only the checked math-module key is eligible.
-fn __fraction_mul(left: Int, right: Int) -> Int Never! { left - right }
+fn fraction_identity(value: Fraction) -> math.Fraction Never! { value.copy() }
+fn decimal_identity(value: Decimal) -> math.Decimal Never! { value.copy() }
+fn complex_identity(value: Complex) -> math.Complex Never! { value.copy() }
+// A user function named like a math helper must not be called by the precise
+// output gate: only the checked math-module key is eligible.
+fn fraction_mul(left: Int, right: Int) -> Int Never! { left - right }
 
 fn run() {
     fraction :: math.fraction(1, 8) ?? panic("fraction")
     decimal :: math.decimal("-123.4500")
-    complex :: math.__complex_from_parts(3.0, -0.0)
+    complex :: math.Complex{real: 3.0, imaginary: -0.0}
     print(reflect.of(fraction).type_name() == reflect.of(fraction_identity(fraction)).type_name())
     print(reflect.of(decimal).type_name() == reflect.of(decimal_identity(decimal)).type_name())
     print(reflect.of(complex).type_name() == reflect.of(complex_identity(complex)).type_name())
@@ -23,5 +23,5 @@ fn run() {
     product :: fraction * (math.fraction(4, 1) ?? panic("fraction"))
     assert_eq(product.numerator(), 1)
     assert_eq(product.denominator(), 2)
-    assert_eq(__fraction_mul(10, 3), 7)
+    assert_eq(fraction_mul(10, 3), 7)
 }

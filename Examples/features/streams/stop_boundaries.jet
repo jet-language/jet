@@ -80,7 +80,7 @@ fn run() {
     worker :: task consume_until_cancel(started_tx, gate_rx)
     print("task: started with {started_rx.receive() ?? -1}")
     worker.cancel()
-    if ^^worker.join() == {
+    if ^worker.join() == {
         .Ok(sum) -> print("task: finished {sum}")
         .Err(error) -> print("task: {failure_label(error)}")
     }

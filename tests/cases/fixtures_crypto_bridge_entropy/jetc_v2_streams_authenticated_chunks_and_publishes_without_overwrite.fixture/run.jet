@@ -52,13 +52,13 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     final_at :: 5 + 1048576 + 16
     assert_eq(little(body, final_at, 4), 17)
     assert_eq(body[final_at + 4], U8{1})
-    crypto.file_open(&recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) ?? panic("open")
+    crypto.file_open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) ?? panic("open")
     assert_eq(files.read_bytes("restored.bin") ?? panic("restored"), plain)
     wrong :: crypto.X25519SecretKey.new_random() ?? panic("wrong")
-    assert_eq(crypto.file_open(&wrong, Path.from("sealed.jetc"), Path.from("wrong.bin")), Err(crypto.FileCryptoError.OpenFailed))
+    assert_eq(crypto.file_open(wrong, Path.from("sealed.jetc"), Path.from("wrong.bin")), Err(crypto.FileCryptoError.OpenFailed))
     assert(!files.exists("wrong.bin"))
     files.write_bytes("restored.bin", "do not replace".bytes()) ?? panic("sentinel")
     // Ratified DestinationExists, not drift PublishFailed: #4821, Core crypto.jet54-58,531-535.
-    assert_eq(crypto.file_open(&recipient, Path.from("sealed.jetc"), Path.from("restored.bin")), Err(crypto.FileCryptoError.DestinationExists))
+    assert_eq(crypto.file_open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")), Err(crypto.FileCryptoError.DestinationExists))
     assert_eq(files.read_bytes("restored.bin") ?? panic("preserved"), "do not replace".bytes())
 }

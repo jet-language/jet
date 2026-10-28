@@ -24,8 +24,8 @@ fn run() {
     summed :: compute.add(matrix, broadcast) ?? panic("broadcast add")
     if compute.shape(matrix) != [2, 3] -> panic("dense shape")
     if compute.shape(transposed) != [3, 2] -> panic("transpose shape")
-    if compute.to_list(transposed) != [Float]{1.0, 4.0, 2.0, 5.0, 3.0, 6.0} -> panic("transpose values")
-    if compute.to_list(summed) != [Float]{11.0, 12.0, 13.0, 14.0, 15.0, 16.0} -> panic("broadcast values")
+    if compute.to_list(transposed) != ([Float]{1.0, 4.0, 2.0, 5.0, 3.0, 6.0}) -> panic("transpose values")
+    if compute.to_list(summed) != ([Float]{11.0, 12.0, 13.0, 14.0, 15.0, 16.0}) -> panic("broadcast values")
 
     // Named dimensions and coordinates stay in a user record beside Tensor.
     coordinates :: [Coordinate]{
@@ -113,15 +113,15 @@ fn run() {
     plan := chunked(chunk_source, 8)
     if chunk_count(plan) != 8 -> panic("chunk count")
     indexed_tensor :: read_chunk(plan, 1)
-    if compute.to_list(indexed_tensor) != [Float]{8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0} {
+    if compute.to_list(indexed_tensor) != ([Float]{8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0}) {
         panic("indexed chunk")
     }
     first_tensor :: map_chunk(&plan, 0, double)
     tail_tensor :: map_chunk(&plan, 7, double)
     first :: compute.to_list(first_tensor)
     tail :: compute.to_list(tail_tensor)
-    if first != [Float]{0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0} -> panic("first chunk")
-    if tail != [Float]{112.0, 114.0, 116.0, 118.0, 120.0, 122.0, 124.0, 126.0} -> panic("tail chunk")
+    if first != ([Float]{0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0}) -> panic("first chunk")
+    if tail != ([Float]{112.0, 114.0, 116.0, 118.0, 120.0, 122.0, 124.0, 126.0}) -> panic("tail chunk")
     if plan.reads != 2 -> panic("indexed read count")
 
     all_plan := chunked(chunk_source, 8)
@@ -139,7 +139,7 @@ fn run() {
     image :: decode_ppm(fixture) ?? panic("image decode")
     source_pixels :: compute.to_list(image.pixels)
     if image.width != 2 || image.height != 2 || image.channels != 3 -> panic("image metadata")
-    if source_pixels != [Float]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0} {
+    if source_pixels != ([Float]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0}) {
         panic("image pixels")
     }
 
@@ -155,7 +155,7 @@ fn run() {
     gray :: grayscale(image)
     gray_pixels :: compute.to_list(gray.pixels)
     if gray.width != 2 || gray.height != 2 || gray.channels != 1 -> panic("gray metadata")
-    if gray_pixels != [Float]{0.3, 0.59, 0.11, 1.0} -> panic("gray pixels")
+    if gray_pixels != ([Float]{0.3, 0.59, 0.11, 1.0}) -> panic("gray pixels")
 
     output :: encode_ppm(resized)
     temp :: files.temp_dir("arrays-image") ?? panic("image output directory")

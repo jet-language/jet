@@ -79,7 +79,7 @@ fn run() {
     worker :: task mapped_worker(start_tx, block_rx)
     start_rx.receive() ?? panic("worker did not reach map callback")
     worker.cancel()
-    if ^^worker.join() == {
+    if ^worker.join() == {
         .Ok(short_result) -> { panic("cancelled map returned short success: {short_result}") }
         .Err(error) -> {
             if error == {
@@ -96,7 +96,7 @@ fn run() {
     loop_worker :: task looped_worker(loop_start_tx, loop_block_rx)
     loop_start_rx.receive() ?? panic("loop did not reach map callback")
     loop_worker.cancel()
-    if ^^loop_worker.join() == {
+    if ^loop_worker.join() == {
         .Ok(short_result) -> { panic("cancelled loop returned short success: {short_result}") }
         .Err(error) -> {
             if error == {
@@ -113,7 +113,7 @@ fn run() {
         family_task :: task family_worker(family, family_start_tx, family_block_rx)
         family_start_rx.receive() ?? panic("family did not reach callback")
         family_task.cancel()
-        if ^^family_task.join() == {
+        if ^family_task.join() == {
             .Ok(result) -> { panic("cancelled family {family} returned success: {result}") }
             .Err(error) -> {
                 if error == {

@@ -133,9 +133,9 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     cart_link :: url.percent_encode(json.to_string(cart_search) ?? panic("JSON encode"))
     ship_data :: ShipForm{id: id, carrier: "Parcel", tracking: "PX-41"}
     typed_form :: web.form(ShipForm, action: submit_ship_order)
-    &typed_form.set("id", "{ship_data.id}") ?? panic("typed id value")
-    &typed_form.set("carrier", ship_data.carrier) ?? panic("typed carrier value")
-    &typed_form.set("tracking", ship_data.tracking) ?? panic("typed tracking value")
+    typed_form.set("id", "{ship_data.id}") ?? panic("typed id value")
+    typed_form.set("carrier", ship_data.carrier) ?? panic("typed carrier value")
+    typed_form.set("tracking", ship_data.tracking) ?? panic("typed tracking value")
     typed_form_markup :: typed_form
         .validate(.carrier, on: .Blur, with: check_carrier)
         .render()

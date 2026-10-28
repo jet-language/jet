@@ -9,7 +9,7 @@ use core.encoding.[DataEvent, EncodingCause, EncodingError, EncodingErrorKind, E
     assert_eq(base32.b32decode("MZXW6===") ?? panic("base32"), "foo".bytes())
     assert_eq(base32.b32hexdecode("CPNMU===") ?? panic("base32hex"), "foo".bytes())
     assert_eq(base64.decode("Zm9v") ?? panic("base64"), "foo".bytes())
-    assert_eq(base64.decode_url("-_8=") ?? panic("base64url"), [U8]{251, 255})
+    assert_eq(base64.decode_url("-_8") ?? panic("base64url"), [U8]{251, 255})
     assert_eq(base64.decodebytes("Zm9v\n") ?? panic("base64 lines"), "foo".bytes())
     assert_eq(hex.a2b_base64("Zm9v\n") ?? panic("hex base64"), "foo".bytes())
 }
@@ -36,5 +36,3 @@ struct Row { value: Int }
     if event == .Number(text) -> assert_eq(text, "abc") else -> panic("Number is not matchable")
     assert_eq(EncodingLimits.safe().buffer_bytes, 65536)
 }
-
-fn main() Never! {}
