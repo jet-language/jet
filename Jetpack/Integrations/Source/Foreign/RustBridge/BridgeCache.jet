@@ -74,13 +74,6 @@ struct RustBridgeKeyInputs {
             &identity.field("parquet_runtime", FFI_PARQUET_RUNTIME.bytes())
             loop spec in pkg_ffi_parquet_crate_specs() -> &identity.field("parquet_dependency", "{spec.name}={spec.version}".bytes())
         }
-        &identity.field("needs_http_client", pkg_bridge_flag(needs.http_client))
-        if needs.http_client {
-            &identity.field("http_client_runtime", FFI_HTTP_CLIENT_RUNTIME.bytes())
-            &identity.field("http_public_suffix_list", FFI_HTTP_PUBLIC_SUFFIX_LIST.bytes())
-        }
-        &identity.field("needs_net_tls", pkg_bridge_flag(needs.net_tls))
-        if needs.net_tls -> &identity.field("net_tls_runtime", FFI_NET_TLS_RUNTIME.bytes())
         &identity.field("needs_crypto", pkg_bridge_flag(needs.crypto))
         if needs.crypto -> pkg_ffi_identity_crypto_runtimes(&identity)
         &identity.field("needs_compress", pkg_bridge_flag(needs.compress))

@@ -33,12 +33,6 @@ FFI_ARROW_DATA_CRATE_SPEC :: FFICrateSpec{name: "arrow-data", version: "59.3.0"}
 FFI_ARROW_SCHEMA_CRATE_SPEC :: FFICrateSpec{name: "arrow-schema", version: "59.3.0"}
 FFI_ARROW_SELECT_CRATE_SPEC :: FFICrateSpec{name: "arrow-select", version: "59.3.0"}
 FFI_BYTES_CRATE_SPEC :: FFICrateSpec{name: "bytes", version: "1"}
-// `rustls` backs the HTTP client and `core.net.tls`.
-FFI_RUSTLS_CRATE_SPEC :: FFICrateSpec{name: "rustls", version: "0.23"}
-// PEM parser used by `core.net.tls` identities.
-FFI_RUSTLS_PEMFILE_CRATE_SPEC :: FFICrateSpec{name: "rustls-pemfile", version: "2"}
-// System root loader used by `core.net.tls_connect`.
-FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC :: FFICrateSpec{name: "rustls-native-certs", version: "0.7"}
 // This rule crypto closure.
 FFI_AES_GCM_CRATE_SPEC :: FFICrateSpec{name: "aes-gcm", version: "=0.10.3"}
 FFI_CHACHA_POLY_CRATE_SPEC :: FFICrateSpec{name: "chacha20poly1305", version: "=0.10.1"}
@@ -77,7 +71,6 @@ FFI_FEATURED_DEPS :: comptime { [FFIFeaturedDep]{
     {name: "ed25519-dalek", toml: "{{ version = \"=2.2.0\", default-features = false, features = [\"alloc\", \"zeroize\"] }}"},
     {name: "hkdf", toml: "{{ version = \"=0.12.4\", default-features = false, features = [] }}"},
     {name: "rusqlite", toml: "{{ version = \"0.31\", features = [\"bundled\", \"hooks\"] }}"},
-    {name: "rustls", toml: "{{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }}"},
     {name: "sha2", toml: "{{ version = \"=0.10.9\", default-features = false, features = [] }}"},
     {name: "subtle", toml: "{{ version = \"=2.6.1\", default-features = false, features = [] }}"},
     {name: "wasmtime", toml: "{{ version = \"25\", features = [\"component-model\"] }}"},
@@ -88,11 +81,6 @@ FFI_FEATURED_DEPS :: comptime { [FFIFeaturedDep]{
 // only code that touches its pinned crates.
 FFI_DB_RUNTIME :: comptime { embed_file("Runtime/DB.rs") }
 FFI_PARQUET_RUNTIME :: comptime { embed_file("Runtime/Parquet.rs") }
-FFI_HTTP_CLIENT_RUNTIME :: comptime { embed_file("Runtime/HTTP.rs") }
-// Mozilla Public Suffix List snapshot, IDNA-ToASCII and whitespace compacted
-// (https://publicsuffix.org/list/public_suffix_list.dat, MPL-2.0).
-FFI_HTTP_PUBLIC_SUFFIX_LIST :: comptime { embed_file("Runtime/public_suffix_list.dat") }
-FFI_NET_TLS_RUNTIME :: comptime { embed_file("Runtime/NetTls.rs") }
 FFI_CRYPTO_RUNTIME :: comptime { embed_file("Runtime/Crypto.rs") }
 FFI_OUTCOME_RUNTIME :: comptime { embed_file("Support/jet-foundation/src/Outcome.rs") }
 FFI_RUNTIME_DIAGNOSTIC_CORE :: comptime { embed_file("Support/jet-foundation/src/RuntimeDiagnosticCore.rs") }
@@ -151,15 +139,13 @@ struct RustBridgeNeeds {
     archive: Bool
     db: Bool
     parquet: Bool
-    http_client: Bool
-    net_tls: Bool
     crypto: Bool
     compress: Bool
     plugin: Bool
     secrets: Bool
 
     fn none() -> RustBridgeNeeds Never! {
-        RustBridgeNeeds{regex: false, archive: false, db: false, parquet: false, http_client: false, net_tls: false, crypto: false, compress: false, plugin: false, secrets: false}
+        RustBridgeNeeds{regex: false, archive: false, db: false, parquet: false, crypto: false, compress: false, plugin: false, secrets: false}
     }
 
     // The providers the program's reached Core surfaces select.
@@ -170,8 +156,6 @@ struct RustBridgeNeeds {
             // Byte-source loader calls select the Parquet
             // provider; bare dependency-closure module rows do not.
             if pkg_ffi_needs_parquet_provider(usage) -> needs.parquet = true
-            if pkg_ffi_is_http_client_usage(usage) -> needs.http_client = true
-            if pkg_ffi_needs_net_tls_provider(usage) -> needs.net_tls = true
             if pkg_ffi_is_crypto_usage(usage) -> needs.crypto = true
             // (c81): the sandboxed plugin loader.
             if usage == "core.plugin" || usage.starts_with("core.plugin::") || usage.starts_with("core.plugin.") -> needs.plugin = true
@@ -182,7 +166,7 @@ struct RustBridgeNeeds {
     }
 
     fn any(self) -> Bool Never! {
-        self.regex || self.archive || self.db || self.parquet || self.http_client || self.net_tls || self.crypto || self.compress || self.plugin || self.secrets
+        self.regex || self.archive || self.db || self.parquet || self.crypto || self.compress || self.plugin || self.secrets
     }
 }
 
@@ -190,23 +174,6 @@ struct RustBridgeNeeds {
 fn pkg_ffi_needs_parquet_provider(usage: String) -> Bool Never! {
     parts :: usage.split_once("::") ?? return false
     parts.before == "core.data" || parts.before.starts_with("core.data.")
-}
-
-fn pkg_ffi_needs_net_tls_provider(usage: String) -> Bool Never! {
-    bare := usage
-    if usage.starts_with("__core_source::") {
-        bare = usage.removeprefix("__core_source::")
-    } else if usage.starts_with("__core_intrinsic::") {
-        bare = usage.removeprefix("__core_intrinsic::")
-    }
-    bare == "core.net::tls_connect" || bare == "core.net.tls" || bare.starts_with("core.net.tls::") || bare == "core.email" || bare.starts_with("core.email::")
-}
-
-fn pkg_ffi_is_http_client_usage(usage: String) -> Bool Never! {
-    if usage == {
-        "core.http::get" | "core.http::post" | "core.http::request" -> true
-        else -> usage == "core.http.client" || usage.starts_with("core.http.client::")
-    }
 }
 
 fn pkg_ffi_is_crypto_usage(usage: String) -> Bool Never! {
@@ -224,7 +191,7 @@ fn pkg_ffi_native_cacheable(program: RustBridgeProgram) -> Bool Never! {
     // Whether a program has foreign rows does not depend on the target triple.
     if program.cffi.links_c() || pkg_ffi_collect_externs(program, "").len() > 0 -> return false
     loop usage in program.used_core {
-        if usage == "core.db" || usage.starts_with("core.db::") || pkg_ffi_needs_parquet_provider(usage) || pkg_ffi_is_http_client_usage(usage) || pkg_ffi_needs_net_tls_provider(usage) -> return false
+        if usage == "core.db" || usage.starts_with("core.db::") || pkg_ffi_needs_parquet_provider(usage) -> return false
         if usage == "core.crypto" || usage.starts_with("core.crypto::") || usage == "core.crypto.expert" || usage.starts_with("core.crypto.expert::") || usage == "core.auth" || usage.starts_with("core.auth::") -> return false
         if usage == "core.plugin" || usage.starts_with("core.plugin::") || usage.starts_with("core.plugin.") -> return false
     }

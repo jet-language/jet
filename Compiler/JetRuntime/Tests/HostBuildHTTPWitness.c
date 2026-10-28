@@ -1,5 +1,5 @@
 // Real Jet-only runtime witness for HostBuildHTTP.jet: the checked-build DNS
-// answer as native [[U8]] carriers with the exact HTTP.rs:5536-5712 error text.
+// answer as native [[U8]] carriers with the exact error text of the deleted Rust bridge HTTP.rs (lines 5536-5712).
 // The pinned GET is Jet source; tests/cases/net/build_http_transport covers it.
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>

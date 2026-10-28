@@ -213,7 +213,7 @@ over packed bytes, and a result returns such a buffer with exact capacities.
 `&mut Vec<u8>` kernels likewise lend the caller's own data and length for an
 in-place write. These rows name Jet runtime providers only, and Lower refuses
 a nested carrier without `native_lists`.
-The checked-build DNS answer (`HostBuildHTTP.jet`, HTTP.rs:5536-5712) uses this
+The checked-build DNS answer (`HostBuildHTTP.jet`, ported from the deleted Rust bridge `HTTP.rs`) uses this
 carrier for its resolved addresses. The pinned GET over them is Jet source,
 `core.http.client.jet_http_build_get` (Core/Http/Client.jet): it connects to the
 checked addresses with `core.net`, wraps `https://` in `core.net.tls` with the
