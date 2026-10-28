@@ -1,0 +1,31 @@
+// Claims ported from tests/jetpack_variants.rs
+// `action_key_includes_variant_sysroot_sdk_linker_signing`: the canonical action
+// key must move when the variant, sysroot, sdk, linker, or signing identity moves.
+
+fn variant_test_key(variant: String, sysroot_digest: String, sdk_version: String, linker: String, target_triple: String, signer: String) -[Rand]> String Never! {
+    build := HermeticBuildContext.new()
+    tc_spec := ToolchainSpec.target(target_triple, BuildProvenance.jetpack_dependency("toolchain.{target_triple}#1", LockRecord.new("toolchain:{target_triple}", "sha256:tc")))
+        .with_host_triple("x86_64-linux")
+        .with_sdk(SDKIdentity.new("sdk", sdk_version, BuildProvenance.jetpack_dependency("sdk#{sdk_version}", LockRecord.new("sdk:{sdk_version}", "sha256:sdk-{sdk_version}"))))
+        .with_linker(LinkerIdentity.new(linker, BuildProvenance.jetpack_dependency("{linker}#1", LockRecord.new("linker:{linker}", "sha256:{linker}"))))
+        .with_sysroot(SysrootIdentity.new("sysroot", sysroot_digest, BuildProvenance.jetpack_dependency("sysroot#1", LockRecord.new("sysroot:1", sysroot_digest))))
+    toolchain :: &build.toolchain("cross-tc", tc_spec) ?? panic("declare toolchain")
+    signer_spec := SigningIdentitySpec.new(signer, BuildProvenance.user_declared("keychain:{signer}", Val(LockRecord.new("signing:1", "sha256:sig"))))
+    signing :: &build.signing_identity("signer", signer_spec) ?? panic("declare signing identity")
+    handle :: &build.action("compile", ActionSpec.cached([String]{"jetc", "--emit", "obj"}).with_outputs([String]{"build/out.o"}).with_cap(BuildEffect.Exec).with_toolchain(toolchain).with_signing_identity(signing).with_variant_identity(variant)) ?? panic("declare action")
+    plan :: build.plan() ?? panic("plan")
+    action :: plan.action(handle) ?? panic("action in plan")
+    build_canonical_action_key(plan, action, [ActionInputSnapshot]{})
+}
+
+#Test("action key includes variant sysroot sdk linker signing") {
+    v :: "role=target;os=linux;arch=aarch64;libc=musl"
+    base :: variant_test_key(v, "sha256:sysroot-a", "1", "lld", "aarch64-linux-musl", "developer-id:ACME")
+    assert_eq(base, variant_test_key(v, "sha256:sysroot-a", "1", "lld", "aarch64-linux-musl", "developer-id:ACME"))
+    assert(base != variant_test_key("role=host;os=linux;arch=aarch64;libc=musl", "sha256:sysroot-a", "1", "lld", "aarch64-linux-musl", "developer-id:ACME"))
+    assert(base != variant_test_key(v, "sha256:sysroot-b", "1", "lld", "aarch64-linux-musl", "developer-id:ACME"))
+    assert(base != variant_test_key(v, "sha256:sysroot-a", "2", "lld", "aarch64-linux-musl", "developer-id:ACME"))
+    assert(base != variant_test_key(v, "sha256:sysroot-a", "1", "mold", "aarch64-linux-musl", "developer-id:ACME"))
+    assert(base != variant_test_key(v, "sha256:sysroot-a", "1", "lld", "aarch64-linux-gnu", "developer-id:ACME"))
+    assert(base != variant_test_key(v, "sha256:sysroot-a", "1", "lld", "aarch64-linux-musl", "developer-id:OTHER"))
+}

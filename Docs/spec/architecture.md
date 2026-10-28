@@ -198,7 +198,7 @@ together with the runtime `#Export(c)` they name. After provider admission
 changes, run `Tools/agent/lane-check.sh --runtime-generators` to check the
 generated runtime message tables.
 
-Native `List<U8>` payloads are packed one-byte elements, matching checked
+Native `[U8]` payloads are packed one-byte elements, matching checked
 `StorageLayout(U8)` and the C ABI's `u8` buffer. The runtime's
 `RT_HOST_U8_STRIDE` is 1; byte-list allocation, indexing, copying and freeing
 share that fact across Dyn, files, networking, text, crypto and codecs.
@@ -207,7 +207,7 @@ HTTP Body chunk buffers use the same layout, including borrowed input windows.
 that checks all 256 byte values through List pack/unpack and multi-chunk HTTP
 Body transfer; it rejects an object whose pinned source declares another stride.
 
-A nested `List<List<U8>>` crosses a route only to a Jet runtime provider: the
+A nested `[[U8]]` crosses a route only to a Jet runtime provider: the
 outer data pointer and length address native 24-byte `[len, cap, data]` headers
 over packed bytes, and a result returns such a buffer with exact capacities.
 `&mut Vec<u8>` kernels likewise lend the caller's own data and length for an

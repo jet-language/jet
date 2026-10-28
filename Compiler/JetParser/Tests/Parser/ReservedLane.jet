@@ -1,0 +1,24 @@
+use jet_lexer.[lex, lex_generated]
+use jet_parser.[parse_generated_source]
+use jet_foundation.[ast_comptime_generated_name, ast_comptime_generated_suffix]
+
+// User source may not spell `__` names; compiler-generated source owns that lane.
+#Test("compiler_generated_identifiers_use_the_reserved_lane") {
+    source :: `fn __jet_generated() { print("{__jet_value}") }`
+    user :: lex(source.bytes())
+    reserved := false
+    loop diagnostic in user.diagnostics {
+        if diagnostic.code == "E0067" -> reserved = true
+    }
+    assert(reserved, "user source spelling `__jet_` names is E0067")
+    generated :: lex_generated(source.bytes())
+    assert(generated.diagnostics.is_empty(), "{generated.diagnostics:Debug}")
+    parsed :: parse_generated_source(source.bytes())
+    assert(parsed.diagnostics.is_empty(), "{parsed.diagnostics:Debug}")
+}
+
+#Test("generated_symbol_ladder_has_one_canonical_prefix") {
+    assert_eq(ast_comptime_generated_name("lambda_7"), "__jet_lambda_7")
+    assert_eq(ast_comptime_generated_name("__jet_lambda_7"), "__jet_lambda_7")
+    assert_eq(ast_comptime_generated_suffix("__jet_lambda_7"), "lambda_7")
+}

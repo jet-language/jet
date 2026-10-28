@@ -1,0 +1,66 @@
+// Every typed diagnostic row carries What/Why/Fix prose, the prose opens in
+// sentence case, and the sentence-case projection keeps code fragments, flags,
+// paths, package refs, identifiers and keywords in their own case.
+use jet_foundation.[diagnostic_registry_rows, diagnostic_sentence_case_line]
+
+fn diagnostic_format_any_part_contains(needle: String) -> Bool Never! {
+    loop row in diagnostic_registry_rows() {
+        if row.meaning.contains(needle) || row.what.contains(needle) || row.why.contains(needle) || row.fix.contains(needle) -> return true
+    }
+    false
+}
+
+#Test("every typed diagnostic row is complete") {
+    violations := [String]{}
+    loop row in diagnostic_registry_rows() {
+        if row.what.trim().is_empty() -> &violations.push("{row.code}: What is empty")
+        if row.why.trim().is_empty() -> &violations.push("{row.code}: Why is empty")
+        if row.fix.trim().is_empty() -> &violations.push("{row.code}: Fix is empty")
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+#Test("every typed diagnostic line uses ratified sentence case") {
+    violations := [String]{}
+    loop row in diagnostic_registry_rows() {
+        if diagnostic_sentence_case_line(row.what) != row.what -> &violations.push("{row.code} What: {row.what}")
+        if diagnostic_sentence_case_line(row.why) != row.why -> &violations.push("{row.code} Why: {row.why}")
+        if diagnostic_sentence_case_line(row.fix) != row.fix -> &violations.push("{row.code} Fix: {row.fix}")
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+#Test("diagnostic case validator preserves code fragments and flags") {
+    assert(diagnostic_format_any_part_contains("`--offline` forbids network access"))
+    assert(diagnostic_format_any_part_contains("or `lo > hi` (empty range)"))
+    assert(diagnostic_format_any_part_contains("C-style"))
+    assert(!diagnostic_format_any_part_contains("`--offline` Forbids Network Access"))
+    assert(!diagnostic_format_any_part_contains("or `Lo > Hi` (empty range)"))
+    kept :: [String]{
+        "Int cannot cross the C boundary",
+        "Syntax.jet owns user-typeable syntax",
+        "Bool cannot cross the boundary",
+        "U8 has the wrong width",
+        "src/Main.jet is not reachable",
+        "package@Source#Version is not available",
+        "UserId has no matching field",
+        "fn is the only declaration form",
+        "`TypeName` cannot be constructed here",
+    }
+    loop line in kept -> assert_eq(diagnostic_sentence_case_line(line), line)
+}
+
+#Test("diagnostic case validator excludes non-prose tokens") {
+    kept :: [String]{
+        "UserId has no matching field",
+        "--offline forbids network access",
+        "src/Main.jet is not reachable",
+        "Main.jet is not reachable",
+        "package@Source#Version is not available",
+        "fn is the only declaration form",
+        "{{\"SomeKey\":\"SomeValue\"}}",
+    }
+    loop line in kept -> assert_eq(diagnostic_sentence_case_line(line), line)
+    assert_eq(diagnostic_sentence_case_line("this row opens in prose"), "This row opens in prose")
+    assert_eq(diagnostic_sentence_case_line("  remove the comma"), "  Remove the comma")
+}

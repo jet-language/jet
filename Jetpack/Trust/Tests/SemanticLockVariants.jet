@@ -1,0 +1,48 @@
+// Claims ported from tests/jetpack_variants.rs: declared variant domains are
+// recorded in the semantic lock, written, parsed, and reported as covered.
+use jetpack_trust.[LockRecordKind, SemanticLockFile, trust_parse_semantic_lock, trust_write_semantic_lock]
+use jet_pkg_model.[
+    ARCH_X64, ArtifactKind, PackageVariant, PlatformKey, VariantArch, VariantLibc, VariantLinkage,
+    VariantOS, VariantRole,
+]
+
+#Test("semantic lock covers declared variant domains") {
+    need :: PackageVariant.cross_target(VariantOS.Linux, VariantArch.Aarch64, VariantLibc.Musl).with_linkage(VariantLinkage.Static)
+    native :: PackageVariant.defaults_for_context(PlatformKey{arch: ARCH_X64, os: "linux"})
+    lock := SemanticLockFile.empty()
+    &lock.record_selected_variant("openssl", need.identity_key(), "sha256:openssl-cross", "exact match for static musl aarch64")
+    &lock.record_selected_variant("zlib", native.identity_key(), "sha256:zlib-native", "host default")
+    domains :: lock.locked_variant_domains()
+    assert(domains.contains(need.identity_key()))
+    assert(domains.contains(native.identity_key()))
+    assert_eq(PackageVariant.missing_lock_domains([PackageVariant]{need, native}, domains), [String]{})
+    missing :: PackageVariant.missing_lock_domains([PackageVariant]{need, PackageVariant.cross_target(VariantOS.Windows, VariantArch.X64, VariantLibc.Msvc)}, domains)
+    assert_eq(missing.len(), 1)
+    assert(missing[0].contains("os=windows"))
+    text :: trust_write_semantic_lock(lock)
+    assert(text.contains("kind = \"variant\""))
+    parsed :: trust_parse_semantic_lock(text)
+    assert_eq(parsed.records.len(), 2)
+    loop record in parsed.records {
+        assert(record.identity.kind == LockRecordKind.Variant)
+    }
+}
+
+#Test("native cross toolchain building remote and emulator domains") {
+    // Five declared domains, all lockable.
+    native :: PackageVariant.defaults_for_context(PlatformKey{arch: ARCH_X64, os: "linux"}).with_role(VariantRole.Host)
+    cross :: PackageVariant.cross_target(VariantOS.Linux, VariantArch.Aarch64, VariantLibc.Musl)
+    toolchain_building :: PackageVariant.defaults_for_context(PlatformKey{arch: ARCH_X64, os: "linux"})
+        .with_role(VariantRole.Build)
+        .with_artifact(ArtifactKind.DevTool)
+    remote_target :: PackageVariant.cross_target(VariantOS.Linux, VariantArch.X64, VariantLibc.Gnu).with_feature("remote-builder")
+    emulator :: PackageVariant.cross_target(VariantOS.Linux, VariantArch.Aarch64, VariantLibc.Gnu).with_feature("emulator")
+    declared :: [PackageVariant]{native, cross, toolchain_building, remote_target, emulator}
+    lock := SemanticLockFile.empty()
+    &lock.record_selected_variant("app", native.identity_key(), "sha256:app", "native host domain")
+    &lock.record_selected_variant("app-cross", cross.identity_key(), "sha256:app-cross", "cross domain")
+    &lock.record_selected_variant("toolchain", toolchain_building.identity_key(), "sha256:toolchain", "toolchain building domain")
+    &lock.record_selected_variant("remote", remote_target.identity_key(), "sha256:remote", "remote target domain")
+    &lock.record_selected_variant("emulator", emulator.identity_key(), "sha256:emulator", "emulator domain")
+    assert_eq(PackageVariant.missing_lock_domains(declared, lock.locked_variant_domains()), [String]{})
+}

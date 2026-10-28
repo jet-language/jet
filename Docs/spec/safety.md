@@ -2737,7 +2737,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
       "line": 138,
       "column": 5,
-      "reason": "output lends a 24-byte native List<U8> header and receives ownership of data"
+      "reason": "output lends a 24-byte native [U8] header and receives ownership of data"
     },
     {
       "package": "Compiler",
@@ -3192,7 +3192,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "file": "Compiler/JetRuntime/Source/Secret.jet",
       "line": 124,
       "column": 5,
-      "reason": "bytes is the moved native List<U8> header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material"
+      "reason": "bytes is the moved native [U8] header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material"
     },
     {
       "package": "Compiler",

@@ -4,7 +4,7 @@ This page is the registry for environment variables that configure Jet tools,
 generated Jet programs, and repository verification. It is for users writing
 reproducible automation and maintainers passing explicit state to child
 processes. Command-line flags remain the normal user interface. The executable
-name checks are in [`tests/syntax_reconciliation.rs`](../../../tests/syntax_reconciliation.rs),
+name checks are in [`tests/guards/syntax_reconciliation.jet`](../../../tests/guards/syntax_reconciliation.jet),
 the effect surface is
 [`EffectsSurface.jet`](../../../Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet),
 and the verification defaults are in

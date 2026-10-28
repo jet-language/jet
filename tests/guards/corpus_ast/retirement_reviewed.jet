@@ -2,7 +2,7 @@ use core.files as s6_retirement_reviewed_files
 use corpus_manifest.policy_split_whitespace
 use jet_lexer.[lex, Token, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL, TOKEN_KW_IT, TOKEN_SELF, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_PLUS_PLUS, TOKEN_MINUS_MINUS, TOKEN_GT, TOKEN_SHR, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_STAR, TOKEN_KW_FN, TOKEN_BANG, TOKEN_QUESTION, TOKEN_HASH, TOKEN_UNIFIED_ARROW, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_EOF]
 
-// Exact source-law algorithms tests/retirement_ratchet.rs:127-164,195-717.
+// Failure-surface source law: walk boundaries, fenced and embedded fragments.
 // Token facts use the compiler lexer, never a text substitute.
 struct S6RetirementReviewedFragment { first_line: Int source: String }
 struct S6RetirementReviewedHit { line: Int spelling: String }
@@ -323,7 +323,7 @@ fn s6_retirement_reviewed_failure_skip(path: String) -> Bool {
 }
 
 fn s6_retirement_reviewed_allowlisted(path: String) -> Bool {
-    path == "Docs/spec/syntax-decisions.md" || path == "Docs/spec/contributing/agent-engineering.md" || path == "Docs/spec/reference/prior-art.md" || path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") || path.starts_with("Docs/research/") || path.starts_with("Tools/agent-eval/domain-foundations/") || path.starts_with("tests/ui/") || path.starts_with("tests/fuzz/") || path == "tests/syntax_reconciliation.rs" || path == "Tools/notebook-test/acceptance.mjs" || path == "Compiler/Prelude/Diagnostics.jet" || path == "crates/jet-parser/src/Parser/mod.rs" || path == "tests/fmt.rs" || path == "tests/retirement_ratchet.rs"
+    path == "Docs/spec/syntax-decisions.md" || path == "Docs/spec/contributing/agent-engineering.md" || path == "Docs/spec/reference/prior-art.md" || path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") || path.starts_with("Docs/research/") || path.starts_with("Tools/agent-eval/domain-foundations/") || path.starts_with("tests/ui/") || path.starts_with("tests/fuzz/") || path == "tests/guards/syntax_reconciliation.jet" || path == "Tools/notebook-test/acceptance.mjs" || path == "Compiler/Prelude/Diagnostics.jet" || path == "crates/jet-parser/src/Parser/mod.rs" || path == "tests/fmt.rs"
 }
 
 fn s6_retirement_reviewed_scan_file(path: String, offenders: &[String]) {

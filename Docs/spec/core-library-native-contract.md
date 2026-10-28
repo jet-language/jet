@@ -683,7 +683,7 @@ runtime. Until formatter issue #4770 is fixed, diff-scoped formatting receipts
 preserve those declarations rather than accepting empty import bodies or
 rewriting the registry as an immutable binding.
 
-At native C byte boundaries, `List<U8>` retains its word-stride layout.
+At native C byte boundaries, `[U8]` retains its word-stride layout.
 `jet_rt_bytes_pack` borrows that header and returns an independently owned
 packed byte buffer; `jet_rt_bytes_free` releases it with its original length
 and alignment one. Empty packed bytes use the non-null dangling pointer `1`
