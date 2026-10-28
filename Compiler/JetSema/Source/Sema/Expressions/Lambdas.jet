@@ -1597,6 +1597,7 @@ fn sema_expression_lambda_install_loop_label(lambda: &Lambda, label: NamedSpan) 
                 else -> {}
             }
             if old_label == .Val(old) && old != label.name -> sema_expression_lambda_rewrite_loop_label(&updated_statements, old, label.name)
+            lambda.body = LambdaBody.Block{body: updated_statements}
         }
         else -> {}
     }
@@ -1843,7 +1844,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     // too, even when that use stops this body's check with its E0121.
     body_result_ty := Type.Named{name: "Unit"}
     executable := TLambdaBody?{None}
-    if lambda.body == {
+    if lambda_work.body == {
         .Expr(value) -> {
             checked_value := sema_check_expression(value, sema_expression_lambda_value_expected(value, body_expected, expected_ret, environment, lambda_scopes), environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
             sema_ownership_keep_share_found(&state, lambda_state)

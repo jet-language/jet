@@ -118,7 +118,7 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
     started :: time.instant()
     child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
-    (done, watching) :: channel<Int>()
+    { sender: done, receiver: watching } :: channel<Int>()
     watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, watching)
     input_error := ""
     child.stdin.write(stdin) ?? {

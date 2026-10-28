@@ -20,7 +20,7 @@ use jet_foundation.[CtValue]
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web.{{ region: base + 2, base: 40 }}\n    }}\n}}\n"
     plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("fleet override evaluates")
     override_plan :: plan.fleets[0].hosts[0].overrides ?? panic("host has an override")
-    (_, first) :: override_plan.fields[0]
+    { name: _, value: first } :: override_plan.fields[0]
     assert(if first == { .Value(value) -> value == CtValue.Int(42) else -> false })
     found := false
     loop region in override_plan.provenance {
@@ -39,7 +39,7 @@ use jet_foundation.[CtValue]
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web.{{ options: [network.hostName: laptop, filesystem.timeZone: \"UTC\", tuning.retries: base + 1], base: 4 }}\n    }}\n}}\n"
     plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("fleet options evaluate")
     override_plan :: plan.fleets[0].hosts[0].overrides ?? panic("host has an override")
-    (_, first) :: override_plan.fields[0]
+    { name: _, value: first } :: override_plan.fields[0]
     options :: if first == { .Options(options) -> options else -> panic("expected options override") }
     assert_eq(options.len(), 3)
     assert_eq(options[0].key, "network.hostName")

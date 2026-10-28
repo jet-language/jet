@@ -1881,6 +1881,29 @@ fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
     None
 }
 
+// The visible binding name nearest `name`, for an unknown name's fix: at most
+// a third of its length away (one edit for short names), nearer frames first.
+fn sema_scope_closest_visible_name(table: SemaScopeTable, name: String) -> String? {
+    limit :: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
+    best := String?{None}
+    best_distance := limit + 1
+    frame := table.current
+    loop frame >= 0 {
+        loop index in 0..<table.bindings.len() {
+            if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin -> next
+            candidate :: table.bindings[index].symbol.name
+            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") -> next
+            distance :: sema_taint_edit_distance(name, candidate)
+            if distance < best_distance {
+                best_distance = distance
+                best = Val(candidate.copy())
+            }
+        }
+        frame = table.frames[frame].parent
+    }
+    best
+}
+
 // The binding of `name` visible at `use_span`. Inside a body a binding is
 // visible only after its declaration, except in a position-free table (a
 // contract condition). Module-level bindings (the root frame:

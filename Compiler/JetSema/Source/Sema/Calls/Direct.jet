@@ -241,16 +241,29 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     local :: checked_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span)
     read :: sema_tir_node(checked.ty, TExprKind.Local{local: local}, call.name_span)
     line :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
-    record :: core_call("core.term", "eprint") ?? {
-        &diagnostics.push(sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route"))
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
+    unavailable :: sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route")
     unit :: Type.Named{name: "Unit"}
     // The trace adds no effect: its stderr write is a known-pure call site, so
     // pure (`-[]>`) and memoized functions keep their rows (Rust sema records
     // no effect for `debug`).
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "debug", call.name_span, [EffectRowEntry]{}, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    write :: sema_tir_node(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, fallibility: TFailureCarrier.Infallible}, call.name_span)
+    // The stderr write is the registered host row when one exists, else the
+    // source-owned `core.term.eprint` declaration.
+    write_kind := TExprKind?{None}
+    if core_call("core.term", "eprint") == .Val(record) {
+        write_kind = Val(TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, fallibility: TFailureCarrier.Infallible})
+    } else if sema_call_core_module_identity(environment, program, "core.term") == .Val(identity) {
+        if sema_call_core_source_target(environment, program, identity, "eprint", [Type]{}, call.name_span, false, &diagnostics) == .Val(target) {
+            callee :: sema_call_callee_decl(program, target.symbol.id, call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+            argument :: TCallArg{value: line, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            write_kind = Val(TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}})
+        }
+    }
+    kind :: write_kind ?? {
+        &diagnostics.push(unavailable)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    write :: sema_tir_node(unit, kind, call.name_span)
     body :: [TStmt]{
         TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
         TStmt.ExprStmt{value: write, span: call.name_span},
@@ -291,24 +304,50 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
         "eprint" -> {
             if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
             if core_call("core.term", "eprint") == .Val(record) -> return sema_call_check_term_eprint(record, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            // A source-owned `core.term.eprint` is called as the item import
-            // the prelude opens: its checked source declaration is the target.
-            module_identity :: sema_call_core_module_identity(environment, program, "core.term") ?? return SemaDirectSpecialCheck{handled: false, value: None}
-            target :: sema_call_core_source_target(environment, program, module_identity, "eprint", call.type_args, call.name_span, false, &diagnostics) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-            scopes.ownership_call_depth += 1
-            value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            scopes.ownership_call_depth -= 1
-            SemaDirectSpecialCheck{handled: true, value: value}
+            sema_call_ambient_source_alias(call, "core.term", "eprint", expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
+        // The readable prelude's file aliases (`read_file`, `write_file`,
+        // `file_exists`) call their `core.files` declarations.
+        "read_file" | "write_file" | "file_exists" -> {
+            if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            member :: if call.name == {
+                "read_file" -> "read"
+                "write_file" -> "write"
+                else -> "exists"
+            }
+            sema_call_ambient_source_alias(call, "core.files", member, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        // The benchmark identity sink `keep(value)` calls `core.prelude.keep`.
+        "keep" -> sema_call_ambient_source_alias(call, "core.prelude", "keep", expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {
             if !sema_expr_is_math_type_name(call.name) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            // A math type Core's source declares builds through its own `new`.
+            if program.registration_graph == .Val(graph) {
+                if sema_type_source_owns_nominal(graph, call.name, sema_scope_caller_row(environment, graph)) {
+                    // copy: the generated call owns its arguments; `call` keeps the written ones.
+                    invocation :: Expr.MethodCall{receiver: Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, method: "new", method_span: call.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call.args.copy(), id: AST_NODE_GENERATED}
+                    return SemaDirectSpecialCheck{handled: true, value: sema_check_expression(invocation, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
+                }
+            }
             components := [Type]{}
             loop _ in 0..<sema_call_math_arity(call.name) -> &components.push(sema_call_math_scalar_type(call.name))
             sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
+}
+
+// A readable prelude alias whose Core declaration is source-owned is called as
+// the item import the prelude opens: its checked source declaration is the
+// target.
+fn sema_call_ambient_source_alias(call: Call, module_name: String, member: String, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    module_identity :: sema_call_core_module_identity(environment, program, module_name) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    target :: sema_call_core_source_target(environment, program, module_identity, member, call.type_args, call.name_span, false, &diagnostics) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.ownership_call_depth -= 1
+    SemaDirectSpecialCheck{handled: true, value: value}
 }
 
 // (Rust `check_call_inner`): `close(^value)` is ambient
@@ -331,7 +370,7 @@ fn sema_call_check_ambient_close(call: Call, environment: SemaScopeEnvironment, 
         satisfies_close :: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params) ?? return None
         if !satisfies_close {
             shown :: type_name(value.ty)
-            &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}: Close {{ … }}` with every required method"))
+            &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
             return None
         }
     }

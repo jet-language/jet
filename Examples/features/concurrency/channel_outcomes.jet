@@ -19,7 +19,7 @@ fn fill_then_block(tx: Sender<Int>) -> Int {
 }
 
 fn orphan_sender() -> Sender<Int> {
-    (tx, _rx) :: channel<Int>(capacity: 1)
+    { sender: tx, receiver: _rx } :: channel<Int>(capacity: 1)
     tx
 }
 
@@ -34,13 +34,13 @@ fn failure_label(error: TaskFailure) -> String {
 fn run() {
     // An omitted capacity creates an unbounded channel; invalid explicit
     // capacities are diagnosed or stop before a channel is constructed.
-    (ztx, zrx) :: channel<Int>()
+    { sender: ztx, receiver: zrx } :: channel<Int>()
     ztx.send(10)
     print("unbounded: send returned before any receive")
     print(zrx.try_receive() ?? -1)
 
     // Capacity 1 holds one value; a second sender waits for the slot.
-    (ftx, frx) :: channel<Int>(capacity: 1)
+    { sender: ftx, receiver: frx } :: channel<Int>(capacity: 1)
     ftx.send(1)
     print("capacity 1 full: ready={frx.is_ready()}")
     filler :: task second_send(ftx)
@@ -49,7 +49,7 @@ fn run() {
     print(frx.try_receive() ?? -1)
 
     // A send after close returns normally and the value is dropped.
-    (ctx, crx) :: channel<Int>(capacity: 2)
+    { sender: ctx, receiver: crx } :: channel<Int>(capacity: 2)
     ctx.send(7)
     ctx.close()
     ctx.send(8)
@@ -63,7 +63,7 @@ fn run() {
     print("send after receiver drop returned (silent)")
 
     // A task parked on a full channel is cancelled at that wait point.
-    (btx, brx) :: channel<Int>(capacity: 1)
+    { sender: btx, receiver: brx } :: channel<Int>(capacity: 1)
     blocked :: task fill_then_block(btx)
     loop {
         if brx.is_ready() -> break
@@ -76,7 +76,7 @@ fn run() {
     }
     print(brx.try_receive() ?? -1)
 
-    (rtx, rrx) :: channel<Int>(capacity: 1)
+    { sender: rtx, receiver: rrx } :: channel<Int>(capacity: 1)
     rtx.close()
     print("receive after close = {rrx.receive() ?? -1}")
 }

@@ -3172,7 +3172,7 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
             field_type_name :: type_name(graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty)
             satisfied :: sema_type_bound_satisfied(graph, graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty, trait_name, module_row.module_identity) ?? true
             if !satisfied {
-                &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}: {trait_name}` on the field's type, or choose a different field"))
+                &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}.{trait_name}` on the field's type, or choose a different field"))
             }
             return
         }

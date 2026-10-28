@@ -1619,9 +1619,27 @@ fn jfmt_fmt_bind_pattern(f: &JetFmt, pat: BindPattern) {
             jfmt_write(&f, "]")
         }
         .Tuple(elems, _) -> {
-            jfmt_write(&f, "(")
-            jfmt_fmt_bind_names(&f, elems)
-            jfmt_write(&f, ")")
+            renamed := false
+            loop elem in elems {
+                if elem.rename != None -> renamed = true
+            }
+            if !renamed {
+                jfmt_write(&f, "(")
+                jfmt_fmt_bind_names(&f, elems)
+                jfmt_write(&f, ")")
+                return
+            }
+            // `{ member: local, … }` renames tuple members.
+            jfmt_write(&f, "{{ ")
+            loop index in 0..<elems.len() {
+                if index > 0 -> jfmt_write(&f, ", ")
+                jfmt_write(&f, elems[index].name)
+                if elems[index].rename == .Val(rename) {
+                    jfmt_write(&f, ": ")
+                    jfmt_write(&f, rename.name)
+                }
+            }
+            jfmt_write(&f, " }}")
         }
         .Refutable(_, _, _, _) -> panic("refutable bindings use statement syntax")
     }

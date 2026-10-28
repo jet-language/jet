@@ -46,7 +46,7 @@ fn lsp_build_graph_json(snapshot: JetDriverQuerySnapshot, path: OSPath, text: St
 fn lsp_script_authority_repair(path: OSPath, text: String, checked: JetDriverCompilerCheckResult, authority: ApplicationAuthority) -> Diagnostic? Never! {
     if checked.graph == None || checked.registration == None -> return None
     if !authority.is_application_default() -> return None
-    if pkg_extract_inline_package(text) != .Ok(.None) -> return None
+    if pkg_extract_inline_package(text) != .None -> return None
     program :: checked.effect_budget_program ?? return None
     summaries :: checked.effect_budget_summaries ?? return None
     projection :: pkg_project_program_effects(program, summaries, "run", None)

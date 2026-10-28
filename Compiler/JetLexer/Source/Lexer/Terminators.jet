@@ -409,6 +409,28 @@ fn place_mark_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
+// `{ member: local, … } :: tuple` at line start renames tuple members, so
+// it begins a statement rather than continuing the line above.
+fn tuple_rename_starts_at(facts: [Int], index: Int) -> Bool Never! {
+    if kind_at(facts, index + 1) != K_IDENT -> return false
+    depth := 0
+    at := index
+    loop at * 4 < facts.len() {
+        kind :: kind_at(facts, at)
+        if kind == K_EOF -> return false
+        if kind == K_LBRACE -> depth += 1
+        if kind == K_RBRACE {
+            depth -= 1
+            if depth == 0 {
+                after :: kind_at(facts, at + 1)
+                return after == K_COLON_COLON || after == K_COLON_EQ
+            }
+        }
+        at += 1
+    }
+    false
+}
+
 fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
@@ -445,6 +467,11 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
                                 else -> false
                             }
                             if {
+                                kind == K_LBRACE && tuple_rename_starts_at(facts, index) -> {
+                                    &events.push(1)
+                                    &events.push(index)
+                                    &events.push(end)
+                                }
                                 split && previous == K_RPAREN -> {
                                     &events.push(2)
                                     &events.push(index)

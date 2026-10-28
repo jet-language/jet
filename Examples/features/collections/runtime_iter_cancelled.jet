@@ -74,8 +74,8 @@ fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> B
 }
 
 fn run() {
-    (start_tx, start_rx) :: channel<Int>(capacity: 1)
-    (block_tx, block_rx) :: channel<Int>(capacity: 1)
+    { sender: start_tx, receiver: start_rx } :: channel<Int>(capacity: 1)
+    { sender: block_tx, receiver: block_rx } :: channel<Int>(capacity: 1)
     worker :: task mapped_worker(start_tx, block_rx)
     start_rx.receive() ?? panic("worker did not reach map callback")
     worker.cancel()
@@ -91,8 +91,8 @@ fn run() {
     }
     // Keep the blocking sender live until after cancellation has been joined.
     block_tx.close()
-    (loop_start_tx, loop_start_rx) :: channel<Int>(capacity: 1)
-    (loop_block_tx, loop_block_rx) :: channel<Int>(capacity: 1)
+    { sender: loop_start_tx, receiver: loop_start_rx } :: channel<Int>(capacity: 1)
+    { sender: loop_block_tx, receiver: loop_block_rx } :: channel<Int>(capacity: 1)
     loop_worker :: task looped_worker(loop_start_tx, loop_block_rx)
     loop_start_rx.receive() ?? panic("loop did not reach map callback")
     loop_worker.cancel()
@@ -108,8 +108,8 @@ fn run() {
     }
     loop_block_tx.close()
     loop family in 0..<14 {
-        (family_start_tx, family_start_rx) :: channel<Int>(capacity: 1)
-        (family_block_tx, family_block_rx) :: channel<Int>(capacity: 1)
+        { sender: family_start_tx, receiver: family_start_rx } :: channel<Int>(capacity: 1)
+        { sender: family_block_tx, receiver: family_block_rx } :: channel<Int>(capacity: 1)
         family_task :: task family_worker(family, family_start_tx, family_block_rx)
         family_start_rx.receive() ?? panic("family did not reach callback")
         family_task.cancel()

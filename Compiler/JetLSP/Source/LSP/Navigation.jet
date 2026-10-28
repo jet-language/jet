@@ -122,7 +122,7 @@ fn enum_variant_leaf_span(db: SymbolDB, reference: SymRef, identity: String) -> 
 
 // Rust: Source/LSP/Features.rs:1975
 fn checked_semantic_identity_at(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> String? {
-    if checked_identity_in_span(db, path, offset, offset) == .Ok(.Val(identity)) -> return Val(identity)
+    if checked_identity_in_span(db, path, offset, offset) == .Val(identity) -> return Val(identity)
     if enum_variant_identity_at(db, tokens, path, offset) == .Val(identity) -> return Val(identity)
     receiver :: compiler_fact_receiver_span(tokens, offset) ?? return None
     checked_identity_in_span(db, path, receiver.start, receiver.end).ok().flatten()
@@ -132,7 +132,7 @@ fn checked_semantic_identity_at(db: SymbolDB, tokens: [Token], path: String, off
 fn checked_rename_span_at(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> (String, Span)? {
     identity :: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
     span := None
-    if checked_reference_in_span(db, path, offset, offset) == .Ok(.Val(reference)) {
+    if checked_reference_in_span(db, path, offset, offset) == .Val(reference) {
         if reference.target == .Val(target) && target.kind == "state" {
             span = state_leaf_span(reference)
         } else if is_enum_variant_identity(db, identity) {
@@ -309,7 +309,7 @@ fn generated_definition_for_reference(db: SymbolDB, declarations: [GeneratedDecl
 // Rust: Source/LSP/Features.rs:2303
 fn compute_definition(db: SymbolDB, tokens: [Token], _src: String, path: String, offset: USize) -> (String, Span)? {
     identity :: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
-    if checked_reference_in_span(db, path, offset, offset) == .Ok(.Val(reference)) {
+    if checked_reference_in_span(db, path, offset, offset) == .Val(reference) {
         if reference.target == .Val(target) {
             if checked_anchor_identity(db, target) == Val((identity)) -> return Val((_0: target.module_path.copy(), _1: target.def_span.into()))
         }
@@ -402,12 +402,12 @@ fn compute_rename(db: SymbolDB, tokens: [Token], path: String, offset: USize, ne
     if is_keyword(name) -> return Err("`${name}` is a keyword and cannot be renamed")
     identity :: checked_semantic_identity_at(db, tokens, path, offset).ok_or_else(() -> { "identifier has no checked semantic target" })
     alias_target :: if checked_reference_in_span(db, path, offset, offset) == {
-        .Ok(.Val(reference)) -> reference.target.filter((target) -> { target.kind == "import_alias" }).and_then((target) -> {
+        .Val(reference) -> reference.target.filter((target) -> { target.kind == "import_alias" }).and_then((target) -> {
             result := target
             result.semantic_identity = Val(checked_anchor_identity(db, result) ?? return None)
             Val(^result)
         })
-        .Ok(.None) -> checked_definition_in_span(db, path, offset, offset).ok().flatten().filter((definition) -> { definition.identity.starts_with("import:") }).map((definition) -> {
+        .None -> checked_definition_in_span(db, path, offset, offset).ok().flatten().filter((definition) -> { definition.identity.starts_with("import:") }).map((definition) -> {
             DefinitionAnchor{module_path: definition.module_path, kind: "import_alias", def_span: definition.def_span.into(), semantic_identity: Val(definition.identity)}
         })
         .Err(_) -> None

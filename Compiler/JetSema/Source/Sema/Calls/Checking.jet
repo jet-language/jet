@@ -19,6 +19,7 @@ use jet_foundation.[
     TLetTy,
     Type,
     ast_empty_call_arg_flags,
+    diagnostic_registry_row,
     expr_span,
     symbol_id,
     checked_symbol_local,
@@ -440,6 +441,17 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
 // E0112 about the call, after a checked typed-text rejection.
 fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    // A value of a type that does not implement the one trait a trait-value
+    // parameter names is the missing implementation, not a type mismatch.
+    if required == .TraitObject(bounds) {
+        if bounds.len() == 1 && !(offered == .TraitObject(_)) {
+            bound := bounds[0]
+            if bound.cut_last("::") == .Val(parts) -> bound = parts.after
+            name :: type_name(offered)
+            row :: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+            return sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why}}", "`{name}` would need to implement `{bound}` before it can be used here"), row.fix.replace("{{fix}}", "write `impl {name}.{bound} {{ … }}` with every required method"))
+        }
+    }
     sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
 }
 
@@ -787,7 +799,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
 // lowering happens only after the ownership check accepts and completes.
 // Return the lowered arguments together with the declaration-slot
 // temporaries placed before the call.
-fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (args: [TCallArg], pins: [TStmt])? {
+fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (lowered: [TCallArg], pins: [TStmt])? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
@@ -795,5 +807,5 @@ fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: Str
     if !sema_call_prepare_variadic_elements(typed, params, args, &lowered, environment, program, &scopes, &state, &context, &diagnostics) -> return None
     pins := sema_call_pin_binder_arguments(typed, params, &lowered, environment, program, scopes, span)
     packed :: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return None
-    Val((args: ^packed, pins: ^pins))
+    Val((lowered: ^packed, pins: ^pins))
 }

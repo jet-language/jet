@@ -80,6 +80,7 @@ use jet_foundation.[
     PlaceAccess,
     TTryConvert,
     ast_empty_lambda_meta,
+    core_module_has_type,
 ]
 
 // A checked node of `kind`. The kind moves in: callers build it as a literal
@@ -1208,6 +1209,19 @@ fn sema_expr_is_math_type_name(name: String) -> Bool Never! {
     name == "I8x32" || name == "U8x32"
 }
 
+// The math type a value of `ty` is: its bare name (`Vec3`), also when the
+// type carries the Core declaration's canonical identity
+// (`<corelib>/core.math::Vec3`), as an operator hook's return does.
+fn sema_expr_math_leaf_name(ty: Type) -> String? {
+    name :: sema_expr_type_base_name(ty) ?? return None
+    if sema_expr_is_math_type_name(name) -> return Val(name)
+    if !name.starts_with("<corelib>/") -> return None
+    parts :: name.split("::").to_list()
+    leaf :: parts[parts.len() - 1]
+    if sema_expr_is_math_type_name(leaf) -> return Val(leaf)
+    None
+}
+
 fn sema_expr_math_scalar_operand(ty: Type) -> Bool Never! {
     if ty == Type.Int || ty == Type.Float || ty == Type.Float32 -> return true
     if ty == .IntN(_, _) -> return true
@@ -1486,6 +1500,22 @@ struct SemaExprDistinctFacts {
     base: Type
     numeric: Bool
     range: TIntegerBounds?
+}
+
+// A quantity unit type's declared base: `.raw()` extracts its unchanged
+// magnitude.
+fn sema_expr_quantity_raw_base(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
+    if ty == .Quantity(base, _) -> return Val(base)
+    if sema_expr_unit_fact(ty, environment, program) != None -> return Val(Type.Float)
+    name :: if ty == {
+        .Named(value) -> value
+        else -> { return None }
+    }
+    owner :: sema_expression_type_symbol(&scopes, environment, program, name) ?? return None
+    definition_value :: sema_scope_declaration_distinct(environment, program, owner.id) ?? return None
+    if definition_value.quantity == None -> return None
+    if program.registration_graph == .Val(graph) -> return Val(sema_type_resolve_declared(graph, definition_value.base, owner.module_name))
+    Val(definition_value.base)
 }
 
 fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaExprDistinctFacts? {
@@ -3049,14 +3079,23 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
         if http.handled -> return http
     }
 
-    owner :: if receiver == {.Ident(name, _, _) -> name else -> ""}
+    owner := if receiver == {.Ident(name, _, _) -> name else -> ""}
+    // `alias.Type.method(...)` names the same Core owner as bare `Type` when the
+    // aliased Core module exports that type.
+    qualified_owner := false
+    if alias != "" && sema_expr_core_module_alias_visible(alias, scopes) && receiver == .Field(_, leaf, _, _) {
+        if sema_call_core_import_module(environment, program, alias) == .Val(module_name) && core_module_has_type(module_name, leaf) {
+            owner = leaf
+            qualified_owner = true
+        }
+    }
     // The Prelude `FieldError.under` framing helper
     // (Rust checks it by owner name before any user lookup).
     if owner == "FieldError" && method == "under" -> return sema_data_check_field_error_under(args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     // Rust `core_type_known`: a prelude core type (`Reader`, `Dyn`, …)
     // needs no `use`, so an unbound owner reaches the reserved constructors
     // too; each route matches only its own owner names.
-    if owner != "" && (sema_scope_resolve_index(scopes, owner) == None || sema_expr_canonical_type_binding(owner, scopes)) {
+    if owner != "" && (qualified_owner || sema_scope_resolve_index(scopes, owner) == None || sema_expr_canonical_type_binding(owner, scopes)) {
         stream := sema_call_try_stream_handle_static(owner, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if stream.handled -> return stream
         time := sema_call_try_time_static_method(owner, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3596,7 +3635,7 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
 
 fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     index :: sema_scope_resolve_index(scopes, name) ?? {
-        &diagnostics.push(sema_unknown_name(name, span))
+        &diagnostics.push(sema_unknown_name_in(name, span, scopes))
         return None
     }
     ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
@@ -3764,6 +3803,10 @@ fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: 
     probe_diagnostics := [Diagnostic]{}
     probed :: sema_probe_expression(right, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
     if sema_expr_measurement_type(probed.ty) || ((op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(probed.ty, environment, program)) -> return Val(Type.Float)
+    // A scalar scales a math value by its lane scalar (`2.0 * v`).
+    if op == BinOp.Mul || op == BinOp.Div {
+        if sema_expr_math_leaf_name(probed.ty) == .Val(math) -> return Val(sema_call_math_scalar_type(math))
+    }
     None
 }
 
@@ -3775,6 +3818,10 @@ fn sema_expr_decimal_rhs_expected(op: BinOp, lhs: Type, environment: SemaScopeEn
     if sema_expr_measurement_type(lhs) -> return Val(Type.Float)
     if sema_dyn_is_type(sema_expr_expected_type(lhs, environment, program)) -> return Val(Type.Float)
     if (op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(lhs, environment, program) -> return Val(Type.Float)
+    // A math value scales by its lane scalar (`v * 2.0`).
+    if op == BinOp.Mul || op == BinOp.Div {
+        if sema_expr_math_leaf_name(lhs) == .Val(math) -> return Val(sema_call_math_scalar_type(math))
+    }
     // Any other left type is no Float carrier, so the literal stays Decimal
     // and the operator check reports the pairing.
     if lhs == Type.Float || lhs == Type.Float32 -> return Val(lhs)
@@ -4225,7 +4272,7 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
         return sema_expr_expected_owned(sema_tir_expr(ty, kind, span), expected, environment, program, &diagnostics)
     }
     if sema_scope_resolve_index(scopes, name) == None {
-        if scopes.comptime_execution_depth == 0 -> &diagnostics.push(sema_unknown_name(name, span))
+        if scopes.comptime_execution_depth == 0 -> &diagnostics.push(sema_unknown_name_in(name, span, scopes))
         return None
     }
     sema_expr_check_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics)

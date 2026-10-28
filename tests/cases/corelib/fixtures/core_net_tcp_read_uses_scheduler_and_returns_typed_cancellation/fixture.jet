@@ -6,7 +6,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    (ready_tx, ready_rx) :: channel<Int>()
+    { sender: ready_tx, receiver: ready_rx } :: channel<Int>()
     server :: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)

@@ -345,7 +345,7 @@ fn lsp_checked_subject_type_name(db: SymbolDB, tokens: [Token], path: String, su
     if subject_index >= tokens.len() -> return None
     span :: tokens[subject_index].span
     checked :: lsp_checked_identity_in_span(db, path, span.start, span.end)
-    if checked == .Ok(.Val(identity)) {
+    if checked == .Val(identity) {
         loop definition in db.defs {
             if definition.identity != identity -> next
             if lsp_type_name_from_kind(definition.kind) == .Val(name) -> return Val(name)

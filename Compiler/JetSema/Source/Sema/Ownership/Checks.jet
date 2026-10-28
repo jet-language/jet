@@ -644,6 +644,22 @@ fn sema_ownership_binding_is_edit_shared_guard(binding: SemaScopeBinding) -> Boo
     false
 }
 
+// A write through the `.value` of a guard taken in the same statement
+// (`store.guard_edit().value.items[key] = text`): the edit permit lives to
+// the end of the statement, so the write reaches the cell without a binding.
+fn sema_ownership_writes_temporary_edit_guard(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Field(base, member, _, _) -> {
+            if member == "value" {
+                if base == .MethodCall(_, method, _, _, _, args, _) -> return method == "guard_edit" && args.len() == 0
+            }
+            sema_ownership_writes_temporary_edit_guard(base)
+        }
+        .Index(base, _, _, _, _) | .Paren(base, _, _) | .Place(base, _, _, _) -> sema_ownership_writes_temporary_edit_guard(base)
+        else -> false
+    }
+}
+
 // Rust `place_reads_untagged_or_read_shared_guard`: a write that reaches a
 // `.value` held by an untagged or `guard_read()` SharedGuard. A write
 // parameter root keeps its caller-granted capability. The guard type is
@@ -2078,6 +2094,7 @@ fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Expr, s
     if sema_ownership_report_invalidated_view(&state, expr, scopes, span, &diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 {
+        if sema_ownership_writes_temporary_edit_guard(expr) -> return true
         &diagnostics.push(sema_error("E0202", span, "the write-access marker `&` needs a place after it", "write access can only be granted to stable storage, not a temporary expression", "bind the value first, then borrow the binding with `&`"))
         return false
     }
@@ -2521,6 +2538,7 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
     if sema_ownership_report_invalidated_view(&state, expr, scopes, expr_span(expr), &diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 {
+        if sema_ownership_writes_temporary_edit_guard(expr) -> return true
         &diagnostics.push(sema_error("E0202", expr_span(expr), "the write-access marker `&` needs a place after it", "write access can only be granted to stable storage, not a temporary expression", "bind the value first, then pass the binding with `&`"))
         return false
     }
@@ -2948,7 +2966,7 @@ fn sema_ownership_diag_expiring_secret_loan_change(name: String, action: String,
 }
 
 fn sema_ownership_diag_move_from_borrowed(name: String, mark_span: Span) -> Diagnostic {
-    sema_error("E0201", mark_span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `.copy()`, or accept it with the move marker `^`")
+    sema_error("E0201", mark_span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `{name}.copy()`, or accept it with the move marker `^`")
 }
 
 // An explicit `^` never lowers to a copy. A call argument `^p` or `^p.f`
@@ -3367,6 +3385,7 @@ fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: E
     places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     if places.len() == 0 {
         if convention == AccessConvention.Write {
+            if sema_ownership_writes_temporary_edit_guard(receiver) -> return true
             &diagnostics.push(sema_error("E0202", span, "the write-access marker `&` needs a place after it", "write access can only be granted to stable storage, not a temporary expression", "bind the value first, then pass the binding with `&`"))
             return false
         }
@@ -4877,6 +4896,7 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
                 sema_ownership_fork_join_close(&state, fork, sema_ownership_fork_base(fork), fallback_path, true)
             } else {
                 sema_ownership_fork_close(&state, fork)
+                sema_ownership_merge_references(&state, fallback_path.references)
             }
             valid
         }

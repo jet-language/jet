@@ -1139,6 +1139,13 @@ fn sema_type_bound_satisfied_nominal(graph: SemaRegistrationGraph, nominal: Sema
 // declaring identity, never the display path or an application's same-named
 // struct.
 fn sema_type_provider_close_owner(nominal: SemaRegistrationNominal) -> Bool Never! {
+    // The compiler-owned allocators release their storage when consumed.
+    if core_identity_in_module(nominal.symbol.module_name, "core.mem") {
+        if nominal.symbol.name == {
+            "Arena" | "Bump" | "Pool" | "Fixed" -> return true
+            else -> return false
+        }
+    }
     if !core_identity_in_module(nominal.symbol.module_name, "core.files") -> return false
     if nominal.symbol.name == {
         "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> true

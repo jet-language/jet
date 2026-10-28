@@ -1167,7 +1167,10 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         sema_ownership_fork_apply(&state, joined)
         sema_ownership_fork_close(&state, fork)
     } else {
+        // A diverging fallback still reads what it names: its references
+        // survive the rollback, as a lambda body's do.
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
+        sema_ownership_merge_references(&state, fallback_path.references)
     }
     route_value :: checked_route.value ?? TOrFallback.Value{value: sema_node(&context, checked_route.payload, NodeKind.Unit, span)}
     // (Rust `lower_or_fallback`): a mixed `T? E!`

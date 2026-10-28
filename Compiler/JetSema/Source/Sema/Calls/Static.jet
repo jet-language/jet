@@ -32,6 +32,7 @@ use jet_foundation.[
     builtin_static_is_type_param,
     builtin_static_rows,
     core_call,
+    core_module_has_member,
     core_module_has_type,
     expr_span,
     jet_target_layout_atomic_scalar_type,
@@ -151,7 +152,14 @@ fn sema_call_static_owner_resolution(owner_params: [SemaInferenceTypeParam], own
     binding :: sema_call_bind_direct("static method", signature, &probe_args, span, &probe_diagnostics) ?? return None
     facts :: sema_call_collect_inference_facts(params, binding, args, environment, program, &scopes, &state, &tail_store, &context)
     return_type :: sema_call_signature_return(signature)
-    result :: sema_infer_callable(program.registration_graph, &inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, &probe_diagnostics) ?? return None
+    result :: sema_infer_callable(program.registration_graph, &inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, &probe_diagnostics) ?? {
+        // An argument that settles an owner parameter but misses its bound
+        // is that missing implementation, not an uninferrable owner.
+        loop diagnostic in probe_diagnostics {
+            if diagnostic.code == "E0905" -> &diagnostics.push(diagnostic)
+        }
+        return None
+    }
     if !result.complete -> return None
     Val(result)
 }
@@ -669,7 +677,18 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
         sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    builtin := sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if builtin.handled -> return builtin
+    // A capitalized `alias.Owner` that no route resolved names no static the
+    // Core module provides: report it rather than leaving the call unchecked.
+    if !sema_checked_module_uppercase(owner) -> return builtin
+    if core_module_has_type(module_name, owner) || core_module_has_member(module_name, owner) {
+        &diagnostics.push(sema_error("E0311", span, "`{owner}` has no matching static method `{method}`", "static lookup requires a visible associated method with no `self` receiver and a valid owner type", "call a static method `{owner}` declares, or call `{method}` on a `{owner}` value"))
+    } else {
+        &diagnostics.push(sema_call_core_unknown_item(module_name, owner, span))
+    }
+    sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: None}
 }
 
 // Rust `infer_method_call` entropy constructors use
@@ -715,9 +734,18 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
         else -> { return None }
     }
     if program.registration_graph == .Val(graph) {
-        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
-        row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+        found :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
+        if sema_resolved_kind(graph, found) != SymbolKind.Type -> return None
+        resolved := found
+        row := sema_type_graph_resolved_nominal_row(graph, found) ?? return None
+        // A plain alias (`alias Date :: LocalDate`) names its target's statics.
+        alias_row :: graph.modules[row.module_index].nominals[row.row]
+        if alias_row.kind == SemaRegistrationNominalKind.TypeAlias && alias_row.generic_params.len() == 0 && alias_row.source == .SourceAST(item) && item == .TypeAlias(definition) && definition.target == .Named(target_name) {
+            target :: sema_type_graph_lookup_symbol(graph, graph.modules[row.module_index].module_identity, target_name) ?? return None
+            if sema_resolved_kind(graph, target) != SymbolKind.Type -> return None
+            row = sema_type_graph_resolved_nominal_row(graph, target) ?? return None
+            resolved = target
+        }
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) -> return None
         return Val(sema_resolved_symbol(graph, resolved))

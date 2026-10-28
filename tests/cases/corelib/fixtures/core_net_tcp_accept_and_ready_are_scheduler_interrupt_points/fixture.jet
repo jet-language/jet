@@ -6,7 +6,7 @@ use core.time as time
 fn run() {
     cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
     cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
-    (accept_tx, accept_rx) :: channel<Int>()
+    { sender: accept_tx, receiver: accept_rx } :: channel<Int>()
     cancelled_accept :: task {
         accept_tx.send(1)
         if &cancelled_listener.accept() == {
@@ -31,7 +31,7 @@ fn run() {
     print(net.ready_readable(write_ready))
     print(net.ready_writable(write_ready))
     interest :: NetReadyInterest.Read
-    (wait_tx, wait_rx) :: channel<Int>()
+    { sender: wait_tx, receiver: wait_rx } :: channel<Int>()
     ready_wait :: task ^ready_server {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {

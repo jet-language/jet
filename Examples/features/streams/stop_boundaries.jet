@@ -75,8 +75,8 @@ fn run() {
     print("failure total: {total}")
 
     // (d) the consuming task is cancelled while it waits.
-    (started_tx, started_rx) :: channel<Int>(capacity: 1)
-    (gate_tx, gate_rx) :: channel<Int>(capacity: 1)
+    { sender: started_tx, receiver: started_rx } :: channel<Int>(capacity: 1)
+    { sender: gate_tx, receiver: gate_rx } :: channel<Int>(capacity: 1)
     worker :: task consume_until_cancel(started_tx, gate_rx)
     print("task: started with {started_rx.receive() ?? -1}")
     worker.cancel()

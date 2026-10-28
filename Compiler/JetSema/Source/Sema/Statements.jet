@@ -3343,6 +3343,23 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                     sema_stmt_destructure_count(elements.len(), items.len(), true, true, pattern_span, &diagnostics)
                 }
             }
+            // Tuples destructure by member name: each written name selects the
+            // member it names, never a position.
+            if elements.len() == fields.len() {
+                by_name := [TypeTupleField]{}
+                loop element in elements {
+                    found := TypeTupleField?{None}
+                    loop field in fields {
+                        if field.name == element.name -> found = Val(field.copy())
+                    }
+                    if found == .Val(field) -> &by_name.push(field)
+                }
+                if by_name.len() == fields.len() {
+                    fields = by_name
+                } else {
+                    &diagnostics.push(sema_stmt_tuple_destructure_by_name(elements, fields, ty, pattern_span))
+                }
+            }
         }
         .Refutable(_, _, _, _) -> return None
     }
@@ -3380,6 +3397,27 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         .List(_, _) -> Val(TStmt.ListDestructure{temp: temp, init: init, count: names.len(), line: sema_source_line_at(environment.source_segments, span) ?? 0, elements: locals, span: span})
         .Refutable(_, _, _, _) -> None
     }
+}
+
+// A tuple destructure names its members; the first written name that is not a
+// member is reported with the member-name and rename forms.
+fn sema_stmt_tuple_destructure_by_name(elements: [BindName], fields: [TypeTupleField], ty: Type, pattern_span: Span) -> Diagnostic {
+    members := [String]{}
+    renames := [String]{}
+    loop field in fields {
+        &members.push(field.name)
+        &renames.push("{field.name}: name")
+    }
+    span := pattern_span
+    written := ""
+    loop element in elements {
+        if !members.contains(element.name) {
+            span = element.span
+            written = element.name
+            break
+        }
+    }
+    sema_error("E0313", span, "`{written}` isn't a member of {type_name(ty)}", "a tuple destructure binds each member by its name, never by position", "name the members, `({members.join(", ")}) :: …`, or rename them: `{{ {renames.join(", ")} }} :: …`")
 }
 
 // True when the initializer is itself a `<alias>.Fixed.<method>(…)` call;
@@ -3794,7 +3832,7 @@ fn sema_stmt_compound_result(op: BinOp, place: Type, offered: Type, span: Span, 
 fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     index :: sema_scope_resolve_index(scopes, name)
     if index == None {
-        &diagnostics.push(sema_unknown_name(name, name_span))
+        &diagnostics.push(sema_unknown_name_in(name, name_span, scopes))
         return None
     }
     binding :: sema_scope_binding_row(environment, scopes, index)
@@ -4616,7 +4654,7 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
                 close_valid := satisfies_close == (Val(true))
                 if !close_valid {
                     shown := type_name(value.ty)
-                    &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}: Close {{ … }}` with every required method"))
+                    &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
                 }
                 if !sema_stmt_move_direct(argument.expr, &state, scopes, "the deferred `close`", &diagnostics) || !close_valid -> return None
                 closed := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)

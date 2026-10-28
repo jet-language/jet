@@ -711,9 +711,10 @@ fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
 }
 
 
-fn read(path: String) -[FS.Read]> String IOError! {
-    bytes :: read_bytes(path)
-    Ok(String.from_bytes(bytes) ?? return Err(io_err("read", path, "stream did not contain valid UTF-8")))
+fn read(path: String | Path) -[FS.Read]> String IOError! {
+    source :: path_text(path)
+    bytes :: read_bytes(source)
+    Ok(String.from_bytes(bytes) ?? return Err(io_err("read", source, "stream did not contain valid UTF-8")))
 }
 
 

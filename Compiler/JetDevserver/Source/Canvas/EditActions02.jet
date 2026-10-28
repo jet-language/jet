@@ -197,11 +197,11 @@ fn find_exec_insertion(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_n
         if same_span(source, node_span) || same_span(anchor, node_span) {
             if execution_terminates(stmt) -> return .Err(edit_error("ambiguous", "Canvas cannot add a convergence step after an early exit"))
             full := stmt_text_span(src, stmt)
-            return .Ok(.Val(ExecInsertion { offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false }))
+            return .Val(ExecInsertion { offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false })
         }
-        if find_exec_insertion_in_children(src, stmt, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+        if find_exec_insertion_in_children(src, stmt, node_span, pin_name)? == .Val(found) -> return .Val(found)
     }
-    .Ok(.None)
+    .None
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2334
 fn exec_branch_node_matches(stmt: Stmt, node_span: SourceSpan) -> Bool {
@@ -276,15 +276,15 @@ fn find_exec_insertion_in_children(src: String, stmt: &Stmt, node_span: SourceSp
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_exec_insertion(src, body, node_span, pin_name)
         .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
             loop arm in arms {
-                if find_exec_insertion(src, arm.body, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+                if find_exec_insertion(src, arm.body, node_span, pin_name)? == .Val(found) -> return .Val(found)
             }
             else_body.as_deref().map((body) -> find_exec_insertion(src, body, node_span, pin_name)).transpose().map((found) -> found.flatten())
         }
         .ComptimeIf { then_body, else_body, .. } -> {
-            if find_exec_insertion(src, then_body, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+            if find_exec_insertion(src, then_body, node_span, pin_name)? == .Val(found) -> return .Val(found)
             else_body.as_deref().map((body) -> find_exec_insertion(src, body, node_span, pin_name)).transpose().map((found) -> found.flatten())
         }
-        else -> .Ok(.None)
+        else -> .None
     }
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2530

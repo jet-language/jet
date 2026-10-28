@@ -448,16 +448,19 @@ fn valid_dns_name(raw: [U8]) -> Bool Never! {
     label_start := 0
     loop i in 0..<raw.len() {
         n :: Int.from_u8(raw[i])
-        if n == 46 {
-            label_len := i - label_start
-            if label_len == 0 {
-                return i == raw.len() - 1 && i > 0 && raw[i - 1] != (U8{46})
+        if {
+            n == 46 -> {
+                label_len := i - label_start
+                if label_len == 0 {
+                    return i == raw.len() - 1 && i > 0 && raw[i - 1] != (U8{46})
+                }
+                if raw[label_start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
+                label_start = i + 1
             }
-            if raw[label_start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
-            label_start = i + 1
-        } else {
-            if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n >= 128) -> return false
-            if i - label_start >= 63 -> return false
+            else -> {
+                if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n >= 128) -> return false
+                if i - label_start >= 63 -> return false
+            }
         }
     }
     label_len := raw.len() - label_start
@@ -578,14 +581,17 @@ fn __load_trust(raw: U64, trust: TLSClientTrust) __TLSFailure! {
 
 fn __load_custom_roots(raw: U64, roots: RootCertificates) __TLSFailure! {
     before :: __c_ca_count(raw)
-    if roots.pem != "" {
-        if __has_nul(roots.pem) -> return Err(__fail("TLS custom CA PEM must contain only certificate blocks"))
-        status :: __c_ca_pem(raw, roots.pem)
-        if status != 0 -> return Err(__fail("TLS could not use a custom certificate root: {__ca_status_text(status)}"))
-    } else if roots.path != "" {
-        if __has_nul(roots.path) -> return Err(__fail("TLS could not load custom certificate roots from `{roots.path}`: the path contains a NUL byte"))
-        status :: __c_ca_file(raw, roots.path)
-        if status != 0 -> return Err(__fail("TLS could not load custom certificate roots from `{roots.path}`: {__ca_status_text(status)}"))
+    if {
+        roots.pem != "" -> {
+            if __has_nul(roots.pem) -> return Err(__fail("TLS custom CA PEM must contain only certificate blocks"))
+            status :: __c_ca_pem(raw, roots.pem)
+            if status != 0 -> return Err(__fail("TLS could not use a custom certificate root: {__ca_status_text(status)}"))
+        }
+        roots.path != "" -> {
+            if __has_nul(roots.path) -> return Err(__fail("TLS could not load custom certificate roots from `{roots.path}`: the path contains a NUL byte"))
+            status :: __c_ca_file(raw, roots.path)
+            if status != 0 -> return Err(__fail("TLS could not load custom certificate roots from `{roots.path}`: {__ca_status_text(status)}"))
+        }
     }
     if __c_ca_count(raw) == before -> return Err(__fail("TLS custom CA PEM did not contain a certificate"))
     Ok(())
@@ -604,17 +610,20 @@ fn __ca_status_text(status: Int) -> String Never! {
 fn __load_system_roots(raw: U64, required: Bool) __TLSFailure! {
     file :: __getenv("SSL_CERT_FILE")
     dirs :: __getenv("SSL_CERT_DIR")
-    if file != "" || dirs != "" {
-        if file != "" && !__has_nul(file) -> _ :: __c_ca_file(raw, file)
-        loop dir in __split_colon(dirs) {
-            if dir != "" && !__has_nul(dir) -> _ :: __c_ca_dir(raw, dir)
+    if {
+        file != "" || dirs != "" -> {
+            if file != "" && !__has_nul(file) -> _ :: __c_ca_file(raw, file)
+            loop dir in __split_colon(dirs) {
+                if dir != "" && !__has_nul(dir) -> _ :: __c_ca_dir(raw, dir)
+            }
         }
-    } else {
-        loop path in __system_root_files() {
-            if __c_ca_count(raw) > 0 -> break
-            _ :: __c_ca_file(raw, path)
+        else -> {
+            loop path in __system_root_files() {
+                if __c_ca_count(raw) > 0 -> break
+                _ :: __c_ca_file(raw, path)
+            }
+            if __c_ca_count(raw) == 0 -> _ :: __c_ca_dir(raw, "/etc/ssl/certs")
         }
-        if __c_ca_count(raw) == 0 -> _ :: __c_ca_dir(raw, "/etc/ssl/certs")
     }
     if required && __c_ca_count(raw) == 0 -> return Err(__fail("TLS could not find system certificate roots"))
     Ok(())
@@ -729,12 +738,15 @@ fn __pem_base64(raw: [U8], start: Int, end: Int) -> Int __TLSFailure! {
         at += 1
         if __space(byte, false) -> next
         if padded -> return Err(__fail("TLS custom CA PEM has data after base64 padding"))
-        if byte == 61 {
-            pads += 1
-        } else {
-            if pads != 0 -> return Err(__fail("TLS custom CA PEM has invalid base64 padding"))
-            if !((byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 43 || byte == 47) {
-                return Err(__fail("TLS custom CA PEM contains invalid base64"))
+        if {
+            byte == 61 -> {
+                pads += 1
+            }
+            else -> {
+                if pads != 0 -> return Err(__fail("TLS custom CA PEM has invalid base64 padding"))
+                if !((byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 43 || byte == 47) {
+                    return Err(__fail("TLS custom CA PEM contains invalid base64"))
+                }
             }
         }
         used += 1
@@ -1351,13 +1363,17 @@ fn __escaped(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop byte in bytes {
         n :: Int.from_u8(byte)
-        if n == 92 || n == 44 || n == 61 {
-            &out.push(U8{92})
-            &out.push(byte)
-        } else if n >= 32 && n <= 126 {
-            &out.push(byte)
-        } else {
-            loop b in "\\x{ascii_lower(__hex(n, 2))}".bytes() -> &out.push(b)
+        if {
+            n == 92 || n == 44 || n == 61 -> {
+                &out.push(U8{92})
+                &out.push(byte)
+            }
+            n >= 32 && n <= 126 -> {
+                &out.push(byte)
+            }
+            else -> {
+                loop b in "\\x{ascii_lower(__hex(n, 2))}".bytes() -> &out.push(b)
+            }
         }
     }
     String.from_bytes(out) ?? ""
@@ -1379,15 +1395,19 @@ fn __der_time(kind: Int, bytes: [U8]) -> Int __TLSFailure! {
     year := 0
     rest := 0
     zulu :: bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{90})
-    if kind == 23 && bytes.len() == 13 && zulu {
-        yy :: __digits(bytes, 0, 2) ?? return Err(__fail("TLS certificate UTC time is invalid"))
-        year = if yy >= 50 -> 1900 + yy else -> 2000 + yy
-        rest = 2
-    } else if kind == 24 && bytes.len() == 15 && zulu {
-        year = __digits(bytes, 0, 4) ?? return Err(__fail("TLS certificate generalized time is invalid"))
-        rest = 4
-    } else {
-        return Err(__fail("TLS certificate time uses an unsupported encoding"))
+    if {
+        kind == 23 && bytes.len() == 13 && zulu -> {
+            yy :: __digits(bytes, 0, 2) ?? return Err(__fail("TLS certificate UTC time is invalid"))
+            year = if yy >= 50 -> 1900 + yy else -> 2000 + yy
+            rest = 2
+        }
+        kind == 24 && bytes.len() == 15 && zulu -> {
+            year = __digits(bytes, 0, 4) ?? return Err(__fail("TLS certificate generalized time is invalid"))
+            rest = 4
+        }
+        else -> {
+            return Err(__fail("TLS certificate time uses an unsupported encoding"))
+        }
     }
     month :: __digits(bytes, rest, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
     day :: __digits(bytes, rest + 2, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))

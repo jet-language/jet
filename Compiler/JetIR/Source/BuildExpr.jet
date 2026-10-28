@@ -247,6 +247,18 @@ fn ir_stmts_leave(p: IRProgram, b: IRBuilder, body: [Int]) -> Bool Never! {
 }
 
 fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
+    mark :: b.statement_guards.len()
+    ir_stmt_body(&m, p, &b, statement)
+    loop b.statement_guards.len() > mark {
+        held :: &b.statement_guards.pop() ?? -1
+        if held >= 0 && !ir_failed(b) {
+            b.fresh[held] = true
+            ir_release(&m, &b, held)
+        }
+    }
+}
+
+fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     // An explicit move is taken by the statement that reads it.
     b.moving = -1
     if ir_body_stmt(p, b, statement) == {
@@ -1365,7 +1377,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             if call == .Method(receiver, method, args) {
                 if ir_untag(ir_subst(m, ir_ty(p, b, receiver))) == .Shared(_) {
                     if (method == "guard_read" || method == "guard_edit") && args.len() == 0 -> return ir_shared_guard(&m, p, &b, expression_ty, receiver, method == "guard_edit", span)
-                    if method == "shared.read" -> return ir_shared_read(&m, p, &b, expression_ty, receiver, args, span)
+                    if method == "shared.read" || method == "shared.edit" -> return ir_shared_read(&m, p, &b, expression_ty, receiver, args, method == "shared.edit", span)
                     if method == "same" && args.len() == 1 -> return ir_shared_same(&m, p, &b, receiver, args[0], span)
                 }
                 host_receiver_ty :: ir_ty(p, b, receiver)

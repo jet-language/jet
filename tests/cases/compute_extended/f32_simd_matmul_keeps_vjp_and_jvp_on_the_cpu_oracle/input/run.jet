@@ -8,7 +8,7 @@ fn tiled_loss(left: Tensor, right: Tensor) -> Tensor {
 fn run() {
     left :: compute.full([1, 1], 2.0) ?? panic("left")
     right :: compute.full([1, 1], 3.0) ?? panic("right")
-    (grad_left, grad_right) :: compute.gradient(tiled_loss, left.copy(), right.copy())
+    { left: grad_left, right: grad_right } :: compute.gradient(tiled_loss, left.copy(), right.copy())
     print("grad_left:{compute.to_list(grad_left)}")
     print("grad_right:{compute.to_list(grad_right)}")
 

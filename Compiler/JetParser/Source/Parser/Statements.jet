@@ -508,6 +508,8 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
         }
         else -> {
             if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
+            // `{ member: local, … } :: tuple` renames tuple members.
+            if token.kind == TOKEN_LBRACE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
             parser_parse_assignment_or_expression(&state)
         }
     }
@@ -1362,7 +1364,8 @@ fn parser_pattern_binding_ahead(state: &JetParserState) -> Bool Never! {
 }
 
 // S74 (Rust `sigil_binding` + `try_bind_pattern`): a destructuring binding
-// `[a, b] :: list`, `(a, b) :: tuple` or `Type{x, y: local, ..} :: value`.
+// `[a, b] :: list`, `(a, b) :: tuple`, `{ a: x, b: y } :: tuple` or
+// `Type{x, y: local, ..} :: value`.
 fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
     start :: parser_current(&state)
     pattern := BindPattern.List{elems: [BindName]{}, span: start.span}
@@ -1377,6 +1380,25 @@ fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
             parser_bump(&state)
             elems :: parser_pattern_binding_names(&state, TOKEN_RPAREN, "for a tuple-pattern binding")
             close :: parser_expect(&state, TOKEN_RPAREN, "`)` to close the tuple pattern")
+            pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
+        }
+        TOKEN_LBRACE -> {
+            parser_bump(&state)
+            elems := [BindName]{}
+            loop {
+                member :: parser_expect_name(&state, "for a tuple-member rename")
+                rename := BindNameRename?{None}
+                if parser_current_kind(&state) == TOKEN_COLON {
+                    parser_bump(&state)
+                    local :: parser_expect_name(&state, "as the renamed binding")
+                    rename = Val(BindNameRename{name: parser_value(state, local), span: local.span})
+                }
+                &elems.push(BindName{name: parser_value(state, member), span: member.span, rename: rename})
+                if parser_current_kind(&state) != TOKEN_COMMA -> break
+                parser_bump(&state)
+                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+            }
+            close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the tuple-member rename")
             pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
         }
         else -> {

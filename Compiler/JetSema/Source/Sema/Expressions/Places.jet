@@ -23,7 +23,9 @@ use jet_foundation.[
     TextEdit,
     Type,
     builtin_numeric_kind,
+    ast_empty_call_arg_flags,
     ast_program,
+    core_source_owns_type,
     core_record_field,
     diagnostic_with_edit,
     diagnostic_with_edit_grade,
@@ -469,6 +471,11 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     if checked_base_value == .Val(probe_value) {
         rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
         if rewritten == None -> rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, &scopes)
+        if rewritten == None {
+            swizzle :: sema_expression_core_vector_swizzle(base, member, span, probe_value.ty, environment, program, &diagnostics)
+            if swizzle.invalid -> return None
+            rewritten = swizzle.read
+        }
         if rewritten == .Val(generated) {
             sema_check_context_rollback(&context, base_context_mark)
             sema_scope_rollback(&scopes, base_scope_mark)
@@ -556,6 +563,46 @@ fn sema_expression_module_constant(alias: String, member: String, span: Span, ex
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// A swizzle read on a Core vector (`v.x`, `v.zyx`) is a call of the
+// declaration's own lane reads: `lane` for one lane, `__swizzleN` for N.
+struct SemaCoreVectorSwizzle {
+    read: Expr?
+    invalid: Bool
+}
+
+fn sema_expression_core_vector_swizzle(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCoreVectorSwizzle {
+    none :: SemaCoreVectorSwizzle{read: None, invalid: false}
+    vector :: sema_expression_core_vector_name(ty, environment, program) ?? return none
+    parsed :: sema_expression_math_swizzle_parse(vector, member, span, &diagnostics)
+    if parsed == {
+        .NotSwizzle -> return none
+        .InvalidLane -> return SemaCoreVectorSwizzle{read: None, invalid: true}
+        .Lanes(packed, count, _) -> {
+            args := [CallArg]{}
+            loop index in 0..<count {
+                lane :: (packed >> (index * 2)).bit_and(3)
+                &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+            }
+            method :: if count == 1 -> "lane" else -> "__swizzle{count}"
+            // copy: the generated call owns its receiver; `base` stays the field's.
+            read :: Expr.MethodCall{receiver: base.copy(), method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
+            return SemaCoreVectorSwizzle{read: Val(read), invalid: false}
+        }
+    }
+}
+
+// The Core vector (`Vec2`, `Vec3`, `Vec4`) a value of `ty` is, when Core's
+// source declares it.
+fn sema_expression_core_vector_name(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    leaf :: sema_expr_math_leaf_name(ty) ?? return None
+    if leaf != "Vec2" && leaf != "Vec3" && leaf != "Vec4" -> return None
+    if program.registration_graph == .Val(graph) {
+        row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+        if core_source_owns_type("{graph.modules[row.module_index].nominals[row.row].symbol.module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}") -> return Val(leaf)
+    }
+    None
 }
 
 // (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to

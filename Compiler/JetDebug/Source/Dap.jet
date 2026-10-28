@@ -75,7 +75,7 @@ fn run_io(server: DapServer, reader: io.BufRead, out: io.Write) -> I32 {
         reader := ^reader
         loop {
             message :: read_message(&reader)
-            done :: message != .Ok(.Val(_))
+            done :: message != .Val(_)
             if input_tx.send(^message).is_err() || done -> break
         }
     })
@@ -91,7 +91,7 @@ fn run_io(server: DapServer, reader: io.BufRead, out: io.Write) -> I32 {
         if input_closed && (!server.has_pending_resume() || requests.is_empty()) -> break
         received :: input_rx.recv_timeout(Duration.from_millis(10))
         if received == {
-            .Ok(.Ok(.Val(body))) -> {
+            .Ok(.Val(body)) -> {
                 parsed :: parse_dap_request(body)
                 if parsed == {
                     .Ok(msg) -> &requests.push_back(^msg)
@@ -101,7 +101,7 @@ fn run_io(server: DapServer, reader: io.BufRead, out: io.Write) -> I32 {
                     }
                 }
             }
-            .Ok(.Ok(.None)) -> input_closed = true
+            .Ok(.None) -> input_closed = true
             .Ok(.Err(error)) -> {
                 // Uncorrelated framing/UTF-8 failures produce no fabricated reply.
                 io.eprintln("error: invalid DAP frame: {error}")
@@ -249,9 +249,9 @@ impl ResumeTask {
         if self.events.try_recv() == {
             .Ok(event) -> {
                 if &self.join.take() == .Val(join) -> _ :: join.join()
-                return .Ok(.Val(^event))
+                return .Val(^event)
             }
-            .Err(.Empty) -> { return .Ok(.None) }
+            .Err(.Empty) -> { return .None }
             .Err(.Disconnected) -> { return .Err(_) }
         }
     }
@@ -944,7 +944,7 @@ impl DapServer {
     // Rust: crates/jet-debug/src/Dap.rs:1645
     fn spawn_target(self) -> (Inferior, USize?) IOError! {
         inf := Inferior.spawn(self.binary)
-        setup := .Ok(.None) as io.Result[USize?]
+        setup := .None as io.Result[USize?]
         if self.stop_on_entry {
             line :: self.map.main_entry_line(self.rust_src)
             if line == .Val(entry_line) {

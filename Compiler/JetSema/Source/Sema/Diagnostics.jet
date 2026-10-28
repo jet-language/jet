@@ -7,6 +7,7 @@ use jet_foundation.[
     Span,
     TagMarker,
     Type,
+    core_module_for_alias,
     diagnostic_from_registry,
     diagnostic_with_source_mapping,
     dimension_display_name,
@@ -236,6 +237,18 @@ fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
         "a name must be declared before it's used",
         "declare it first: `{name} :: ...`",
     )
+}
+
+// E0107 with the most useful fix: the Core import a module-style name
+// misses, a near visible name, or declaring it.
+fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
+    fix := "declare it first: `{name} :: ...`"
+    if core_module_for_alias(name) == .Val(owner) {
+        fix = "add `use {owner} as {name}`"
+    } else if sema_scope_closest_visible_name(scopes, name) == .Val(near) {
+        fix = "did you mean `{near}`?"
+    }
+    sema_error("E0107", span, "nothing named `{name}` exists here", "a name must be declared before it's used", fix)
 }
 
 fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {

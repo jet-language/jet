@@ -58,14 +58,19 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     // as every branch of an `if`) binds like a direct call of that function:
     // its declaration names are labels. Any other function value is bound by
     // its type's contract alone.
+    // A named callee value is reported by its name.
+    shown_callee :: if callee == {
+        .Ident(name, _, _) -> name.copy()
+        else -> "this function value"
+    }
     declared :: sema_call_value_is_declaration(callee, scopes)
     value_params :: if declared -> sema_call_params_from_type(resolved_signature) else -> sema_call_params_from_value_type(resolved_signature)
     params :: value_params ?? {
-        &diagnostics.push(sema_call_not_callable("this function value", resolved_signature, span))
+        &diagnostics.push(sema_call_not_callable(shown_callee, resolved_signature, span))
         return None
     }
     checked_args := args
-    binding :: sema_call_bind_args("this function value", params, &checked_args, span, &diagnostics) ?? return None
+    binding :: sema_call_bind_args(shown_callee, params, &checked_args, span, &diagnostics) ?? return None
     resolved_defaults := defaults
     resolved_binding := binding
     if binding.default_refs.len() > 0 {
@@ -98,7 +103,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
             if context.iter_borrowed.contains(written) -> &diagnostics.push(sema_collection_changed_in_loop(written, "calling `{callee_name}`, which writes `{written}` through its capture,", callee_span))
         }
     }
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, shown_callee, params, None, false, resolved_binding, &checked_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     call_callee := callee_value
     if pins.len() > 0 {
         owner :: sema_scope_function_owner_key(scopes)

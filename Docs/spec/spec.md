@@ -2433,7 +2433,7 @@ cancelled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
 at the call site:
 
 ```jet
-(tx, rx) :: channel<Int>()
+{ sender: tx, receiver: rx } :: channel<Int>()
 tx.send(7)
 value :: rx.receive() ?? panic("channel closed")
 ```

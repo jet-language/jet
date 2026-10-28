@@ -61,7 +61,7 @@ fn canvas_request_authorized(request: Request, target: String, bind_host: String
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3709
 fn unique_session_param(target: String) -> String? Unit! {
-    (_, query) :: target.split_once('?') ?? return .Ok(.None)
+    (_, query) :: target.split_once('?') ?? return .None
     found := false
     loop part in query.split('&') {
         name :: part.split_once('=').map(((_0: name, _1: _)) -> name).unwrap_or(part)
@@ -645,7 +645,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             build_id :: devtools_projection.build_id.filter((value) -> !value.is_empty()) ?? return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
             accept :: request.headers.get("accept").map((v) -> v.as_str()).unwrap_or("*/*")
             identity :: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(^request_id, session.id(), source_id.clone(), ^build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))
-            rendered :: if !facts.is_error() { .Ok(.None) } else {
+            rendered :: if !facts.is_error() { .None } else {
                 source_excerpts :: Canvas.read_source_without_symlinks(OSPath.new(canvas_file)).ok().and_then((source) -> {
                     excerpt :: source.chars().take(jet_devserver.WebErrorPage.MAX_WEB_ERROR_SOURCE_BYTES).collect<String>()
                     jet_devserver.WebErrorPage.WebErrorSourceExcerpt.without_span(source_id.clone(), "failure source", .Val(^excerpt)).ok()
@@ -662,7 +662,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
                 page.and_then((page) -> page.project(accept, jet_devserver.WebErrorPage.WebErrorCapabilities.local()).map((p) -> .Val(^p))).map_err((error) -> error.to_string())
             }
             return if rendered == {
-                .Ok(.Val(projection)) -> {
+                .Val(projection) -> {
                     status :: if projection.status == {
                         200 -> "200 OK"; 400 -> "400 Bad Request"; 401 -> "401 Unauthorized"
                         403 -> "403 Forbidden"; 404 -> "404 Not Found"; 405 -> "405 Method Not Allowed"
@@ -674,7 +674,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
                     }
                     write_response(&stream, status, projection.content_type.as_str(), projection.body.as_bytes())
                 }
-                .Ok(.None) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
+                .None -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
                 .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
             }
         }

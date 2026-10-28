@@ -166,7 +166,7 @@ fn lsp_load_discovery_index(path: String, platform: PathPlatform) -[FS]> Package
     loop {
         // dir originates solely from the UTF-8 input, never native display.
         text :: lsp_source_path.to_str(dir) ?? panic("UTF-8 parent must remain UTF-8")
-        if env_discovery_load(text) == .Ok(.Val(index)) -> return Val(index)
+        if env_discovery_load(text) == .Val(index) -> return Val(index)
         extent :: lsp_source_path.parent_span(dir) ?? break
         dir = lsp_source_path.owned_span(dir, extent)
     }

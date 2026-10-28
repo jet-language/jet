@@ -3,6 +3,6 @@ Error [E0905]: `T` isn't `Decode`
     |
   4 |     db.decode<T>(row)
     |        ^^^^^^
- Why: `T` would need to implement `Decode` before it can be used here
- Fix: Write `impl T: Decode { … }` with every required method
+ Why: Type parameter `T` doesn't declare the `Decode` bound, so a caller may choose a type without it
+ Fix: Declare the bound where `T` is introduced: `<T: Decode>`
 More: jet-lang.dev/e/E0905

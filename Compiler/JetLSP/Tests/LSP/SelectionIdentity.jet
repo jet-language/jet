@@ -28,7 +28,7 @@ fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Nev
 
 #Test("checked reference selects smallest containing span and preserves absent unresolved ambiguous distinctions") {
     db := SymbolDB.new()
-    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(.None))
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .None)
     db.refs = [SymRef]{lsp_selection_test_ref(Val("outer"), 0, 10), lsp_selection_test_ref(None, 3, 6)}
     assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(_))
     db.refs[1] = lsp_selection_test_ref(Val("inner"), 3, 6)
@@ -38,8 +38,8 @@ fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Nev
     &db.refs.push(lsp_selection_test_ref(Val("different"), 3, 6))
     assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(_))
     db.refs[2] = lsp_selection_test_ref(Val("inner"), 3, 6)
-    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(.Val(_)))
-    assert(lsp_checked_reference_in_span(db, "other.jet", 4, 5) == .Ok(.None))
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Val(_))
+    assert(lsp_checked_reference_in_span(db, "other.jet", 4, 5) == .None)
 }
 
 #Test("checked definition keeps smallest span ambiguity and reference errors prevent fallback") {

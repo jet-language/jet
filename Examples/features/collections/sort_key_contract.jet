@@ -159,13 +159,13 @@ fn run() {
     &tuples.sort_by((j: Job) -> (team: j.team, cost: j.cost))
     print("tuple key: {show(tuples)}")
     try_tuples := jobs.copy()
-    &try_tuples.sort_by((j: Job) -> tuple_key(j)) ?? { assert(false, "tuple key") }
+    &try_tuples.sort_by((j: Job) -> tuple_key(j)) ?? panic("tuple key")
     print("fallible tuple key: {show(try_tuples)}")
     named := jobs.copy()
     &named.sort_by((j: Job) -> NamedKey{team: j.team, label: j.name})
     print("named key: {show(named)}")
     try_named := jobs.copy()
-    &try_named.sort_by((j: Job) -> named_key(j)) ?? { assert(false, "named key") }
+    &try_named.sort_by((j: Job) -> named_key(j)) ?? panic("named key")
     print("fallible named key: {show(try_named)}")
     // Normal key retirement follows sorted key order; an Err retires only
     // the initialized prefix in input order.

@@ -196,11 +196,14 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
     // carrier builds the compiler-owned data literal, whose variants carry
     // payloads the unit-only Core enum rows don't list. A declared enum of
     // that name keeps its own variants.
-    if path.variant == method && sema_data_is_json_name(path.enum_name) {
+    // A module-qualified carrier (`encoding.Dyn.Float(1.5)`) names the same
+    // data literal by its leaf.
+    carrier :: path.enum_name.split(".").to_list().last() ?? path.enum_name
+    if path.variant == method && sema_data_is_json_name(carrier) {
         owner :: sema_expression_type_symbol(&scopes, environment, program, path.enum_name)
         declared_enum := false
         if owner == .Val(symbol) -> declared_enum = sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum)
-        if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: path.enum_name}, path.variant, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: carrier}, path.variant, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !sema_expression_enum_declares_variant(path.enum_name, path.variant, environment, program, &scopes) -> return unhandled
     // Payload slots retain written access even though they have no CallArg.

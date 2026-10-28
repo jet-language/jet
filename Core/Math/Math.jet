@@ -653,6 +653,10 @@ impl Vec2 {
         if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for Vec2 (2 lanes)")
         self.lanes[index]
     }
+    // A swizzle read (`v.zyx`) is the vector of the lanes it names.
+    fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(self.lanes[a], self.lanes[b]) }
+    fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(self.lanes[a], self.lanes[b], self.lanes[c]) }
+    fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> Vec4 Never! { Vec4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
     fn dot(self, other: Vec2) -> Float Never! {
         self.lanes[0] * other.lanes[0] + self.lanes[1] * other.lanes[1]
     }
@@ -678,6 +682,19 @@ impl Vec2.Mul {
         Vec2.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1])
     }
 }
+impl Vec2.Mul(Float) {
+    fn mul(self, rhs: Float) -> Vec2 Never! {
+        Vec2.new(self.lanes[0] * rhs, self.lanes[1] * rhs)
+    }
+}
+impl Vec2.Div(Float) {
+    fn div(self, rhs: Float) -> Vec2 Never! {
+        Vec2.new(self.lanes[0] / rhs, self.lanes[1] / rhs)
+    }
+}
+impl Float.Mul(Vec2) {
+    fn mul(self, rhs: Vec2) -> Vec2 Never! { rhs * self }
+}
 struct Vec3 {
     lanes: [Float#3]
 }
@@ -695,6 +712,10 @@ impl Vec3 {
         if index < 0 || index >= 3 -> core.math.__numeric_stop("lane index {index} out of range for Vec3 (3 lanes)")
         self.lanes[index]
     }
+    // A swizzle read (`v.zyx`) is the vector of the lanes it names.
+    fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(self.lanes[a], self.lanes[b]) }
+    fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(self.lanes[a], self.lanes[b], self.lanes[c]) }
+    fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> Vec4 Never! { Vec4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
     fn dot(self, other: Vec3) -> Float Never! {
         self.lanes[0] * other.lanes[0] + self.lanes[1] * other.lanes[1] + self.lanes[2] * other.lanes[2]
     }
@@ -786,6 +807,10 @@ impl Vec4 {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for Vec4 (4 lanes)")
         self.lanes[index]
     }
+    // A swizzle read (`v.zyx`) is the vector of the lanes it names.
+    fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(self.lanes[a], self.lanes[b]) }
+    fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(self.lanes[a], self.lanes[b], self.lanes[c]) }
+    fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> Vec4 Never! { Vec4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
     fn dot(self, other: Vec4) -> Float Never! {
         total := Float{0.0}
         loop i in 0..<4 -> total = total + self.lanes[i] * other.lanes[i]
@@ -812,6 +837,19 @@ impl Vec4.Mul {
     fn mul(self, rhs: Vec4) -> Vec4 Never! {
         Vec4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
     }
+}
+impl Vec4.Mul(Float) {
+    fn mul(self, rhs: Float) -> Vec4 Never! {
+        Vec4.new(self.lanes[0] * rhs, self.lanes[1] * rhs, self.lanes[2] * rhs, self.lanes[3] * rhs)
+    }
+}
+impl Vec4.Div(Float) {
+    fn div(self, rhs: Float) -> Vec4 Never! {
+        Vec4.new(self.lanes[0] / rhs, self.lanes[1] / rhs, self.lanes[2] / rhs, self.lanes[3] / rhs)
+    }
+}
+impl Float.Mul(Vec4) {
+    fn mul(self, rhs: Vec4) -> Vec4 Never! { rhs * self }
 }
 
 #Test("Vec4 dot folds from zero in lane order") {

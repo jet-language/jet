@@ -43,7 +43,7 @@ fn check_pre_response_errors() {
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     url :: "http://{address}/"
-    (stop_tx, stop_rx) :: channel<Int>()
+    { sender: stop_tx, receiver: stop_rx } :: channel<Int>()
     peer :: task {
         requests := [String]{}
         // Original nonblocking accept + stop atomic: zero-deadline accepts queued

@@ -15,12 +15,16 @@ fn select(value: Int?, retired: Int?) -> Int LookupError! {
 }
 fn select_if(value: Int?, kind: Int) -> Int LookupError! {
     found :: value ?? {
-        if kind == 1 {
-            return Err(LookupError.Retired)
-        } else if kind == 2 {
-            return Err(LookupError.Missing)
-        } else {
-            return Err(LookupError.Retired)
+        if {
+            kind == 1 -> {
+                return Err(LookupError.Retired)
+            }
+            kind == 2 -> {
+                return Err(LookupError.Missing)
+            }
+            else -> {
+                return Err(LookupError.Retired)
+            }
         }
     }
     Ok(found)

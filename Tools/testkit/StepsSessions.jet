@@ -123,7 +123,7 @@ fn kit_steps_signal(pid: Int, name: String) -> Bool Err! {
 
 fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState) -> KitStepResult {
     // #4790: keep task handles in joined call frames, not a typed Task list.
-    (sender, reports) :: channel<String>()
+    { sender, receiver: reports } :: channel<String>()
     errors := [String]{}
     task.group sends {
         kit_steps_parallel_start(sends, steps, 0, context, state, sender)

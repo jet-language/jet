@@ -200,10 +200,32 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "Fraction", module_name: "core.math"},
     {name: "Decimal", module_name: "core.math"},
     {name: "Complex", module_name: "core.math"},
+    {name: "eprint", module_name: "core.term"},
+    {name: "debug", module_name: "core.term"},
+    {name: "read_file", module_name: "core.files"},
+    {name: "write_file", module_name: "core.files"},
+    {name: "file_exists", module_name: "core.files"},
+    {name: "Date", module_name: "core.time"},
+    {name: "keep", module_name: "core.prelude"},
 }
 fn core_bare_source_module(name: String) -> String? Never! {
     loop row in CORE_BARE_SOURCE_MODULES {
         if row.name == name -> return Val(row.module_name)
+    }
+    None
+}
+
+// The Core module an unknown module-style name most likely meant to import:
+// one whose last segment is the name (`mem`, `archive`), or the conventional
+// short alias of a module (`fs`, `ar`, `gz`, `re`).
+fn core_module_for_alias(name: String) -> String? {
+    if name == "fs" -> return Val("core.files")
+    if name == "ar" -> return Val("core.archive")
+    if name == "gz" -> return Val("core.archive.gzip")
+    if name == "re" -> return Val("core.regex")
+    suffix :: ".{name}"
+    loop row in CORE_MODULE_EXPORTS {
+        if row.module_name.starts_with("core.") && row.module_name.ends_with(suffix) -> return Val(row.module_name.copy())
     }
     None
 }

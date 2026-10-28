@@ -1046,12 +1046,12 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     resolved_type_args :: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_call_core_check_type_constraints(signature, resolved_type_args, args, span, environment, program, &diagnostics) -> return None
     params := sema_call_core_parameter_records(signature, resolved_type_args, span, type_args.len() == 0)
-    (checked_args, pins) := sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     // A `&` argument keeps its Write borrow of the caller's place: a Core leaf
     // that lends a buffer or handle (zeroize, reserve, stream writers) works
     // on the original, never on a copy.
     values := [TExpr]{}
-    loop argument in checked_args {
+    loop argument in lowered {
         if argument.mut_borrow {
             ty :: argument.value.ty.copy()
             at :: argument.value.span

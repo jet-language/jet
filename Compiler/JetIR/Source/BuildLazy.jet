@@ -1231,15 +1231,16 @@ fn ir_shared_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 }
 
 // `shared.field` (the SharedAccess.jet desugar to `shared.read` with a
-// one-parameter callback): the runtime takes the read lock and runs the
+// one-parameter callback; a write through the cell desugars to `shared.edit`): the runtime takes the read lock and runs the
 // closure through lazy.callback over the cell's slot; the callback writes its
 // owned result into `out`, an inline result straight into its own frame
 // storage.
-fn ir_shared_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "shared.read with {args.len()} arguments")
+fn ir_shared_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], editable: Bool, span: Span) -> Int Never! {
+    access :: if editable -> "shared.edit" else -> "shared.read"
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "{access} with {args.len()} arguments")
     closure_ty :: ir_subst(m, ir_ty(p, b, args[0]))
     arity :: if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) -> params.len() else -> -1
-    if arity != 1 -> return ir_fail_slot(&b, span, "shared.read callback {ir_type_name(closure_ty)}")
+    if arity != 1 -> return ir_fail_slot(&b, span, "{access} callback {ir_type_name(closure_ty)}")
     result_ty :: ir_subst(m, ty)
     unit :: ir_unit_type(result_ty) || ir_never_type(result_ty)
     // Sema checks the callback against the read's result but erases that
@@ -1268,7 +1269,7 @@ fn ir_shared_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     } else {
         out = ir_out_slot(&m, &b, 1)
     }
-    _ :: ir_runtime(&m, &b, "jet_rt_native_shared_read", [Int]{shared, closure, invoke, out}, -1)
+    _ :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", [Int]{shared, closure, invoke, out}, -1)
     if row >= 0 && !inline {
         result = ir_load_at(&m, &b, out, 0, row)
         b.fresh[result] = true
@@ -1312,6 +1313,10 @@ fn ir_shared_guard_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: Int
     if ir_failed(b) || held < 0 -> return -1
     pointer_row :: ir_pointer_row(&m)
     payload :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_edit_guard_edit" else -> "jet_rt_native_shared_read_guard_deref", [Int]{held}, pointer_row)
+    if b.fresh[held] {
+        b.fresh[held] = false
+        &b.statement_guards.push(held)
+    }
     b.fresh[payload] = false
     payload
 }

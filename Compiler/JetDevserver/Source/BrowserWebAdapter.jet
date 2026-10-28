@@ -1005,7 +1005,7 @@ fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser selection body is not valid bounded JSON")
     object := object_map(root) ?? return .Err("browser selection body must be an object")
     selection_value := object.get("selection").ok_or("browser selection body must include selection")?
-    if selection_value == .Null -> return .Ok(.None)
+    if selection_value == .Null -> return .None
     selection := object_map(selection_value) ?? return .Err("browser selection must be an object or null")
     panel_value := selection.get("panel_id").ok_or("browser selection must include panel_id")?
     panel_id := panel_value.as_str() ?? return .Err("browser selection panel_id must be a string")
@@ -1017,7 +1017,7 @@ fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
             .Val(key.to_string())
         }
     }
-    .Ok(.Val((panel_id.to_string(), item_key)))
+    .Val((panel_id.to_string(), item_key))
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1959
 fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
