@@ -22,7 +22,7 @@ import {
 } from './paths.mjs';
 import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
-import { migrateRecommendationLosses } from './migrate.mjs';
+import { migrateRecommendationLosses, migrateReviewPasses } from './migrate.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
   formatHardeningEvidence, normalizeHardeningFixture, prepareHardening,
@@ -750,6 +750,7 @@ export function normalize(s, historyCards = null, sync = true) {
   }
   for (const d of s.decisions) {
     migrateRecommendationLosses(d);
+    migrateReviewPasses(d);
     d.draft = !!d.draft;
     if (d.visualMedia !== undefined) d.visualMedia = normalizeVisualMedia(d.visualMedia);
   }
@@ -2012,42 +2013,33 @@ export function releaseCard(s, ref, by, handoff) {
 
 const PLAIN_SENTENCE_WORDS = 32;
 const PLAIN_PARAGRAPH_WORDS = 90;
+// Stored review-pass layouts by ballot process. Earlier layouts are historical
+// evidence: they keep their stored keys and render unchanged, and Tower checks
+// only that they hold no unknown pass. Process 2 stored six passes; process 3
+// added the reading surface; process 4 added structured losses and stored two
+// readers. Process 5 (owner rule 2026-10-28) records one fresh adversarial pass.
 const LEGACY_REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'adversarial'];
-const REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial'];
-const CURRENT_REVIEW_PASS_KEYS = ['beginner', 'adversarial'];
-// Process 2 added the beginner pass; process 3 adds the reading surface;
-// process 4 records only the two independent readers.
-const BEGINNER_PROCESS_VERSION = 2;
+const SIX_PASS_REVIEW_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial'];
+const TWO_READER_REVIEW_KEYS = ['beginner', 'adversarial'];
+const CURRENT_REVIEW_PASS_KEYS = ['adversarial'];
+const SIX_PASS_PROCESS_VERSION = 2;
 const SURFACE_PROCESS_VERSION = 3;
-const BALLOT_PROCESS_VERSION = 4;
+const STRUCTURED_LOSS_PROCESS_VERSION = 4;
+const BALLOT_PROCESS_VERSION = 5;
 const SYSTEM_ACCEPTANCE = Symbol('system acceptance');
 const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
 const sentences = (text) => String(text || '').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
-const reviewPassKeysFor = (version) => Number(version || 0) >= BALLOT_PROCESS_VERSION
-  ? CURRENT_REVIEW_PASS_KEYS
-  : Number(version || 0) >= BEGINNER_PROCESS_VERSION ? REVIEW_PASS_KEYS : LEGACY_REVIEW_PASS_KEYS;
+const reviewPassKeysFor = (version) => {
+  const v = Number(version || 0);
+  if (v >= BALLOT_PROCESS_VERSION) return CURRENT_REVIEW_PASS_KEYS;
+  if (v >= STRUCTURED_LOSS_PROCESS_VERSION) return TWO_READER_REVIEW_KEYS;
+  if (v >= SIX_PASS_PROCESS_VERSION) return SIX_PASS_REVIEW_KEYS;
+  return LEGACY_REVIEW_PASS_KEYS;
+};
 const orderedReviewPasses = (passes, version = BALLOT_PROCESS_VERSION) =>
   Object.fromEntries(reviewPassKeysFor(version).map(key => [key, passes?.[key]]));
-const beginnerPrefix = /^Fresh agent: ([^.]+)\. Skill: rli5\./;
 const dissentPrefix = /^Author model family: ([^.]+)\. Adversarial model family: ([^.]+)\./;
 const freshReviewerPrefix = /^Fresh agent: ([^.]+)\./;
-
-function beginnerMetadata(pass) {
-  if (typeof pass !== 'string') return null;
-  const match = beginnerPrefix.exec(pass);
-  if (!match) return null;
-  return {
-    agent: match[1].trim(),
-    summary: pass.slice(match[0].length).trim(),
-  };
-}
-
-function beginnerMetadataGaps(p) {
-  const metadata = beginnerMetadata(p.reviewPasses?.beginner);
-  if (!metadata || !metadata.agent)
-    return ['reviewPasses.beginner (must begin with `Fresh agent: <agent-id>. Skill: rli5.`)'];
-  return [];
-}
 
 function dissentMetadata(pass) {
   if (typeof pass !== 'string') return null;
@@ -2070,16 +2062,11 @@ function dissentMetadataGaps(p, { requireFresh = true } = {}) {
   // Family labels record provenance; they do not establish independence.
   if (requireFresh && !metadata.agent)
     return ['reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)'];
-  if (requireFresh && metadata.agent === beginnerMetadata(p.reviewPasses?.beginner)?.agent)
-    return ['reviewPasses.adversarial (must use a different fresh agent from the beginner review)'];
   return [];
 }
 
-const reviewPassSummary = (key, pass) => {
-  if (key === 'beginner') return beginnerMetadata(pass)?.summary || pass;
-  if (key === 'adversarial') return dissentMetadata(pass)?.summary || pass;
-  return pass;
-};
+const reviewPassSummary = (key, pass) =>
+  key === 'adversarial' ? dissentMetadata(pass)?.summary || pass : pass;
 function proseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
   const gaps = [];
@@ -2168,7 +2155,7 @@ export function plainLanguageGaps(p) {
     gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} aspect`, item?.aspect));
     gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} use`, item?.use));
   }
-  for (const key of REVIEW_PASS_KEYS)
+  for (const key of reviewPassKeysFor(p.ballotProcessVersion))
     gaps.push(...proseDensityGaps(`reviewPasses.${key}`, reviewPassSummary(key, p.reviewPasses?.[key])));
   if (typeof p.checkInstructions === 'string')
     gaps.push(...proseDensityGaps('checkInstructions', p.checkInstructions));
@@ -2197,7 +2184,7 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
   const count = (v) => words(text(v)).length;
   const prose = [];
   const processVersion = Number(p.ballotProcessVersion || 0);
-  const structuredLosses = processVersion >= BALLOT_PROCESS_VERSION;
+  const structuredLosses = processVersion >= STRUCTURED_LOSS_PROCESS_VERSION;
   const need = (label, v, max) => {
     if (!text(v)) { gaps.push(`surface.${label}`); return; }
     prose.push([label, text(v)]);
@@ -2294,7 +2281,7 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
 
 function shortBallotGaps(p, card, processVersion) {
   const gaps = [];
-  if (processVersion >= BALLOT_PROCESS_VERSION) {
+  if (processVersion >= STRUCTURED_LOSS_PROCESS_VERSION) {
     const tags = new Set([
       ...(Array.isArray(card?.tags) ? card.tags : []),
       ...(Array.isArray(p.cardTags) ? p.cardTags : []),
@@ -2341,7 +2328,6 @@ function situationGaps(situation) {
 }
 
 export function ballotGaps(p, {
-  requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION,
   requireSurface = Number(p.ballotProcessVersion || 0) >= SURFACE_PROCESS_VERSION,
   requireRecFirst = false,
   card = null,
@@ -2387,7 +2373,7 @@ export function ballotGaps(p, {
       if (!item || !item.reason || !String(item.reason).trim()) missing.push(`recommendation.whyNot[${key}]`);
     }
     const recommendationLosses = Array.isArray(recommendation.losses) ? recommendation.losses : [];
-    if (processVersion >= BALLOT_PROCESS_VERSION) {
+    if (processVersion >= STRUCTURED_LOSS_PROCESS_VERSION) {
       recommendationLosses.forEach((item, i) => {
         const loss = typeof item?.loss === 'string' ? item.loss.trim() : '';
         const mitigation = typeof item?.mitigation === 'string' ? item.mitigation.trim() : '';
@@ -2406,20 +2392,18 @@ export function ballotGaps(p, {
     if (!passes || typeof passes !== 'object' || Array.isArray(passes)) {
       missing.push('reviewPasses');
     } else {
-      const allowedPasses = reviewPassKeysFor(processVersion);
-      const requiredPasses = processVersion >= BALLOT_PROCESS_VERSION
-        ? CURRENT_REVIEW_PASS_KEYS
-        : requireBeginner ? REVIEW_PASS_KEYS : LEGACY_REVIEW_PASS_KEYS;
-      for (const key of requiredPasses) {
-        const summary = reviewPassSummary(key, passes[key]);
-        if (typeof summary !== 'string' || !summary.trim()) missing.push(`reviewPasses.${key} (need text)`);
-        else if (sentences(summary).length > 2) missing.push(`reviewPasses.${key} (need 1-2 sentences)`);
-      }
-      for (const key of Object.keys(passes).filter(key => !allowedPasses.includes(key)))
+      for (const key of Object.keys(passes).filter(key => !reviewPassKeysFor(processVersion).includes(key)))
         missing.push(`reviewPasses.${key} (unexpected)`);
-      if (processVersion >= BEGINNER_PROCESS_VERSION || requireBeginner) missing.push(...beginnerMetadataGaps(p));
-      // Ratified review records are immutable evidence under their recorded law.
-      missing.push(...dissentMetadataGaps(p, { requireFresh: p.status !== 'ratified' }));
+      // Earlier-process review records are immutable historical evidence.
+      if (processVersion >= BALLOT_PROCESS_VERSION) {
+        for (const key of CURRENT_REVIEW_PASS_KEYS) {
+          const summary = reviewPassSummary(key, passes[key]);
+          if (typeof summary !== 'string' || !summary.trim()) missing.push(`reviewPasses.${key} (need text)`);
+          else if (sentences(summary).length > 2) missing.push(`reviewPasses.${key} (need 1-2 sentences)`);
+        }
+        // A ratified record keeps the provenance it was recorded with.
+        missing.push(...dissentMetadataGaps(p, { requireFresh: p.status !== 'ratified' }));
+      }
     }
   } else if (ballotMode === 'short') {
     missing.push(...shortBallotGaps(p, card, processVersion));
@@ -2448,15 +2432,13 @@ export function addDecision(s, p) {
   if (!systemAcceptance && (p.group === 'acceptance' || String(p.id || '').startsWith('D-ACCEPT-')))
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
   if (p.situation != null && typeof p.situation !== 'string') fail('E_INVALID', 'decision situation must be a string');
-  // Every newly authored narrative ballot is process 4. Historical process 2/3
-  // records enter through the store and keep their stored version unchanged.
+  // Every newly authored narrative ballot is process 5. Historical records
+  // enter through the store and keep their stored version unchanged.
   const candidate = systemAcceptance ? p : { ...p, status: 'open', ballotProcessVersion: BALLOT_PROCESS_VERSION };
   const draft = !!candidate.draft;
   if (!systemAcceptance && candidate.group !== 'acceptance') {
-    const gaps = ballotGaps(candidate, { requireBeginner: true, requireSurface: true, requireRecFirst: true, card });
-    const metadataGaps = (candidate.ballotMode || 'full') === 'full'
-      ? [...beginnerMetadataGaps(candidate), ...dissentMetadataGaps(candidate)]
-      : [];
+    const gaps = ballotGaps(candidate, { requireSurface: true, requireRecFirst: true, card });
+    const metadataGaps = (candidate.ballotMode || 'full') === 'full' ? dissentMetadataGaps(candidate) : [];
     if (draft) {
       if (metadataGaps.length)
         fail('E_BALLOT', `ballot draft missing required review metadata: ${metadataGaps.join(', ')}`);
@@ -2577,7 +2559,7 @@ export function reopenDecision(s, decisionId, by) {
     fail('E_OWNER_ONLY', 'reopening a ratified decision is owner-only');
   d.status = 'open'; delete d.outcome; delete d.ratifiedAt; const card = s.cards.find(c => c.id === d.cardId);
   // A reopened narrative ballot is re-authored under the current process, so
-  // its next update is gated by today's two passes, not retired ones.
+  // its next update is gated by today's adversarial pass, not retired ones.
   if (d.group !== 'acceptance' && Number(d.ballotProcessVersion || 0) < BALLOT_PROCESS_VERSION)
     d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
   if (card) touchCard(card, by);
@@ -2599,10 +2581,7 @@ export function updateDecision(s, id, patch, by) {
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
   if (d.group !== 'acceptance' && d.status !== 'ratified' && d.ballotMode !== 'short') {
-    const metadataGaps = [
-      ...(storedVersion >= BEGINNER_PROCESS_VERSION ? beginnerMetadataGaps(d) : []),
-      ...dissentMetadataGaps(d),
-    ];
+    const metadataGaps = dissentMetadataGaps(d);
     if (metadataGaps.length)
       fail('E_BALLOT', `ballot update missing required review metadata: ${metadataGaps.join(', ')}`);
   }
@@ -2610,11 +2589,7 @@ export function updateDecision(s, id, patch, by) {
   // same while promoting a draft. Ratified records remain historical law.
   if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
     d.ballotMode ||= 'full';
-    const gaps = ballotGaps(d, {
-      requireBeginner: storedVersion >= BEGINNER_PROCESS_VERSION,
-      requireSurface: storedVersion >= SURFACE_PROCESS_VERSION,
-      card,
-    });
+    const gaps = ballotGaps(d, { requireSurface: storedVersion >= SURFACE_PROCESS_VERSION, card });
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
     if (d.ballotMode === 'full') {
       d.reviewPasses = orderedReviewPasses(d.reviewPasses, storedVersion);

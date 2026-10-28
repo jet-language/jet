@@ -38,7 +38,6 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   const ballot = JSON.stringify({
     cardId: '#1', id: 'D-CLI1', title: 'Choose', ballotMode: 'full', situation: SITUATION,
     reviewPasses: {
-      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
@@ -68,7 +67,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   run(cwd, ['decision', 'add', '--file', bp, '--by', 'tester']);
   const saved = JSON.parse(run(cwd, ['decision', 'show', 'D-CLI1', '--json']).out);
   assert.equal(saved.ballotMode, 'full');
-  assert.equal(saved.ballotProcessVersion, 4);
+  assert.equal(saved.ballotProcessVersion, 5);
   assert.equal(saved.recommendation.losses[0].mitigation, 'Provide a short example to copy.');
   assert.equal(saved.surface.recommendation.losses[0].mitigation, 'Provide a short example to copy.');
   assert.equal(saved.reviewPasses.adversarial, 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.');
@@ -81,7 +80,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   assert.match(tooShort.out, /situation has 10 characters \(need 300-1200\)/);
   const brief = run(cwd, ['brief', '#1', '--color=never']).out;
   assert.ok(brief.includes(revised), 'brief prints the situation summary');
-  const ordered = [revised, 'beginner pass:', 'adversarial pass:', 'rec:'];
+  const ordered = [revised, 'adversarial pass:', 'rec:'];
   for (let i = 1; i < ordered.length; i++)
     assert.ok(brief.indexOf(ordered[i - 1]) < brief.indexOf(ordered[i]), `${ordered[i - 1]} must precede ${ordered[i]}`);
 
@@ -131,7 +130,7 @@ test('decision scaffold captures probe and cited evidence without touching tower
   assert.equal(draft.id, 'D-SCAFF');
   assert.equal(draft.surface.trio.current.code, 'current-probe');
   assert.equal(draft.surface.trio.wild.code, 'wild evidence from the cited tool');
-  assert.deepEqual(Object.keys(draft.reviewPasses), ['beginner', 'adversarial']);
+  assert.deepEqual(Object.keys(draft.reviewPasses), ['adversarial']);
   assert.deepEqual(draft.recommendation.losses, []);
   assert.deepEqual(draft.surface.recommendation.losses, []);
   assert.deepEqual(readFileSync(towerFile), before);

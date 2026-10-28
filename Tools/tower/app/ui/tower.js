@@ -1614,6 +1614,8 @@ function focusAll(startId) {
 function exitFocus() { focusIds = null; focusShown = null; $('#focus').hidden = true; render(); setTimeout(flushPending, 0); }
 function focusGo(delta) { focusIdx = Math.max(0, Math.min(focusIds.length - 1, focusIdx + delta)); focusFacet = null; askOpen = false; renderFocus(); }
 const optName = (d, key) => ((d.options || []).find(x => x.key === key) || {}).name || '';
+// Current ballots record one adversarial pass; historical records keep the
+// passes they were ratified with and render them in this order.
 const REVIEW_STAGES = [
   ['base', '●', 'Base'],
   ['boilOcean', '◎', 'Boil the ocean'],
@@ -1622,19 +1624,13 @@ const REVIEW_STAGES = [
   ['beginner', '◌', 'Beginner'],
   ['adversarial', '⚑', 'Adversarial'],
 ];
-const CURRENT_REVIEW_STAGES = [
-  ['beginner', '◌', 'Beginner'],
-  ['adversarial', '⚑', 'Adversarial'],
-];
-const reviewStagesFor = (d) => Number(d.ballotProcessVersion || 0) >= 4
-  ? CURRENT_REVIEW_STAGES : REVIEW_STAGES;
 function reviewPassesBody(d) {
   if (!d.reviewPasses) {
     return d.hybrid?.synthesis ? `<div class="hybrid"><b>◇ Hybrid pass — ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
       ${(d.hybrid.harvest || []).map(x => `<p><b>From ${esc(x.key)}:</b> ${esc(x.aspect || '')} — ${esc(x.use || '')}</p>`).join('')}</div>` : '';
   }
   return `<section class="reviewpasses" aria-label="Ballot review passes">
-    ${reviewStagesFor(d).map(([key, icon, label]) => `<div class="reviewpass reviewpass--${key}">
+    ${REVIEW_STAGES.filter(([key]) => d.reviewPasses[key] != null).map(([key, icon, label]) => `<div class="reviewpass reviewpass--${key}">
       <div class="reviewpass__label"><span aria-hidden="true">${icon}</span> ${label} pass</div>
       <p>${esc(d.reviewPasses[key] || '')}</p>
       ${key === 'hybrid' && d.hybrid?.synthesis ? `<div class="reviewpass__detail"><b>Result ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}

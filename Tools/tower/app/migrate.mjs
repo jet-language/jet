@@ -25,6 +25,17 @@ export function migrateRecommendationLosses(decision) {
   return changed;
 }
 
+// Owner ballot rule (2026-10-28): a ballot needs only one fresh adversarial
+// pass. Unratified process-4 ballots move to process 5 and drop the retired
+// beginner pass. Ratified records keep their passes as historical evidence.
+// Runs on every load; normal Tower writes persist the canonical form.
+export function migrateReviewPasses(decision) {
+  if (decision.status === 'ratified' || decision.group === 'acceptance' || decision.ballotProcessVersion !== 4) return false;
+  decision.ballotProcessVersion = 5;
+  if (decision.reviewPasses && typeof decision.reviewPasses === 'object') delete decision.reviewPasses.beginner;
+  return true;
+}
+
 export function migrate(old, { project = 'Project' } = {}) {
   const src = old && typeof old === 'object' ? old : {};
   const meta = src.meta || {};

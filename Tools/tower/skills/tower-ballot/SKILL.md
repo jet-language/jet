@@ -17,10 +17,9 @@ description: >-
 - **Supplied inputs:** The card and unresolved choice, ratified decisions,
   current and in-the-wild examples, project priorities, and the required
   profile.
-- **Allowed child result:** In `full`, one fresh beginner reader returns RLI5
-  friction and a separate fresh adversarial reader returns challenge findings.
-  Neither reader authors, decides, publishes, or opens follow-on work. The
-  readers may share the author's model family.
+- **Allowed child result:** In `full`, one fresh adversarial reader returns
+  challenge findings. The reader does not author, decide, publish, or open
+  follow-on work. The reader may share the author's model family.
 - **Completion owner:** `tower-ballot` owns drafting and repair. The owner owns
   the choice and ratification.
 - **Return point:** Reader results return to the ballot's readiness and
@@ -67,9 +66,9 @@ below.
 
 ## Choose the profile
 
-Ratified 2026-09-02 (D-BALLOT-PROCESS1 = C): new full ballots use two fresh
-reader passes, `beginner` and `adversarial`. Stored process 2/3 ballots keep
-their historical six-pass records and render unchanged; never rewrite them.
+Owner direction 2026-10-28: a new full ballot needs one fresh adversarial pass
+before it is marked ready. Stored ballots from earlier processes keep their
+historical review records and render unchanged; never rewrite them.
 
 - **`short`** is the default for one mechanism with at most three options. It
   is one complete base draft: reading surface, every decision field, complete
@@ -77,17 +76,14 @@ their historical six-pass records and render unchanged; never rewrite them.
   `shortAuthorizedBy` is not needed.
 - **`full`** is required for new syntax (anything touching `Syntax.rs`), an
   I1–I9 invariant carve-out, or a card the owner marks `full`. It is the same
-  base draft plus the two independent fresh readers recorded in
-  `reviewPasses`.
+  base draft plus one fresh adversarial pass recorded in
+  `reviewPasses.adversarial`.
 
-A full reader's `beginner` summary must begin exactly:
-`Fresh agent: <agent-id>. Skill: rli5.` The beginner attempts explain,
-predict, modify, and derive tasks and returns a friction table. The
-`adversarial` summary must begin exactly:
+The first line of the `adversarial` summary must begin exactly:
 `Author model family: <family>. Adversarial model family: <family>.` It must
-identify the actual reviewer with `Fresh agent: <agent-id>.` The adversarial
-reader is separate from both the author and beginner. A different model family
-is optional. Follow the owner's requested reader and routing.
+identify the actual reviewer with `Fresh agent: <agent-id>.` The reviewer did
+not author the ballot. A different model family is optional. Follow the
+owner's requested reader and routing.
 
 ## Situation summary
 
@@ -175,10 +171,9 @@ for the corrected JSON shape (`A` first, recommendation `A`, and `whyNot` for
 
 Do not repeat dispatch or closeout cadence in this skill. For full ballots, use
 the canonical [fresh-reader mechanics](../../../../.agents/skills/orchestration/references/ballot-review.md)
-for the complete-ballot brief, RLI5 tasks, adversarial attack, receipts, and
-provenance.
-After both fresh passes, repair material findings, re-check every loss, and
-confirm `recommendation.whyNot` still covers every loser. Each reader summary
+for the complete-ballot brief, adversarial attack, receipts, and provenance.
+After the fresh pass, repair material findings, re-check every loss, and
+confirm `recommendation.whyNot` still covers every loser. The reader summary
 is evidence, not a status label: state what was tested, added, removed, or
 repaired. Preserve every loss mitigation after the adversarial pass. The
 orchestration [closeout reference](../../../../.agents/skills/orchestration/references/closeout.md)
@@ -189,7 +184,7 @@ its card, the `situation` summary, then the question, lesson, and code
 stacked at full width without sideways scrolling: `Current`, `In the wild`
 (side by side only when both fit), then `A` first and every option with the
 same shape: name, gist, gains, losses, and proposed code. Recommendation and
-long form follow. The beginner pass is blue, adversarial orange,
+long form follow. The adversarial pass is orange,
 recommendation blue, and losing reasons muted red. Labels and icons carry the
 same meaning without color.
 
@@ -209,8 +204,8 @@ surface and long-form fields.
 ## Mechanics
 
 Scaffold into a scratch file. Finish the applicable fields and required reader
-evidence there before submission: even a full draft must pass Tower's reader
-metadata validation. The scaffold retains `draft: true`; adding it does not
+evidence there before submission: even a full draft must pass Tower's
+adversarial metadata validation. The scaffold retains `draft: true`; adding it does not
 expose the ballot to the owner.
 
 ```sh
@@ -248,5 +243,5 @@ New ballots appear through the live SSE board; web push is removed.
 - Ratified decisions are immutable history. Leave the card in `decide` until
   the owner ratifies it.
 - Use `short` only for one mechanism with at most three options. New syntax,
-  invariant changes, and owner-tagged full cards require the full two-reader
+  invariant changes, and owner-tagged full cards require the full one-pass
   profile. Do not invent `shortAuthorizedBy`.

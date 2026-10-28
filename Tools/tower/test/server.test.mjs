@@ -307,7 +307,6 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
 
 const fullBallot = (cardId, id, title) => ({ cardId, id, title,
     ballotMode: 'full', situation: SITUATION, reviewPasses: {
-      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
@@ -338,8 +337,8 @@ test('server ratify flow advances the card', async () => {
   let state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'decide');
   assert.equal(state.decisions[0].ballotMode, 'full');
-  assert.equal(state.decisions[0].ballotProcessVersion, 4);
-  assert.equal(state.decisions[0].reviewPasses.beginner, 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.');
+  assert.equal(state.decisions[0].ballotProcessVersion, 5);
+  assert.deepEqual(Object.keys(state.decisions[0].reviewPasses), ['adversarial']);
   const r = await post('clearance', { decisionId: 'D-S1', outcome: 'A', by: 'owner' });
   assert.equal(r.status, 200);
   state = await (await fetch(url('/api/state'))).json();
@@ -349,7 +348,7 @@ test('server ratify flow advances the card', async () => {
 test('clearance/reopen rejects missing actor without owner attribution', async () => {
   const added = await post('decision/add', {
     cardId: '#1', id: 'D-OPEN-NO-ACTOR', title: 'open decision', by: 'agent-test', draft: true,
-    reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' },
+    reviewPasses: { adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' },
   });
   assert.equal(added.status, 200);
   const rejected = await post('clearance/reopen', { decisionId: 'D-OPEN-NO-ACTOR' });

@@ -30,7 +30,6 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
 const ballot = (extra = {}) => ({
   ballotMode: 'full', situation: SITUATION,
   reviewPasses: {
-    beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
     adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
   },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
@@ -155,8 +154,8 @@ test('an open decision carries its full options text verbatim (owner decides fro
   const d = p.decisions.find(x => x.id === 'D-2');
   assert.equal(d.status, 'open');
   assert.equal(d.lesson, 'Concept, mechanics, terms, and stakes.');
-  assert.equal(d.ballotProcessVersion, 4);
-  assert.equal(d.reviewPasses.beginner, 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.');
+  assert.equal(d.ballotProcessVersion, 5);
+  assert.deepEqual(Object.keys(d.reviewPasses), ['adversarial']);
   assert.equal(d.rec, 'A');
   assert.equal(d.situation, SITUATION, 'open decisions carry the situation summary verbatim');
   assert.equal(d.ballotMode, 'full');

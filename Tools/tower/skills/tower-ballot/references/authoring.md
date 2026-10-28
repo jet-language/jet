@@ -44,15 +44,14 @@ Do not research or sell a new owner choice where none exists.
 
 ## Full-profile review handoff
 
-A full ballot needs two independent fresh readers. Use the canonical
+A full ballot needs one fresh adversarial reader. Use the canonical
 [ballot review mechanics](../../../../../.agents/skills/orchestration/references/ballot-review.md)
-for dispatch, complete-ballot input, RLI5 tasks, receipt shape, and provenance.
-The beginner pass invokes `/rli5` and attempts explain, predict, modify, and
-derive tasks, returning a friction table. The adversarial pass attacks the
-recommendation, evidence, failure modes, and every `mitigation`.
+for dispatch, complete-ballot input, receipt shape, and provenance. The
+adversarial pass attacks the recommendation, evidence, failure modes, and
+every `mitigation`.
 
-Neither reader may have authored the ballot or performed the other pass. A
-model-family change is optional; freshness and separate agent IDs are required.
-After both receipts, repair material findings, re-run the loss checks, and
-ensure `recommendation.whyNot` names every losing option. A short ballot ends
-after the complete base draft and design-away result; it has no review passes.
+The reader may not have authored the ballot. A model-family change is optional;
+freshness and a named agent ID are required. After the receipt, repair
+material findings, re-run the loss checks, and ensure `recommendation.whyNot`
+names every losing option. A short ballot ends after the complete base draft
+and design-away result; it has no review passes.

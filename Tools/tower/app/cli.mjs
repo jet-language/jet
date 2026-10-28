@@ -627,10 +627,10 @@ function scaffoldDecision(store, ref, flags) {
   // Start loss-free; add only negligible remaining costs as { loss, mitigation }.
   const draft = {
     id, cardId: card.id, title: card.title, group: 'other', ballotMode: 'full',
-    shortAuthorizedBy: null, ballotProcessVersion: 4, draft: true, status: 'open',
+    shortAuthorizedBy: null, ballotProcessVersion: 5, draft: true, status: 'open',
     situation: '', gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', rec: '',
     options: [], comparisons: [], recommendation: emptyRecommendation(), hybrid: null,
-    reviewPasses: { beginner: '', adversarial: '' }, checkInstructions: null,
+    reviewPasses: { adversarial: '' }, checkInstructions: null,
     surface: {
       gist: '', lesson: '',
       trio: {

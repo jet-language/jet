@@ -13,7 +13,6 @@ import { ownerDecisions, ownerVerifyQueue } from '../app/ui/board-state.js';
 import { renderNowReports } from '../app/ui/now.js';
 
 const reviewPasses = {
-  beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
   adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.',
 };
 function board() {

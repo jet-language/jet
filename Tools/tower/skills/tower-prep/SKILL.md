@@ -88,7 +88,7 @@ Load the smallest slice. Never hand-edit `Tools/tower/.tower/*.json`.
    use `--ready` and read back the owner gate when the ballot is complete. Use
    `short` for one mechanism with at most three options; use `full` for new
    syntax, invariant carve-outs, or owner-tagged full cards. Full ballots use
-   two fresh readers; see the [ballot review mechanics](../../../../.agents/skills/orchestration/references/ballot-review.md).
+   one fresh adversarial reader; see the [ballot review mechanics](../../../../.agents/skills/orchestration/references/ballot-review.md).
 6. Advance only when preparation requires it: an ungated `planning` card may
    become stored phase `ready`; an open owner gate keeps the card in stored
    `deciding` and computed lane `decide`; blocked or external cards keep their
