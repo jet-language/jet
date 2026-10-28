@@ -814,16 +814,6 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
                     else -> return None
                 }
             }
-            if kind == "HTTPMux" && method == "middleware" -> return Val(ir_handle_h("http_mux.middleware", "jet_http_mux_middleware", [Bool]{true, false}, Val(Effect.Net)))
-            if kind == "HTTPServer" {
-                if method == {
-                    "local_addr" -> return Val(ir_handle_h("http_server.local_addr", "jet_http_server_local_addr", [Bool]{true}, Val(Effect.Net)))
-                    "serve" -> return Val(ir_handle_h("http_server.serve", "jet_http_server_serve", [Bool]{true}, Val(Effect.Net)))
-                    "wait" -> return Val(ir_handle_h("http_server.wait", "jet_http_server_wait", [Bool]{true}, Val(Effect.Net)))
-                    "shutdown" -> return Val(ir_handle_h("http_server.shutdown", "jet_http_server_shutdown", [Bool]{true, true}, Val(Effect.Net)))
-                    else -> return None
-                }
-            }
             return None
         }
         else -> None

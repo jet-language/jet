@@ -106,17 +106,13 @@ fn pkg_ffi_bridge_deps(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env
         loop spec in pkg_ffi_parquet_crate_specs() -> &specs.push(spec)
     }
     if needs.http_client {
-        &specs.push(FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(FFI_RUSTLS_CRATE_SPEC)
         &specs.push(FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
-    }
-    if needs.http_server_tls {
-        &specs.push(FFI_HTTP_SERVER_TLS_CRATE_SPEC)
-        &specs.push(FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
     }
     if needs.net_tls {
-        &specs.push(FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(FFI_RUSTLS_CRATE_SPEC)
         &specs.push(FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
-        &specs.push(FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
+        &specs.push(FFI_RUSTLS_PEMFILE_CRATE_SPEC)
     }
     if needs.crypto {
         loop spec in pkg_ffi_crypto_crate_specs() -> &specs.push(spec)

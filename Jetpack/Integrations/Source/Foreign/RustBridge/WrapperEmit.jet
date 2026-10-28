@@ -165,8 +165,6 @@ fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBrid
     if needs.parquet -> out = "{out}{pkg_ffi_runtime_mod("__jet_parquet", "{FFI_PARQUET_RUNTIME}\n")}"
     // Native HTTP; rustls is the separately ratified TLS seam.
     if needs.http_client -> out = "{out}{pkg_ffi_runtime_mod("__jet_http_client", "const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"{FFI_HTTP_PUBLIC_SUFFIX_LIST}\"################;\n{FFI_HTTP_CLIENT_RUNTIME}\n")}"
-    // The server TLS runtime is the only place serving touches rustls.
-    if needs.http_server_tls -> out = "{out}{pkg_ffi_runtime_mod("__jet_http_server_tls", "{FFI_HTTP_SERVER_TLS_RUNTIME}\n")}"
     // Client stream TLS over an existing TcpStream.
     if needs.net_tls -> out = "{out}{pkg_ffi_runtime_mod("__jet_net_tls", "{FFI_NET_TLS_RUNTIME}\n")}"
     if needs.crypto || needs.secrets -> out = "{out}{pkg_ffi_crypto_modules(needs)}"

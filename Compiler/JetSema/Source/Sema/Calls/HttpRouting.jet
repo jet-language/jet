@@ -1,17 +1,27 @@
 // Static route contracts are checked before HTTPRouterRegister reaches TIR.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
+    Call,
     CallArg,
     Diagnostic,
     Expr,
+    Lambda,
     LambdaBody,
+    LambdaParam,
     HTTPRouteMethod,
+    NamedSpan,
+    OrFallback,
     ParamZone,
     Span,
     Stmt,
+    StrPart,
     StructDef,
     SymbolKind,
     Type,
+    ast_binding,
+    ast_empty_call_arg_flags,
+    ast_empty_lambda_meta,
     core_source_receiver_method,
     type_name,
 ]
@@ -1042,6 +1052,11 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         handler_param_types := [Type]{}
         loop parameter in handler_shape.params -> &handler_param_types.push(parameter.ty)
         handler_type := Type.Fn{params: handler_param_types, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+        if receiver_name == "HTTPMux" {
+            request_ty :: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program)
+            updated_args[1].expr = sema_http_mux_route_handler(updated_args[1].expr, handler_shape.params, request_names, typed, request_ty, updated_args[1].span)
+            handler_type = Type.Fn{params: [Type]{request_ty}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+        }
         callback :: sema_check_expression_with_lambda_escapes(updated_args[1].expr, Val(handler_type), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if !sema_call_http_check_middleware_callback(callback, environment, program, &scopes, &state, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         updated_args[1].convention = AccessConvention.Move
@@ -1080,6 +1095,15 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler has no complete checked endpoint contract", "router registration needs response metadata and serializable path/query/body schemas", "return a typed `HTTPResponse` constructor from every handler path"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
+        if receiver_name == "HTTPMux" {
+            verb :: sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_http_route_method_name(method)}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            route_args := [TCallArg]{
+                sema_call_http_static_tir_arg(verb, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
+                sema_call_http_static_tir_arg(path_value, updated_args[0]),
+                sema_call_http_static_tir_arg(callback, updated_args[1]),
+            }
+            return sema_call_http_mux_source_call(receiver_value, "__route", route_args, span, expected, environment, program, &scopes, &context, &diagnostics)
+        }
         route_handler := sema_tir_node(callback.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: callback}}, callback.span)
         operation := THandleOp.HTTPRouterRegister{verb: sema_http_route_verb(method), handler: route_handler, file: environment.source_file, line: line, handler_param_names: path_names_for_tir, contract_json: contract}
         tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{path_value}}, span)
@@ -1087,4 +1111,57 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: true, value: None}
+}
+
+fn sema_http_mux_ident(name: String, span: Span) -> Expr Never! {
+    Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+}
+
+fn sema_http_mux_lambda(expression: Expr) -> Lambda? {
+    if expression == {
+        .Paren(inner, _, _) -> return sema_http_mux_lambda(inner)
+        .Lambda(lambda, _) -> return Val(lambda)
+        else -> return None
+    }
+}
+
+fn sema_http_mux_callee(expression: Expr) -> String? {
+    if expression == {
+        .Paren(inner, _, _) -> return sema_http_mux_callee(inner)
+        .Ident(name, _, _) -> return Val(name)
+        else -> return None
+    }
+}
+
+// A mux route stores one request-taking handler. Each typed input decodes
+// from the request's path parameters or query before the handler body runs;
+// an input that does not decode answers 400 without entering the body.
+fn sema_http_mux_route_handler(handler: Expr, params: [SemaHTTPRouteParameter], request_names: [String], typed: [SemaHTTPRouteParameter], request_ty: Type, span: Span) -> Expr Never! {
+    request := "__jet_http_request"
+    if request_names.len() == 1 && request_names[0] != "_" -> request = request_names[0]
+    body := [Stmt]{}
+    loop parameter in typed {
+        name_arg :: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: parameter.name}}, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        input :: Expr.MethodCall{receiver: sema_http_mux_ident(request, span), method: "__route_input", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{parameter.ty}, args: [CallArg]{name_arg}, id: AST_NODE_GENERATED}
+        rejected :: Expr.MethodCall{receiver: sema_http_mux_ident(request, span), method: "__route_rejected", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+        decoded :: Expr.OrFallback{value: input, fallback: OrFallback.Return{value: Val(Expr.Ok{value: rejected, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
+        &body.push(Stmt.Val{binding: ast_binding(parameter.name, span, false, decoded, None)})
+    }
+    request_param :: LambdaParam{name: request, name_span: span, ty: Val(request_ty), ty_span: None}
+    if sema_http_mux_lambda(handler) == .Val(lambda) {
+        if lambda.body == {
+            .Expr(value) -> { &body.push(Stmt.Expr{expr: value}) }
+            .Block(statements) -> { loop statement in statements -> &body.push(statement) }
+        }
+        return Expr.Lambda{lambda: Lambda{take_names: lambda.take_names, params: [LambdaParam]{request_param}, effects: lambda.effects, body: LambdaBody.Block{body: body}, span: lambda.span, meta: lambda.meta}, id: AST_NODE_GENERATED}
+    }
+    callee :: sema_http_mux_callee(handler) ?? panic("HTTP mux route handler is neither a lambda nor a named function")
+    args := [CallArg]{}
+    loop parameter in params {
+        name := parameter.name
+        if request_names.contains(parameter.name) -> name = request
+        &args.push(CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+    }
+    &body.push(Stmt.Expr{expr: Expr.Call{call: Call{name: callee, name_span: span, type_args: [Type]{}, args: args}, id: AST_NODE_GENERATED}})
+    Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{request_param}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
 }

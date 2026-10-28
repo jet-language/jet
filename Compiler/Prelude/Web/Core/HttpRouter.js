@@ -8,59 +8,6 @@ function jet_http_router_new() {
   return { kind: "http_router", routes: [] };
 }
 
-function jet_http_mux_new() {
-  return { kind: "http_mux", routes: [] };
-}
-
-function jet_http_mux_validate(mux, method, pattern, handler) {
-  if (
-    mux == null ||
-    typeof mux !== "object" ||
-    mux.kind !== "http_mux" ||
-    !Array.isArray(mux.routes)
-  ) {
-    throw new Error("invalid HTTP mux");
-  }
-  if (!JET_HTTP_ROUTE_METHODS.includes(method)) {
-    throw new Error(`invalid HTTP method: ${String(method)}`);
-  }
-  if (typeof handler !== "function") throw new Error("invalid HTTP route handler");
-  let parsed;
-  try {
-    parsed = jet_http_route_parse_pattern(pattern);
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : String(error));
-  }
-  if (mux.routes.some((route) => route.method === method && route.shape === parsed.shape)) {
-    throw new Error(`duplicate route \`${method} ${pattern}\``);
-  }
-  return parsed;
-}
-
-function jet_http_mux_add_handler(mux, method, pattern, handler) {
-  const parsed = jet_http_mux_validate(mux, method, pattern, handler);
-  mux.routes.push({
-    method,
-    pattern,
-    shape: parsed.shape,
-    parsed,
-    handler,
-    zero: false,
-  });
-}
-
-function jet_http_mux_add_zero_handler(mux, method, pattern, handler) {
-  const parsed = jet_http_mux_validate(mux, method, pattern, handler);
-  mux.routes.push({
-    method,
-    pattern,
-    shape: parsed.shape,
-    parsed,
-    handler,
-    zero: true,
-  });
-}
-
 function jet_http_router_handler_with_names(handler, names) {
   if (typeof handler !== "function" || !Array.isArray(names)) {
     throw new Error("invalid HTTP route handler metadata");
@@ -83,64 +30,6 @@ function jet_http_route_decode_segment(segment) {
   }
   return decoded;
 }
-function jet_http_mux_dispatch(mux, request) {
-  if (
-    mux == null ||
-    typeof mux !== "object" ||
-    mux.kind !== "http_mux" ||
-    !Array.isArray(mux.routes)
-  ) {
-    throw new Error("invalid HTTP mux");
-  }
-  if (request == null || typeof request !== "object") {
-    throw new Error("invalid HTTP request");
-  }
-  const method = request.method;
-  const path = request.path;
-  if (typeof method !== "string" || typeof path !== "string") {
-    throw new Error("invalid HTTP request carrier");
-  }
-  let pathSegments;
-  try {
-    pathSegments = jet_http_route_parse_path(path);
-  } catch (_error) {
-    return jet_http_bad_request();
-  }
-  const candidates = mux.routes
-    .map((route, index) => ({ route, index }))
-    .filter(({ route }) => jet_http_route_matches(route.parsed, pathSegments));
-  const methodCandidates = candidates.filter(({ route }) => route.method === method);
-  let selected = methodCandidates;
-  if (method === "HEAD" && selected.length === 0) {
-    selected = candidates.filter(({ route }) => route.method === "GET");
-  }
-  if (selected.length === 0) {
-    return jet_http_result_ok(
-      jet_http_response(
-        candidates.length === 0 ? 404 : 405,
-        candidates.length === 0 ? "404 not found" : "405 method not allowed",
-      ),
-    );
-  }
-  const chosen = selected.reduce((best, candidate) => (
-    best === null ||
-      jet_http_route_compare(
-        candidate.route.parsed,
-        candidate.index,
-        best.route.parsed,
-        best.index,
-      ) > 0
-      ? candidate
-      : best
-  ), null);
-  const route = chosen.route;
-  const routedRequest = Object.assign({}, request, {
-    params: jet_http_route_params(route.parsed, pathSegments),
-    route_template: route.pattern,
-  });
-  return route.zero ? route.handler() : route.handler(routedRequest);
-}
-
 
 function jet_http_route_parse_pattern(pattern) {
   if (typeof pattern !== "string" || pattern.length === 0 || !pattern.startsWith("/")) {

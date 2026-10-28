@@ -11,7 +11,6 @@ package {
 
 use core as core
 use core.http.client as provider
-use core.http.server as http_server
 use core.net.url as http_url
 use core.encoding.json as json_codec
 use core.files.[FileWriter]
@@ -256,6 +255,17 @@ fn __response(status: Int, body: ^Body, fields: ^Headers) -> HTTPResponse Never!
     HTTPResponse{status: status, body: ^body, headers: ^fields, __cell: Val(shared __HTTPBodyCell{taken: false})}
 }
 
+// A text response; an out-of-range status is a 500.
+fn __text_response(status: Int, text: String) -> HTTPResponse Never! {
+    fields :: headers()
+    if status < 100 || status > 599 {
+        fallback :: body_text("500 Internal Server Error")
+        return __response(500, ^fallback, ^fields)
+    }
+    payload :: body_text(text)
+    __response(status, ^payload, ^fields)
+}
+
 fn __client_response(status: Int, body: Body, fields: Headers, redirect_history: [String], timings: [Int], reused: Bool, raw_encoding: String?, body_error: HTTPError?) -> HTTPResponse Never! {
     HTTPResponse{
         status: status, body: body, headers: fields,
@@ -274,6 +284,18 @@ fn request_target_path(url: String) -> String Never! {
     query :: parsed.query()
     if query != "" -> return "{path}?{query}"
     path
+}
+
+// A route input's text: the matched path parameter, else the first query
+// field of that name.
+fn __route_text(request: HTTPRequest, name: String) -> String? Never! {
+    loop pair in request.__params {
+        if pair.name == name -> return Val(pair.value)
+    }
+    raw :: request.path.bytes()
+    at :: index_byte(raw, 63)
+    if at < 0 -> return None
+    query_get(query_decode(slice_str(request.path, at + 1, raw.len())), name)
 }
 
 impl HTTPRequest {
@@ -301,6 +323,27 @@ impl HTTPRequest {
             if pair.name == name -> return Val(pair.value)
         }
         None
+    }
+
+    // A typed route input: the path parameter, else the query field. The
+    // text decodes as a JSON string first, then as a JSON value; an absent
+    // input decodes `null`, so only optional targets accept it.
+    fn __route_input<Target: Decode>(self, name: String) -> Target? {
+        if __route_text(self, name) == .Val(text) {
+            quoted :: json_codec.to_string(text.encode()) ?? return None
+            if json_codec.decode<Target>(quoted) == .Ok(value) -> return Val(value)
+            if json_codec.decode<Target>(text) == .Ok(value) -> return Val(value)
+            return None
+        }
+        if json_codec.decode<Target>("null") == .Ok(value) -> return Val(value)
+        None
+    }
+
+    // The answer when a typed route input does not decode.
+    fn __route_rejected(self) -> HTTPResponse Never! {
+        payload :: body_text("400 Bad Request")
+        fields :: headers()
+        __response(400, ^payload, ^fields)
     }
 
     fn header(self, name: String) -> String? Never! { headers_get(self.headers, name) }
@@ -902,7 +945,7 @@ fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
     if response_forbids_body(parsed.status.code) && body_raw.len() > 0 -> return Err(.InvalidFraming)
     body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
-    parsed_response := http_server.response(parsed.status.code, body_text)
+    parsed_response := __text_response(parsed.status.code, body_text)
     loop line in hdr_lines {
         col := index_byte(line.bytes(), 58)
         name :: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
@@ -1267,7 +1310,7 @@ fn request_with(method: Method, url: String, h: Headers, body: Body) -> HTTPRequ
 }
 
 fn response_ok(body: Body) -> HTTPResponse Never! {
-    http_server.response(200, body_as_text(body))
+    __text_response(200, body_as_text(body))
 }
 
 fn response_json_headers() -> Headers Never! { headers_set(headers(), "content-type", "application/json; charset=utf-8") }

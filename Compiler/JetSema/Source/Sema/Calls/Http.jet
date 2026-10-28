@@ -76,9 +76,6 @@ fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironmen
                         namespace == "core.http" && leaf == "RetryPolicy" -> "HTTPRetryPolicy"
                         namespace == "core.http" && leaf == "CookieJar" -> "HTTPCookieJar"
                         namespace == "core.http" && leaf == "Router" -> "HTTPRouter"
-                        namespace == "core.http" && leaf == "Mux" -> "HTTPMux"
-                        namespace == "core.http" && leaf == "Handler" -> "HTTPHandler"
-                        namespace == "core.http" && leaf == "Server" -> "HTTPServer"
                         else -> ""
                     }
                     if type_name == "" {
@@ -345,7 +342,7 @@ fn sema_call_try_http_static(
 }
 
 fn sema_call_http_known_receiver_type(name: String) -> Bool Never! {
-    name == "HTTPClient" || name == "HTTPMux" || name == "HTTPRouter" || name == "HTTPHandler" || name == "HTTPServer" || name == "Headers"
+    name == "HTTPClient" || name == "HTTPMux" || name == "HTTPRouter" || name == "Headers"
 }
 
 fn sema_call_http_method_result(name: String, method: String, count: Int) -> Type? {
@@ -354,15 +351,7 @@ fn sema_call_http_method_result(name: String, method: String, count: Int) -> Typ
         if method == "send" && count == 1 -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
         if method == "cookies" || method == "redirects" || method == "protocols" || method == "timeouts" || method == "raw_encoding" || method == "proxy" || method == "tls" || method == "allow_http_downgrade" || method == "retries" -> return Val(Type.Named{name: "HTTPClient"})
     }
-    if name == "HTTPMux" {
-        if method == "get" || method == "post" || method == "put" || method == "delete" || method == "patch" || method == "head" || method == "options" || method == "middleware" -> return Val(Type.Named{name: "Unit"})
-    }
     if name == "HTTPRouter" && (method == "get" || method == "post" || method == "put" || method == "delete") -> return Val(Type.Named{name: "Unit"})
-    if name == "HTTPHandler" && method == "handle" -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
-    if name == "HTTPServer" {
-        if method == "local_addr" -> return Val(Type.Result{ok: Type.String, err: error})
-        if method == "serve" || method == "shutdown" || method == "wait" -> return Val(Type.Result{ok: Type.Named{name: "HTTPShutdownReport"}, err: error})
-    }
     if name == "Headers" {
         if method == "first" && count == 0 -> return Val(Type.Option{inner: Type.String})
         if method == "all" && count == 0 -> return Val(Type.List{element: Type.String})
@@ -387,7 +376,6 @@ fn sema_call_http_client_arg_types(method: String) -> [Type] Never! {
 
 fn sema_call_http_method_arg_types(name: String, method: String, count: Int) -> [Type] Never! {
     if name == "HTTPClient" -> return sema_call_http_client_arg_types(method)
-    if name == "HTTPHandler" && method == "handle" -> return [Type]{Type.Named{name: "HTTPRequest"}}
     if name == "Headers" {
         if method == "append" || method == "set" -> return [Type]{Type.String, Type.String}
         if method == "remove" -> return [Type]{Type.String}
@@ -420,8 +408,7 @@ fn sema_call_http_source_json_target(target: SemaCallDirectTarget, environment: 
 }
 
 fn sema_call_http_emit_method(receiver: TExpr, name: String, method: String, args: [TExpr], result_type: Type, span: Span) -> TExpr Never! {
-    operation :: if name.starts_with("HTTPServer") || name == "HTTPMux" || name == "HTTPHandler" -> THandleOp.HTTPServerMethod{kind: name, method: method} else -> THandleOp.HTTPClientMethod{kind: name, method: method}
-    sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.HTTPClientMethod{kind: name, method: method}, args: args}, span)
 }
 
 
@@ -437,7 +424,7 @@ fn sema_call_http_record_effect(effect_name: String, api: String, result_type: T
 }
 
 fn sema_call_http_method_effect(name: String, method: String, count: Int) -> String? {
-    if name == "HTTPClient" || name == "HTTPServer" || (name == "HTTPMux" && method == "middleware") -> return Val("Net")
+    if name == "HTTPClient" -> return Val("Net")
     None
 }
 
@@ -476,7 +463,8 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    callback_type := Type.Fn{params: [Type]{Type.Named{name: "HTTPHandler"}}, ret: Val(Type.Named{name: "HTTPHandler"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    handler_ty :: sema_call_resolved_type(Type.Named{name: "HTTPHandler"}, environment, program)
+    callback_type := Type.Fn{params: [Type]{handler_ty}, ret: Val(handler_ty), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     callback :: sema_check_expression_with_lambda_escapes(updated_args[0].expr, Val(callback_type), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     compatible :: sema_call_type_assignable(callback_type, callback.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !compatible {
@@ -488,9 +476,21 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
     parameter := SemaCallParam{label: "middleware", name: "middleware", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(callback_type), variadic: false}
     ownership := sema_ownership_check_method_call(&state, "middleware", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.HTTPServerMethod{kind: "HTTPMux", method: "middleware"}, args: [TExpr]{callback}}, span)
-    sema_call_http_record_effect("Net", "HTTPMux.middleware", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
+    sema_call_http_mux_source_call(receiver_value, "__middleware", [TCallArg]{sema_call_http_static_tir_arg(callback, updated_args[0])}, span, expected, environment, program, &scopes, &context, &diagnostics)
+}
+
+// Mux registration lowers to the mux's own source methods; the checked
+// arguments carry their conventions.
+fn sema_call_http_mux_source_call(receiver_value: TExpr, method: String, args: [TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if program.registration_graph == .Val(graph) {
+        candidates := sema_expr_registration_method_candidates(graph, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, &scopes, &diagnostics)
+        candidate := &candidates.pop() ?? panic("HTTPMux.{method} is not registered")
+        tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.MethodCall{receiver: receiver_value, method: ^candidate.method, type_args: [Type]{}, args: args}, span)
+        sema_call_http_record_effect("Net", "HTTPMux.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
+    } else {
+        panic("HTTPMux.{method} needs a registration graph")
+    }
 }
  
 fn sema_call_try_http_method(
@@ -535,23 +535,8 @@ fn sema_call_try_http_method(
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    if name == "HTTPServer" {
-        want := if method == "shutdown" -> 1 else -> 0
-        if args.len() != want {
-            &diagnostics.push(sema_call_arity_diagnostic("{method}", want, args.len(), false, span))
-            loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-    }
-    if name == "HTTPHandler" && method == "handle" && args.len() != 1 {
-        &diagnostics.push(sema_call_arity_diagnostic(method, 1, args.len(), false, span))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
     arg_types := sema_call_http_method_arg_types(name, method, args.len())
     if name == "HTTPClient" -> arg_types = sema_call_http_client_arg_types(method)
-    if name == "HTTPServer" && method == "shutdown" -> arg_types = [Type]{Type.Named{name: "Duration"}}
-    if name == "HTTPHandler" && method == "handle" -> arg_types = [Type]{Type.Named{name: "HTTPRequest"}}
     moving := [Int]{}
     values := [TExpr]{}
     checked := true

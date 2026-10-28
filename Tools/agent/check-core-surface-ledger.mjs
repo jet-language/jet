@@ -1381,7 +1381,6 @@ function coreCallEffectFor(moduleName, member) {
   ])) || (moduleName === "core.crypto.random" && member === "bytes")) return "Rand";
   if (member === "style_force" && moduleName === "core.term") return null;
   if (moduleName === "core.net" && member === "gethostname") return "Env";
-  if (moduleName === "core.http.server" && member === "__response_parts") return null;
   if (moduleName === "core.net" && coreCallOneOf(member, [
     "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
     "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts",
@@ -1514,7 +1513,7 @@ function coreCallEffectLeafFor(moduleName, member) {
   // TLS waits.
   if (moduleName === "core.net.tls" && coreCallOneOf(member, ["client", "read", "read_text", "write", "write_all", "write_text", "close"])) return "Time.Wait";
   // HTTP waits.
-  if ((moduleName === "core.http.client" && coreCallOneOf(member, ["get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"])) || (moduleName === "core.http" && member === "get") || (moduleName === "core.http.server" && coreCallOneOf(member, ["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"]))) return "Time.Wait";
+  if ((moduleName === "core.http.client" && coreCallOneOf(member, ["get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"])) || (moduleName === "core.http" && member === "get") || (moduleName === "core.http.server" && coreCallOneOf(member, ["serve", "serve_once", "serve_once_listener"]))) return "Time.Wait";
   // Encoding readers and writers.
   if ((coreCallOneOf(moduleName, [
     "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",

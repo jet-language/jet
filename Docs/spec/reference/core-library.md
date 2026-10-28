@@ -1072,34 +1072,38 @@ meaning rather than becoming an I/O error. The public `Body.Empty`,
 
 ### `core.http.server` — HTTP serving
 
-`core.http.server` builds a typed multiplexer and serves HTTP/1.1. `bind` and
-`serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
-and `serve_once_listener` provide testable one-request entry points.
+`core.http.server` builds a typed multiplexer and serves HTTP/1.1 over
+`core.net` TCP, one request per connection with `Connection: close`. `bind`
+and `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
+and `serve_once_listener` provide testable one-request entry points. A server
+given TLS material refuses to bind, because no listener TLS adapter exists yet.
 The Jet `tls(cert, key)` constructor preserves both PEM strings verbatim,
 including empty or malformed material. Loading and validating those credentials
 belongs to the listener's TLS setup, not to construction.
 
+`core.http.serve(mux, deadline)` binds `mux` on 127.0.0.1:8080 and returns the
+`HTTPServer`, panicking when the address cannot be bound.
 
-`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
-returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
-returns an `HTTPShutdownReport`. It is distinct from the blocking
-`core.http.server.serve(addr, mux, ...)` operation.
+An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
+`shutdown(grace)`. Each request is answered before the next is accepted, so a
+shutdown has no in-flight request to cancel. Every caller of `serve` and
+`shutdown` receives the same `HTTPShutdownReport{accepted, overloaded,
+completed, cancelled}`; a second `serve` is an `HTTPError.IO`. The connection
+deadline bounds each connection's reads and writes (30 seconds by default).
 
-`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
-returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
-returns an `HTTPShutdownReport`. It is distinct from the blocking
-`core.http.server.serve(addr, mux, ...)` operation.
-
-`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
-returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
-returns an `HTTPShutdownReport`. It is distinct from the blocking
-`core.http.server.serve(addr, mux, ...)` operation.
+Static files are read through `core.files` and the `Date` field comes from the
+`core.time` wall clock, so serving carries `[Net, FS.Read, Time]`:
+`serve(addr, …)`, `HTTPServer.serve`/`wait`, `serve_once` and
+`serve_once_listener` have that row. `static_file`, `static_file_range`,
+`HTTPHandler.handle`, and the mux installers `static_files`, `cors` and
+`request_id` are `[Net, FS.Read]`, and a handler closure may use `Net` and
+`FS.Read`.
 
 | API | Result | Description |
 | --- | --- | --- |
 | `mux()` | `HTTPMux` | Create a router carrier. |
-| `bind(addr, mux, tls, deadline)` | `HTTPServer !HTTPError` | Bind a plaintext or explicitly configured TLS listener. |
-| `serve(addr, mux, tls, deadline)` | `!HTTPError` | Serve requests until the operation fails or is stopped. |
+| `bind(addr, mux, tls, deadline)` | `HTTPServer !HTTPError` | Bind a plaintext listener. |
+| `serve(addr, mux, tls, deadline)` | `!HTTPError` | Bind, then serve requests until the listener fails. |
 | `serve_once(addr, mux)` / `serve_once_listener(listener, mux)` | `!HTTPError` | Serve one request for tests and small adapters. |
 | `response(status, body)` | `HTTPResponse` | Construct a text response. |
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
@@ -1110,6 +1114,40 @@ returns an `HTTPShutdownReport`. It is distinct from the blocking
 | `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
+
+Routes are `/`, static segments, `:name` parameters, and one final `*name`
+catch-all that may match zero segments. An invalid pattern panics with E2805
+and a second route of the same method and shape panics with E2804. Request
+paths are percent-decoded per segment without `+` rewriting; an encoded `/`, a
+`.` or `..` segment, or invalid UTF-8 is `400`. A static segment outranks a
+parameter, which outranks a catch-all, segment by segment; then the shorter
+pattern wins, then the earlier registration. `HEAD` falls back to `GET`. A path
+served only for other methods is `405` with `Allow`, an unknown path `404`, and
+`OPTIONS *` is `204` with every registered method in `Allow`. Middleware
+registered first runs outermost. Every request carries `x-request-id`: a valid
+incoming value (1–128 visible ASCII bytes) is kept, otherwise one is generated.
+
+Request framing refuses what HTTP/1.1 forbids: a head over 32 KiB or more than
+100 fields is `431`; a malformed request line, an obsolete folded field, a
+missing or repeated `Host` on HTTP/1.1, `Content-Length` with
+`Transfer-Encoding`, a coding other than `chunked`, and conflicting lengths are
+`400`; a body over 1 MiB is `413`; any `Content-Encoding` is `415`; an
+`Expect` other than `100-continue` is `417`; an unsupported `HTTP/` version is
+`505`; and a request not completed within the deadline is `408`. Chunked bodies
+accept only the trailers the request declared. Responses carry `Date` and the
+server's own framing: user `Content-Length`, `Transfer-Encoding`, `Trailer`
+and `Connection` fields are not sent. Response trailers switch the body to
+chunked framing with a `Trailer` field; `1xx`, `204`, `205` and `304` carry no
+body. A handler error of `BodyTooLarge`, `InvalidFraming` or
+`UnsupportedEncoding` answers `413`, `400` or `415`; any other is `500`.
+
+`static_files` serves `GET` below the prefix. It refuses dot-files unless
+`dotfiles: true`, symbolic links unless `follow_links: true`, and any path that
+resolves outside the root. A directory serves its `index.html` unless
+`index: false`. Responses carry a content type from the file extension,
+`accept-ranges`, an `etag` and `last-modified`; `If-None-Match` and
+`If-Modified-Since` answer `304`, one byte range answers `206` (guarded by
+`If-Range`), an unsatisfiable range `416`, and anything unservable `404`.
 
 The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
 Empty method/header lists retain the published defaults, credentials default to
@@ -4057,19 +4095,20 @@ an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
 and decode the status line, headers, chunked/length framing, and gzip into an
 `HTTPResponse` record. `HTTPRequest`, `HTTPResponse`, and `HTTPBodyChunks` are
 Jet records in `Core/Http/Http.jet`; their accessors and builders are Jet
-methods, and `core.http.parse` reuses the Jet request parser. Server `mux`,
-`serve_once`, `serve_once_listener`, `static_file`, `static_file_range`,
-`cors`, and `request_id` enter their Jet source functions before the reserved
-raw leaves. Existing specialized public admission remains unchanged;
-callback-bearing host leaves retain their original unsupported AOT tiers.
+methods, and `core.http.parse` reuses the Jet request parser. The HTTP server
+is Jet end to end as well: `HTTPMux`, `HTTPHandler`, `HTTPServer`, and
+`HTTPShutdownReport` are records in `Core/Http/Server.jet`, which accepts over
+`core.net` TCP, frames requests and responses, routes, and serves static files.
+Its only reserved leaves read the wall clock for `Date` and stat, canonicalize,
+and read files for static serving, all under the Net effect.
 HTTP router creation and dispatch, TLS byte I/O, and WebSocket connect/upgrade are also
 source-owned; the reserved transport/carrier leaves keep their old effects
 (including no new WebSocket effect) and tier support.
-Reserved Unix connect, TLS client handshake, HTTP serve/bind, static-files,
-and middleware leaves use full positional signatures inside Core. Their
-public overload selection, implicit option defaults, and escaping callback
-admission still precede source forwarding; registration of a raw alias alone
-does not replace those public admission checks.
+Reserved Unix connect and TLS client handshake leaves use full positional
+signatures inside Core. Their public overload selection, implicit option
+defaults, and escaping callback admission still precede source forwarding;
+registration of a raw alias alone does not replace those public admission
+checks.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string
@@ -4686,8 +4725,9 @@ The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packag
 The overloaded Unix connect and TLS client calls retain their checked public
 argument forms before forwarding into their owning Jet entry points. HTTP
 server serve/bind and static-file mounts likewise forward normalized options;
-`HTTPMux.middleware` forwards only after the existing escaping-callback
-admission. The original effects and resource conventions remain in force.
+`HTTPMux` route and middleware registration lower to its Jet methods after the
+existing escaping-callback admission. The original effects and resource
+conventions remain in force.
 
 ### Examples in the repository
 
