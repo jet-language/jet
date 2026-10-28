@@ -118,6 +118,22 @@ export function ruleOrphanBlockers(s, history) {
   return findings;
 }
 
+// ---- rule: unknown-goal -----------------------------------------------------
+// card.goals naming a goal that does not exist. The store rejects new unknown
+// links; this rule catches links that arrive through repair or restore paths.
+export function ruleUnknownGoal(s) {
+  const findings = [];
+  const goalIds = new Set((s.goals || []).map(g => g.id));
+  for (const c of s.cards) {
+    for (const id of c.goals || []) {
+      if (goalIds.has(id)) continue;
+      findings.push({ rule: 'unknown-goal', ref: `#${c.num}`,
+        msg: `#${c.num} "${c.title}" links unknown goal ${id}` });
+    }
+  }
+  return findings;
+}
+
 // ---- rule: blocker-unpopulated (D-TWR-OPS2=A) --------------------------------
 // Plan-phase exit: an epoch-track card that already has a plan must also
 // record its real prerequisites (or explicitly claim none). Sidequests and
@@ -202,7 +218,7 @@ export function ruleDuplicateSuspects(s) {
   }));
 }
 
-const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects];
+const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects, ruleUnknownGoal];
 
 const DECISION_ID_RE = /\bD-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
 const CARD_REF_RE = /#(\d+)\b/g;

@@ -61,6 +61,12 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   `review-ready` when all are done. `milestone closeout` records the frozen
   source commit that authorizes broad proof. Only `milestone verify` can make
   the tokened milestone `met`.
+- **Goals** — long-term aims such as "self-compile in about 50 ms" or "remove
+  Rust" (`goal list|show|add|update|log`). A goal is not a card: it has no
+  phase, criteria, or gate, and it never blocks work. Cards point at goals with
+  `card add|update --goals G1,G2`; `goal show` lists the linked cards and their
+  phases. Status is `active`, `achieved`, or `dropped`. The **Goals** tab lists
+  each goal with its linked cards.
 - **Cards** — the work. Stages: deciding → planning → ready → building →
   review → done (+ frozen). A fresh card lands in `planning` — no owner
   greenlight step. Tower picks review, building, implement, then plan cards.
@@ -134,6 +140,7 @@ tower decision  list|show|add|update|ratify|reopen|delete
 tower question  list|ask|answer|delete
 tower message   list|add|done
 tower papercut  list|add|resolve
+tower goal      list|show|add|update|log
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
 tower milestone list|add|update|criteria|closeout|verify|delete

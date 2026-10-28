@@ -76,6 +76,24 @@ an agent or the owner when an acceptance ballot is open. `blocked`/`frozen`/
 Milestones are goals inside an epoch; linked cards determine their progress.
 The board's open questions and decisions stay attached to their cards.
 
+Goals are long-term aims, such as "self-compile in about 50 ms" or "remove
+Rust". A goal is not a card: it has no phase, criteria, or gate, and it never
+blocks, ranks, or closes work. Cards point at goals, so a goal shows which work
+serves it:
+
+```sh
+tower goal list [--all]
+tower goal show G1 [--json]          # linked cards with their phases, then the log
+tower goal add --title "…" [--body "…"] --by <agent>
+tower goal update G1 [--title "…"] [--body "…"] [--status active|achieved|dropped] --by <agent>
+tower goal log G1 --text "…" --by <agent>
+tower card update '#N' --goals G1,G2 --by <agent>   # --goals '' clears the links
+```
+
+An unknown goal id is rejected on write; `tower lint` reports `unknown-goal`
+for a stale link. A **Current goals and progress** briefing on Now is a status
+report, not a goal record.
+
 The owner's decisions are the only allowed bottleneck. Raise a ballot for an
 unresolved owner gate, but do not wait for generic approval before working a
 fresh ungated card. Use the current short/full ballot profile through

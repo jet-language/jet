@@ -11,7 +11,7 @@
 // `applyIndexDelta(prev, patch)` returns a new index object; untouched
 // records keep their identity, so the client can cheaply tell what moved.
 
-const KEYED = new Set(['cards', 'decisions', 'questions', 'milestones', 'ideas', 'papercuts', 'briefings', 'recentlyDecided', 'radar', 'epochs']);
+const KEYED = new Set(['cards', 'decisions', 'questions', 'milestones', 'ideas', 'papercuts', 'briefings', 'recentlyDecided', 'radar', 'epochs', 'goals']);
 const HEADS = new Set(['events']);
 
 const jsonCache = new WeakMap();

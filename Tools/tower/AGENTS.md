@@ -57,6 +57,7 @@ tower lint [--json] [--docs] # durability sweeper over the live board (+
 tower question list --open   # owner questions — block only affected slices
 tower message list [--all]   # open card messages, or every one with --all
 tower papercut list [--open] # logged tooling friction, newest first (--open filters)
+tower goal list [--all]      # long-term aims; goal show G1 lists linked cards + phases
 tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
@@ -101,6 +102,10 @@ Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `tower next` sorts by review > building > implement > plan, then by ascending
 `workOrder` inside each lane. **Epochs** group the work; **milestones** are
 goals inside an epoch — link cards with `--milestone <id>` and progress computes itself.
+**Goals** are long-term aims (`G1`, `G2`, …), not cards: no phase, criteria,
+or gate, and they never block or rank work. Link a card with
+`--goals G1,G2`; an unknown goal id is rejected and `tower lint` reports
+`unknown-goal` for a stale link.
 Every card lives in an epoch or is a sidequest — frozen cards included
 (frozen is a phase, not a home; the store refuses an epoch-track card with no
 epoch). The board shows frozen cards in their epoch or sidequest section with a
@@ -120,6 +125,10 @@ tower message add '#12' --text "..." --by me
 tower message done <id> --by owner
 tower papercut add --by me --text "jet-env swallowed stderr" [--card '#12']  # recurring tooling friction only (hit twice, or deterministic for everyone); never blocked by a card lane
 tower papercut resolve <id> --by owner        # owner clears a handled papercut
+tower goal add --title "Self-compile in about 50 ms" [--body "…"] --by me
+tower goal update G1 --status achieved|dropped|active [--title …] [--body …] --by me
+tower goal log G1 --text "measured 410 ms" --by me
+tower card update '#12' --goals G1,G2 --by me  # link goals; --goals '' clears them
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower decision list --open --drafts          # agent review: include drafts, hidden from owner views
 tower card update '#12' --phase done --log "criteria met" --by orchestrator

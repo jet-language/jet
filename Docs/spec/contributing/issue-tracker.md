@@ -40,6 +40,7 @@ status document.
 | Ask a question | `tower question ask '#N' --text "..." --by <agent>` |
 | Add a message | `tower message add '#N' --text "..." --by <agent>` |
 | Record a tooling papercut | `tower papercut add --card '#N' --text "..." --by <agent>` |
+| Link a card to goals | `tower card update '#N' --goals G1,G2 --by <agent>` |
 | Record blockers | `tower card update '#N' --blocked-by '#1,#2' --by <agent>` |
 | Claim a card | `tower brief '#N' --agent <agent>` |
 
@@ -60,6 +61,27 @@ Read the card back and confirm `done`. To decline work, the owner uses:
 ```sh
 tower card update '#N' --add-tag wontfix --phase frozen --by owner
 ```
+
+## Goals
+
+A goal is a long-term aim, such as "self-compile in about 50 ms", "remove
+Rust", "port all scripts to Jet", "remove TIR/MIR/LIR", or "typed IR with a
+Core lint". A goal is not a card. It has no phase, criteria, or closure gate,
+and it never blocks the backlog. Cards point at goals; a goal never points at
+cards.
+
+| Operation | Command |
+|---|---|
+| List active goals | `tower goal list` (`--all` adds achieved and dropped) |
+| Read a goal and its linked cards | `tower goal show G1 --json` |
+| Add a goal | `tower goal add --title "..." --body "..." --by <agent>` |
+| Edit or retire a goal | `tower goal update G1 --status achieved --by <agent>` |
+| Log goal progress | `tower goal log G1 --text "..." --by <agent>` |
+
+`tower goal show` prints each linked card with its phase, including archived
+cards. Tower rejects a card link to an unknown goal, and `tower lint` reports
+`unknown-goal` for a stale one. The served board lists goals on the **Goals**
+tab.
 
 ## Messages and questions
 

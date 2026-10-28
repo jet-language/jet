@@ -144,7 +144,7 @@ function maybeReload() {
 
 // Board-driven views redraw on every change; Docs, AGENTS.md, and Gauntlet
 // hold their own drafts and data, so only the chrome updates under them.
-const LIVE_VIEWS = new Set(['now', 'board', 'papercuts']);
+const LIVE_VIEWS = new Set(['now', 'board', 'papercuts', 'goals']);
 function liveRender({ own = false } = {}) {
   renderBeacon();
   renderChrome();
@@ -460,6 +460,7 @@ const VIEWS = [
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
   { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
+  { id: 'goals', name: 'Goals', count: () => (S.goals || []).filter(g => g.status === 'active').length },
   { id: 'guidance', name: 'AGENTS.md' },
   { id: 'gauntlet', name: 'Gauntlet' },
 ];
@@ -2708,8 +2709,56 @@ function viewPapercuts() {
   }
 }
 
+// ---- GOALS: long-term aims that cards point at ------------------------------
+// Read-only. A goal has no phase and never blocks work; each section lists the
+// live cards linked to it and where they stand.
+let goalFilter = 'active';   // 'active' | 'all'
+function viewGoals() {
+  const v = $('#view');
+  const all = S.goals || [];
+  const active = all.filter(g => g.status === 'active');
+  const list = goalFilter === 'active' ? active : all;
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Goals</h1>
+      <span class="viewhead__sub">long-term aims cards work toward — <b>${active.length}</b> active</span>
+      <div class="viewhead__actions">
+        <button class="btn btn--ghost" id="goal-filter">${goalFilter === 'active' ? 'Show all' : 'Active only'}</button>
+      </div></div>
+    <div id="goal-list"></div>`;
+  $('#goal-filter').addEventListener('click', () => { goalFilter = goalFilter === 'active' ? 'all' : 'active'; viewGoals(); });
+  const body = $('#goal-list');
+  if (!list.length) {
+    body.appendChild(el(`<div class="empty"><div class="empty__glyph">◎</div><div>${goalFilter === 'active'
+      ? 'No active goals.' : 'No goals recorded yet.'}</div></div>`));
+    return;
+  }
+  for (const g of list) {
+    const cards = g.cards || [];
+    const done = cards.filter(c => c.phase === 'done').length;
+    const section = el(`<section class="goal">
+        <div class="goal__head">
+          <span class="num">${esc(g.id)}</span>
+          <span class="goal__t">${esc(g.title)}</span>
+          ${g.status === 'active' ? '' : `<span class="chip">${esc(g.status)}</span>`}
+          <span class="viewhead__sub">${done}/${cards.length} linked cards done</span>
+        </div>
+        ${g.body ? `<div class="goal__body">${esc(g.body)}</div>` : ''}
+      </section>`);
+    if (!cards.length) section.appendChild(el('<div class="idea__note">No cards linked yet.</div>'));
+    for (const c of cards) {
+      const row = el(`<div class="idea" title="open card">
+          <span class="num">${ticket(c)}</span>
+          <span class="idea__t">${esc(c.title)}</span>
+          <span class="chip">${esc(c.phase)}</span>
+        </div>`);
+      row.addEventListener('click', () => showDetail(c.id));
+      section.appendChild(row);
+    }
+    body.appendChild(section);
+  }
+}
+
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, goals: viewGoals, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
 function renderView() {
   try { (RENDER[VIEW] || viewNow)(); }
   catch (err) {

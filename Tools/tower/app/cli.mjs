@@ -68,11 +68,11 @@ const COMMAND_FLAGS = {
     list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey'],
     show: ['hardeningDedupKey'],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force',
+      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'goals', 'parent', 'force',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev',
+      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'goals', 'parent', 'expectRev',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     claim: by(),
@@ -108,6 +108,13 @@ const COMMAND_FLAGS = {
     list: ['open'],
     add: by('card', 'text'),
     resolve: by(),
+  }},
+  goal: { verbs: {
+    list: ['all'],
+    show: [],
+    add: by('title', 'body'),
+    update: by('title', 'body', 'status'),
+    log: by('text'),
   }},
   idea: { verbs: {
     list: ['all'],
@@ -184,7 +191,7 @@ const FLAG_VALUE = {
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
   id: 'ID', card: 'REF', decision: 'ID', epoch: 'E', milestone: 'M',
   phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', checkSteps: '"…"', probe: '"jet run …"', lane: 'L',
-  tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', parent: 'REF', blockedBy: 'REF',
+  tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', goals: 'G1,G2', parent: 'REF', blockedBy: 'REF',
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
   expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"',
   status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
@@ -497,6 +504,7 @@ function cmdCard(store, { pos, flags }) {
         criteria: p.criteria,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
         tags,
+        goals: flags.goals !== undefined ? String(flags.goals).split(',') : p.goals,
         parent: flags.parent ?? p.parentId ?? p.parent,
         workOrder: flags.workOrder ?? p.workOrder, by,
         needsAcceptance: flags.needsAcceptance ?? p.needsAcceptance,
@@ -519,6 +527,7 @@ function cmdCard(store, { pos, flags }) {
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
       if (flags.tags !== undefined) patch.tags = flags.tags === '' ? [] : String(flags.tags).split(',');
+      if (flags.goals !== undefined) patch.goals = flags.goals === '' ? [] : String(flags.goals).split(',');
       if (flags.addTag !== undefined) patch.addTags = String(flags.addTag).split(',');
       if (flags.removeTag !== undefined) patch.removeTags = String(flags.removeTag).split(',');
       if (flags.parent !== undefined) patch.parent = flags.parent;
@@ -800,6 +809,59 @@ function cmdPapercut(store, { pos, flags }) {
       return out(flags, `resolved papercut ${result.id}`, result);
     }
     default: throw new TowerError('E_USAGE', `unknown papercut verb "${verb}" — list/add/resolve`);
+  }
+}
+
+// Goals are long-term aims, not work: no phase, criteria, or gate. Cards link
+// to them with `card add|update --goals G1,G2`; `goal show` derives the cards.
+function cmdGoal(store, { pos, flags }) {
+  const [verb, ref] = pos;
+  switch (verb) {
+    case 'list': {
+      const s = store.load();
+      const historyCards = store.loadHistory().cards;
+      const goals = db.listGoals(s, { all: !!flags.all }).map(g => ({ ...g, cards: db.goalCards(g, s.cards, historyCards) }));
+      if (flags.json) return out(flags, null, goals);
+      for (const g of goals) {
+        const done = g.cards.filter(c => c.phase === 'done').length;
+        console.log(`${g.id.padEnd(5)} ${g.status.padEnd(9)} ${`${done}/${g.cards.length} cards done`.padEnd(17)} ${g.title}`);
+      }
+      if (!goals.length) console.log(flags.all ? '(no goals)' : '(no active goals; --all includes achieved and dropped)');
+      return;
+    }
+    case 'show': {
+      const s = store.load();
+      const goal = db.findGoal(s, ref);
+      if (!goal) throw new TowerError('E_NOT_FOUND', `no goal ${ref}`);
+      const cards = db.goalCards(goal, s.cards, store.loadHistory().cards);
+      if (flags.json) return out(flags, null, { ...goal, cards });
+      console.log(`${goal.id} [${goal.status}] ${goal.title}`);
+      if (goal.body) console.log(`\n${goal.body}`);
+      console.log(`\ncards (${cards.length}):`);
+      for (const c of cards) console.log(`  #${String(c.num).padEnd(5)} ${String(c.phase).padEnd(10)} ${c.title}${c.archived ? ' (archived)' : ''}`);
+      if (!cards.length) console.log('  (none linked — use `tower card update \'#N\' --goals ' + goal.id + ' --by <you>`)');
+      if (goal.log.length) {
+        console.log('\nlog:');
+        for (const e of goal.log) console.log(`  ${e.at} [${e.by}] ${e.text}`);
+      }
+      return;
+    }
+    case 'add': {
+      const { result } = store.mutate((s) => db.addGoal(s, { title: flags.title, body: flags.body, by: flags.by }));
+      return out(flags, `added goal ${result.id}`, result);
+    }
+    case 'update': {
+      const patch = { by: flags.by };
+      for (const k of ['title', 'body', 'status']) if (flags[k] !== undefined) patch[k] = flags[k];
+      if (Object.keys(patch).length === 1) throw new TowerError('E_USAGE', 'goal update needs --title, --body, or --status');
+      const { result } = store.mutate((s) => db.updateGoal(s, ref, patch));
+      return out(flags, `updated goal ${result.id}`, result);
+    }
+    case 'log': {
+      const { result } = store.mutate((s) => db.updateGoal(s, ref, { logEntry: flags.text ?? pos.slice(2).join(' '), by: flags.by }));
+      return out(flags, `logged on goal ${result.id}`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown goal verb "${verb}" — list/show/add/update/log`);
   }
 }
 
@@ -1376,6 +1438,7 @@ export async function run(argv) {
       case 'question':  return cmdQuestion(store, sub);
       case 'message':   return cmdMessage(store, sub);
       case 'papercut':  return cmdPapercut(store, sub);
+      case 'goal':      return cmdGoal(store, sub);
       case 'idea':      return cmdIdea(store, sub);
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);
