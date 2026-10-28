@@ -552,13 +552,18 @@ the explicit write-access marker; cancellation does not consume the stream.
 
 ## Testing evidence source policy
 
-`core.testing.golden` and `fixture` own success/failure selection and exact
-evidence messages in `Core/Testing/Testing.jet`. Golden diffs compare at most
-64 KiB and 256 inclusive-newline lines per input; their delete-first LCS tie
-rule and UTF-8-safe 32 KiB output limit preserve the existing native policy.
+`core.testing.golden`, `snap`, and `fixture` own success/failure selection and
+exact evidence messages in `Core/Testing/Testing.jet`. Golden and snapshot
+diffs compare at most 64 KiB and 256 inclusive-newline lines per input; their
+delete-first LCS tie rule and UTF-8-safe 32 KiB output limit preserve the
+existing native policy. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) `golden`
+writes a missing or differing file and passes, the same switch `snap` reads.
 The host supplies only file-read facts, failure TLS transport, and selected
 string byte windows. These leaves do not add checkpoints to the old testing
-operations.
+operations. The runtime's one consumer of that transport is the
+`assert`/`assert_eq` stop (`jet_rt_require_stop`, JetRuntime `Trap.jet`): with
+a failure pending it reports the recorded message as the stop message and the
+recorded detail (path, then any diff) as the locals; `panic` keeps its text.
 
 `temp_dir` owns Unicode-scalar prefix sanitation, ASCII-only thread sanitation,
 the `jet_test_` name, remove-before-create ordering, NotFound handling, and

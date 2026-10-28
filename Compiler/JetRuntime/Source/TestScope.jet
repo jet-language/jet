@@ -114,6 +114,15 @@ fn test_scope_state_drop(state: I64) {
     if (state != I64{0}) -> test_scope_failure_clear(state)
 }
 
+// The thread's test state while a testing failure is pending, else 0. The
+// pair stays at state+120/+128 until the next record, clear, or state drop.
+fn test_scope_pending_failure() -> I64 {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return I64{0}
+    if (trap_word(state + I64{120}) == I64{0}) -> return I64{0}
+    state
+}
+
 // Rust Core.rs:718-727.
 #Export(c) fn jet_rt_test_expect_fail_enter_scope(scope: I64, expected: I64, expected_message: I64) {
     state :: test_state_ensure()

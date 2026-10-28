@@ -63,7 +63,7 @@ one exists instead of adding another spelling for the same job.
 | `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget; `Tools/agent/verify-full.sh` defaults it to 6. |
 | `JET_UI_FILTER` | repository-relative fixture substring | Selects UI diagnostic or lint fixtures. |
 | `JET_UPDATE_GOLDEN` | `1` | Updates the existing expected channel for the selected golden example; requires `JET_GOLDEN_FILTER`. |
-| `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows; review the diff immediately. |
+| `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows, and the files `core.testing.snap` and `core.testing.golden` compare against (`jet test -u` sets it); review the diff immediately. |
 | `JET_VERIFY_TMPDIR` | path | Overrides the temporary root used by verification scenarios. |
 
 Golden stdout remains exact except for probes whose subject is a real host

@@ -95,7 +95,8 @@ fn terminal_comparison(relation: String, reason: String) -> TestComparison {
 }
 
 /// Compare or create a snapshot. Updating observes JET_UPDATE_SNAPSHOTS,
-/// so the environment read is part of the declared effect row.
+/// so the environment read is part of the declared effect row. A mismatch
+/// records `snapshot differs` with the same bounded unified diff as `golden`.
 fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
     path :: "__snapshots__/{snapshot_name(name)}.snap"
     update :: (sys.get("JET_UPDATE_SNAPSHOTS") ?? "") == "1"
@@ -104,23 +105,60 @@ fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
             .Ok(_) -> {}
             .Err(_) -> {}
         }
-        files.write(path, value) ?? return false
+        if files.write(path, value) == {
+            .Ok(_) -> {}
+            .Err(_) -> {
+                __record_failure("snapshot cannot be written: {name}", "path: {path}")
+                return false
+            }
+        }
+        __clear_failure()
         return true
     }
-    expected :: files.read(path) ?? return false
-    expected == value
-}
-
-fn golden(name: String, value: String) -[FS]> Bool Never! {
-    read :: __evidence_read(name)
+    read :: __evidence_read(path)
     if !read.ok {
-        reason :: if read.missing -> "golden file is missing: {name}" else -> "golden file cannot be read: {name}"
-        __record_failure(reason, "path: {name}")
+        __record_failure("snapshot cannot be read: {name}", "path: {path}")
         return false
     }
     if read.text == value {
         __clear_failure()
         return true
+    }
+    __record_failure("snapshot differs: {name}", "path: {path}\n{testing_unified_diff(path, read.text, value)}")
+    false
+}
+
+/// Compare `value` with the golden file `name`. Under `-u`
+/// (JET_UPDATE_SNAPSHOTS=1, the same switch as `snap`) a missing or differing
+/// golden file is written, parent directories included, and the check passes.
+fn golden(name: String, value: String) -[FS, Env]> Bool Never! {
+    read :: __evidence_read(name)
+    if read.ok && read.text == value {
+        __clear_failure()
+        return true
+    }
+    if (sys.get("JET_UPDATE_SNAPSHOTS") ?? "") == "1" {
+        parent :: files.dirname(name)
+        if parent != "" {
+            if files.create_dir_all(parent) == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+        if files.write(name, value) == {
+            .Ok(_) -> {}
+            .Err(_) -> {
+                __record_failure("golden file cannot be written: {name}", "path: {name}")
+                return false
+            }
+        }
+        __clear_failure()
+        return true
+    }
+    if !read.ok {
+        reason :: if read.missing -> "golden file is missing: {name}" else -> "golden file cannot be read: {name}"
+        __record_failure(reason, "path: {name}")
+        return false
     }
     diff :: testing_unified_diff(name, read.text, value)
     __record_failure("golden file differs: {name}", "path: {name}\n{diff}")
@@ -169,6 +207,40 @@ fn corpus(glob: String) -[FS]> [String] Never! {
         &values.push(value)
     }
     values
+}
+
+/// One corpus entry: `id` is the entry's path below the corpus root without
+/// the corpus suffix (`basics/hello` for `<root>/basics/hello.jet`), the row
+/// name a test reports; `path` is the file to read.
+struct CorpusEntry {
+    id: String
+    path: String
+}
+
+/// The regular files below `root`, at any depth, whose names end in `suffix`,
+/// ordered by id. Names starting with `.` are skipped, folders included; an
+/// absent or unreadable root or folder has no entries.
+fn corpus_entries(root: String, suffix: String) -[FS]> [CorpusEntry] Never! {
+    entries := [CorpusEntry]{}
+    testing_corpus_walk(root, "", suffix, &entries)
+    &entries.sort_by((left: CorpusEntry, right: CorpusEntry) -> left.id <=> right.id)
+    entries
+}
+
+fn testing_corpus_walk(directory: String, prefix: String, suffix: String, entries: &[CorpusEntry]) -[FS]> {
+    children :: files.list_dir(directory) ?? return
+    loop child in children {
+        if child.name.starts_with(".") -> next
+        relative :: if prefix == "" -> child.name.copy() else -> "{prefix}/{child.name}"
+        if child.is_dir {
+            testing_corpus_walk(child.path, relative, suffix, &entries)
+            next
+        }
+        if !relative.ends_with(suffix) || !files.is_file(child.path) -> next
+        bytes :: relative.bytes()
+        id :: String.from_bytes(bytes[0..<(bytes.len() - suffix.count_bytes())]) ?? relative.copy()
+        &entries.push(CorpusEntry{id: id, path: child.path.copy()})
+    }
 }
 
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
@@ -327,6 +399,22 @@ fn status(comparison: TestComparison) -> String Never! { comparison.status }
 
 #Test("corpus reports an absent directory as an empty collection") {
     assert_eq(corpus("__jet_absent_corpus__/missing").len(), 0)
+}
+
+#Test("corpus entries walk every depth in id order and skip hidden names") {
+    root :: temp_dir("corpus-entries")
+    loop folder in ["b", "a/deep", ".hidden"] {
+        files.create_dir_all("{root}/{folder}") ?? panic("corpus folder: {err}")
+    }
+    loop file in ["b/two.jet", "a/deep/one.jet", "a/zero.jet", "top.jet", "a/notes.txt", ".skip.jet", ".hidden/three.jet"] {
+        files.write("{root}/{file}", file) ?? panic("corpus file: {err}")
+    }
+    entries :: corpus_entries(root, ".jet")
+    ids := [String]{}
+    loop entry in entries -> &ids.push(entry.id.copy())
+    assert_eq(ids, ["a/deep/one", "a/zero", "b/two", "top"])
+    assert_eq(files.read(entries[0].path) ?? "", "a/deep/one.jet")
+    assert_eq(corpus_entries("{root}/absent", ".jet").len(), 0)
 }
 
 fn snapshot_name(name: String) -> String Never! {

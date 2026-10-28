@@ -535,7 +535,21 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
     trap_footer(I64{2})
 }
 
+// A pending core.testing evidence failure (`golden`, `snap`, `fixture`) is
+// what a failed `assert`/`assert_eq` of that result reports: its message is
+// the stop's message and its detail (the path, then any bounded diff) the
+// locals line. An explicit `panic` (kind 2) keeps its own text. The stop does
+// not return, so the pair stays owned by the thread's test state.
 #Export(c) fn jet_rt_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
+    state :: if (kind == I64{2}) -> I64{0} else -> test_scope_pending_failure()
+    if (state == I64{0}) {
+        trap_require_stop(kind, descriptor, message, left, right, locals)
+        return
+    }
+    trap_require_stop(I64{0}, descriptor, trap_word(state + I64{120}), I64{0}, I64{0}, trap_word(state + I64{128}))
+}
+
+fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
     comptime_serve_stop(I64{4}, kind, message, left, right)
     if (jet_rt_stop_domain() == I64{2}) {
         // Same raw task message as trap_rich; equality stops carry their text.

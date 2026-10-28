@@ -3359,11 +3359,12 @@ or golden file. The public source is
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
 | `compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
-| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. |
-| `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
+| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. A mismatch returns `false` and records `snapshot differs: <name>` with the same bounded unified diff as `golden`, so a failing `assert` shows it. |
+| `golden(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare `value` with the file `name`. A missing, unreadable, or differing file returns `false` and records the reason (with a bounded unified diff for a difference). The next failing `assert` or `assert_eq` on that thread reports the recorded reason as its stop message and the path and diff as its locals; a passing helper call clears it. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) a missing or differing file is written, parent folders included, and the check passes. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
-| `corpus(glob: String) -[FS]> [String]` | paths | Select files matching a corpus glob. |
+| `corpus(glob: String) -[FS]> [String]` | contents | Read each readable regular file directly inside the directory `glob` (the parameter keeps its historical name; it is not a pattern), ordered by full path; an absent directory gives `[]`. |
+| `corpus_entries(root: String, suffix: String) -[FS]> [CorpusEntry]` | entries | List the regular files below `root`, at any depth, whose names end in `suffix`, ordered by `id`. `CorpusEntry{id, path}`: `id` is the path below `root` without `suffix` (`basics/hello` for `<root>/basics/hello.jet`). Names starting with `.` are skipped, folders included; an absent root gives `[]`. |
 | `fake_clock(unix_ms: Int) -> Clock` | clock | Create a deterministic clock at a Unix-millisecond value. |
 | `fake_rng(seed: Int) -> RNG` | RNG | Create deterministic random state. |
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
