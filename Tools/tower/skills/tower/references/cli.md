@@ -64,6 +64,13 @@ Cards compute to one lane: `decide` is owner-only; `plan`, `implement`,
 inert. Epochs group work. Milestones group goals inside an epoch and derive
 progress from linked cards.
 
+Goals are long-term aims, not cards. They carry no phase, criteria, or gate and
+never block a card. Link work with `tower card update '#N' --goals G1,G2 --by
+<agent>` (`--goals ''` clears). `tower goal show G1` lists the linked live and
+archived cards with their phases; `tower goal list --all` includes achieved
+and dropped goals. Record progress with `tower goal log G1 --text "…" --by
+<agent>`.
+
 A card needs a non-empty criteria checklist. Each row moves from `open` to
 `met` to `verified`. Integrated focused proof supplies `met`; a different
 reviewer may supply `verified`. Close a card as soon as every row has concrete
