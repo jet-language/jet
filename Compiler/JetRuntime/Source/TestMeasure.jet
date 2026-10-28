@@ -1,0 +1,120 @@
+// The measurement loop of a `.measure { ... }` test member (D-CLAIM-BENCH1).
+// The member lowers to (BuildExpr.jet ir_measure_scope):
+//
+//     state :: jet_rt_test_measure_begin()
+//     loop jet_rt_test_measure_next(state) { body }
+//     jet_rt_test_measure_end(state)
+//
+// Plain `jet test` runs the body once. Under `jet test --measure`
+// (JET_TEST_MEASURE set in the claim's environment) the loop runs
+// MEASURE_WARMUPS single warmup iterations, calibrates a batch size by
+// doubling until one batch takes MEASURE_TARGET_NS (or reaches
+// MEASURE_MAX_BATCH iterations), then times MEASURE_SAMPLES serial batches.
+// The clock is read only at batch boundaries. jet_rt_test_measure_end prints
+// the record frame on the claim's stdout:
+//
+//     \tjet-measure\t<warmups>\t<iterations>\t<ns>,<ns>,...\tjet-measure-end\t
+//
+// with one total per sample; the `jet test` host strips it from the claim's
+// output, reports it and evaluates the claim's budgets
+// (JetCli Cli/Measure.jet). State (MEASURE_STATE_BYTES):
+//   +0 mode (1: measuring), +8 phase (0 warmup, 1 calibrate, 2 sample,
+//   3 done), +16 iterations run in the current batch, +24 batch size,
+//   +32 batch start ns, +40 warmup or sample index, +48 sample totals.
+
+MEASURE_WARMUPS :: I64{5}
+MEASURE_SAMPLES :: I64{20}
+MEASURE_TARGET_NS :: I64{1000000}
+MEASURE_MAX_BATCH :: I64{1073741824}
+MEASURE_STATE_BYTES :: I64{56}
+
+#Export(c) fn jet_rt_test_measure_begin() -> I64 {
+    state :: jet_rt_alloc(MEASURE_STATE_BYTES, I64{8})
+    thread_zero(state, MEASURE_STATE_BYTES)
+    key :: jet_rt_string_clone(rt_static_text("JET_TEST_MEASURE"))
+    measuring :: jet_rt_env_present(key)
+    test_text_drop(key)
+    if measuring {
+        trap_store(state, I64{1})
+        samples :: jet_rt_alloc(MEASURE_SAMPLES * I64{8}, I64{8})
+        thread_zero(samples, MEASURE_SAMPLES * I64{8})
+        trap_store(state + I64{48}, samples)
+    }
+    state
+}
+
+// Whether the body runs once more. Each call after the first ends one
+// iteration.
+#Export(c) fn jet_rt_test_measure_next(state: I64) -> Bool {
+    phase :: trap_word(state + I64{8})
+    if (trap_word(state) == I64{0}) {
+        if (phase != I64{0}) -> return false
+        trap_store(state + I64{8}, I64{3})
+        return true
+    }
+    if (phase == I64{0}) {
+        index :: trap_word(state + I64{40})
+        if (index < MEASURE_WARMUPS) {
+            trap_store(state + I64{40}, index + I64{1})
+            return true
+        }
+        trap_store(state + I64{8}, I64{1})
+        trap_store(state + I64{24}, I64{1})
+        trap_store(state + I64{16}, I64{1})
+        trap_store(state + I64{32}, sync_now_ns())
+        return true
+    }
+    if (phase == I64{3}) -> return false
+    done :: trap_word(state + I64{16})
+    batch :: trap_word(state + I64{24})
+    if (done < batch) {
+        trap_store(state + I64{16}, done + I64{1})
+        return true
+    }
+    now :: sync_now_ns()
+    elapsed :: now - trap_word(state + I64{32})
+    if (phase == I64{1}) {
+        if (elapsed < MEASURE_TARGET_NS && batch < MEASURE_MAX_BATCH) {
+            trap_store(state + I64{24}, batch * I64{2})
+        } else {
+            trap_store(state + I64{8}, I64{2})
+            trap_store(state + I64{40}, I64{0})
+        }
+    } else {
+        index :: trap_word(state + I64{40})
+        trap_store(trap_word(state + I64{48}) + index * I64{8}, elapsed)
+        trap_store(state + I64{40}, index + I64{1})
+        if (index + I64{1} == MEASURE_SAMPLES) {
+            trap_store(state + I64{8}, I64{3})
+            return false
+        }
+    }
+    trap_store(state + I64{16}, I64{1})
+    trap_store(state + I64{32}, sync_now_ns())
+    true
+}
+
+// Prints the record of a finished measurement and frees the state.
+#Export(c) fn jet_rt_test_measure_end(state: I64) {
+    samples :: trap_word(state + I64{48})
+    if (trap_word(state) != I64{0} && trap_word(state + I64{8}) == I64{3}) {
+        target :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(target, rt_static_text("\tjet-measure\t"))
+        rt_text_push_number(target, MEASURE_WARMUPS)
+        jet_rt_string_builder_push(target, rt_static_text("\t"))
+        rt_text_push_number(target, trap_word(state + I64{24}))
+        jet_rt_string_builder_push(target, rt_static_text("\t"))
+        index := I64{0}
+        loop index < MEASURE_SAMPLES {
+            if (index != I64{0}) { jet_rt_string_builder_push(target, rt_static_text(",")) }
+            rt_text_push_number(target, trap_word(samples + index * I64{8}))
+            index += I64{1}
+        }
+        jet_rt_string_builder_push(target, rt_static_text("\tjet-measure-end\t"))
+        record :: jet_rt_string_builder_finish(target)
+        jet_rt_test_print(record, true)
+        test_text_drop(record)
+    }
+    if (samples != I64{0}) { jet_rt_free(samples, MEASURE_SAMPLES * I64{8}, I64{8}) }
+    jet_rt_free(state, MEASURE_STATE_BYTES, I64{8})
+}

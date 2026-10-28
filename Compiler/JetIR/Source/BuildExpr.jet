@@ -599,9 +599,9 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         .ContextBlock(guards, body, _) -> ir_context_block(&m, p, &b, guards, body)
         .Shield(body, _) -> ir_shield(&m, p, &b, body)
         // Test scope members: a `.setup` body runs in the enclosing scope, so
-        // its bindings stay visible after it; a `.measure` body runs as a
-        // plain scope (no runtime action). `.expect_fail`, `.timeout` and
-        // `.skip` need the runtime's test scope rail.
+        // its bindings stay visible after it; a `.measure` body runs in the
+        // runtime's measurement loop (ir_measure_scope). `.expect_fail`,
+        // `.timeout` and `.skip` need the runtime's test scope rail.
         .ScopeMember(kind, body, span) -> {
             if kind == {
                 .Setup -> {
@@ -610,13 +610,32 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
                         ir_stmt(&m, p, &b, inner)
                     }
                 }
-                .Measure -> ir_stmts(&m, p, &b, body)
+                .Measure -> ir_measure_scope(&m, p, &b, body)
                 else -> ir_fail(&b, span, "statement ScopeMember")
             }
         }
         .Transact(handle, snapshots, stm, body, span) -> ir_transact(&m, p, &b, handle, snapshots, stm, body, span)
         .GCEdit(_, _, _, _, _, _, span) -> ir_fail(&b, span, "statement GCEdit")
     }
+}
+
+// A `.measure` member (D-CLAIM-BENCH1): its body runs while the runtime's
+// measurement loop asks for another iteration (JetRuntime TestMeasure.jet):
+// once under plain `jet test`, as warmups, calibration and timed batches
+// under `jet test --measure`; the end prints the measured record.
+fn ir_measure_scope(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
+    word_row :: ir_word_row(&m)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    state :: ir_runtime(&m, &b, "jet_rt_test_measure_begin", [Int]{}, word_row)
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    again :: ir_runtime(&m, &b, "jet_rt_test_measure_next", [Int]{state}, bool_row)
+    ir_exit_unless(&m, &b, again, exit)
+    ir_stmts(&m, p, &b, body)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_test_measure_end", [Int]{state}, -1)
 }
 
 // The line of a call, binding or return statement starts the code it emits,

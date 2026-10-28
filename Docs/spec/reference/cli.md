@@ -666,10 +666,16 @@ captured output is shown under `--capture=all`, or for a failed run under the
 default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
 honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
 `--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
-`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, and `--threads`.
+`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, `--threads`,
+`--measure`, and `--json`.
 Doctests (fenced ```` ```jet ```` blocks in `///` comments) run as claims of
 the same harness, named `doctest at <file>:<line>`, and `--docs` runs them alone; a wrong `// =>` value
-fails with E2901, and `-u` rewrites it instead (D-TEST4). Directory and package
+fails with E2901, and `-u` rewrites it instead (D-TEST4). `--measure` runs only
+the claims with a `.measure` member, serially and under the release profile
+unless `--profile` names one. It prints one record per claim, as a `measure
+NAME:` line or, with `--json`, as one JSON object line with the same fields.
+It also evaluates the claim's `.Test(name)` budgets against that record
+(D-CLAIM-BENCH1). Directory and package
 targets, a `fn test` override, a bare `--shuffle`, and the other test flags are
 refused with E2104 until they are ported. The test-result cache, the evidence
 report, and the package claims

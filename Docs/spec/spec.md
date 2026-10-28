@@ -3622,6 +3622,20 @@ execution tier, profile, warmups, iterations, and serial mode. `--filter` still
 selects measured claims by name. A standalone benchmark marker and command
 are not a second test surface. (D-CLAIM-BENCH1=A)
 
+Each measured claim yields one record: its name, whether it passed, the tier,
+profile, warmups, iterations, serial mode, sample count, and the minimum,
+median, mean, and maximum time per iteration in nanoseconds. Text prints one
+`measure NAME:` line per record, and `--json` prints the same fields in the
+same order as one JSON object per line. The record is also the evidence for
+the file's typed budgets whose scope is `.Test(name)` (metric `BenchTime`,
+provider `BenchMeasurement`), and they are evaluated in the same report frame.
+For an `.AbsoluteFrom` `.AtMost` budget, the named percentile of the sample
+times is compared with the limit. A miss is E2907, which fails the claim under
+`.Fail` and is only reported under `.Warn`. A `.RelativeTo` budget needs a
+recorded baseline, and `jet test` keeps none, so it reports E2906 and fails
+nothing. Measurement writes no evidence store and feeds no other budget store.
+`--measure` builds with the release profile unless `--profile` selects another.
+
 The harness sends the region's result through `black_box`, but that sink does
 not keep dead intermediate work alive. Put the operation's observable result or
 the approved identity sink `keep(value)` inside the measured loop.

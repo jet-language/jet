@@ -205,6 +205,11 @@ struct JetCLITestOptions {
     update_snapshots: Bool
     // `--docs`: run only the doctest claims (Doctests.jet).
     docs: Bool
+    // `--measure`: run only the measured claims, timed (Measure.jet), under
+    // `profile`; `--json` prints its records as JSON lines.
+    measure: Bool
+    json: Bool
+    profile: String
     project_root: String?
     status: String
 }
@@ -1081,7 +1086,7 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
 // `jet test` flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_TEST_UNPORTED_FLAGS :: [String]{
     "--watch", "--where", "--coverage", "--grade", "--iterations", "--time", "--seed",
-    "--corpus", "--measure", "--record", "--browser", "--browser-retries", "--browser-reporter",
+    "--corpus", "--record", "--browser", "--browser-retries", "--browser-reporter",
     "--browser-ui", "--browser-visual", "--browser-trace", "--browser-scaffold", "--set",
 }
 
@@ -1098,7 +1103,7 @@ fn jet_cli_test_option_error(what: String, color: Bool) -> JetCLIPlan Never! {
 // and JET_CLI_TEST_UNPORTED_FLAGS are not ported yet.
 fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
-    options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, project_root: None, status: ""}
+    options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, measure: false, json: false, profile: "", project_root: None, status: ""}
     fresh := false
     show_default := false
     positionals := [String]{}
@@ -1129,6 +1134,12 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
             name == "--fresh" -> fresh = true
             name == "--update-snapshots" || name == "-u" -> options.update_snapshots = true
             name == "--docs" -> options.docs = true
+            // Measured samples never share the machine with another claim.
+            name == "--measure" -> {
+                options.measure = true
+                options.serial = true
+            }
+            name == "--json" -> options.json = true
             name == "--release" -> {}
             name == "--trace-tiers" -> options.trace_tiers = true
             name == "--serial" -> options.serial = true
@@ -1218,7 +1229,12 @@ fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Boo
     source :: cli_files.read(file) ?? {
         return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
-    if jet_cli_build_options(jet_argv, "test", file, source, color, quiet) == {
+    // `--measure` builds under the release profile unless a profile is named.
+    argv := [String]{}
+    if options.measure && jet_cli_profile_name(jet_argv) == "" -> &argv.push("--release")
+    loop argument in jet_argv -> &argv.push(argument)
+    options.profile = jet_cli_profile_name(argv)
+    if jet_cli_build_options(argv, "test", file, source, color, quiet) == {
         .Refused(refusal) -> return refusal
         .Selected(selected, notes) -> {
             options.build = ^selected
