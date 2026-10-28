@@ -44,9 +44,9 @@ fn error_response(status: Int, message: String, metrics: Shared<Metrics>) -> HTT
 }
 
 fn authorized(req: HTTPRequest, session_id: String) -[DB, Time]> Bool Never! {
-    provided :: &req.header("x-session") ?? return false
+    provided :: req.header("x-session") ?? return false
     if provided != session_id -> return false
-    role :: &req.header("x-role") ?? return false
+    role :: req.header("x-role") ?? return false
     if role != "writer" -> return false
     _checked :: auth.session_validate(provided, time.now()) ?? return false
     return true

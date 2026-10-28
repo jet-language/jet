@@ -1026,9 +1026,6 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     if context.unsafe_depth == 0 && ((canonical_record.module_name == "core.ui" && (canonical_record.member == "__node_transfer" || canonical_record.member == "__viewport_transfer" || canonical_record.member == "__accessibility_transfer" || canonical_record.member == "__shortcut_transfer")) || (canonical_record.module_name == "core.ui.host" && canonical_record.member == "__request_transfer")) {
         &diagnostics.push(sema_error("E3101", span, "`{canonical_record.module_name}.{canonical_record.member}` requires an audited `#Unsafe` region", "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots", "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") {{ … }}`"))
     }
-    if canonical_record.module_name == "core.http.server" && canonical_record.member == "__response_parts" && context.unsafe_depth == 0 {
-        &diagnostics.push(sema_error("E3101", span, "`core.http.server.__response_parts` requires an audited `#Unsafe` region", "the transport transfer trusts the source response policy and consumes body ownership", "wrap the transfer in `#Unsafe(\"normalized response ownership transfer\") {{ … }}`"))
-    }
     actual_accesses :: loop argument in args -> argument.convention
     signature :: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))

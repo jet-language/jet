@@ -241,7 +241,6 @@ fn sema_taint_core_effect(module_name: String, method: String) -> Effect? Never!
     if core_call(module_name, method) == .Val(record) -> return record.effect_kind
     if module_name == "core.service" && method == "state_store" -> return Val(Effect.FS)
     if module_name == "core.net" && method == "gethostname" -> return Val(Effect.Env)
-    if module_name == "core.http.server" && method == "__response_parts" -> return None
     if (module_name == "core.sys" && method == "success") || (module_name == "core.process" && method == "status_ok") -> return None
     if module_name == "core.time" && method == "__zone_env" -> return Val(Effect.Env)
     if module_name == "core.time" && (method == "zone" || method == "parse_zoned" || method == "__zone_file_bytes") -> return Val(Effect.FS)

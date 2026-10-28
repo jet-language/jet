@@ -332,9 +332,12 @@ fn listener_local_socket_addr(listener: TCPListener) -[Net]> SocketAddr NetError
     core.net.__listener_local_socket_addr(listener)
 }
 
+// One plain-text HTTP/1.1 reply, then the write half closes.
 fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
     if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
-    core.net.__tcp_reply(^stream, status, body)
+    conn := ^stream
+    &conn.write_all("HTTP/1.1 {status}\r\nContent-Length: {body.bytes().len()}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{body}".bytes()) ?? return Err(err)
+    return &conn.shutdown(NetShutdown.Write)
 }
 
 fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {

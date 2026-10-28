@@ -223,7 +223,7 @@ if (( hosted == 1 )); then
   unit_record hosted
   bounded hosted "${JETPACK_HOSTED_MEM:-20G}" "${JETPACK_HOSTED_SECS:-5400}" "$scratch/hosted/project" "$jet" build src/jetpack.jet || overall=1
   node "$bootstrap/locate.mjs" check "$scratch/hosted/jetpack.map.json" "$scratch/hosted.log" > "$scratch/hosted-errors.txt" || true
-  binary="$scratch/hosted/project/jetpack"
+  binary="$scratch/hosted/project/.jet/build/jetpack"
   if (( overall == 0 )) && [[ -x "$binary" ]]; then
     printf 'hosted-binary: %s\nhosted-binary-sha256: %s\n' "$binary" "$(sha256sum "$binary" | cut -d' ' -f1)" >> "$receipt"
   else

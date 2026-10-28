@@ -61,6 +61,7 @@ use jet_foundation.[
     core_module_export,
     core_source_owns_type,
     core_source_receiver_method,
+    core_source_receiver_method_routes,
     dimension_display_name,
     dimension_divide,
     dimension_identity,
@@ -3384,7 +3385,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, projected_value, &diagnostics) -> return None
         return Val(projected_value.value)
     }
-    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    routed_method :: core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     // Only method absence enables the callable field. As in the reference,
     // the callee field is spanned at the method name and the call runs from
     // that name to its last argument.

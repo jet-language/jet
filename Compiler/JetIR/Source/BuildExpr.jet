@@ -500,6 +500,12 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             }
             lines :: line_export != ""
             received :: method_kind == (Val(TForInMethod.ChannelReceiver))
+            if method_kind == .Val(kind) {
+                if kind == .Iterable(_, _, iter_symbol, next_symbol, item_type) {
+                    if step != None || columnar -> return ir_fail(&b, span, "statement ForIn over an Iterable with a step or columns")
+                    return ir_iterable_walk(&m, p, &b, label, variable, collection, iter_symbol, next_symbol, item_type, body, span)
+                }
+            }
             if (method_kind != None && !chars && !lines && !received) || step != None || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
             // `loop line in handle.lines()` reads its source, the handle
             // (Sema sema_stmt_for_in_source); `collection` is the checked
@@ -1632,7 +1638,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .ReaderTakePattern(binary_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, true, [StrMatchPart]{}, binary_parts, canonical, span)
     dedicated :: if operation == {
         .Hardware(_) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
-        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
+        .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
         // ir_dyn_method lowered key lookups, indexing, keys, path writes,
         // remove, decode, the operators and the scalar, Field and At reads on
@@ -4033,6 +4039,61 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     ir_end(&b.f, b.line)
     one :: ir_word_const(&m, &b, 1)
     ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_scope_close(&m, &b)
+}
+
+// `loop x in value` over a type with an `Iterable` impl: `iter` takes the
+// value into its iterator, which the loop owns; each step calls
+// `next(&iterator)`, and the walk ends at its first None. The item a step
+// takes out of the Option belongs to that step: `break`, `next` and the end
+// of the body drop it unless the body moved it.
+fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, iter_symbol: String, next_symbol: String, item_type: Type, body: [Int], span: Span) Never! {
+    iter_row :: ir_function_row(p, iter_symbol) ?? return ir_fail(&b, span, "loop over an Iterable whose `iter` is outside the checked program")
+    next_row :: ir_function_row(p, next_symbol) ?? return ir_fail(&b, span, "loop over an Iterable whose `next` is outside the checked program")
+    collection_ty :: ir_ty(p, b, collection)
+    iter_args :: ir_owner_args(p, p.functions[iter_row], ir_subst(m, collection_ty)) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection_ty)}, which does not spell its owner's type arguments")
+    concrete_item :: ir_subst(m, item_type)
+    item_row :: ir_value_type(&m, p, concrete_item) ?? return ir_fail(&b, span, "type {ir_type_name(item_type)}")
+    source :: ir_expr(&m, p, &b, collection)
+    if ir_failed(b) || source < 0 -> return
+    ir_scope_open(&b)
+    iterator :: ir_call(&m, p, &b, iter_symbol, iter_args, source, [IRWriteBack]{}, [BodyCallArg]{}, span)
+    if ir_failed(b) || iterator < 0 -> return
+    b.fresh[iterator] = false
+    &b.bindings.push(IRBinding{name: "", slot: iterator, owned: true})
+    iterator_ty :: m.types[b.f.slot_type[iterator]].ty
+    next_args :: ir_owner_args(p, p.functions[next_row], iterator_ty) ?? return ir_fail(&b, span, "iterator {ir_type_name(iterator_ty)}, which does not spell its owner's type arguments")
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    backs := [IRWriteBack]{}
+    receiver := iterator
+    if ir_kind_of(m, b, iterator) != .Aggregate {
+        size :: m.types[b.f.slot_type[iterator]].size
+        pointer_row :: ir_pointer_row(&m)
+        receiver = ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, receiver, if size < 8 -> 8 else -> size, 8, -1, b.line)
+        ir_emit(&b.f, IROp.Store, -1, receiver, 0, iterator, b.line)
+        &backs.push(IRWriteBack{cell: receiver, slot: iterator})
+    }
+    option :: ir_call(&m, p, &b, next_symbol, next_args, receiver, backs, [BodyCallArg]{}, span)
+    if ir_failed(b) || option < 0 -> return
+    present :: ir_option_is_some(&m, &b, option)
+    ir_exit_unless(&m, &b, present, exit)
+    step_block :: ir_open(&b.f, IROp.Block, b.line)
+    ir_scope_open(&b)
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    item :: ir_box_take(&m, p, &b, option, 0, item_row)
+    if item >= 0 {
+        b.fresh[item] = false
+        &b.bindings.push(IRBinding{name: variable.name, slot: item, owned: ir_has_drop(m, b, item)})
+    }
+    ir_stmts(&m, p, &b, body)
+    _ :: &b.loops.pop()
+    ir_scope_close(&m, &b)
+    ir_end(&b.f, b.line)
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)

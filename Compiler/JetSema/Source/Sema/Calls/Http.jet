@@ -38,12 +38,11 @@ struct SemaHTTPStaticTarget {
     type_name: String
 }
 
+// The bare leaf of an HTTP nominal: a runtime handle is named bare, a
+// source-owned Core type by its canonical `module::Leaf` spelling.
 fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
     if ty == {
-        .Named(name) -> {
-            parts := name.split(".").to_list()
-            return parts[parts.len() - 1]
-        }
+        .Named(_) -> { return sema_type_nominal_leaf(ty) }
         .Tagged(_, inner) -> { return sema_call_http_nominal_leaf(inner) }
         else -> { return "" }
     }
@@ -346,40 +345,11 @@ fn sema_call_try_http_static(
 }
 
 fn sema_call_http_known_receiver_type(name: String) -> Bool Never! {
-    name == "HTTPRequest" || name == "HTTPResponse" || name == "HTTPClient" || name == "HTTPMux" || name == "HTTPRouter" || name == "HTTPHandler" || name == "HTTPServer" || name == "Headers" || name == "Body"
+    name == "HTTPClient" || name == "HTTPMux" || name == "HTTPRouter" || name == "HTTPHandler" || name == "HTTPServer" || name == "Headers"
 }
 
 fn sema_call_http_method_result(name: String, method: String, count: Int) -> Type? {
     error := Type.Named{name: "HTTPError"}
-    if name == "HTTPRequest" {
-        if (method == "method" || method == "path") && count == 0 -> return Val(Type.String)
-        if method == "text" && (count == 0 || count == 1) -> return Val(Type.Result{ok: Type.String, err: error})
-        if method == "body" && count == 0 -> return Val(Type.Named{name: "core.http.Body"})
-        if method == "trailers" && count == 0 -> return Val(Type.Result{ok: Type.Named{name: "Headers"}, err: error})
-        if (method == "param" || method == "header") && count == 1 -> return Val(Type.Option{inner: Type.String})
-        if method == "header" && count == 2 -> return Val(Type.Named{name: "HTTPRequest"})
-        if method == "body" && count == 1 -> return Val(Type.Named{name: "HTTPRequest"})
-        if (method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" || method == "redirects" || method == "proxy") && count == 1 -> return Val(Type.Named{name: "HTTPRequest"})
-        // Name/value builders take the pair after the receiver (Rust
-        // `http_type_method_return`, the `jet_http_client_request_{cookie,form,multipart_text}` rows).
-        if (method == "cookie" || method == "form" || method == "multipart_text") && count == 2 -> return Val(Type.Named{name: "HTTPRequest"})
-        if method == "send" && count == 0 -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
-        if method == "body_len" && count == 0 -> return Val(Type.Int)
-        if method == "under_limit" && count == 1 -> return Val(Type.Bool)
-    }
-    if name == "HTTPResponse" {
-        if method == "status" && count == 0 -> return Val(Type.Int)
-        if method == "text" && (count == 0 || count == 1) -> return Val(Type.Result{ok: Type.String, err: error})
-        if method == "body" && count == 0 -> return Val(Type.Named{name: "core.http.Body"})
-        if method == "header" && count == 1 -> return Val(Type.Option{inner: Type.String})
-        if method == "header" && count == 2 -> return Val(Type.Named{name: "HTTPResponse"})
-        if method == "trailers" && count == 1 -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
-        if method == "cookies" && count == 0 -> return Val(Type.List{element: Type.String})
-        if method == "redirect_history" && count == 0 -> return Val(Type.List{element: Type.String})
-        if method == "timings" && count == 0 -> return Val(Type.List{element: Type.Int})
-        if method == "reused_connection" && count == 0 -> return Val(Type.Bool)
-        if method == "raw_content_encoding" && count == 0 -> return Val(Type.Option{inner: Type.String})
-    }
     if name == "HTTPClient" {
         if method == "send" && count == 1 -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
         if method == "cookies" || method == "redirects" || method == "protocols" || method == "timeouts" || method == "raw_encoding" || method == "proxy" || method == "tls" || method == "allow_http_downgrade" || method == "retries" -> return Val(Type.Named{name: "HTTPClient"})
@@ -399,15 +369,6 @@ fn sema_call_http_method_result(name: String, method: String, count: Int) -> Typ
         if (method == "append" || method == "set") && count == 2 -> return Val(Type.Result{ok: Type.Named{name: "Headers"}, err: error})
         if method == "remove" && count == 1 -> return Val(Type.Named{name: "Headers"})
     }
-    if name == "Body" {
-        if (method == "bytes" || method == "text" || method == "json") && count == 1 -> return Val(Type.Result{ok: if {
-            method == "bytes" -> Type.List{element: Type.IntN{signed: false, bits: 8}}
-            method == "text" -> Type.String
-            else -> Type.Named{name: "Unknown"}
-        }, err: error})
-        if method == "copy_to" && count == 2 -> return Val(Type.Result{ok: Type.Int, err: error})
-        if method == "chunks" && (count == 0 || count == 1) -> return Val(Type.Named{name: "HTTPBodyChunks"})
-    }
     None
 }
 
@@ -424,56 +385,14 @@ fn sema_call_http_client_arg_types(method: String) -> [Type] Never! {
     [Type]{}
 }
 
-fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] Never! {
-    if method == "param" || method == "header" -> return if count == 2 -> [Type]{Type.String, Type.String} else -> [Type]{Type.String}
-    if method == "cookie" || method == "form" || method == "multipart_text" -> return [Type]{Type.String, Type.String}
-    // Rust `http_type_method_return` leaves the `body(text)` builder's
-    // argument to inference; its one lowering route
-    // (`jet_http_client_request_body`) takes the request text, a `String`.
-    if method == "body" -> return [Type]{Type.String}
-    // Rust `http_type_method_return` leaves these builders' arguments to
-    // inference too; their lowering routes take the milliseconds and the
-    // redirect limit as Int (`jet_http_client_request_timeout(req, ms)`,
-    // `…_redirects(req, limit)`) and the proxy URL as a `String`.
-    if method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" -> return [Type]{Type.Int}
-    if method == "redirects" -> return [Type]{Type.Int}
-    if method == "proxy" -> return [Type]{Type.String}
-    if method == "under_limit" || method == "text" -> return [Type]{Type.Int}
-    [Type]{}
-}
-
 fn sema_call_http_method_arg_types(name: String, method: String, count: Int) -> [Type] Never! {
-    if name == "HTTPRequest" -> return sema_call_http_request_arg_types(method, count)
-    if name == "HTTPResponse" {
-        if method == "header" -> return if count == 2 -> [Type]{Type.String, Type.String} else -> [Type]{Type.String}
-        if method == "trailers" -> return [Type]{Type.Named{name: "Headers"}}
-        if method == "text" || method == "json" -> return if count == 1 -> [Type]{Type.Int} else -> [Type]{}
-    }
     if name == "HTTPClient" -> return sema_call_http_client_arg_types(method)
     if name == "HTTPHandler" && method == "handle" -> return [Type]{Type.Named{name: "HTTPRequest"}}
     if name == "Headers" {
         if method == "append" || method == "set" -> return [Type]{Type.String, Type.String}
         if method == "remove" -> return [Type]{Type.String}
     }
-    if name == "Body" {
-        if method == "bytes" || method == "text" || method == "json" || method == "chunks" -> return if count == 1 -> [Type]{Type.Int} else -> [Type]{}
-        if method == "copy_to" -> return [Type]{Type.Named{name: "FileWriter"}, Type.Int}
-    }
     [Type]{}
-}
-
-fn sema_call_http_json_target(type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    if type_args.len() > 0 -> return Val(sema_call_resolved_type(type_args[0], environment, program))
-    if expected == {
-        .Val(value) -> {
-            if value == {
-                .Result(ok, _) -> { return Val(sema_call_resolved_type(ok, environment, program)) }
-                else -> {}
-            }
-        }
-        else -> {}
-    }
-    None
 }
 
 fn sema_call_http_check_serde(direction: SemaSerdeDirection, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
@@ -500,41 +419,11 @@ fn sema_call_http_source_json_target(target: SemaCallDirectTarget, environment: 
     }
 }
 
-fn sema_call_http_json_result(name: String, type_args: [Type], expected: Type?, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Type {
-    target :: sema_call_http_json_target(type_args, expected, environment, program) ?? {
-        decode_name := if {
-            name == "Body" -> "body"
-            name == "HTTPRequest" -> "req"
-            else -> "resp"
-        }
-        decode_fix := if {
-            name == "Body" -> "write `body.json<Type>(limit)`"
-            name == "HTTPRequest" -> "write `req.json<Type>()`"
-            else -> "write `resp.json<Type>(limit)`"
-        }
-        &diagnostics.push(sema_error("E0901", span, "`{decode_name}.json` needs a decode type", "JSON bytes can decode to many types, so the target must be explicit", decode_fix))
-        return Type.Named{name: "Unknown"}
-    }
-    sema_call_http_check_serde(SemaSerdeDirection.Decode, target, span, environment, program, &diagnostics)
-    target
-}
-
 fn sema_call_http_emit_method(receiver: TExpr, name: String, method: String, args: [TExpr], result_type: Type, span: Span) -> TExpr Never! {
-    operation := if {
-        name == "HTTPRequest" && method == "body_len" -> THandleOp.HTTPReqField{field: "body_len"}
-        name == "HTTPRequest" && method == "under_limit" -> THandleOp.HTTPReqField{field: "under_limit"}
-        name == "HTTPRequest" && method == "header" && args.len() == 1 -> THandleOp.HTTPReqHeader
-        name == "HTTPRequest" && method == "param" -> THandleOp.HTTPReqParam
-        name == "HTTPRequest" && method == "trailers" -> THandleOp.HTTPReqTrailers
-        name == "HTTPResponse" && method == "trailers" -> THandleOp.HTTPRespTrailers
-        name == "HTTPResponse" && method == "header" && args.len() == 1 -> THandleOp.HTTPRespHeader
-        name == "HTTPRequest" && (method == "method" || method == "path" || (method == "body" && args.len() == 0)) -> THandleOp.HTTPReqField{field: method}
-        name == "HTTPResponse" && (method == "status" || method == "body") -> THandleOp.HTTPRespField{field: method}
-        (name == "HTTPRequest" && (method == "method" || method == "path" || method == "param" || method == "body_len" || method == "under_limit" || (method == "header" && args.len() == 1) || (method == "body" && args.len() == 0) || method == "text" || (method == "json" && args.len() == 0) || method == "trailers")) || (name == "HTTPResponse" && method == "header" && args.len() == 2) || name.starts_with("HTTPServer") || name == "HTTPMux" || name == "HTTPHandler" -> THandleOp.HTTPServerMethod{kind: name, method: method}
-        else -> THandleOp.HTTPClientMethod{kind: name, method: method}
-    }
+    operation :: if name.starts_with("HTTPServer") || name == "HTTPMux" || name == "HTTPHandler" -> THandleOp.HTTPServerMethod{kind: name, method: method} else -> THandleOp.HTTPClientMethod{kind: name, method: method}
     sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
 }
+
 
 fn sema_call_http_record_effect(effect_name: String, api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
@@ -549,12 +438,6 @@ fn sema_call_http_record_effect(effect_name: String, api: String, result_type: T
 
 fn sema_call_http_method_effect(name: String, method: String, count: Int) -> String? {
     if name == "HTTPClient" || name == "HTTPServer" || (name == "HTTPMux" && method == "middleware") -> return Val("Net")
-    if name == "HTTPRequest" {
-        if method == "send" || method == "param" || method == "trailers" -> return Val("Net")
-        if (method == "body" && count == 1) || (method == "header" && count == 2) || (method == "json" && count == 1) || method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" || method == "redirects" || method == "proxy" || method == "cookie" || method == "form" || method == "multipart_text" -> return Val("Net")
-    }
-    if name == "HTTPResponse" && (method == "trailers" || method == "text" || method == "json") -> return Val("Net")
-    if name == "Body" && (method == "bytes" || method == "text" || method == "json" || method == "copy_to" || method == "chunks") -> return Val("Net")
     None
 }
 
@@ -634,38 +517,6 @@ fn sema_call_try_http_method(
     }
     if name == "HTTPMux" && method == "middleware" -> return sema_call_http_middleware(receiver, receiver_value, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 
-    if (name == "HTTPRequest" || name == "HTTPResponse" || name == "Body") && method == "json" {
-        if name == "HTTPRequest" && args.len() == 1 && type_args.len() == 0 {
-            value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-            sema_call_http_check_serde(SemaSerdeDirection.Encode, value.ty, args[0].span, environment, program, &diagnostics)
-            params := sema_call_http_ownership_params(args, [Type]{value.ty}, [Int]{})
-            call_args := args.copy()
-            ownership := sema_ownership_check_method_call(&state, "HTTPRequest.json", receiver, AccessConvention.Read, params, &call_args, scopes, span, &diagnostics)
-            if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-            tir := sema_call_http_emit_method(receiver_value, name, method, [TExpr]{value}, Type.Named{name: "HTTPRequest"}, span)
-            if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-            return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(tir, expected, environment, program, context, &diagnostics)}
-        }
-        count_ok := if {
-            name == "HTTPRequest" -> args.len() == 0
-            name == "HTTPResponse" -> args.len() <= 1
-            else -> args.len() == 1
-        }
-        if !count_ok {
-            want := if name == "HTTPRequest" -> 0 else -> 1
-            &diagnostics.push(sema_call_arity_diagnostic("{name}.json", want, args.len(), false, span))
-            loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        decode_target :: sema_call_http_json_result(name, type_args, expected, args, span, environment, program, &diagnostics)
-        decoded := Type.Result{ok: decode_target, err: Type.Named{name: "HTTPError"}}
-        argument_types := if args.len() == 1 -> [Type]{Type.Int} else -> [Type]{}
-        values :: sema_call_http_check_values(args, argument_types, [Int]{}, "{name}.json", receiver, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        tir := sema_call_http_emit_method(receiver_value, name, method, values, decoded, span)
-        if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(tir, expected, environment, program, context, &diagnostics)}
-    }
-
     result_type := sema_call_http_method_result(name, method, args.len())
     if result_type == None -> return SemaMethodSpecialCheck{handled: false, value: None}
     result :: result_type ?? Type.Named{name: "Unit"}
@@ -701,12 +552,7 @@ fn sema_call_try_http_method(
     if name == "HTTPClient" -> arg_types = sema_call_http_client_arg_types(method)
     if name == "HTTPServer" && method == "shutdown" -> arg_types = [Type]{Type.Named{name: "Duration"}}
     if name == "HTTPHandler" && method == "handle" -> arg_types = [Type]{Type.Named{name: "HTTPRequest"}}
-    if name == "HTTPResponse" && method == "trailers" -> arg_types = [Type]{Type.Named{name: "Headers"}}
-    moving := if {
-        name == "HTTPResponse" && method == "trailers" -> [Int]{0}
-        name == "Body" && method == "copy_to" -> [Int]{0}
-        else -> [Int]{}
-    }
+    moving := [Int]{}
     values := [TExpr]{}
     checked := true
     if {
@@ -720,10 +566,9 @@ fn sema_call_try_http_method(
             if !ownership.accepted || !ownership.complete -> checked = false
         }
     }
-    // Rust `net_method_return` types the request/response/header handle
-    // methods without recording a receiver convention, so a written mark
-    // (`&req.header(name, value)`) has nothing to be compared with.
-    if name == "HTTPRequest" || name == "HTTPResponse" || name == "Headers" -> sema_receiver_mark_forget(&state, receiver)
+    // The header handle methods record no receiver convention, so a written
+    // mark has nothing to be compared with.
+    if name == "Headers" -> sema_receiver_mark_forget(&state, receiver)
     if !checked -> return SemaMethodSpecialCheck{handled: true, value: None}
     tir := sema_call_http_emit_method(receiver_value, name, method, values, result, span)
     if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)

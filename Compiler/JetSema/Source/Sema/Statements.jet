@@ -1079,12 +1079,18 @@ fn sema_stmt_for_in_encoding_item_type(name: String) -> Type? {
 fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
     if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
     if program.registration_graph == .Val(graph) {
+        // Impls key their target by the declaring nominal's identity, so a
+        // source type and its `Iter` resolve to that nominal first (a Core
+        // type written by its bare name, `HTTPBodyChunks`, included).
         collection_identity := type_identity_key(collection_type)
+        if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) == .Val(row) -> collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
         iterable_impl := SemaRegistrationImpl?{None}
+        iterable_module := -1
         loop module_row_index in 0..<graph.modules.len() {
             loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
                 if graph.modules[module_row_index].impls[implementation_index].trait_name != (Val("Iterable")) || graph.modules[module_row_index].impls[implementation_index].target_identity_key != collection_identity -> next
                 iterable_impl = Val(graph.modules[module_row_index].impls[implementation_index])
+                iterable_module = module_row_index
             }
         }
         iterable :: iterable_impl ?? return None
@@ -1099,6 +1105,7 @@ fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, program: Se
         resolved_iter_type :: iter_type ?? return None
         if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
         iterator_identity := type_identity_key(resolved_iter_type)
+        if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable_module) == .Val(iter_row) -> iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
         iterator_impl := SemaRegistrationImpl?{None}
         loop module_row_index in 0..<graph.modules.len() {
             loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
@@ -1931,7 +1938,6 @@ fn sema_stmt_for_in_consumes_collection(collection_type: Type, item_type: Type) 
     if collection_type == {
         .List(_) | .FixedList(_, _) -> return sema_stmt_for_in_type_requires_owned_iteration(item_type)
         .Apply(name, _) -> return name == "Stream" || name == "Iter" || name == "ViewIter"
-        .Named(name) -> return name == "HTTPBodyChunks"
         else -> return false
     }
 }
@@ -1940,7 +1946,6 @@ fn sema_stmt_for_in_by_value(collection_type: Type, item_type: Type) -> Bool Nev
     if collection_type == {
         .List(_) | .FixedList(_, _) -> return sema_stmt_for_in_type_requires_owned_iteration(item_type)
         .Apply(name, _) -> return name == "Stream" || name == "Iter"
-        .Named(name) -> return name == "HTTPBodyChunks"
         else -> return false
     }
 }
@@ -2067,7 +2072,6 @@ fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: TForInMethod?,
             if (name == "Iter" || name == "ViewIter" || name == "Stream" || name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == "Receiver") && args.len() == 1 -> return Val(args[0])
         }
         .Named(name) -> {
-            if name == "HTTPBodyChunks" -> return Val(Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "HTTPError"}})
             if name == "FileLines" || name == "StdinLines" || name == "ProcessLines" -> return Val(Type.String)
             if name == "Range" -> return Val(Type.Int)
             return sema_stmt_for_in_encoding_item_type(name)

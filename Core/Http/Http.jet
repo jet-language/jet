@@ -13,6 +13,8 @@ use core as core
 use core.http.client as provider
 use core.http.server as http_server
 use core.net.url as http_url
+use core.encoding.json as json_codec
+use core.files.[FileWriter]
 C_MAX_BODY_BYTES :: 1048576
 C_MAX_HEADER_BYTES :: 32768
 C_MAX_HEADER_LINE_BYTES :: 8192
@@ -91,8 +93,397 @@ enum Body {
     Bytes([U8])
 }
 
+C_MAX_CONSUME_BYTES :: 1073741824
+C_BODY_CHUNK_BYTES :: 65536
 
+// A message body is read once, shared by every copy of its message: the
+// first `text`/`json` read takes it and later reads fail with BodyConsumed.
+struct __HTTPBodyCell { taken: Bool }
 
+/// One HTTP request: what a client builds and sends, and what a server
+/// parses and routes. The method, path, body and headers are public facts;
+/// the rest is the client's send configuration and the server's route state.
+struct HTTPRequest {
+    method: String
+    path: String
+    body: Body
+    headers: Headers
+    __url: String{""}
+    __trailers: Headers?{None}
+    __header_error: HTTPError?{None}
+    __body_set: Bool{false}
+    __params: [Header]{[]}
+    __route_template: String?{None}
+    __timeout_ms: Int?{None}
+    __connect_timeout_ms: Int?{None}
+    __read_timeout_ms: Int?{None}
+    __total_timeout_ms: Int?{None}
+    __dns_timeout_ms: Int?{None}
+    __tls_timeout_ms: Int?{None}
+    __write_timeout_ms: Int?{None}
+    __first_byte_timeout_ms: Int?{None}
+    __redirects: Int?{None}
+    __proxy: String?{None}
+    __cookies: [Header]{[]}
+    __form: [Header]{[]}
+    __multipart: [Header]{[]}
+    __cell: Shared<__HTTPBodyCell>?{None}
+}
+
+/// One HTTP response: the status, body and headers, plus the client's
+/// transport facts (redirects followed, phase timings, connection reuse).
+struct HTTPResponse {
+    status: Int
+    body: Body
+    headers: Headers
+    __trailers: Headers?{None}
+    __redirect_history: [String]{[]}
+    __timings: [Int]{[]}
+    __reused: Bool{false}
+    __raw_encoding: String?{None}
+    __body_error: HTTPError?{None}
+    __cell: Shared<__HTTPBodyCell>?{None}
+}
+
+/// A body read in bounded pieces: `loop chunk in body.chunks(n)` yields each
+/// piece of at most `n` bytes as `[U8] HTTPError!`.
+struct HTTPBodyChunks {
+    __bytes: [U8]
+    __max: Int
+    __error: HTTPError?{None}
+}
+
+struct __HTTPBodyCursor {
+    bytes: [U8]
+    max: Int
+    at: Int
+    error: HTTPError?
+    done: Bool
+}
+
+impl __HTTPBodyCursor.Iterator {
+    type Item = Result<[U8], HTTPError>
+
+    fn next(&self) -> Result<[U8], HTTPError>? {
+        if self.done -> return None
+        if self.error == .Val(error) {
+            self.done = true
+            return Val(Err(error))
+        }
+        if self.at >= self.bytes.len() {
+            self.done = true
+            return None
+        }
+        end :: if self.bytes.len() - self.at > self.max -> self.at + self.max else -> self.bytes.len()
+        piece :: slice_b(self.bytes, self.at, end)
+        self.at = end
+        Val(Ok(piece))
+    }
+}
+
+impl HTTPBodyChunks.Iterable {
+    type Iter = __HTTPBodyCursor
+
+    fn iter(^self) -> __HTTPBodyCursor {
+        __HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false}
+    }
+}
+
+impl Body {
+    /// The body's bytes when there are at most `limit` (0..=1 GiB) of them.
+    fn bytes(self, limit: Int) -[Net]> [U8] HTTPError! { __body_bytes_within(self, limit) }
+
+    /// The body as UTF-8 text when it has at most `limit` bytes.
+    fn text(self, limit: Int) -[Net]> String HTTPError! { __body_text_within(self, limit) }
+
+    /// The body decoded from JSON when it has at most `limit` bytes; a body
+    /// that is not the target's JSON is InvalidFraming.
+    fn json<Target: Decode>(self, limit: Int) -[Net]> Target HTTPError! {
+        text :: __body_text_within(self, limit) ?? return Err(err)
+        json_codec.decode<Target>(text) ?? return Err(.InvalidFraming)
+    }
+
+    /// Write the body to `writer` when it has at most `limit` bytes; the
+    /// count written.
+    fn copy_to(self, writer: ^FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
+        raw :: __body_bytes_within(self, limit) ?? return Err(err)
+        out := ^writer
+        &out.write_all(raw) ?? return Err(.IO{operation: "copy body"})
+        &out.flush() ?? return Err(.IO{operation: "copy body"})
+        Ok(raw.len())
+    }
+
+    /// The body in pieces of at most `max_chunk` (1..=1 GiB) bytes.
+    fn chunks(self, max_chunk: Int{C_BODY_CHUNK_BYTES}) -[Net]> HTTPBodyChunks Never! {
+        if max_chunk < 1 || max_chunk > C_MAX_CONSUME_BYTES -> return HTTPBodyChunks{__bytes: [U8]{}, __max: 1, __error: Val(HTTPError.BodyTooLarge{limit: 0})}
+        HTTPBodyChunks{__bytes: body_as_bytes(self), __max: max_chunk}
+    }
+}
+
+fn __body_bytes_within(body: Body, limit: Int) -> [U8] HTTPError! {
+    if limit < 0 || limit > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: limit})
+    raw :: body_as_bytes(body)
+    if raw.len() > limit -> return Err(.BodyTooLarge{limit: limit})
+    Ok(raw)
+}
+
+fn __body_text_within(body: Body, limit: Int) -> String HTTPError! {
+    raw :: __body_bytes_within(body, limit) ?? return Err(err)
+    String.from_bytes(raw) ?? return Err(.UnsupportedEncoding)
+}
+
+// The first read of a message body takes it; a transport failure met while
+// the body arrived surfaces at that read, as the reference's lazy body did.
+fn __take_body(cell: Shared<__HTTPBodyCell>?, failure: HTTPError?) HTTPError! {
+    if cell == .Val(state) {
+        guard := state.guard_edit()
+        if guard.value.taken -> return Err(.BodyConsumed)
+        guard.value.taken = true
+    }
+    if failure == .Val(error) -> return Err(error)
+    Ok(())
+}
+
+fn __request(method: String, url: String) -> HTTPRequest Never! {
+    HTTPRequest{method: method, path: request_target_path(url), body: Body.Empty, headers: headers(), __url: url, __cell: Val(shared __HTTPBodyCell{taken: false})}
+}
+
+fn __server_request(method: String, path: String, body: Body, fields: Headers) -> HTTPRequest Never! {
+    HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(shared __HTTPBodyCell{taken: false})}
+}
+
+fn __response(status: Int, body: ^Body, fields: ^Headers) -> HTTPResponse Never! {
+    HTTPResponse{status: status, body: ^body, headers: ^fields, __cell: Val(shared __HTTPBodyCell{taken: false})}
+}
+
+fn __client_response(status: Int, body: Body, fields: Headers, redirect_history: [String], timings: [Int], reused: Bool, raw_encoding: String?, body_error: HTTPError?) -> HTTPResponse Never! {
+    HTTPResponse{
+        status: status, body: body, headers: fields,
+        __redirect_history: redirect_history, __timings: timings, __reused: reused,
+        __raw_encoding: raw_encoding, __body_error: body_error,
+        __cell: Val(shared __HTTPBodyCell{taken: false}),
+    }
+}
+
+// The request target of an absolute URL: its path (`/` when empty) and
+// query; any other text is taken as the target itself.
+fn request_target_path(url: String) -> String Never! {
+    parsed :: http_url.parse(url) ?? return url.copy()
+    path := parsed.path()
+    if path == "" -> path = "/"
+    query :: parsed.query()
+    if query != "" -> return "{path}?{query}"
+    path
+}
+
+impl HTTPRequest {
+    fn method(self) -> String Never! { self.method.copy() }
+    fn path(self) -> String Never! { self.path.copy() }
+    fn body(self) -> Body Never! { self.body.copy() }
+
+    /// The body as text, at most `limit` bytes; the first read takes the body.
+    fn text(self, limit: Int{C_MAX_BODY_BYTES}) -> String HTTPError! {
+        _ :: __take_body(self.__cell, None) ?? return Err(err)
+        __body_text_within(self.body, limit)
+    }
+
+    /// The body decoded from JSON (1 MiB bound); the first read takes the body.
+    fn json<Target: Decode>(self) -> Target HTTPError! {
+        _ :: __take_body(self.__cell, None) ?? return Err(err)
+        text :: __body_text_within(self.body, C_MAX_BODY_BYTES) ?? return Err(err)
+        json_codec.decode<Target>(text) ?? return Err(.InvalidFraming)
+    }
+
+    fn trailers(self) -[Net]> Headers HTTPError! { Ok(self.__trailers ?? headers()) }
+
+    fn param(self, name: String) -[Net]> String? Never! {
+        loop pair in self.__params {
+            if pair.name == name -> return Val(pair.value)
+        }
+        None
+    }
+
+    fn header(self, name: String) -> String? Never! { headers_get(self.headers, name) }
+
+    // `header(name, value)`: an invalid name or value fails the send.
+    fn __with_header(self, name: String, value: String) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        if !client_header_name(name) || !client_header_value(value) {
+            out.__header_error = Val(HTTPError.InvalidHeader)
+            return out
+        }
+        &out.headers.fields.push(Header{name: name, value: value})
+        out
+    }
+
+    // `body(text)`.
+    fn __with_body(self, text: String) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.body = Body.Text(text)
+        out.__body_set = true
+        out
+    }
+
+    // `json(value)`: the value's JSON as the body, typed application/json.
+    fn __with_json<Value: Encode>(self, value: Value) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        if json_codec.to_string(value) == {
+            .Ok(text) -> {
+                out.body = Body.Bytes(text.bytes())
+                out.__body_set = true
+                out.headers = headers_set_raw(out.headers, "content-type", "application/json")
+            }
+            .Err(_) -> out.__header_error = Val(HTTPError.InvalidFraming)
+        }
+        out
+    }
+
+    fn timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__timeout_ms = Val(ms)
+        out
+    }
+    fn connect_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__connect_timeout_ms = Val(ms)
+        out
+    }
+    fn read_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__read_timeout_ms = Val(ms)
+        out
+    }
+    fn total_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__total_timeout_ms = Val(ms)
+        out
+    }
+    fn dns_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__dns_timeout_ms = Val(ms)
+        out
+    }
+    fn tls_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__tls_timeout_ms = Val(ms)
+        out
+    }
+    fn write_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__write_timeout_ms = Val(ms)
+        out
+    }
+    fn first_byte_timeout(self, ms: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__first_byte_timeout_ms = Val(ms)
+        out
+    }
+    fn redirects(self, limit: Int) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__redirects = Val(limit)
+        out
+    }
+    fn proxy(self, url: String) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        out.__proxy = Val(url)
+        out
+    }
+    fn cookie(self, name: String, value: String) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        &out.__cookies.push(Header{name: name, value: value})
+        out
+    }
+    fn form(self, name: String, value: String) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        &out.__form.push(Header{name: name, value: value})
+        out
+    }
+    fn multipart_text(self, name: String, value: String) -[Net]> HTTPRequest Never! {
+        out := self.copy()
+        &out.__multipart.push(Header{name: name, value: value})
+        out
+    }
+
+    fn send(self) -[Net, Time.Wait]> HTTPResponse HTTPError! { provider.__send(self) }
+
+    fn body_len(self) -> Int Never! { body_len(self.body) }
+    fn under_limit(self, limit: Int) -> Bool Never! { body_len(self.body) <= limit }
+}
+
+impl HTTPResponse {
+    fn status(self) -> Int Never! { self.status }
+    fn body(self) -> Body Never! { self.body.copy() }
+
+    /// The body as text, at most `limit` bytes; the first read takes the body.
+    fn text(self, limit: Int{C_MAX_BODY_BYTES}) -[Net]> String HTTPError! {
+        _ :: __take_body(self.__cell, self.__body_error) ?? return Err(err)
+        self.body.text(limit)
+    }
+
+    /// The body decoded from JSON, at most `limit` bytes; the first read
+    /// takes the body.
+    fn json<Target: Decode>(self, limit: Int{C_MAX_BODY_BYTES}) -[Net]> Target HTTPError! {
+        _ :: __take_body(self.__cell, self.__body_error) ?? return Err(err)
+        self.body.json<Target>(limit)
+    }
+
+    fn header(self, name: String) -> String? Never! { headers_get(self.headers, name) }
+
+    // `header(name, value)` appends one field; an invalid one is dropped.
+    fn __with_header(self, name: String, value: String) -> HTTPResponse Never! {
+        out := self.copy()
+        if !client_header_name(name) || !client_header_value(value) -> return out
+        &out.headers.fields.push(Header{name: name, value: value})
+        out
+    }
+
+    fn trailers(self, fields: ^Headers) -[Net]> HTTPResponse HTTPError! {
+        loop field in fields.fields {
+            if !client_header_name(field.name) || !client_header_value(field.value) -> return Err(.InvalidHeader)
+        }
+        out := self.copy()
+        out.__trailers = Val(^fields)
+        Ok(out)
+    }
+
+    fn cookies(self) -> [String] Never! { headers_all(self.headers, "set-cookie") }
+    fn redirect_history(self) -> [String] Never! { self.__redirect_history.copy() }
+    fn timings(self) -> [Int] Never! { self.__timings.copy() }
+    fn reused_connection(self) -> Bool Never! { self.__reused }
+    fn raw_content_encoding(self) -> String? Never! { self.__raw_encoding.copy() }
+}
+
+// RFC 9110 field-name token bytes.
+fn client_header_name(name: String) -> Bool Never! {
+    raw :: name.bytes()
+    if raw.len() == 0 -> return false
+    loop byte in raw {
+        n :: Int{byte}
+        alnum :: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        if !alnum && n != 33 && n != 35 && n != 36 && n != 37 && n != 38 && n != 39 && n != 42 && n != 43 && n != 45 && n != 46 && n != 94 && n != 95 && n != 96 && n != 124 && n != 126 -> return false
+    }
+    true
+}
+
+// Field-value bytes: HTAB, visible ASCII, space and obs-text.
+fn client_header_value(value: String) -> Bool Never! {
+    loop byte in value.bytes() {
+        n :: Int{byte}
+        if n != 9 && (n < 32 || n == 127) -> return false
+    }
+    true
+}
+
+// Set one field without the public setter's trimming or validation.
+fn headers_set_raw(h: Headers, name: String, value: String) -> Headers Never! {
+    want :: ascii_lower(name)
+    fields := [Header]{}
+    loop f in h.fields {
+        if ascii_lower(f.name) != want -> &fields.push(f)
+    }
+    &fields.push(Header{name: name, value: value})
+    Headers{fields: fields}
+}
 
 // Shared router/request carriers keep their native callback/body ownership.
 // Public operations enter source before crossing the reserved host boundary.
@@ -100,8 +491,12 @@ fn router() -> HTTPRouter Never! {
     core.http.__router()
 }
 
+// A request message, leniently: text without a blank line is taken as
+// newline-separated head lines, and an unparseable message is `GET /`.
 fn parse(raw: String) -> HTTPRequest Never! {
-    core.http.__parse(raw)
+    bytes := raw.bytes()
+    if find_double_crlf(bytes) < 0 -> bytes = "{raw.replace("\n", "\r\n")}\r\n\r\n".bytes()
+    parse_request(bytes) ?? __request("GET", "/")
 }
 
 fn dispatch(router: HTTPRouter, request: HTTPRequest) -> HTTPResponse HTTPError! {
@@ -446,14 +841,14 @@ fn put(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     req := core.http.client.request("PUT", url)
-    send_request(req.body(body))
+    send_request(req.__with_body(body))
 }
 
 fn patch(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     req := core.http.client.request("PATCH", url)
-    send_request(req.body(body))
+    send_request(req.__with_body(body))
 }
 
 fn delete(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
@@ -512,7 +907,7 @@ fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
         col := index_byte(line.bytes(), 58)
         name :: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
         value :: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
-        parsed_response = &parsed_response.header(name, trim(value))
+        parsed_response = parsed_response.__with_header(name, trim(value))
     }
     Ok(parsed_response)
 }
@@ -558,18 +953,19 @@ fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     expected :: content_length(h)
     if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len()) || (expected < 0 && body_raw.len() > 0) -> return Err(.InvalidFraming)
-    req := core.http.client.request(method_text(method_parse(parts[0])), parts[1])
+    fields := headers()
     loop line in hlines {
         col := index_byte(line.bytes(), 58)
         name :: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
         value :: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
-        req = &req.header(name, trim(value))
+        &fields.fields.push(Header{name: name, value: trim(value)})
     }
+    body := Body.Empty
     if body_raw.len() > 0 {
         body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
-        req = req.body(body_text)
+        body = Body.Text(body_text)
     }
-    Ok(req)
+    Ok(__server_request(method_text(method_parse(parts[0])), parts[1], body, fields))
 }
 
 struct StatusLine {
@@ -837,11 +1233,11 @@ fn basic_auth(user: String, password: String) -> String Never! {
 fn bearer_auth(token: String) -> String Never! { "Bearer {token}" }
 fn with_header(req: HTTPRequest, name: String, value: String) -> HTTPRequest Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return req.copy()
-    &req.header(name, value)
+    req.__with_header(name, value)
 }
 
 fn with_body(req: HTTPRequest, body: Body) -> HTTPRequest Never! {
-    req.body(body_as_text(body))
+    req.__with_body(body_as_text(body))
 }
 
 fn with_query(url: String, q: Query) -> String Never! {
@@ -866,7 +1262,7 @@ fn status_class(s: Status) -> String Never! {
 
 fn request_with(method: Method, url: String, h: Headers, body: Body) -> HTTPRequest Never! {
     req := core.http.client.request(method_text(method), url)
-    loop f in h.fields -> req = &req.header(f.name, f.value)
+    loop f in h.fields -> req = req.__with_header(f.name, f.value)
     with_body(req, body)
 }
 

@@ -4042,22 +4042,29 @@ and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
 connect, byte transfer, DNS, and the other listed waiting operations retain
 their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
 moving public validation into Jet does not widen the authority contract.
-TCP reply, TCP option access, and UDP bind enter their Jet public functions
-before the corresponding reserved `__tcp_reply`, `__set_*`, `__nodelay`,
-`__ttl`, and `__udp_bind*` leaves. Raw leaves retain existing native error
-mapping, borrow/move conventions, and interpreter-route availability.
+TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
+writes it with the stream's own `write_all`, then shuts down the write half.
+TCP option access and UDP bind enter their Jet public functions before the
+corresponding reserved `__set_*`, `__nodelay`, `__ttl`, and `__udp_bind*`
+leaves. Raw leaves retain existing native error mapping, borrow/move
+conventions, and interpreter-route availability.
 UDP address, timeout, send, and receive operations and Unix listen, accept,
 read, byte-write, shutdown, and close also enter Jet source first. Their
 reserved raw leaves preserve exactly the public operation's existing effect
 row and supported interpreter/native tiers.
-HTTP client `get`, `post`, and `request`, and server `mux`, `serve_once`,
-`serve_once_listener`, `static_file`, `static_file_range`, `cors`, and
-`request_id` likewise enter their Jet source functions before the reserved
+The HTTP client is Jet end to end: `get`, `post`, `request`, and `send` build
+an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
+and decode the status line, headers, chunked/length framing, and gzip into an
+`HTTPResponse` record. `HTTPRequest`, `HTTPResponse`, and `HTTPBodyChunks` are
+Jet records in `Core/Http/Http.jet`; their accessors and builders are Jet
+methods, and `core.http.parse` reuses the Jet request parser. Server `mux`,
+`serve_once`, `serve_once_listener`, `static_file`, `static_file_range`,
+`cors`, and `request_id` enter their Jet source functions before the reserved
 raw leaves. Existing specialized public admission remains unchanged;
 callback-bearing host leaves retain their original unsupported AOT tiers.
-HTTP router creation, parsing, and dispatch, TLS byte I/O, and WebSocket
-connect/upgrade are also source-owned; the reserved transport/carrier leaves
-keep their old effects (including no new WebSocket effect) and tier support.
+HTTP router creation and dispatch, TLS byte I/O, and WebSocket connect/upgrade are also
+source-owned; the reserved transport/carrier leaves keep their old effects
+(including no new WebSocket effect) and tier support.
 Reserved Unix connect, TLS client handshake, HTTP serve/bind, static-files,
 and middleware leaves use full positional signatures inside Core. Their
 public overload selection, implicit option defaults, and escaping callback

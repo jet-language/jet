@@ -24,6 +24,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     builtin_method_receiver_accepts,
     core_source_receiver_method,
+    core_source_receiver_method_routes,
     diagnostic_with_edit,
     expr_span,
     sema_collection_is_list,
@@ -835,7 +836,7 @@ fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Expr, 
 
 fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     receiver_value :: sema_check_expression(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    routed_method :: core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     candidates := sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
     if program.registration_graph == .Val(graph) {
         trait_candidates :: sema_call_trait_method_candidates(graph, receiver_value.ty, routed_method, type_args, environment.module_identity, environment.package_identity, environment.generic_params, method_span, &diagnostics)

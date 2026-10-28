@@ -957,10 +957,6 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .UnixStreamClose -> return Val(ir_handle_h("unix_stream.close", "jet_net_unix_close", [Bool]{true}, Val(Effect.Net)))
         .UnixStreamSetTimeout -> return Val(ir_handle_h("unix_stream.set_timeout", "jet_net_unix_set_timeout", [Bool]{true, true}, Val(Effect.Net)))
         .HTTPClientNew -> return Val(ir_handle_h("http.client_new", "jet_http_client_new_impl", [Bool]{}, Val(Effect.Net)))
-        .HTTPReqParam -> return Val(ir_handle_h("http.request_param", "jet_http_srv_req_param", [Bool]{true, true}, Val(Effect.Net)))
-        .HTTPReqHeader -> return Val(ir_handle_h("http.request_header", "jet_http_srv_req_header", [Bool]{true, true}, None))
-        .HTTPReqTrailers -> return Val(ir_handle_h("http.request_trailers", "jet_http_srv_req_trailers", [Bool]{true}, Val(Effect.Net)))
-        .HTTPRespTrailers -> return Val(ir_handle_h("http.response_trailers", "jet_http_srv_response_trailers", [Bool]{true, false}, Val(Effect.Net)))
         .ArgsSpecFlag -> return Val(ir_handle_h("args.flag", "jet_args_flag", [Bool]{false, true, true}, Val(Effect.Env)))
         .ArgsSpecFlagShort -> return Val(ir_handle_h("args.flag_short", "jet_args_flag_short", [Bool]{false, true, true, true}, Val(Effect.Env)))
         .ArgsSpecOption -> return Val(ir_handle_h("args.option", "jet_args_option", [Bool]{false, true, true, true}, Val(Effect.Env)))
@@ -1061,7 +1057,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
             if sender_receiver -> return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
-        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
         else -> return None
     }
 }

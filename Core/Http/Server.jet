@@ -67,28 +67,10 @@ fn response(status: Int, body: String) -> HTTPResponse Never! {
     response_body(status, ^payload, ^fields)
 }
 
-// Head policy stays in Jet. The resource transfer consumes the selected body
-// once without reading it; streaming bodies are never flattened into text.
+// Head policy stays in Jet: an out-of-range status is a 500.
 fn response_body(status: Int, body: ^Body, headers: ^Headers) -> HTTPResponse Never! {
-    selected := status
-    payload := ^body
-    if selected < 100 || selected > 599 {
-        selected = 500
-        payload = core.http.body_text("500 Internal Server Error")
-    }
-    version :: "HTTP/1.1"
-    trailers :: core.http.headers()
-    wire_version :: "HTTP/1.1"
-    wire_length :: ""
-    wire_transfer :: [String]{}
-    wire_chunks :: [I64]{}
-    wire_failure :: String?{None}
-    #Unsafe("move the normalized response head and one-shot body into the transport carrier") {
-        return core.http.server.__response_parts(
-            I64{selected}, ^version, ^headers, ^payload, ^trailers,
-            None, false, ^wire_version, ^wire_length, ^wire_transfer, ^wire_chunks, false, ^wire_failure
-        )
-    }
+    if status < 100 || status > 599 -> return core.http.__response(500, core.http.body_text("500 Internal Server Error"), ^headers)
+    core.http.__response(status, ^body, ^headers)
 }
 
 fn json<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
@@ -148,9 +130,7 @@ fn access_log(request: HTTPRequest, status: Int) -[Net]> String Never! {
 }
 
 fn access_log_template(request: HTTPRequest) -> String? Never! {
-    #Unsafe("borrow the request's stored optional route-template metadata; no route selection or formatting policy") {
-        return core.http.server.__route_template(request)
-    }
+    request.__route_template.copy()
 }
 
 fn access_log_parts(method: String, path: String, template: String?, status: Int) -> String Never! {

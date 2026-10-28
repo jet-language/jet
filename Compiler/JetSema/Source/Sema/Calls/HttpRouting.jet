@@ -12,6 +12,7 @@ use jet_foundation.[
     StructDef,
     SymbolKind,
     Type,
+    core_source_receiver_method,
     type_name,
 ]
 
@@ -621,19 +622,18 @@ fn sema_http_route_response_local_type(expression: Expr, environment: SemaScopeE
 fn sema_http_route_response_adapter_returns_response(method: String, args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, module_identity: String) -> Bool Never! {
     updated_args := args
     updated_scopes := scopes
-    builtin_result := sema_call_http_method_result("HTTPResponse", method, updated_args.len())
-    if builtin_result == (Val(Type.Named{name: "HTTPResponse"})) -> return true
     if program.registration_graph == .Val(graph) {
     response_row :: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
     response_nominal :: graph.modules[response_row.module_index].nominals[response_row.row]
+    routed :: core_source_receiver_method("{response_nominal.symbol.module_name}::{response_nominal.symbol.name}", method, updated_args.len())
     handler_environment := sema_http_route_environment_for_module(environment, program, module_identity)
     probe_diagnostics := [Diagnostic]{}
-    candidates := sema_expr_registration_method_candidates(graph, response_nominal.ty, method, [Type]{}, type_args, span, handler_environment, program, &updated_scopes, &probe_diagnostics)
+    candidates := sema_expr_registration_method_candidates(graph, response_nominal.ty, routed, [Type]{}, type_args, span, handler_environment, program, &updated_scopes, &probe_diagnostics)
     if candidates.len() == 0 -> return false
     matched := false
     all_return_response := true
     loop candidate in candidates {
-        if sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, &updated_args, span, &probe_diagnostics) == None -> next
+        if sema_call_bind_method(routed, candidate.signature, candidate.receiver_offset, &updated_args, span, &probe_diagnostics) == None -> next
         matched = true
         result_type :: sema_call_signature_return(candidate.signature) ?? {
             all_return_response = false

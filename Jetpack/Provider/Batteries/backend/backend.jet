@@ -141,9 +141,9 @@ fn session_policy() -> SessionPolicy {
     }
 }
 fn session_value(req: HTTPRequest, policy: SessionPolicy) -> String {
-    header_value :: &req.header(policy.session_header) ?? ""
+    header_value :: req.header(policy.session_header) ?? ""
     if header_value != "" -> return header_value
-    cookie_header :: &req.header("cookie") ?? ""
+    cookie_header :: req.header("cookie") ?? ""
     loop part in cookie_header.split(";").to_list() {
         pair_opt :: part.trim().split_once("=")
         if pair_opt == .Val(pair) {
@@ -161,7 +161,7 @@ fn request_id(raw: String) -> RequestId {
 
 
 fn error_response(req: HTTPRequest, status: Int, code: String, message: String) -> HTTPResponse HTTPError! {
-    id :: request_id(&req.header("x-request-id") ?? "")
+    id :: request_id(req.header("x-request-id") ?? "")
     return Ok(http_server.json(status, ErrorResponse{
         status: status,
         code: code,
@@ -171,7 +171,7 @@ fn error_response(req: HTTPRequest, status: Int, code: String, message: String) 
 }
 
 fn health_response(req: HTTPRequest) -> HTTPResponse HTTPError! {
-    id :: request_id(&req.header("x-request-id") ?? "")
+    id :: request_id(req.header("x-request-id") ?? "")
     return Ok(http_server.json(200, HealthResponse{
         status: "ok",
         request_id: id.value,
@@ -190,7 +190,7 @@ fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now
     policy :: session_policy()
     provided :: session_value(req, policy)
     if provided == "" || provided != session_id -> return false
-    role :: &req.header(policy.role_header) ?? ""
+    role :: req.header(policy.role_header) ?? ""
     if role != expected_role -> return false
     _checked :: auth.session_validate(provided, now) ?? return false
     return true

@@ -145,6 +145,9 @@
             jetDev
             jetpackDev
             pkgs.pkg-config
+            # The https/TLS cases' loopback peer is `openssl s_server`
+            # (`requires: tool:openssl`), so the testkit runs them here.
+            pkgs.openssl
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             # D-BUILDENTRY1 / #95: core verification executes typed build actions.
@@ -247,6 +250,8 @@
             jetDev
             jetpackDev
             pkgs.pkg-config
+            # `tool:openssl` loopback TLS peer, as in the default shell.
+            pkgs.openssl
             pkgs.raylib
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [

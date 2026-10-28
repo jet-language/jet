@@ -480,48 +480,6 @@ function jet_http_invalid_route_parameter() {
   return jet_http_result_ok(jet_http_response(400, "invalid route parameter"));
 }
 
-
-function jet_http_parse_request(raw) {
-  if (typeof raw !== "string") throw new TypeError("HTTP request must be text");
-  let source = raw;
-  if (!source.includes("\r\n\r\n")) {
-    source = `${source.replaceAll("\n", "\r\n")}\r\n\r\n`;
-  }
-  const boundary = source.indexOf("\r\n\r\n");
-  const headerText = source.slice(0, boundary);
-  const bodyText = source.slice(boundary + 4);
-  const lines = headerText.split("\r\n");
-  const requestLine = lines.shift()?.trim().split(/\s+/) ?? [];
-  if (
-    requestLine.length !== 3 ||
-    !requestLine[0] ||
-    !requestLine[1]?.startsWith("/") ||
-    !["HTTP/1.0", "HTTP/1.1"].includes(requestLine[2])
-  ) {
-    return jet_http_parse_request("GET / HTTP/1.1\r\n\r\n");
-  }
-  const headers = Object.create(null);
-  for (const line of lines) {
-    const separator = line.indexOf(":");
-    if (separator <= 0) return jet_http_parse_request("GET / HTTP/1.1\r\n\r\n");
-    const name = line.slice(0, separator).trim().toLowerCase();
-    const value = line.slice(separator + 1).trim();
-    if (!name) return jet_http_parse_request("GET / HTTP/1.1\r\n\r\n");
-    headers[name] = headers[name] === undefined ? value : `${headers[name]}, ${value}`;
-  }
-  return {
-    kind: "http_request",
-    method: requestLine[0],
-    path: requestLine[1],
-    url: requestLine[1],
-    version: requestLine[2],
-    headers,
-    body: JET_HTTP_TEXT_ENCODER.encode(bodyText),
-    params: Object.create(null),
-    route_template: null,
-  };
-}
-
 function jet_http_router_register(router, method, pattern, handler, file, line, contract_json) {
   if (
     router == null ||
