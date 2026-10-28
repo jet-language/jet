@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { buildScoreboard, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals } from "./live-reload.mjs";
 import { compileThroughputContractIssues } from "./compile-throughput.mjs";
+import { BUILD_SYSTEM_CELLS, buildSystemContractIssues } from "./build-system.mjs";
+import { EDIT_FILES, generate as generateBuildSystemProject } from "../axes/build-system/generate.mjs";
 
 const gauntletDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = path.resolve(gauntletDir, "../..");
@@ -651,6 +653,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     live_reload: "gauntlet-axis-live-reload-v1",
     memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
     compile_throughput: "gauntlet-axis-compile-throughput-v1",
+    build_system: "gauntlet-axis-build-system-v1",
   });
   assert.equal(manifest.report_contract.axis_publication, "required_axes_complete_and_unblocked");
   for (const axis of Object.values(manifest.axes)) assert.equal(axis.status, "required");
@@ -690,6 +693,21 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
   assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
   assert.ok(pins.phase_budgets.every((row) => row.owners.length > 0));
+
+  // The Nix peer: five paired cells, the stricter target on the three
+  // everyday loops, and a generated project whose edit files exist.
+  const buildSystem = manifest.axes.build_system;
+  assert.deepEqual(buildSystemContractIssues(buildSystem), []);
+  assert.equal(await exists(repoSourcePath(buildSystem.harness)), true);
+  assert.deepEqual(buildSystem.cells.map((cell) => cell.id), BUILD_SYSTEM_CELLS);
+  for (const cell of buildSystem.cells) {
+    assert.deepEqual(cell.target, ["eval", "noop", "incremental"].includes(cell.id) ? { ratio_max: 0.25 } : { ratio_lt: 1.0 });
+  }
+  const project = generateBuildSystemProject();
+  assert.deepEqual(buildSystem.project.edit_files, EDIT_FILES);
+  for (const file of Object.values(EDIT_FILES)) assert.equal(typeof project[file], "string", `${file}: not generated`);
+  assert.ok(project["jet/@build.jet"].includes("fn build(b: Build)"));
+  assert.ok(project["nix/flake.nix"].includes("stdenv.mkDerivation"));
 
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
   assert.equal(matrix.cells.length, manifest.corpus.matrix_cell_count);

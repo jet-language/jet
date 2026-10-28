@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { runLiveReloadAxis as runLiveReloadAxisAdapter } from "./live-reload.mjs";
 import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./memory-safety-fuzz.mjs";
 import { compileThroughputContractIssues, runCompileThroughputAxisAdapter } from "./compile-throughput.mjs";
+import { buildSystemContractIssues, runBuildSystemAxisAdapter } from "./build-system.mjs";
 import { applyStatusGate, projectStatus, rebuildStatusFromResults } from "./status.mjs";
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -1037,6 +1038,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
       live_reload: "gauntlet-axis-live-reload-v1",
       memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
       compile_throughput: "gauntlet-axis-compile-throughput-v1",
+      build_system: "gauntlet-axis-build-system-v1",
     }) || reportContract.axis_publication !== "required_axes_complete_and_unblocked") {
     throw new Error("unsupported gauntlet report contract");
   }
@@ -1067,7 +1069,8 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     memorySafetyFuzz.oracle?.output !== "cases {case_count} valid {valid} boundary {boundary} oob {oob} use_after_free {use_after_free} wrong_output {wrong_output} bytes {byte_count} checksum {u32_sum} semantic {semantic}\n" ||
     JSON.stringify([...memorySafetyRunnerIds].sort()) !== JSON.stringify(["c", "jet-default", "rust", "zig"]) ||
     !equalStringArrays(memorySafetyFuzz.fairness ?? [], ["same generated input file", "same timeout and resource budget", "sanitizer or equivalent finding evidence", "deduplicate each finding before close"]) ||
-    compileThroughputContractIssues(manifest.axes.compile_throughput).length) {
+    compileThroughputContractIssues(manifest.axes.compile_throughput).length ||
+    buildSystemContractIssues(manifest.axes.build_system).length) {
     throw new Error("gauntlet report is missing a required comparison axis");
   }
   if (matrix) {
@@ -3533,6 +3536,7 @@ async function runAxes(manifest, runDir, jetBin, fullScope, runId, selectedAxis 
         fileSha256,
       });
       else if (id === "compile_throughput") axes[id] = await runCompileThroughputAxisAdapter(axis, { runDir, jetBin, repoDir });
+      else if (id === "build_system") axes[id] = await runBuildSystemAxisAdapter(axis, { runDir, jetBin, repoDir });
       else axes[id] = unmeasuredAxis(id, axis, "no runner is implemented for this required axis");
     } catch (error) {
       axes[id] = {

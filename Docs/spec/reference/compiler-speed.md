@@ -123,6 +123,16 @@ Jet/Rust ratio of `1.05` or lower, which is a noise band rather than a win.
 Missing, wrong, unavailable, uncovered, mismatched, or inconclusive evidence
 cannot be averaged away.
 
+The build system has its own required peer: Nix, in the `build_system` axis of
+`Tools/gauntlet/measurement-manifest.json` (harness
+`Tools/gauntlet/harness/build-system.mjs`). Both build the same medium project.
+Jet builds it as a package with a `fn build` program, and Nix builds it as a
+flake. The five paired cells are configuration evaluation (`jet check` of
+`@build.jet` against `nix eval`), no-op rebuild, one-file incremental rebuild,
+a cold build while a populated cache or substituter holds the result, and a
+hermetic build from scratch. Evaluation, no-op and incremental each need
+Jet/Nix at or below `0.25`; the other two need it below `1.00`.
+
 A dated receipt is historical evidence, not a live status claim:
 [`performance-receipt.md`](../../audits/performance-receipt.md). The scripts
 and their manifest define the measurement protocol; this page records the

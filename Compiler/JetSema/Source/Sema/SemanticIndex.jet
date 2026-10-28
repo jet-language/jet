@@ -606,9 +606,8 @@ struct SemaCompilerIndexWalkState {
     structural: [SemaCompilerIndexStructuralRecord]
     arithmetic: [TComptimeValue]
     parents: [Int]
-    ordinal_parents: [Int?]
-    ordinal_slots: [String]
-    ordinal_values: [Int]
+    // The next ordinal of each (parent, slot) pair, keyed by sema_compiler_index_ordinal_key.
+    ordinals: [String:Int]
     slot: String
     slot_is_list: Bool
     module_identity: String
@@ -620,9 +619,7 @@ fn sema_compiler_index_walk_state() -> SemaCompilerIndexWalkState Never! {
         structural: [SemaCompilerIndexStructuralRecord]{},
         arithmetic: [TComptimeValue]{},
         parents: [Int]{},
-        ordinal_parents: [Int?]{},
-        ordinal_slots: [String]{},
-        ordinal_values: [Int]{},
+        ordinals: [String:Int]{},
         slot: "root",
         slot_is_list: true,
         module_identity: "",
@@ -818,25 +815,19 @@ fn sema_compiler_index_stmt_span(statement: Stmt) -> Span {
     }
 }
 
+// One (parent, slot) pair as a map key: a node id never contains `:`.
+fn sema_compiler_index_ordinal_key(parent: Int?, slot: String) -> String Never! {
+    if parent == .Val(id) -> return "{id}:{slot}"
+    "-:{slot}"
+}
+
 fn sema_compiler_index_walk_node(state: &SemaCompilerIndexWalkState, class: String, shape: String, module_path: String, span: Span) -> Int? {
     if span.end < span.start -> return None
     parent := Int?{None}
     if state.parents.len() > 0 -> parent = Val(state.parents[state.parents.len() - 1])
-    ordinal := 0
-    found := false
-    loop index in 0..<state.ordinal_slots.len() {
-        if state.ordinal_parents[index] == parent && state.ordinal_slots[index] == state.slot {
-            ordinal = state.ordinal_values[index]
-            state.ordinal_values[index] = ordinal + 1
-            found = true
-            break
-        }
-    }
-    if !found {
-        &state.ordinal_parents.push(parent)
-        &state.ordinal_slots.push(state.slot)
-        &state.ordinal_values.push(1)
-    }
+    key :: sema_compiler_index_ordinal_key(parent, state.slot)
+    ordinal :: state.ordinals.get(key) ?? 0
+    state.ordinals[key] = ordinal + 1
     id := state.nodes.len()
     slot_kind := if state.slot_is_list -> "list" else -> "scalar"
     &state.structural.push(SemaCompilerIndexStructuralRecord{
