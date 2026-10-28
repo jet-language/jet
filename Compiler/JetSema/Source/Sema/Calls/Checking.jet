@@ -438,6 +438,30 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: source_indices, pin_arguments: pin_arguments, binder_site: binder_site})
 }
 
+// A fixed-shape Core route checks its own arguments. An unmarked bare name
+// passed to one of its taking parameters still moves at its last use, as at
+// an ordinary call; a name another argument of the same call also references
+// has no last use there. `values` are the checked arguments, in `args` order.
+fn sema_call_note_route_implicit_takes(params: [SemaCallParam], args: [CallArg], values: [TExpr], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext) {
+    loop index in 0..<args.len() {
+        if index >= params.len() || index >= values.len() -> break
+        if sema_call_argument_convention(params[index], args[index]) != SemaCallConventionDecision.NeedsImplicitClone -> next
+        declared :: params[index].ty ?? next
+        required :: sema_call_resolved_type(declared, environment, program)
+        key :: sema_ownership_note_implicit_take(&state, args[index].expr, values[index].ty, required, environment, program, context.generic_params, scopes) ?? next
+        twice := false
+        loop reference in context.name_references {
+            if reference.symbol.id.key != key -> next
+            loop other in 0..<args.len() {
+                if other == index -> next
+                other_span :: expr_span(args[other].expr)
+                if reference.span.start >= other_span.start && reference.span.end <= other_span.end -> twice = true
+            }
+        }
+        if twice -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[index].expr))
+    }
+}
+
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
 fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {

@@ -2310,6 +2310,29 @@ fn sema_ownership_view_fact_matches_expr(fact: SemaOwnershipViewFact, expr: Expr
     scopes.bindings[index].symbol.id.key == fact.carrier_key && sema_ownership_path_starts(output_path, fact.output_path)
 }
 
+// An index or field write whose path steps into a `ViewMut` value writes
+// the window's owner, not the carrier binding: `option_part[0] = 6` with
+// `option_part: ViewMut<Int>`, `selected[0][0] = 11` with
+// `selected: [ViewMut<Int>]`.
+fn sema_ownership_writes_through_view_type(expr: Expr, root_type: Type?) -> Bool Never! {
+    path := [String]{}
+    _ :: sema_ownership_named_view_root(expr, &path) ?? return false
+    current := root_type ?? return false
+    loop step in path {
+        if current == .Apply(name, _) {
+            if name == "ViewMut" -> return true
+        }
+        if current == .List(element) {
+            if step.starts_with("[") && step != "[..]" {
+                current = element.copy()
+                next
+            }
+        }
+        return false
+    }
+    false
+}
+
 fn sema_ownership_view_fact_exact_expr(fact: SemaOwnershipViewFact, expr: Expr, scopes: SemaScopeTable) -> Bool {
     output_path := [String]{}
     root :: sema_ownership_named_view_root(expr, &output_path) ?? return false
@@ -2622,7 +2645,7 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
     // binding is registered without `mutable`); every other static root was
     // refused above.
     persist :: state.persist_roots.contains(places[0].root_key)
-    if !has_view && !persist && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
+    if !has_view && !persist && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) && !sema_ownership_writes_through_view_type(expr, info.symbol.ty) {
         if action == "be assigned" && sema_ownership_report_assignment_capability(expr, places[0].root, info, &diagnostics) -> return false
         if info.access == {
             .Read -> {
@@ -2982,6 +3005,14 @@ fn sema_ownership_call_diag_not_copyable(callee: String, index: Int, name: Strin
     sema_error("E0201", span, "`{callee}` needs the move marker `^` here — this value can't be copied", "parameter {index + 1} takes ownership through the move marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied", "write the move marker `^` (`^{name}`) to move ownership to `{callee}`")
 }
 
+fn sema_ownership_argument_is_function_item(arg: CallArg, scopes: SemaScopeTable) -> Bool Never! {
+    if arg.expr == .Ident(name, span, _) {
+        index :: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+        return scopes.bindings[index].symbol.kind == SymbolKind.Function
+    }
+    false
+}
+
 // The argument names a binding whose value is a secret-bearing crypto type
 // (a generic `^T` slot spells only its formal).
 fn sema_ownership_argument_is_secret(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
@@ -3150,6 +3181,9 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
         mark_implicit_take := false
         if decision == SemaCallConventionDecision.NeedsImplicitClone {
             if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) -> next
+            // A top-level function item names static code: passing it
+            // copies nothing and leaves nothing to move.
+            if sema_ownership_argument_is_function_item(arg, scopes) -> next
             if take_lent {
                 accepted = false
                 &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
@@ -3741,6 +3775,9 @@ fn sema_ownership_check_lambda_captures(state: &SemaOwnershipState, lambda: Lamb
     }
     if lambda.meta.escapes {
         loop name in lambda.meta.mut_captures {
+            // A write through a captured write window names the window's
+            // owner too; the window's own capture carries that access.
+            if sema_ownership_owner_of_captured_window(state, name, lambda.meta.mut_captures) -> next
             capture_expr :: Expr.Ident{name: name, span: lambda.span, id: AST_NODE_GENERATED}
             places := sema_ownership_places_from_expr_in_state(capture_expr, scopes, &state)
             if places.len() > 0 {
@@ -3749,6 +3786,14 @@ fn sema_ownership_check_lambda_captures(state: &SemaOwnershipState, lambda: Lamb
         }
     }
     valid
+}
+
+fn sema_ownership_owner_of_captured_window(state: SemaOwnershipState, owner: String, captures: [String]) -> Bool Never! {
+    loop view in state.views {
+        if !view.active || view.invalidated || view.access != AccessConvention.Write || view.source.root != owner || view.carrier == owner -> next
+        if captures.contains(view.carrier) -> return true
+    }
+    false
 }
 
 // ────────────────────────────────────────────────────────────────────────────

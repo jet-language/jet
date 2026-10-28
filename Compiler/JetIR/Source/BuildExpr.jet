@@ -2205,6 +2205,15 @@ fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], sp
                     if ir_failed(b) || text < 0 -> return -1
                     _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
                     ir_release(&m, &b, text)
+                    // `:Unit(name)` follows the magnitude with the generated
+                    // unit type name.
+                    if format == .Unit(.Name) {
+                        if ir_untag(ir_subst(m, ir_ty(p, b, value))) == .Named(unit_type) {
+                            args := [Int]{builder}
+                            loop arg in ir_static_text(&m, &b, " {ir_short_name(unit_type)}") -> &args.push(arg)
+                            _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push_static", args, -1)
+                        }
+                    }
                     next
                 }
                 debug :: format == .Debug
@@ -4466,9 +4475,12 @@ fn ir_window_subject(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, plac
 // ---------------------------------------------------------------------------
 // Closures: a counted box (ir_closure_box) with its code at 8 and the
 // captures from 24. The code takes the box as its hidden first parameter. A
-// capture the body writes is held by address: its variable becomes a frame
-// cell from the closure's creation on. Any other capture is a copy the box
-// owns until its release helper drops it.
+// capture the body of a non-escaping lambda writes is held by address: its
+// variable becomes a frame cell from the closure's creation on. A written
+// alias of another holder's storage (a write window or write parameter) is
+// held by address too, so a scoped task's writes land on the owner. Any
+// other capture is a copy the box owns until its release helper drops it;
+// an escaping lambda's writes stay in that copy, which outlives the frame.
 //
 // The lambda's function is keyed by its enclosing function, its own source
 // span and its occurrence there: the merge shares functions by key, and the
@@ -4481,7 +4493,7 @@ fn ir_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLa
     offset := 24
     loop capture in lambda.captures {
         binding :: ir_lookup_binding(b, capture.source) ?? ir_lookup_binding(b, capture.local.name) ?? return ir_fail_slot(&b, span, "capture of unknown local {capture.source}")
-        by_ref :: lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name)
+        by_ref :: (!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name))
         value_row :: if binding.indirect >= 0 -> binding.indirect else -> b.f.slot_type[binding.slot]
         size :: if by_ref -> 8 else -> ir_align8(m.types[value_row].size)
         &captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref})
@@ -4559,7 +4571,9 @@ fn ir_build_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) 
             pointer_row :: ir_pointer_row(&m)
             address :: ir_temp(&m, &b, if aggregate -> capture.row else -> pointer_row)
             ir_emit(&b.f, IROp.Offset, address, env, capture.offset, -1, b.line)
-            &b.bindings.push(IRBinding{name: capture.name, slot: address, indirect: if aggregate -> -1 else -> capture.row})
+            // The box owns this copy: a whole assignment in the body writes
+            // through to it, so the next call sees the new value.
+            &b.bindings.push(IRBinding{name: capture.name, slot: address, indirect: if aggregate -> -1 else -> capture.row, write: aggregate})
         }
     }
     if lambda.executable == {

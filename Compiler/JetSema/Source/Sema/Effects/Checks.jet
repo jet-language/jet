@@ -913,6 +913,12 @@ fn sema_effect_node_from_source(function: FnBody, sources: [SemaEffectFunctionSo
     if actual.declared_effects == .Val(effect_row) {
         if effect_row.len() > 0 -> node.row_span = Val(effect_row[0].span)
         loop entry in effect_row {
+            // An open row (`-[..E]>`, `-[IO, ..E]>`) has no closed ceiling:
+            // its named effects are a floor, so no bound is checked.
+            if entry.name.starts_with("..") {
+                node.has_declared_row = false
+                next
+            }
             prohibited :: entry.name.starts_with("!")
             if prohibited && node.prohibition_span == None -> node.prohibition_span = Val(entry.span)
             raw := entry.name
@@ -1015,7 +1021,7 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
     if fact.facts.effect_bound == .Val(effect_row) {
         loop entry in effect_row {
             raw :: entry.name
-            if raw.starts_with("!") -> next
+            if raw.starts_with("!") || raw.starts_with("..") -> next
             effect_name :: sema_effect_parse_name(raw) ?? {
                 &diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next

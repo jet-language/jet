@@ -3574,6 +3574,14 @@ fn ir_numeric_cast(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target
         return ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, target)
     }
     if source.kind == .Int && destination.kind == .Float -> return ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{value}, target)
+    // `F32.from_int`: the nearest Float, rounded once more to Float32.
+    if source.kind == .Int && destination.kind == .Float32 {
+        float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "numeric conversion without a Float row")
+        wide :: ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{value}, float_row)
+        result :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, result, wide, -1, -1, b.line)
+        return result
+    }
     // Float32 widens to Float exactly and Float narrows to Float32 by
     // rounding (`Float.from_f32`; IR Convert between the float rows).
     if (source.kind == .Float || source.kind == .Float32) && (destination.kind == .Float || destination.kind == .Float32) {

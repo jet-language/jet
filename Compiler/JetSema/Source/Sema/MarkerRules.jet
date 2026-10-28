@@ -1042,7 +1042,7 @@ fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (si
 fn sema_marker_rules_declared_site_error(marker: Marker, rule: SemaScopeMembersMarkerRule) -> Diagnostic {
     sites := (loop site in rule.sites -> ".{site}")
     allowed := if sites.len() == 0 -> "no sites" else -> sites.join(", ")
-    sema_error("E0355", marker.span, "`#{marker.name}` cannot attach at this site", "the declared rule allows only these sites: {allowed}", "remove the marker or move it to one of its declared sites")
+    sema_error("E0355", marker.name_span, "`#{marker.name}` cannot attach at this site", "the declared rule allows only these sites: {allowed}", "remove the marker or move it to one of its declared sites")
 }
 
 fn sema_marker_rules_applied_site_error(marker: Marker, rule: TAppliedRule, site: RuleSite) -> Diagnostic {
@@ -1441,11 +1441,25 @@ fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, pr
             }
             next
         }
-        user_index :: sema_marker_rules_user_rule_index(registry, application.marker) ?? next
-        rule := registry.marker_rules[user_index]
-        if !rule.sites.contains(sema_marker_rules_site_name(site)) {
-            &diagnostics.push(sema_marker_rules_declared_site_error(application.marker, rule))
-        }
+        diagnostic :: sema_marker_rules_user_site_error(registry, application, site) ?? next
+        &diagnostics.push(diagnostic)
+    }
+}
+
+// A source-declared marker rule names its legal sites (`$sites: [.Type]`).
+fn sema_marker_rules_user_site_error(registry: SemaScopeMembersMarkerRegistry, application: AppliedRuleApplication, site: RuleSite) -> Diagnostic? {
+    user_index :: sema_marker_rules_user_rule_index(registry, application.marker) ?? return None
+    if registry.marker_rules[user_index].sites.contains(sema_marker_rules_site_name(site)) -> return None
+    Val(sema_marker_rules_declared_site_error(application.marker, registry.marker_rules[user_index]))
+}
+
+// The site check of every source-declared marker applied in `program`.
+fn sema_marker_rules_validate_user_sites(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+    loop application in sema_marker_rules_applications(program) {
+        site :: application.site ?? next
+        if sema_marker_rules_builtin_index(registry, application.marker) != None -> next
+        diagnostic :: sema_marker_rules_user_site_error(registry, application, site) ?? next
+        &diagnostics.push(diagnostic)
     }
 }
 

@@ -156,9 +156,10 @@ fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool Never!
 
 // Apply the runtime reflection gate after the normal Core argument checker has
 // inferred the value. This keeps argument evaluation and ownership in the
-// ordinary call path while centralizing secret/display diagnostics.
+// ordinary call path while centralizing secret/display diagnostics. A value
+// reflects exactly where bare `"{x}"` interpolation shows it.
 fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    if sema_call_reflection_is_displayable(value.ty, environment, program) -> return true
+    if sema_expression_displayable(value.ty, environment, program) -> return true
     if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
     if {
         sema_call_reflection_secret_bearing(value.ty) -> {

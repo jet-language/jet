@@ -249,6 +249,7 @@ fn sema_services_check_core_method(api: String, contract: SemaServiceCoreMethodC
         index += 1
     }
     params := sema_services_method_params(contract.parameters, accesses)
+    sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, &state, context)
     ownership := sema_ownership_check_method_call(&state, api, receiver, contract.receiver_access, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     fallback_accesses := [AccessConvention]{contract.receiver_access}
@@ -408,6 +409,7 @@ fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value
         core_args := [TExpr]{receiver_value, values[0], handler, sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: handler_name}}}, span), values[2]}
         record :: sema_call_core_record("core.service", "worker", core_args.len(), span, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
         params := sema_services_method_params([Type]{Type.String, handler_type, Type.Int}, [AccessConvention]{sema_call_core_access(record, 1) ?? AccessConvention.Read, sema_call_core_access(record, 2) ?? AccessConvention.Read, sema_call_core_access(record, 4) ?? AccessConvention.Read})
+        sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, &state, context)
         ownership := sema_ownership_check_method_call(&state, "ServiceTree.worker", receiver, AccessConvention.Write, params, &updated_args, scopes, span, &diagnostics)
         if !ownership.accepted || !ownership.complete -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
         fallbacks := [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
@@ -506,6 +508,7 @@ fn sema_check_service_runtime_method(method: String, receiver: Expr, receiver_va
     if !valid -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     accesses := if method == "send" -> [AccessConvention]{AccessConvention.Read, AccessConvention.Read, AccessConvention.Read} else -> [AccessConvention]{AccessConvention.Move}
     params := sema_services_method_params(types, accesses)
+    sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, &state, context)
     ownership := sema_ownership_check_method_call(&state, "ServiceRuntime.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     result_type := if {
@@ -558,6 +561,7 @@ fn sema_call_try_service_core_call(module_name: String, member: String, args: [C
         index += 1
     }
     params := sema_services_method_params(parameters, accesses)
+    sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, &state, context)
     ownership := sema_ownership_check_call_arguments(&state, api, params, &updated_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     if member == "tree" {

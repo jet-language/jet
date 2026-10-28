@@ -2208,7 +2208,7 @@ fn sema_stmt_call_return_views_for_expr(expr: Expr, context: SemaCheckContext) -
         .Call(call, _) -> return sema_stmt_call_return_views_at(call.name_span, context)
         .MethodCall(_, _, method_span, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _, _) -> return sema_stmt_call_return_views_at(method_span, context)
         .CallValue(_, _, span, _) -> return sema_stmt_call_return_views_at(span, context)
-        .Paren(value, _, _) | .Place(value, _, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) -> return sema_stmt_call_return_views_for_expr(value, context)
+        .Paren(value, _, _) | .Place(value, _, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .OrFallback(value, _, _, _, _) -> return sema_stmt_call_return_views_for_expr(value, context)
         .StructLit(_, _, _, _, fields, _, _, _) -> {
             result := [SemaCallReturnViewFact]{}
             loop field in fields {
@@ -2483,6 +2483,23 @@ fn sema_stmt_binding_is_place_view(expr: Expr) -> Bool Never! {
     }
 }
 
+fn sema_stmt_binding_is_write_place(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Place(_, access, _, _) -> access == PlaceAccess.Write
+        .Paren(value, _, _) -> sema_stmt_binding_is_write_place(value)
+        else -> false
+    }
+}
+
+// A `::` binding made from `&place` is a live write window: assigning it
+// writes the place it names.
+fn sema_stmt_binding_is_write_window(state: SemaOwnershipState, key: String) -> Bool Never! {
+    loop view in state.views {
+        if view.carrier_key == key && view.active && view.access == AccessConvention.Write -> return true
+    }
+    false
+}
+
 // Rust `place_from_expr` on a range: `xs[a..b]` over a named place (through
 // fields and indexes) is the source of a read window.
 fn sema_stmt_is_bare_range_place(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
@@ -2544,14 +2561,21 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
         sema_stmt_store_local_view_provenance(local_symbol.id.key, local_facts, &context)
         return valid
     }
-    access :: sema_stmt_view_access(init_ty) ?? return true
-    if sema_stmt_binding_is_place_view(binding.init) {
+    // `x :: &place` is a write window into the place whatever the place's
+    // type: a scalar or struct place is not carried by a `ViewMut`.
+    view_access :: sema_stmt_view_access(init_ty)
+    if sema_stmt_binding_is_place_view(binding.init) && (view_access != None || sema_stmt_binding_is_write_place(binding.init)) {
+        if view_access == None && sema_expr_place_root_ident(binding.init) == None {
+            &diagnostics.push(sema_error("E0213", expr_span(binding.init), "a window must start from a place", "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying", "bind the call or temporary to a name first, then take a window into that name"))
+            return false
+        }
         if sema_ownership_view_producer(binding.init) == .Val(producer) {
             producer_places :: sema_ownership_places_from_expr_in_state(producer.source, scopes, &state)
             sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer_places, producer.access, scopes, &diagnostics)
         }
         return sema_ownership_record_binding_view(&state, binding, scopes)
     }
+    access :: view_access ?? return true
     places := sema_ownership_places_from_expr_in_state(binding.init, scopes, &state)
     if places.len() == 0 {
         empty_provenance := ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
@@ -3851,7 +3875,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     if binding.symbol.kind == SymbolKind.Constant && sema_stmt_module_storage_binding(environment, program, binding.symbol.id) {
         return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    if !binding.mutable {
+    if !binding.mutable && !sema_stmt_binding_is_write_window(state, binding.symbol.id.key) {
         &diagnostics.push(sema_error("E0111", name_span, "`{name}` was made with `::`, so it can't change", "only `:=` bindings and parameters marked with the write-access marker `&` can be changed", "declare it with `{name} := ...` instead"))
         return None
     }
